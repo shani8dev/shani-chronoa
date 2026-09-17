@@ -1,0 +1,5 @@
+#!/bin/bash
+set -e
+
+# Pre-installation script - nothing special needed
+exit 0

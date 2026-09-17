@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="orbGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2196F3;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1565C0;stop-opacity:1" />
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Orb base -->
+  <circle cx="64" cy="64" r="50" fill="url(#orbGrad)" filter="url(#glow)"/>
+  <!-- Inner ring -->
+  <circle cx="64" cy="64" r="35" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="2"/>
+  <!-- Microphone icon -->
+  <circle cx="64" cy="58" r="12" fill="none" stroke="white" stroke-width="2"/>
+  <rect x="60" y="70" width="8" height="14" rx="2" fill="white"/>
+  <!-- Sound waves -->
+  <path d="M 80 55 Q 88 64 80 73" fill="none" stroke="rgba(255,255,255,0.6)" stroke-width="1.5"/>
+  <path d="M 84 50 Q 94 64 84 78" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="1"/>
+  <!-- Bottom label area -->
+  <rect x="20" y="108" width="88" height="6" rx="3" fill="rgba(255,255,255,0.2)"/>
+</svg>

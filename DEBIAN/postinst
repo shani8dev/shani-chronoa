@@ -1,0 +1,23 @@
+#!/bin/bash
+set -e
+
+# Update icon cache
+if command -v gtk-update-icon-cache &>/dev/null; then
+    if [ -d "/usr/share/icons/hicolor" ]; then
+        gtk-update-icon-cache -ftq /usr/share/icons/hicolor 2>/dev/null || true
+    fi
+fi
+
+# Update desktop database
+if command -v update-desktop-database &>/dev/null; then
+    update-desktop-database --quiet 2>/dev/null || true
+fi
+
+# Compile glib schemas
+if [ -d "/usr/share/glib-2.0/schemas" ]; then
+    glib-compile-schemas /usr/share/glib-2.0/schemas 2>/dev/null || true
+fi
+
+echo "shani-chronoa installed successfully."
+
+exit 0

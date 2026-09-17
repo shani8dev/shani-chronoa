@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - Local AI Assistant for Shanios.
+
+Entry point for the shani-chronoa package.
+Launches the GTK4 application with whisper.cpp STT,
+Ollama LLM inference, and Piper TTS.
+"""
+
+import sys
+import os
+
+# The package lives at usr/lib/shani-chronoa/shani_chronoa, not directly
+# under usr/ - dirname(dirname(__file__)) alone (usr/bin -> usr) pointed
+# sys.path at the wrong directory and this script never actually ran when
+# invoked directly (ModuleNotFoundError: No module named 'shani_chronoa'),
+# confirmed by execution.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa.app import main
+
+if __name__ == "__main__":
+    main()

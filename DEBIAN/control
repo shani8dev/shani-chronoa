@@ -1,0 +1,13 @@
+Package: shani-chronoa
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-gi, gir1.2-gtk-4.0, python3-httpx, whisper.cpp, piper-tts, pipewire, wireplumber, libnotify-bin, upower
+Suggests: python3-openwakeword, python3-numpy, python3-mcp
+Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
+Description: Local AI assistant with privacy-first design, integrated into Shanios
+ Shani Chronoa is a local-first AI assistant for the Shanios ecosystem.
+ It provides speech-to-text via whisper.cpp, LLM inference through Ollama,
+ and text-to-speech via Piper TTS, all with a GTK4 GUI interface.
+ All processing happens locally ensuring complete privacy and data sovereignty.

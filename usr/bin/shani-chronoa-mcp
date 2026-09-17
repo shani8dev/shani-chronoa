@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - MCP server entry point.
+
+Exposes Chronoa's local system skills (open apps, volume, timers, battery,
+web search, plus any user-added skills) as a standard MCP server over
+stdio, so any MCP-speaking tool (Claude Desktop, Claude Code, Cursor, etc.)
+can call them. Runs standalone - independent of the GTK app.
+"""
+
+import sys
+import os
+
+# See usr/bin/shani-chronoa for why this is usr/lib/shani-chronoa, not just
+# dirname(dirname(__file__)) - the package lives one directory deeper.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa.mcp import main
+
+if __name__ == "__main__":
+    main()

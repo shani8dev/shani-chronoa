@@ -1,0 +1,12 @@
+[Desktop Entry]
+Name=Shani Chronoa
+Comment=Local AI Assistant with Privacy-First Design
+Exec=shani-chronoa
+Icon=shani-chronoa
+Terminal=false
+Type=Application
+Categories=Utility;Accessibility;Office;GTK;
+StartupNotify=true
+Keywords=AI;assistant;speech;privacy;local;
+X-GNOME-Uses-Privacy-Indicator=true
+X-GNOME-Single-Instance=true

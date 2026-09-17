@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.shani.chronoa" path="/org/shani/chronoa/">
+    <key name="model" type="s">
+      <default>''</default>
+      <summary>LLM model override</summary>
+      <description>The Ollama model identifier for LLM inference. Empty means auto-select based on hardware capabilities; set explicitly to override.</description>
+    </key>
+    <key name="hardware-profile" type="s">
+      <default>'auto'</default>
+      <summary>Hardware profile for model selection</summary>
+      <description>Selects the model, whisper, and context-window tier based on hardware. Supported values: "auto" (detect at startup), "low", "medium", "high", "gpu". Applied during component initialization at startup; an unknown or blank value behaves like "auto".</description>
+    </key>
+    <key name="privacy-mode" type="b">
+      <default>true</default>
+      <summary>Enable privacy-first local-only mode</summary>
+      <description>When true, all processing happens locally. No data is sent to external servers.</description>
+    </key>
+    <key name="whisper-model" type="s">
+      <default>''</default>
+      <summary>Whisper.cpp model override</summary>
+      <description>The whisper.cpp model to use for transcription. Empty means auto-select based on hardware capabilities; set explicitly (e.g. "tiny", "base", "medium") to override.</description>
+    </key>
+    <key name="piper-voice" type="s">
+      <default>'en_US-lessac-medium'</default>
+      <summary>Piper TTS voice to use</summary>
+      <description>The voice model for text-to-speech synthesis.</description>
+    </key>
+    <key name="ollama-host" type="s">
+      <default>'http://localhost:11434'</default>
+      <summary>Ollama server host URL</summary>
+      <description>The URL of the Ollama inference server.</description>
+    </key>
+    <key name="auto-start" type="b">
+      <default>false</default>
+      <summary>Auto-start on login</summary>
+      <description>Whether to automatically start shani-chronoa on user login.</description>
+    </key>
+    <key name="notification-enabled" type="b">
+      <default>true</default>
+      <summary>Enable spoken replies and timer notifications</summary>
+      <description>When true, Chronoa speaks its replies aloud (text-to-speech) and timer completions fire a desktop notification. When false, replies are shown on screen only and timers stay silent.</description>
+    </key>
+    <key name="language" type="s">
+      <default>'en'</default>
+      <summary>Interface and processing language</summary>
+      <description>The language code for speech recognition and interface text.</description>
+    </key>
+    <key name="debug-mode" type="b">
+      <default>false</default>
+      <summary>Enable debug logging</summary>
+      <description>When true, verbose debug output is logged for troubleshooting.</description>
+    </key>
+    <key name="wake-word-enabled" type="b">
+      <default>false</default>
+      <summary>Enable hands-free wake-word activation</summary>
+      <description>When true and openWakeWord is installed, listens continuously for the wake word instead of requiring a button press.</description>
+    </key>
+    <key name="wake-word-model" type="s">
+      <default>'hey_jarvis'</default>
+      <summary>Wake-word model to listen for</summary>
+      <description>The openWakeWord pretrained model name to activate on. No dedicated "hey chronoa" model has been trained yet, so this defaults to one of openWakeWord's bundled phrases.</description>
+    </key>
+    <key name="cloud-fallback-enabled" type="b">
+      <default>false</default>
+      <summary>Allow falling back to a free cloud LLM when Ollama is unavailable</summary>
+      <description>When true AND privacy mode is off, Chronoa may send prompts to a free, no-API-key cloud LLM gateway (LLM7, Kilo Gateway, or BlockRun) if Ollama cannot be reached. Off by default - this is the one setting that sends data off the machine.</description>
+    </key>
+    <key name="barge-in-vad-enabled" type="b">
+      <default>false</default>
+      <summary>Interrupt spoken replies as soon as you start talking</summary>
+      <description>When true, continuously monitors the microphone while Chronoa is speaking and interrupts immediately on detected speech, instead of only interrupting on the next button press or wake word. Off by default: there is no acoustic echo cancellation, so on speakers (not headphones) the mic may pick up Chronoa's own voice and self-interrupt.</description>
+    </key>
+    <key name="llm7-api-key" type="s">
+      <default>''</default>
+      <summary>Optional LLM7 API key (BYOK)</summary>
+      <description>Bring-your-own-key for the LLM7 free cloud gateway. Empty uses anonymous access (no key required); a real key may raise rate limits.</description>
+    </key>
+    <key name="kilo-api-key" type="s">
+      <default>''</default>
+      <summary>Optional Kilo Gateway API key (BYOK)</summary>
+      <description>Bring-your-own-key for the Kilo Gateway free cloud gateway. Empty uses anonymous access; Kilo's own rate-limit errors suggest a real key raises the limit.</description>
+    </key>
+    <key name="blockrun-api-key" type="s">
+      <default>''</default>
+      <summary>Optional BlockRun API key (BYOK)</summary>
+      <description>Bring-your-own-key for the BlockRun free cloud gateway. Empty uses anonymous access, which shares a global free-tier quota with every other anonymous user.</description>
+    </key>
+    <key name="openai-api-key" type="s">
+      <default>''</default>
+      <summary>OpenAI API key</summary>
+      <description>Required to use OpenAI as a cloud LLM fallback - OpenAI has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="anthropic-api-key" type="s">
+      <default>''</default>
+      <summary>Anthropic API key</summary>
+      <description>Required to use Anthropic (Claude) as a cloud LLM fallback - Anthropic has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="google-api-key" type="s">
+      <default>''</default>
+      <summary>Google Gemini API key</summary>
+      <description>Required to use Google Gemini as a cloud LLM fallback - Google has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="groq-api-key" type="s">
+      <default>''</default>
+      <summary>Groq API key</summary>
+      <description>Required to use Groq as a cloud LLM fallback - Groq has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+  </schema>
+</schemalist>
