@@ -8,6 +8,8 @@ import httpx
 import json
 from typing import Optional, AsyncIterator
 
+from shani_chronoa.secrets_manager import secrets_manager
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,9 +48,13 @@ class OllamaLLM:
             The assistant message dict, e.g. {"role", "content", "tool_calls"}
         """
         client = await self._get_client()
+        sanitized_messages = [
+            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            for msg in messages
+        ]
         payload = {
             "model": self.model,
-            "messages": messages,
+            "messages": sanitized_messages,
             "stream": stream and not tools,
             "options": {
                 "temperature": 0.7,

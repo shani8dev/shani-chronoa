@@ -96,6 +96,7 @@ from typing import NamedTuple, Optional
 
 import httpx
 
+from shani_chronoa.secrets_manager import secrets_manager
 from shani_chronoa.skills import is_valid_schema
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,11 @@ class OpenAICompatibleLLM:
         a 200 response whose body is actually an error (confirmed live for
         both Kilo and BlockRun - see module docstring)."""
         client = await self._get_client()
-        payload: dict = {"model": self.model, "messages": messages}
+        sanitized_messages = [
+            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            for msg in messages
+        ]
+        payload: dict = {"model": self.model, "messages": sanitized_messages}
         if tools:
             payload["tools"] = _valid_tools(tools)
 
@@ -337,10 +342,16 @@ class AnthropicLLM:
     async def chat_message(self, messages: list[dict], tools: Optional[list[dict]] = None, stream: bool = False) -> dict:
         client = await self._get_client()
         system_prompt, anthropic_messages = self._history_to_anthropic(messages)
+        if system_prompt:
+            system_prompt = secrets_manager.sanitize_text_for_llm(system_prompt)
+        sanitized_messages = [
+            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            for msg in anthropic_messages
+        ]
         payload: dict = {
             "model": self.model,
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
-            "messages": anthropic_messages,
+            "messages": sanitized_messages,
         }
         if system_prompt:
             payload["system"] = system_prompt
@@ -416,11 +427,15 @@ class CloudLLMChain:
     _MAX_RETRY_WAIT = 10.0  # cap how long we'll wait on a provider's own retry_after hint
 
     async def chat_message(self, messages: list[dict], tools: Optional[list[dict]] = None, stream: bool = False) -> dict:
+        sanitized_messages = [
+            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            for msg in messages
+        ]
         last_error: Optional[Exception] = None
         for backend in self._backends:
             for attempt in range(2):  # one retry after a provider's own retry_after hint, then move on
                 try:
-                    message = await backend.chat_message(messages, tools=tools, stream=stream)
+                    message = await backend.chat_message(sanitized_messages, tools=tools, stream=stream)
                     logger.info(f"Cloud LLM fallback answered via {backend.provider.name} ({backend.model})")
                     return message
                 except CloudLLMError as e:
