@@ -166,6 +166,13 @@ carefully — only by constructing the actual GTK objects / running
 `glib-compile-schemas` / driving the real GLib main loop and watching what
 happens.
 
+## Commit discipline
+
+Before composing a commit message, run `git log --oneline -20` (and `git
+log -5 -- <touched paths>` for the files you changed) and match the
+existing style — subject shape, scope prefixes, body detail level —
+rather than writing in a generic format.
+
 ## Boundaries
 
 - ✅ **Always**: grep for real callers before trusting a `feat:` commit
@@ -181,6 +188,7 @@ happens.
   shell-exec tool, even as a convenience shortcut — that's the specific
   design boundary that makes this an "actual task-doing assistant" safe to
   run LLM-issued commands through, not an accident to "simplify" away.
+- 🚫 **Never**: delete or skip a failing test to make a build/CI pass — fix the underlying code, not the test. A red test is signal; silencing it destroys the signal, not the bug.
 
 *Maintenance note: this file is well past 300 lines. Keep new entries
 terse and current-state; consider a dated `AUDIT-HISTORY.md` split (the
