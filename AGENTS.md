@@ -166,6 +166,27 @@ carefully — only by constructing the actual GTK objects / running
 `glib-compile-schemas` / driving the real GLib main loop and watching what
 happens.
 
+## Boundaries
+
+- ✅ **Always**: grep for real callers before trusting a `feat:` commit
+  message or a passing module-level unit test as proof something is live
+  — this repo has shipped multiple modules that were fully built,
+  unit-tested, and never actually wired into anything that runs (see
+  "Audit-verified known issues" below).
+- ⚠️ **Ask first**: adding an MCP *client* (consuming external servers) —
+  deliberately not done; it conflicts with the fixed-whitelist skill
+  design's whole safety rationale and needs its own trust story first, not
+  a quick addition.
+- 🚫 **Never**: turn `tools.py`'s skill whitelist into a generic
+  shell-exec tool, even as a convenience shortcut — that's the specific
+  design boundary that makes this an "actual task-doing assistant" safe to
+  run LLM-issued commands through, not an accident to "simplify" away.
+
+*Maintenance note: this file is well past 300 lines. Keep new entries
+terse and current-state; consider a dated `AUDIT-HISTORY.md` split (the
+pattern already used in shani-docs/shani-install-media/shani-deploy/
+shani-builder) if it keeps growing.*
+
 ## Required verification for a change
 
 ```bash
