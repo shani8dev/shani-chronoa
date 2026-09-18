@@ -20,6 +20,7 @@ import sys
 
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
+from shani_chronoa.tool_tracking import ToolTracker
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,10 @@ TOOLS, _HANDLER_FNS = discover_skills()
 
 # Module-level sandbox executor singleton
 _SANDBOX = SandboxExecutor()
+
+# Module-level tool-call audit trail singleton (last 100 calls in memory,
+# full history appended to ~/.local/share/shani-chronoa/logs/tool_calls.log)
+_TRACKER = ToolTracker()
 
 logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FNS)) or '(none)'}")
 
@@ -86,11 +91,14 @@ def execute_tool(name: str, arguments: dict) -> str:
     )
 
     try:
-        exit_code, output, _duration = _SANDBOX.execute(cmd, config)
+        exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
+        result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
+        _TRACKER.record_call(name, arguments, result, duration_ms)
         if exit_code != 0:
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
             return output or f"Tool '{name}' failed with exit code {exit_code}"
         return output
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
+        _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0)
         return f"Tool '{name}' failed: {e}"

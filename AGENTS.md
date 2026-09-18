@@ -493,14 +493,20 @@ these were missed:
 Implementation priorities are per `../IMPLEMENTATION-ROADMAP.md` (master roadmap for the whole shani ecosystem).
 
 **Status correction (2026-09-18, audit-verified — read this before trusting
-any item below):** items 1-3 were implemented as code (commits `fb5fd67`,
-`9fde500`, `b3dd356`) but were NOT actually functional as shipped — see the
-"Audit-verified known issues" section above for the live-execution proof and
-the fixes applied this pass. Items 4, 6, 7, 8 are implemented as standalone
-modules but confirmed (via `grep` for real callers) **never imported by
-anything that runs** — dead code, not done. Only item 5 is dead-but-harmless
-(gracefully skipped, logs a warning). Don't take a `feat:` commit message or
-this list's prose as proof of "done" — grep for real callers first.
+any item below):** items 1-3 and 7 were implemented as code (commits
+`fb5fd67`, `9fde500`, `b3dd356`, `d85df5c`) but were NOT actually functional
+as shipped — see the "Audit-verified known issues" section above for the
+live-execution proof and the fixes applied this pass (items 1-3, 7 are now
+genuinely done). Items 4, 6, 8 remain implemented as standalone modules but
+confirmed (via `grep` for real callers) **never imported by anything that
+runs** — dead code, not done, and deliberately left that way (each needs a
+real design decision - see the entries below and the "Deliberately not
+done" section - not a mechanical wire-up like item 7 got). Item 5 is
+dead-but-harmless (gracefully skipped, logs a warning). Don't take a `feat:`
+commit message or this list's prose as proof of "done" — grep for real
+callers first, and check what the default arguments actually do when
+nothing overrides them (item 7's `/var/log` default was the second
+"passes its own unit test, crashes for real" bug found this pass).
 
 1. ~~**Sandbox Executor** (P0, 2-3 days)~~ **Module exists and IS wired into
    `tools.py`'s `execute_tool()` path, but its timeout enforcement for
@@ -542,10 +548,22 @@ this list's prose as proof of "done" — grep for real callers first.
    open only if Discord/Telegram/Matrix integration ever becomes a goal
    (roadmap #22).
 
-7. **Tool Call Tracking** (P2, 1 day) — `tool_tracking.py`'s `ToolCall`
-   dataclass exists but is dead code, never imported by `tools.py`,
-   `assistant.py`, or `mcp.py`. Chronoa still has zero real audit trail for
-   LLM-initiated actions. Still open (roadmap #20).
+7. ~~**Tool Call Tracking** (P2, 1 day)~~ **DONE (2026-09-18).** Wired
+   `ToolTracker` into `tools.py:execute_tool()` — every call (success,
+   non-zero exit, or exception) is now recorded to an in-memory ring
+   buffer (`_TRACKER.get_calls()`, last 100) and appended to
+   `~/.local/share/shani-chronoa/logs/tool_calls.log`. Its own default
+   `LOG_DIR` was `/var/log/shani-chronoa` — not writable by the normal
+   desktop user Chronoa actually runs as; **confirmed live**:
+   `ToolTracker()` with defaults raised `PermissionError` before this fix
+   (the module's own unit test never caught this because it always passes
+   an explicit `tmp_path` override). Changed the default to
+   `~/.local/share/shani-chronoa/logs`, matching the sandbox executor's own
+   per-user state directory, and capped the in-memory list to a
+   `deque(maxlen=100)` (was an unbounded list) per the roadmap's own "last
+   100" spec. **Verified live**: a real `execute_tool('get_datetime', {})`
+   call produced a matching entry in both `_TRACKER.get_calls()` and the
+   on-disk log file (roadmap #20).
 
 8. **Per-Agent Sandbox Profiles** (P2, 2 days) — `sandbox/profiles.py`'s
    `AgentProfile` dataclass exists but is dead code, never imported by the

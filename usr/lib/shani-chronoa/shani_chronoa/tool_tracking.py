@@ -2,14 +2,21 @@
 
 import json
 import logging
+import os
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-LOG_DIR = Path("/var/log/shani-chronoa")
+# Chronoa runs as a normal desktop user, never root - /var/log is not
+# writable by that user (confirmed live: ToolTracker() with the default
+# raised PermissionError on a real, unprivileged install). Use the same
+# per-user XDG data location the sandbox executor already uses for its
+# own state (~/.local/share/shani-chronoa/...).
+LOG_DIR = Path(os.path.expanduser("~/.local/share/shani-chronoa/logs"))
 LOG_FILE = LOG_DIR / "tool_calls.log"
 
 
@@ -43,10 +50,12 @@ class ToolCallRecord:
 class ToolTracker:
     """Tracks tool calls made by shani-chronoa agents."""
 
-    def __init__(self, log_dir: Path = LOG_DIR):
+    def __init__(self, log_dir: Path = LOG_DIR, max_in_memory: int = 100):
         self.log_dir = log_dir
         self.log_file = log_dir / "tool_calls.log"
-        self._calls: list[ToolCallRecord] = []
+        # In-memory ring buffer for conversation-context use (last N calls);
+        # the on-disk log below is append-only and unbounded, this is not.
+        self._calls: deque[ToolCallRecord] = deque(maxlen=max_in_memory)
         self._ensure_log_dir()
 
     def _ensure_log_dir(self) -> None:
