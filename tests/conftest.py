@@ -29,6 +29,14 @@ import textwrap
 import types
 from pathlib import Path
 
+# Disable bytecode generation BEFORE any shani_chronoa import — pytest
+# imports test modules (and their dependencies) during collection, which
+# would otherwise write .pyc files into usr/lib/shani-chronoa/**/__pycache__/
+# and make the packaging tests (test_no_pycache_in_packaged_payload,
+# test_no_bytecode_files_in_packaged_payload) fail spuriously.
+sys.dont_write_bytecode = True
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent

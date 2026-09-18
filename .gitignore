@@ -1,2 +1,4 @@
 __pycache__/
 tests/__pycache__/
+usr/**/__pycache__/
+usr/**/*.pyc
