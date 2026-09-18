@@ -332,20 +332,25 @@ class TestToolExecutionGuards:
     """execute_tool must handle untrusted non-dict arguments deterministically."""
 
     def test_execute_tool_non_dict_arguments_are_ignored(self, monkeypatch):
-        # Given: a tool whose handler records the arguments it receives
+        # Given: execute_tool routes every call through the sandbox executor as
+        # a subprocess command string (SandboxExecutor.execute), not an
+        # in-process function call - so this must assert on the command it
+        # builds rather than on a directly-observable handler invocation.
         import shani_chronoa.tools as tools_mod
-        received = []
+        captured = {}
 
-        def _probe(arguments):
-            received.append(arguments)
-            return "ok"
+        def fake_execute(cmd, config, agent_id="default"):
+            captured["cmd"] = cmd
+            return (0, "ok", 1.0)
 
-        monkeypatch.setitem(tools_mod._HANDLERS, "probe", _probe)
+        monkeypatch.setattr(tools_mod._SANDBOX, "execute", fake_execute)
+        handler_name = next(iter(tools_mod._HANDLER_FNS))
         # When: it is called with a non-dict arguments value
-        result = tools_mod.execute_tool("probe", "not-a-dict")
-        # Then: the arguments are treated as empty instead of crashing the handler
+        result = tools_mod.execute_tool(handler_name, "not-a-dict")
+        # Then: the arguments are treated as empty (`{}`) in the command built
+        # for the sandbox, instead of crashing or forwarding the non-dict value
         assert result == "ok"
-        assert received == [{}]
+        assert "({})" in captured["cmd"]
 
 
 class TestMuteCoercion:
