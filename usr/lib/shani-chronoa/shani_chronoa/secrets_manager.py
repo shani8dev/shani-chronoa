@@ -119,6 +119,28 @@ class SecretsManager:
         }
         self._save()
 
+    def register_runtime_secret(
+        self, key: str, value: str, description: str = ""
+    ) -> None:
+        """Registers a secret value for sanitize_text_for_llm()/inject_environment()
+        purposes only, WITHOUT persisting it to the on-disk vault.
+
+        Use this for a secret that already lives in another store (e.g. a
+        cloud LLM API key kept in GSettings by design - see
+        `ChronoaConfig.cloud_llm_api_keys()`'s threat-model note) so the
+        sanitizer and sandboxed-tool env injection know about the live
+        value without creating a second, redundant on-disk copy of the
+        same credential. A blank value is ignored (nothing to redact/inject).
+        """
+        if not value:
+            return
+        clean_key = key.strip().upper().replace(" ", "_")
+        self._cache[clean_key] = {
+            "value": self._obfuscate(value.strip()),
+            "description": description,
+            "updated_at": str(int(time.time())),
+        }
+
     def get_secret(self, key: str) -> Optional[str]:
         """Retrieves raw secret value."""
         clean_key = key.strip().upper().replace(" ", "_")

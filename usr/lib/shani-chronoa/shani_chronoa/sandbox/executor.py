@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -128,6 +129,7 @@ class SandboxExecutor:
                 proc = subprocess.Popen(
                     command, shell=True, env=env,
                     stdout=tmp_out, stderr=tmp_err,
+                    start_new_session=True,
                 )
 
                 poll_start = time.monotonic()
@@ -156,17 +158,34 @@ class SandboxExecutor:
 
                     return (retcode, combined, duration)
 
-                tmp_out.seek(0)
-                tmp_err.seek(0)
-                partial_out = tmp_out.read().strip()
-                partial_err = tmp_err.read().strip()
-                combined_partial = (partial_out + "\n" + partial_err).strip()
+                if is_bg:
+                    tmp_out.seek(0)
+                    tmp_err.seek(0)
+                    partial_out = tmp_out.read().strip()
+                    partial_err = tmp_err.read().strip()
+                    combined_partial = (partial_out + "\n" + partial_err).strip()
 
-                msg = f"Command started and continues running in the background (PID: {proc.pid})."
-                if combined_partial:
-                    msg += f"\nOutput:\n{combined_partial}"
+                    msg = f"Command started and continues running in the background (PID: {proc.pid})."
+                    if combined_partial:
+                        msg += f"\nOutput:\n{combined_partial}"
 
-                return (0, msg, duration)
+                    return (0, msg, duration)
+
+                # Foreground command exceeded its timeout: kill the whole
+                # process group (shell=True spawns a shell whose children
+                # would otherwise survive proc.kill()) rather than silently
+                # reporting success while it keeps running unbounded.
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+
+                duration = (time.monotonic() - start_time) * 1000.0
+                return (124, f"Error: Command timed out after {timeout}s and was terminated.", duration)
 
             except Exception as exc:
                 duration = (time.monotonic() - start_time) * 1000.0

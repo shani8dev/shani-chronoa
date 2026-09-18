@@ -26,6 +26,7 @@ from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
 from shani_chronoa.cloud_llm import CloudLLMChain, DEFAULT_PROVIDER_ORDER, BYOK_PROVIDER_ORDER
+from shani_chronoa.secrets_manager import secrets_manager
 from shani_chronoa.tts import PiperTTS
 from shani_chronoa.wakeword import WakeWordListener
 from shani_chronoa.gui import CajitaWindow, ChronoaOrbWidget
@@ -324,6 +325,14 @@ class ChronoaApplication(Gtk.Application):
         # last resort. CloudLLMChain itself skips any BYOK provider left
         # without a key, so listing all of them here is harmless.
         api_keys = self.config.cloud_llm_api_keys()
+        # Make the sanitizer/sandbox-env-injection aware of the actual live
+        # keys (stored in GSettings by design, not the vault - see
+        # ChronoaConfig.cloud_llm_api_keys()'s threat-model note) so
+        # secrets_manager.sanitize_text_for_llm() can actually redact them.
+        # Without this the vault's cache stays empty and sanitization is a
+        # silent no-op against every real key in use.
+        for provider_id, key_value in api_keys.items():
+            secrets_manager.register_runtime_secret(f"cloud_llm_{provider_id}", key_value)
         provider_order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
         cloud_llm = CloudLLMChain(provider_ids=provider_order, api_keys=api_keys)
         if not cloud_llm.is_available():

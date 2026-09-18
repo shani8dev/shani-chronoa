@@ -46,6 +46,14 @@ only looked like MCP support (see the bug list below). Packaged via both an
 Arch `PKGBUILD` and a `DEBIAN/control` (two different package managers, keep
 dependency names in the right convention for each — see below).
 
+## Empirical verification (mandatory)
+
+**Reading code is analysis; running code is verification.** A change is not
+verified by reading the diff, running `bash -n`, or confirming it "looks
+correct." It is verified by observing the actual behavior of the real
+thing in the real environment — built, served, deployed, signed, running.
+If you haven't seen it work (or fail) for real, it isn't verified.
+
 ## Rule: verify by actually running it, not by reading it
 
 This repo has shipped multiple bugs that read as completely correct and
@@ -303,6 +311,88 @@ missing `.get_child()` hop was in the test, not `settings_window.py`. If a
 future check on a `Gtk.ScrolledWindow`'s contents finds implausibly few
 children, check for this before suspecting the widget-building code itself.
 
+## Audit-verified known issues (confirmed present)
+
+- **`SandboxExecutor._run_host()`: `timeout_seconds` was never actually
+  enforced for LEVEL_3_HOST_USER (the default level for every skill call)
+  — FIXED (2026-09-18).** A foreground command that ran past its configured
+  timeout was never killed: the poll loop just gave up waiting and the
+  function returned `(0, "Command started and continues running in the
+  background (PID: ...)", ...)` — reporting success while the real process
+  kept running on the host, completely untracked, for as long as it liked.
+  **Verified live**: a command with `timeout_seconds=2` running `sleep 10 &&
+  touch marker` returned exit 0 after 2s while the `sleep` kept running and
+  the marker file was created 8 seconds later, proving the process was never
+  terminated. This defeats the entire stated purpose of the sandbox executor
+  (bounding LLM-issued commands) for the common case — every skill call
+  goes through `tools.py:_get_sandbox_config()`, which defaults to
+  `LEVEL_3_HOST_USER`. Fixed by launching with `start_new_session=True` and,
+  when a genuinely-foreground command (not `&`/`gtk-launch`/`xdg-open`)
+  exceeds its timeout, `os.killpg()`-ing the whole process group and
+  returning `(124, "...timed out...", ...)` instead of `(0, "...continues
+  running...")`. **Verified live after the fix**: the same repro now kills
+  the sleep within the 2s window (marker file never created) and returns
+  124; real backgrounded commands (trailing `&`) and normal quick commands
+  were re-verified unaffected.
+- **`SecretsManager`'s vault was never populated with the actual secrets it
+  exists to protect — FIXED (2026-09-18).** `set_secret()`/`get_secret()`
+  were never called anywhere in the app; the real cloud LLM API keys
+  (Anthropic/OpenAI/Google/Groq/etc.) are stored via `ChronoaConfig`/
+  GSettings instead (a deliberate, documented choice — see
+  `cloud_llm_api_keys()`'s own threat-model docstring in `config.py`). This
+  meant `sanitize_text_for_llm()` — the P0 "prevent API keys leaking to LLM
+  providers" fix — always checked against an empty `_cache` and silently
+  redacted nothing. **Verified live**: a fake key embedded in a prompt
+  string passed through `sanitize_text_for_llm()` completely unredacted
+  before the fix. Fixed by adding `register_runtime_secret()` (registers a
+  value in the in-memory cache for sanitization/env-injection purposes only,
+  without persisting a second copy to `vault.json` — GSettings stays the
+  single source of truth for these keys, matching the existing design) and
+  calling it from `app.py:_maybe_enable_cloud_fallback()` for every
+  non-empty configured provider key before building the `CloudLLMChain`.
+  **Verified live after the fix**: the same fake-key repro is now redacted
+  to `$SECRET:CLOUD_LLM_ANTHROPIC`, and the vault file is confirmed to stay
+  absent from disk (no second on-disk copy created).
+- **Four of the six 2026-09-18 security/architecture modules are dead code —
+  built, unit-tested in isolation, and never imported by anything that
+  actually runs.** Confirmed via `grep` across the whole package: none of
+  `ipc.py` (`PeerValidator` — also isn't a real peer-credential check, it's
+  an unkeyed SHA256 hash, not a signature, and Chronoa has no D-Bus/socket
+  IPC surface for it to protect in the first place — the MCP server is
+  explicitly stdio-only/same-user-trusted, see `mcp.py`'s own "Trust model"
+  docstring), `tool_tracking.py` (`ToolCall`), `gateway_supervisor.py`, and
+  `sandbox/profiles.py` (`AgentProfile`) are referenced from `app.py`,
+  `tools.py`, `assistant.py`, or `mcp.py`. `skills/scan_archive.py`
+  (zip-slip protection) is additionally miscategorized: it lives under
+  `skills/` but doesn't match the skill contract, so `discover_skills()`
+  logs a `Skipping 'builtin:scan_archive': SKILLS must be a list of Skill
+  entries` warning on every startup — harmless (doesn't break skill
+  loading, verified live) but pure noise, and correct anyway since there is
+  no skill-download feature in Chronoa for it to guard (only
+  `~/.config/shani-chronoa/skills/` local drop-in, per this file's own "What
+  this repo is" section). Do not treat a `feat: add X` commit or a passing
+  module-level unit test as proof `X` is live in the running app — grep for
+  real callers first, per this file's own verify-by-running rule above.
+  Wiring these in (or deciding they're not worth wiring in) is still open
+  work, not done — see the Implementation Roadmap section below, which was
+  written under the same mistaken assumption and needs re-reading with this
+  in mind.
+- **`tests/`: two more pre-existing bugs found and fixed the same pass.**
+  Fourteen `.pyc` files under `usr/lib/shani-chronoa/shani_chronoa/**/__pycache__/`
+  were committed to git (`git ls-files | grep __pycache__` — the
+  `.gitignore` rule existed but never retroactively untracked them),
+  directly contradicting this repo's own `test_no_pycache_in_packaged_payload`/
+  `test_no_bytecode_files_in_packaged_payload` tests, which were failing
+  before this pass — `git rm --cached` fixed it. Separately,
+  `tests/test_skills.py::test_execute_tool_non_dict_arguments_are_ignored`
+  referenced a `tools_mod._HANDLERS` attribute that doesn't exist (renamed
+  to `_HANDLER_FNS` at some point, or the test predates `execute_tool`'s
+  current subprocess-based dispatch, which makes monkeypatching a handler
+  directly impossible anyway) — rewritten to mock `_SANDBOX.execute` and
+  assert on the built command string instead, which actually matches how
+  `execute_tool` dispatches today. Full suite: 122 passed / 3 failed before
+  this pass, 125 passed / 0 failed after.
+
 ## Garuda Cross-Reference Findings (added 2026-09-17)
 
 Based on a full scan of 29 garuda-linux repos mapped against shani (see `../garuda-catalog.md` — 29 repos, not 34; several user-listed names don't exist). See `../garuda-mapping-analysis.md` and `../deep-analysis.md` for full details. Sayri (a Pulsar OS AI assistant, present in garuda-clones/ — not a garuda repo itself) is the most directly comparable repo — both are local-first GTK4 AI assistants.
@@ -402,24 +492,74 @@ these were missed:
 
 Implementation priorities are per `../IMPLEMENTATION-ROADMAP.md` (master roadmap for the whole shani ecosystem).
 
-This repo is the **P0 CRITICAL** security gap in the whole ecosystem: no sandbox execution, plaintext API keys, and no prompt sanitization. The reference implementation for the security items below is sayri, readable at `/home/shrinivaskumbhar/Documents/shani/garuda-clones/sayri/` (verified present: `usr/share/sayri/lib/sayri/adapters/sandbox/executor.py`, `domain/secrets_manager.py`, `gateway_supervisor.py`). Chronoa already beats sayri on wake word with VAD calibration, barge-in with TTS interrupt, 7+ LLM providers, BYOK cloud fallback, a real MCP server, and a calibrated noise floor — none of those are being touched.
+**Status correction (2026-09-18, audit-verified — read this before trusting
+any item below):** items 1-3 were implemented as code (commits `fb5fd67`,
+`9fde500`, `b3dd356`) but were NOT actually functional as shipped — see the
+"Audit-verified known issues" section above for the live-execution proof and
+the fixes applied this pass. Items 4, 6, 7, 8 are implemented as standalone
+modules but confirmed (via `grep` for real callers) **never imported by
+anything that runs** — dead code, not done. Only item 5 is dead-but-harmless
+(gracefully skipped, logs a warning). Don't take a `feat:` commit message or
+this list's prose as proof of "done" — grep for real callers first.
 
-1. **Sandbox Executor** (P0, 2-3 days) — Port the 5-level `bwrap` sandbox from `sayri/adapters/sandbox/executor.py` (LEVEL_0_NO_EXEC → LEVEL_4_HOST_ROOT) into `tools.py`'s `execute_tool()` path (`tools.py:25`, the single implementation both `assistant.py:98` and `mcp.py:121` call): privilege-escalation blocking (`sudo`/`pkexec`/`su`), a dangerous-binary blocklist (`mkfs`, `dd`, `shutdown`, `reboot`, `mount`), `subprocess.run(timeout=...)`, and GUI-access detection. This is what stops the LLM from running destructive commands. Do NOT copy sayri's `AgentProfile`/`SandboxConfig` dataclasses — Chronoa needs its own config model (roadmap #1).
+1. ~~**Sandbox Executor** (P0, 2-3 days)~~ **Module exists and IS wired into
+   `tools.py`'s `execute_tool()` path, but its timeout enforcement for
+   `LEVEL_3_HOST_USER` (the default) was a no-op until fixed 2026-09-18** —
+   see "Audit-verified known issues" above.
 
-2. **Secrets Vault** (P0, 1-2 days) — Add `secrets_manager.py` modeled on `sayri/domain/secrets_manager.py`: XOR obfuscation with a machine-id + UID salt, `os.chmod(0o600)`, `inject_environment()` that only injects into child-process env, and masked previews in `list_secrets()`. This replaces plaintext API keys — audit-verified 2026-09-17: there is **no** `config.json`; keys live in GSettings/dconf (`org.shani.chronoa`) — and must support the longer BYOK key formats (Anthropic, OpenAI, Google, Groq) (roadmap #2).
+2. ~~**Secrets Vault** (P0, 1-2 days)~~ **Module exists but its
+   `set_secret()`/`get_secret()` were never called anywhere — the vault's
+   cache was always empty until `register_runtime_secret()` was added and
+   wired into `app.py` 2026-09-18** — see "Audit-verified known issues"
+   above. Real API keys still live in GSettings/dconf by design (roadmap
+   #2's `config.json` premise was already wrong per the 2026-09-17 note
+   below — no such file ever existed).
 
-3. **LLM Prompt Sanitization** (P0, 2-4 hours) — Add `sanitize_text_for_llm()` (pattern: `sayri/domain/secrets_manager.py:143-152`) and wire it into every LLM API call path before the `httpx.post` to any provider, so a secret can never leak even if the vault is bypassed. Handle secrets embedded in longer strings and partial matches (roadmap #3).
+3. ~~**LLM Prompt Sanitization** (P0, 2-4 hours)~~ **`sanitize_text_for_llm()`
+   exists and IS wired into every LLM call path (`llm.py`, `cloud_llm.py`
+   x3), but was a silent no-op against real keys until item 2's fix above
+   made the vault aware of them — DONE as of 2026-09-18.**
 
-4. **Peer-Validated IPC** (P3, 1 day) — Chronoa's D-Bus interface has no peer validation; sayri's UNIX socket (`~/.local/share/sayri/sayri.sock`, chmod 600) rejects connections from other UIDs. Validate the D-Bus peer UID and reject/log unauthorized connections (roadmap #28).
+4. **Peer-Validated IPC** (P3, 1 day) — `ipc.py`'s `PeerValidator` exists but
+   is dead code: never imported anywhere, isn't a real peer-credential check
+   (unkeyed SHA256 hash, not a signature), and Chronoa has no D-Bus/socket
+   IPC surface for it to protect — the MCP server is explicitly stdio-only,
+   same-user-trusted (see `mcp.py`'s "Trust model" docstring). Still open;
+   decide whether there's a real integration point before wiring it in, or
+   remove it (roadmap #28).
 
-5. **Zip-Slip Protection + Skill Download Validation** (P3, 1 day) — If/when skills are downloaded rather than only user-dropped, scan archives for `../` path traversal and reject executable files outside expected directories (pattern: sayri's `downloads.py` + `domain/skills_scanner.py` risk scoring; roadmap #29).
+5. **Zip-Slip Protection + Skill Download Validation** (P3, 1 day) —
+   `skills/scan_archive.py` exists, is correct, but is unused and
+   miscategorized: it lives under `skills/` without matching the skill
+   contract, so it's skipped with a harmless warning log on every startup.
+   There is still no skill-download feature in Chronoa (only local
+   `~/.config/shani-chronoa/skills/` drop-in) for it to guard. Still open
+   (roadmap #29).
 
-6. **Gateway Supervisor Architecture** (P2, 2-3 days, only if external channels are planned) — Port the *architecture* of `sayri/gateway_supervisor.py` (per-instance process management, per-instance env binding, dynamic secret injection from the vault, inactivity timeouts) if Discord/Telegram/Matrix integration ever becomes a goal. Not needed for the current local-first design (roadmap #22).
+6. **Gateway Supervisor Architecture** (P2, 2-3 days, only if external
+   channels are planned) — `gateway_supervisor.py` exists but is dead code,
+   never imported. Not needed for the current local-first design; still
+   open only if Discord/Telegram/Matrix integration ever becomes a goal
+   (roadmap #22).
 
-7. **Tool Call Tracking** (P2, 1 day) — `ToolCall` dataclass (`name`, `args`, `status` PENDING/RUNNING/SUCCESS/DENIED/FAILED/TIMEOUT, `result`, `duration_ms`, `timestamp`) wired into `execute_tool()` in `assistant.py`, with recent calls (last 100) kept in memory for conversation context and surfaced via MCP responses. Chronoa currently has zero audit trail for LLM-initiated actions (roadmap #20).
+7. **Tool Call Tracking** (P2, 1 day) — `tool_tracking.py`'s `ToolCall`
+   dataclass exists but is dead code, never imported by `tools.py`,
+   `assistant.py`, or `mcp.py`. Chronoa still has zero real audit trail for
+   LLM-initiated actions. Still open (roadmap #20).
 
-8. **Per-Agent Sandbox Profiles** (P2, 2 days) — `AgentProfile` dataclass (`name`, `sandbox_level` 0-4, `allowed_commands`, `blocked_commands`, `timeout_seconds`), default level 3, per-agent config in `~/.config/shani-chronoa/agents/<name>.yaml`; sandbox executor (item 1) looks up the profile before each command (roadmap #21).
+8. **Per-Agent Sandbox Profiles** (P2, 2 days) — `sandbox/profiles.py`'s
+   `AgentProfile` dataclass exists but is dead code, never imported by the
+   sandbox executor or anything else. Still open (roadmap #21).
 
-9. **LICENSE file** (P3, 5 min) — Chronoa is one of the 4 repos still missing a LICENSE (master-roadmap #31). Add GPL-3.0-only matching the OS-side repos (the web repos' sibling `shani-blog` is MIT — not the precedent here; chronoa is OS-side).
+9. **LICENSE file** (P3, 5 min) — **DONE.** A `LICENSE` file is present
+   (audit-verified 2026-09-18); the master-roadmap #31 "4 repos missing a
+   LICENSE" list is stale for this repo.
 
-10. **Shared CI templates, Renovate, conventional commits** (P1, cross-repo) — Adopt `shani-ci-commons` (roadmap #7), add `renovate.json` (roadmap #8 — Python repo: pip + GitHub Actions), enforce conventional commits (roadmap #9). Implemented centrally, tracked here. Note: this repo is **not** a git repo (no `.git`, verified 2026-09-17) — git-dependent CI hooks need the directory git-initialized first.
+10. **Shared CI templates, Renovate, conventional commits** (P1, cross-repo)
+    — Adopt `shani-ci-commons` (roadmap #7), add `renovate.json` (roadmap
+    #8 — Python repo: pip + GitHub Actions), enforce conventional commits
+    (roadmap #9). Still open. **Correction (2026-09-18):** the "this repo is
+    not a git repo" note here was stale even at the time it was written —
+    verified this pass: real git history, 9 commits, `git status`/`git log`
+    work normally. Whatever blocked git detection during the 2026-09-17
+    pass was environmental, not a property of this repo.
