@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    uses: shani8dev/shani-ci-commons/.github/workflows/lint.yml@main
+    with:
+      language: python
+
+  test:
+    name: Test
+    uses: shani8dev/shani-ci-commons/.github/workflows/test.yml@main
+    with:
+      language: python
+      # shani-chronoa's conftest.py inserts usr/lib/shani-chronoa into
+      # sys.path itself and needs the host's gi/GTK reachable, so the
+      # shared template's dependency-install step must NOT shadow it:
+      # it installs pytest + httpx only, which is exactly what this
+      # repo's own conftest documents as its required dep set.
+      test-command: |
+        PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider
+      python-version: "3.12"
+    needs: lint
+
+  security:
+    name: Security
+    uses: shani8dev/shani-ci-commons/.github/workflows/security.yml@main
+    with:
+      scan-type: secrets
+    needs: lint
