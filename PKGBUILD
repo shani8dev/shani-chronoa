@@ -13,8 +13,8 @@ depends=(
     'python-gobject'
     'gtk4'
     'python-httpx'
-    'whisper.cpp'
-    'piper-tts'
+    'espeak-ng'
+
     'pipewire'
     'wireplumber'
     'libnotify'

@@ -34,48 +34,52 @@ class PiperTTS:
             path = f"/usr/share/piper/voices/{voice_file}"
         return path
 
+    # Engines, best first. Piper is not in the Arch repos (it needs
+    # onnxruntime, which is not either); RHVoice (extra/rhvoice + a
+    # rhvoice-language-* and rhvoice-voice-*) sounds natural; espeak-ng
+    # ships in every Shanios image, so speech always works.
+    def engine(self) -> Optional[str]:
+        if os.path.exists(self.piper_path) and os.path.exists(self.voice_path):
+            return "piper"
+        if shutil.which("RHVoice-test") and self._rhvoice_has_voice():
+            return "rhvoice"
+        if shutil.which("espeak-ng"):
+            return "espeak-ng"
+        return None
+
+    @staticmethod
+    def _rhvoice_has_voice() -> bool:
+        return any(os.path.isdir(d) and os.listdir(d)
+                   for d in ("/usr/share/RHVoice/voices", "/usr/local/share/RHVoice/voices"))
+
+    def _lang(self) -> str:
+        """Piper voice id en_US-lessac-medium -> espeak language en-us."""
+        return self.voice.split("-", 1)[0].replace("_", "-").lower() or "en"
+
     def synthesize(self, text: str, output_file: str) -> bool:
-        """Synthesize text to speech.
-
-        Args:
-            text: The text to synthesize
-            output_file: Path to output audio file (WAV or PCM)
-
-        Returns:
-            True if synthesis succeeded
-        """
-        if not os.path.exists(self.voice_path):
-            logger.error(f"Piper voice model not found: {self.voice_path}")
+        """Synthesize text to a WAV file with the best available engine."""
+        eng = self.engine()
+        if eng == "piper":
+            cmd = [self.piper_path, "--model", self.voice_path, "--output_file", output_file]
+        elif eng == "rhvoice":
+            cmd = ["RHVoice-test", "-o", output_file]
+        elif eng == "espeak-ng":
+            cmd = ["espeak-ng", "--stdin", "-v", self._lang(), "-w", output_file]
+        else:
+            logger.error("No speech engine: install rhvoice (+ a voice) or espeak-ng")
             return False
-
         try:
-            cmd = [
-                self.piper_path,
-                "--model", self.voice_path,
-                "--output_file", output_file,
-            ]
-
-            # Pipe text to piper via stdin
-            process = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            stdout, stderr = process.communicate(input=text.encode("utf-8"), timeout=60)
-
-            if process.returncode != 0:
-                logger.error(f"Piper synthesis failed: {stderr.decode()}")
-                return False
-
-            return os.path.exists(output_file)
-
+            process = subprocess.run(cmd, input=text.encode("utf-8"), capture_output=True, timeout=60)
         except subprocess.TimeoutExpired:
-            logger.error("Piper synthesis timed out")
+            logger.error("%s synthesis timed out", eng)
             return False
-        except Exception as e:
-            logger.error(f"Piper synthesis error: {e}")
+        except OSError as e:
+            logger.error("%s synthesis error: %s", eng, e)
             return False
+        if process.returncode != 0:
+            logger.error("%s synthesis failed: %s", eng, process.stderr.decode(errors="replace"))
+            return False
+        return os.path.exists(output_file) and os.path.getsize(output_file) > 44  # > a bare WAV header
 
     def synthesize_to_bytes(self, text: str) -> bytes:
         """Synthesize text to audio bytes.
@@ -112,5 +116,5 @@ class PiperTTS:
         return voices
 
     def is_available(self) -> bool:
-        """Check if Piper TTS is available."""
-        return os.path.exists(self.piper_path) and os.path.exists(self.voice_path)
+        """Some speech engine is installed (see engine())."""
+        return self.engine() is not None
