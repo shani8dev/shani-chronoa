@@ -6,6 +6,7 @@ Provides local speech recognition using whisper.cpp models.
 import logging
 import subprocess
 import os
+import shutil
 import tempfile
 from typing import Optional
 
@@ -15,21 +16,26 @@ logger = logging.getLogger(__name__)
 class WhisperSTT:
     """Speech-to-text using whisper.cpp."""
 
-    def __init__(self, model: str = "base", whisper_path: str = "/usr/bin/whisper.cpp", language: str = "en") -> None:
+    def __init__(self, model: str = "base", whisper_path: Optional[str] = None, language: str = "en") -> None:
         self.model = model
-        self.whisper_path = whisper_path
+        # Arch's whisper-cpp installs whisper-cli; "whisper.cpp" was never a
+        # binary name there, so speech input could not work on Shanios
+        self.whisper_path = whisper_path or shutil.which("whisper-cli") or shutil.which("whisper.cpp") \
+            or "/usr/bin/whisper-cli"
         self.model_path = self._get_model_path(model)
         self.language = language
 
     def _get_model_path(self, model: str) -> str:
         """Get the path to the whisper.cpp model file."""
-        model_dir = os.path.expanduser("~/.local/share/whisper/models")
-        model_file = f"{model}.bin"
-        path = os.path.join(model_dir, model_file)
-        if not os.path.exists(path):
-            # Try system-wide location
-            path = f"/usr/share/whisper/models/{model_file}"
-        return path
+        # whisper.cpp publishes its models as ggml-<model>.bin; <model>.bin
+        # kept for files named by hand
+        dirs = (os.path.expanduser("~/.local/share/whisper/models"), "/usr/share/whisper/models")
+        names = (f"ggml-{model}.bin", f"{model}.bin")
+        for d in dirs:
+            for n in names:
+                if os.path.exists(os.path.join(d, n)):
+                    return os.path.join(d, n)
+        return os.path.join(dirs[0], names[0])
 
     def transcribe(self, audio_file: str) -> str:
         """Transcribe audio file to text.

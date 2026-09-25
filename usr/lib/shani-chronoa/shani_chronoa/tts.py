@@ -6,6 +6,7 @@ Provides local text-to-speech synthesis using Piper voice models.
 import logging
 import subprocess
 import os
+import shutil
 import tempfile
 from typing import Optional
 
@@ -15,9 +16,12 @@ logger = logging.getLogger(__name__)
 class PiperTTS:
     """Text-to-speech using Piper."""
 
-    def __init__(self, voice: str = "en_US-lessac-medium", piper_path: str = "/usr/bin/piper") -> None:
+    def __init__(self, voice: str = "en_US-lessac-medium", piper_path: Optional[str] = None) -> None:
         self.voice = voice
-        self.piper_path = piper_path
+        # Only the TTS binary, installed as piper-tts: on Arch /usr/bin/piper
+        # is the GTK gaming-mouse configurator (extra/piper), which the old
+        # default would have launched with TTS arguments
+        self.piper_path = piper_path or shutil.which("piper-tts") or "/usr/bin/piper-tts"
         self.voice_path = self._get_voice_path(voice)
 
     def _get_voice_path(self, voice: str) -> str:
