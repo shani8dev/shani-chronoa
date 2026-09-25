@@ -36,6 +36,8 @@ from pathlib import Path
 # test_no_bytecode_files_in_packaged_payload) fail spuriously.
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+# never the real session keyring (API keys otherwise go to Secret Service)
+os.environ["SHANI_CHRONOA_KEYRING"] = "0"
 
 import pytest
 

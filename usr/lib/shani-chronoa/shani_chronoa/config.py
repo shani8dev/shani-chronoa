@@ -31,6 +31,25 @@ _LOCAL_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
 _DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 
 
+# API keys live in the desktop keyring (Secret Service: GNOME Keyring,
+# KWallet), not in GSettings - dconf is plaintext and ends up in home
+# backups. A key still found in GSettings is moved on first read.
+try:
+    gi.require_version("Secret", "1")
+    from gi.repository import Secret  # type: ignore
+    _SECRET_SCHEMA = Secret.Schema.new("org.shani.chronoa.ApiKey", Secret.SchemaFlags.NONE,
+                                       {"key": Secret.SchemaAttributeType.STRING})
+except (ImportError, ValueError):  # no libsecret GIR
+    Secret = None  # type: ignore[assignment]
+    _SECRET_SCHEMA = None
+
+
+def _is_secret(key: str) -> bool:
+    # SHANI_CHRONOA_KEYRING=0: settings only (the hermetic test suite - it
+    # must not read or write the real session keyring)
+    return key.endswith("-api-key") and os.environ.get("SHANI_CHRONOA_KEYRING", "1") != "0"
+
+
 class ChronoaConfig:
     """Configuration manager using GSettings.
 
@@ -96,10 +115,50 @@ class ChronoaConfig:
         """
         if self._settings is None or key not in self._valid_keys:
             return default
+        if _is_secret(key):
+            got = self._secret_get(key)
+            if got is not None:
+                return got
         value = self._settings.get_value(key)
         if value.get_type_string() == "s":
             return value.get_string()
         return default
+
+    # --- keyring (Secret Service) for *-api-key ---------------------------
+    def _secret_get(self, key: str) -> Optional[str]:
+        """The key from the keyring (migrating a plaintext GSettings value
+        there first); None when no keyring is available."""
+        if _SECRET_SCHEMA is None:
+            return None
+        try:
+            val = Secret.password_lookup_sync(_SECRET_SCHEMA, {"key": key}, None)
+            legacy = self._settings.get_string(key)
+            if legacy:
+                if not val:
+                    Secret.password_store_sync(_SECRET_SCHEMA, {"key": key}, Secret.COLLECTION_DEFAULT,
+                                               f"Chronoa {key}", legacy, None)
+                    val = legacy
+                self._settings.reset(key)  # no plaintext copy left behind
+                logger.info("Moved %s from settings to the keyring", key)
+            return val or ""
+        except Exception as e:  # no Secret Service on this session
+            logger.warning("Keyring unavailable (%s); %s stays in settings", type(e).__name__, key)
+            return None
+
+    def _secret_set(self, key: str, value: str) -> bool:
+        if _SECRET_SCHEMA is None:
+            return False
+        try:
+            if value:
+                Secret.password_store_sync(_SECRET_SCHEMA, {"key": key}, Secret.COLLECTION_DEFAULT,
+                                           f"Chronoa {key}", value, None)
+            else:
+                Secret.password_clear_sync(_SECRET_SCHEMA, {"key": key}, None)
+            self._settings.reset(key)
+            return True
+        except Exception as e:
+            logger.warning("Keyring unavailable (%s); %s stays in settings", type(e).__name__, key)
+            return False
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         """Get a boolean configuration value (schema type "b")."""
@@ -119,6 +178,9 @@ class ChronoaConfig:
         """
         if self._settings is None or key not in self._valid_keys:
             logger.error("Unknown or unavailable setting key: %s", key)
+            return
+        if _is_secret(key) and self._secret_set(key, value):
+            logger.debug("Set %s (keyring)", key)
             return
         current = self._settings.get_value(key)
         if current.get_type_string() == "b":
