@@ -22,14 +22,14 @@ keys, no telemetry.
 - **MCP server** — Model Context Protocol support so external tools and
   data sources can be plugged in.
 - **GTK4 native UI** — integrates into the Shanios shell alongside
-  shani-gui.
+  shani-cassini.
 - **Privacy-first** — everything runs locally; nothing leaves the machine.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                   shani-gui                      │
+│                   shani-cassini                      │
 │  (settings / chat / status chrome)               │
 └────────────┬──────────────┬──────────────────────┘
              │              │
