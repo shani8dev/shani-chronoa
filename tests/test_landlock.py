@@ -228,3 +228,57 @@ def test_the_default_allowlist_does_not_grant_read_on_root():
                     "READ_FILE on '/' makes every file on the machine readable "
                     "and voids the confinement this layer exists to provide"
                 )
+
+
+def test_a_failed_ruleset_application_stops_the_command_instead_of_running_it():
+    """The a803def behaviour change, checked from the side that can hurt.
+
+    Missing bubblewrap used to mean REFUSE; it now means RUN CONFINED via
+    Landlock. That is a real improvement, but it trades a loud refusal for a
+    silent guarantee, and a guarantee that can fail open is worse than the
+    refusal it replaced: the caller gets rc != 0 and no output either way, so
+    "confinement could not be established" and "the command failed" are
+    indistinguishable unless something proves the command never ran.
+
+    So prove it. Simulate the kernel refusing the ruleset, and assert the
+    command's side effect is absent. Without this, a future refactor that
+    falls back to an unconfined exec when the wrapper exits non-zero would
+    still pass every other test here.
+    """
+    from shani_chronoa.sandbox import executor as executor_mod
+    from shani_chronoa.sandbox import landlock as landlock_mod
+    from shani_chronoa.sandbox.executor import SandboxConfig, SandboxLevel
+
+    with tempfile.TemporaryDirectory() as tmp:
+        workspace = os.path.join(tmp, "iso")
+        os.makedirs(workspace)
+        canary = os.path.join(tmp, "CANARY")
+
+        # Bubblewrap is present on many dev hosts but unusable where user
+        # namespaces are blocked, which is exactly the case that makes the
+        # Landlock fallback load-bearing rather than theoretical.
+        original_usable = executor_mod._BWRAP_USABLE
+        original_wrapper = landlock_mod.get_landlock_wrapper
+        executor_mod._BWRAP_USABLE = False
+        landlock_mod.get_landlock_wrapper = lambda *a, **k: (
+            "import sys\n"
+            "sys.stderr.write('simulated landlock_create_ruleset ENOSYS\\n')\n"
+            "sys.exit(1)\n"
+        )
+        try:
+            sandbox = executor_mod.SandboxExecutor(sandboxes_root=os.path.join(tmp, "sb"))
+            rc, out, _ = sandbox.execute(
+                f"touch {canary}",
+                SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, isolated_dir=workspace),
+                agent_id="canary",
+            )
+        finally:
+            executor_mod._BWRAP_USABLE = original_usable
+            landlock_mod.get_landlock_wrapper = original_wrapper
+
+        assert rc != 0, f"a failed ruleset must not report success, got rc={rc}"
+        assert not os.path.exists(canary), (
+            "the command executed even though confinement could not be "
+            "established - this is the fail-open case the fallback must never "
+            f"allow; output was: {out!r}"
+        )
