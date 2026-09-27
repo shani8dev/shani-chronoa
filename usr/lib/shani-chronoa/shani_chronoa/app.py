@@ -31,7 +31,7 @@ from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.senses.store import PerceptStore
 from shani_chronoa.tts import PiperTTS
 from shani_chronoa.wakeword import WakeWordListener
-from shani_chronoa.gui import CajitaWindow, ChronoaOrbWidget
+from shani_chronoa.gui import AssistantState, CajitaWindow, ChronoaOrbWidget
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +266,13 @@ class ChronoaApplication(Gtk.Application):
         debug_action.connect("activate", self._toggle_debug)
         self.add_action(debug_action)
 
+        # `player.stop()` was previously only reachable via `_begin_listening`,
+        # so stopping the assistant meant also opening the mic.
+        stop_speaking_action = Gio.SimpleAction.new("stop-speaking", None)
+        stop_speaking_action.connect("activate", self._stop_speaking)
+        self.add_action(stop_speaking_action)
+        self.set_accels_for_action("app.stop-speaking", ["Escape"])
+
         # Settings window
         settings_action = Gio.SimpleAction.new("open-settings", None)
         settings_action.connect("activate", self._open_settings)
@@ -292,12 +299,32 @@ class ChronoaApplication(Gtk.Application):
         barge-in: starting to talk again while the assistant is still
         speaking cuts it off immediately instead of waiting it out.
         """
+        was_speaking = self.window is not None and self.window.get_state() is AssistantState.SPEAKING
         self.player.stop()
         self._listening = True
         if self.window:
-            self.window.set_orb_state("listening")
-            self.window.set_status("Listening...")
+            # Route the handover through INTERRUPTING so the stop is visible
+            # as its own moment; cutting straight from speaking to listening
+            # reads as a dropped frame rather than a deliberate interrupt.
+            if was_speaking:
+                self.window.set_state(AssistantState.INTERRUPTING)
+                GLib.timeout_add(180, self._settle_into_listening)
+            else:
+                self.window.set_state(AssistantState.LISTENING)
+            self.window.set_status("")
         self._start_listening()
+
+    def _settle_into_listening(self) -> bool:
+        """Finish the interrupt handover, unless something else took over."""
+        if self.window and self._listening and self.window.get_state() is AssistantState.INTERRUPTING:
+            self.window.set_state(AssistantState.LISTENING)
+        return GLib.SOURCE_REMOVE
+
+    def _stop_speaking(self, _action: Gio.SimpleAction, _param: object) -> None:
+        """Stop spoken playback without opening the microphone."""
+        self.player.stop()
+        if self.window and self.window.get_state() is AssistantState.SPEAKING:
+            self.window.set_state(AssistantState.IDLE)
 
     def _toggle_privacy(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle privacy mode."""
@@ -558,7 +585,8 @@ class ChronoaApplication(Gtk.Application):
 
         text = str(result).strip()
         if self.window:
-            self.window.set_status(f'Heard: "{text}"')
+            self.window.set_state(AssistantState.THINKING)
+            self.window.add_user_turn(text)
         self._submit(text)
         return GLib.SOURCE_REMOVE
 
@@ -603,12 +631,13 @@ class ChronoaApplication(Gtk.Application):
             return GLib.SOURCE_REMOVE
 
         response = str(result)
+        speaking = bool(self.tts and self.tts.is_available() and self.config.notification_enabled)
         if self.window:
             self.window.set_response(response)
-            self.window.set_orb_state("idle")
-            self.window.set_status("Ready")
+            self.window.set_state(AssistantState.SPEAKING if speaking else AssistantState.IDLE)
+            self.window.set_status("")
 
-        if self.tts and self.tts.is_available() and self.config.notification_enabled:
+        if speaking:
             self._async.run(self._speak(response))
 
         return GLib.SOURCE_REMOVE
@@ -634,6 +663,18 @@ class ChronoaApplication(Gtk.Application):
         finally:
             if use_vad:
                 self.barge_in_monitor.stop()
+            self._on_speech_finished()
+
+    def _on_speech_finished(self) -> None:
+        """Clear the speaking state once playback ends.
+
+        Guarded on the state still being SPEAKING: an interrupt moves the
+        window to LISTENING, and without the guard playback ending would
+        yank the UI back to IDLE mid-turn, so the mic looked closed while it
+        was still open.
+        """
+        if self.window and self.window.get_state() is AssistantState.SPEAKING:
+            self.window.set_state(AssistantState.IDLE)
 
     def _on_barge_in_detected(self) -> None:
         """Barge-in monitor callback - runs on the monitor's own background thread."""
