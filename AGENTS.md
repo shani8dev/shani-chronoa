@@ -414,6 +414,60 @@ and `app.py` will not import. Pass `PYTHONPATH=$HOME/.local/lib/python3.12/
 site-packages` (or use a `venv --system-site-packages`) when probing by hand.
 The repo's own `test_sense_scheduler.py` handles this for child processes.
 
+## Machine-state senses (added 2026-09-28)
+
+Nine senses that read the machine rather than the user's world — `contention`
+(who holds a capture device), `privilege` (who holds a dangerous capability),
+`thermal`, `display`, `network`, `bluetooth`, `camera` (enumeration only),
+`rfsense` (WiFi RSSI spread), `thermalgrid` (MLX90640/AMG8833 over I2C) — plus
+`senses/latch.py` and scheduler de-duplication, so a polled sense that keeps
+saying the same thing is not deposited 1440 times a day.
+
+**Three of the nine were green on the dev box while confidently wrong on the
+distribution this actually ships to, and the lesson is not optional to read:**
+`contention` reported every microphone and camera as *free* when `fuser`
+(psmisc) was missing, because the OSError was swallowed into "no holders";
+`privilege` used Debian's `dpkg-query`, so on Arch — which is what ShaniOS is —
+it found no package owner for anything and reported **every process as
+unmanaged third-party software**, burying the one real finding; `bluetooth`
+reported "0 devices" when `bluetoothctl` was simply not installed. 584 passing
+unit tests caught none of it, because the tests ran on the wrong distro.
+
+**Rule: a sense whose failure mode is a plausible-looking wrong answer is
+worse than a sense that fails.** "I could not determine X" must be a state the
+code can represent, distinct from "X is false" — and it must fail toward
+UNKNOWN, never toward a clean result. Ownership lookups span pacman/dpkg/rpm/
+zypper and report *undetermined* when none answers.
+
+Also load-bearing and invisible:
+
+- A malformed sense schema is **skipped at load with only a log line**, so a
+  registered-but-unusable sense looks merely absent. The contract is Ollama's
+  `{"type": "function", "function": {...}}` wrapper, not raw JSON Schema.
+- `glib-compile-schemas` rejects `_` in key names and on hitting one discards
+  the **entire file** — all keys at once. A sense name must be legal as a key
+  fragment; there is a test asserting this across the whole registry.
+- ALSA nodes live in `/dev/snd/`, not `/dev/`; `/proc/net/wireless` writes
+  `70.`/`-40.` with trailing points; `i2cdetect` prints bare hex `33` and
+  prints "Permission denied" on stderr **while exiting 0**.
+- Consent key is `<sense-name>-sense-enabled`, derived from the name, so a
+  rename silently makes a sense permanently ungrantable.
+
+`rfsense` deliberately states its own ceiling: the research it sits beside
+(RF-Pose, RF-Avatar, arXiv 2401.17417) is real but runs on Channel State
+Information, and this machine's Intel AX201/`iwlwifi` exposes no CSI. It
+answers "is something moving", not "what" — and says so rather than implying
+the research result it cannot produce.
+
+Full methodology, the eight running-only bugs, the research correction, and
+the live security finding are in **`AUDIT-HISTORY.md`**.
+
+**Verification status:** unit suite green on Ubuntu (584 passed, 3 skipped).
+The ShaniOS slot test (`shani-testbed/slot-tests/chronoa-machine-state.sh`,
+testbed `3ca190e`) is written and committed but **has not been run** — no slot
+exists on the dev host and the bootstrap was aborted. Everything
+distro-dependent above is unverified on Arch.
+
 ## Audit-verified known issues (confirmed present)
 
 
