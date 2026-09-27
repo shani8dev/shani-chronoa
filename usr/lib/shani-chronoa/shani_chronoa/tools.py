@@ -12,12 +12,25 @@ All tool execution is routed through the 5-level SandboxExecutor
 (LEVEL_0_NO_EXEC → LEVEL_4_HOST_ROOT), blocking privilege escalation,
 dangerous binaries, and GUI access from sandboxed levels — adapting the
 pattern from sayri/adapters/sandbox/executor.py.
+
+Arguments reach the child two ways. Small, JSON-representable ones are
+JSON-interpolated into the `python3 -c` program source below, which is what
+every built-in skill's arguments look like. A `bytes` argument cannot be
+carried that way at all, so it is passed by reference instead: the value goes
+to a private temp file, the child is handed the path as a `FileRef`, and it
+runs under a fixed program with no interpolation of anything at all. A
+caller can ask for the same treatment of a merely oversized argument with
+`by_reference=True`; nothing else changes transport, so no existing skill
+moves (`argfile.py` documents both, and the ceilings there were measured
+against real subprocesses, not assumed).
 """
 
 import json
 import logging
+import shlex
 import sys
 
+from shani_chronoa import argfile
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker
@@ -58,13 +71,20 @@ def _get_sandbox_config(tool_name: str) -> SandboxConfig:
     return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=30)
 
 
-def execute_tool(name: str, arguments: dict) -> str:
+def execute_tool(name: str, arguments: dict, by_reference: bool = False) -> str:
     """Execute a named tool with the given arguments, returning a short result string.
 
     All execution is sandboxed according to the tool's configured SandboxLevel.
     Privilege escalation (sudo/pkexec/su) is blocked for all levels except
     LEVEL_4_HOST_ROOT. Dangerous binaries (mkfs, dd, shutdown, reboot) are
     blocked by the sandbox policy. GUI access is blocked from sandboxed levels.
+
+    `by_reference=True` passes every argument to the skill as a `FileRef` (a
+    `str` path into a private temp file) instead of inlining the call's JSON
+    into the child's program source. Needed for an argument the inline
+    transport cannot carry: a `bytes` value always takes this path on its own,
+    and this flag is how a caller asks for it deliberately rather than by
+    accident. See `argfile.py`.
     """
     handler = _HANDLER_FNS.get(name)
     if handler is None:
@@ -79,16 +99,31 @@ def execute_tool(name: str, arguments: dict) -> str:
     handler_module = handler.__module__
     handler_func = handler.__name__
 
-    # Build a command string that invokes the handler in a subprocess.
-    # This allows SandboxExecutor to wrap it with bwrap for sandboxed levels.
-    args_json = json.dumps(arguments, default=str)
-    cmd = (
-        f"python3 -c \""
-        f"from {handler_module} import {handler_func}; "
-        f"import sys; "
-        f"result = {handler_func}({args_json}); "
-        f"sys.stdout.write(str(result))\""
-    )
+    # Asked first because it is the only transport that can carry a bytes
+    # argument; it returns None whenever the inline path below suffices.
+    payload = argfile.reference_command(handler_module, handler_func, arguments, by_reference)
+
+    if payload is not None:
+        cmd = payload.command
+    else:
+        # Build a command string that invokes the handler in a subprocess.
+        # This allows SandboxExecutor to wrap it with bwrap for sandboxed levels.
+        #
+        # The program is quoted with shlex, not wrapped in hand-written double
+        # quotes: the JSON arguments contain double quotes of their own, which
+        # the shell stripped, so every call with a dict argument reached the
+        # child as `_run({query: foo})` and died with `NameError: name 'query'
+        # is not defined`. Only zero-argument skills worked. shlex.quote
+        # escapes the whole program correctly whatever the LLM put in the
+        # arguments.
+        args_json = json.dumps(arguments, default=str)
+        program = (
+            f"from {handler_module} import {handler_func}; "
+            f"import sys; "
+            f"result = {handler_func}({args_json}); "
+            f"sys.stdout.write(str(result))"
+        )
+        cmd = f"python3 -c {shlex.quote(program)}"
 
     try:
         exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
@@ -102,3 +137,9 @@ def execute_tool(name: str, arguments: dict) -> str:
         logger.error(f"Tool '{name}' failed: {e}")
         _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0)
         return f"Tool '{name}' failed: {e}"
+    finally:
+        # The payload files hold the argument values themselves, so they go
+        # away whatever the child did. cleanup() is idempotent, so this also
+        # covers a payload that was built but never dispatched.
+        if payload is not None:
+            payload.cleanup()

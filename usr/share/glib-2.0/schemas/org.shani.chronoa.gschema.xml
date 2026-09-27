@@ -6,6 +6,11 @@
       <summary>LLM model override</summary>
       <description>The Ollama model identifier for LLM inference. Empty means auto-select based on hardware capabilities; set explicitly to override.</description>
     </key>
+    <key name="vision-model" type="s">
+      <default>''</default>
+      <summary>Vision model override</summary>
+      <description>The Ollama model identifier the vision sense describes screen and camera captures with. Empty means auto-select by hardware tier. Deliberately independent of "model" and of the --model command line flag: that setting is about chat, a text model has no vision tower, and changing one must not silently change the other. Must name a LOCAL Ollama model - a URL, a host, or any other remote reference is refused rather than sent a screenshot.</description>
+    </key>
     <key name="hardware-profile" type="s">
       <default>'auto'</default>
       <summary>Hardware profile for model selection</summary>
@@ -105,6 +110,41 @@
       <default>''</default>
       <summary>Groq API key</summary>
       <description>Required to use Groq as a cloud LLM fallback - Groq has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="vision-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa see the screen</summary>
+      <description>When true, Chronoa may capture and describe what is on screen. Off by default: this is the widest privacy surface Chronoa has. Also requires privacy mode to be off for any cloud processing. Reactive only - Chronoa looks when you ask it to, it does not watch continuously.</description>
+    </key>
+    <key name="ocr-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read text from images</summary>
+      <description>When true, Chronoa may extract text from images and screenshots you point it at, using local tesseract. Off by default. Processing is entirely local.</description>
+    </key>
+    <key name="filesystem-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read files</summary>
+      <description>When true, Chronoa may read files inside your home directory that you name. Off by default. Reads are confined to your home directory and size-capped; nothing outside it is reachable.</description>
+    </key>
+    <key name="web-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa retrieve web content</summary>
+      <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
+    </key>
+    <key name="memory-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa remember things between sessions</summary>
+      <description>When true, Chronoa keeps durable notes about you across sessions so it does not have to be re-told the same things. On by default because remembering is what makes an assistant useful over time. Everything stays on this machine; you can erase it at any time from the settings window or the shani-chronoa-sense CLI.</description>
+    </key>
+    <key name="hearing-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa hear what you say</summary>
+      <description>When true, an utterance you speak may be turned into a transient percept so the assistant can refer to it in the turn. Off by default: microphone capture is the widest privacy surface Chronoa has, alongside vision. Utterances are transient and are never durable - only the memory sense may persist. This is the consent gate for the sense; it does not control wake-word listening or TTS.</description>
+    </key>
+    <key name="input-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa control the pointer and keyboard</summary>
+      <description>When true, Chronoa may move the pointer, click, and type text as named actions. Off by default, and deliberately separate from the vision sense: seeing a screen and controlling it are different risks, and together they would let any prompt injection in a web page or a file reach the machine. Every action is logged to the per-user tool-call audit log.</description>
     </key>
   </schema>
 </schemalist>

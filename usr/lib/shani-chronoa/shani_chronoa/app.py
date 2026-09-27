@@ -27,6 +27,8 @@ from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
 from shani_chronoa.cloud_llm import CloudLLMChain, DEFAULT_PROVIDER_ORDER, BYOK_PROVIDER_ORDER
 from shani_chronoa.secrets_manager import secrets_manager
+from shani_chronoa.senses.context import ContextBuilder
+from shani_chronoa.senses.store import PerceptStore
 from shani_chronoa.tts import PiperTTS
 from shani_chronoa.wakeword import WakeWordListener
 from shani_chronoa.gui import CajitaWindow, ChronoaOrbWidget
@@ -49,6 +51,12 @@ class ChronoaApplication(Gtk.Application):
         self.llm: Optional[Union[OllamaLLM, CloudLLMChain]] = None
         self.tts: Optional[PiperTTS] = None
         self.assistant: Optional[Assistant] = None
+        # The senses layer's read side. Until these existed the whole layer
+        # was reachable only from the headless CLI, so a percept it produced
+        # never reached an LLM turn; the Assistant rebuilds the percept block
+        # from `percept_store` on every request (see assistant.build_messages).
+        self.percept_store: Optional[PerceptStore] = None
+        self.percept_context: Optional[ContextBuilder] = None
         self.window: Optional[CajitaWindow] = None
         self._settings_window: Optional[Gtk.Window] = None
         self.recorder = AudioRecorder()
@@ -168,7 +176,20 @@ class ChronoaApplication(Gtk.Application):
         if not self._ollama_available:
             logger.warning("Ollama not available")
             self._maybe_enable_cloud_fallback()
-        self.assistant = Assistant(self.llm)
+
+        # Perception is optional context, so this is wired unconditionally and
+        # degrades to nothing: with no percepts stored, the assistant's prompts
+        # are byte-for-byte what they were before the senses layer existed.
+        # `PerceptStore()`'s default durable path is the same file
+        # `shani-chronoa-sense remember` and the memory sense write to, so
+        # anything persisted by the CLI is already live on the next turn here.
+        self.percept_store = PerceptStore()
+        self.percept_context = ContextBuilder()
+        self.assistant = Assistant(
+            self.llm,
+            percept_store=self.percept_store,
+            context_builder=self.percept_context,
+        )
 
         # Initialize TTS
         self.tts = PiperTTS(voice=self.config.piper_voice)

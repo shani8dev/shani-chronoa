@@ -1,0 +1,228 @@
+"""Storage for `Percept` objects, split by lifetime.
+
+Two tiers, because a screen grab and a remembered preference have genuinely
+different lifetimes and conflating them is how ambient perception becomes a
+liability:
+
+- **Transient** percepts (those with a `ttl_seconds`) are held in a bounded
+  in-memory deque only. They are never written to disk: a percept of what
+  the screen looked like three sessions ago is not context, it is a
+  surveillance record, and keeping one has no upside.
+- **Durable** percepts (`ttl_seconds is None` - the memory sense) are
+  appended to a JSON-lines file so they survive a restart.
+
+Expiry is applied on read, never on a timer, so a store that is not being
+polled still returns correct results and there is no background thread to
+leak. `active()` is the only read path the context builder uses.
+
+State lives under the per-user XDG data location
+(`~/.local/share/shani-chronoa/`), matching the sandbox executor's own
+state directory and `tool_tracking.py`'s log directory. Chronoa runs as a
+normal desktop user and never as root, so nothing here may assume a
+writable system path - an earlier `/var/log/shani-chronoa` default raised
+`PermissionError` in real use precisely because it did.
+"""
+
+import json
+import logging
+import os
+import threading
+import time
+from collections import deque
+from pathlib import Path
+from typing import Iterable, Optional
+
+from shani_chronoa.senses import Percept
+
+logger = logging.getLogger(__name__)
+
+PERCEPT_DIR = Path(
+    os.path.expanduser("~/.local/share/shani-chronoa/percepts")
+)
+DURABLE_FILE = PERCEPT_DIR / "memory.jsonl"
+
+# Bounded so a long-running ambient session cannot grow without limit. A
+# transient percept is only useful while fresh, so a small window is not a
+# real loss - anything older should have been persisted as a durable
+# percept by the memory sense instead.
+_TRANSIENT_CAPACITY = 256
+
+# Guards both tiers. The ambient scheduler writes from its own thread while
+# the turn path reads on the GTK main thread.
+_LOCK = threading.RLock()
+
+
+def _as_dict(percept: Percept) -> dict:
+    return {
+        "sense": percept.sense,
+        "kind": percept.kind,
+        "content": percept.content,
+        "created_at": percept.created_at,
+        "ttl_seconds": percept.ttl_seconds,
+        "source": percept.source,
+        "sensitivity": percept.sensitivity,
+        "metadata": percept.metadata or {},
+    }
+
+
+def _from_dict(raw: object) -> Optional[Percept]:
+    """Rebuild a Percept from a decoded record, or None if it is unusable.
+
+    A corrupt or hand-edited line is skipped rather than raised: one bad
+    record must not make every previously-stored memory unreadable.
+    """
+    if not isinstance(raw, dict):
+        return None
+    try:
+        sense = raw["sense"]
+        kind = raw["kind"]
+        content = raw["content"]
+        created_at = float(raw["created_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not isinstance(sense, str) or not isinstance(kind, str):
+        return None
+    if not isinstance(content, str):
+        return None
+
+    ttl = raw.get("ttl_seconds")
+    if ttl is not None:
+        if isinstance(ttl, bool) or not isinstance(ttl, (int, float)):
+            ttl = None
+        else:
+            ttl = float(ttl)
+
+    metadata = raw.get("metadata")
+    return Percept(
+        sense=sense,
+        kind=kind,
+        content=content,
+        created_at=created_at,
+        ttl_seconds=ttl,
+        source=raw.get("source") or "",
+        sensitivity=raw.get("sensitivity") or "public",
+        metadata=metadata if isinstance(metadata, dict) else None,
+    )
+
+
+class PerceptStore:
+    """Holds transient percepts in memory and durable ones on disk."""
+
+    def __init__(
+        self,
+        durable_path: Optional[Path] = None,
+        transient_capacity: int = _TRANSIENT_CAPACITY,
+    ) -> None:
+        self._durable_path = Path(durable_path) if durable_path else DURABLE_FILE
+        self._transient: "deque[Percept]" = deque(maxlen=transient_capacity)
+        self._durable: list[Percept] = []
+        self._loaded = False
+
+    def _ensure_loaded(self) -> None:
+        """Read the durable file once, lazily.
+
+        A missing file is the normal first-run case, not an error.
+        """
+        if self._loaded:
+            return
+        self._loaded = True
+        try:
+            if not self._durable_path.is_file():
+                return
+            with self._durable_path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        decoded = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            "Skipping malformed durable percept record in %s",
+                            self._durable_path,
+                        )
+                        continue
+                    percept = _from_dict(decoded)
+                    if percept is not None:
+                        self._durable.append(percept)
+        except OSError as e:
+            # A store that cannot read its own file degrades to "no durable
+            # percepts" rather than breaking startup - the same reasoning
+            # as the skills loader skipping a broken user module.
+            logger.error("Failed to read durable percepts from %s: %s", self._durable_path, e)
+
+    def add(self, percept: Percept) -> None:
+        """Record a percept in the tier its lifetime dictates."""
+        if percept.ttl_seconds is None:
+            self._append_durable(percept)
+        else:
+            with _LOCK:
+                self._transient.append(percept)
+
+    def extend(self, percepts: Iterable[Percept]) -> None:
+        for percept in percepts:
+            self.add(percept)
+
+    def _append_durable(self, percept: Percept) -> None:
+        with _LOCK:
+            self._ensure_loaded()
+            self._durable.append(percept)
+            try:
+                self._durable_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._durable_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(_as_dict(percept)) + "\n")
+            except OSError as e:
+                logger.error("Failed to persist durable percept to %s: %s", self._durable_path, e)
+
+    def active(self, now: Optional[float] = None) -> list[Percept]:
+        """Every percept still within its lifetime, freshest last.
+
+        Expired entries are dropped from the transient window as they are
+        found, so a store left idle for a long time does not accumulate
+        garbage indefinitely.
+        """
+        current = time.time() if now is None else now
+        with _LOCK:
+            self._ensure_loaded()
+            live = [p for p in self._durable if not p.is_expired(current)]
+            kept: deque[Percept] = deque()
+            for percept in self._transient:
+                if percept.is_expired(current):
+                    continue
+                kept.append(percept)
+            self._transient = deque(kept, maxlen=self._transient.maxlen)
+            return live + list(self._transient)
+
+    def durable(self) -> list[Percept]:
+        """The persistent tier, oldest first."""
+        with _LOCK:
+            self._ensure_loaded()
+            return list(self._durable)
+
+    def clear_transient(self) -> None:
+        """Drop every transient percept. Durable memories are untouched."""
+        with _LOCK:
+            self._transient.clear()
+
+    def forget(self, predicate) -> int:
+        """Remove durable percepts matching `predicate`; return how many.
+
+        Rewrites the durable file, because deletion is the whole point -
+        a user who asks the assistant to forget something needs it gone from
+        disk, not merely hidden from a read.
+        """
+        with _LOCK:
+            self._ensure_loaded()
+            kept = [p for p in self._durable if not predicate(p)]
+            removed = len(self._durable) - len(kept)
+            if not removed:
+                return 0
+            self._durable = kept
+            try:
+                self._durable_path.parent.mkdir(parents=True, exist_ok=True)
+                with self._durable_path.open("w", encoding="utf-8") as handle:
+                    for percept in kept:
+                        handle.write(json.dumps(_as_dict(percept)) + "\n")
+            except OSError as e:
+                logger.error("Failed to rewrite durable percepts to %s: %s", self._durable_path, e)
+            return removed

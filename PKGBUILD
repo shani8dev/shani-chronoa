@@ -14,7 +14,8 @@ depends=(
     'gtk4'
     'python-httpx'
     'espeak-ng'
-
+    'tesseract'
+    'tesseract-data-eng'
     'pipewire'
     'wireplumber'
     'libnotify'
@@ -38,6 +39,7 @@ package() {
     # Binaries
     install -Dm755 "$startdir/usr/bin/shani-chronoa" "$pkgdir/usr/bin/shani-chronoa"
     install -Dm755 "$startdir/usr/bin/shani-chronoa-mcp" "$pkgdir/usr/bin/shani-chronoa-mcp"
+    install -Dm755 "$startdir/usr/bin/shani-chronoa-sense" "$pkgdir/usr/bin/shani-chronoa-sense"
 
     # Python package
     cp -r "$startdir/usr/lib/shani-chronoa" "$pkgdir/usr/lib/"

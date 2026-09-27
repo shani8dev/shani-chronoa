@@ -421,26 +421,33 @@ class TestVolumeCoercion:
 
 
 class TestWebSearchPrivacy:
-    """Web search must be blocked in local-only privacy mode."""
+    """Web search must be blocked in local-only privacy mode, and must never
+    open a browser - the skill retrieves text now, it does not hand the query
+    to a window."""
 
     def test_web_search_blocked_in_local_only_mode(self, mock_launch_uri, privacy_manager):
         # Given: local-only privacy mode is active (schema default privacy-mode=true)
         assert privacy_manager.is_local_only
         from shani_chronoa.skills.web_search import _run
         # When: the web search skill is invoked
-        _run({"query": "secret query"})
-        # Then: no browser may be launched
+        result = _run({"query": "secret query"})
+        # Then: it refuses, and no browser may be launched
+        assert "not permitted" in result
         assert mock_launch_uri == []
 
-    def test_web_search_launches_when_privacy_off(self, mock_launch_uri, chronoa_config):
-        # Baseline: with privacy mode explicitly off, the browser launch is attempted.
+    def test_web_search_blocked_when_only_privacy_is_off(self, mock_launch_uri, chronoa_config):
+        # Given: privacy mode explicitly off, but the web sense left at its
+        # default of false - the per-sense consent gate is separate
         from shani_chronoa.config import PrivacyManager
         chronoa_config.set("privacy-mode", "false")
-        privacy = PrivacyManager(chronoa_config)
-        assert not privacy.is_local_only
+        assert not PrivacyManager(chronoa_config).is_local_only
+        assert not chronoa_config.web_sense_enabled
         from shani_chronoa.skills.web_search import _run
-        _run({"query": "hello"})
-        assert len(mock_launch_uri) == 1
+        # When: the skill is invoked
+        result = _run({"query": "hello"})
+        # Then: it still refuses, and launches nothing
+        assert "web-sense-enabled" in result
+        assert mock_launch_uri == []
 
 
 class TestTimerNotifications:

@@ -1,0 +1,766 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - headless CLI for the assistant's senses.
+
+Lists, enables, disables, runs, inspects and ambient-polls senses
+(perceptions) without a GTK display, an X server or a Wayland socket. The GUI
+is not involved on any code path here: it exists so a sense can be
+interrogated on a server, over ssh, in a container, in a systemd unit, or in a
+test - none of which have a display. `shani-chronoa-mcp` is the same idea one
+layer down (a machine-facing protocol over stdio); this is the plain
+human/machine-facing one.
+
+Three decisions worth stating up front, because each looks surprising:
+
+- **Consent is checked here, not only in the app.** `ChronoaConfig.sense_allowed()`
+  gates every perception on the sense's own `<name>-sense-enabled` key *and* on
+  `privacy-mode`. A CLI that invoked `Sense.run()` directly would be a hole
+  straight through the design's central guarantee - "which perceptions may
+  this assistant form?" has to be answerable, and a path that answers "yes"
+  regardless of settings is a reason to distrust the answer. So `run` refuses
+  with `sense_allowed_reason()` and a dedicated exit code, and `list` shows
+  the per-sense verdict rather than hiding it.
+- **`argparse`, not the hand-parsed `app.py` style.** `app.py` parses with
+  `Gio.CommandLine` because it is a `Gtk.Application` and gets a
+  `Gio.Application` for free; this script is a plain process on a possibly
+  headless box, so there is nothing to inherit. `argparse` also gives
+  subcommand help, `--json` placement after the subcommand, and standard
+  exit code 2 on bad args, all of which matter more for a CLI than for an
+  app window.
+- **Values passed to `Sense.run()` are strings, with one narrow exception.**
+  `key=value` on the command line is text, so it is passed as text. The one
+  exception is a value that is *JSON-shaped* (`30`, `true`, `null`,
+  `["a"]`, `{...}`), because an Ollama-style function schema declares those
+  properties with a JSON type and a string where a number is expected is a
+  sense that silently misbehaves. Coercion is skipped whenever the sense's
+  own schema declares that property as a string - so a path that happens to be
+  literally `true` or a bare number stays a string, and the schema, not a
+  guess, is what decides.
+
+`--json` on any subcommand prints one object and nothing else, so output is
+parseable even when zero senses are registered (or, in the case of loader
+warnings, when a broken user drop-in prints to stderr).
+
+Exit codes:
+    0  success
+    2  bad usage (argparse, or a malformed `key=value`)
+    3  unknown sense
+    4  consent denied (`sense_allowed()` said no)
+    5  the operation itself failed (sense raised, setting would not persist)
+    6  nothing could be polled, and not because of consent
+"""
+
+import argparse
+import json
+import os
+import sys
+from typing import Callable, Optional
+
+# See usr/bin/shani-chronoa for why this is usr/lib/shani-chronoa, not just
+# dirname(dirname(__file__)) - the package lives one directory deeper, and
+# getting that wrong shipped a ModuleNotFoundError for the project's entire
+# life. Reproduced verbatim from usr/bin/shani-chronoa-mcp.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+# Gio, not Gtk. The GSettings schema source is the only way to ask "does this
+# key exist in the installed schema?", and ChronoaConfig.set() deliberately
+# *silently* no-ops for a key the running schema does not declare - fine for an
+# app that must not crash on an old schema, unacceptable for a CLI that would
+# report "enabled" for a value that was never written. Importing Gio does not
+# require a display.
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio  # noqa: E402  (path fix must run first)
+
+from shani_chronoa.config import SCHEMA_ID, ChronoaConfig  # noqa: E402
+from shani_chronoa.senses import Percept, Sense, discover_senses  # noqa: E402
+from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
+from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
+from shani_chronoa.senses.store import PerceptStore  # noqa: E402
+
+EXIT_OK = 0
+EXIT_USAGE = 2
+EXIT_UNKNOWN_SENSE = 3
+EXIT_CONSENT = 4
+EXIT_FAILED = 5
+EXIT_NOTHING_POLLABLE = 6
+
+_SENSE_KEY_SUFFIX = "-sense-enabled"
+
+
+class CliError(Exception):
+    """A failure to report to the user, with the exit code it maps to."""
+
+    def __init__(self, message: str, code: int) -> None:
+        super().__init__(message)
+        self.message = message
+        self.code = code
+
+
+# --- settings helpers ------------------------------------------------------
+
+
+def consent_sense_names() -> "list[str]":
+    """Every sense name the *installed schema* declares a consent key for.
+
+    Queried from the schema rather than from the registry on purpose: the
+    registry and the consent surface are deliberately independent (a sense
+    module may be added before its key ships, and a key may ship before its
+    module exists - which is the current state of this tree). `enable` must
+    therefore accept a name that has no registered module, or turning a sense
+    on would be impossible until the module lands.
+    """
+    source = Gio.SettingsSchemaSource.get_default()
+    schema = source.lookup(SCHEMA_ID, True) if source is not None else None
+    if schema is None:
+        return []
+    return sorted(
+        key[: -len(_SENSE_KEY_SUFFIX)]
+        for key in schema.list_keys()
+        if key.endswith(_SENSE_KEY_SUFFIX)
+    )
+
+
+def known_sense_names(registered: "dict[str, Sense]") -> "list[str]":
+    """Names this CLI will accept: registered modules plus schema keys."""
+    return sorted(set(registered) | set(consent_sense_names()))
+
+
+def set_sense_enabled(config: ChronoaConfig, name: str, enabled: bool) -> bool:
+    """Write `<name>-sense-enabled`; return whether the value actually landed.
+
+    The read-back is not redundant verification (the usual "the operation is
+    the proof" rule does not apply): `ChronoaConfig.set()` has a documented
+    silent no-op branch for a key the running schema does not declare, and a
+    CLI that reported success while nothing was written is exactly the class
+    of bug this repo's AGENTS.md keeps finding by running things. Anything
+    that could have caused the no-op is excluded before this point.
+    """
+    key = f"{name}{_SENSE_KEY_SUFFIX}"
+    config.set(key, "true" if enabled else "false")
+    return config.get_bool(key, False) is enabled
+
+
+# --- argument parsing ------------------------------------------------------
+
+
+def parse_arguments(pairs: "list[str]", schema: dict) -> dict:
+    """Turn `key=value` argv fragments into the dict `Sense.run` expects.
+
+    `schema` is the sense's own function schema, consulted only to decide
+    whether a JSON-shaped value should be decoded. See the module docstring
+    for why a declared string type wins over any guess.
+    """
+    properties = {}
+    function = schema.get("function") if isinstance(schema, dict) else None
+    if isinstance(function, dict):
+        parameters = function.get("parameters")
+        if isinstance(parameters, dict):
+            candidate = parameters.get("properties")
+            if isinstance(candidate, dict):
+                properties = candidate
+
+    arguments: dict = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise CliError(
+                f"argument {pair!r} is not key=value (e.g. path=/home/me/notes.txt)",
+                EXIT_USAGE,
+            )
+        key, _, raw = pair.partition("=")
+        key = key.strip()
+        if not key:
+            raise CliError(f"argument {pair!r} has an empty key", EXIT_USAGE)
+        declared = properties.get(key)
+        declared_type = declared.get("type") if isinstance(declared, dict) else None
+        arguments[key] = _decode_value(raw, declared_type)
+    return arguments
+
+
+def _decode_value(raw: str, declared_type: Optional[str]) -> object:
+    """Decode a JSON-shaped value; keep everything else verbatim.
+
+    A declared `"string"` property is never decoded, so `name=42` or
+    `name=null` reaches the sense as the two- and four-character strings the
+    user actually typed. An undeclared or non-string property is offered to
+    `json.loads`, and a value it cannot parse is passed through as text rather
+    than rejected - a sense that wanted a number will say so itself, and
+    failing here would break a legitimate string.
+    """
+    if declared_type == "string":
+        return raw
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return raw
+
+
+# --- output ----------------------------------------------------------------
+
+
+def percept_dict(percept: Percept) -> dict:
+    return {
+        "sense": percept.sense,
+        "kind": percept.kind,
+        "content": percept.content,
+        "created_at": percept.created_at,
+        "age_seconds": round(percept.age_seconds(), 3),
+        "ttl_seconds": percept.ttl_seconds,
+        "durable": percept.ttl_seconds is None,
+        "source": percept.source,
+        "sensitivity": percept.sensitivity,
+        "metadata": percept.metadata or {},
+    }
+
+
+def describe_ttl(ttl: Optional[float]) -> str:
+    """`None` is a durable percept, not a missing one - say which it is."""
+    return "durable" if ttl is None else f"{ttl:g}s"
+
+
+def indent(text: str, prefix: str = "      ") -> str:
+    return "\n".join(prefix + line for line in text.splitlines())
+
+
+# --- commands --------------------------------------------------------------
+
+
+def cmd_list(args: argparse.Namespace) -> tuple:
+    config = ChronoaConfig()
+    registered = discover_senses()
+
+    entries = []
+    lines = []
+    for name in known_sense_names(registered):
+        sense = registered.get(name)
+        allowed = config.sense_allowed(name)
+        reason = config.sense_allowed_reason(name)
+        if sense is not None:
+            entries.append(
+                {
+                    "name": name,
+                    "registered": True,
+                    "kind": sense.kind,
+                    "ttl_seconds": sense.ttl_seconds,
+                    "durable": sense.ttl_seconds is None,
+                    "sensitivity": sense.sensitivity,
+                    "ambient": sense.is_ambient(),
+                    "poll_interval": sense.poll_interval,
+                    "allowed": allowed,
+                    "denied_reason": reason,
+                }
+            )
+        else:
+            entries.append(
+                {
+                    "name": name,
+                    "registered": False,
+                    "kind": None,
+                    "ttl_seconds": None,
+                    "durable": None,
+                    "sensitivity": None,
+                    "ambient": None,
+                    "poll_interval": None,
+                    "allowed": allowed,
+                    "denied_reason": reason,
+                }
+            )
+        lines.append(_list_line(name, sense, allowed, reason))
+
+    if not registered:
+        notice = [
+            "No senses are registered: no module under",
+            "  shani_chronoa/senses/ declares a SENSES list, and",
+            "  ~/.config/shani-chronoa/senses/ is empty or absent.",
+            "Consent keys the installed schema declares (no module yet):",
+        ]
+    else:
+        notice = [f"{len(registered)} registered sense(s):"]
+
+    if not lines:
+        notice.append("  (the installed schema declares no *-sense-enabled keys either)")
+    return EXIT_OK, notice + lines, {"count": len(entries), "senses": entries}
+
+
+def _list_line(
+    name: str,
+    sense: Optional[Sense],
+    allowed: bool,
+    reason: str,
+) -> str:
+    if sense is None:
+        return f"  {name:<12} (no sense module registered)  allowed={'yes' if allowed else 'no'}"
+    return (
+        f"  {name:<12} kind={sense.kind} ttl={describe_ttl(sense.ttl_seconds)} "
+        f"sensitivity={sense.sensitivity} ambient={'yes' if sense.is_ambient() else 'no'} "
+        f"allowed={'yes' if allowed else 'no'}"
+        + (f"  ({reason})" if not allowed else "")
+    )
+
+
+def cmd_set_enabled(args: argparse.Namespace, enabled: bool) -> tuple:
+    config = ChronoaConfig()
+    name = args.sense
+    known = known_sense_names(discover_senses())
+    if name not in known:
+        raise CliError(
+            f"unknown sense {name!r}; known senses: {', '.join(known) or '(none)'}",
+            EXIT_UNKNOWN_SENSE,
+        )
+    if not set_sense_enabled(config, name, enabled):
+        raise CliError(
+            f"could not persist {name}{_SENSE_KEY_SUFFIX}", EXIT_FAILED
+        )
+    verb = "enabled" if enabled else "disabled"
+    return (
+        EXIT_OK,
+        [f"{name}{_SENSE_KEY_SUFFIX} = {str(enabled).lower()} ({verb})"],
+        {
+            "sense": name,
+            "key": f"{name}{_SENSE_KEY_SUFFIX}",
+            "enabled": enabled,
+            "allowed": config.sense_allowed(name),
+            "denied_reason": config.sense_allowed_reason(name),
+        },
+    )
+
+
+def cmd_enable(args: argparse.Namespace) -> tuple:
+    return cmd_set_enabled(args, True)
+
+
+def cmd_disable(args: argparse.Namespace) -> tuple:
+    return cmd_set_enabled(args, False)
+
+
+def cmd_run(args: argparse.Namespace) -> tuple:
+    config = ChronoaConfig()
+    registered = discover_senses()
+    name = args.sense
+    sense = registered.get(name)
+    if sense is None:
+        known = known_sense_names(registered)
+        hint = (
+            "; it has a consent key but no sense module is registered"
+            if name in consent_sense_names()
+            else ""
+        )
+        raise CliError(
+            f"unknown sense {name!r}; registered senses: "
+            f"{', '.join(sorted(registered)) or '(none)'}{hint}",
+            EXIT_UNKNOWN_SENSE,
+        )
+
+    # Parsed before the consent check, not after: parsing is pure (it never
+    # touches the sense, only the argv strings and the declared schema), and
+    # reporting a typo as a usage error beats reporting it later as a
+    # consent failure the user has to fix twice to see. The sense itself is
+    # still not invoked until consent has passed.
+    arguments = parse_arguments(args.arguments, sense.schema)
+
+    # Consent before anything else touches the sense - see the module
+    # docstring. `run` is the only subcommand that perceives, so this is the
+    # only place the check has teeth, but it is the whole point of the tool.
+    if not config.sense_allowed(name):
+        reason = config.sense_allowed_reason(name)
+        raise CliError(
+            f"refusing to run sense {name!r}: {reason or 'consent denied'}",
+            EXIT_CONSENT,
+        )
+
+    try:
+        result = sense.run(arguments)
+    except Exception as exc:  # noqa: BLE001 - report a sense's own failure
+        raise CliError(
+            f"sense {name!r} failed: {type(exc).__name__}: {exc}", EXIT_FAILED
+        ) from exc
+
+    # `run` may return a bare string (the loader wraps it in a Percept
+    # carrying the sense's declared shape); normalise so the CLI has one type
+    # to print and store.
+    percept = result if isinstance(result, Percept) else sense.to_percept(result)
+
+    stored = None
+    if not args.no_store:
+        # Transient percepts live only in memory (PerceptStore), so a
+        # one-shot CLI process that recorded one and exited would make it
+        # unreachable forever. Storing is what makes `run` and `percepts`
+        # coherent; `--no-store` exists for probing a sense without writing.
+        store = _store(args)
+        store.add(percept)
+        stored = percept.ttl_seconds is None
+
+    lines = [
+        f"percept {percept.sense}/{percept.kind}",
+        f"  content:     {percept.content}",
+        f"  ttl:         {describe_ttl(percept.ttl_seconds)}",
+        f"  sensitivity: {percept.sensitivity}",
+        f"  age:         {percept.age_seconds():.3f}s",
+    ]
+    if percept.source:
+        lines.append(f"  source:      {percept.source}")
+    if args.no_store:
+        lines.append("  stored:      no (--no-store)")
+    else:
+        lines.append(
+            f"  stored:      yes (durable, on disk)"
+            if stored
+            else "  stored:      transient only - in memory, lost when this process exits"
+        )
+    return EXIT_OK, lines, {
+        "arguments": arguments,
+        "percept": percept_dict(percept),
+        "stored": stored,
+    }
+
+
+def cmd_ambient(args: argparse.Namespace) -> tuple:
+    """Report on, or actually run, ambient (scheduled) sensing.
+
+    The only consumer of `senses/scheduler.py` in the shipped tree. `ambient`
+    without a mode prints the plan; `--once` performs a single poll pass;
+    `--seconds N` starts the real scheduler thread, leaves it polling for N
+    seconds of wall-clock time and then stops it - so the start/stop path is
+    exercised by a command a user (or a systemd timer) can actually run, not
+    only by a unit test.
+    """
+    registered = discover_senses()
+    scheduler = _ambient_scheduler(args, registered, _store(args))
+
+    if args.list:
+        return _ambient_plan(scheduler)
+
+    results = scheduler.poll_due() if args.once else scheduler.run_for(args.seconds)
+    return _ambient_report(args, scheduler, results)
+
+
+def _ambient_scheduler(
+    args: argparse.Namespace, registered: "dict[str, Sense]", store: PerceptStore
+) -> AmbientScheduler:
+    """The scheduler for this invocation, narrowed to `--sense` when given."""
+    if not args.sense:
+        return AmbientScheduler(senses=registered, store=store)
+
+    name = args.sense
+    if name not in registered:
+        hint = (
+            "; it has a consent key but no sense module is registered"
+            if name in consent_sense_names()
+            else ""
+        )
+        raise CliError(
+            f"unknown sense {name!r}; registered senses: "
+            f"{', '.join(sorted(registered)) or '(none)'}{hint}",
+            EXIT_UNKNOWN_SENSE,
+        )
+    sense = registered[name]
+    if not sense.is_ambient():
+        raise CliError(
+            f"sense {name!r} is reactive only (poll_interval is None), so there is "
+            "nothing for the scheduler to poll",
+            EXIT_NOTHING_POLLABLE,
+        )
+    return AmbientScheduler(
+        senses={name: sense},
+        store=store,
+        arguments={name: parse_arguments(args.arguments, sense.schema)},
+    )
+
+
+def _ambient_plan(scheduler: AmbientScheduler) -> tuple:
+    """Every sense name the scheduler knows about, and whether it may poll it."""
+    entries = scheduler.plan(consent_sense_names())
+    lines = [f"ambient plan ({len(entries)} sense name(s)):"]
+    for entry in entries:
+        if entry.will_poll:
+            state = f"will poll every {entry.poll_interval:g}s"
+        else:
+            state = "; ".join(filter(None, [entry.denial, entry.refusal])) or "unknown"
+        lines.append(
+            f"  {entry.name:<12} registered={'yes' if entry.registered else 'no ':<3} "
+            f"allowed={'yes' if entry.allowed else 'no '}  {state}"
+        )
+    return EXIT_OK, lines, {"entries": [entry.as_dict() for entry in entries]}
+
+
+def _ambient_report(
+    args: argparse.Namespace, scheduler: AmbientScheduler, results: "list[PollResult]"
+) -> tuple:
+    """What the run did, and the exit code that honestly describes it."""
+    summary = scheduler.summary()
+    span = "single pass" if args.once else f"{args.seconds:g}s"
+    lines = [
+        f"ambient run ({span}): {summary['polls']} poll(s), "
+        f"{summary['deposited']} percept(s) deposited from "
+        f"{len(summary['ambient_senses'])} ambient sense(s)"
+    ]
+    for result in results:
+        outcome = "ok" if result.ok else "skip"
+        detail = (
+            f"percept {result.percept.kind} ttl={describe_ttl(result.percept.ttl_seconds)} "
+            f"sensitivity={result.percept.sensitivity}"
+            if result.ok
+            else result.reason
+        )
+        lines.append(f"  {result.name:<12} {outcome}  {detail}")
+
+    if summary["denied"]:
+        for name, reason in sorted(summary["denied"].items()):
+            lines.append(f"  {name:<12} deny  {reason}")
+
+    polled_any = summary["polls"] > 0 or bool(results)
+    if not polled_any and not summary["denied"]:
+        # Silence here would read as "the ambient loop ran and found nothing",
+        # which is a different claim from "no sense is ambient-capable at all".
+        lines.append(
+            "no sense currently declares a poll_interval, so nothing was polled; "
+            "`shani-chronoa-sense ambient --list` says why for each sense"
+        )
+        return EXIT_NOTHING_POLLABLE, lines, summary
+
+    if summary["denied"] and summary["deposited"] == 0:
+        lines.append("every poll was refused by consent; no perception was made")
+        return EXIT_CONSENT, lines, summary
+    return EXIT_OK, lines, summary
+
+
+def cmd_percepts(args: argparse.Namespace) -> tuple:
+    store = _store(args)
+    live = store.active()
+    durable = store.durable()
+
+    lines: list[str] = []
+    # PerceptStore.active() returns durable-then-transient, so a durable
+    # percept legitimately appears in both lists. The headings say so rather
+    # than hiding the overlap, because a user reading two identical lists
+    # would reasonably conclude the CLI double-counted.
+    headings = {
+        "live": "live percepts (durable + transient, still within lifetime)",
+        "durable": "durable percepts only (the persistent tier, a subset of the above)",
+    }
+    for tier, percepts in (("live", live), ("durable", durable)):
+        lines.append(f"{headings[tier]} ({len(percepts)}):")
+        if not percepts:
+            lines.append("  (none)")
+            continue
+        for percept in percepts:
+            lines.append(
+                f"  [{tier:<7}] {percept.sense}/{percept.kind} "
+                f"ttl={describe_ttl(percept.ttl_seconds)} "
+                f"age={percept.age_seconds():.0f}s "
+                f"sensitivity={percept.sensitivity} "
+                f"durable={'yes' if percept.ttl_seconds is None else 'no'}"
+            )
+            lines.append(indent(percept.content))
+    if not live:
+        # ContextBuilder's own "nothing to inject" wording, so the human and
+        # machine views of "no live percepts" cannot drift apart.
+        lines.append(ContextBuilder().render_for_log(live))
+
+    return EXIT_OK, lines, {
+        "live": [percept_dict(p) for p in live],
+        "durable": [percept_dict(p) for p in durable],
+        # What the next turn would actually carry into the LLM's context, so
+        # a percept can be judged where it is used rather than in isolation.
+        "context_block": ContextBuilder().render(live),
+    }
+
+
+def cmd_forget(args: argparse.Namespace) -> tuple:
+    store = _store(args)
+    if args.all:
+        removed = store.forget(lambda _percept: True)
+        description = "all durable percepts"
+    else:
+        needle = args.containing
+        # Content only, not the sense name: `--containing` reads as "the text
+        # I am looking for", and silently matching provenance too would make
+        # it impossible to erase by content without also erasing a sense's
+        # whole history.
+        removed = store.forget(lambda percept: needle in percept.content)
+        description = f"durable percepts containing {needle!r}"
+    remaining = len(store.durable())
+    return (
+        EXIT_OK,
+        [f"forgot {removed} {description}; {remaining} durable percept(s) remain"],
+        {
+            "removed": removed,
+            "remaining": remaining,
+            "scope": "all" if args.all else "containing",
+            "text": None if args.all else args.containing,
+        },
+    )
+
+
+# --- wiring ----------------------------------------------------------------
+
+
+def _store(args: argparse.Namespace) -> PerceptStore:
+    # `--durable-file` exists so this CLI can be driven against a scratch
+    # store; PerceptStore already takes a path for exactly that reason, and
+    # without it there is no way to inspect or forget percepts without writing
+    # to (or erasing from) the real ~/.local/share one.
+    if args.durable_file:
+        return PerceptStore(durable_path=args.durable_file)
+    return PerceptStore()
+
+
+def build_parser() -> argparse.ArgumentParser:
+    # SUPPRESS is load-bearing: a subparser that carried its own `--json`
+    # default would overwrite a `--json` given before the subcommand, so
+    # `sense --json list` and `sense list --json` must both work and agree.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="print one machine-readable JSON object instead of text",
+    )
+
+    parser = argparse.ArgumentParser(
+        prog="shani-chronoa-sense",
+        description=(
+            "Inspect and control Chronoa's senses headlessly. No GTK, no X "
+            "server and no Wayland socket are required."
+        ),
+        parents=[common],
+    )
+    parser.add_argument(
+        "--durable-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "read/write durable percepts at PATH instead of "
+            "~/.local/share/shani-chronoa/percepts/memory.jsonl"
+        ),
+    )
+    sub = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    sub.add_parser(
+        "list", parents=[common], help="list registered senses and their consent state"
+    )
+
+    for name, help_text in (("enable", "turn a sense on"), ("disable", "turn a sense off")):
+        enable_parser = sub.add_parser(name, parents=[common], help=help_text)
+        enable_parser.add_argument("sense", help="sense name, e.g. memory")
+
+    run_parser = sub.add_parser(
+        "run", parents=[common], help="run a sense and print the percept it produces"
+    )
+    run_parser.add_argument("sense", help="registered sense name")
+    run_parser.add_argument(
+        "arguments",
+        nargs="*",
+        metavar="key=value",
+        help="arguments for the sense; values are text unless JSON-shaped",
+    )
+    run_parser.add_argument(
+        "--no-store",
+        action="store_true",
+        help="do not record the resulting percept in the store",
+    )
+
+    sub.add_parser(
+        "percepts", parents=[common], help="show live and durable percepts"
+    )
+
+    ambient_parser = sub.add_parser(
+        "ambient",
+        parents=[common],
+        help="report on, or run, scheduled (ambient) sensing",
+        description=(
+            "Ambient sensing polls senses that declare a poll_interval and "
+            "deposits a percept unprompted, over the same Sense contract the "
+            "reactive `run` uses. A sense whose consent key is off is never "
+            "polled at all."
+        ),
+    )
+    mode = ambient_parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--list",
+        action="store_true",
+        help="print which sense names can be polled and why (the default)",
+    )
+    mode.add_argument(
+        "--once", action="store_true", help="poll every due sense a single time"
+    )
+    mode.add_argument(
+        "--seconds",
+        type=float,
+        default=None,
+        metavar="N",
+        help="start the scheduler and poll for N seconds of real time",
+    )
+    ambient_parser.add_argument(
+        "--sense", metavar="NAME", help="restrict polling to one registered sense"
+    )
+    ambient_parser.add_argument(
+        "arguments",
+        nargs="*",
+        metavar="key=value",
+        help="arguments for --sense, parsed against that sense's own schema",
+    )
+
+    forget_parser = sub.add_parser(
+        "forget", parents=[common], help="remove durable percepts"
+    )
+    scope = forget_parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--all", action="store_true", help="remove every durable percept")
+    scope.add_argument(
+        "--containing", metavar="TEXT", help="remove durable percepts whose content contains TEXT"
+    )
+
+    return parser
+
+
+def main(argv: Optional["list[str]"] = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.command:
+        parser.print_help()
+        return EXIT_USAGE
+
+    as_json = getattr(args, "json", False)
+    commands: "dict[str, Callable[[argparse.Namespace], tuple]]" = {
+        "list": cmd_list,
+        "enable": cmd_enable,
+        "disable": cmd_disable,
+        "run": cmd_run,
+        "ambient": cmd_ambient,
+        "percepts": cmd_percepts,
+        "forget": cmd_forget,
+    }
+    if args.command == "ambient" and not (args.list or args.once or args.seconds):
+        # `ambient` on its own reports rather than polls: starting an
+        # unattended capture loop is never a thing a bare command should do.
+        args.list = True
+    if getattr(args, "seconds", None) is None:
+        args.seconds = 0.0
+    try:
+        code, lines, data = commands[args.command](args)
+    except CliError as error:
+        if as_json:
+            print(
+                json.dumps(
+                    {
+                        "command": args.command,
+                        "ok": False,
+                        "error": {"message": error.message, "exit_code": error.code},
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            print(f"error: {error.message}", file=sys.stderr)
+        return error.code
+
+    if as_json:
+        print(json.dumps({"command": args.command, "ok": code == EXIT_OK, "data": data}, indent=2))
+    else:
+        print("\n".join(lines))
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

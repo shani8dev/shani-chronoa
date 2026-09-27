@@ -340,7 +340,82 @@ missing `.get_child()` hop was in the test, not `settings_window.py`. If a
 future check on a `Gtk.ScrolledWindow`'s contents finds implausibly few
 children, check for this before suspecting the widget-building code itself.
 
+## Senses layer: wired into the live chat path (2026-09-27)
+
+The senses layer (`senses/`) was built, consent-gated per sense, unit-tested
+and exposed through the headless CLI - and reached **no LLM turn at all**.
+`app.py`, `assistant.py`, `tools.py` and `mcp.py` imported none of it, so
+`shani_chronoa-sense` was its only consumer and every percept it produced died
+in the one-shot process that made it. This is the same dead-code class as
+`ipc.py`/`tool_tracking.py`/`gateway_supervisor.py`/`sandbox/profiles.py`
+below, and `test_sense_manifest.py` only passed because the CLI counted.
+
+Fixed: `Assistant` takes an optional `percept_store` + `context_builder`, and
+`Assistant.build_messages()` re-reads live percepts and inserts them as one
+transient system message on **every** request (`app.py:_init_components`
+constructs a real `PerceptStore()` + `ContextBuilder()` and passes them in).
+`build_messages()` is called fresh on each round of the tool loop, not once
+per turn, so a percept added or expired mid-turn is reflected immediately.
+
+Three things this deliberately does **not** do, all of which look like
+oversights and are not:
+
+- **Percepts never enter `_history`.** `MAX_HISTORY_MESSAGES` is 40 and
+  `_trim_history()` preserves only `_history[0]` - a percept parked at
+  `_history[1]` would be silently deleted by the next trim, would eat the
+  conversation's context budget (Ollama *drops* rather than errors on
+  overflow), and would outlive its own TTL. Asserted directly, including
+  after enough turns to force repeated trimming.
+- **No sense is exposed to the LLM as a callable tool.** That is a separate
+  design decision touching the fixed-whitelist boundary; this change only
+  makes perception the assistant already has *visible* to the turn. A
+  percept recorded by the CLI (or by any future in-GUI producer) is now live
+  on the next turn, but the GUI still cannot itself *ask* a sense anything.
+- **Consent is still checked only at perception time**, in
+  `ChronoaConfig.sense_allowed()`. Nothing yet re-checks a *stored* percept
+  against the current consent state before it is sent, so a fact remembered
+  while the memory sense was on is still sent after it is switched off. That
+  is an open decision, not a finished design.
+
+**Verified by running, not by reading:** the real `ChronoaApplication()` (a
+genuine `Gtk.Application`, not `__new__`) through the real `_init_components()`,
+with a real `Percept` added to the app's own store, produced a prompt
+containing `- [memory/fact] the meeting is at 4pm in the annex` at index 1,
+`percept in _history: False`, `_history length: 1`. The cross-process case is
+proven through the real `usr/bin/shani-chronoa-sense` launcher as a
+subprocess, and both the revert-the-wiring and the park-it-in-`_history`
+mutations were run to confirm the tests fail without the fix.
+Suite: 190 passed, 1 failed - the failure is
+`test_tool_tracking.py::test_export_csv` (`NameError: name 'record' is not
+defined` at `tool_tracking.py:128`, where the loop variable is `call`), which
+is in concurrent, unrelated work in `tool_tracking.py` and was left alone.
+
+**Two real defects found by running, deliberately NOT fixed here** (both are
+in the senses CLI, both need a `Sense.run` contract or ownership decision
+rather than a mechanical patch):
+
+- `argfile.py`'s module docstring wrote a bare `\uXXXX` in a non-raw
+  docstring, which is a `SyntaxError` - so `tools.py`, `assistant.py` and
+  `app.py` could not be imported at all, i.e. **the whole assistant was
+  unlaunchable**, and every module-level test passed anyway because none of
+  them import it. Fixed (one backslash), because it blocked all verification
+  here; it is the clearest argument yet for this file's own rule that a
+  passing test suite proves nothing about the app starting.
+- `shani-chronoa-sense --durable-file PATH run memory operation=remember`
+  ignores `PATH` for the *durable* write: the fact lands in the default
+  `~/.local/share/shani-chronoa/percepts/memory.jsonl` (the memory sense
+  holds its own store, which the CLI cannot reach through `run(arguments)`),
+  and a following `percepts --durable-file PATH` then reports zero. The
+  option's own help text promises otherwise.
+
+Also worth knowing: a fresh `python3 -c` with a overridden `HOME` loses
+`~/.local/lib/python3.*/site-packages` from `sys.path`, so `httpx` disappears
+and `app.py` will not import. Pass `PYTHONPATH=$HOME/.local/lib/python3.12/
+site-packages` (or use a `venv --system-site-packages`) when probing by hand.
+The repo's own `test_sense_scheduler.py` handles this for child processes.
+
 ## Audit-verified known issues (confirmed present)
+
 
 - **`SandboxExecutor._run_host()`: `timeout_seconds` was never actually
   enforced for LEVEL_3_HOST_USER (the default level for every skill call)

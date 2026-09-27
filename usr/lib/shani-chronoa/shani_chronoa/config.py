@@ -50,6 +50,40 @@ def _is_secret(key: str) -> bool:
     return key.endswith("-api-key") and os.environ.get("SHANI_CHRONOA_KEYRING", "1") != "0"
 
 
+# Senses that reach outside this machine no matter how they are configured,
+# and are therefore refused outright while privacy mode is on.
+#
+# Vision is deliberately NOT listed. Whether a screen capture leaves the
+# machine depends on which model is selected, and that decision belongs to
+# the vision sense where the model is actually chosen - gating it here would
+# deny local vision under privacy mode, which is the one case privacy mode
+# is supposed to permit.
+_NETWORKED_SENSES = frozenset({"web"})
+
+# The authoritative sense -> consent-key table. Written out rather than
+# composed as f"{sense}-sense-enabled" so that adding a sense is one visible
+# line here, and so a sense with no declared key is denied outright instead
+# of silently probing a setting that does not exist.
+_SENSE_CONSENT_KEYS = {
+    "vision": "vision-sense-enabled",
+    "ocr": "ocr-sense-enabled",
+    "filesystem": "filesystem-sense-enabled",
+    "web": "web-sense-enabled",
+    "memory": "memory-sense-enabled",
+    "hearing": "hearing-sense-enabled",
+}
+
+# Only memory is on by default: it is local-only and remembering is the point
+# of an assistant. Everything that captures or reads the user's world waits
+# to be asked for.
+_SENSE_DEFAULT_ENABLED = frozenset({"memory"})
+
+# Input control is not a sense (it has no percept to emit), so it lives here
+# rather than in `_SENSE_CONSENT_KEYS`. It still needs the same fail-closed
+# treatment: a missing key denies, never silently permits.
+_INPUT_CONTROL_KEY = "input-control-enabled"
+
+
 class ChronoaConfig:
     """Configuration manager using GSettings.
 
@@ -202,6 +236,21 @@ class ChronoaConfig:
         return self.get("model", "")
 
     @property
+    def vision_model(self) -> str:
+        """Get the persisted *vision* model override, or "" if none is set.
+
+        Deliberately a different key from `model`, and deliberately not derived
+        from it. Vision is a separate capability with a separate model family:
+        a text model that cannot see is useless to `senses/vision.py`, and a
+        vision model is a much worse tool-caller than a text-tuned one. Folding
+        them together - reading `model` here, or letting `--model=` on the
+        command line reach this sense - would mean picking a chatty 4B for
+        screen descriptions, or a vision model for every tool call in the app.
+        Empty means "no override, use `HardwareProfile.get_vision_model()`".
+        """
+        return self.get("vision-model", "")
+
+    @property
     def hardware_profile(self) -> str:
         """Get the persisted hardware profile override, or "auto" if none is set."""
         return self.get("hardware-profile", "auto")
@@ -210,6 +259,91 @@ class ChronoaConfig:
     def privacy_mode(self) -> bool:
         """Get privacy mode status."""
         return self.get_bool("privacy-mode", True)
+
+    def sense_allowed(self, sense: str) -> bool:
+        """Whether `sense` is permitted to perceive right now.
+
+        Two independent gates, both of which must pass:
+
+        - the sense's own `<name>-sense-enabled` key, which defaults to
+          false for every sense except memory. This is the per-sense consent
+          surface: "which perceptions may this assistant form?" has to be
+          answerable one sense at a time, because they differ enormously in
+          intrusiveness. Screen capture and filesystem traversal are not the
+          same request as remembering a stated preference, and a single
+          global switch cannot express that difference.
+        - `privacy-mode`, which is checked here and not merely relied upon
+          downstream. A sense that touches the network or captures the
+          screen must not act while the user believes the machine is
+          local-only.
+
+        `get_bool` returns the supplied default for a key the running schema
+        does not declare, so an older installed schema denies the new senses
+        rather than silently allowing them.
+        """
+        key = _SENSE_CONSENT_KEYS.get(sense)
+        if key is None:
+            return False
+        if not self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED):
+            return False
+        if sense in _NETWORKED_SENSES and self.privacy_mode:
+            return False
+        return True
+
+    def sense_allowed_reason(self, sense: str) -> str:
+        """A user-facing explanation of why `sense` is or isn't permitted."""
+        key = _SENSE_CONSENT_KEYS.get(sense)
+        if key is None:
+            return f"there is no '{sense}' sense"
+        if not self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED):
+            return f"the {sense} sense is turned off (enable '{key}')"
+        if sense in _NETWORKED_SENSES and self.privacy_mode:
+            return (
+                f"the {sense} sense needs privacy mode off because it reaches "
+                f"outside this machine"
+            )
+        return ""
+
+    @property
+    def hearing_sense_enabled(self) -> bool:
+        """Whether Chronoa may turn an utterance into a transient percept."""
+        return self.sense_allowed("hearing")
+
+    @property
+    def input_control_enabled(self) -> bool:
+        """Whether Chronoa may move the pointer, click, or type as an action.
+
+        Not a sense (it emits no percept), so it is checked directly against
+        its own key rather than through `sense_allowed`. A missing key denies,
+        which is the only safe default for something that can move the
+        pointer.
+        """
+        return self.get_bool(_INPUT_CONTROL_KEY, False)
+
+    @property
+    def vision_sense_enabled(self) -> bool:
+        """Whether Chronoa may capture and describe the screen."""
+        return self.sense_allowed("vision")
+
+    @property
+    def ocr_sense_enabled(self) -> bool:
+        """Whether Chronoa may extract text from images."""
+        return self.sense_allowed("ocr")
+
+    @property
+    def filesystem_sense_enabled(self) -> bool:
+        """Whether Chronoa may read files in the user's home directory."""
+        return self.sense_allowed("filesystem")
+
+    @property
+    def web_sense_enabled(self) -> bool:
+        """Whether Chronoa may fetch web content."""
+        return self.sense_allowed("web")
+
+    @property
+    def memory_sense_enabled(self) -> bool:
+        """Whether Chronoa may keep durable notes across sessions."""
+        return self.sense_allowed("memory")
 
     @property
     def whisper_model(self) -> str:
@@ -431,6 +565,37 @@ class HardwareProfile:
             return "qwen3:4b"
         else:
             return "qwen3:1.7b"
+
+    def get_vision_model(self) -> str:
+        """Get the vision model `senses/vision.py` describes images with.
+
+        **Independent of `get_model()` on purpose.** The text pin is Qwen3,
+        chosen for reliable tool-call argument formatting; a text model has no
+        vision tower at all, so pointing the vision sense at it cannot work,
+        and pointing the text LLM at a VLM makes every tool call worse. A user
+        who sets `--model=` on the command line, or the `model` gsetting, has
+        expressed a preference about *chat* and must not silently change what
+        looks at their screen. The `vision-model` gsetting overrides this
+        (see `ChronoaConfig.vision_model`), and only that.
+
+        Qwen3-VL is the vision sibling of the text pin, so the family is at
+        least familiar, and 2B is the smallest size that still reads a
+        screenshot's small text rather than describing wallpaper. Tiers mirror
+        `get_model()` exactly so the two are comparable at a glance.
+
+        **Not verified live.** No Ollama server was reachable on the machine
+        this was written on, so these tags have never been pulled or run -
+        treat them as the intended default, not a tested one. If a tag is
+        missing, `ollama pull qwen3-vl:2b` (or a `vision-model` override)
+        resolves it, and a wrong tag surfaces as an Ollama error the sense
+        reports verbatim rather than as a silently blank description.
+        """
+        if self.profile in ("gpu", "high"):
+            return "qwen3-vl:8b"
+        elif self.profile == "medium":
+            return "qwen3-vl:4b"
+        else:
+            return "qwen3-vl:2b"
 
     def get_whisper_model(self) -> str:
         """Get the appropriate whisper model for hardware."""

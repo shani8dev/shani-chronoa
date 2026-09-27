@@ -19,6 +19,35 @@ logger = logging.getLogger(__name__)
 LOG_DIR = Path(os.path.expanduser("~/.local/share/shani-chronoa/logs"))
 LOG_FILE = LOG_DIR / "tool_calls.log"
 
+# One tool call can now legitimately carry a multi-megabyte argument: a binary
+# payload reaches a skill by reference (see argfile.py), and the reference is
+# recorded here alongside everything else. This log is append-only and
+# unbounded, so a single call must not be able to write a megabyte per
+# invocation. Values past the cap are replaced in the log only - the exact
+# value is still in the in-memory ring, which is the thing
+# `get_calls()` exists for.
+MAX_LOGGED_ARGS_CHARS = 4096
+
+
+def _loggable(value: Any) -> Any:
+    """`value` itself if it is small and JSON-serializable, else a stand-in.
+
+    `default=repr` alone would not be enough: `repr()` of a megabyte of bytes
+    is a three-megabyte string, which defeats the point of being able to log
+    the call at all. Confirmed live that neither is hypothetical - a
+    `TypeError: Object of type bytes is not JSON serializable` raised out of
+    `_write_to_log` propagated into `tools.py:execute_tool()`, whose `except`
+    turned a skill that had already run successfully into
+    "Tool 'x' failed: ...".
+    """
+    try:
+        encoded = json.dumps(value)
+    except (TypeError, ValueError):
+        return f"<{type(value).__name__}, {len(repr(value))} chars, not JSON-serializable>"
+    if len(encoded) > MAX_LOGGED_ARGS_CHARS:
+        return f"<{type(value).__name__}, {len(encoded)} chars of JSON, omitted from the log>"
+    return value
+
 
 class ToolCallRecord:
     """Represents a single tool call record."""
@@ -45,6 +74,10 @@ class ToolCallRecord:
             "result": self.result,
             "duration_ms": self.duration_ms,
         }
+
+    def to_log_dict(self) -> dict[str, Any]:
+        """`to_dict()` with every argument value made safe to serialize."""
+        return {**self.to_dict(), "args": {k: _loggable(v) for k, v in self.args.items()}}
 
 
 class ToolTracker:
@@ -90,17 +123,17 @@ class ToolTracker:
         with open(output_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(["timestamp", "tool_name", "args", "result", "duration_ms"])
-            for call in self._calls:
+            for record in self._calls:
                 writer.writerow([
-                    call.timestamp.isoformat(),
-                    call.tool_name,
-                    json.dumps(call.args),
-                    json.dumps(call.result),
-                    call.duration_ms,
+                    record.timestamp.isoformat(),
+                    record.tool_name,
+                    json.dumps(record.to_log_dict()["args"], default=repr),
+                    json.dumps(record.result, default=repr),
+                    record.duration_ms,
                 ])
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 
     def _write_to_log(self, record: ToolCallRecord) -> None:
         """Append a call record to the log file."""
         with open(self.log_file, "a") as f:
-            f.write(json.dumps(record.to_dict()) + "\n")
+            f.write(json.dumps(record.to_log_dict(), default=repr) + "\n")
