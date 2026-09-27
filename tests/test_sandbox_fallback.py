@@ -24,7 +24,17 @@ EXIT_SECURITY_ERROR = 126
 
 @pytest.fixture
 def no_bwrap(monkeypatch):
-    """A machine where bubblewrap is not installed."""
+    """A machine with neither bubblewrap nor Landlock.
+
+    Landlock now counts as a confinement mechanism, so "bwrap is missing" alone
+    no longer means the level must refuse - it runs confined instead. These
+    tests are about the case where NOTHING can confine the command, which is the
+    only one where refusing is the right answer.
+    """
+    from shani_chronoa.sandbox import executor as ex
+
+    monkeypatch.setattr(ex, "_bwrap_usable", lambda: False, raising=False)
+    monkeypatch.setattr(ex, "_landlock_abi", lambda: 0, raising=False)
     executor = SandboxExecutor()
     monkeypatch.setattr(executor, "bwrap_available", False, raising=False)
     return executor
@@ -37,7 +47,9 @@ def test_levels_that_promise_isolation_refuse_without_bubblewrap(no_bwrap):
         )
 
         assert code == EXIT_SECURITY_ERROR, f"{level} ran unisolated instead of refusing"
-        assert "bubblewrap" in out, "the refusal must name the missing package"
+        assert "bubblewrap" in out or "Landlock" in out, (
+        "the refusal must name what is missing"
+    )
 
 
 def test_the_refusal_never_reveals_command_output(no_bwrap):
@@ -126,3 +138,88 @@ def test_the_packaging_manifests_actually_declare_the_sandbox():
         text = path.read_text().lower()
         assert "bubblewrap" in text, f"{path.name} does not declare bubblewrap"
         assert "libsecret" in text, f"{path.name} does not declare libsecret"
+
+
+class TestTheConfinedLevelsActuallyConfine:
+    """LEVEL_1/LEVEL_2 run through a Landlock wrapper that restricts, then execs.
+
+    Landlock is the primary mechanism rather than a fallback because it needs no
+    user namespaces. bubblewrap is layered on only where it works, and `_bwrap_usable`
+    probes that: this repository's own development container has bwrap installed
+    and still cannot use it ("setting up uid map"), so gating on `shutil.which`
+    made every confined command fail on precisely the machines Landlock exists to
+    serve.
+    """
+
+    @staticmethod
+    def _executor(monkeypatch, bwrap_usable, landlock=True):
+        from shani_chronoa.sandbox import executor as ex
+
+        monkeypatch.setattr(ex, "_bwrap_usable", lambda: bwrap_usable, raising=False)
+        monkeypatch.setattr(ex, "_landlock_abi", lambda: 8 if landlock else 0, raising=False)
+        instance = ex.SandboxExecutor()
+        monkeypatch.setattr(instance, "bwrap_available", bwrap_usable, raising=False)
+        return instance
+
+    def test_a_file_inside_the_workspace_is_readable(self, tmp_path, monkeypatch):
+        from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        target = workspace / "ok.txt"
+        target.write_text("visible")
+        executor = self._executor(monkeypatch, bwrap_usable=False)
+        config = SandboxConfig(
+            level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=30,
+            isolated_dir=str(workspace),
+        )
+
+        code, out, _ = executor.execute(f"cat {target}", config, "probe")
+
+        assert code == 0, f"the workspace must stay readable: {out}"
+        assert "visible" in out
+
+    def test_a_file_outside_the_workspace_is_refused(self, tmp_path, monkeypatch):
+        from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
+
+        outside = tmp_path.parent / "outside-secret.txt"
+        outside.write_text("TOP-SECRET")
+        executor = self._executor(monkeypatch, bwrap_usable=False)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        config = SandboxConfig(
+            level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=30,
+            isolated_dir=str(workspace),
+        )
+
+        code, out, _ = executor.execute(f"cat {outside}", config, "probe")
+
+        assert code != 0, f"a read outside the workspace was allowed: {out!r}"
+        assert "TOP-SECRET" not in out, "the contents leaked into the output"
+
+    def test_with_neither_confinement_mechanism_it_refuses(self, tmp_path, monkeypatch):
+        from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
+
+        executor = self._executor(monkeypatch, bwrap_usable=False, landlock=False)
+        config = SandboxConfig(
+            level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5,
+            isolated_dir=str(tmp_path),
+        )
+
+        code, out, _ = executor.execute("cat /etc/hostname", config, "probe")
+
+        assert code == EXIT_SECURITY_ERROR
+        assert "unconfined" in out, "the refusal must say it declined to run unconfined"
+
+    def test_level_3_is_unaffected_by_either(self, tmp_path, monkeypatch):
+        # LEVEL_3 promises no isolation so skills can reach the session bus; the
+        # probe must not change that.
+        from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
+
+        executor = self._executor(monkeypatch, bwrap_usable=False)
+        config = SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=15)
+
+        code, out, _ = executor.execute("echo alive", config, "probe")
+
+        assert code == 0
+        assert out.strip() == "alive"

@@ -5,16 +5,63 @@ Adapted from sayri/adapters/sandbox/executor.py with shani-chronoa paths.
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Tuple
 
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.secrets_manager import secrets_manager
+
+
+def _bwrap_usable() -> bool:
+    """Whether bubblewrap can actually create the namespaces it needs.
+
+    Presence is not capability. A host can have bwrap installed and still be
+    unable to create a user namespace - a hardened kernel, most container
+    runtimes, and this development box, where it dies with "setting up uid map"
+    or "loopback: Failed RTM_NEWADDR". Gating on shutil.which() alone therefore
+    made every confined command fail on exactly the machines Landlock exists to
+    serve. Probed once, then cached: the answer cannot change mid-process.
+    """
+    global _BWRAP_USABLE
+    if _BWRAP_USABLE is not None:
+        return _BWRAP_USABLE
+    if not shutil.which("bwrap"):
+        _BWRAP_USABLE = False
+        return False
+    try:
+        probe = subprocess.run(
+            ["bwrap", "--ro-bind", "/", "/", "--dev-bind", "/dev", "/dev", "--proc", "/proc", "--", "true"],
+            capture_output=True, timeout=10,
+        )
+        _BWRAP_USABLE = probe.returncode == 0
+    except Exception:  # noqa: BLE001 - unusable is the answer, not an error
+        _BWRAP_USABLE = False
+    return _BWRAP_USABLE
+
+
+_BWRAP_USABLE = None
+
+
+def _landlock_abi() -> int:
+    """Landlock ABI version, or 0 when the kernel has no Landlock.
+
+    Resolved per call rather than cached: the answer depends on the kernel,
+    and a cached 0 would keep reporting 'unavailable' on a host that has it.
+    """
+    try:
+        from shani_chronoa.sandbox.landlock import abi_version
+
+        return abi_version()
+    except Exception:  # noqa: BLE001 - absence is the answer, not an error
+        return 0
 
 DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
 
@@ -116,6 +163,26 @@ class SandboxExecutor:
                 0.0,
             )
 
+        # A level that promises isolation must never degrade to plain host
+        # execution. Landlock counts: it is unprivileged and needs no user
+        # namespaces, so confinement survives on hosts where bubblewrap cannot
+        # create them. Only when NEITHER mechanism exists do we refuse - and we
+        # refuse loudly rather than running unconfined while reporting success.
+        if (
+            config.level
+            in (SandboxLevel.LEVEL_1_READONLY, SandboxLevel.LEVEL_2_ISOLATED_DEV)
+            and not self.bwrap_available
+            and not _landlock_abi() >= 1
+        ):
+            return (
+                126,
+                "Security error: this sandbox level needs bubblewrap or Landlock "
+                "and neither is available. Install 'bubblewrap' or run on a "
+                "kernel with Landlock (5.13+); refusing to run the command "
+                "unconfined rather than pretending it was confined.",
+                0.0,
+            )
+
         timeout = max(1, config.timeout_seconds)
 
         # 6. Level 4: Elevated Host with pkexec
@@ -137,18 +204,87 @@ class SandboxExecutor:
         # name the package. LEVEL_3 is deliberately exempt - it means "host as
         # this user" with no isolation promised, because skills legitimately
         # need the session bus and display to reach `speak` or `open_application`.
-        if not self.bwrap_available:
-            return (
-                126,
-                "Security error: this sandbox level requires bubblewrap (bwrap), "
-                "which is not installed. Install the 'bubblewrap' package; "
-                "refusing to run the command unisolated rather than pretending "
-                "it was sandboxed.",
-                0.0,
+
+        # 8. Level 1 & 2: confined.
+        #
+        # Landlock first, and it is not a fallback: it is unprivileged and needs
+        # no user namespaces, so it confines on machines where bubblewrap cannot
+        # run at all (hardened kernels, most container runtimes, and this
+        # development container, where bwrap dies with
+        # "loopback: Failed RTM_NEWADDR: Operation not permitted"). Requiring
+        # bubblewrap for the isolated levels meant the levels were simply
+        # unavailable wherever namespaces are restricted - the opposite of what
+        # a confinement level is for.
+        return self._run_landlock(
+            raw_cmd, config, agent_id, timeout, start_time, use_bwrap=self.bwrap_available
+        )
+
+    def _run_landlock(
+        self,
+        command: str,
+        config: SandboxConfig,
+        agent_id: str,
+        timeout: int,
+        start_time: float,
+        use_bwrap: bool = False,
+    ) -> Tuple[int, str, float]:
+        """Confine via a Landlock wrapper that restricts, then execs the command.
+
+        The wrapper is a separate program precisely so `landlock_restrict_self`
+        runs in the child: it cannot be undone for the life of a process, so
+        applying it here would permanently strip the app of filesystem access.
+        """
+        workspace = config.isolated_dir or os.path.join(self.sandboxes_root, agent_id)
+        os.makedirs(workspace, exist_ok=True)
+
+        from shani_chronoa.sandbox import landlock as _landlock
+
+        paths = _landlock.get_default_allowed_paths(workspace)
+        wrapper = os.path.join(workspace, ".chronoa-landlock-wrapper.py")
+        with open(wrapper, "w", encoding="utf-8") as handle:
+            handle.write(_landlock.get_landlock_wrapper())
+
+        # exec a shell rather than the command itself: `command` is a shell
+        # string, and the wrapper takes argv. The ruleset is already in force by
+        # the time /bin/sh runs.
+        inner = f"{shlex.quote(sys.executable)} {shlex.quote(wrapper)} /bin/sh -c {shlex.quote(command)}"
+        use_bwrap = use_bwrap and _bwrap_usable()
+        if use_bwrap:
+            inner = (
+                "bwrap --ro-bind / / --bind " + shlex.quote(workspace) + " "
+                + workspace + " --dev-bind /dev /dev --proc /proc --die-with-parent -- "
+                + inner
             )
 
-        # 8. Level 1 & 2: Sandboxed with Bubblewrap
-        return self._run_bwrap(raw_cmd, config, agent_id, timeout, start_time)
+        env = secrets_manager.inject_environment()
+        env.update(
+            {
+                "LANLOCK_ALLOWED_PATHS": json.dumps([list(p) for p in paths]),
+                "PYTHONPATH": os.path.dirname(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                ),
+            }
+        )
+        for key in ("HOME", "USER", "LANG", "LC_ALL"):
+            if key in os.environ and key not in env:
+                env[key] = os.environ[key]
+
+        try:
+            proc = subprocess.run(
+                inner, shell=True, env=env, capture_output=True, text=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            return (124, f"Error: Command timed out after {timeout}s and was terminated.", 0.0)
+        except Exception as exc:  # noqa: BLE001
+            return (1, f"Execution error in the confined scope: {exc}", 0.0)
+
+        duration = (time.monotonic() - start_time) * 1000.0
+        out = proc.stdout or ""
+        if proc.returncode != 0:
+            err = (proc.stderr or "").strip().splitlines()
+            detail = err[-1] if err else f"exit status {proc.returncode}"
+            out = out or f"ERROR(exit={proc.returncode}): {detail}"
+        return (proc.returncode, out, duration)
 
     def _run_host(
         self, command: str, timeout: int, start_time: float, elevated: bool = False
