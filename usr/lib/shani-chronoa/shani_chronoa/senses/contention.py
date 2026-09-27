@@ -43,6 +43,7 @@ by default and this sense is fail-closed until the user grants it.
 import logging
 import os
 import re
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -126,13 +127,28 @@ def _dev_nodes() -> List[Path]:
     return found
 
 
+_FUSER_MISSING: "Optional[str]" = None
+
+
 def _holders(node: Path, timeout: float = 2.0) -> List[int]:
-    """PIDs holding `node` open.
+    """PIDs holding `node` open, or None when that cannot be determined.
 
     `fuser` writes PIDs to stdout and signals access through its exit status,
     so a non-zero exit is normal here and must not be treated as failure - an
     unused device legitimately yields no PIDs and a non-zero status.
+
+    The None case matters more than it looks. `fuser` comes from `psmisc`,
+    which is not a Chronoa dependency and need not be installed, and an
+    OSError from a missing binary is indistinguishable from "no process holds
+    this". Returning [] for both made the sense report every microphone and
+    every webcam as free on any machine without psmisc - which is the exact
+    inverse of what it exists to tell you, and wrong in the direction that
+    matters. The caller reports that as UNKNOWN rather than as "free".
     """
+    global _FUSER_MISSING
+    if shutil.which("fuser") is None:
+        _FUSER_MISSING = "fuser (from psmisc) is not installed"
+        return None
     try:
         proc = subprocess.run(
             ["fuser", str(node)],
@@ -143,7 +159,8 @@ def _holders(node: Path, timeout: float = 2.0) -> List[int]:
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("fuser failed for %s: %s", node, exc)
-        return []
+        _FUSER_MISSING = f"fuser could not be run for {node}: {exc}"
+        return None
     pids: List[int] = []
     for token in re.findall(r"\d+", proc.stdout or ""):
         value = int(token)
@@ -167,12 +184,16 @@ def _cmdline(pid: int) -> str:
 
 
 def describe(node: Path) -> Dict[str, object]:
-    """One device node and everything currently holding it open."""
+    """One device node and everything currently holding it open.
+
+    `in_use` is None - not False - when the holders could not be determined,
+    so a missing `fuser` can never be reported as an unused microphone.
+    """
     pids = _holders(node)
-    holders = [{"pid": pid, "cmdline": _cmdline(pid)} for pid in pids]
+    holders = [{"pid": pid, "cmdline": _cmdline(pid)} for pid in (pids or [])]
     return {
         "device": str(node),
-        "in_use": bool(pids),
+        "in_use": None if pids is None else bool(pids),
         "holders": holders,
     }
 
@@ -196,6 +217,12 @@ def _run(arguments: dict) -> Union[str, Percept]:
 
     if not reports:
         return "No capture devices were found on this machine."
+    if not busy and all(r["in_use"] is None for r in reports):
+        return (
+            "Could not determine who holds the capture devices open: "
+            f"{_FUSER_MISSING or 'the holder lookup is unavailable'}. Whether "
+            "anything is using the camera or microphone is UNKNOWN, not free."
+        )
     if not busy:
         free = ", ".join(str(r["device"]) for r in reports)
         return f"No process holds any capture device open ({free} are all free)."

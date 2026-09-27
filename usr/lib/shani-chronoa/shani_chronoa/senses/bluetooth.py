@@ -75,12 +75,16 @@ def read_adapters() -> list:
 def read_devices() -> list:
     """Device addresses the controller lists, via bluetoothctl.
 
-    Returns [] rather than raising when bluetoothctl is absent or the daemon
-    is down: a machine with the radio disabled is a normal state, and
-    reporting "no Bluetooth" is the right answer for it.
+    Returns None when bluetoothctl is not installed, [] when the controller
+    genuinely lists nothing, and a list otherwise. A machine with the radio
+    disabled is a normal state and [] is the right answer for it; a machine
+    without bluez installed has not been asked anything, and reporting "0
+    devices" for that is a confident answer to a question nobody asked.
     """
     if shutil.which("bluetoothctl") is None:
-        return []
+        # Distinct from "the controller lists no devices", which is a different
+        # claim about a different situation.
+        return None
     try:
         proc = subprocess.run(
             ["bluetoothctl", "--timeout", str(int(_TIMEOUT)), "devices"],
@@ -120,6 +124,16 @@ def _run(arguments: dict) -> Union[str, Percept]:
     for a in adapters:
         state = "rfkill-blocked" if a["rfkill_blocked"] else "unblocked"
         lines.append(f"  {a['adapter']} ({state})")
+    if devices is None:
+        lines.append(
+            "devices: UNKNOWN - bluetoothctl is not installed, so the "
+            "controller was not asked and this is not a count of zero"
+        )
+        return _SENSE.to_percept(
+            "\n".join(lines),
+            source="sysfs-bluetooth",
+            metadata={"adapters": len(adapters), "devices": None},
+        )
     lines.append(f"devices seen by the controller: {len(devices)}")
     for d in devices:
         lines.append(f"  {d['address']} {d['name']}")

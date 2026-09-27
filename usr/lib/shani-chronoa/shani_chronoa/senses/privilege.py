@@ -32,6 +32,7 @@ Read-only: this never signals, never writes, and never changes a capability.
 """
 import logging
 import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional, Union
@@ -123,32 +124,62 @@ def _exe_path(pid: str, cmdline: str) -> str:
     return token if token.startswith("/") else ""
 
 
-def _package_owned(paths: "list[str]") -> dict:
+# Which tool answers "which package owns this file", per distro. Chronoa
+# ships on Arch-based ShaniOS, so a Debian-only implementation is not a
+# portability detail - on the actual target `dpkg-query` does not exist, the
+# lookup returns nothing, and every process on the machine is then reported as
+# unmanaged third-party software. That is not a degraded mode, it is the
+# sense actively crying wolf on its own distribution.
+_OWNERSHIP_TOOLS = (
+    ("dpkg-query", ["-S", "--"]),          # Debian, Ubuntu
+    ("pacman", ["-Qo"]),                   # Arch, ShaniOS
+    ("rpm", ["-qf"]),                      # Fedora
+    ("zypper", ["what-provides"]),         # openSUSE
+)
+
+
+def _ownership_command(paths: "list[str]") -> "Optional[tuple]":
+    """An argv prefix that answers ownership for these paths, or None."""
+    for tool, prefix in _OWNERSHIP_TOOLS:
+        if shutil.which(tool) is not None:
+            return [tool, *prefix, *paths]
+    return None
+
+
+def _package_owned(paths: "list[str]") -> "Optional[dict]":
     """Map each path to whether a distribution package owns it.
 
-    One batched `dpkg-query` rather than a call per process: this runs on an
-    unattended poll, and a dozen subprocesses a minute is a cost the sense
-    should not impose. A path dpkg does not recognise is reported as
-    unmanaged, which is the answer that matters here.
+    One batched call rather than a call per process: this runs on an
+    unattended poll and a dozen subprocesses a minute is a cost the sense
+    should not impose.
+
+    Returns None when no ownership tool is available, which the caller must
+    treat as "provenance undeterminable" - never as "unmanaged". Those are
+    opposite claims and only one of them is safe to guess.
     """
     unique = sorted({p for p in paths if p.startswith("/")})
     if not unique:
         return {}
-    owned: dict = {}
+    argv = _ownership_command(unique)
+    if argv is None:
+        return None
     try:
         proc = subprocess.run(
-            ["dpkg-query", "-S", "--", *unique],
-            capture_output=True, text=True, timeout=15, check=False,
+            argv, capture_output=True, text=True, timeout=15, check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        logger.debug("dpkg-query unavailable: %s", exc)
-        return {p: None for p in unique}
+        logger.debug("ownership lookup failed: %s", exc)
+        return None
+    owned: dict = {}
     for line in (proc.stdout or "").splitlines():
-        # `dpkg-query -S` prints "<package>: <path>"; package names cannot
-        # contain ": ", so the first one is the separator.
-        _package, separator, path = line.partition(": ")
-        if separator and path in unique:
-            owned[path] = True
+        # `dpkg-query -S` prints "<package>: <path>"; `pacman -Qo` prints
+        # "<path> is owned by <package>". Package names cannot contain ": ",
+        # so the leading separator is the first one, and the path is either
+        # the text before it or the first whitespace-delimited field.
+        package, separator, path = line.partition(": ")
+        candidate = path if separator and path in unique else line.split()[0] if line.split() else ""
+        if candidate in unique:
+            owned[candidate] = True
     return {p: owned.get(p, False) for p in unique}
 
 
@@ -186,7 +217,9 @@ def read_holders() -> list:
 
     owned = _package_owned([c["exe"] for c in candidates])
     for c in candidates:
-        if not c["exe"]:
+        if owned is None:
+            c["provenance"] = "unknown"
+        elif not c["exe"]:
             # No resolvable path at all. Treated as unknown rather than
             # unmanaged: a process whose exe link cannot be read is not
             # evidence of anything, and defaulting it to "unmanaged" would
