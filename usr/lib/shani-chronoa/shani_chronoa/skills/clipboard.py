@@ -149,6 +149,40 @@ SCHEMAS = {
     },
 }
 
+
+def _verify_clipboard_written(arguments: dict):
+    """Read the clipboard back and compare it with what we were asked to write.
+
+    `wl-copy`/`xclip` exiting 0 only means the request was accepted by the
+    display server; it does not mean the selection now holds that text. This
+    is the round trip the skill's own result string cannot perform, and it is
+    the only evidence that the effect happened.
+
+    Returns `(ok, evidence)`.
+    """
+    expected = str(arguments.get("text", ""))
+    backend = _detect_backend()
+    if backend is None:
+        return False, "no clipboard backend available to verify with"
+    _session, _write_tool, read_tool = backend
+    try:
+        completed = subprocess.run(
+            [read_tool, "-selection", "clipboard", "-o"],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        return False, f"could not read the clipboard back: {exc}"
+    if completed.returncode != 0:
+        return False, (completed.stderr or "read-back failed").strip()
+    actual = completed.stdout
+    if actual == expected:
+        return True, "clipboard read-back matches"
+    return False, f"clipboard holds {actual[:40]!r}, expected {expected[:40]!r}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _verify_clipboard_written
+
 SKILLS = [
     Skill(name="get_clipboard", schema=SCHEMAS["get_clipboard"], run=_run_get_clipboard),
     Skill(name="set_clipboard", schema=SCHEMAS["set_clipboard"], run=_run_set_clipboard),

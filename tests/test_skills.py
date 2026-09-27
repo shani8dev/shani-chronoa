@@ -348,8 +348,12 @@ class TestToolExecutionGuards:
         # When: it is called with a non-dict arguments value
         result = tools_mod.execute_tool(handler_name, "not-a-dict")
         # Then: the arguments are treated as empty (`{}`) in the command built
-        # for the sandbox, instead of crashing or forwarding the non-dict value
-        assert result == "ok"
+        # for the sandbox, instead of crashing or forwarding the non-dict value.
+        # The result also carries the post-condition verdict (see verification.py):
+        # a skill with no POST_CONDITION is reported as unverified rather than
+        # letting the sandbox's "ok" stand in for evidence that anything happened.
+        assert result.startswith("ok")
+        assert "unverified" in result
         assert "({})" in captured["cmd"]
 
 

@@ -31,7 +31,7 @@ import logging
 import shlex
 import sys
 
-from shani_chronoa import argfile
+from shani_chronoa import argfile, verification
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -156,7 +156,19 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         if exit_code != 0:
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
             return output or f"Tool '{name}' failed with exit code {exit_code}"
-        return output
+        # The skill's own string is its account of what it did, not evidence
+        # that it happened. A module that declares POST_CONDITION gets that
+        # checked against real state here, and an action with no post-condition
+        # says so rather than letting the caller infer success. See
+        # verification.py for why this is not optional politeness.
+        try:
+            checked = verification.verify(handler_module, arguments)
+        except Exception as e:  # noqa: BLE001 - verification must never kill the action
+            logger.warning(f"Post-condition for '{name}' raised: {e}")
+            checked = verification.Result(verification.Verdict.UNVERIFIED, str(e))
+        if checked.verdict is verification.Verdict.FAILED:
+            logger.error(f"Tool '{name}' reported success but verification failed: {checked.evidence}")
+        return output + checked.suffix
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
         _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0, origin=origin)
