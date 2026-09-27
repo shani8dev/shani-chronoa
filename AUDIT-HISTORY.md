@@ -47,17 +47,39 @@ must be a state the code can actually represent, distinct from "X is false."**
 
 - **Unit suite on Ubuntu 24.04: 584 passed, 3 skipped.** Real, but proves
   little about ShaniOS, per the table above.
-- **`shani-testbed/slot-tests/chronoa-machine-state.sh` is WRITTEN AND
-  COMMITTED (testbed `3ca190e`) BUT HAS NOT BEEN RUN.** No ShaniOS slot exists
-  on the development host; creating one requires a full `bootstrap -p gnome
-  -d latest`, and the attempt was aborted. The slot test asserts the nine
-  senses register, that all nine consent keys are in the *running compiled*
-  schema, that consent genuinely refuses, that each sense produces a real
-  reading when its dependency is present, and — the reason it exists — that
-  none of them reports UNKNOWN while its dependency *is* installed, nor "free"
-  while undetermined.
-- **Not yet verified on the target: everything distro-dependent above.** The
-  fixes are written and unit-tested; they have not been exercised on Arch.
+- **Real ShaniOS slot test: 35 pass, 0 fail, rc=0** (2026-09-28). Full
+  sequence run on a genuinely installed slot:
+  `./run_in_container.sh build.sh test bootstrap -p gnome -d latest`
+  (completed: "Bootstrap complete (via real install.sh + configure.sh)"),
+  then `testbed slot-test blue chronoa-machine-state --local-src-chronoa=…`.
+
+  The decisive line, and the whole reason the test exists:
+
+  ```
+  RESULT privilege-uses-package-manager  PASS (18 further holder attributed
+    to distribution packages, so the ownership lookup is actually working)
+  ```
+
+  On Arch the lookup resolves through `pacman -Qo` and 18 processes are
+  correctly attributed to the packages that own them. Before the fix,
+  `dpkg-query` did not exist on that slot, nothing was attributed, and the
+  sense reported *every* process as unmanaged third-party software.
+  `contention-fuser-respected` also passed — `fuser` present, real holder
+  state, not the missing-binary path. All nine senses registered, all nine
+  consent keys were in the *running compiled* schema, and consent genuinely
+  refused (exit 4) for each of the nine.
+
+  Real readings from the booted slot: `eth0: up, carrier`, `DNS:
+  192.168.31.1`; `INT3400 Thermal: 20.0C, SEN1: 72.0C, SEN2: 90.0C`;
+  `intel_backlight: 9514/96000 (10%)`; `hci0 (unblocked)`; and `privilege`
+  reporting "No unmanaged software holds a dangerous capability" — correct
+  for a clean image, in contrast to the Workpuls finding on the dev box.
+
+  Two environment notes for anyone repeating this: `systemd-nspawn` needs
+  cgroup delegation that a nested terminal scope does not provide, so the
+  container must run with `--cgroupns=host`; and `run_in_container.sh` does
+  not mount `shani-chronoa` at `/opt/shani-chronoa`, so the chronoa overlay
+  has to be run with a hand-rolled `docker run` that adds that one mount.
 
 ### Bugs found by running, not by reading
 

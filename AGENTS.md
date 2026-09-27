@@ -462,11 +462,14 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (584 passed, 3 skipped).
-The ShaniOS slot test (`shani-testbed/slot-tests/chronoa-machine-state.sh`,
-testbed `3ca190e`) is written and committed but **has not been run** — no slot
-exists on the dev host and the bootstrap was aborted. Everything
-distro-dependent above is unverified on Arch.
+**Verification status:** unit suite green on Ubuntu (584 passed, 3 skipped),
+**and 35 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28, testbed
+`3ca190e`) — including `privilege-uses-package-manager` PASS with 18 holders
+correctly attributed to packages, which is the check that only exists to catch
+the Arch failure. Real readings from the slot: `eth0: up, carrier`,
+`DNS: 192.168.31.1`, `SEN2: 90.0C`, `intel_backlight 9514/96000 (10%)`,
+`hci0 (unblocked)`. Repeating it needs `--cgroupns=host` for nspawn and a
+hand-rolled mount for `shani-chronoa` — see `AUDIT-HISTORY.md`.
 
 ## Audit-verified known issues (confirmed present)
 
