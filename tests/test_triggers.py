@@ -156,3 +156,51 @@ def test_a_disabled_rule_does_not_fire(engine, calls):
 
     assert engine.evaluate(_percept("doorbell")) == []
     assert calls == []
+
+
+class TestDefaultWhitelistPath:
+    """`build_rule`'s default was broken in a way its own tests could not see.
+
+    `discover_skills()` returns `(TOOLS, handlers)`. The default branch assigned
+    that tuple to `skills` and then tested `actuator not in skills`, which
+    compares against the two container objects and never a skill name - so every
+    default-path call rejected every actuator. The suite never caught it
+    because it passes `skills=` explicitly. It stayed invisible until the CLI
+    (the first production caller) used the default.
+    """
+
+    def test_a_real_whitelisted_skill_is_accepted_by_default(self):
+        from shani_chronoa.triggers import build_rule
+
+        rule, problem = build_rule(
+            name="r", sense="memory", match_mode="substring",
+            actuator="notify", arguments={}, substring="x",
+        )
+        assert rule is not None, f"default path rejected a real skill: {problem}"
+        assert rule.actuator == "notify"
+
+    def test_a_genuinely_unknown_skill_is_still_rejected_by_default(self):
+        from shani_chronoa.triggers import build_rule
+
+        rule, problem = build_rule(
+            name="r", sense="memory", match_mode="substring",
+            actuator="definitely_not_a_skill", arguments={}, substring="x",
+        )
+        assert rule is None
+        assert "not a whitelisted skill" in (problem or "")
+
+
+class TestDryRun:
+    """There was no way to ask "would this fire?" without firing it."""
+
+    def test_dry_run_reports_without_dispatching(self, engine, calls):
+        engine.store().add(_rule())
+        percept = _percept("that was the doorbell")
+        results = engine.evaluate(percept, dry_run=True)
+        assert calls == [], "dry run dispatched a real action"
+        assert any("would fire" in (r.reason or "") for r in results)
+
+    def test_non_dry_run_still_dispatches(self, engine, calls):
+        engine.store().add(_rule())
+        engine.evaluate(_percept("that was the doorbell"))
+        assert calls, "the normal path stopped dispatching"

@@ -215,3 +215,24 @@ def stubbed_app(chronoa_config):
     app._wake_word_active = False
     app._sync_autostart = lambda: None
     return app
+
+@pytest.fixture(autouse=True)
+def _isolate_trigger_rule_store(tmp_path_factory, monkeypatch):
+    """Keep the armed-rule store out of the developer's real state dir.
+
+    `triggers.RULES_FILE` is a module-level constant resolved from `$HOME` at
+    *import* time, so a per-test `monkeypatch.setenv("HOME", tmp_path)` lands
+    too late to move it - the path was captured when `triggers.py` was first
+    imported, pointing at the real home. The consequence was that running the
+    suite wrote armed actuator rules (`doorbell` -> notify, `click` ->
+    move_pointer) into `~/.local/share/shani-chronoa/triggers/rules.json`,
+    where they would later fire unattended.
+
+    This is the same class of bug `PerceptStore.DURABLE_FILE` already caused
+    in this repo, so the guard is autouse and repo-wide rather than patched
+    into the one test module that happened to trip it.
+    """
+    triggers = pytest.importorskip("shani_chronoa.triggers")
+    monkeypatch.setattr(
+        triggers, "RULES_FILE", tmp_path_factory.mktemp("rules") / "rules.json", raising=False
+    )

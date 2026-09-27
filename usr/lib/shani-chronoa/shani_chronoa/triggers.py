@@ -334,7 +334,14 @@ def build_rule(
     silently redirected to a different one later.
     """
     if skills is None:
-        skills = discover_skills()
+        # `discover_skills()` returns `(TOOLS, handlers)`; the name-keyed
+        # mapping is the second element. Assigning the tuple here and testing
+        # `actuator not in skills` compares against the two container objects,
+        # never a skill name, so every default-path call rejected every
+        # actuator. The unit suite passed because it substitutes `skills=`
+        # explicitly - so the broken default was invisible until something
+        # outside the tests called it.
+        _tools, skills = discover_skills()
     if actuator not in skills:
         return None, f"actuator {actuator!r} is not a whitelisted skill"
     problem = _validate_rule_fields(
@@ -572,8 +579,18 @@ class TriggerEngine:
             )
         return ""
 
-    def evaluate(self, percept, now: Optional[float] = None) -> "list[FireResult]":
-        """Fire every armed rule this percept matches. Never raises."""
+    def evaluate(
+        self, percept, now: Optional[float] = None, dry_run: bool = False
+    ) -> "list[FireResult]":
+        """Fire every armed rule this percept matches. Never raises.
+
+        `dry_run` reports what *would* fire without dispatching anything. It
+        exists because the alternative is unacceptable: without it there is no
+        way to ask "is this rule armed, does it match, and is it consented?"
+        except by letting it act. A user cannot review an unattended action
+        before it happens, and a denied rule cannot be distinguished from an
+        absent one without firing something.
+        """
         import time
 
         moment = time.time() if now is None else now
@@ -594,6 +611,9 @@ class TriggerEngine:
                 continue
             if not rule.due(moment):
                 continue
+            if dry_run:
+                results.append(FireResult(rule, fired=False, reason="would fire (dry run)"))
+                continue
             try:
                 # origin= is what makes this distinguishable in the audit log
                 # from a person asking. An unattended action nobody can
@@ -608,6 +628,15 @@ class TriggerEngine:
             results.append(FireResult(rule, fired=True))
 
         return results
+
+    def evaluate_many(
+        self, percepts, now: Optional[float] = None, dry_run: bool = False
+    ) -> "list[FireResult]":
+        """Evaluate a batch without dispatching. Preserves order."""
+        out: list[FireResult] = []
+        for percept in percepts:
+            out.extend(self.evaluate(percept, now=now, dry_run=dry_run))
+        return out
 
     def fire_all(self, percepts, now: Optional[float] = None) -> "list[FireResult]":
         """Evaluate a batch, preserving order. Used by the polling loop."""

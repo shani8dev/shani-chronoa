@@ -78,6 +78,7 @@ from shani_chronoa.senses import Percept, Sense, discover_senses  # noqa: E402
 from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
 from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
+from shani_chronoa.triggers import TriggerEngine, TriggerRule, build_rule  # noqa: E402
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -494,6 +495,133 @@ def cmd_ambient(args: argparse.Namespace) -> tuple:
     return _ambient_report(args, scheduler, results)
 
 
+def cmd_trigger(args: argparse.Namespace) -> tuple:
+    """Arm, list, disarm, and dry-run percept-triggered actuator rules.
+
+    The only consumer of `triggers.py` in the shipped tree. That module was 617
+    lines of consent-gated, whitelist-only engine with a full unit suite and no
+    production caller - a user could not list, arm, or test a rule, so the
+    safety design it documents was unreachable in practice.
+
+    A rule names a sense, a match mode, and ONE already-whitelisted skill with
+    fixed user-supplied arguments. The LLM is not in this path at all: nothing
+    here resolves a skill name at fire time, takes a free-form prompt, or
+    accepts a shell string. That is the point - an unattended action that a
+    language model authored is not one the consent gates can reason about.
+
+    `--dry-run` is the default for `run` because the honest question is "what
+    would fire, and was anything denied", not "please act on my machine while
+    I am not looking". Pass `--fire` to actually dispatch.
+    """
+    engine = TriggerEngine()
+
+    if args.trigger_command == "list":
+        return _trigger_list(engine)
+    if args.trigger_command == "remove":
+        if not engine.store().remove(args.name):
+            raise CliError(f"no rule named {args.name!r}", EXIT_FAILED)
+        return EXIT_OK, [f"removed rule {args.name!r}"], {"removed": args.name}
+    if args.trigger_command == "run":
+        return _trigger_run(args, engine, _store(args))
+    return _trigger_add(args, engine)
+
+
+def _trigger_list(engine: TriggerEngine) -> tuple:
+    rules = engine.store().all()
+    if not rules:
+        return EXIT_OK, ["no trigger rules armed"], {"count": 0, "rules": []}
+    lines = []
+    for rule in rules:
+        state = "enabled" if rule.enabled else "disabled"
+        lines.append(
+            f"{rule.name}  [{state}]  {rule.sense} --{rule.match_mode}--> "
+            f"{rule.actuator} (cooldown {rule.cooldown_seconds:g}s)"
+        )
+    return EXIT_OK, lines, {"count": len(rules), "rules": [r.to_dict() for r in rules]}
+
+
+def _trigger_add(args: argparse.Namespace, engine: TriggerEngine) -> tuple:
+    sense = discover_senses().get(args.sense)
+    if sense is None:
+        raise CliError(f"unknown sense {args.sense!r}", EXIT_UNKNOWN_SENSE)
+    try:
+        arguments = json.loads(args.arguments) if args.arguments else {}
+    except json.JSONDecodeError as error:
+        raise CliError(f"--arguments is not valid JSON: {error}", EXIT_USAGE) from error
+    if not isinstance(arguments, dict):
+        raise CliError("--arguments must be a JSON object", EXIT_USAGE)
+
+    keywords = [k for k in (args.keyword or []) if k]
+    rule, problem = build_rule(
+        name=args.name,
+        sense=args.sense,
+        match_mode=args.match_mode,
+        actuator=args.actuator,
+        arguments=arguments,
+        substring=args.substring or "",
+        keywords=keywords,
+        cooldown_seconds=args.cooldown,
+    )
+    if rule is None:
+        raise CliError(problem or "rule rejected", EXIT_USAGE)
+    engine.store().add(rule)
+    return EXIT_OK, [f"armed rule {rule.name!r}: {rule.sense} -> {rule.actuator}"], {
+        "armed": rule.to_dict()
+    }
+
+
+def _trigger_run(args: argparse.Namespace, engine: TriggerEngine, store: PerceptStore) -> tuple:
+    """Evaluate every enabled rule against currently-held percepts.
+
+    Reports denials as first-class output. A rule blocked by consent is not an
+    error and not silence - it is the safety mechanism working, and hiding it
+    would make a denied rule look identical to an absent one.
+    """
+    config = ChronoaConfig()
+    engine = TriggerEngine(store=engine.store(), config_factory=lambda: config)
+    active = store.active()
+    if not active:
+        return EXIT_NOTHING_POLLABLE, ["no live percepts to evaluate against"], {
+            "fired": 0,
+            "denied": 0,
+            "would_fire": 0,
+            "considered": 0,
+        }
+
+    if args.fire:
+        results = engine.fire_all(active)
+        matched = [r for r in results if r.fired]
+        would = []
+    else:
+        results = engine.evaluate_many(active, dry_run=True)
+        matched = []
+        would = [r for r in results if not r.denied and not r.fired]
+    denied = [r for r in results if r.denied]
+
+    verb = "FIRED  " if args.fire else "WOULD  "
+    lines = [
+        f"{len(active)} live percept(s), {engine.store().count()} rule(s)"
+        + ("" if args.fire else "  [dry run - nothing was dispatched]")
+    ]
+    for result in denied:
+        lines.append(f"  DENIED {result.rule.name}: {result.reason}")
+    for result in matched + would:
+        lines.append(f"  {verb}{result.rule.name}: {result.rule.actuator}")
+    if not matched and not denied and not would:
+        lines.append("  no rule matched")
+    return EXIT_OK, lines, {
+        "considered": len(active),
+        "fired": len(matched),
+        "would_fire": len(would),
+        "denied": len(denied),
+        "dry_run": not args.fire,
+        "results": [
+            {"rule": r.rule.name, "fired": r.fired, "denied": r.denied, "reason": r.reason}
+            for r in results
+        ],
+    }
+
+
 def _ambient_scheduler(
     args: argparse.Namespace, registered: "dict[str, Sense]", store: PerceptStore
 ) -> AmbientScheduler:
@@ -766,6 +894,40 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common],
         help="list selectable microphones and speakers, and the current choice",
     )
+    trigger_parser = sub.add_parser(
+        "trigger",
+        parents=[common],
+        help="arm and test percept-triggered actuator rules",
+    )
+    trigger_sub = trigger_parser.add_subparsers(dest="trigger_command", metavar="ACTION")
+    trigger_sub.add_parser("list", parents=[common], help="list armed rules")
+    trigger_add = trigger_sub.add_parser("add", parents=[common], help="arm a rule")
+    trigger_add.add_argument("--name", required=True)
+    trigger_add.add_argument("--sense", required=True)
+    trigger_add.add_argument(
+        "--match-mode",
+        default="substring",
+        choices=["substring", "keywords"],
+        help="how a percept matches this rule (default: substring)",
+    )
+    trigger_add.add_argument("--substring", default="")
+    trigger_add.add_argument("--keyword", action="append")
+    trigger_add.add_argument("--actuator", required=True, help="a whitelisted skill name")
+    trigger_add.add_argument(
+        "--arguments", default="", help="JSON object of fixed arguments for the actuator"
+    )
+    trigger_add.add_argument("--cooldown", type=float, default=300.0)
+    trigger_remove = trigger_sub.add_parser("remove", parents=[common], help="disarm a rule")
+    trigger_remove.add_argument("name")
+    trigger_run = trigger_sub.add_parser(
+        "run", parents=[common], help="evaluate rules against live percepts"
+    )
+    trigger_run.add_argument(
+        "--fire",
+        action="store_true",
+        help="actually dispatch; without this it is a dry run and nothing runs",
+    )
+
     forget_parser = sub.add_parser(
         "forget", parents=[common], help="remove durable percepts"
     )
@@ -794,6 +956,7 @@ def main(argv: Optional["list[str]"] = None) -> int:
         "ambient": cmd_ambient,
         "percepts": cmd_percepts,
         "forget": cmd_forget,
+        "trigger": cmd_trigger,
         "devices": cmd_devices,
     }
     if args.command == "ambient" and not (args.list or args.once or args.seconds):
