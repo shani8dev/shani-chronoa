@@ -19,11 +19,68 @@ keys, no telemetry.
   act on your system (files, calendar, shell) instead of just chatting.
 - **Local text-to-speech** — Piper voices, gender/age configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
+- **Senses** — a perception layer beside `skills/`. Six senses deposit
+  *percepts* the assistant can reason about: `memory` (the only durable
+  one), `filesystem`, `web`, `ocr`, `vision` (screen, described by a
+  separate local vision model) and `hearing`. Every sense has its own
+  `<name>-sense-enabled` consent key and all default to **off** except
+  memory, so nothing starts watching your screen or listening to your room
+  until you say so.
+- **Actuators** — the outbound side, as ordinary whitelisted skills:
+  `speak`, `notify`, `clipboard`, `screenshot`, plus pointer/click/type
+  behind their own `input-control-enabled` key. There is deliberately no
+  generic "run this shell command" tool; each action is a narrow, named,
+  schema-typed skill.
+- **Triggers** — arm a rule like *"when a hearing percept contains
+  'doorbell', send a notification"*. A rule can only name a whitelisted
+  skill with fixed arguments, consent is checked on both the sensing and
+  the acting side, and every unattended action is logged with
+  `origin="unattended"` so it is distinguishable from something you asked
+  for.
 - **MCP server** — Model Context Protocol support so external tools and
   data sources can be plugged in.
 - **GTK4 native UI** — integrates into the Shanios shell alongside
   shani-cassini.
 - **Privacy-first** — everything runs locally; nothing leaves the machine.
+
+## Senses, percepts and consent
+
+A **sense** perceives; a **skill** acts. `senses/` is inbound and deposits
+**percepts**; `skills/` is outbound and is the whitelist the LLM can call.
+Neither is a "tool" in the shell-exec sense — there is no generic command
+escape hatch, and that is the point.
+
+**Percepts are not conversation.** They are rebuilt fresh each turn and are
+never appended to the chat history, because history is trimmed to
+`MAX_HISTORY_MESSAGES` and a percept that got trimmed away would silently
+stop informing the assistant.
+
+**Two lifetimes.** `ttl_seconds is None` means durable and is exclusive to
+`memory`; everything else is transient and expires. So the assistant can
+forget a screenshot the moment it is no longer relevant, while a fact you
+asked it to remember survives across sessions.
+
+**Consent is per-sense and fail-closed.** `web` is additionally denied
+while privacy mode is on, because it is the only sense that reaches off the
+machine. Pointer and keyboard control sit behind `input-control-enabled`,
+kept deliberately separate from `vision`: seeing a screen and controlling
+it are different risks, and together they would let any prompt injection in
+a web page reach the machine.
+
+Try the senses without the GUI:
+
+```bash
+# what is available, and what is currently permitted
+shani-chronoa-sense list
+
+# consent is explicit; ask before anything perceives
+shani-chronoa-sense enable ocr
+shani-chronoa-sense run ocr path=~/screenshot.png
+
+# durable memory, readable from a later process
+shani-chronoa-sense run memory operation=remember fact="I prefer flat white"
+shani-chronoa-sense run memory operation=recall query=coffee
+```
 
 ## Architecture
 
@@ -63,12 +120,23 @@ See [`PKGBUILD`](PKGBUILD) for the full dependency list.
 - `whisper.cpp` — speech-to-text
 - `piper-tts` — text-to-speech
 - `gtk4`, `python-gobject` — native UI
+- `bubblewrap` — the skill sandbox. **Not optional in practice:** without it
+  a skill that promises isolation has no way to be isolated, and Chronoa
+  refuses to run such a command rather than pretending it was confined.
+  Landlock (kernel 5.13+) is used as well, and is what confines on hosts
+  where bubblewrap cannot create user namespaces.
 
 ### Optional
 
 - `ollama` — local LLM runtime (must be installed separately; not a declared package dependency)
 - `python-openwakeword` — wake-word detection
 - `python-mcp` — Model Context Protocol support
+- `tesseract` + `tesseract-data-eng` — the `ocr` sense. Both halves are
+  required: the binary without language data cannot read anything, and
+  `ocr` reports itself unavailable rather than returning empty text.
+- a local Ollama **vision** model (for example `qwen3-vl:2b`) — the
+  `vision` sense. Chosen independently of the text model, because a text
+  model has no vision tower; see `chronoa-config set vision-model`.
 
 ## Installation
 
@@ -107,6 +175,34 @@ gsettings set org.shanios.chronoa wake-word-model "hey_jarvis"
 # Example: select a Piper voice
 gsettings set org.shanios.chronoa piper-voice "en_US-lessac-medium"
 ```
+
+### Consent keys
+
+Each sense is granted separately, so "may I remember things?" and "may I
+look at your screen?" stay independent questions:
+
+| Key | Default | Grants |
+|---|---|---|
+| `memory-sense-enabled` | `true` | keeping durable notes across sessions |
+| `vision-sense-enabled` | `false` | capturing and describing the screen |
+| `hearing-sense-enabled` | `false` | turning an utterance into a percept |
+| `ocr-sense-enabled` | `false` | reading text out of images |
+| `filesystem-sense-enabled` | `false` | reading files you name, inside `$HOME` |
+| `web-sense-enabled` | `false` | fetching pages (also needs privacy mode off) |
+| `input-control-enabled` | `false` | pointer, clicks and typing |
+| `vision-model` | `""` | pins the local vision model; empty auto-selects by hardware |
+
+```bash
+# the same keys, without a GUI
+shani-chronoa-sense enable vision
+shani-chronoa-sense disable web
+shani-chronoa-sense list          # shows what is permitted and why not
+```
+
+A missing key **denies** for every capture sense, so an older installed
+schema cannot silently switch one on. The single exception is `memory`,
+which stays enabled when its key is absent — it is local-only, and
+remembering is the point of an assistant.
 
 ## Development
 
