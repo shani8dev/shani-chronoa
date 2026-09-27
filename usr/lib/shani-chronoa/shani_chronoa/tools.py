@@ -25,6 +25,7 @@ moves (`argfile.py` documents both, and the ceilings there were measured
 against real subprocesses, not assumed).
 """
 
+import importlib
 import json
 import logging
 import shlex
@@ -33,7 +34,7 @@ import sys
 from shani_chronoa import argfile
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
-from shani_chronoa.tool_tracking import ToolTracker
+from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ def _get_sandbox_config(tool_name: str) -> SandboxConfig:
     return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=30)
 
 
-def execute_tool(name: str, arguments: dict, by_reference: bool = False) -> str:
+def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin: str = ORIGIN_USER) -> str:
     """Execute a named tool with the given arguments, returning a short result string.
 
     All execution is sandboxed according to the tool's configured SandboxLevel.
@@ -85,6 +86,14 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False) -> str:
     transport cannot carry: a `bytes` value always takes this path on its own,
     and this flag is how a caller asks for it deliberately rather than by
     accident. See `argfile.py`.
+
+    `origin` records *who asked for the call* on the existing audit trail -
+    `tools.tool_tracking.ORIGIN_USER` (the default, every shipped caller) or
+    `ORIGIN_UNATTENDED` (an armed trigger rule that fired unprompted). It is
+    one field on the record `ToolTracker` already writes; there is no second
+    log. An unattended actuation that does not set this is indistinguishable
+    from one the user asked for, which defeats the audit trail's purpose for
+    exactly the behaviour that erodes trust.
     """
     handler = _HANDLER_FNS.get(name)
     if handler is None:
@@ -98,6 +107,21 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False) -> str:
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
     handler_func = handler.__name__
+
+    # A skill may opt into the by-reference transport for its own oversized
+    # arguments (see `skills/speak.py:wants_by_reference`). Ask the module
+    # before dispatch rather than guessing: the caller's `by_reference` flag
+    # is for callers that know their argument is binary, and a skill that
+    # declares its own ceiling gets to enforce it without every caller
+    # remembering to pass the flag.
+    if not by_reference:
+        try:
+            module = importlib.import_module(handler_module)
+            wants = getattr(module, "wants_by_reference", None)
+            if callable(wants) and wants(arguments):
+                by_reference = True
+        except Exception as e:  # noqa: BLE001 - a broken probe must not kill the call
+            logger.debug(f"wants_by_reference probe for '{name}' failed: {e}")
 
     # Asked first because it is the only transport that can carry a bytes
     # argument; it returns None whenever the inline path below suffices.
@@ -128,14 +152,14 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False) -> str:
     try:
         exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
         result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
-        _TRACKER.record_call(name, arguments, result, duration_ms)
+        _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)
         if exit_code != 0:
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
             return output or f"Tool '{name}' failed with exit code {exit_code}"
         return output
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
-        _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0)
+        _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0, origin=origin)
         return f"Tool '{name}' failed: {e}"
     finally:
         # The payload files hold the argument values themselves, so they go

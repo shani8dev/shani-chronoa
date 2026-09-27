@@ -311,7 +311,12 @@ class TestPermissionsAndCleanup:
             _sys.path.remove(str(child_module))
         monkeypatch.setitem(tools_mod._HANDLER_FNS, "probe_explode", argfile_probe.explode)
         recorded = []
-        monkeypatch.setattr(tools_mod._TRACKER, "record_call", lambda *a: recorded.append(a))
+        # `record_call` also takes `origin=` (who asked for the call), so the
+        # stub has to accept keyword arguments. The assertion below still reads
+        # `recorded[0][2]` as the result string, unchanged.
+        monkeypatch.setattr(
+            tools_mod._TRACKER, "record_call", lambda *a, **k: recorded.append(a)
+        )
         made = {}
         real_reference = argfile.reference_command
 

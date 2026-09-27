@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 LOG_DIR = Path(os.path.expanduser("~/.local/share/shani-chronoa/logs"))
 LOG_FILE = LOG_DIR / "tool_calls.log"
 
+# Who asked for this call. The audit trail's whole point for the trigger
+# engine is being able to tell a user-initiated actuation from an
+# unattended one: an armed rule that fires `notify-send` unprompted is the
+# behaviour most likely to erode trust, and "it was logged" is not the same
+# as "it was logged AS UNATTENDED". One field, on the existing record -
+# deliberately NOT a second log file (see AGENTS.md).
+ORIGIN_USER = "user"
+ORIGIN_UNATTENDED = "unattended"
+
 # One tool call can now legitimately carry a multi-megabyte argument: a binary
 # payload reaches a skill by reference (see argfile.py), and the reference is
 # recorded here alongside everything else. This log is append-only and
@@ -59,12 +68,14 @@ class ToolCallRecord:
         result: Any,
         duration_ms: float,
         timestamp: Optional[datetime] = None,
+        origin: str = ORIGIN_USER,
     ):
         self.tool_name = tool_name
         self.args = args
         self.result = result
         self.duration_ms = duration_ms
         self.timestamp = timestamp or datetime.now(timezone.utc)
+        self.origin = origin
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +84,7 @@ class ToolCallRecord:
             "args": self.args,
             "result": self.result,
             "duration_ms": self.duration_ms,
+            "origin": self.origin,
         }
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -101,9 +113,17 @@ class ToolTracker:
         args: dict[str, Any],
         result: Any,
         duration_ms: float,
+        origin: str = ORIGIN_USER,
     ) -> ToolCallRecord:
-        """Record a tool call."""
-        record = ToolCallRecord(tool_name, args, result, duration_ms)
+        """Record a tool call.
+
+        `origin` distinguishes who asked for the call. Every caller in the
+        shipped tree defaults to `ORIGIN_USER`; only the trigger engine
+        passes `ORIGIN_UNATTENDED`, which is the whole point of the field.
+        """
+        record = ToolCallRecord(
+            tool_name, args, result, duration_ms, origin=origin
+        )
         self._calls.append(record)
         self._write_to_log(record)
         logger.info("Recorded call to %s (%.2fms)", tool_name, duration_ms)
@@ -122,7 +142,9 @@ class ToolTracker:
         import csv
         with open(output_path, "w", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["timestamp", "tool_name", "args", "result", "duration_ms"])
+            writer.writerow(
+                ["timestamp", "tool_name", "args", "result", "duration_ms", "origin"]
+            )
             for record in self._calls:
                 writer.writerow([
                     record.timestamp.isoformat(),
@@ -130,6 +152,7 @@ class ToolTracker:
                     json.dumps(record.to_log_dict()["args"], default=repr),
                     json.dumps(record.result, default=repr),
                     record.duration_ms,
+                    record.origin,
                 ])
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 
