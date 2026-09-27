@@ -186,6 +186,16 @@
       <summary>Let Chronoa enumerate the machine's cameras</summary>
       <description>When true, Chronoa may list which camera devices exist, what they are called, and whether anything currently holds them open. Off by default. Enumeration only: it captures no frames and reads no image. Actually looking through a camera is a separate, much wider decision than knowing one exists, and is not covered by this key.</description>
     </key>
+    <key name="rfsense-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa sample the WiFi link and notice movement</summary>
+      <description>When true, Chronoa may sample each wireless interface's link quality from /proc/net/wireless and track how much the signal is varying, which is a real and long-established indication that something in the room is moving. Off by default. This is RSSI-only, which is the coarser half of radio sensing: it notices movement, not who or what, it gives no position, and it cannot distinguish a person from a pet, a curtain or a rotating fan. It reports the machine's sensing ceiling honestly rather than implying a capability it does not have. No frames, no image, no camera.</description>
+    </key>
+    <key name="thermalgrid-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read a thermal camera array if one is attached</summary>
+      <description>When true, Chronoa may probe the machine's I2C buses for a Melexis MLX90640 (32x24, 768 pixels) or Panasonic AMG8833 (8x8, 64 pixels) infrared array and, if one answers, report its temperature grid. Off by default. This is the real thermal-imaging path and it needs the sensor wired to I2C - no array, no grid, and this says so rather than substituting the CPU's own thermal zones, which measure the machine and not the room. A grid read here is coarse enough that it shows a warm shape, not a face.</description>
+    </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>

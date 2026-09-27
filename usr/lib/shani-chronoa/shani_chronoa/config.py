@@ -78,6 +78,8 @@ _SENSE_CONSENT_KEYS = {
     "network": "network-sense-enabled",
     "bluetooth": "bluetooth-sense-enabled",
     "camera": "camera-sense-enabled",
+    "rfsense": "rfsense-sense-enabled",
+    "thermalgrid": "thermalgrid-sense-enabled",
 }
 
 # Only memory is on by default: it is local-only and remembering is the point

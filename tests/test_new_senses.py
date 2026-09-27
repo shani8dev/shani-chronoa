@@ -207,3 +207,210 @@ class TestDeviceScanCoversBothDirectories:
         monkeypatch.setattr(contention.os, "listdir", _fake_listdir)
 
         assert [str(p) for p in contention._dev_nodes()] == ["/dev/video0"]
+
+
+class TestRadioSense:
+    """`/proc/net/wireless` is fixed-width with trailing decimal points.
+
+    Reading it as plain integers skipped every line, and the sense reported
+    "no wireless interface" on a machine that had one - a confident wrong
+    answer rather than a failure, which is the worst shape for a sensor.
+    """
+
+    _SAMPLE = (
+        "Inter-| sta-|   Quality        |   Discarded packets               | Missed\n"
+        " face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n"
+        "wlp0s20f3: 0000   70.  -40.  -256        0      0      0      0    104        0\n"
+    )
+
+    def test_it_parses_the_trailing_dot_format(self, monkeypatch):
+        from shani_chronoa.senses import rfsense
+        from pathlib import Path
+
+        monkeypatch.setattr(
+            rfsense, "_WIRELESS", type("P", (), {"read_text": staticmethod(lambda: self._SAMPLE)})()
+        )
+        links = rfsense.read_links()
+        assert len(links) == 1, f"the fixed-width format was not parsed: {links}"
+        assert links[0]["interface"] == "wlp0s20f3"
+        assert links[0]["link"] == 70
+        assert links[0]["level"] == -40
+
+    def test_a_malformed_line_is_skipped_not_guessed(self, monkeypatch):
+        from shani_chronoa.senses import rfsense
+
+        text = "h1\nh2\ngarbage\nwlp0s20f3: 0000   70.  -40.  -256  0 0 0 0 0 0\n"
+        monkeypatch.setattr(
+            rfsense, "_WIRELESS", type("P", (), {"read_text": staticmethod(lambda: text)})()
+        )
+        assert len(rfsense.read_links()) == 1
+
+    def test_movement_needs_a_real_spread_not_one_sample(self, monkeypatch):
+        from shani_chronoa.senses import rfsense
+
+        rfsense._HISTORY_BY_IFACE.clear()
+        first = rfsense.movement("wlan0", -40)
+        assert first["moving"] is False, "a single sample cannot show variance"
+        rfsense.movement("wlan0", -38)
+        steady = rfsense.movement("wlan0", -39)
+        assert steady["moving"] is False
+        rfsense.movement("wlan0", -50)
+        jumpy = rfsense.movement("wlan0", -39)
+        assert jumpy["moving"] is True, "a 11dB swing is movement"
+        rfsense._HISTORY_BY_IFACE.clear()
+
+    def test_the_window_is_bounded(self, monkeypatch):
+        from shani_chronoa.senses import rfsense
+
+        rfsense._HISTORY_BY_IFACE.clear()
+        for i in range(rfsense._HISTORY * 3):
+            rfsense.movement("wlan0", -40 + (i % 2))
+        assert len(rfsense._HISTORY_BY_IFACE["wlan0"]) == rfsense._HISTORY
+        rfsense._HISTORY_BY_IFACE.clear()
+
+    def test_the_ceiling_names_the_actual_hardware_limit(self):
+        from shani_chronoa.senses import rfsense
+
+        text = rfsense.sensing_ceiling()
+        assert "CSI" in text or "not verified" in text
+        assert "ESP32" in text or "5300" in text or "not verified" in text
+
+
+class TestThermalGridSense:
+    def test_it_is_registered_under_a_name_a_gschema_key_can_derive(self):
+        """gschema rejects underscores, so `thermal_array` was ungrantable."""
+        from shani_chronoa.senses import discover_senses, is_valid_schema
+
+        registry = discover_senses()
+        assert "thermalgrid" in registry
+        assert "_" not in registry["thermalgrid"].name
+        assert is_valid_schema(registry["thermalgrid"].schema)
+        assert registry["thermalgrid"].schema["function"]["name"] == registry["thermalgrid"].name
+
+    def test_every_sense_name_is_a_legal_gschema_key_fragment(self):
+        import re as _re
+        from shani_chronoa.senses import discover_senses
+
+        # glib-compile-schemas discards the ENTIRE schema file on one illegal
+        # key name, taking every other key with it, so the rule is worth
+        # asserting across the whole registry rather than for one sense.
+        for name in discover_senses():
+            assert _re.fullmatch(r"[a-z0-9-]+", name), (
+                f"{name!r} cannot appear in a gschema key; the whole schema "
+                "file is discarded if one key name is illegal"
+            )
+
+
+class TestThermalGridProbeHonesty:
+    """A scan that could not read anything must not report "nothing found".
+
+    `i2cdetect` prints "Permission denied" on stderr and exits 0, so an
+    unprivileged scan is byte-for-byte indistinguishable from a clean one that
+    found no device. Collapsing them produced a confident false negative: on a
+    machine that *had* a thermal array, Chronoa would have said there was
+    none, with nothing anywhere to suggest otherwise.
+    """
+
+    _DENIED = "Error: Could not open file `/dev/i2c-1': Permission denied\nRun as root?"
+
+    def _fake_run(self, stdout, stderr=""):
+        import subprocess as sp
+
+        def _run(argv, **kwargs):
+            return sp.CompletedProcess(argv, 0, stdout=stdout, stderr=stderr)
+
+        return _run
+
+    def test_a_denied_scan_is_not_reported_as_a_clean_one(self, monkeypatch):
+        import subprocess as sp
+        from shani_chronoa.senses import thermalgrid
+
+        monkeypatch.setattr(sp, "run", self._fake_run("", self._DENIED))
+        result = thermalgrid.probe()
+
+        assert result.arrays == []
+        assert result.determined is False, "nothing was read, so nothing was determined"
+        assert result.denied, "the refusal must be recorded"
+
+    def test_a_clean_scan_of_an_empty_bus_is_a_determined_negative(self, monkeypatch):
+        import subprocess as sp
+        from shani_chronoa.senses import thermalgrid
+
+        empty = "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n" \
+                "00:                         -- -- -- -- -- -- -- --\n"
+        monkeypatch.setattr(sp, "run", self._fake_run(empty, ""))
+        result = thermalgrid.probe()
+
+        assert result.determined is True
+        assert result.found is False
+
+    def test_a_present_array_is_detected(self, monkeypatch):
+        import subprocess as sp
+        from shani_chronoa.senses import thermalgrid
+
+        hit = "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n" \
+              "00:                         -- -- -- 33 -- -- -- --\n"
+        monkeypatch.setattr(sp, "run", self._fake_run(hit, ""))
+        result = thermalgrid.probe()
+
+        assert result.found is True
+        assert result.arrays[0]["part"] == "MLX90640"
+        assert result.arrays[0]["pixels"] == 768
+
+    def test_a_refusal_overrides_a_table_that_arrived_anyway(self, monkeypatch):
+        """The stderr check is not redundant with the empty-stdout check.
+
+        With a denied scan the two agree, so a test that only supplies empty
+        stdout cannot tell whether the permission branch is doing any work -
+        removing it entirely left the suite green. A table that arrives on
+        stdout *despite* the refusal is the case that separates them, and
+        trusting that table would be believing a scan that never completed.
+        """
+        import subprocess as sp
+        from shani_chronoa.senses import thermalgrid
+
+        table = (
+            "     0  1  2  3  4  5  6  7  8  9  a  b  c  d  e  f\n"
+            "00:  -- -- -- 33 -- -- -- --\n"
+        )
+        monkeypatch.setattr(
+            sp, "run",
+            lambda argv, **kw: sp.CompletedProcess(
+                argv, 0, stdout=table,
+                stderr="Error: Permission denied\nRun as root?",
+            ),
+        )
+        result = thermalgrid.probe()
+
+        assert result.determined is False
+        assert result.found is False, "a refused scan must not be believed"
+        assert result.denied
+
+    def test_escalation_is_opt_in_and_argv_only(self, monkeypatch):
+        """A sense the model can call must not silently ask for a password."""
+        import subprocess as sp
+        from shani_chronoa.senses import thermalgrid
+
+        seen = []
+
+        def _run(argv, **kwargs):
+            seen.append(argv)
+            return sp.CompletedProcess(argv, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(sp, "run", _run)
+        thermalgrid.probe(escalate=False)
+        assert all("pkexec" not in argv for argv in seen), "escalated without being asked"
+
+        seen.clear()
+        thermalgrid.probe(escalate=True)
+        assert any("pkexec" in argv for argv in seen)
+        for argv in seen:
+            assert argv[0] == "pkexec" and argv[1].endswith("i2cdetect")
+            assert argv[-1].isdigit(), "the bus number must reach argv as digits only"
+
+    def test_a_bus_name_that_is_not_a_bus_number_is_never_passed_on(self):
+        from pathlib import Path as _P
+        from shani_chronoa.senses import thermalgrid
+
+        assert thermalgrid._bus_number(_P("/dev/i2c-7")) == "7"
+        assert thermalgrid._bus_number(_P("/dev/i2c-;rm -rf /")) is None
