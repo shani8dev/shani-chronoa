@@ -535,7 +535,12 @@ class ChronoaApplication(Gtk.Application):
                 self.window.set_orb_state("error")
             return
 
-        started = self.recorder.start_auto_stop(self._on_recording_done, max_seconds=20.0, silence_seconds=1.2)
+        started = self.recorder.start_auto_stop(
+            self._on_recording_done,
+            max_seconds=20.0,
+            silence_seconds=1.2,
+            on_level=self._on_input_level,
+        )
         if not started:
             logger.error("Failed to start audio recording")
             self._listening = False
@@ -544,6 +549,19 @@ class ChronoaApplication(Gtk.Application):
             return
 
         logger.info("Recording speech input (auto-stops on silence)...")
+
+    def _on_input_level(self, level: float) -> None:
+        """Input level from the recorder, for the orb's halo.
+
+        Called from the recorder's own background thread, so it hops to the
+        GTK thread before touching the window.
+        """
+        GLib.idle_add(self._on_input_level_main, level)
+
+    def _on_input_level_main(self, level: float) -> bool:
+        if self.window:
+            self.window.set_input_level(level)
+        return GLib.SOURCE_REMOVE
 
     def _on_recording_done(self, audio_path: Optional[str]) -> None:
         """Recorder callback - runs on the recorder's own background thread."""
@@ -668,13 +686,22 @@ class ChronoaApplication(Gtk.Application):
     def _on_speech_finished(self) -> None:
         """Clear the speaking state once playback ends.
 
+        Reached from `_speak`, which the AsyncBridge runs on its own thread,
+        so the state change hops to the GTK thread first - GTK4 is not
+        thread-safe and every other background callback in this file does the
+        same.
+
         Guarded on the state still being SPEAKING: an interrupt moves the
         window to LISTENING, and without the guard playback ending would
         yank the UI back to IDLE mid-turn, so the mic looked closed while it
         was still open.
         """
+        GLib.idle_add(self._on_speech_finished_main)
+
+    def _on_speech_finished_main(self) -> bool:
         if self.window and self.window.get_state() is AssistantState.SPEAKING:
             self.window.set_state(AssistantState.IDLE)
+        return GLib.SOURCE_REMOVE
 
     def _on_barge_in_detected(self) -> None:
         """Barge-in monitor callback - runs on the monitor's own background thread."""

@@ -19,7 +19,7 @@ import pytest
 
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import Gtk, GLib  # noqa: E402
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.gui import (  # noqa: E402
@@ -28,6 +28,20 @@ from shani_chronoa.gui import (  # noqa: E402
     ChronoaOrbWidget,
     TranscriptView,
 )
+
+
+def _pump(limit=1.5):
+    """Drain pending `GLib.idle_add` / timeout sources without a full main loop.
+
+    The level halo eases on a GLib timeout, so its settled value is only
+    observable once those sources have run.
+    """
+    ctx = GLib.MainContext.default()
+    deadline = time.time() + limit
+    while time.time() < deadline:
+        while ctx.pending():
+            ctx.iteration(False)
+        time.sleep(0.01)
 
 
 @pytest.fixture(scope="module")
@@ -253,3 +267,121 @@ def _turns(transcript):
             out.append((role, child.get_label()))
         child = child.get_next_sibling()
     return out
+
+
+class TestLevelHalo:
+    """The orb's amplitude-reactive halo.
+
+    Asserted on the halo's actual `size_request`, not on "the draw call did not
+    raise". An earlier version of the halo was a `Gtk.DrawingArea` whose draw
+    callback silently failed on every frame - `py_compile` passed, the level
+    maths was right, and the orb simply never moved - while a check that only
+    confirmed `queue_draw()` did not throw reported success throughout. The
+    cairo foreign-struct converter is only registered once something imports
+    the `cairo` gi override, and `python3-cairo` is in neither package manifest.
+    """
+
+    def test_level_maps_to_a_growing_ring(self):
+        from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX, _halo_size
+
+        assert _halo_size(0.0) == (_HALO_MIN_PX, _HALO_MIN_PX)
+        assert _halo_size(1.0) == (_HALO_MAX_PX, _HALO_MAX_PX)
+        assert _halo_size(0.5)[0] > _HALO_MIN_PX
+        assert _halo_size(0.0)[0] < _halo_size(1.0)[0]
+
+    def test_out_of_range_levels_are_clamped(self):
+        from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX, _halo_size
+
+        assert _halo_size(5.0)[0] == _HALO_MAX_PX
+        assert _halo_size(-3.0)[0] == _HALO_MIN_PX
+
+    def test_the_halo_really_resizes(self, gtk_app):
+        """The check that would have caught the dead draw callback."""
+        from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX
+
+        win = CajitaWindow(gtk_app)
+        orb = win._orb
+        orb.set_level(0.0)
+        _pump(1.0)
+        quiet = orb._halo.get_size_request()[0]
+        orb.set_level(1.0)
+        _pump(2.0)
+        loud = orb._halo.get_size_request()[0]
+
+        assert quiet == _HALO_MIN_PX
+        assert loud == _HALO_MAX_PX, f"halo stayed at {loud}px; the level is not reaching it"
+        assert loud > quiet
+        win.destroy()
+
+    def test_level_eases_rather_than_jumping(self, gtk_app):
+        from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX, _TICK_MS
+
+        win = CajitaWindow(gtk_app)
+        orb = win._orb
+        orb.set_level(1.0)
+        # Mid-flight the value must be strictly between the endpoints, which is
+        # what makes the orb look like it is following the voice.
+        _pump(_TICK_MS / 1000.0 + 0.05)
+        mid = orb.get_level()
+        assert 0.0 < mid < 1.0, f"level jumped straight to {mid}; easing is not running"
+        # ...and the halo must be following that in-flight value, not merely
+        # jumping to its final size when the easing completes. Checking only
+        # the settled size cannot tell those two apart.
+        mid_px = orb._halo.get_size_request()[0]
+        assert _HALO_MIN_PX < mid_px < _HALO_MAX_PX, (
+            f"halo is at {mid_px}px while the level is only {mid:.2f}; the ring is "
+            "not tracking the level as it eases"
+        )
+        win.destroy()
+
+    def test_input_level_is_ignored_unless_listening(self, gtk_app):
+        """A level arriving after the turn ended must not pulse at nothing."""
+        win = CajitaWindow(gtk_app)
+        win.set_state(AssistantState.IDLE)
+        win.set_input_level(1.0)
+        _pump(0.5)
+        assert win._orb.get_level() == 0.0
+
+        win.set_state(AssistantState.LISTENING)
+        win.set_input_level(1.0)
+        _pump(1.5)
+        assert win._orb.get_level() > 0.5
+        win.destroy()
+
+    def test_halo_colour_tracks_the_state(self, gtk_app):
+        win = CajitaWindow(gtk_app)
+        for state in AssistantState:
+            win.set_state(state)
+            assert f"halo-{state.value}" in list(win._orb._halo.get_css_classes())
+        win.destroy()
+
+
+class TestLevelNormalisation:
+    def test_quiet_room_reads_as_silence(self):
+        """An indicator that flickers with background hum is worse than a still one."""
+        from shani_chronoa.vad import _LEVEL_FLOOR, normalize_level
+
+        assert normalize_level(0) == 0.0
+        assert normalize_level(_LEVEL_FLOOR) == 0.0
+        assert normalize_level(_LEVEL_FLOOR / 2) == 0.0
+
+    def test_loud_speech_reaches_the_top_without_pinning_early(self):
+        from shani_chronoa.vad import _LEVEL_CEILING, normalize_level
+
+        assert normalize_level(_LEVEL_CEILING) == 1.0
+        assert normalize_level(32768) == 1.0
+        # 2000 sits near the middle of the scale, not pinned at either end.
+        assert 0.2 < normalize_level(2000) < 0.8
+
+    def test_normalisation_is_monotonic(self):
+        from shani_chronoa.vad import normalize_level
+
+        values = [normalize_level(v) for v in range(0, 8000, 100)]
+        assert all(b >= a for a, b in zip(values, values[1:])), "level curve is not monotonic"
+
+    def test_the_curve_is_sqrt_shaped_so_quiet_speech_still_moves(self):
+        """Loudness is perceived logarithmically; linear leaves speech invisible."""
+        from shani_chronoa.vad import _LEVEL_FLOOR, _LEVEL_CEILING, normalize_level
+
+        midpoint_rms = (_LEVEL_FLOOR + _LEVEL_CEILING) / 2
+        assert normalize_level(midpoint_rms) > 0.5, "a linear curve would give ~0.5 here"

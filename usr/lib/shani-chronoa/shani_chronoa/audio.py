@@ -16,7 +16,7 @@ import time
 import wave
 from typing import Callable, Optional
 
-from shani_chronoa.vad import SilenceDetector, calibrate_noise_floor, rms
+from shani_chronoa.vad import SilenceDetector, calibrate_noise_floor, normalize_level, rms
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ class AudioRecorder:
         on_done: Callable[[Optional[str]], None],
         max_seconds: float = 20.0,
         silence_seconds: float = 1.2,
+        on_level: Optional[Callable[[float], None]] = None,
     ) -> bool:
         """Start recording; auto-stops once the user stops talking (or times out).
 
@@ -88,7 +89,9 @@ class AudioRecorder:
         self._proc = proc
         self._auto_stop_cancel.clear()
         self._auto_stop_thread = threading.Thread(
-            target=self._auto_stop_loop, args=(proc, on_done, max_seconds, silence_seconds), daemon=True
+            target=self._auto_stop_loop,
+            args=(proc, on_done, max_seconds, silence_seconds, on_level),
+            daemon=True,
         )
         self._auto_stop_thread.start()
         return True
@@ -98,7 +101,12 @@ class AudioRecorder:
         self._auto_stop_cancel.set()
 
     def _auto_stop_loop(
-        self, proc: subprocess.Popen, on_done: Callable[[Optional[str]], None], max_seconds: float, silence_seconds: float
+        self,
+        proc: subprocess.Popen,
+        on_done: Callable[[Optional[str]], None],
+        max_seconds: float,
+        silence_seconds: float,
+        on_level: Optional[Callable[[float], None]] = None,
     ) -> None:
         stdout = proc.stdout
         chunks: list = []
@@ -121,8 +129,12 @@ class AudioRecorder:
                     break
                 chunks.append(chunk)
                 detector.feed(chunk)
+                if on_level is not None:
+                    on_level(normalize_level(rms(chunk)))
                 if detector.is_done():
                     break
+            if on_level is not None:
+                on_level(0.0)
         except Exception as e:
             logger.error(f"Auto-stop recording loop crashed: {e}")
         finally:

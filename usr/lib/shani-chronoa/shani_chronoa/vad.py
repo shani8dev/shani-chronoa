@@ -86,3 +86,31 @@ class SilenceDetector:
     def is_done(self) -> bool:
         """True once speech was heard and then enough trailing silence followed."""
         return self._heard_speech and self._consecutive_silence >= self._silence_frames_needed
+
+
+# Ambient level and loud-speech level for `normalize_level`, from this repo's
+# own measurement of a real mic: `vad.py`'s calibration pass recorded ambient
+# noise around RMS 592 on an idle machine, so anything under a few hundred is
+# the room rather than the user. The ceiling is deliberately well under the
+# signed-16-bit maximum (32768) so ordinary speech reaches the top of the
+# scale instead of pinning there.
+_LEVEL_FLOOR = 300.0
+_LEVEL_CEILING = 6000.0
+
+
+def normalize_level(rms_value: float) -> float:
+    """Map an RMS reading to 0.0-1.0 for a listening indicator.
+
+    Square-rooted rather than linear, because loudness is perceived roughly
+    logarithmically: on a linear scale, ordinary speech barely moves the
+    indicator and only shouting reaches the top.
+
+    Below the floor this is 0.0 by design. An indicator that jitters with the
+    room's background hum is worse than one that stays still, since the user
+    cannot tell noise from themselves speaking.
+    """
+    if rms_value <= _LEVEL_FLOOR:
+        return 0.0
+    if rms_value >= _LEVEL_CEILING:
+        return 1.0
+    return math.sqrt((rms_value - _LEVEL_FLOOR) / (_LEVEL_CEILING - _LEVEL_FLOOR))

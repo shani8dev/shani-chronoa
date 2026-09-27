@@ -94,6 +94,26 @@ _STATE_LABELS = {
 # Kept for the old caller-facing spelling; `thinking` is what it always meant.
 _LEGACY_STATE_ALIASES = {"processing": AssistantState.THINKING, "error": AssistantState.ERROR}
 
+# The recorder emits a level every 80ms frame (~12.5 Hz), which is too coarse to
+# look like a waveform. Easing toward that target at ~60 Hz is what makes the orb
+# appear to follow the voice rather than jump between values.
+_TICK_MS = 16
+_EASE_FACTOR = 0.25
+
+# The halo starts just outside the 80px orb and grows to fill the 124px button.
+_HALO_MIN_PX = 84
+_HALO_MAX_PX = 120
+
+
+def _halo_size(level: float) -> tuple[int, int]:
+    """Halo diameter in pixels for a 0.0-1.0 input level.
+
+    Pure so the level-to-size mapping can be asserted without a display.
+    """
+    span = _HALO_MAX_PX - _HALO_MIN_PX
+    px = _HALO_MIN_PX + int(round(span * max(0.0, min(1.0, level))))
+    return px, px
+
 
 class ChronoaOrbWidget(Gtk.Button):
     """The orb - the window's single visual statement of assistant state.
@@ -108,14 +128,62 @@ class ChronoaOrbWidget(Gtk.Button):
         super().__init__()
         self._state = AssistantState.IDLE
         self._icon = Gtk.Image()
+        self._level = 0.0
+        self._level_target = 0.0
+        self._tick_id = 0
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.set_size_request(80, 80)
+        # Roomier than the 80px orb so the level halo has somewhere to go.
+        self.set_size_request(124, 124)
         self.add_css_class("flat")
         self.add_css_class("chronoa-orb")
-        self.set_child(self._icon)
+
+        # The halo is a plain styled box whose size is driven by the level,
+        # not a `Gtk.DrawingArea`. A draw callback needs the cairo foreign
+        # struct converter, which only exists once something has imported the
+        # `cairo` gi override - and `python3-cairo` is not a declared
+        # dependency in either the Arch or the Debian manifest, so on a
+        # machine without it every frame logged a TypeError and drew nothing.
+        # Sizing a CSS ring needs no extra dependency and cannot fail that way.
+        self._halo = Gtk.Box()
+        self._halo.add_css_class("chronoa-halo")
+
+        overlay = Gtk.Overlay()
+        overlay.set_child(self._halo)
+        overlay.add_overlay(self._icon)
+        self.set_child(overlay)
+
         self._apply_state(AssistantState.IDLE)
+        self._resize_halo()
+
+    def set_level(self, level: float) -> None:
+        """Set the input level, 0.0-1.0.
+
+        The raw value comes from the recorder's own RMS at 12.5 Hz, which is
+        too coarse to look like a waveform, so it is treated as a target and
+        eased toward on a display-rate tick.
+        """
+        self._level_target = max(0.0, min(1.0, float(level)))
+        if self._tick_id == 0 and self._level != self._level_target:
+            self._tick_id = GLib.timeout_add(_TICK_MS, self._tick)
+
+    def get_level(self) -> float:
+        return self._level
+
+    def _tick(self) -> bool:
+        delta = self._level_target - self._level
+        if abs(delta) < 0.01:
+            self._level = self._level_target
+            self._tick_id = 0
+            self._resize_halo()
+            return GLib.SOURCE_REMOVE
+        self._level += delta * _EASE_FACTOR
+        self._resize_halo()
+        return GLib.SOURCE_CONTINUE
+
+    def _resize_halo(self) -> None:
+        self._halo.set_size_request(*_halo_size(self._level))
 
     def set_state(self, state: AssistantState) -> None:
         """Move to a state. The only mutator; everything else is derived."""
@@ -128,16 +196,15 @@ class ChronoaOrbWidget(Gtk.Button):
         return self._state
 
     def _apply_state(self, state: AssistantState) -> None:
-        color, icon_name = _STATE_STYLE[state]
+        _color, icon_name = _STATE_STYLE[state]
         self._icon.set_from_icon_name(icon_name)
         self._icon.set_pixel_size(32)
         self.set_tooltip_text(state.label)
         for candidate in AssistantState:
             self.remove_css_class(f"state-{candidate.value}")
+            self._halo.remove_css_class(f"halo-{candidate.value}")
         self.add_css_class(f"state-{state.value}")
-        # Idle is the only state with no glow, so every active state gains
-        # contrast against it rather than merely against the previous frame.
-        self.set_name(f"orb-{color.lstrip('#')}")
+        self._halo.add_css_class(f"halo-{state.value}")
 
 
 class TranscriptView(Gtk.ScrolledWindow):
@@ -339,6 +406,26 @@ class CajitaWindow(Gtk.ApplicationWindow):
             100% { box-shadow: 0 0 14px rgba(34,197,94,0.35); }
         }
 
+        /* The level halo. Its size is set from the recorder's RMS, so the
+           only thing CSS has to supply is the ring itself; the border colour
+           tracks the orb's state so the two never disagree about what is
+           happening. */
+        .chronoa-halo {
+            border-radius: 50%;
+            border: 3px solid rgba(255,255,255,0.28);
+            background-color: transparent;
+        }
+        .chronoa-halo.halo-idle { border-color: rgba(255,255,255,0.18); }
+        .chronoa-halo.halo-listening { border-color: rgba(34,197,94,0.65); }
+        .chronoa-halo.halo-thinking { border-color: rgba(245,158,11,0.6); }
+        .chronoa-halo.halo-speaking { border-color: rgba(59,130,246,0.6); }
+        .chronoa-halo.halo-interrupting { border-color: rgba(168,85,247,0.7); }
+        .chronoa-halo.halo-error { border-color: rgba(239,68,68,0.6); }
+
+        /* Reduce-motion also stops the halo easing, since a ring that keeps
+           changing size is motion too. */
+        .reduce-motion .chronoa-halo { border-width: 2px; }
+
         /* Honour the desktop's reduce-motion setting by dropping the pulse
            while keeping the colour and icon that carry the same meaning. */
         .reduce-motion .chronoa-orb.state-listening {
@@ -488,6 +575,15 @@ class CajitaWindow(Gtk.ApplicationWindow):
         if hot:
             self._mic_icon.add_css_class("mic-off")
         self._stop_button.set_visible(self._state is AssistantState.SPEAKING)
+
+    def set_input_level(self, level: float) -> None:
+        """Feed the recorder's input level to the orb.
+
+        Ignored unless listening, so a level that arrives after the turn ended
+        cannot make the halo pulse at nothing.
+        """
+        if self._state is AssistantState.LISTENING:
+            self._orb.set_level(level)
 
     def set_orb_state(self, state: str) -> None:
         """Compatibility shim for the existing `app.py` call sites.
