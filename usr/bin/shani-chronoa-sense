@@ -387,8 +387,18 @@ def cmd_run(args: argparse.Namespace) -> tuple:
         # one-shot CLI process that recorded one and exited would make it
         # unreachable forever. Storing is what makes `run` and `percepts`
         # coherent; `--no-store` exists for probing a sense without writing.
+        #
+        # Only the TRANSIENT tier needs this. A durable percept has already
+        # been written to the durable file by whichever store the sense used
+        # (memory keeps a process-wide one), so adding it again appended a
+        # second identical JSON line on every call - every fact a user ever
+        # saved was stored twice, both lines sharing one created_at, and
+        # identity cannot detect it because the CLI's store loads its own
+        # copies from the file. Re-adding a durable percept has no upside:
+        # it is already on disk, which is what `stored: yes` reports.
         store = _store(args)
-        store.add(percept)
+        if percept.ttl_seconds is not None:
+            store.add(percept)
         stored = percept.ttl_seconds is None
 
     lines = [

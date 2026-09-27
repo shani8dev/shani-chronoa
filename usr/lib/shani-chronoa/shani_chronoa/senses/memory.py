@@ -474,7 +474,13 @@ def _run(arguments: dict) -> Percept:
                 fact, source=str(arguments.get("source") or "user-stated")
             )
             if stored is not None:
-                return _note(f"Remembered. {stored.content}")
+                # The stored fact itself, not a transient acknowledgement of
+                # it. Returning `_note(...)` here made the CLI print "transient
+                # only - lost when this process exits" immediately after
+                # durably writing the fact to disk, so the one operation whose
+                # whole purpose is persistence reported itself as the one
+                # thing that does not persist.
+                return stored
             return _note(
                 f"Did not remember that. "
                 f"{_consent_error() or 'the write was refused.'}"

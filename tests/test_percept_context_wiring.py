@@ -336,11 +336,16 @@ class TestTheCliAndTheAssistantShareOneStore:
         reported = self._run_cli(
             "run", "memory", "operation=remember", f"fact={FACT}", "--json"
         )
-        # The percept `run` hands back is a transient confirmation - real,
-        # observed behaviour: it lives only inside the process that just exited.
-        assert reported["data"]["percept"]["ttl_seconds"] is not None
-        assert reported["data"]["stored"] is False
-        # What crossed the process boundary is the durable fact on disk.
+        # The percept `run` hands back is the stored fact itself, and it says
+        # so. It used to be a transient confirmation that reported
+        # `ttl_seconds: 120` / `stored: false` immediately after durably
+        # writing the fact, so the one operation whose purpose is persistence
+        # claimed not to persist; these two assertions pinned that bug.
+        assert reported["data"]["percept"]["ttl_seconds"] is None
+        assert reported["data"]["stored"] is True
+        # What crossed the process boundary is the durable fact on disk, and
+        # it is on disk exactly once - the CLI used to re-add the durable
+        # percept the sense had already written, duplicating every fact.
         assert durable.is_file(), f"{durable} was not written by the real launcher"
         persisted = PerceptStore().durable()
         assert [p.content for p in persisted] == [FACT]
@@ -353,3 +358,57 @@ class TestTheCliAndTheAssistantShareOneStore:
         assert SENSED_BLOCK_HEADER in llm.prompts[0][1]["content"]
         assert FACT in llm.prompts[0][1]["content"]
         assert all(FACT not in m.get("content", "") for m in assistant._history)
+
+
+class TestDurableFactsAreWrittenExactlyOnce:
+    """The durable file is append-only, so a double write is permanent.
+
+    Both of these were found by reading the raw JSONL, not by a failing
+    assertion: a duplicated line is invisible to every test that looks at
+    `PerceptStore.durable()` through the same store that wrote it.
+    """
+
+    def _remember(self, fact):
+        from shani_chronoa.senses import memory
+        from shani_chronoa.senses.store import PerceptStore
+
+        store = PerceptStore(durable_path=self.durable)
+        return memory.remember_fact(fact, store=store)
+
+    @pytest.fixture(autouse=True)
+    def _isolated(self, tmp_path, monkeypatch):
+        import shani_chronoa.senses.store as store_mod
+        from shani_chronoa.config import ChronoaConfig
+
+        self.durable = tmp_path / "percepts" / "memory.jsonl"
+        monkeypatch.setattr(store_mod, "DURABLE_FILE", self.durable)
+        monkeypatch.setattr(
+            ChronoaConfig, "sense_allowed", lambda self, sense: sense == "memory"
+        )
+
+    def _lines(self):
+        return [json.loads(l) for l in self.durable.read_text().splitlines() if l.strip()]
+
+    def test_one_remember_writes_exactly_one_record(self):
+        self._remember("a single fact")
+
+        assert len(self._lines()) == 1
+
+    def test_two_facts_write_two_records_not_four(self):
+        self._remember("first fact")
+        self._remember("second fact")
+
+        assert [r["content"] for r in self._lines()] == ["first fact", "second fact"]
+
+    def test_remembering_the_same_fact_twice_supersedes_rather_than_duplicates(self):
+        self._remember("a repeated fact")
+        self._remember("a repeated fact")
+
+        assert [r["content"] for r in self._lines()] == ["a repeated fact"]
+
+    def test_the_report_matches_what_reached_the_disk(self):
+        stored = self._remember("honest reporting")
+
+        assert stored.ttl_seconds is None, "memory is the only durable sense"
+        assert self._lines()[0]["ttl_seconds"] is None
+        assert self._lines()[0]["content"] == "honest reporting"
