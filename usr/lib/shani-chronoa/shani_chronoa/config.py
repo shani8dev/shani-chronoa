@@ -71,6 +71,13 @@ _SENSE_CONSENT_KEYS = {
     "web": "web-sense-enabled",
     "memory": "memory-sense-enabled",
     "hearing": "hearing-sense-enabled",
+    "contention": "contention-sense-enabled",
+    "privilege": "privilege-sense-enabled",
+    "thermal": "thermal-sense-enabled",
+    "display": "display-sense-enabled",
+    "network": "network-sense-enabled",
+    "bluetooth": "bluetooth-sense-enabled",
+    "camera": "camera-sense-enabled",
 }
 
 # Only memory is on by default: it is local-only and remembering is the point

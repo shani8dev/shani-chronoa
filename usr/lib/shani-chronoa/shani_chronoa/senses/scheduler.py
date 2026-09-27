@@ -91,6 +91,7 @@ from typing import Callable, Iterable, Mapping, NamedTuple, Optional
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import Percept, Sense, discover_senses
+from shani_chronoa.senses.latch import LatchRegistry
 from shani_chronoa.senses.store import PerceptStore
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,12 @@ _FAILURE_LOG_CEILING = 1
 # accumulate a record with no bound on it.
 _RESULT_HISTORY = 128
 
+# How long an ambient percept may hold unchanged before it is deposited again.
+# Fifteen minutes is long enough that a stable condition does not restate
+# itself every poll, and short enough that a user who missed the first notice
+# is not still looking at a stale one hours later.
+_DEFAULT_REARM_SECONDS = 900.0
+
 # `config._SENSE_CONSENT_KEYS` is the authoritative sense -> consent-key list,
 # read here through `getattr` with an empty default. A copy of the table would
 # be a second list to keep in step with the first, and a bare attribute access
@@ -139,6 +146,13 @@ class PollResult(NamedTuple):
     `denied` distinguishes "consent said no" from "the sense broke". A
     consent denial is a standing state rather than an event, so `poll_due()`
     records it once instead of appending one refused result per interval.
+
+    `suppressed` distinguishes a third case: the sense ran correctly and
+    produced a percept, but the percept said exactly what the last one said,
+    so it was not deposited. That is neither a success (nothing was stored)
+    nor a failure (nothing broke) nor a denial (consent was fine), and
+    collapsing it into any of the three would make the poll history lie about
+    what the scheduler did.
     """
 
     name: str
@@ -146,6 +160,7 @@ class PollResult(NamedTuple):
     percept: Optional[Percept]
     reason: str
     denied: bool = False
+    suppressed: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -153,6 +168,7 @@ class PollResult(NamedTuple):
             "ok": self.ok,
             "reason": self.reason or None,
             "denied": self.denied,
+            "suppressed": self.suppressed,
             "percept": None
             if self.percept is None
             else {
@@ -231,6 +247,7 @@ class AmbientScheduler:
         config_factory: Callable[[], ChronoaConfig] = ChronoaConfig,
         arguments: Optional[Mapping[str, dict]] = None,
         poll_immediately: bool = True,
+        rearm_seconds: float = _DEFAULT_REARM_SECONDS,
     ) -> None:
         self._senses: dict[str, Sense] = dict(senses if senses is not None else discover_senses())
         self._store = store if store is not None else PerceptStore()
@@ -257,6 +274,9 @@ class AmbientScheduler:
         self._thread: Optional[threading.Thread] = None
         self._results: "deque[PollResult]" = deque(maxlen=_RESULT_HISTORY)
         self._denied: dict[str, str] = {}
+        # Per-sense re-arm state for de-duplicating unchanged percepts. See
+        # `poll()` for why this is not the "discard" mode ruled out above.
+        self._rearm = LatchRegistry(rearm_seconds=rearm_seconds)
         # Consecutive-failure counts, for the log-level policy above. Written
         # and read only by whichever thread is polling, so it needs no lock.
         self._failures: dict[str, int] = {}
@@ -386,6 +406,27 @@ class AmbientScheduler:
             )
             logger.error("Discarding percept from sense %r: %s", name, reason)
             return PollResult(name, False, None, reason)
+
+        # Re-arm / de-duplication. This is not the discard mode the class
+        # docstring rules out: that one is about never keeping a percept at
+        # all, which is a capture with no consumer. This is the opposite - the
+        # percept is real, correct and wanted, it was kept the first time, and
+        # re-adding an identical copy every interval would only spend context
+        # budget restating a fact the store already holds. An ambient sense
+        # polled once a minute would otherwise write 1440 identical entries a
+        # day, and the tenth most-recent-most-relevant percepts the context
+        # builder keeps would all be the same sentence. A condition that
+        # *changes* re-states immediately; one that holds re-arms after the
+        # quiet window, so "the camera is still in use" is re-asserted to a
+        # user who may have stopped looking, without ever becoming a spam loop.
+        if not self._rearm.should_emit(name, percept.content):
+            return PollResult(
+                name,
+                False,
+                percept,
+                "unchanged since the last poll; not re-deposited",
+                suppressed=True,
+            )
 
         self._note_success(name)
         self._store.add(percept)

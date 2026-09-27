@@ -151,6 +151,41 @@
       <summary>Let Chronoa hear what you say</summary>
       <description>When true, an utterance you speak may be turned into a transient percept so the assistant can refer to it in the turn. Off by default: microphone capture is the widest privacy surface Chronoa has, alongside vision. Utterances are transient and are never durable - only the memory sense may persist. This is the consent gate for the sense; it does not control wake-word listening or TTS.</description>
     </key>
+    <key name="contention-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report which programs are using your camera and microphone</summary>
+      <description>When true, Chronoa may list which processes currently hold a capture device open - webcams under /dev/video and audio under /dev/snd - and report the command line of each holder. Off by default. Read-only: it names every holder of every capture device, and acts on none of them. It reports the machine's state to you; it does not grant, revoke or interfere with any device. Polled on an interval, so this is the one sense that observes something outside Chronoa's own use of the machine.</description>
+    </key>
+    <key name="privilege-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report which programs hold elevated Linux capabilities</summary>
+      <description>When true, Chronoa may read each process's effective capability set from /proc and report those holding a capability that can sniff network traffic, load kernel modules, or override ownership checks. Off by default. Read-only and vendor-neutral: it matches on the capability bit, not on a program name, so it reports an unusual privilege rather than a blacklist of software. Ordinary system daemons that legitimately hold these capabilities are excluded.</description>
+    </key>
+    <key name="thermal-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read machine temperatures</summary>
+      <description>When true, Chronoa may read the kernel's thermal zones - CPU, board and any named sensor the firmware exposes. Off by default. This is the machine's own heat, not a room: it reports temperature of silicon, not of the air or of any person. No thermal camera is involved and no image of any kind is produced.</description>
+    </key>
+    <key name="display-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read the screen's brightness and output state</summary>
+      <description>When true, Chronoa may read display state from sysfs - backlight brightness, whether an output is connected, and the current mode. Off by default. This reads the panel's own backlight setting; it is not a light sensor and cannot tell you how bright the room is.</description>
+    </key>
+    <key name="network-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read local network interface state</summary>
+      <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
+    </key>
+    <key name="bluetooth-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa list paired and nearby Bluetooth devices</summary>
+      <description>When true, Chronoa may list the Bluetooth adapters on this machine and the device addresses and names it can see. Off by default. It reads the local controller's own registry; it does not track devices, does not record presence history, and cannot tell whether a device is in the room - Bluetooth range is far too coarse and the controller gives no ranging data.</description>
+    </key>
+    <key name="camera-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa enumerate the machine's cameras</summary>
+      <description>When true, Chronoa may list which camera devices exist, what they are called, and whether anything currently holds them open. Off by default. Enumeration only: it captures no frames and reads no image. Actually looking through a camera is a separate, much wider decision than knowing one exists, and is not covered by this key.</description>
+    </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>

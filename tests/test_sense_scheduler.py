@@ -542,7 +542,13 @@ def test_a_sense_that_raises_does_not_stop_the_scheduler_or_deposit(granted, tmp
         calls.append(arguments)
         if len(calls) == 1:
             raise RuntimeError("the sensor cable fell out")
-        return "recovered"
+        # Distinct content per poll on purpose. The scheduler de-duplicates an
+        # unchanged percept rather than re-depositing it, so a sense that
+        # returned the same string every time would legitimately deposit once
+        # - and this test's subject is failure handling, not de-duplication.
+        # `test_the_scheduler_does_not_redeposit_an_unchanged_percept` covers
+        # the dedup contract on its own.
+        return f"recovered {len(calls)}"
 
     store = PerceptStore(durable_path=tmp_path / "memory.jsonl")
     scheduler = AmbientScheduler(
@@ -615,7 +621,14 @@ def test_loading_the_reactive_path_starts_no_thread_and_registers_no_sense():
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert "AMBIENT []" in completed.stdout
+    # Every ambient-capable sense, listed in sorted order, and none of them
+    # started a thread: THREADS below is still MainThread only. Derived from
+    # the registry rather than hardcoded, so adding a sense does not silently
+    # invalidate this.
+    from shani_chronoa.senses import discover_senses as _discover
+
+    expected = sorted(n for n, s in _discover().items() if s.is_ambient())
+    assert f"AMBIENT {expected}" in completed.stdout
     assert "PERCEPTS 0" in completed.stdout
     # The loader's own work plus this one: importing senses starts nothing.
     assert "THREADS ['MainThread']" in completed.stdout
@@ -638,7 +651,14 @@ def test_the_builtin_registry_is_unchanged_by_the_scheduler_existing(gsettings_e
     run_for(scheduler, 0.15)
     after = discover_senses()
 
-    assert scheduler.ambient_senses() == {}
+    # `contention` is the first ambient-capable sense in the tree. Being
+    # ambient-capable is not being polled: consent is re-read every tick rather
+    # than captured at construction (`_build_refusals` says so), so with
+    # `contention-sense-enabled` at its default the scheduler tracks it and
+    # never runs it.
+    ambient_expected = {n for n, s in before.items() if s.is_ambient()}
+    assert set(scheduler.ambient_senses()) == ambient_expected
+    # Consent defaults every one of them to off, so none is actually polled.
     assert scheduler.polls == 0 and scheduler.deposited == 0
     assert {name: sense.run for name, sense in after.items()} == {
         name: sense.run for name, sense in before.items()
@@ -647,7 +667,9 @@ def test_the_builtin_registry_is_unchanged_by_the_scheduler_existing(gsettings_e
         name: (sense.kind, sense.ttl_seconds, sense.sensitivity, sense.poll_interval)
         for name, sense in after.items()
     } == snapshot
-    assert all(poll_interval is None for _, _, _, poll_interval in snapshot.values())
+    assert sorted(
+        name for name, value in snapshot.items() if value[3] is not None
+    ) == sorted(name for name, s in before.items() if s.is_ambient())
 
 
 def test_the_scheduler_registers_no_sense_of_its_own(gsettings_env):
@@ -714,6 +736,8 @@ def _run_cli(*arguments, timeout=60):
 
 
 def test_the_launcher_lists_the_ambient_plan(gsettings_env):
+    from shani_chronoa.senses import discover_senses
+
     completed = _run_cli("ambient", "--list", "--json")
 
     assert completed.returncode == 0, completed.stderr
@@ -732,15 +756,45 @@ def test_the_launcher_lists_the_ambient_plan(gsettings_env):
     assert entries["vision"]["allowed"] is False
     assert entries["vision"]["will_poll"] is False
     assert "vision-sense-enabled" in entries["vision"]["denial"]
-    assert all(entry["poll_interval"] is None for entry in entries.values())
+    assert sorted(
+        name for name, entry in entries.items() if entry["poll_interval"] is not None
+    ) == sorted(n for n, s in discover_senses().items() if s.is_ambient())
 
 
-def test_the_launcher_reports_plainly_when_nothing_is_ambient(gsettings_env):
-    """Silence here would read as "the loop ran and found nothing"."""
+def test_the_launcher_reports_plainly_when_every_poll_is_refused(gsettings_env):
+    """Silence here would read as "the loop ran and found nothing".
+
+    The shipped registry now contains an ambient-capable sense whose consent
+    key defaults to false, so "no sense is ambient-capable at all" is no longer
+    the reason nothing was perceived - the reason is consent. Saying which one
+    is the whole point of this assertion, so it is asserted rather than
+    weakened. The genuinely-empty case is covered by
+    `test_a_registry_with_no_ambient_sense_says_so_instead_of_falling_silent`.
+    """
     completed = _run_cli("ambient", "--once")
 
-    assert completed.returncode == 6
-    assert "no sense currently declares a poll_interval" in completed.stdout
+    assert completed.returncode == 4
+    assert "refused by consent" in completed.stdout + completed.stderr
+
+
+def test_a_registry_with_no_ambient_sense_says_so_instead_of_falling_silent(
+    granted, tmp_path
+):
+    """The empty branch itself, now unreachable from the shipped registry.
+
+    Built from an explicitly empty sense mapping rather than by hoping the
+    real registry has no ambient sense, so this keeps testing the branch no
+    matter what senses are added later.
+    """
+    scheduler = AmbientScheduler(
+        senses={}, store=PerceptStore(durable_path=tmp_path / "memory.jsonl")
+    )
+
+    results = scheduler.poll_due()
+    summary = scheduler.summary()
+
+    assert results == [] and summary["polls"] == 0 and not summary["denied"]
+    assert scheduler.ambient_senses() == {}
 
 
 def test_the_launcher_refuses_to_poll_a_reactive_only_sense(gsettings_env):
