@@ -152,3 +152,79 @@ def test_the_wrapper_is_what_applies_the_ruleset():
         "the wrapper must be what applies the ruleset, so the parent never does"
     )
     assert "execvp" in wrapper, "the wrapper should exec the real command inside the scope"
+
+
+@needs_landlock
+def test_the_shipped_default_allowlist_actually_confines_reads():
+    """The regression that mattered, and the test shape that catches it.
+
+    An earlier version of this file hand-built a narrow allowlist, which passed
+    while the SHIPPED defaults granted READ_FILE on "/" - making every file on
+    the machine readable. Confinement was void and every layer above it reported
+    a confined child. The failure only appeared when the real defaults were used,
+    so this test uses them too.
+    """
+    import json
+    import subprocess
+
+    workspace = tempfile.mkdtemp()
+    allowed = os.path.join(workspace, "allowed")
+    os.makedirs(allowed)
+    with open(os.path.join(allowed, "ok.txt"), "w") as handle:
+        handle.write("hi")
+
+    outside = tempfile.mkdtemp()
+    secret = os.path.join(outside, "secret.txt")
+    with open(secret, "w") as handle:
+        handle.write("nope")
+
+    wrapper = os.path.join(workspace, "wrapper.py")
+    with open(wrapper, "w") as handle:
+        handle.write(get_landlock_wrapper())
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = PKG_PARENT
+    env["LANLOCK_ALLOWED_PATHS"] = json.dumps(
+        [list(entry) for entry in get_default_allowed_paths(workspace)]
+    )
+
+    def read(path):
+        return subprocess.run(
+            [sys.executable, wrapper, "cat", path],
+            capture_output=True, text=True, timeout=30, env=env,
+        )
+
+    inside = read(os.path.join(allowed, "ok.txt"))
+    assert inside.returncode == 0, f"the workspace must stay readable: {inside.stderr}"
+    assert inside.stdout.strip() == "hi"
+
+    leaked = read(secret)
+    assert leaked.stdout.strip() == "", (
+        "a file outside the workspace was readable under the shipped defaults - "
+        f"read confinement is void; got {leaked.stdout!r}"
+    )
+    assert leaked.returncode != 0
+    assert "Permission denied" in leaked.stderr
+
+    # The interpreter must still run, or the confinement is useless in practice.
+    alive = subprocess.run(
+        [sys.executable, wrapper, sys.executable, "-c", "print('ok')"],
+        capture_output=True, text=True, timeout=30, env=env,
+    )
+    assert alive.stdout.strip() == "ok", (
+        f"python cannot run inside the scope: {alive.stderr}"
+    )
+
+
+def test_the_default_allowlist_does_not_grant_read_on_root():
+    # Belt and braces on the same defect, stated as a property of the table
+    # rather than as an observed side effect, so it cannot regress quietly.
+    from shani_chronoa.sandbox.landlock import _LANDLOCK_ACCESS_FS_READ_FILE
+
+    with tempfile.TemporaryDirectory() as tmp:
+        for path, rights in get_default_allowed_paths(tmp):
+            if path == "/":
+                assert not rights & _LANDLOCK_ACCESS_FS_READ_FILE, (
+                    "READ_FILE on '/' makes every file on the machine readable "
+                    "and voids the confinement this layer exists to provide"
+                )

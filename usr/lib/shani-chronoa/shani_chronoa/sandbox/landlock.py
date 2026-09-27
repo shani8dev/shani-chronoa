@@ -355,8 +355,7 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
     # Define the access rights we want to allow
     # Note: We assume ABI >= 1 for the default rights.
     # The caller should check the ABI version and adjust if needed.
-    read_execute = (
-        _LANDLOCK_ACCESS_FS_READ_FILE |
+    traverse_execute = (
         _LANDLOCK_ACCESS_FS_READ_DIR |
         _LANDLOCK_ACCESS_FS_EXECUTE
     )
@@ -382,7 +381,22 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
     )
 
     return [
-        ("/", read_execute),
+        # Traverse and run, but do NOT read. A READ_FILE rule on "/" makes every
+        # file on the machine readable, which voids read confinement entirely
+        # while still reporting a confined child - verified: with this entry
+        # granting read_execute, a file outside the workspace was read back in
+        # full. Root gets READ_DIR so paths can be traversed and EXECUTE so
+        # binaries can be run; reading is granted only where it is genuinely
+        # needed, below.
+        ("/", traverse_execute),
+        # The interpreter and its libraries must be readable or nothing runs at
+        # all (`python3 -c ...` reads the standard library). This is the
+        # smallest set that keeps skills working.
+        ("/usr", read_only),
+        ("/bin", read_only),
+        ("/sbin", read_only),
+        ("/lib", read_only),
+        ("/lib64", read_only),
         ("/dev", read_only),
         ("/proc", read_only),
         (workspace, read_write_execute),
