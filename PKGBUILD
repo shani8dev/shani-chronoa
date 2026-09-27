@@ -20,6 +20,8 @@ depends=(
     'wireplumber'
     'libnotify'
     'upower'
+    'bubblewrap'
+    'libsecret'
 )
 optdepends=(
     'python-openwakeword: hands-free "hey chronoa" wake-word activation (AUR, not in official repos)'

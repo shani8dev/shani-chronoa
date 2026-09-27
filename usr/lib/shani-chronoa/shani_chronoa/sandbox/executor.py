@@ -16,6 +16,30 @@ from typing import Tuple
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.secrets_manager import secrets_manager
 
+DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
+
+
+def _first_blocked_binary(command: str, blocked_names) -> "str | None":
+    """The first blocklisted binary `command` would actually run, if any.
+
+    Matching on `blocked in command.split()` looks right and is not. It
+    compares whole tokens, so it blocks the bare word `mkfs` and sails
+    straight past `mkfs.ext4` - which is how mkfs is invoked in every real
+    command, and the only form anyone types. The same gap let `/sbin/dd` and
+    `/bin/mount` through. Verified rather than assumed: with exact-token
+    matching, `mkfs.ext4 /dev/sda` reached the executor and ran.
+
+    So compare the *basename* of each token, and treat a dotted variant
+    (`mkfs.ext4`, `mount.fuse`) as the same binary it is named after. Still no
+    substring matching: `add` and `ddrescue` are not `dd`.
+    """
+    for token in command.split():
+        name = token.rsplit("/", 1)[-1]
+        for blocked in blocked_names:
+            if name == blocked or name.startswith(blocked + "."):
+                return name
+    return None
+
 
 class SandboxExecutionError(Exception):
     pass
@@ -75,23 +99,22 @@ class SandboxExecutor:
                     )
 
         # 4. Explicit blocked binaries check
-        for blocked in config.blocked_binaries:
-            if blocked in raw_cmd.split():
-                return (
-                    126,
-                    f"Security error: The command '{blocked}' is explicitly blocked in the agent's policy.",
-                    0.0,
-                )
+        blocked = _first_blocked_binary(raw_cmd, config.blocked_binaries)
+        if blocked is not None:
+            return (
+                126,
+                f"Security error: The command '{blocked}' is explicitly blocked in the agent's policy.",
+                0.0,
+            )
 
         # 5. Dangerous binary blocklist
-        DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
-        for blocked in DANGEROUS_BINARIES:
-            if blocked in raw_cmd.split():
-                return (
-                    126,
-                    f"Security error: The command '{blocked}' is blocked by the sandbox policy.",
-                    0.0,
-                )
+        blocked = _first_blocked_binary(raw_cmd, DANGEROUS_BINARIES)
+        if blocked is not None:
+            return (
+                126,
+                f"Security error: The command '{blocked}' is blocked by the sandbox policy.",
+                0.0,
+            )
 
         timeout = max(1, config.timeout_seconds)
 
@@ -104,8 +127,25 @@ class SandboxExecutor:
             return self._run_host(raw_cmd, timeout, start_time, elevated=True)
 
         # 7. Level 3: Host as Current User
-        if config.level == SandboxLevel.LEVEL_3_HOST_USER or not self.bwrap_available:
+        if config.level == SandboxLevel.LEVEL_3_HOST_USER:
             return self._run_host(raw_cmd, timeout, start_time, elevated=False)
+
+        # Levels 1 and 2 exist to be isolated. If bubblewrap is missing they
+        # cannot be, and running them anyway is the worst outcome available:
+        # the caller asked for a sandbox, the sandbox silently did not exist,
+        # and the only symptom is that the command worked. Refuse instead, and
+        # name the package. LEVEL_3 is deliberately exempt - it means "host as
+        # this user" with no isolation promised, because skills legitimately
+        # need the session bus and display to reach `speak` or `open_application`.
+        if not self.bwrap_available:
+            return (
+                126,
+                "Security error: this sandbox level requires bubblewrap (bwrap), "
+                "which is not installed. Install the 'bubblewrap' package; "
+                "refusing to run the command unisolated rather than pretending "
+                "it was sandboxed.",
+                0.0,
+            )
 
         # 8. Level 1 & 2: Sandboxed with Bubblewrap
         return self._run_bwrap(raw_cmd, config, agent_id, timeout, start_time)
