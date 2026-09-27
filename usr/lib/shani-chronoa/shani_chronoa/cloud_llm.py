@@ -96,6 +96,7 @@ from typing import NamedTuple, Optional
 
 import httpx
 
+from shani_chronoa import egress
 from shani_chronoa.secrets_manager import secrets_manager
 from shani_chronoa.skills import is_valid_schema
 
@@ -205,10 +206,23 @@ class OpenAICompatibleLLM:
         if tools:
             payload["tools"] = _valid_tools(tools)
 
+        status = None
         try:
             response = await client.post("/chat/completions", json=payload)
+            status = response.status_code
         except httpx.RequestError as e:
             raise CloudLLMError(f"{self.provider.name}: request failed: {e}") from e
+        finally:
+            # Metadata only - never the payload. This is one of only two paths
+            # that deliberately send a conversation off the machine, so it is
+            # one of only two places a user most needs to be able to check.
+            egress.record(
+                f"cloud_llm:{self.provider.name}",
+                f"{self.provider.base_url}/chat/completions",
+                method="POST",
+                status=status,
+                bytes_out=egress.payload_size(payload),
+            )
 
         try:
             data = response.json()
@@ -358,10 +372,20 @@ class AnthropicLLM:
         if tools:
             payload["tools"] = self._tools_to_anthropic(tools)
 
+        status = None
         try:
             response = await client.post("/messages", json=payload)
+            status = response.status_code
         except httpx.RequestError as e:
             raise CloudLLMError(f"Anthropic: request failed: {e}") from e
+        finally:
+            egress.record(
+                f"cloud_llm:{self.provider.name}",
+                f"{self.provider.base_url}/messages",
+                method="POST",
+                status=status,
+                bytes_out=egress.payload_size(payload),
+            )
 
         try:
             data = response.json()

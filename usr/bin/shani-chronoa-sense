@@ -78,6 +78,7 @@ from shani_chronoa.senses import Percept, Sense, discover_senses  # noqa: E402
 from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
 from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
+from shani_chronoa import egress  # noqa: E402
 from shani_chronoa.triggers import TriggerEngine, TriggerRule, build_rule  # noqa: E402
 
 EXIT_OK = 0
@@ -493,6 +494,42 @@ def cmd_ambient(args: argparse.Namespace) -> tuple:
 
     results = scheduler.poll_due() if args.once else scheduler.run_for(args.seconds)
     return _ambient_report(args, scheduler, results)
+
+
+def cmd_egress(args: argparse.Namespace) -> tuple:
+    """What has left this machine, and what has not.
+
+    Chronoa is local-first and this is the command that makes that checkable
+    rather than a claim: every outbound request is logged with its destination,
+    and a request that left the machine is counted separately from one that
+    stayed on loopback.
+    """
+    stats = egress.summary()
+    if not stats["total"]:
+        return EXIT_OK, [
+            "no outbound requests recorded",
+            f"(log: {stats['log']})",
+        ], stats
+
+    lines = [
+        f"{stats['total']} request(s): {stats['local']} stayed local, "
+        f"{stats['remote']} left this machine",
+        f"bytes sent: {stats['bytes_out']}",
+    ]
+    if stats["remote_hosts"]:
+        lines.append("remote destinations:")
+        lines.extend(f"  {host}" for host in stats["remote_hosts"])
+    if stats["violations"]:
+        lines.append(
+            f"!! {stats['violations']} request(s) left the machine while privacy mode was ON"
+        )
+    for event in egress.read_events(limit=args.last):
+        where = "local " if event.get("local") else "REMOTE"
+        lines.append(
+            f"  {where} {event.get('method', 'GET'):5s} {event.get('host', '')}"
+            f" {event.get('bytes_out', 0)}B status={event.get('status')}"
+        )
+    return EXIT_OK, lines, stats
 
 
 def cmd_trigger(args: argparse.Namespace) -> tuple:
@@ -928,6 +965,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="actually dispatch; without this it is a dry run and nothing runs",
     )
 
+    egress_parser = sub.add_parser(
+        "egress",
+        parents=[common],
+        help="show what has been sent off this machine, and what has not",
+    )
+    egress_parser.add_argument(
+        "--last", type=int, default=20, help="how many recent events to print"
+    )
     forget_parser = sub.add_parser(
         "forget", parents=[common], help="remove durable percepts"
     )
@@ -957,6 +1002,7 @@ def main(argv: Optional["list[str]"] = None) -> int:
         "percepts": cmd_percepts,
         "forget": cmd_forget,
         "trigger": cmd_trigger,
+        "egress": cmd_egress,
         "devices": cmd_devices,
     }
     if args.command == "ambient" and not (args.list or args.once or args.seconds):

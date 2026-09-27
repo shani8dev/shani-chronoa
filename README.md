@@ -80,7 +80,48 @@ shani-chronoa-sense run ocr path=~/screenshot.png
 # durable memory, readable from a later process
 shani-chronoa-sense run memory operation=remember fact="I prefer flat white"
 shani-chronoa-sense run memory operation=recall query=coffee
+
+# what has actually left this machine, and what stayed on loopback
+shani-chronoa-sense egress
 ```
+
+## What leaves this machine
+
+Local-first is a claim, so it gets checked rather than asserted. Every outbound
+request is appended to a local log with its destination, classified as *local*
+(loopback, `.local`, `.internal`) or *remote*, and readable with one command:
+
+```bash
+shani-chronoa-sense egress
+```
+
+```
+5 request(s): 2 stayed local, 3 left this machine
+bytes sent: 15439
+remote destinations:
+  api.llm7.io
+  en.wikipedia.org
+!! 1 request(s) left the machine while privacy mode was ON
+```
+
+The distinction is the whole point: to `httpx` a call to `127.0.0.1:11434` and
+a call to a cloud LLM provider look identical, and that difference is what a
+user of a local-first tool actually needs to see. Classification is
+**conservative** — an unparseable or schemeless target counts as remote, so a
+malformed URL can never be mistaken for a safe one.
+
+Two further properties:
+
+- **A remote call while privacy mode is on is an alarm, not a log line.** Privacy
+  mode is Chronoa's documented local-only guarantee, so a request that breaks it
+  is logged at `ERROR` and counted as a violation in the summary above.
+- **The log holds metadata, never payloads.** Destination, method, status and
+  byte count only, at mode `600`. An audit log that captured bodies would
+  become the very leak it exists to prevent — `test_the_log_never_stores_a_payload`
+  pins that.
+
+A request that was sent and then failed still counts as having left the machine,
+and is still recorded.
 
 ## Architecture
 
