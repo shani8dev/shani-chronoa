@@ -226,6 +226,55 @@ def indent(text: str, prefix: str = "      ") -> str:
 # --- commands --------------------------------------------------------------
 
 
+def cmd_devices(args: argparse.Namespace) -> tuple:
+    """List selectable audio devices, and which ones are currently chosen.
+
+    Exists because the device settings store a PipeWire node name, which is
+    not something a person can guess: the names are long and generated. Without
+    a way to print them, the setting is only usable by someone who already
+    knows `pw-dump`.
+    """
+    from shani_chronoa import pipewire
+
+    config = ChronoaConfig()
+    chosen_in = config.audio_input_device
+    chosen_out = config.audio_output_device
+
+    if not pipewire.is_available():
+        return EXIT_FAILED, ["no PipeWire graph available (is pipewire running?)"], {
+            "available": False,
+            "inputs": [],
+            "outputs": [],
+            "echo_cancel_active": False,
+        }
+
+    inputs = pipewire.list_inputs()
+    outputs = pipewire.list_outputs()
+    lines = []
+    for heading, devices, chosen in (
+        ("inputs (microphones)", inputs, chosen_in),
+        ("outputs (speakers)", outputs, chosen_out),
+    ):
+        lines.append(f"{heading}:")
+        if not devices:
+            lines.append("  (none found)")
+        for device in devices:
+            mark = "*" if device.name == chosen else " "
+            note = "" if chosen else "   (default device; set audio-*-device to pin one)"
+            lines.append(f"  {mark} {device.label}{note}")
+            lines.append(f"      {device.name}")
+        lines.append("")
+
+    return EXIT_OK, lines, {
+        "available": True,
+        "inputs": [{"name": d.name, "label": d.label} for d in inputs],
+        "outputs": [{"name": d.name, "label": d.label} for d in outputs],
+        "selected_input": chosen_in,
+        "selected_output": chosen_out,
+        "echo_cancel_active": pipewire.echo_cancel_active(),
+    }
+
+
 def cmd_list(args: argparse.Namespace) -> tuple:
     config = ChronoaConfig()
     registered = discover_senses()
@@ -712,6 +761,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="arguments for --sense, parsed against that sense's own schema",
     )
 
+    sub.add_parser(
+        "devices",
+        parents=[common],
+        help="list selectable microphones and speakers, and the current choice",
+    )
     forget_parser = sub.add_parser(
         "forget", parents=[common], help="remove durable percepts"
     )
@@ -740,6 +794,7 @@ def main(argv: Optional["list[str]"] = None) -> int:
         "ambient": cmd_ambient,
         "percepts": cmd_percepts,
         "forget": cmd_forget,
+        "devices": cmd_devices,
     }
     if args.command == "ambient" and not (args.list or args.once or args.seconds):
         # `ambient` on its own reports rather than polls: starting an

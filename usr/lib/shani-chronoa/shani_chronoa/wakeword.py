@@ -72,10 +72,19 @@ class WakeWordListener:
     `GLib.idle_add`), same convention as `AsyncBridge`.
     """
 
-    def __init__(self, wakeword_model: str = "hey_jarvis", threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        wakeword_model: str = "hey_jarvis",
+        threshold: float = 0.5,
+        target: Optional[str] = None,
+    ) -> None:
         self._wakeword_model = wakeword_model
         self._threshold = threshold
         self._backend = self._detect_backend()
+        # Same device the recorder uses. A wake word that triggers on one
+        # microphone while the turn records from another is a bug that would
+        # look like intermittent recognition failure.
+        self._target = target or None
         self._model = None
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
@@ -92,9 +101,16 @@ class WakeWordListener:
         """True if openWakeWord/numpy and a mic capture backend are all present."""
         return _OWWModel is not None and self._backend is not None
 
+    def set_target(self, target: Optional[str]) -> None:
+        self._target = target or None
+
     def _record_cmd(self) -> list:
         if self._backend == "pw-record":
-            return ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16", "-"]
+            cmd = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16"]
+            if self._target:
+                cmd += ["--target", self._target]
+            cmd.append("-")
+            return cmd
         return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", "16000", "-c", "1", "-"]
 
     def start(self, on_detected: Callable[[], None]) -> bool:

@@ -424,6 +424,26 @@ class ChronoaConfig:
         return self.get_bool("cloud-fallback-enabled", False)
 
     @property
+    def audio_input_device(self) -> str:
+        """PipeWire node name to record from; empty means the default device.
+
+        Applied as `pw-record --target`. Only honoured on the PipeWire
+        backends - a PipeWire node name is not an ALSA device identifier - so
+        see `pipewire.list_inputs()` for what a valid value looks like.
+        """
+        return self.get("audio-input-device", "").strip()
+
+    @property
+    def audio_output_device(self) -> str:
+        """PipeWire node name to play through; empty means the default device."""
+        return self.get("audio-output-device", "").strip()
+
+    def set_audio_devices(self, input_device: str, output_device: str) -> None:
+        """Persist a chosen input/output pair in one call."""
+        self.set("audio-input-device", (input_device or "").strip())
+        self.set("audio-output-device", (output_device or "").strip())
+
+    @property
     def barge_in_vad_enabled(self) -> bool:
         """Whether to continuously monitor the mic during playback and interrupt on speech.
 

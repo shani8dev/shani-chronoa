@@ -76,6 +76,16 @@
       <summary>Interrupt spoken replies as soon as you start talking</summary>
       <description>When true, continuously monitors the microphone while Chronoa is speaking and interrupts immediately on detected speech, instead of only interrupting on the next button press or wake word. Off by default: there is no acoustic echo cancellation, so on speakers (not headphones) the mic may pick up Chronoa's own voice and self-interrupt.</description>
     </key>
+    <key name="audio-input-device" type="s">
+      <default>''</default>
+      <summary>PipeWire node name to record from</summary>
+      <description>Empty means whatever PipeWire treats as the default microphone. Otherwise this must be a PipeWire node name as listed by `shani-chronoa-sense devices` or by `pw-cli ls Node`, and it is applied as `pw-record --target`. Only honoured on the PipeWire backends: ALSA's arecord takes a different identifier (hw:0,0), not a PipeWire node name.</description>
+    </key>
+    <key name="audio-output-device" type="s">
+      <default>''</default>
+      <summary>PipeWire node name to play through</summary>
+      <description>Empty means whatever PipeWire treats as the default output. Otherwise this must be a PipeWire node name, applied as `pw-play --target`. Only honoured on the PipeWire backends: ALSA's aplay takes a different identifier, not a PipeWire node name.</description>
+    </key>
     <key name="llm7-api-key" type="s">
       <default>''</default>
       <summary>Optional LLM7 API key (BYOK)</summary>

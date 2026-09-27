@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
+from shani_chronoa import pipewire
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
@@ -59,10 +60,33 @@ class ChronoaApplication(Gtk.Application):
         self.percept_context: Optional[ContextBuilder] = None
         self.window: Optional[CajitaWindow] = None
         self._settings_window: Optional[Gtk.Window] = None
-        self.recorder = AudioRecorder()
-        self.player = AudioPlayer()
-        self.barge_in_monitor = BargeInMonitor()
-        self.wakeword = WakeWordListener(wakeword_model=self.config.wake_word_model)
+        # A chosen device is threaded into every capture path at once -
+        # recorder, barge-in monitor and wake word each run their own
+        # `pw-record`, so setting it on only one of them would have the
+        # assistant listening and waking on different microphones.
+        #
+        # Each is resolved against the live graph first, because `pw-record`
+        # silently ignores an unknown --target and records from the default
+        # device instead - so an unplugged headset would look honoured while
+        # quietly using the laptop mic. The problem is kept for `do_activate`,
+        # where a window exists to say it in.
+        self._device_warnings: "list[str]" = []
+        in_target, in_problem = pipewire.resolve_target(
+            self.config.audio_input_device, "input"
+        )
+        out_target, out_problem = pipewire.resolve_target(
+            self.config.audio_output_device, "output"
+        )
+        for problem in (in_problem, out_problem):
+            if problem:
+                logger.warning("Audio device: %s", problem)
+                self._device_warnings.append(problem)
+        self.recorder = AudioRecorder(target=in_target or None)
+        self.player = AudioPlayer(target=out_target or None)
+        self.barge_in_monitor = BargeInMonitor(target=in_target or None)
+        self.wakeword = WakeWordListener(
+            wakeword_model=self.config.wake_word_model, target=in_target or None
+        )
         self._listening = False
         self._wake_word_active = False
         self._ollama_available = False
@@ -109,7 +133,11 @@ class ChronoaApplication(Gtk.Application):
         if not self.window:
             self.window = CajitaWindow(self)
             self.window.connect("user-input", self._on_user_input)
-            self.window.set_status(self._llm_status_text())
+            # A rejected device outranks the ordinary status: it explains why
+            # the microphone the user picked is not the one in use.
+            self.window.set_status(
+                self._device_warnings[0] if self._device_warnings else self._llm_status_text()
+            )
             self.window.present()
         else:
             self.window.present()
@@ -486,8 +514,27 @@ class ChronoaApplication(Gtk.Application):
         """Toggle continuous-VAD barge-in. `_speak()` reads this fresh each call, no extra sync needed."""
         new_value = not self.config.barge_in_vad_enabled
         self.config.set("barge-in-vad-enabled", "true" if new_value else "false")
-        if self.window:
-            self.window.set_status(f"Barge-in (VAD): {'ON' if new_value else 'OFF'}")
+        if not new_value:
+            if self.window:
+                self.window.set_status("Barge-in (VAD): OFF")
+            return
+        # Say why this is risky *here*, where the choice is made. PipeWire ships
+        # an echo canceller, but it is a SPA hook attached by a
+        # filter-chain.conf.d fragment, so it cannot be switched on from here -
+        # only detected. Pretending otherwise would leave the user with a
+        # setting that mysteriously interrupts itself on speakers.
+        from shani_chronoa import pipewire
+
+        if pipewire.echo_cancel_active():
+            if self.window:
+                self.window.set_status("Barge-in (VAD): ON, echo cancel active")
+        else:
+            logger.warning(
+                "Continuous-VAD barge-in enabled with no echo cancellation in the "
+                "PipeWire graph; on speakers Chronoa may interrupt itself"
+            )
+            if self.window:
+                self.window.set_status("Barge-in (VAD): ON - no echo cancel, use headphones")
 
     def _toggle_debug(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle debug logging live and persist the choice."""

@@ -28,11 +28,22 @@ _FRAME_BYTES = int(_SAMPLE_RATE * _FRAME_SECONDS) * _SAMPLE_WIDTH
 _CALIBRATION_FRAMES = 4  # ~320ms of ambient audio sampled before listening for speech
 
 
-def _stream_capture_cmd(backend: str) -> list:
+def _stream_capture_cmd(backend: str, target: Optional[str] = None) -> list:
     """Raw s16le PCM to stdout - confirmed live (see wakeword.py's docstring)
-    that both backends stream from byte zero with no WAV header when piped."""
+    that both backends stream from byte zero with no WAV header when piped.
+
+    `target` is a PipeWire node name, applied as `--target` so a chosen
+    microphone is actually the one being recorded. ALSA's `arecord` takes a
+    different kind of identifier (`-D hw:0,0`), which a PipeWire node name is
+    not, so the setting is only honoured on the pw-* backends and the caller
+    is expected to have said so rather than have it silently do nothing.
+    """
     if backend == "pw-record":
-        return ["pw-record", "--rate", str(_SAMPLE_RATE), "--channels", str(_CHANNELS), "--format", "s16", "-"]
+        cmd = ["pw-record", "--rate", str(_SAMPLE_RATE), "--channels", str(_CHANNELS), "--format", "s16"]
+        if target:
+            cmd += ["--target", target]
+        cmd.append("-")
+        return cmd
     return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(_SAMPLE_RATE), "-c", str(_CHANNELS), "-"]
 
 
@@ -43,11 +54,16 @@ class AudioRecorder:
     explicit "stop recording" call - see that method's docstring.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, target: Optional[str] = None) -> None:
         self._proc: Optional[subprocess.Popen] = None
         self._backend = self._detect_backend()
         self._auto_stop_thread: Optional[threading.Thread] = None
         self._auto_stop_cancel = threading.Event()
+        self._target = target or None
+
+    def set_target(self, target: Optional[str]) -> None:
+        """Point capture at a specific device, or back to the default."""
+        self._target = target or None
 
     def _detect_backend(self) -> Optional[str]:
         if shutil.which("pw-record"):
@@ -80,7 +96,9 @@ class AudioRecorder:
             return False
         try:
             proc = subprocess.Popen(
-                _stream_capture_cmd(self._backend), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                _stream_capture_cmd(self._backend, self._target),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as e:
             logger.error(f"Failed to start auto-stop recording ({self._backend}): {e}")
@@ -179,10 +197,15 @@ class AudioPlayer:
     playback, a bigger undertaking not attempted here).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, target: Optional[str] = None) -> None:
         self._backend = self._detect_backend()
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
+        self._target = target or None
+
+    def set_target(self, target: Optional[str]) -> None:
+        """Point playback at a specific device, or back to the default."""
+        self._target = target or None
 
     def _detect_backend(self) -> Optional[str]:
         if shutil.which("pw-play"):
@@ -195,6 +218,16 @@ class AudioPlayer:
         """Check if a playback backend is installed."""
         return self._backend is not None
 
+    def _playback_cmd(self, path: str) -> list:
+        """Playback argv, with `--target` applied when a device is chosen.
+
+        As with capture, the setting is only meaningful on `pw-play`; ALSA's
+        `aplay -D` wants a different identifier than a PipeWire node name.
+        """
+        if self._backend == "pw-play" and self._target:
+            return ["pw-play", "--target", self._target, path]
+        return [self._backend, path]
+
     def play_file(self, path: str) -> bool:
         """Play a WAV file, blocking until playback finishes or is stopped."""
         if not self._backend:
@@ -202,7 +235,7 @@ class AudioPlayer:
         try:
             with self._lock:
                 proc = subprocess.Popen(
-                    [self._backend, path],
+                    self._playback_cmd(path),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
                 self._proc = proc
@@ -272,11 +305,15 @@ class BargeInMonitor:
     # itself raises the effective noise floor further than plain silence.
     _PLAYBACK_MARGIN = 1.5
 
-    def __init__(self) -> None:
+    def __init__(self, target: Optional[str] = None) -> None:
         self._backend = self._detect_backend()
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        # Must match the recorder's device: barge-in that listens to a
+        # different microphone than the one recording would fire on the room
+        # rather than on the user.
+        self._target = target or None
 
     def _detect_backend(self) -> Optional[str]:
         if shutil.which("pw-record"):
@@ -295,7 +332,9 @@ class BargeInMonitor:
             return False
         try:
             proc = subprocess.Popen(
-                _stream_capture_cmd(self._backend), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+                _stream_capture_cmd(self._backend, self._target),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
         except Exception as e:
             logger.error(f"Failed to start barge-in monitor ({self._backend}): {e}")
