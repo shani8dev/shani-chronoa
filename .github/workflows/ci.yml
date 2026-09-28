@@ -43,7 +43,13 @@ jobs:
       # settings_window.py requires the Adw namespace, so without the typelib
       # pytest cannot even COLLECT tests/test_settings_surface.py and the whole
       # run dies at collection with exit 2 - 639 items found, then interrupted.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb
+      #
+      # xdotool is not decoration either. TestInputControlBackendDetection
+      # deliberately tests REAL detection on the host rather than a mock, and
+      # with xvfb alone the runner has an X11 display but no input backend, so
+      # _detect_backend() returns None and that test fails. Installing the
+      # binary keeps the test honest instead of deleting its subject.
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb xdotool
       system-site-packages: true
     needs: lint
 

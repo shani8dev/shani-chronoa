@@ -85,6 +85,25 @@ class TestDiscoveryDegradesQuietly:
             assert device.label == device.label.strip()
 
 
+def _pin_pipewire_backends(monkeypatch):
+    """Pretend PipeWire is installed, so these tests are about the argv.
+
+    The neighbouring tests in this class call _stream_capture_cmd("pw-record", ...)
+    and pass the backend in explicitly, which is why they always passed. These
+    three instead construct AudioPlayer/WakeWordListener, whose _detect_backend
+    really does shutil.which("pw-play") / ("pw-record"). On a dev machine with
+    PipeWire that resolved to pw-play and the --target assertions held; on a
+    runner with neither binary it resolved to None, _playback_cmd returned
+    [None, path], and the tests failed without ever reaching the behaviour they
+    are named for. Pin the detection, not the assertion.
+    """
+    from shani_chronoa.audio import AudioPlayer
+    from shani_chronoa.wakeword import WakeWordListener
+
+    monkeypatch.setattr(AudioPlayer, "_detect_backend", lambda self: "pw-play")
+    monkeypatch.setattr(WakeWordListener, "_detect_backend", lambda self: "pw-record")
+
+
 class TestTargetReachesTheSubprocess:
     def test_capture_uses_target_on_pipewire(self):
         from shani_chronoa.audio import _stream_capture_cmd
@@ -108,7 +127,8 @@ class TestTargetReachesTheSubprocess:
         assert "--target" not in cmd
         assert cmd[0] == "arecord"
 
-    def test_playback_uses_target_on_pipewire(self):
+    def test_playback_uses_target_on_pipewire(self, monkeypatch):
+        _pin_pipewire_backends(monkeypatch)
         from shani_chronoa.audio import AudioPlayer
 
         player = AudioPlayer(target="alsa_output.bar._sink")
@@ -116,15 +136,17 @@ class TestTargetReachesTheSubprocess:
         assert cmd[:3] == ["pw-play", "--target", "alsa_output.bar._sink"]
         assert cmd[-1] == "/tmp/x.wav"
 
-    def test_playback_target_can_be_cleared(self):
+    def test_playback_target_can_be_cleared(self, monkeypatch):
+        _pin_pipewire_backends(monkeypatch)
         from shani_chronoa.audio import AudioPlayer
 
         player = AudioPlayer(target="alsa_output.bar._sink")
         player.set_target(None)
         assert player._playback_cmd("/tmp/x.wav") == ["pw-play", "/tmp/x.wav"]
 
-    def test_the_wake_word_honours_the_same_device_as_the_recorder(self):
+    def test_the_wake_word_honours_the_same_device_as_the_recorder(self, monkeypatch):
         """A wake word listening on a different mic looks like flaky recognition."""
+        _pin_pipewire_backends(monkeypatch)
         from shani_chronoa.wakeword import WakeWordListener
 
         listener = WakeWordListener(target="alsa_input.foo.__source")

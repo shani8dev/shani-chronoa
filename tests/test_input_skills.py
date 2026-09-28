@@ -40,7 +40,13 @@ def _allow_input_control(monkeypatch):
 
 
 def _spy_subprocess(monkeypatch):
-    """Record every subprocess.run argv the skill builds, without executing it."""
+    """Record every subprocess.run argv the skill builds, without executing it.
+
+    Deliberately does NOT pin the backend. test_no_backend_available_refuses
+    sets _detect_backend to None and then calls this helper, so anything pinned
+    here would silently overwrite that and the refusal would stop being
+    exercised. Use _pin_xdotool_backend explicitly instead.
+    """
     import shani_chronoa.skills.input_control as mod
 
     calls: list[list[str]] = []
@@ -51,6 +57,22 @@ def _spy_subprocess(monkeypatch):
 
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
     return calls
+
+
+def _pin_xdotool_backend(monkeypatch):
+    """Pretend xdotool is installed, so an argv-shape test is about argv shape.
+
+    Stubbing subprocess.run is not enough on its own: the skill calls
+    _detect_backend() before it builds any argv, and that really does look for
+    the binary on PATH. On a host with xdotool the argv assertions passed; on a
+    runner without it, detection returned None, the skill returned its "no
+    backend available" message, and five tests that assert argv shape failed
+    without having asserted anything about argv. Consent is checked before
+    detection (input_control.py), so this cannot mask a consent refusal.
+    """
+    import shani_chronoa.skills.input_control as mod
+
+    monkeypatch.setattr(mod, "_detect_backend", lambda: ("xdotool", ["xdotool"]))
 
 
 def _spy_build_command(monkeypatch):
@@ -125,6 +147,7 @@ class TestInputControlCommandConstruction:
 
     def test_move_pointer_builds_xdotool_argv(self, chronoa_config, monkeypatch):
         _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
         run_calls = _spy_subprocess(monkeypatch)
         from shani_chronoa.skills.input_control import _run_move_pointer
 
@@ -135,6 +158,7 @@ class TestInputControlCommandConstruction:
 
     def test_click_pointer_builds_xdotool_argv(self, chronoa_config, monkeypatch):
         _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
         run_calls = _spy_subprocess(monkeypatch)
         from shani_chronoa.skills.input_control import _run_click_pointer
 
@@ -145,6 +169,7 @@ class TestInputControlCommandConstruction:
 
     def test_click_pointer_repeat_builds_repeat_argv(self, chronoa_config, monkeypatch):
         _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
         run_calls = _spy_subprocess(monkeypatch)
         from shani_chronoa.skills.input_control import _run_click_pointer
 
@@ -154,6 +179,7 @@ class TestInputControlCommandConstruction:
 
     def test_type_text_builds_xdotool_argv(self, chronoa_config, monkeypatch):
         _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
         run_calls = _spy_subprocess(monkeypatch)
         from shani_chronoa.skills.input_control import _run_type_text
 
@@ -166,6 +192,7 @@ class TestInputControlCommandConstruction:
         # The text must be a single argv element (no shell), so special
         # characters cannot break out into a command.
         _allow_input_control(monkeypatch)
+        _pin_xdotool_backend(monkeypatch)
         run_calls = _spy_subprocess(monkeypatch)
         from shani_chronoa.skills.input_control import _run_type_text
 
