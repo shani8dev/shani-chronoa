@@ -81,6 +81,7 @@ _SENSE_CONSENT_KEYS = {
     "rfsense": "rfsense-sense-enabled",
     "thermalgrid": "thermalgrid-sense-enabled",
     "hwmon": "hwmon-sense-enabled",
+    "modelfit": "modelfit-sense-enabled",
 }
 
 # Only memory is on by default: it is local-only and remembering is the point

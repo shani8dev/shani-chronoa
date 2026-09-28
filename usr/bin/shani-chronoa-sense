@@ -78,7 +78,7 @@ from shani_chronoa.senses import Percept, Sense, discover_senses  # noqa: E402
 from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
 from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
-from shani_chronoa import egress  # noqa: E402
+from shani_chronoa import egress, models  # noqa: E402
 from shani_chronoa.triggers import TriggerEngine, TriggerRule, build_rule  # noqa: E402
 
 EXIT_OK = 0
@@ -494,6 +494,41 @@ def cmd_ambient(args: argparse.Namespace) -> tuple:
 
     results = scheduler.poll_due() if args.once else scheduler.run_for(args.seconds)
     return _ambient_report(args, scheduler, results)
+
+
+def cmd_model(args: argparse.Namespace) -> tuple:
+    """Which model Chronoa uses for each job, and why.
+
+    Exists so another program can ask instead of hardcoding a model name - the
+    same reason Arch's `llm-manager` exists. The answer is Chronoa's own:
+    a pin in its settings if there is one, otherwise the hardware tier, and the
+    report always names which of the two it was so a wrong answer is
+    attributable.
+    """
+    if args.task:
+        detail = models.explain(args.task)
+        if args.task not in models.tasks():
+            return EXIT_USAGE, [detail], {"task": args.task, "known": False}
+        return EXIT_OK, detail.splitlines(), {
+            "task": args.task,
+            "known": True,
+            "model": models.resolve(args.task),
+            "purpose": models.describe(args.task),
+        }
+
+    lines = [f"known tasks: {', '.join(models.tasks())}"]
+    payload = {}
+    for task in models.tasks():
+        lines.append("")
+        lines.extend(models.explain(task).splitlines())
+        payload[task] = models.resolve(task)
+    lines.append("")
+    lines.append(
+        "Pin one with `gsettings set org.shani.chronoa "
+        "<model|vision-model> <name>`, or leave it empty to let the hardware "
+        "tier decide."
+    )
+    return EXIT_OK, lines, payload
 
 
 def cmd_egress(args: argparse.Namespace) -> tuple:
@@ -965,6 +1000,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="actually dispatch; without this it is a dry run and nothing runs",
     )
 
+    model_parser = sub.add_parser(
+        "model",
+        parents=[common],
+        help="which model is used for each job (text, vision, transcribe)",
+    )
+    model_parser.add_argument(
+        "--task", help="report one task only, e.g. text, vision or transcribe"
+    )
     egress_parser = sub.add_parser(
         "egress",
         parents=[common],
@@ -1003,6 +1046,7 @@ def main(argv: Optional["list[str]"] = None) -> int:
         "forget": cmd_forget,
         "trigger": cmd_trigger,
         "egress": cmd_egress,
+        "model": cmd_model,
         "devices": cmd_devices,
     }
     if args.command == "ambient" and not (args.list or args.once or args.seconds):

@@ -544,3 +544,313 @@ class TestBrightnessSkill:
         monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path / "absent")
         out = brightness.run({"level": 50})
         assert "no backlight node" in out
+
+
+class TestModelFitSense:
+    """The configured model is picked by a fixed two-way tier.
+
+    `HardwareProfile.get_model()` returns qwen3:4b or qwen3:1.7b and nothing
+    else - it never asks what is installed, never checks the answer fits, and
+    says nothing if the model it names is absent. On a 31GB machine it still
+    selects the ~2.5GB model a 16GB machine gets.
+    """
+
+    def test_unreachable_ollama_is_unknown_not_an_empty_list(self, monkeypatch):
+        """The failure this guards.
+
+        `installed_models()` returning None means the question was not
+        answered. Collapsing that into [] would report "this machine has no
+        models", which is a different claim and is wrong precisely when
+        Ollama is installed but not running.
+        """
+        from shani_chronoa.senses import modelfit
+
+        assert modelfit.installed_models("http://127.0.0.1:1/") is None
+
+    def test_a_running_ollama_with_no_models_is_a_real_empty_list(self, monkeypatch):
+        import io
+        import json as _json
+        from shani_chronoa.senses import modelfit
+
+        payload = _json.dumps({"models": []}).encode()
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(
+            modelfit.urllib.request, "urlopen",
+            lambda url, timeout=None: _Resp(payload),
+        )
+        assert modelfit.installed_models("http://x/") == []
+
+    def test_real_reported_sizes_drive_the_fit_verdict(self):
+        from shani_chronoa.senses import modelfit
+
+        # 2.5 GB against a 1 GB budget must not pass; the same against 4 GB must.
+        two_gb = 2 * 1024 ** 3
+        assert modelfit._fits(two_gb, 1024) is False
+        assert modelfit._fits(two_gb, 4096) is True
+        assert modelfit._fits(None, 4096) is None, "unknown size must not be called a fit"
+
+    def test_a_model_present_locally_is_reported_with_its_real_size(self, monkeypatch):
+        import io
+        import json as _json
+        from shani_chronoa.senses import modelfit
+
+        payload = _json.dumps({"models": [
+            {"name": "qwen3:4b", "size": 2_600_000_000,
+             "details": {"family": "qwen3", "parameter_size": "4.0B"}},
+            {"name": "llama3:8b", "size": 5_200_000_000,
+             "details": {"family": "llama", "parameter_size": "8.0B"}},
+        ]}).encode()
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(
+            modelfit.urllib.request, "urlopen",
+            lambda url, timeout=None: _Resp(payload),
+        )
+        models = modelfit.installed_models("http://x/")
+        assert [m["name"] for m in models] == ["qwen3:4b", "llama3:8b"]
+        assert models[0]["size_bytes"] == 2_600_000_000
+        assert models[0]["family"] == "qwen3"
+
+    def test_a_configured_model_that_is_not_installed_is_flagged(
+        self, monkeypatch, chronoa_config, gsettings_env
+    ):
+        import io
+        import json as _json
+        from shani_chronoa.senses import modelfit
+
+        # The sense refuses before it inspects anything, so the consent
+        # gate has to be opened for this to be about the warning at all.
+        chronoa_config.set("modelfit-sense-enabled", "true")
+
+        # Only llama3:8b is installed, but the tier will have chosen qwen3:4b.
+        payload = _json.dumps({"models": [
+            {"name": "llama3:8b", "size": 5_200_000_000, "details": {}},
+        ]}).encode()
+
+        class _Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(
+            modelfit.urllib.request, "urlopen",
+            lambda url, timeout=None: _Resp(payload),
+        )
+        out = modelfit._SENSE.run({})
+        text = out.content if hasattr(out, "content") else str(out)
+        assert "WARNING" in text and "not among the installed models" in text
+
+
+class TestBackendAndSourceDetection:
+    """A binary on PATH is not the same as an engine that can serve.
+
+    vLLM and SGLang require a CUDA device. On a machine with only integrated
+    graphics they are present-and-useless, and listing them as available is how
+    a machine ends up "supporting vLLM" because a binary exists.
+    """
+
+    def test_a_gpu_only_engine_without_cuda_is_present_but_unusable(self, monkeypatch):
+        from shani_chronoa.senses import modelfit
+
+        monkeypatch.setattr(modelfit, "_has_cuda", lambda: False)
+        monkeypatch.setattr(
+            modelfit.shutil, "which",
+            lambda b: "/usr/bin/vllm" if b == "vllm" else None,
+        )
+        backends = {b["backend"]: b for b in modelfit.backends()}
+        assert backends["vllm"]["state"] == "present-unusable"
+        assert "no CUDA" in backends["vllm"]["detail"]
+
+    def test_the_same_engine_with_cuda_is_plainly_present(self, monkeypatch):
+        from shani_chronoa.senses import modelfit
+
+        monkeypatch.setattr(modelfit, "_has_cuda", lambda: True)
+        monkeypatch.setattr(
+            modelfit.shutil, "which",
+            lambda b: "/usr/bin/vllm" if b == "vllm" else None,
+        )
+        backends = {b["backend"]: b for b in modelfit.backends()}
+        assert backends["vllm"]["state"] == "present"
+
+    def test_a_cpu_engine_needs_no_cuda(self, monkeypatch):
+        from shani_chronoa.senses import modelfit
+
+        monkeypatch.setattr(modelfit, "_has_cuda", lambda: False)
+        monkeypatch.setattr(
+            modelfit.shutil, "which",
+            lambda b: "/usr/local/bin/ollama" if b == "ollama" else None,
+        )
+        backends = {b["backend"]: b for b in modelfit.backends()}
+        assert backends["ollama"]["state"] == "present"
+
+    def test_huggingface_is_a_source_not_a_backend(self):
+        """The distinction the research write-ups blur.
+
+        HF is where GGUF weights live; Ollama pulls from HF underneath. Listing
+        it beside vLLM would imply Chronoa needs it to fetch models, which it
+        does not.
+        """
+        from shani_chronoa.senses import modelfit
+
+        # _BACKENDS is the (name, binary, needs_cuda) table; backends() is
+        # what it produces. Index the table by position, not by key.
+        backend_names = {entry[0] for entry in modelfit._BACKENDS}
+        assert "huggingface" not in backend_names
+        assert "huggingface-cli" in {s[0] for s in modelfit._SOURCES}
+        # And the GPU-only ones are backends, not sources.
+        assert {"vllm", "sglang"} <= backend_names
+
+    def test_the_ollama_source_is_reported_from_its_store_directory(self, tmp_path, monkeypatch):
+        from shani_chronoa.senses import modelfit
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        sources = {s["source"]: s for s in modelfit.model_sources()}
+        assert sources["ollama"]["state"] == "absent"
+
+        (tmp_path / ".ollama" / "models").mkdir(parents=True)
+        sources = {s["source"]: s for s in modelfit.model_sources()}
+        assert sources["ollama"]["state"] == "present"
+
+
+class TestModelManager:
+    def test_both_actions_register(self):
+        from shani_chronoa.skills import discover_skills
+
+        _tools, handlers = discover_skills()
+        assert "recommend_model" in handlers
+        assert "install_model" in handlers
+
+    def test_install_refuses_to_pick_a_model_by_itself(self):
+        """The property that makes this safe to expose to a model.
+
+        A recommendation must not turn into gigabytes fetched on an
+        assumption, so `install_model` with no name does nothing.
+        """
+        from shani_chronoa.skills import model_manager
+
+        out = model_manager.install({})
+        assert "does not choose one for you" in out
+
+    def test_a_nonsense_model_name_is_refused_before_any_request(self):
+        from shani_chronoa.skills import model_manager
+
+        for bad in ("../etc/passwd", "Qwen3:8B", "a" * 300, ""):
+            out = model_manager.install({"name": bad})
+            assert "Nothing was installed" in out or "not a valid" in out or "No model name" in out
+
+    def test_recommend_sizes_against_available_memory_not_total(self, monkeypatch):
+        from shani_chronoa.senses import modelfit
+        from shani_chronoa.skills import model_manager
+
+        monkeypatch.setattr(
+            modelfit, "_meminfo",
+            lambda: {"total_mb": 32000, "available_mb": 1000},
+        )
+        monkeypatch.setattr(model_manager, "_meminfo", modelfit._meminfo, raising=False)
+        out = model_manager.recommend({})
+        assert "available" in out
+        # A 1 GB budget must not offer a 9 GB model.
+        assert "qwen3:14b" not in out
+
+    def test_a_model_the_budget_cannot_hold_is_reported_as_fitting_nothing(self, monkeypatch):
+        from shani_chronoa.senses import modelfit
+        from shani_chronoa.skills import model_manager
+
+        monkeypatch.setattr(
+            modelfit, "_meminfo",
+            lambda: {"total_mb": 2000, "available_mb": 100},
+        )
+        monkeypatch.setattr(model_manager, "_meminfo", modelfit._meminfo, raising=False)
+        out = model_manager.recommend({})
+        assert "No model in the catalogue fits" in out
+
+    def test_recommend_says_its_sizes_are_approximate(self):
+        from shani_chronoa.skills import model_manager
+
+        out = model_manager.recommend({})
+        assert "approximate" in out, "a hardcoded table must not look measured"
+
+
+class TestTaskModelResolution:
+    """The idea is llm-manager's; the shape is Chronoa's own.
+
+    Arch's `llm-manager` keeps a flat task->model INI. Chronoa needs no second
+    config file because it already has per-task pins in its own settings layer,
+    each falling back to its own hardware tier. What was missing was the
+    *lookup* - one place that answers "which model for this job" and says
+    whether the answer came from the user or from the tier.
+    """
+
+    def test_the_three_real_jobs_resolve(self):
+        from shani_chronoa import models
+
+        assert models.tasks() == ["text", "transcribe", "vision"]
+        for task in models.tasks():
+            assert models.resolve(task), f"{task} resolved to nothing"
+            assert models.describe(task), f"{task} has no stated purpose"
+
+    def test_an_unknown_task_is_none_not_the_chat_model(self, monkeypatch):
+        """A typo must say so, not quietly answer with the text model."""
+        from shani_chronoa import models
+
+        assert models.resolve("textt") is None
+        out = models.explain("textt")
+        assert "not a task Chronoa resolves" in out
+        assert "text" in out  # it lists what is known
+
+    def test_a_user_pin_beats_the_hardware_tier(self, monkeypatch, chronoa_config):
+        from shani_chronoa import models
+
+        chronoa_config.set("model", "qwen3:30b-a3b")
+        assert models.resolve("text", config=chronoa_config) == "qwen3:30b-a3b"
+        explain = models.explain("text", config=chronoa_config)
+        assert "which wins" in explain, "the source of the answer must be named"
+
+    def test_an_empty_pin_falls_through_to_the_tier(self, chronoa_config):
+        from shani_chronoa import models
+
+        chronoa_config.set("model", "")
+        resolved = models.resolve("text", config=chronoa_config)
+        assert resolved == "qwen3:4b" or resolved == "qwen3:1.7b"
+        assert "hardware tier decides" in models.explain("text", config=chronoa_config)
+
+    def test_whitespace_only_a_pin_is_not_a_pin(self, chronoa_config):
+        """A settings field left as spaces is not a user preference."""
+        from shani_chronoa import models
+
+        chronoa_config.set("model", "   ")
+        resolved = models.resolve("text", config=chronoa_config)
+        assert resolved in ("qwen3:4b", "qwen3:1.7b")
+
+    def test_transcribe_is_flagged_as_not_an_ollama_model(self, chronoa_config):
+        """Whisper is not pulled with `ollama pull`, and saying so prevents a
+        user chasing a model that was never going to be there."""
+        from shani_chronoa import models
+
+        assert "transcribe" in models.NON_OLLAMA_TASKS
+        assert "not an Ollama model" in models.explain("transcribe", config=chronoa_config)
+
+    def test_the_vision_pin_is_separate_from_the_text_pin(self, monkeypatch, chronoa_config):
+        """They are different jobs with different requirements, and conflating
+        them is the mistake the two separate settings exist to prevent."""
+        from shani_chronoa import models
+
+        chronoa_config.set("model", "qwen3:4b")
+        chronoa_config.set("vision-model", "qwen3-vl:2b")
+        assert models.resolve("text", config=chronoa_config) == "qwen3:4b"
+        assert models.resolve("vision", config=chronoa_config) == "qwen3-vl:2b"

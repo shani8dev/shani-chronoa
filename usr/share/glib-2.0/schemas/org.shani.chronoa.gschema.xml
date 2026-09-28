@@ -201,6 +201,11 @@
       <summary>Let Chronoa read the machine's hardware monitoring sensors</summary>
       <description>When true, Chronoa may read the kernel's hwmon class - fan speeds in RPM, and the temperature, voltage, current and power readings each driver exposes, with each chip identified by its driver name. Off by default. Read-only, and it complements the thermal sense rather than repeating it: the thermal zones report the CPU and board, while hwmon is where fan RPM, SSD temperature, WiFi chip temperature and battery voltage live. Slots a driver declares but does not populate are reported as unpopulated rather than as a reading, because those slots read back as zero.</description>
     </key>
+    <key name="modelfit-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa check which language models this machine can actually run</summary>
+      <description>When true, Chronoa may ask the local Ollama which models are installed, compare their on-disk size against this machine's available memory, and report whether the model currently configured is present and fits. Off by default. Read-only: it reports and recommends, and never downloads, loads, unloads or changes a model. This exists because the configured model is otherwise chosen by a two-way hardware tier that never checks what is installed or whether it fits - on a 31GB machine that still selects the same 2.5GB model it would choose on a 16GB one, and reports nothing if that model is not present at all.</description>
+    </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>
