@@ -96,6 +96,13 @@ def applied(tmp_path_factory, compiled_schema_dir):
     # set()/get_bool() silently no-ops. That made a sense the user had enabled
     # by hand look like the bulk action had switched it back off.
     env["GSETTINGS_SCHEMA_DIR"] = str(compiled_schema_dir)
+    # A keyfile backend, for the same reason the sibling harness sets one: there
+    # is no session bus on a runner, and dconf writes fail SILENTLY without one.
+    # That is what this file was still hitting - the hand-enabled value was
+    # written and simply never landed, so the test reported that the bulk action
+    # had switched it back off. Reading it locally hid it, because a dev machine
+    # has the bus that makes dconf work.
+    env["GSETTINGS_BACKEND"] = "keyfile"
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS],
         capture_output=True, text=True, timeout=120, env=env, cwd=str(work),
