@@ -35,6 +35,7 @@ from shani_chronoa import argfile, verification
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +153,8 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
     try:
         exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
         result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
-        _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)
         if exit_code != 0:
+            _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
             return output or f"Tool '{name}' failed with exit code {exit_code}"
         # The skill's own string is its account of what it did, not evidence
@@ -166,6 +167,15 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         except Exception as e:  # noqa: BLE001 - verification must never kill the action
             logger.warning(f"Post-condition for '{name}' raised: {e}")
             checked = verification.Result(verification.Verdict.UNVERIFIED, str(e))
+        # Recorded after verification, not before: a record written on the way
+        # out cannot carry a verdict that does not exist yet, which left a
+        # failed action in the audit log looking exactly like a successful one.
+        # Do not move this call back up.
+        _TRACKER.record_call(
+            name, arguments, result, duration_ms,
+            origin=origin, verdict=checked.verdict.value,
+            evidence=checked.evidence,
+        )
         if checked.verdict is verification.Verdict.FAILED:
             logger.error(f"Tool '{name}' reported success but verification failed: {checked.evidence}")
         return output + checked.suffix
@@ -179,3 +189,39 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         # covers a payload that was built but never dispatched.
         if payload is not None:
             payload.cleanup()
+
+
+class ToolOutcome(NamedTuple):
+    """A dispatch result with the verdict attached, for callers that act on it.
+
+    `execute_tool` returns a bare string because that is what an LLM reads, and
+    prose is the right shape for that. It is the wrong shape for a caller
+    deciding whether to *record a success* - the verdict is only recoverable
+    from the string by matching the marker text, and a caller that forgets is
+    indistinguishable from one that never checked.
+    """
+
+    text: str
+    verdict: verification.Verdict
+    evidence: str = ""
+
+
+def execute_tool_outcome(
+    name: str,
+    arguments: dict,
+    by_reference: bool = False,
+    origin: str = ORIGIN_USER,
+) -> ToolOutcome:
+    """`execute_tool`, with the verification verdict as data rather than prose.
+
+    The verdict is recovered from the returned string via
+    `verification.verdict_from_text`, which matches the marker
+    `verification.Result.suffix` emits - so this stays correct if that suffix
+    changes, rather than hardcoding a second copy of the string here.
+    """
+    text = execute_tool(name, arguments, by_reference=by_reference, origin=origin)
+    verdict = verification.verdict_from_text(text)
+    evidence = ""
+    if verdict is verification.Verdict.FAILED:
+        evidence = text.split(verification.FAILED_MARKER, 1)[-1].lstrip(": ").rstrip(")")
+    return ToolOutcome(text=text, verdict=verdict, evidence=evidence)

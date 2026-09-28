@@ -12,6 +12,7 @@ import time
 
 import pytest
 
+from shani_chronoa import verification
 from shani_chronoa.senses import Percept, SENSITIVITY_PRIVATE
 from shani_chronoa.triggers import (
     MATCH_SUBSTRING,
@@ -204,3 +205,107 @@ class TestDryRun:
         engine.store().add(_rule())
         engine.evaluate(_percept("that was the doorbell"))
         assert calls, "the normal path stopped dispatching"
+
+
+class TestAFailedActionDoesNotGetToLookSuccessful:
+    """The gap: `execute_tool` returns a string, and the FAILED verdict inside
+    it was only ever prose. The engine took "no exception" as success, so a
+    rule whose actuator ran and did nothing was reported fired and then parked
+    in a cooldown window - one silent failure per rule per window, with nothing
+    in the FireResult saying otherwise.
+    """
+
+    @pytest.fixture
+    def failing_engine(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        calls = []
+
+        def dispatch(name, args, **kw):
+            calls.append(name)
+            return verification.Result(
+                verification.Verdict.FAILED, "the display never changed"
+            )
+
+        engine = TriggerEngine(config_factory=FakeConfig, dispatch=dispatch)
+        return engine, calls
+
+    def test_a_failed_post_condition_is_not_reported_as_fired(self, failing_engine):
+        engine, _ = failing_engine
+        engine.store().add(_rule())
+        (result,) = engine.evaluate(_percept("the doorbell is ringing"))
+
+        assert result.fired is False, (
+            "the actuator ran but its post-condition says the effect is not "
+            "there; reporting this as fired is the bug"
+        )
+        assert result.verdict is verification.Verdict.FAILED
+        assert "the display never changed" in result.reason
+
+    def test_a_failed_action_does_not_consume_the_cooldown(self, failing_engine):
+        """Otherwise the rule goes quiet for its whole cooldown having done
+        nothing, and one transient failure looks exactly like success."""
+        engine, _ = failing_engine
+        engine.store().add(_rule())
+        rule = engine.store().all()[0]
+        assert rule.last_fired_at is None
+
+        engine.evaluate(_percept("the doorbell is ringing"), now=1000.0)
+        assert rule.last_fired_at is None, (
+            "a failed action must not start the cooldown clock"
+        )
+        # Still due, so the next matching percept retries rather than the rule
+        # silently disabling itself.
+        assert rule.due(1000.1) is True
+
+    def test_the_failing_actuator_is_still_retried_on_the_next_percept(self, failing_engine):
+        engine, calls = failing_engine
+        engine.store().add(_rule())
+        engine.evaluate(_percept("the doorbell is ringing"), now=1000.0)
+        engine.evaluate(_percept("the doorbell is ringing"), now=1001.0)
+        assert len(calls) == 2, "a failure must not suppress the retry"
+
+    def test_a_successful_action_still_records_and_still_cools_down(self, tmp_path, monkeypatch):
+        """The fix must not have turned every rule into a retry loop."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        engine = TriggerEngine(
+            config_factory=FakeConfig,
+            dispatch=lambda name, args, **kw: verification.Result(
+                verification.Verdict.VERIFIED, "the display is at 40%"
+            ),
+        )
+        engine.store().add(_rule())
+        rule = engine.store().all()[0]
+
+        (result,) = engine.evaluate(_percept("the doorbell is ringing"), now=1000.0)
+        assert result.fired is True
+        assert result.verdict is verification.Verdict.VERIFIED
+        assert rule.last_fired_at == 1000.0
+        assert rule.due(1001.0) is False, "cooldown must still apply on success"
+
+    def test_a_plain_string_dispatch_is_still_accepted(self, tmp_path, monkeypatch):
+        """`dispatch` is a public injection seam and existing callers pass a
+        lambda returning None or a string. Not breaking them is the point."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        calls = []
+        engine = TriggerEngine(
+            config_factory=FakeConfig,
+            dispatch=lambda name, args, **kw: calls.append(name),
+        )
+        engine.store().add(_rule())
+        (result,) = engine.evaluate(_percept("the doorbell is ringing"), now=1000.0)
+        assert result.fired is True
+        assert calls == ["notify"]
+
+    def test_a_dispatch_returning_the_failed_marker_is_still_caught(self, tmp_path, monkeypatch):
+        """A dispatch that returns a raw string carrying the FAILED marker - the
+        shape `execute_tool` itself returns - must not be read as success."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        engine = TriggerEngine(
+            config_factory=FakeConfig,
+            dispatch=lambda name, args, **kw: "Done! (VERIFICATION FAILED: nothing changed)",
+        )
+        engine.store().add(_rule())
+        rule = engine.store().all()[0]
+        (result,) = engine.evaluate(_percept("the doorbell is ringing"), now=1000.0)
+        assert result.fired is False
+        assert rule.last_fired_at is None

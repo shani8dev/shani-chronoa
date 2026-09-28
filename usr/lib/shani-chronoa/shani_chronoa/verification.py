@@ -66,6 +66,32 @@ class Result(NamedTuple):
         return " (unverified - this action reports success but nothing observed it)"
 
 
+FAILED_MARKER = "VERIFICATION FAILED"
+
+
+def verdict_from_text(text: str) -> Verdict:
+    """Recover a verdict from a dispatch result string.
+
+    The suffix above is the only place that string is produced, so recognising
+    it here is not string-matching a stranger's prose - it is the reverse of a
+    function defined a few lines above.
+
+    It exists because the trigger engine dispatches through the same plain
+    `-> str` interface every other caller uses, and that interface loses the
+    verdict. Without this, a rule whose actuator failed its post-condition is
+    indistinguishable from one that worked, and gets to sit in a cooldown
+    window having done nothing.
+
+    UNVERIFIED rather than VERIFIED when the text says nothing: an action that
+    merely failed to declare a post-condition has not been shown to have
+    worked, but it also has not been shown to have failed, and treating that as
+    success is what this whole module exists to avoid.
+    """
+    if FAILED_MARKER in (text or ""):
+        return Verdict.FAILED
+    return Verdict.UNVERIFIED
+
+
 def post_condition_for(handler_module: str) -> Optional[object]:
     """The post-condition a module declares, if any.
 

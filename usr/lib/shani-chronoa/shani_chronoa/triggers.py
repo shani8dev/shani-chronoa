@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
+from shani_chronoa import verification
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import Percept
 from shani_chronoa.skills import discover_skills
@@ -532,18 +533,28 @@ class FireResult:
     are values so the caller keeps going and can see what did not run.
     """
 
-    __slots__ = ("rule", "fired", "denied", "reason")
+    __slots__ = ("rule", "fired", "denied", "reason", "verdict")
 
-    def __init__(self, rule, fired: bool, denied: bool = False, reason: str = "") -> None:
+    def __init__(
+        self,
+        rule,
+        fired: bool,
+        denied: bool = False,
+        reason: str = "",
+        verdict: Optional[verification.Verdict] = None,
+    ) -> None:
         self.rule = rule
         self.fired = fired
         self.denied = denied
         self.reason = reason
+        # None when no verdict applies: the rule was denied, or only dry-run.
+        self.verdict = verdict
 
     def __repr__(self) -> str:
         return (
             f"FireResult(rule={self.rule.name!r}, fired={self.fired}, "
-            f"denied={self.denied}, reason={self.reason!r})"
+            f"denied={self.denied}, reason={self.reason!r}, "
+            f"verdict={self.verdict})"
         )
 
 
@@ -558,7 +569,6 @@ class TriggerEngine:
     """
 
     def __init__(self, store=None, config_factory=None, dispatch=None) -> None:
-        from shani_chronoa.config import ChronoaConfig
         from shani_chronoa.tools import execute_tool
 
         self._store = store if store is not None else RuleStore()
@@ -618,14 +628,32 @@ class TriggerEngine:
                 # origin= is what makes this distinguishable in the audit log
                 # from a person asking. An unattended action nobody can
                 # distinguish from a user action is not auditable.
-                self._dispatch(rule.actuator, dict(rule.arguments), origin=_ORIGIN)
+                outcome = self._dispatch(rule.actuator, dict(rule.arguments), origin=_ORIGIN)
             except Exception as exc:  # noqa: BLE001 - one bad rule must not stop the rest
                 results.append(
                     FireResult(rule, fired=False, reason=f"{type(exc).__name__}: {exc}")
                 )
                 continue
+            # An injected dispatch may still be the plain string-returning
+            # seam, so accept either shape rather than assuming.
+            text = getattr(outcome, "text", outcome)
+            verdict = getattr(
+                outcome, "verdict", verification.verdict_from_text(text or "")
+            )
+            if verdict is verification.Verdict.FAILED:
+                # The actuator ran and its post-condition says the effect is
+                # not there. Cooldown is deliberately NOT started: the rule
+                # stays due so the next matching percept retries, and the
+                # failure is reported rather than being spent silently.
+                results.append(FireResult(
+                    rule, fired=False,
+                    reason=f"actuator ran but verification failed: "
+                           f"{getattr(outcome, 'evidence', '') or 'no evidence'}",
+                    verdict=verdict,
+                ))
+                continue
             rule.last_fired_at = moment
-            results.append(FireResult(rule, fired=True))
+            results.append(FireResult(rule, fired=True, verdict=verdict))
 
         return results
 

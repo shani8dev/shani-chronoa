@@ -69,6 +69,8 @@ class ToolCallRecord:
         duration_ms: float,
         timestamp: Optional[datetime] = None,
         origin: str = ORIGIN_USER,
+        verdict: Optional[str] = None,
+        evidence: str = "",
     ):
         self.tool_name = tool_name
         self.args = args
@@ -76,6 +78,17 @@ class ToolCallRecord:
         self.duration_ms = duration_ms
         self.timestamp = timestamp or datetime.now(timezone.utc)
         self.origin = origin
+        # "verified" / "failed" / "unverified", or None when the call never
+        # reached verification at all (non-zero exit, or an exception). The
+        # result string says this in prose too, but an audit trail has to be
+        # sortable, and "which of my actions actually took effect" is the
+        # first question asked of one.
+        self.verdict = verdict
+        # What verification actually observed. `result` holds the skill's own
+        # account, which for a failed action is the confident claim that it
+        # worked; without the evidence here the log reads "All done
+        # successfully." next to verdict=failed and never says why.
+        self.evidence = evidence
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,6 +98,8 @@ class ToolCallRecord:
             "result": self.result,
             "duration_ms": self.duration_ms,
             "origin": self.origin,
+            "verdict": self.verdict,
+            "evidence": self.evidence,
         }
 
     def to_log_dict(self) -> dict[str, Any]:
@@ -114,15 +129,22 @@ class ToolTracker:
         result: Any,
         duration_ms: float,
         origin: str = ORIGIN_USER,
+        verdict: Optional[str] = None,
+        evidence: str = "",
     ) -> ToolCallRecord:
         """Record a tool call.
 
         `origin` distinguishes who asked for the call. Every caller in the
         shipped tree defaults to `ORIGIN_USER`; only the trigger engine
         passes `ORIGIN_UNATTENDED`, which is the whole point of the field.
+
+        `verdict` is verification's conclusion, passed by callers that have
+        one. It defaults to None because a call that died before verification
+        has no verdict, and inventing one would be worse than recording none.
         """
         record = ToolCallRecord(
-            tool_name, args, result, duration_ms, origin=origin
+            tool_name, args, result, duration_ms, origin=origin,
+            verdict=verdict, evidence=evidence,
         )
         self._calls.append(record)
         self._write_to_log(record)
@@ -143,7 +165,8 @@ class ToolTracker:
         with open(output_path, "w", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(
-                ["timestamp", "tool_name", "args", "result", "duration_ms", "origin"]
+                ["timestamp", "tool_name", "args", "result", "duration_ms",
+                 "origin", "verdict", "evidence"]
             )
             for record in self._calls:
                 writer.writerow([
@@ -153,6 +176,8 @@ class ToolTracker:
                     json.dumps(record.result, default=repr),
                     record.duration_ms,
                     record.origin,
+                    record.verdict or "",
+                    record.evidence,
                 ])
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 
