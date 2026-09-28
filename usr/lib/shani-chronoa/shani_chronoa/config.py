@@ -92,6 +92,7 @@ _SENSE_CONSENT_KEYS = {
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
     "monitors": "monitors-sense-enabled",
+    "printing": "printing-sense-enabled",
     "smart": "smart-sense-enabled",
 }
 

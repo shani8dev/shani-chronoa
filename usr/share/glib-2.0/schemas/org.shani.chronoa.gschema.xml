@@ -176,6 +176,11 @@
       <summary>Let Chronoa read the connected monitors</summary>
       <description>When true, Chronoa may read which displays are connected, on which connector, at what mode, and - where the connector exposes EDID - the manufacturer, model name, serial number and physical size. On by default because it reads the machine, not you, and never leaves it. A connected monitor with no EDID is reported as connected with its identity undetermined, which is normal for a laptop panel over eDP.</description>
     </key>
+    <key name="printing-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read which printers and scanners this machine has</summary>
+      <description>When true, Chronoa may read which printers are configured in CUPS, which is the default destination, and which scanners the SANE backends detect. Off by default because a printer and scanner inventory describes the physical peripherals someone has chosen to connect, which is a step further than reading the machine's own specifications. It never prints or scans anything - only the two inventories are read - so enabling it has no physical effect. A missing cups or sane package is reported as the missing package it is, not as an absence of printers or scanners.</description>
+    </key>
     <key name="cpu-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read processor and load state</summary>

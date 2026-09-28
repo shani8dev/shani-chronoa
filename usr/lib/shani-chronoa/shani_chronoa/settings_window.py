@@ -166,6 +166,10 @@ SENSE_LABELS = {
         "Monitors",
         "Which displays are connected, at what mode, and which make they are",
     ),
+    "printing": (
+        "Printers and scanners",
+        "Which printers are set up, and which scanners are plugged in",
+    ),
 }
 
 
@@ -203,6 +207,9 @@ SENSE_CATEGORIES = [
      "Firmware security, connected hardware, which software can act as "
      "administrator, and what is already using your camera",
      ["security", "devices", "privilege", "contention"]),
+    ("Printers and scanners",
+     "Whether anything is set up to print, and anything is there to scan",
+     ["printing"]),
     ("Model capability",
      "What this machine can run, and whether the configured model fits",
      ["modelfit"]),

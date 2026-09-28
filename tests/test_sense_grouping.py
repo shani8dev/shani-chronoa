@@ -68,7 +68,7 @@ class TestTheGroupingCoversTheRegistryExactly:
         assert [t for t, _d, _n in SENSE_CATEGORIES] == [
             "Talking to Chronoa", "Looking at things", "Getting work done",
             "The screen", "Network and wireless", "The machine itself",
-            "Security and privacy", "Model capability",
+            "Security and privacy", "Printers and scanners", "Model capability",
         ]
 
     def test_no_group_is_empty(self):
