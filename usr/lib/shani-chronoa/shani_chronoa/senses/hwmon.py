@@ -99,6 +99,13 @@ _SCHEMA = {
 }
 
 
+def _read_int(path: Path) -> Optional[int]:
+    try:
+        return int(path.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def _read_text(path: Path) -> Optional[str]:
     try:
         return path.read_text().strip()
@@ -219,6 +226,86 @@ def read_zones() -> list:
 
 
 
+def read_pwm(chips: List[dict]) -> List[dict]:
+    """Fan PWM outputs, read only.
+
+    `pwmN` is the commanded duty cycle as 0-255 and `pwmN_enable` says whether
+    anything is actually applying it. Reading the pair is useful because the
+    two can disagree: a commanded 0 with the fan still spinning means the
+    command is being ignored, which is a fault worth seeing and is invisible
+    from the tachometer alone.
+
+    The meaning of `pwmN_enable` is a convention rather than a standard. The
+    kernel's own driver documentation has `dell-smm-hwmon` describing 1 as
+    "BIOS fan control disabled" and 2 as re-enabling it, while `g762` calls 2
+    "closed-loop mode" - so the number is reported verbatim and the reading is
+    labelled as the convention it is.
+
+    Nothing here writes. Writing a PWM value is a standing policy decision with
+    physical consequences, not a bounded action, and it belongs to the machine's
+    firmware unless a human has deliberately taken it over.
+    """
+    out: List[dict] = []
+    for chip in chips:
+        # `chip` is the driver's own name; `path` is the hwmonN directory the
+        # channels were read from. Using the name here would look for a
+        # directory called "thinkpad" and silently find no PWM at all.
+        directory = Path(chip["path"])
+        try:
+            entries = sorted(p.name for p in directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.startswith("pwm") or not entry[3:].isdigit():
+                continue
+            index = entry[3:]
+            value = _read_int(directory / entry)
+            if value is None:
+                continue
+            record: Dict[str, object] = {
+                "chip": chip["chip"],
+                "channel": f"pwm{index}",
+                "value": value,
+            }
+            enable = _read_int(directory / f"pwm{index}_enable")
+            record["enable"] = enable
+            record["mode"] = _PWM_ENABLE_MEANING.get(enable, "unknown")
+            record["duty_pct"] = round(100.0 * value / 255.0, 1)
+            out.append(record)
+    return out
+
+
+# The de-facto reading of pwmN_enable. Not a kernel guarantee: see read_pwm().
+_PWM_ENABLE_MEANING = {
+    0: "no speed control, fan runs at full",
+    1: "manual",
+    2: "automatic, closed loop",
+}
+
+
+def _pwm_lines(pwm: List[dict], fans: List[dict]) -> List[str]:
+    by_chip: Dict[str, Dict[str, int]] = {}
+    for fan in fans:
+        by_chip.setdefault(fan["chip"], {})[fan["channel"]] = fan["rpm"]
+
+    lines: List[str] = []
+    for record in pwm:
+        detail = (
+            f"{record['duty_pct']:g}% ({record['value']}/255), "
+            f"enable {record['enable']} - {record['mode']} "
+            f"(driver-specific)"
+        )
+        line = f"  {record['chip']} {record['channel']}: {detail}"
+        # A commanded stop the fan is ignoring is a fault, and reporting only
+        # the duty cycle or only the tachometer would hide it.
+        for channel, rpm in by_chip.get(record["chip"], {}).items():
+            if record["value"] == 0 and rpm > 0:
+                line += (f" - but {channel} is still spinning at {rpm} RPM, "
+                         f"so the two disagree and the stop is not taking effect")
+        lines.append(line)
+    return lines
+
+
 def fans_from(chips: List[dict]) -> List[dict]:
     """Fan channels, derived from the chip walk rather than a second one.
 
@@ -317,6 +404,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
     chips = read_chips()
     zones = read_zones()
     fans = fans_from(chips)
+    pwm = read_pwm(chips)
 
     if not chips and not zones:
         return (
@@ -404,6 +492,12 @@ def _run(arguments: dict) -> Union[str, Percept]:
             f"cooler(s) reported by liquidctl"
         )
 
+    if pwm:
+        lines.append(
+            f"fan control: {len(pwm)} PWM output(s) exposed (read only)"
+        )
+        lines.extend(_pwm_lines(pwm, fans))
+
     if zones:
         hottest = max(
             (z for z in zones if z.get("celsius") is not None),
@@ -431,6 +525,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
             "unpopulated": total_unpopulated,
             "zones": len(zones),
             "fans": len(fans),
+            "pwm_channels": len(pwm),
             "stopped_fans": stopped,
             "coolers": len(coolers),
             "liquidctl_present": liquidctl_present,

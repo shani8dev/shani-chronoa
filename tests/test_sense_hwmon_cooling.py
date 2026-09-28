@@ -218,3 +218,81 @@ class TestDegradation:
         monkeypatch.setattr(hwmon.ChronoaConfig, "sense_allowed",
                             lambda self, s: False)
         assert isinstance(hwmon._run({}), str)
+
+
+def _chip_with_pwm(root, driver="thinkpad", pwm=255, enable=2, fans=None):
+    """A chip exposing fan PWM control, the way a laptop's EC bridge does."""
+    chip = _chip(root, driver, fans=fans or {1: 3300})
+    (chip / "pwm1").write_text(f"{pwm}\n")
+    (chip / "pwm1_enable").write_text(f"{enable}\n")
+    return chip
+
+
+class TestPwmIsReadNeverWritten:
+    """Fan control is readable even though Chronoa must never write it.
+
+    `pwm1` answers a question nobody can answer any other way - is this
+    machine's firmware driving the fans, or has something taken manual control?
+    - and reading it costs nothing. Writing it is a different proposition
+    entirely: `fancontrol` is a standing policy rather than a bounded action,
+    Arch's own man page for it warns about burning the CPU, and its config
+    refers to hwmon indices that are assigned at boot and are not stable across
+    reboots. So the read half is in the sense and the write half is not
+    anywhere in the codebase.
+    """
+
+    def test_the_duty_cycle_is_reported_as_a_percentage(self, hwmon_root, granted):
+        _chip_with_pwm(hwmon_root, pwm=128, enable=1)
+        content = hwmon._run({}).content
+        assert "pwm1" in content
+        assert "50.2%" in content, (
+            "128 of 255 is 50.196% and was not reported as a duty cycle")
+
+    def test_the_enable_value_is_reported_raw(self, hwmon_root, granted):
+        """The 0/1/2 reading is a de-facto convention, not a standard: the
+        kernel's own driver docs have dell-smm-hwmon calling 1 'BIOS control
+        disabled' and g762 calling 2 'closed-loop mode'. So the number is
+        reported and the interpretation is marked as the convention it is."""
+        _chip_with_pwm(hwmon_root, enable=2)
+        content = hwmon._run({}).content
+        assert "enable 2" in content
+        assert "driver-specific" in content
+
+    def test_a_full_duty_cycle_is_not_reported_as_a_stalled_fan(self, hwmon_root, granted):
+        _chip_with_pwm(hwmon_root, pwm=255, enable=2, fans={1: 3300})
+        content = hwmon._run({}).content
+        assert "100%" in content
+        assert "3300 RPM" in content
+        assert "stopped" not in content
+
+    def test_a_zero_duty_cycle_with_the_fan_still_spinning_is_flagged(
+        self, hwmon_root, granted
+    ):
+        """The two disagree, and both are reported. A commanded stop that the
+        fan ignores is a real fault; reporting either half alone would hide it.
+        """
+        _chip_with_pwm(hwmon_root, pwm=0, enable=1, fans={1: 3300})
+        content = hwmon._run({}).content
+        assert "0%" in content
+        assert "3300 RPM" in content
+        assert "still spinning" in content or "disagree" in content
+
+    def test_a_chip_with_no_pwm_nodes_says_nothing_about_control(self, hwmon_root, granted):
+        _chip(hwmon_root, "bat0", fans={})
+        content = hwmon._run({}).content
+        assert "pwm" not in content.lower(), (
+            "a chip with no PWM node was given an opinion about fan control"
+        )
+
+    def test_the_sense_never_writes_to_a_pwm_node(self, hwmon_root, granted):
+        import inspect
+        source = inspect.getsource(hwmon)
+        for forbidden in ('"w"', "'w'", r"open\(.*pwm", "write_text"):
+            assert not __import__("re").search(forbidden, source), (
+                f"the hwmon sense opened a pwm node for writing: {forbidden}"
+            )
+
+    def test_pwm_presence_is_in_the_metadata(self, hwmon_root, granted):
+        _chip_with_pwm(hwmon_root)
+        metadata = hwmon._run({}).metadata
+        assert metadata["pwm_channels"] == 1
