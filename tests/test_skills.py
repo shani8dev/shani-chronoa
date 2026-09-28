@@ -6,6 +6,8 @@ Each test fails for a named defect in the current code (failing-first / RED phas
 import asyncio
 import inspect
 import json
+import os
+import subprocess
 import textwrap
 import types
 
@@ -455,70 +457,166 @@ class TestWebSearchPrivacy:
 
 
 class TestTimerNotifications:
-    """Timer completion must respect the notification-enabled setting and run without GLib."""
+    """What the timer's notification says, and when it stays silent.
 
-    def _capture_timer(self, monkeypatch):
-        captured: dict = {}
+    These two assertions predate the move off `threading.Timer` and caught a
+    real regression in it: the first systemd version sent a fixed
+    "A timer finished" with no label and no consent check, so a user who had
+    turned notifications off still got one, and one that did not say which
+    timer went off was no use to them. The mechanism is `systemd-run` now, so
+    the payload is inspected rather than a thread callback invoked.
+    """
 
-        def _fake_timer(interval, function):
-            captured["interval"] = interval
-            captured["function"] = function
-            timer = types.SimpleNamespace(
-                daemon=False, start=lambda: captured.setdefault("started", True)
-            )
-            captured["timer"] = timer
-            return timer
+    def _payload(self, monkeypatch, label="pasta", returncode=0):
+        captured = {}
 
-        monkeypatch.setattr("shani_chronoa.skills.timer.threading.Timer", _fake_timer)
-        return captured
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(argv, returncode, "", "")
 
-    def test_timer_notify_send_respects_notification_enabled(
+        monkeypatch.setattr("shani_chronoa.skills.timer.subprocess.run", fake_run)
+        monkeypatch.setattr(
+            "shani_chronoa.skills.timer._systemd_available", lambda: True)
+        from shani_chronoa.skills.timer import _run
+        _run({"seconds": 60, "label": label})
+        return captured["argv"][-1]
+
+    def test_the_notification_says_which_timer_fired(self, monkeypatch):
+        # When: a labelled timer is scheduled
+        payload = self._payload(monkeypatch, label="pasta")
+        # Then: the payload names it
+        assert "pasta" in payload, (
+            "the notification does not say which timer finished, so a user "
+            "with two pending cannot tell which one went off"
+        )
+
+    def test_the_notification_honours_notification_enabled(
         self, mock_notify_send, chronoa_config, monkeypatch
     ):
         # Given: desktop notifications are disabled
         chronoa_config.set("notification-enabled", "false")
-        captured = self._capture_timer(monkeypatch)
-        from shani_chronoa.skills.timer import _run
-        # When: a timer is set and fires
-        _run({"seconds": 60, "label": "pasta"})
-        captured["function"]()
-        # Then: notify-send must not be invoked
-        log = mock_notify_send.read_text() if mock_notify_send.exists() else ""
-        assert log == ""
+        # When: a timer is scheduled and fires
+        payload = self._payload(monkeypatch)
+        # Then: the payload checks the setting instead of sending regardless
+        assert "notification-enabled" in payload, (
+            "the payload sends a notification without checking "
+            "notification-enabled, so a user who turned them off still gets one"
+        )
 
-    def test_timer_notify_send_fires_when_enabled(
-        self, mock_notify_send, chronoa_config, monkeypatch
+    def test_a_label_cannot_break_out_of_its_shell_argument(
+        self, monkeypatch, tmp_path
     ):
-        # Given: desktop notifications are enabled
-        chronoa_config.set("notification-enabled", "true")
-        captured = self._capture_timer(monkeypatch)
-        from shani_chronoa.skills.timer import _run
-        # When: a timer is set and fires
-        _run({"seconds": 60, "label": "pasta"})
-        captured["function"]()
-        # Then: notify-send is invoked with the timer label
-        log = mock_notify_send.read_text() if mock_notify_send.exists() else ""
-        assert "pasta" in log
+        # The label is model-supplied and lands inside a quoted shell word, so
+        # this runs the real payload through a real shell and checks for a file
+        # the injected command would create. Asserting the text is absent would
+        # be a test that cannot fail - the label is *supposed* to still be there.
+        #
+        # `timer.subprocess` IS the `subprocess` module, so the fake installed
+        # by `_payload` would also swallow this call and nothing would run -
+        # leaving the marker check passing without ever executing a shell.
+        real_run = subprocess.run
+        marker = tmp_path / "pwned"
+        payload = self._payload(monkeypatch, label=f"'; touch {marker}; '")
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        log = tmp_path / "sent.log"
+        for name, body in {
+            "gsettings": "echo true",
+            "notify-send": f'printf "%s\\n" "$@" >> {log}',
+        }.items():
+            script = fake_bin / name
+            script.write_text(f"#!/bin/sh\n{body}\n")
+            script.chmod(0o755)
+        real_run(
+            ["/bin/sh", "-c", payload],
+            env=dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}"),
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert not marker.exists(), (
+            "a model-supplied label escaped its shell quoting and ran a command"
+        )
+        sent = log.read_text() if log.exists() else ""
+        assert "touch" in sent, (
+            "the label did not survive quoting intact, so the notification would "
+            "read as mangled"
+        )
 
-    def test_timer_schedules_daemon_thread(self, monkeypatch):
-        # Given: a valid integer duration
-        captured = self._capture_timer(monkeypatch)
+    def test_this_injection_test_can_actually_fail(self, monkeypatch, tmp_path):
+        """A negative control that cannot fail is not a control. The payload
+        above is checked by asserting a file was NOT created, so without this
+        the whole test passes even if the escaping is deleted."""
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        (fake_bin / "gsettings").write_text("#!/bin/sh\necho true\n")
+        (fake_bin / "notify-send").write_text("#!/bin/sh\nexit 0\n")
+        for script in fake_bin.iterdir():
+            script.chmod(0o755)
+        marker = tmp_path / "pwned"
+        unescaped = (
+            "gsettings get org.shani.chronoa notification-enabled "
+            f"2>/dev/null | grep -q true && touch {marker}"
+        )
+        subprocess.run(
+            ["/bin/sh", "-c", unescaped],
+            env=dict(os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}"),
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        assert marker.exists(), (
+            "the control did not execute, so the injection test proves nothing"
+        )
+
+    def test_a_timer_is_owned_by_systemd_not_a_thread(self, monkeypatch):
+        """An in-process timer dies when the assistant restarts, silently."""
+        self._payload(monkeypatch)
+        import shani_chronoa.skills.timer as timer_module
+        assert not hasattr(timer_module, "threading"), (
+            "the timer module is holding threads in the assistant's own "
+            "process again, so every pending timer dies on restart"
+        )
+
+    def test_a_timer_systemd_refused_is_not_reported_as_set(
+        self, monkeypatch, tmp_path
+    ):
+        # Given: systemd-run fails, as it does with no user session
+        captured = {}
+
+        def fake_run(argv, **kwargs):
+            captured["argv"] = argv
+            return subprocess.CompletedProcess(
+                argv, 1, "", "Failed to start transient service unit: no session")
+
+        monkeypatch.setattr("shani_chronoa.skills.timer.subprocess.run", fake_run)
+        monkeypatch.setattr(
+            "shani_chronoa.skills.timer._systemd_available", lambda: True)
+        monkeypatch.setattr(
+            "shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
-        # When: a timer is set
         result = _run({"seconds": 60, "label": "pasta"})
-        # Then: a daemon threading.Timer is scheduled with the exact seconds
-        assert result == "Timer set for 60 seconds: 'pasta'."
-        assert captured["interval"] == 60
-        assert captured["timer"].daemon is True
-        assert captured["started"] is True
+        assert "NOT set" in result
+        assert "no session" in result
 
-    @pytest.mark.parametrize("bad", [60.0, "60", True, False, None])
-    def test_timer_non_integer_seconds_is_rejected(self, monkeypatch, bad):
-        # Given: a non-integer duration
-        captured = self._capture_timer(monkeypatch)
+    @pytest.mark.parametrize("seconds", [600, "600"])
+    def test_a_whole_number_of_seconds_is_accepted(
+        self, monkeypatch, tmp_path, seconds
+    ):
+        # An LLM may send the number as a string; refusing that would be pedantic.
+        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
-        # When: a timer is set
+        assert "Timer set for" in _run({"seconds": seconds})
+
+    @pytest.mark.parametrize("bad", [True, False, 60.0, "60.5", "soon", [], {}])
+    def test_a_duration_that_is_not_a_whole_number_is_refused(
+        self, chronoa_config, mock_notify_send, monkeypatch, tmp_path, bad
+    ):
+        # `true` is the interesting one: isinstance(True, int) is True, so an
+        # unguarded int() silently scheduled a 1-second timer.
+        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        from shani_chronoa.skills.timer import _run
         result = _run({"seconds": bad})
-        # Then: it must return a clear error and schedule nothing
-        assert result.startswith("Invalid timer duration")
-        assert "function" not in captured
+        assert "Invalid timer duration" in result
+        assert not (tmp_path / "t.json").exists(), "a refused timer was still stored"
+
+    def test_a_missing_duration_says_how_to_pass_one(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        from shani_chronoa.skills.timer import _run
+        assert "seconds=600" in _run({})
