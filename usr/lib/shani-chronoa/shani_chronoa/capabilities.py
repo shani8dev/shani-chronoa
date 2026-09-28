@@ -85,6 +85,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_power_profile": ("Power and screen", "Power profile"),
     "calculate": ("Everyday tools", "Calculation"),
     "list_apps": ("Apps", "List installed applications"),
+    "check_updates": ("System", "Check for waiting package updates"),
+    "disk_usage": ("System", "Report filesystem and directory space use"),
+    "system_info": ("System", "Describe this machine"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -100,6 +103,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Clipboard",
     "Screen",
     "Apps",
+    "System",
     "Web",
     "Local models",
     "Pointer and keyboard",
