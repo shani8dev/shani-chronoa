@@ -402,7 +402,49 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
         (workspace, read_write_execute),
         ("/tmp", write_execute),
         ("/run", write_execute),
-    ]
+    ] + _interpreter_read_paths(read_only)
+
+
+def _interpreter_read_paths(read_only: int) -> List[Tuple[str, int]]:
+    """Read-only grants for the running interpreter, if the fixed list misses it.
+
+    The fixed entries above cover a SYSTEM python: /usr, /bin and /lib are all
+    granted read, so `python3 -c ...` starts. That silently assumes the
+    interpreter lives under one of them, and it is the only thing making this
+    work at all - a rule that grants EXECUTE without READ_FILE lets the kernel
+    run the binary but not read it, so a missing read grant does not produce a
+    permission error, it produces an interpreter that cannot initialise.
+
+    It is not a safe assumption. A venv, pyenv, conda or /opt install puts the
+    interpreter somewhere else entirely, and then the confined child dies at
+    `init_import_site: Failed to import the site module` - which is exactly what
+    CI hit, since its interpreter is a venv under the runner's temp dir and
+    therefore in none of the entries above. The test noticed before a user did:
+    "the interpreter must still run, or the confinement is useless in
+    practice."
+
+    Only the interpreter's own directories are added, and only read. This is
+    not a widening of read confinement in any meaningful sense - it is the
+    narrowest set that lets the process that is already being confined start,
+    and it deliberately does not grant the parent of a venv, which is what
+    would actually expose the user's home directory. Paths already covered by
+    a fixed entry are skipped so the ruleset does not accumulate redundant
+    grants.
+    """
+    covered = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
+    candidates = [sys.prefix, sys.base_prefix, os.path.dirname(sys.executable)]
+    out: List[Tuple[str, int]] = []
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        real = os.path.realpath(path)
+        if any(real == c or real.startswith(c.rstrip("/") + "/") for c in covered):
+            continue
+        if os.path.isdir(real):
+            out.append((real, read_only))
+    return out
 
 
 def get_landlock_wrapper() -> str:
