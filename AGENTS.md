@@ -166,6 +166,54 @@ carefully — only by constructing the actual GTK objects / running
 `glib-compile-schemas` / driving the real GLib main loop and watching what
 happens.
 
+## Rendering the UI to a PNG, and what it cost to work out (2026-09-28)
+
+The UI defects in this app's history - `hwmon` and `thermalgrid` shown to users
+as module names, reply markdown displayed as `**38G**`, near-white text on a
+light theme at a measured 2.80:1 - were all invisible to a suite that
+constructed the widgets and walked the tree. Constructing a widget is not the
+same as it being legible. `Gsk.CairoRenderer` renders a widget tree offscreen
+with no compositor and no window manager, which is the only way to *look*.
+
+**Three requirements, all of them silent on failure. Each returned a plausible
+wrong answer rather than an error, which is what makes them worth writing down:**
+
+- **`Adw.init()` must come before any Adw widget is constructed, and before the
+  `Gtk.Application` exists.** Initialise it at module scope. The settings window
+  is entirely Adw widgets and renders *nothing* without it - no node, no
+  exception, just an empty PNG. Calling it inside `activate`, after the window
+  was built, does not help.
+- **`present()` must happen a main-loop turn before the snapshot.** Inside
+  `GApplication::activate` the tree is unallocated (`0x0`, `get_mapped()` False),
+  and pumping the context does not help: with nothing pending,
+  `iteration(False)` returns immediately. Worse, calling `present()` *again*
+  from inside the capture function re-maps the window and the snapshot catches
+  a tree with no node.
+- **`Gdk.Texture.save_to_png_bytes()` fails on the texture a
+  `Gsk.CairoRenderer` produces; `save_to_png(path)` works on the same texture.**
+  The bytes form returns nothing with no error, which is indistinguishable from
+  a window that rendered blank.
+
+Also: `Gsk.CairoRenderer.new_for_surface` is inherited from `Gsk.Renderer` and
+refuses to construct the subclass (`TypeError`); use `new()` then `realize(None)`,
+because `render_texture` asserts on being realized. And an `Adw.Application`
+id is a D-Bus well-formed name - one containing `Adwaita` is invalid, registers
+badly enough that the window never maps, and produces the same empty PNG.
+
+**Measure the pixels; do not trust a description of them.** A written
+description of the pre-fix screenshot called the header "black text, clearly
+readable" when it measured 2.80:1 and the glyphs were the page's own lightness.
+Current measurements: light theme 11.61:1, HighContrast 13.88:1 main window and
+17.58:1 settings. A skip is silent, so a display probe that is wrong is worse
+than no probe - `Gdk.Display.get_default()` returns None until GTK is
+initialised, and the first version of that probe skipped every test on a
+machine with a live X session.
+
+The renderer itself is **not committed**: it works from a standalone script and
+the pytest wrapper could not be made reliable. Two known-good scripts are
+`~/local/opt/llamacpp`-adjacent scratch, not the tree. Everything above is the
+durable part.
+
 ## Commit discipline
 
 Before composing a commit message, run `git log --oneline -20` (and `git
