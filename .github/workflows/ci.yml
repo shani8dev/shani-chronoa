@@ -38,7 +38,12 @@ jobs:
       # process died there pytest never printed a report for the 16 real test
       # failures that came first. The suite passed on dev machines only
       # because they have a DISPLAY. shani-cassini already runs the same way.
-      apt-packages: python3-gi gir1.2-gtk-4.0 libglib2.0-bin xvfb
+      #
+      # gir1.2-adw-1 is needed for the same reason and for a different one:
+      # settings_window.py requires the Adw namespace, so without the typelib
+      # pytest cannot even COLLECT tests/test_settings_surface.py and the whole
+      # run dies at collection with exit 2 - 639 items found, then interrupted.
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb
       system-site-packages: true
     needs: lint
 
