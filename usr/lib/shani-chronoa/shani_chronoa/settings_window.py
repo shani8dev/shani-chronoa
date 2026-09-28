@@ -91,7 +91,7 @@ SENSE_LABELS = {
         "CPU and motherboard thermal zones",
     ),
     "display": (
-        "Screen and brightness",
+        "Screen, brightness and monitors",
         "Report connected outputs, and set the backlight",
     ),
     "network": (
@@ -162,10 +162,6 @@ SENSE_LABELS = {
         "Audio devices",
         "What the machine can play and record, and at what volume",
     ),
-    "monitors": (
-        "Monitors",
-        "Which displays are connected, at what mode, and which make they are",
-    ),
     "printing": (
         "Printers and scanners",
         "Which printers are set up, and which scanners are plugged in",
@@ -195,7 +191,7 @@ SENSE_CATEGORIES = [
      ["filesystem", "web"]),
     ("The screen",
      "Connected monitors, what mode they are in, and the backlight",
-     ["display", "monitors"]),
+     ["display"]),
     ("Network and wireless",
      "Interfaces, audio devices, Bluetooth, and motion from Wi-Fi signal",
      ["link", "network", "audio", "bluetooth", "rfsense"]),

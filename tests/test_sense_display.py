@@ -1,4 +1,10 @@
-"""The `monitors` sense, and the EDID byte layout it decodes.
+"""The `display` sense, and the EDID byte layout it decodes.
+
+Formerly the `monitors` sense, which was merged into `display`: both walked
+/sys/class/drm and both reported which connectors were connected, so one
+enumeration now reports the backlight and the panel identity together. Every
+EDID assertion below is retained unchanged - the merge moved the code, it did
+not reduce what is decoded.
 
 The layout is fixed by the VESA spec and mirrored in the kernel's own
 `include/drm/drm_edid.h`, so it is read by position rather than guessed. The
@@ -28,7 +34,7 @@ as the panel's native resolution.
 
 import pytest
 
-from shani_chronoa.senses import monitors
+from shani_chronoa.senses import display
 
 HEADER = bytes((0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00))
 
@@ -76,13 +82,13 @@ def _connector(root, name, *, status="connected", enabled="enabled",
 def drm(tmp_path, monkeypatch):
     root = tmp_path / "drm"
     root.mkdir()
-    monkeypatch.setattr(monitors, "_DRM", root)
+    monkeypatch.setattr(display, "_DRM", root)
     return root
 
 
 @pytest.fixture
 def granted(monkeypatch):
-    monkeypatch.setattr(monitors.ChronoaConfig, "sense_allowed",
+    monkeypatch.setattr(display.ChronoaConfig, "sense_allowed",
                         lambda self, s: True)
 
 
@@ -91,8 +97,8 @@ class TestManufacturerDecoding:
         """`0x09E5` is the id in this machine's panel EDID, and it decodes to
         BOE. Read little-endian the same two bytes give a different company
         entirely, and a three-8-bit reading gives three more."""
-        assert monitors.manufacturer(0x09E5) == "BOE"
-        assert monitors.manufacturer(0xE509) != "BOE"
+        assert display.manufacturer(0x09E5) == "BOE"
+        assert display.manufacturer(0xE509) != "BOE"
 
     @pytest.mark.parametrize("text,value", [
         ("DEL", 0x10AC), ("SAM", 0x4C2D), ("BNQ", 0x09D1),
@@ -100,16 +106,16 @@ class TestManufacturerDecoding:
     def test_known_manufacturers_round_trip(self, text, value):
         """Each letter is `(ord - 64)` in a 5-bit field, so three real ids are
         worth checking: a decoder that is wrong for one is wrong for all."""
-        assert monitors.manufacturer(value) == text
+        assert display.manufacturer(value) == text
 
     def test_it_is_big_endian(self):
-        assert monitors.manufacturer(0x060F) != monitors.manufacturer(0x0F06)
+        assert display.manufacturer(0x060F) != display.manufacturer(0x0F06)
 
     def test_the_unset_id_stays_unset(self):
         """`00 00` is the spec's unset value. Decoding it as three letters
         yields `@@@`, which is a company that does not exist."""
-        assert monitors.manufacturer(0x0000) == ""
-        assert monitors.manufacturer(0x0000) != "@@@"
+        assert display.manufacturer(0x0000) == ""
+        assert display.manufacturer(0x0000) != "@@@"
 
 
 class TestBlobValidation:
@@ -118,14 +124,14 @@ class TestBlobValidation:
         offset after it is wrong."""
         data = bytearray(_edid())
         data[0] = 0xFF
-        assert monitors.parse_edid(bytes(data)) is None
+        assert display.parse_edid(bytes(data)) is None
 
     def test_a_short_blob_is_refused(self):
-        assert monitors.parse_edid(bytes(127)) is None
-        assert monitors.parse_edid(b"") is None
+        assert display.parse_edid(bytes(127)) is None
+        assert display.parse_edid(b"") is None
 
     def test_a_valid_blob_decodes(self):
-        found = monitors.parse_edid(_edid())
+        found = display.parse_edid(_edid())
         assert found["manufacturer"] == "BOE"
         assert found["product_code"] == 0x08C7
         assert found["serial"] == 0x11223344
@@ -137,7 +143,7 @@ class TestBlobValidation:
         real = _p.Path("/sys/class/drm/card1-eDP-1/edid")
         if not real.exists() or real.stat().st_size != 128:
             pytest.skip("no connected panel with EDID on this machine")
-        found = monitors.parse_edid(real.read_bytes())
+        found = display.parse_edid(real.read_bytes())
         assert found["manufacturer"] == "BOE"
         assert found["product_code"] == 2247
         assert found["manufactured"] == "2019-W32"
@@ -147,25 +153,25 @@ class TestBlobValidation:
 
 class TestFieldDecoding:
     def test_the_manufacture_year_is_offset_from_1990(self):
-        assert monitors.parse_edid(_edid(year=29))["manufactured"] == "2019-W32"
+        assert display.parse_edid(_edid(year=29))["manufactured"] == "2019-W32"
 
     def test_an_unset_manufacture_date_is_omitted_not_reported_as_1990(self):
         """Year 0 is the spec's unset value, and `1990-W00` is a claim."""
-        assert "manufactured" not in monitors.parse_edid(_edid(year=0))
+        assert "manufactured" not in display.parse_edid(_edid(year=0))
 
     def test_the_physical_size_is_in_centimetres(self):
-        assert monitors.parse_edid(_edid(width=31, height=17))["size_cm"] == "31 x 17"
+        assert display.parse_edid(_edid(width=31, height=17))["size_cm"] == "31 x 17"
 
     def test_the_version_and_revision_are_joined(self):
-        assert monitors.parse_edid(_edid(version=(1, 4)))["edid_version"] == "1.4"
+        assert display.parse_edid(_edid(version=(1, 4)))["edid_version"] == "1.4"
 
     def test_a_zero_serial_is_omitted_not_reported_as_zero(self):
         """0 is the spec's unset serial; printing `serial 0` implies a
         device with a real serial number of zero."""
-        assert "serial" not in monitors.parse_edid(_edid(serial=0))
+        assert "serial" not in display.parse_edid(_edid(serial=0))
 
     def test_the_monitor_name_descriptor_is_read(self):
-        found = monitors.parse_edid(_edid(name="VS248"))
+        found = display.parse_edid(_edid(name="VS248"))
         assert found["name"] == "VS248"
 
     def test_the_serial_string_descriptor_does_not_clobber_the_numeric_one(self):
@@ -173,13 +179,13 @@ class TestFieldDecoding:
         *string* about the same monitor. Sharing one key let the string
         overwrite the number, so a panel carrying both reported only the
         string."""
-        found = monitors.parse_edid(
+        found = display.parse_edid(
             _edid(serial=0x11223344, serial_string="H7LMQS122161"))
         assert found["serial"] == 0x11223344
         assert found["serial_text"] == "H7LMQS122161"
 
     def test_a_zero_size_is_omitted(self):
-        assert "size_cm" not in monitors.parse_edid(_edid(width=0, height=0))
+        assert "size_cm" not in display.parse_edid(_edid(width=0, height=0))
 
 
 class TestNoEdidIsNotNoMonitor:
@@ -188,7 +194,7 @@ class TestNoEdidIsNotNoMonitor:
         _connector(drm, "card1-DP-1", status="disconnected", enabled="disabled",
                    dpms="Off", modes="", edid=b"")
         _connector(drm, "card1-eDP-1", edid=_edid(name="Internal"))
-        content = monitors._run({}).content
+        content = display._run({}).content
         assert "card1-eDP-1" in content
         assert "BOE" in content or "Internal" in content
 
@@ -196,15 +202,15 @@ class TestNoEdidIsNotNoMonitor:
         """Firmware that fills EDID only over DDC leaves the kernel with
         nothing. Reporting "no monitor" would be wrong."""
         _connector(drm, "card1-HDMI-A-1", edid=b"")
-        content = monitors._run({}).content
+        content = display._run({}).content
         assert "connected, identity undetermined" in content
         assert "not evidence that no monitor is attached" in content
-        assert monitors._run({}).metadata["connected"] == 1
-        assert monitors._run({}).metadata["identified"] == 0
+        assert display._run({}).metadata["connected"] == 1
+        assert display._run({}).metadata["identified"] == 0
 
     def test_the_mode_in_use_is_not_called_native(self, drm, granted):
         _connector(drm, "card1-eDP-1", edid=b"", modes="1920x1080\n")
-        content = monitors._run({}).content
+        content = display._run({}).content
         assert "showing 1920x1080" in content
         assert "not the panel's native resolution" in content
 
@@ -217,30 +223,30 @@ class TestConnectors:
         (drm / "renderD128").mkdir()
         _connector(drm, "card1-DP-1", status="disconnected", enabled="disabled",
                    dpms="Off", modes="")
-        assert [c["connector"] for c in monitors.read_connectors()] == ["card1-DP-1"]
+        assert [c["connector"] for c in display.read_connectors()] == ["card1-DP-1"]
 
     def test_a_disconnected_port_is_reported_as_a_port(self, drm, granted):
         _connector(drm, "card1-DP-1", status="disconnected", enabled="disabled",
                    dpms="Off", modes="")
         _connector(drm, "card1-HDMI-A-1", status="disconnected", enabled="disabled",
                    dpms="Off", modes="")
-        percept = monitors._run({})
+        percept = display._run({})
         assert percept.metadata["connectors"] == 2
         assert percept.metadata["connected"] == 0
         assert "none currently connected" in percept.content
 
     def test_the_first_offered_mode_is_reported_as_in_use(self, drm, granted):
         _connector(drm, "card1-eDP-1", modes="1920x1080 1680x1050 1280x1024\n")
-        content = monitors._run({}).content
+        content = display._run({}).content
         assert "showing 1920x1080 of 3 mode(s) offered" in content
 
     def test_an_unreadable_drm_is_not_a_machine_with_no_display(self, tmp_path, monkeypatch, granted):
-        monkeypatch.setattr(monitors, "_DRM", tmp_path / "no-drm")
-        percept = monitors._run({})
+        monkeypatch.setattr(display, "_DRM", tmp_path / "no-drm")
+        percept = display._run({})
         assert percept.metadata["determined"] is False
         assert "fact about what could be read" in percept.content
 
     def test_it_refuses_when_consent_is_off(self, monkeypatch):
-        monkeypatch.setattr(monitors.ChronoaConfig, "sense_allowed",
+        monkeypatch.setattr(display.ChronoaConfig, "sense_allowed",
                             lambda self, s: False)
-        assert isinstance(monitors._run({}), str)
+        assert isinstance(display._run({}), str)

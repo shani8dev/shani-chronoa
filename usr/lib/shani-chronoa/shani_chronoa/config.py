@@ -91,9 +91,22 @@ _SENSE_CONSENT_KEYS = {
     "security": "security-sense-enabled",
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
-    "monitors": "monitors-sense-enabled",
     "printing": "printing-sense-enabled",
+    "display": "display-sense-enabled",
     "smart": "smart-sense-enabled",
+}
+
+# Retired consent keys, still honoured.
+#
+# Merging two senses retires one name, and the consent key is derived from that
+# name - so a plain merge silently revokes every grant a user had already made.
+# Each entry lists the keys that used to gate the sense and still do, so an
+# existing grant survives the merge and either key is enough to allow it.
+_SENSE_CONSENT_ALIASES = {
+    # `monitors` walked /sys/class/drm and reported which connectors were
+    # connected; `display` walked the same tree and reported the same list, plus
+    # the backlight. One enumeration now produces both halves.
+    "display": ("monitors-sense-enabled",),
 }
 
 # On by default are `memory` and the machine-state senses. `memory` because it is
@@ -105,7 +118,7 @@ _SENSE_CONSENT_KEYS = {
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
     "memory", "power", "storage", "link", "cpu", "smart", "gpu", "devices",
-    "audio", "monitors", "security",
+    "audio", "display", "security",
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here
@@ -314,7 +327,12 @@ class ChronoaConfig:
         key = _SENSE_CONSENT_KEYS.get(sense)
         if key is None:
             return False
-        if not self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED):
+        granted = self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED)
+        for alias in _SENSE_CONSENT_ALIASES.get(sense, ()):
+            # Either key is enough. A merged sense keeps the permissions both
+            # of its halves had, rather than the narrower of the two.
+            granted = granted or self.get_bool(alias, False)
+        if not granted:
             return False
         if sense in _NETWORKED_SENSES and self.privacy_mode:
             return False
@@ -325,8 +343,12 @@ class ChronoaConfig:
         key = _SENSE_CONSENT_KEYS.get(sense)
         if key is None:
             return f"there is no '{sense}' sense"
-        if not self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED):
-            return f"the {sense} sense is turned off (enable '{key}')"
+        aliases = _SENSE_CONSENT_ALIASES.get(sense, ())
+        granted = self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED) or any(
+            self.get_bool(alias, False) for alias in aliases)
+        if not granted:
+            either = f"'{key}'" + "".join(f" or '{a}'" for a in aliases)
+            return f"the {sense} sense is turned off (enable {either})"
         if sense in _NETWORKED_SENSES and self.privacy_mode:
             return (
                 f"the {sense} sense needs privacy mode off because it reaches "

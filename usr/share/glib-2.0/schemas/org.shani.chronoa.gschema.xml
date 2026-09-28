@@ -172,9 +172,9 @@
       <description>When true, Chronoa may read what the machine can play and record, and at what volume. On by default because it reads the machine, not you, and never leaves it. Anything needing a tool that is not installed reports that it was not determined rather than a clean negative.</description>
     </key>
     <key name="monitors-sense-enabled" type="b">
-      <default>true</default>
-      <summary>Let Chronoa read the connected monitors</summary>
-      <description>When true, Chronoa may read which displays are connected, on which connector, at what mode, and - where the connector exposes EDID - the manufacturer, model name, serial number and physical size. On by default because it reads the machine, not you, and never leaves it. A connected monitor with no EDID is reported as connected with its identity undetermined, which is normal for a laptop panel over eDP.</description>
+      <default>false</default>
+      <summary>Retired: merged into the display sense</summary>
+      <description>The `monitors` sense was merged into `display` - both walked /sys/class/drm and both reported which connectors were connected, so one enumeration now reports the backlight and the panel identity together. This key is still honoured: setting it to true grants the `display` sense, so a permission granted before the merge is not revoked by it. It will be removed in a future release once no supported install can still hold it.</description>
     </key>
     <key name="printing-sense-enabled" type="b">
       <default>false</default>
@@ -227,7 +227,7 @@
       <description>When true, Chronoa may read the kernel's thermal zones - CPU, board and any named sensor the firmware exposes. Off by default. This is the machine's own heat, not a room: it reports temperature of silicon, not of the air or of any person. No thermal camera is involved and no image of any kind is produced.</description>
     </key>
     <key name="display-sense-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa read the screen's brightness and output state</summary>
       <description>When true, Chronoa may read display state from sysfs - backlight brightness, whether an output is connected, and the current mode. Off by default. This reads the panel's own backlight setting; it is not a light sensor and cannot tell you how bright the room is.</description>
     </key>

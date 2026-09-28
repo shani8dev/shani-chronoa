@@ -59,6 +59,13 @@ NOT_EXPOSED = {
     "hardware-profile": "shown read-only in 'In effect right now'; it is "
                         "auto-detected, and overriding it by hand is how a "
                         "user ends up with a model too large for the machine",
+    "monitors-sense-enabled": "retired: the `monitors` sense was merged into "
+                              "`display`, which now has the row. The key is "
+                              "still honoured - setting it grants `display` - "
+                              "but a second row for the same permission would "
+                              "be a switch that appears to do nothing when it "
+                              "is turned off, because the other one still "
+                              "allows it",
 }
 
 
