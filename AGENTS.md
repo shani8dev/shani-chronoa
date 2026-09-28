@@ -22,10 +22,16 @@ done.
 - `Settings window`, `Model choice`, `Packaging` — the two naming
   conventions must not be mixed
 
-**On-demand reference:**
+**Current known issues — read this before you start:**
 - `Audit-verified known issues` and `Garuda Cross-Reference Findings` —
   dated retrospectives. **Grep for the subsystem you are changing.** Full
   methodology in `AUDIT-HISTORY.md`.
+
+  This section mixes fixed history with issues that are **still open**,
+  including Critical security ones. Grep it for `not fixed`,
+  `still open`, and your subsystem name before you touch anything.
+
+**Background reference — skippable, pure survey material:**
 - `Deliberately not done` — read before proposing a feature, so you don't
   rebuild something intentionally excluded.
 
