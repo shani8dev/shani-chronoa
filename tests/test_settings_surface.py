@@ -95,9 +95,10 @@ _HARNESS = textwrap.dedent(
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory):
+def built(tmp_path_factory, compiled_schema_dir):
     import os
     import json
+    import pathlib
 
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -110,6 +111,21 @@ def built(tmp_path_factory):
     env["XDG_DATA_HOME"] = str(work / "data")
     (work / "config").mkdir()
     (work / "data").mkdir()
+    # The harness imports shani_chronoa, so it needs the source tree on its
+    # path; the other two harnesses in this suite already set it and this one
+    # did not, which is why its eight tests died at
+    # "ModuleNotFoundError: No module named 'shani_chronoa'" on a clean
+    # checkout and nowhere else.
+    env["PYTHONPATH"] = str(pathlib.Path("usr/lib/shani-chronoa").resolve())
+    # And the same two gsettings inputs the sibling harnesses need. Without a
+    # compiled schema the child's ChronoaConfig falls back to Python defaults
+    # with an empty _valid_keys, and set()/get_bool() then return early on every
+    # key - writes dropped with no exception, reads answering False. Without a
+    # keyfile backend it uses dconf, which fails silently on a runner with no
+    # session bus. Either one shows up as "the window does not offer the sense"
+    # rather than as a configuration problem.
+    env["GSETTINGS_SCHEMA_DIR"] = str(compiled_schema_dir)
+    env["GSETTINGS_BACKEND"] = "keyfile"
     proc = subprocess.run(
         [sys.executable, "-c", _HARNESS],
         capture_output=True, text=True, timeout=120, env=env, cwd=str(work),
