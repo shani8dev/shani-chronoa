@@ -55,7 +55,7 @@ from shani_chronoa.senses import discover_senses
 # inheriting its filename.
 SENSE_LABELS = {
     "vision": (
-        "Camera",
+        "Take and describe photos",
         "Take a photo when asked, if a camera is attached",
     ),
     "ocr": (
@@ -75,7 +75,7 @@ SENSE_LABELS = {
         "Keep facts you ask it to, on this machine only",
     ),
     "hearing": (
-        "Listening",
+        "Transcribe speech",
         "Hear you through the microphone",
     ),
     "contention": (
@@ -95,7 +95,7 @@ SENSE_LABELS = {
         "Report connected outputs, and set the backlight",
     ),
     "network": (
-        "Network",
+        "Internet and DNS",
         "Connected interfaces, addresses and DNS",
     ),
     "bluetooth": (
@@ -103,7 +103,7 @@ SENSE_LABELS = {
         "Adapters, and whether rfkill has blocked them",
     ),
     "camera": (
-        "Cameras attached",
+        "Connected cameras",
         "List camera devices. Never opens a stream",
     ),
     "rfsense": (
@@ -131,7 +131,7 @@ SENSE_LABELS = {
         "Which drives this machine has, how big, and how worn the NVMe ones are",
     ),
     "link": (
-        "Network links",
+        "Network link speed",
         "Which interfaces exist, which are up, and how fast the wired ones are",
     ),
     "cpu": (

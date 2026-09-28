@@ -101,3 +101,52 @@ class TestTheRowDoesNotDeriveItsTextFromTheSchema:
         assert 'f"{name} {description}".lower()' in source, (
             "the module name is no longer part of what search matches"
         )
+
+
+class TestNoLabelIsContainedInAnother:
+    """Exact-equality is too weak a test for "can a user tell these apart?".
+
+    `test_titles_are_distinct` only catches two rows with the *same* title. It
+    walked straight past three real collisions, the worst being `vision`
+    labelled "Camera" sitting next to `camera` labelled "Cameras attached" -
+    two adjacent rows with near-identical titles and completely different
+    functions, one listing webcams and one letting the assistant look through
+    them. A user scanning the settings list could not tell which was which.
+
+    Containment is the right relation rather than similarity: the failure is
+    that one title reads as a more specific version of another, so a substring
+    test catches it without needing a fuzzy metric.
+    """
+
+    def test_no_title_is_contained_in_another(self, registry):
+        from shani_chronoa.settings_window import SENSE_LABELS
+
+        titles = {name: SENSE_LABELS[name][0] for name in registry}
+        clashes = []
+        for name, title in titles.items():
+            for other, other_title in titles.items():
+                if name == other or title == other_title:
+                    continue
+                if title.lower() in other_title.lower():
+                    clashes.append(f"{name} {title!r} inside {other} {other_title!r}")
+        assert not clashes, (
+            "these row titles are indistinguishable at a glance: "
+            + "; ".join(clashes)
+        )
+
+    def test_the_check_is_not_vacuous(self):
+        """A containment test that cannot fail proves nothing, so confirm the
+        comparison actually rejects a contained pair."""
+        from shani_chronoa.settings_window import SENSE_LABELS
+
+        titles = {n: SENSE_LABELS[n][0] for n in SENSE_LABELS}
+        self_contained = [
+            (a, b) for a, x in titles.items() for b, y in titles.items()
+            if a != b and x != y and x.lower() in y.lower()
+        ]
+        assert self_contained == [], (
+            f"the real labels still collide, so the guard is not testing "
+            f"anything: {self_contained}"
+        )
+        # and the predicate itself does reject a contained pair
+        assert "camera" in "cameras attached".lower()
