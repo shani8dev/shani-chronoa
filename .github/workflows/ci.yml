@@ -27,9 +27,18 @@ jobs:
       # it installs pytest + httpx only, which is exactly what this
       # repo's own conftest documents as its required dep set.
       test-command: |
-        PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider
+        xvfb-run -a env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider
       python-version: "3.12"
-      apt-packages: python3-gi gir1.2-gtk-4.0 libglib2.0-bin
+      # xvfb is not optional. tests/test_window_ux.py builds real Gtk widgets
+      # (ChronoaOrbWidget is a Gtk.Button), and GTK4 with no display does not
+      # raise a clean error on construction - it segfaults. That is what ended
+      # this job: "Fatal Python error: Segmentation fault" at gui.py:128 in
+      # ChronoaOrbWidget.__init__, called from
+      # test_orb_reports_its_own_state_independently, exit 139, and because the
+      # process died there pytest never printed a report for the 16 real test
+      # failures that came first. The suite passed on dev machines only
+      # because they have a DISPLAY. shani-cassini already runs the same way.
+      apt-packages: python3-gi gir1.2-gtk-4.0 libglib2.0-bin xvfb
       system-site-packages: true
     needs: lint
 
