@@ -84,6 +84,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_privacy": ("Privacy controls", "Mute the microphone, disable a camera, or blank the screen"),
     "set_power_profile": ("Power and screen", "Power profile"),
     "calculate": ("Everyday tools", "Calculation"),
+    "list_apps": ("Apps", "List installed applications"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
