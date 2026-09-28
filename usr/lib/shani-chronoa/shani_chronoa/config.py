@@ -101,7 +101,7 @@ _SENSE_CONSENT_KEYS = {
 # health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
-    "memory", "power", "storage", "link", "cpu", "smart", "gpu", "security",
+    "memory", "power", "storage", "link", "cpu", "smart", "gpu", "devices", "security",
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here
