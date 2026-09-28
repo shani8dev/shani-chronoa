@@ -93,7 +93,6 @@ _SENSE_CONSENT_KEYS = {
     "audio": "audio-sense-enabled",
     "printing": "printing-sense-enabled",
     "display": "display-sense-enabled",
-    "smart": "smart-sense-enabled",
 }
 
 # Retired consent keys, still honoured.
@@ -107,6 +106,10 @@ _SENSE_CONSENT_ALIASES = {
     # connected; `display` walked the same tree and reported the same list, plus
     # the backlight. One enumeration now produces both halves.
     "display": ("monitors-sense-enabled",),
+    # `smart` was merged into `storage`: same drives, same /sys/block walk, and
+    # `storage` was already reporting NVMe wear from sysfs while `smart`
+    # reported the same endurance figure from SMART attribute 233.
+    "storage": ("smart-sense-enabled",),
 }
 
 # On by default are `memory` and the machine-state senses. `memory` because it is
@@ -117,7 +120,7 @@ _SENSE_CONSENT_ALIASES = {
 # health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
-    "memory", "power", "storage", "link", "cpu", "smart", "gpu", "devices",
+    "memory", "power", "storage", "link", "cpu", "gpu", "devices",
     "audio", "display", "security",
 })
 

@@ -14,7 +14,7 @@ because either mistake is silent.
 
 import pytest
 
-from shani_chronoa.senses import smart
+from shani_chronoa.senses import storage
 
 
 # The shape of `smartctl -A` on a real NVMe, column-for-column.
@@ -55,7 +55,7 @@ PERMISSION_OUTPUT = """smartctl: device open failed: Permission denied
 
 
 def _smartctl(monkeypatch, result):
-    monkeypatch.setattr(smart.shutil, "which",
+    monkeypatch.setattr(storage.shutil, "which",
                         lambda n: "/usr/bin/smartctl" if n == "smartctl" else None)
 
     class R:
@@ -68,44 +68,44 @@ def _smartctl(monkeypatch, result):
         r.returncode = result["rc"]
         return r
 
-    monkeypatch.setattr(smart.subprocess, "run", fake_run)
-    monkeypatch.setattr(smart, "_read_disks", lambda: ["/dev/nvme0n1"])
+    monkeypatch.setattr(storage.subprocess, "run", fake_run)
+    monkeypatch.setattr(storage, "_read_disks", lambda: ["/dev/nvme0n1"])
 
 
 @pytest.fixture
 def granted(monkeypatch):
-    monkeypatch.setattr(smart.ChronoaConfig, "sense_allowed",
+    monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
                         lambda self, s: True)
 
 
 class TestTheBitmask:
     def test_zero_means_healthy(self):
-        assert smart.classify(0) == "healthy"
+        assert storage.classify(0) == "healthy"
 
     def test_the_failing_bit_means_failing(self):
-        assert "failing" in smart.classify(0x08)
+        assert "failing" in storage.classify(0x08)
 
     def test_the_failing_bit_wins_even_when_combined(self):
         """A drive that cannot be opened AND reports failing must be reported
         as failing, because the weaker claim is the safe one to omit."""
-        assert "failing" in smart.classify(0x08 | 0x02)
+        assert "failing" in storage.classify(0x08 | 0x02)
 
     def test_a_drive_that_cannot_be_opened_is_not_healthy(self):
         """The dangerous direction. This is the whole reason `classify` exists."""
-        state = smart.classify(0x02)
+        state = storage.classify(0x02)
         assert state != "healthy"
         assert "not-determined" in state
 
     def test_an_unreadable_drive_is_not_also_reported_as_failing(self):
         """Otherwise every unprivileged read reports a failing disk."""
-        state = smart.classify(0x02)
+        state = storage.classify(0x02)
         assert not state.startswith("failing")
 
     def test_an_unreadable_drive_is_never_a_healthy_string(self):
         for status in range(1, 256):
             if status & 0x08:
                 continue
-            assert smart.classify(status) != "healthy", (
+            assert storage.classify(status) != "healthy", (
                 f"status {status} classified as healthy without the failing bit"
             )
 
@@ -113,16 +113,16 @@ class TestTheBitmask:
         """`smartctl` is not installed here, so these values come from the
         smartmontools documentation and have not been checked against a real
         binary. Recorded rather than implied to be verified."""
-        assert smart.BIT_DISK_FAILING == 0x08
-        assert smart.BIT_OPEN_FAILED == 0x02
-        source = smart.__doc__ or ""
+        assert storage.BIT_DISK_FAILING == 0x08
+        assert storage.BIT_OPEN_FAILED == 0x02
+        source = storage.__doc__ or ""
         assert "not been verified against the installed binary" in source
 
 
 class TestAttributeParsing:
     def test_it_reads_the_real_table(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": REAL_OUTPUT, "rc": 0})
-        (drive,) = smart.read_health()
+        (drive,) = storage.read_health()
         assert drive["model"] == "KBG40ZNT512G TOSHIBA MEMORY"
         names = {a["name"]: a["raw"] for a in drive["attributes"]}
         assert names["SSD life left"] == "7"
@@ -134,13 +134,13 @@ class TestAttributeParsing:
         anything with it, and a wall of every attribute is how a health
         summary becomes unreadable."""
         _smartctl(monkeypatch, {"stdout": REAL_OUTPUT, "rc": 0})
-        (drive,) = smart.read_health()
+        (drive,) = storage.read_health()
         assert all(a["name"] != "power on hours" for a in drive["attributes"])
         assert all(a["name"] != "critical warning" for a in drive["attributes"])
 
     def test_a_failing_attribute_is_surfaced_with_its_threshold(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": FIRING_OUTPUT, "rc": 0x08})
-        (drive,) = smart.read_health()
+        (drive,) = storage.read_health()
         assert "failing" in drive["state"]
         reallocated = [a for a in drive["attributes"] if a["id"] == 5][0]
         assert reallocated["raw"] == "4096"
@@ -149,19 +149,19 @@ class TestAttributeParsing:
 
     def test_a_garbage_table_yields_no_attributes_not_a_crash(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": "not a table at all\n1 2 3\n", "rc": 0})
-        (drive,) = smart.read_health()
+        (drive,) = storage.read_health()
         assert "attributes" not in drive
 
     def test_the_parser_ignores_a_table_with_the_wrong_column_count(self):
-        assert smart._parse_attributes(
+        assert storage._parse_attributes(
             "ID# NAME FLAG VALUE WORST THRESH TYPE\n5 Reallocated 0x0033 100\n"
         ) == []
 
 
 class TestDegradation:
     def test_a_missing_smartctl_says_so_and_names_the_package(self, monkeypatch, granted):
-        monkeypatch.setattr(smart.shutil, "which", lambda n: None)
-        percept = smart._run({})
+        monkeypatch.setattr(storage.shutil, "which", lambda n: None)
+        percept = storage._run({})
         assert "smartctl is not installed" in percept.content
         assert "smartmontools" in percept.content
         assert percept.metadata["smartctl_present"] is False
@@ -177,14 +177,14 @@ class TestDegradation:
 
     def test_a_permission_failure_is_quoted_not_summarised_away(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": "", "stderr": PERMISSION_OUTPUT, "rc": 2})
-        content = smart._run({}).content
+        content = storage._run({}).content
         assert "Permission denied" in content
         assert "not the same as healthy" in content
 
     def test_no_identifiable_drive_is_not_no_bad_drives(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": REAL_OUTPUT, "rc": 0})
-        monkeypatch.setattr(smart, "_read_disks", lambda: [])
-        percept = smart._run({})
+        monkeypatch.setattr(storage, "_read_disks", lambda: [])
+        percept = storage._run({})
         assert "not determined" in percept.content
         assert percept.metadata["drives"] == 0
 
@@ -193,24 +193,24 @@ class TestDegradation:
         smartctl against a device-mapper layer that has no SMART data."""
         import shani_chronoa.senses.storage as storage_module
         monkeypatch.setattr(storage_module, "_BLOCK", __import__("pathlib").Path("/nonexistent"))
-        assert smart._read_disks() == []
+        assert storage._read_disks() == []
 
 
 class TestEndToEnd:
     def test_a_healthy_drive_says_so_with_its_wear(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": REAL_OUTPUT, "rc": 0})
-        percept = smart._run({})
+        percept = storage._run({})
         assert percept.metadata["healthy"] == 1
         assert "SSD life left: 7" in percept.content
         assert "1 drive(s): 1 healthy" in percept.content
 
     def test_a_failing_drive_says_to_back_up_now(self, monkeypatch, granted):
         _smartctl(monkeypatch, {"stdout": FIRING_OUTPUT, "rc": 0x08})
-        percept = smart._run({})
+        percept = storage._run({})
         assert percept.metadata["failing"] == 1
         assert "backed up" in percept.content
 
     def test_it_refuses_when_consent_is_off(self, monkeypatch):
-        monkeypatch.setattr(smart.ChronoaConfig, "sense_allowed",
+        monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
                             lambda self, s: False)
-        assert isinstance(smart._run({}), str)
+        assert isinstance(storage._run({}), str)

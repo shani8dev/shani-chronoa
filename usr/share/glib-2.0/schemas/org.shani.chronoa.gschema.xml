@@ -142,9 +142,9 @@
       <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
     </key>
     <key name="smart-sense-enabled" type="b">
-      <default>true</default>
-      <summary>Drive health</summary>
-      <description>When true, Chronoa may read smart attributes, wear, and whether a disk is failing. On by default because it reads the machine, not you, and never leaves it. Anything that needs a tool which is not installed reports that it was not determined rather than a clean negative.</description>
+      <default>false</default>
+      <summary>Retired: merged into the storage sense</summary>
+      <description>The `smart` sense was merged into `storage` - both describe the same physical drives, and `storage` was already reporting NVMe wear from sysfs while `smart` read the same endurance figure from SMART attribute 233. One walk of /sys/block now reports identity, capacity, wear and SMART health together. This key is still honoured: setting it to true grants the `storage` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
     <key name="gpu-sense-enabled" type="b">
       <default>true</default>

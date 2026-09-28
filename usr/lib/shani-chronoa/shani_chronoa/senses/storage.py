@@ -33,10 +33,20 @@ image — and it needs root for most drives. This sense therefore reports what
 sysfs genuinely says (identity, capacity, rotational claim, queue depth) and
 says plainly that health was not determined, rather than inferring health from
 a temperature that hwmon already covers.
+
+**The SMART bitmask has not been verified against the installed binary.** The exit
+status is a bitmask, not a verdict, and the failing-disk bit is 3 while a
+failure-to-open bit is 1 - so a bare non-zero check is unsafe in both
+directions. `classify()` below decodes it explicitly, but the mapping has not
+been confirmed against a real `smartctl` on this machine, so a drive reported
+here as healthy is a drive smartctl exited 0 on, not a drive independently
+proven good.
 """
 
 import logging
 import os
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -53,6 +63,7 @@ _POLL_INTERVAL = 600.0
 
 _BLOCK = Path("/sys/block")
 _SECTOR_BYTES = 512
+_SMARTCTL_TIMEOUT = 30
 # Never a disk, whatever the slave chain says. `dm-` and `md` are here as well
 # as being detected structurally: a mapper with no `slaves` directory at all is
 # not a drive, and a RAID member is only meaningful with its array.
@@ -193,6 +204,220 @@ def read_layered() -> List[dict]:
     return layers
 
 
+BIT_USAGE = 0x01
+BIT_OPEN_FAILED = 0x02
+BIT_COMMAND_FAILED = 0x04
+BIT_DISK_FAILING = 0x08
+BIT_PREFAIL_PAST = 0x10
+BIT_PREFAIL_PAST_ONCE = 0x20
+BIT_ERROR_LOG = 0x40
+BIT_SELF_TEST_LOG = 0x80
+
+# Attributes worth surfacing by name. Reading the whole table is the tool's job;
+# picking the ones a person can act on is this sense's.
+_WATCHED = {
+    5: "reallocated sectors",
+    187: "uncorrectable errors",
+    188: "command timeout",
+    194: "temperature",
+    197: "pending sectors",
+    199: "uncorrectable via CRC",
+    231: "SSD life left",
+    233: "media wearout indicator",
+    241: "total writes (GB)",
+    242: "total reads (GB)",
+}
+
+
+
+def _run_smartctl(device: str) -> Optional[subprocess.CompletedProcess]:
+    if shutil.which("smartctl") is None:
+        return None
+    try:
+        return subprocess.run(
+            ["smartctl", "-H", "-A", device],
+            capture_output=True, text=True, timeout=_SMARTCTL_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("smartctl failed on %s: %s", device, exc)
+        return None
+
+
+def classify(status: int) -> str:
+    """Turn an exit status into one of: healthy, failing, or not-determined.
+
+    The middle case is what makes this safe. A drive we could not open is
+    *not* healthy and *not* failing, and reporting either would be a lie the
+    user acts on.
+    """
+    if status == 0:
+        return "healthy"
+    if status & BIT_DISK_FAILING:
+        return "failing"
+    if status & BIT_OPEN_FAILED:
+        return "not-determined: the drive could not be opened"
+    if status & BIT_PREFAIL_PAST:
+        return "degraded: a prefail attribute is past its threshold"
+    if status & BIT_ERROR_LOG or status & BIT_SELF_TEST_LOG:
+        return "degraded: the drive's own logs contain errors"
+    if status & BIT_PREFAIL_PAST_ONCE:
+        return "watch: an attribute was past threshold previously"
+    return "not-determined"
+
+
+def _parse_attributes(text: str) -> List[dict]:
+    """The attribute table, restricted to the ones worth a person's attention.
+
+    `smartctl -A` output is a fixed-width table, and the column positions shift
+    between smartmontools versions, so the value is taken from the raw-format
+    reading (`VALUE/MAX`) which every version emits rather than from a column
+    offset.
+    """
+    rows: List[dict] = []
+    for line in (text or "").splitlines():
+        parts = line.split()
+        # ID# NAME FLAG VALUE WORST THRESH TYPE UPDATED WHEN_FAILED RAW_VALUE
+        if len(parts) < 10 or not parts[0].isdigit():
+            continue
+        identifier = int(parts[0])
+        if identifier not in _WATCHED:
+            continue
+        raw = parts[9]
+        value = None
+        worst = None
+        threshold = None
+        # The normalised triple starts after the FLAG, at index 3. Reading it
+        # one column right takes THRESH as VALUE and TYPE as THRESH, and still
+        # yields three numbers, so it looks correct.
+        for token in parts[3:6]:
+            if token.isdigit():
+                number = int(token)
+                if value is None:
+                    value = number
+                elif worst is None:
+                    worst = number
+                else:
+                    threshold = number
+                    break
+        rows.append({
+            "id": identifier,
+            "name": _WATCHED[identifier],
+            "raw": raw,
+            "value": value,
+            "threshold": threshold,
+        })
+    return rows
+
+
+def _read_disks() -> List[str]:
+    """Device paths for the physical disks, by this module's own disk rule.
+
+    Deliberately the same `read_disks()` the inventory half uses, so smartctl is
+    only ever run against a physical device. A second implementation here would
+    be a second chance to hand `smartctl` a device-mapper layer, which has no
+    SMART data behind it.
+    """
+    return [f"/dev/{d['name']}" for d in read_disks()]
+
+
+def read_health() -> List[dict]:
+    """Every readable physical drive, with what SMART actually said."""
+    if shutil.which("smartctl") is None:
+        return []
+    out = []
+    for device in _read_disks():
+        proc = _run_smartctl(device)
+        if proc is None:
+            out.append({"device": device, "state": "not-determined: smartctl failed"})
+            continue
+        state = classify(proc.returncode)
+        record: Dict[str, object] = {
+            "device": device,
+            "state": state,
+            "status": proc.returncode,
+        }
+        attributes = _parse_attributes(proc.stdout or "")
+        if attributes:
+            record["attributes"] = attributes
+        model = ""
+        for line in (proc.stdout or "").splitlines():
+            if line.startswith("Device Model:"):
+                model = line.split(":", 1)[1].strip()
+                break
+        if model:
+            record["model"] = model
+        if state.startswith("not-determined") and (proc.stderr or "").strip():
+            record["detail"] = (proc.stderr or "").strip().splitlines()[0][:120]
+        out.append(record)
+    return out
+
+
+
+def _health_report():
+    """SMART health for every physical drive, or why it is unavailable.
+
+    A missing smartctl, no readable drive, and a drive that could not be opened
+    are three different facts and none of them is "healthy", so each keeps its
+    own wording rather than collapsing into one empty result.
+    """
+    if shutil.which("smartctl") is None:
+        return (
+            ["SMART health was not determined: smartctl is not installed. It "
+             "comes from the smartmontools package. Drive identity, capacity "
+             "and NVMe wear are still reported above."],
+            {"smartctl_present": False, "drives": 0},
+        )
+
+    drives = read_health()
+    if not drives:
+        return (
+            ["SMART health was not determined: no physical drive could be "
+             "identified to read."],
+            {"smartctl_present": True, "drives": 0},
+        )
+
+    lines = []
+    counts = {"healthy": 0, "failing": 0, "degraded": 0, "undetermined": 0}
+    for drive in drives:
+        state = str(drive["state"])
+        if state == "healthy":
+            counts["healthy"] += 1
+        elif state == "failing":
+            counts["failing"] += 1
+        elif state.startswith("degraded"):
+            counts["degraded"] += 1
+        else:
+            counts["undetermined"] += 1
+        header = drive.get("model") or drive["device"]
+        lines.append(f"{header}: {state}")
+        if "detail" in drive:
+            lines.append(f"  {drive['detail']}")
+        for attribute in drive.get("attributes", []):
+            line = f"  {attribute['name']}: {attribute['raw']}"
+            if attribute.get("value") is not None and attribute.get("threshold"):
+                line += (f" (normalised {attribute['value']}, failing at or "
+                         f"below {attribute['threshold']})")
+            lines.append(line)
+
+    if counts["failing"]:
+        lines.append(
+            f"{counts['failing']} drive(s) report a FAILING status. Copy "
+            f"anything you have not backed up before trusting this machine."
+        )
+    if counts["undetermined"]:
+        lines.append(
+            f"{counts['undetermined']} drive(s) could not be read. That is not "
+            f"the same as healthy: most often it needs root, or the drive is "
+            f"behind a controller that does not pass SMART through."
+        )
+    lines.append(
+        f"{len(drives)} drive(s): {counts['healthy']} healthy, "
+        f"{counts['failing']} failing, {counts['degraded']} degraded, "
+        f"{counts['undetermined']} not determined"
+    )
+    return lines, {"smartctl_present": True, "drives": len(drives), **counts}
+
+
 def _run(arguments: dict) -> Union[str, Percept]:
     config = ChronoaConfig()
     if not config.sense_allowed("storage"):
@@ -233,17 +458,20 @@ def _run(arguments: dict) -> Union[str, Percept]:
         )
     lines.append(f"{len(disks)} physical disk(s), {total:.1f} GiB total")
 
-    # Health is a different question from inventory, and is not answered here.
-    lines.append(
-        "SMART health was not read: it needs smartctl, which is in the opt-in "
-        "shani-tools-extra package, and root on most drives. Temperature is "
-        "covered by the hwmon sense."
-    )
+    # Health used to be refused here with a fixed sentence claiming smartctl
+    # could not be read. It is a different question from inventory, but it is
+    # the same subject - the same drive - and _health_report() below can now
+    # say what smartctl actually reported instead of asserting in advance that
+    # it cannot, which also retires the stale "shani-tools-extra" claim.
+    health_lines, health_meta = _health_report()
+    lines.append("")
+    lines.extend(health_lines)
 
     return _SENSE.to_percept(
         "\n".join(lines),
         source="sysfs-block",
         metadata={
+            **health_meta,
             "disks": len(disks),
             "layers": len(layers),
             "total_gib": round(total, 1),
@@ -265,9 +493,11 @@ _SCHEMA = {
             "been used plus any media errors. Reports only the physical disks - "
             "the device-mapper and RAID layers built on top of them are counted "
             "separately, because listing those as disks reports the same drive "
-            "three times. Does not read SMART health: that needs a tool from "
-            "an opt-in package and root on most drives, so it is reported as "
-            "not determined rather than guessed at."
+            "three times. Also reads SMART health per drive where smartctl is "
+            "available: reallocated and pending sectors, media wearout, "
+            "temperature and error counts, keeping a drive's own failing bit "
+            "distinct from a drive that merely could not be opened. A drive "
+            "that cannot be read is reported as not determined, never healthy."
         ),
         "parameters": {"type": "object", "properties": {}},
     },

@@ -152,7 +152,7 @@ class TestEndToEnd:
         percept = storage._run({})
         assert percept.metadata["disks"] == 1
         assert percept.metadata["layers"] == 1
-        assert "SMART health was not read" in percept.content
+        assert "SMART health was not determined" in percept.content
         assert "not separate disks" in percept.content
 
     def test_it_refuses_when_consent_is_off(self, monkeypatch):

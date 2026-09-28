@@ -138,10 +138,6 @@ SENSE_LABELS = {
         "Processor and load",
         "How busy the machine is, what memory is free, and the power governor",
     ),
-    "smart": (
-        "Drive health",
-        "SMART attributes, wear, and whether a disk is failing",
-    ),
     "gpu": (
         "Graphics",
         "Which GPU this machine has, its driver, and how much video memory",
@@ -196,8 +192,8 @@ SENSE_CATEGORIES = [
      "Interfaces, audio devices, Bluetooth, and motion from Wi-Fi signal",
      ["link", "network", "audio", "bluetooth", "rfsense"]),
     ("The machine itself",
-     "Processor load, battery, disks, graphics, temperature, fans, and arrays",
-     ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",
+     "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
+     ["cpu", "power", "storage", "gpu", "thermal", "hwmon",
       "cooling", "thermalgrid"]),
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
