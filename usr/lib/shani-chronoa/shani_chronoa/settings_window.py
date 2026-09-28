@@ -468,6 +468,14 @@ class SettingsWindow(Gtk.Window):
         self._entry(group, "Wake-word model", "openWakeWord model file",
                     config.wake_word_model, lambda t: config.set("wake-word-model", t.strip()))
         self._switch(
+            group, "Speak answers aloud",
+            "Read replies and timers back through Piper. The notify skill also "
+            "refuses while this is off, which is why it can look like a skill "
+            "that does nothing.",
+            config.get_bool("notification-enabled", True),
+            lambda a: self._set_bool("notification-enabled", a),
+        )
+        self._switch(
             group, "Interrupt while replying (barge-in)",
             "No echo cancellation, so speaker output can self-interrupt; best with headphones",
             config.barge_in_vad_enabled, lambda a: self._app_toggle("toggle-barge-in-vad", a))
