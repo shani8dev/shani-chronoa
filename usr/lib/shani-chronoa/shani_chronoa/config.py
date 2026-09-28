@@ -80,6 +80,7 @@ _SENSE_CONSENT_KEYS = {
     "camera": "camera-sense-enabled",
     "rfsense": "rfsense-sense-enabled",
     "thermalgrid": "thermalgrid-sense-enabled",
+    "hwmon": "hwmon-sense-enabled",
 }
 
 # Only memory is on by default: it is local-only and remembering is the point

@@ -414,3 +414,133 @@ class TestThermalGridProbeHonesty:
 
         assert thermalgrid._bus_number(_P("/dev/i2c-7")) == "7"
         assert thermalgrid._bus_number(_P("/dev/i2c-;rm -rf /")) is None
+
+
+class TestHwmonSentinelHandling:
+    """A driver declares more channels than the board wires up.
+
+    On a real machine `thinkpad` exposes temp1..temp8 and temp4..temp8 all read
+    back exactly `0` - 0.0 degrees, impossible on a running laptop. Reporting
+    those as readings would put five fictitious zero-degree sensors in front of
+    a user, and a plausible zero is worse than an absent value because it is
+    indistinguishable from a real reading until something acts on it.
+    """
+
+    def _chip(self, tmp_path, name, attrs):
+        chip = tmp_path / f"hwmon_{name}"
+        chip.mkdir(parents=True, exist_ok=True)
+        (chip / "name").write_text(name)
+        for filename, value in attrs.items():
+            (chip / filename).write_text(str(value))
+        return chip
+
+    def test_a_zero_temperature_is_unpopulated_not_zero_degrees(self, tmp_path, monkeypatch):
+        from shani_chronoa.senses import hwmon
+
+        chip = self._chip(tmp_path, "thinkpad", {
+            "temp1_input": "90000", "temp1_label": "CPU",
+            "temp4_input": "0",
+        })
+        monkeypatch.setattr(hwmon, "_chips", lambda: [chip])
+
+        out = hwmon.read_chips()[0]
+        temps = {c["channel"]: c for c in out["channels"]["temp"]}
+        assert temps["temp1"]["celsius"] == 90.0
+        assert temps["temp1"]["state"] == "ok"
+        assert temps["temp4"]["state"] == "unpopulated"
+        assert "celsius" not in temps["temp4"], "an unwired slot must not carry a value"
+
+    def test_an_implausibly_hot_reading_is_a_bad_read_not_a_temperature(self, tmp_path, monkeypatch):
+        """The kernel docs call >127C a BIOS/driver read error, not a value."""
+        from shani_chronoa.senses import hwmon
+
+        chip = self._chip(tmp_path, "thinkpad", {
+            "temp1_input": "200000", "temp1_label": "CPU",
+            "temp2_input": "71000",
+        })
+        monkeypatch.setattr(hwmon, "_chips", lambda: [chip])
+
+        temps = {c["channel"]: c for c in hwmon.read_chips()[0]["channels"]["temp"]}
+        assert temps["temp1"]["state"] == "bad-reading"
+        assert "celsius" not in temps["temp1"]
+        assert temps["temp2"]["state"] == "ok"
+
+    def test_fans_and_voltages_are_scaled_and_labelled(self, tmp_path, monkeypatch):
+        from shani_chronoa.senses import hwmon
+
+        chip = self._chip(tmp_path, "thinkpad", {
+            "fan1_input": "3300", "fan1_label": "CPU fan",
+            "in0_input": "12752",
+        })
+        monkeypatch.setattr(hwmon, "_chips", lambda: [chip])
+
+        ch = hwmon.read_chips()[0]["channels"]
+        assert ch["fan"][0]["value"] == 3300 and ch["fan"][0]["unit"] == "RPM"
+        assert ch["fan"][0]["label"] == "CPU fan"
+        assert ch["voltage"][0]["value"] == 12.752
+
+    def test_an_unreadable_chip_is_skipped_not_fatal(self, tmp_path, monkeypatch):
+        from shani_chronoa.senses import hwmon
+
+        monkeypatch.setattr(hwmon, "_chips", lambda: [tmp_path / "does-not-exist"])
+        assert hwmon.read_chips() == []
+
+
+class TestBrightnessSkill:
+    def test_it_registers(self):
+        from shani_chronoa.skills import discover_skills
+
+        _tools, handlers = discover_skills()
+        assert "set_brightness" in handlers
+
+    def test_reading_reports_each_panel(self, tmp_path, monkeypatch):
+        from shani_chronoa.skills import brightness
+
+        panel = tmp_path / "intel_backlight"
+        panel.mkdir()
+        (panel / "brightness").write_text("9514")
+        (panel / "max_brightness").write_text("96000")
+        monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path)
+
+        out = brightness.run({})
+        assert "intel_backlight" in out and "10%" in out
+
+    def test_a_denied_write_says_the_brightness_did_not_change(self, tmp_path, monkeypatch):
+        """The failure this guards: a set that silently does nothing and then
+        reports success, leaving the user believing their screen changed."""
+        from shani_chronoa.skills import brightness
+
+        panel = tmp_path / "intel_backlight"
+        panel.mkdir()
+        (panel / "brightness").write_text("9514")
+        (panel / "max_brightness").write_text("96000")
+
+        def _denied(self, data):
+            raise PermissionError(13, "Permission denied")
+
+        monkeypatch.setattr(type(panel / "brightness"), "write_text", _denied, raising=False)
+        monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path)
+
+        out = brightness.run({"level": 40})
+        assert "permission denied" in out.lower()
+        assert "NOT changed" in out, "a refused write must not read as success"
+
+    @pytest.mark.parametrize("level", [-1, 101, 500, "bright"])
+    def test_out_of_range_and_non_numeric_levels_are_refused(self, tmp_path, monkeypatch, level):
+        from shani_chronoa.skills import brightness
+
+        panel = tmp_path / "backlight"
+        panel.mkdir()
+        (panel / "brightness").write_text("100")
+        (panel / "max_brightness").write_text("1000")
+        monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path)
+
+        out = brightness.run({"level": level})
+        assert "between 0 and 100" in out or "not a whole number" in out
+
+    def test_no_backlight_node_says_so_rather_than_claiming_success(self, tmp_path, monkeypatch):
+        from shani_chronoa.skills import brightness
+
+        monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path / "absent")
+        out = brightness.run({"level": 50})
+        assert "no backlight node" in out

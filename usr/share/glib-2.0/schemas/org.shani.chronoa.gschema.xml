@@ -196,6 +196,11 @@
       <summary>Let Chronoa read a thermal camera array if one is attached</summary>
       <description>When true, Chronoa may probe the machine's I2C buses for a Melexis MLX90640 (32x24, 768 pixels) or Panasonic AMG8833 (8x8, 64 pixels) infrared array and, if one answers, report its temperature grid. Off by default. This is the real thermal-imaging path and it needs the sensor wired to I2C - no array, no grid, and this says so rather than substituting the CPU's own thermal zones, which measure the machine and not the room. A grid read here is coarse enough that it shows a warm shape, not a face.</description>
     </key>
+    <key name="hwmon-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read the machine's hardware monitoring sensors</summary>
+      <description>When true, Chronoa may read the kernel's hwmon class - fan speeds in RPM, and the temperature, voltage, current and power readings each driver exposes, with each chip identified by its driver name. Off by default. Read-only, and it complements the thermal sense rather than repeating it: the thermal zones report the CPU and board, while hwmon is where fan RPM, SSD temperature, WiFi chip temperature and battery voltage live. Slots a driver declares but does not populate are reported as unpopulated rather than as a reading, because those slots read back as zero.</description>
+    </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>
