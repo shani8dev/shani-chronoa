@@ -88,6 +88,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "check_updates": ("System", "Check for waiting package updates"),
     "disk_usage": ("System", "Report filesystem and directory space use"),
     "system_info": ("System", "Describe this machine"),
+    "scan_network": ("System", "Find other devices on the local network"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
