@@ -209,10 +209,27 @@ than no probe - `Gdk.Display.get_default()` returns None until GTK is
 initialised, and the first version of that probe skipped every test on a
 machine with a live X session.
 
-The renderer itself is **not committed**: it works from a standalone script and
-the pytest wrapper could not be made reliable. Two known-good scripts are
-`~/local/opt/llamacpp`-adjacent scratch, not the tree. Everything above is the
-durable part.
+`render_ui.py` in the repo root is that renderer, working and committed - it
+prints a PNG for `main`, `empty`, `settings` and `help`, and takes an optional
+theme argument. It must be run as a script, not imported into a test.
+
+**A visual regression suite was written, could not be made to fail, and was
+deleted rather than shipped.** The measurements, so nobody re-derives them:
+
+- A pytest wrapper returned empty PNGs when built in-process; shelling out to
+  `render_ui.py` fixed that, and 15 tests passed.
+- Restoring the pre-theming `gui.py` (hardcoded `#14141f` background) left all
+  15 **passing**, and the header measured 9.89:1 - not the 2.80:1 that the
+  original investigation recorded. The regression could not be reproduced.
+- The "not a blank page" assertion (`> 50 distinct colours`) was aimed at the
+  `Adw.init()` failure above. Rendering the settings window with `Adw.init()`
+  omitted still produced **345** distinct colours against **350** for the
+  working build - the two are indistinguishable by that measure.
+
+So every assertion in it passed regardless of the state it was meant to
+catch. A test that cannot fail is the same failure as a test that always
+passes, and is worse than no test because it reads as coverage. The renderer
+is the durable artefact; the assertions were not salvageable.
 
 ## Commit discipline
 
