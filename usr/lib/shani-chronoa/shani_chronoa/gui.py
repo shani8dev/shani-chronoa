@@ -329,56 +329,81 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._apply_motion_preference()
 
     def _apply_css(self) -> None:
+        """Layout, shape and the orb's state palette - but no theme colours.
+
+        This used to hardcode a dark window (`background-color: #14141f`) and
+        hand-pick every foreground to match, so a user on a light GTK theme got
+        a dark dialog with white borders that were invisible against it. The
+        theme is the user's, and it already knows the answer: every colour here
+        that describes *chrome* is now a named palette entry
+        (`@theme_fg_color`, `@theme_base_color`, `alpha(...)`), which follows
+        light, dark and high-contrast without this file knowing they exist.
+
+        What stays hardcoded is the orb's state palette, and that is deliberate:
+        green/amber/blue/violet/red are not decoration, they are how the
+        assistant says what it is doing. A theme cannot supply "thinking", and
+        diluting them into theme greys would cost the one signal the window
+        depends on. The state is also carried by the icon and the state text, so
+        colour is reinforcement rather than the only channel.
+        """
         css_data = b"""
-        window.cajita-window {
-            background-color: #14141f;
-        }
+        /* The window takes the desktop's background. Naming a colour here at
+           all is what made a light theme unusable. */
         .cajita-header {
-            color: #e6e6ef;
+            color: @theme_fg_color;
             font-size: 17px;
             font-weight: 600;
         }
         .cajita-state {
-            color: #e6e6ef;
+            color: @theme_fg_color;
             font-size: 14px;
             font-weight: 600;
         }
         .cajita-detail {
-            color: #9aa0b4;
+            color: alpha(@theme_fg_color, 0.65);
             font-size: 12px;
         }
         .transcript-turn {
             font-size: 14px;
+            color: @theme_fg_color;
         }
+        /* Bubbles are a tint of the foreground rather than a fixed dark grey,
+           so they read as raised on a light theme and on a dark one without a
+           second rule. */
         .transcript-user {
-            color: #9aa0b4;
-            background-color: #1e1e30;
+            color: @theme_fg_color;
+            background-color: alpha(@theme_fg_color, 0.08);
             border-radius: 10px;
             padding: 8px 12px;
         }
         .transcript-assistant {
-            color: #e6e6ef;
-            background-color: #23233a;
+            color: @theme_fg_color;
+            background-color: alpha(@theme_fg_color, 0.14);
             border-radius: 10px;
             padding: 8px 12px;
         }
         .transcript-placeholder {
-            color: #6b7280;
+            color: alpha(@theme_fg_color, 0.5);
             font-size: 13px;
         }
 
-        /* Per-state orb appearance. Idle is deliberately flat: the only
-           state with no glow, so every active state reads as active even
-           when the transition is a single frame. */
+        /* Per-state orb appearance. Idle is deliberately flat and drawn from
+           the theme, since "nothing is happening" is not a colour anyone
+           picked. Every active state is a real signal, so those stay fixed.
+           All active states glow; idle is the only one with no glow, so a
+           single-frame transition still reads as active. */
         .chronoa-orb {
-            background-color: #6b7280;
+            background-color: alpha(@theme_fg_color, 0.45);
             border-radius: 50%;
             min-width: 80px;
             min-height: 80px;
             box-shadow: none;
             transition: background-color 0.25s ease, box-shadow 0.25s ease;
         }
-        .chronoa-orb:hover { box-shadow: 0 0 12px rgba(255,255,255,0.18); }
+        .chronoa-orb:hover { box-shadow: 0 0 12px alpha(@theme_fg_color, 0.18); }
+        .chronoa-orb:focus-visible {
+            box-shadow: 0 0 0 3px alpha(@accent_bg_color, 0.9);
+        }
         .chronoa-orb.state-listening {
             background-color: #22c55e;
             box-shadow: 0 0 22px rgba(34,197,94,0.55);
@@ -406,16 +431,17 @@ class CajitaWindow(Gtk.ApplicationWindow):
             100% { box-shadow: 0 0 14px rgba(34,197,94,0.35); }
         }
 
-        /* The level halo. Its size is set from the recorder's RMS, so the
-           only thing CSS has to supply is the ring itself; the border colour
-           tracks the orb's state so the two never disagree about what is
-           happening. */
+        /* The level halo. Its size comes from the recorder's RMS, so all CSS
+           has to supply is the ring; the border colour tracks the orb's state
+           so the two never disagree. The idle ring is drawn from the theme,
+           because white-on-white is invisible and this used to be exactly
+           that on a light theme. */
         .chronoa-halo {
             border-radius: 50%;
-            border: 3px solid rgba(255,255,255,0.28);
+            border: 3px solid alpha(@theme_fg_color, 0.28);
             background-color: transparent;
         }
-        .chronoa-halo.halo-idle { border-color: rgba(255,255,255,0.18); }
+        .chronoa-halo.halo-idle { border-color: alpha(@theme_fg_color, 0.18); }
         .chronoa-halo.halo-listening { border-color: rgba(34,197,94,0.65); }
         .chronoa-halo.halo-thinking { border-color: rgba(245,158,11,0.6); }
         .chronoa-halo.halo-speaking { border-color: rgba(59,130,246,0.6); }
@@ -433,12 +459,15 @@ class CajitaWindow(Gtk.ApplicationWindow):
             box-shadow: 0 0 20px rgba(34,197,94,0.6);
         }
         .cajita-input {
-            color: #f2f2f7;
+            color: @theme_fg_color;
             font-size: 14px;
             padding: 8px 10px;
-            background-color: #1e1e30;
+            background-color: @theme_base_color;
             border-radius: 8px;
-            border: 1px solid #34344d;
+            border: 1px solid alpha(@theme_fg_color, 0.2);
+        }
+        .cajita-input:focus {
+            border-color: @accent_color;
         }
         .mic-off { color: #ef4444; }
         """
