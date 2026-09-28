@@ -61,6 +61,10 @@ _TTL_SECONDS = 300.0
 _POLL_INTERVAL = 300.0
 
 _TAGS_URL = "http://127.0.0.1:11434/api/tags"
+# llama.cpp serves an OpenAI-compatible model list. The port is the one the
+# small local server in the dev notes binds; a machine with no llama.cpp
+# simply does not answer, which is the same UNKNOWN path Ollama takes.
+_LLAMA_MODELS_URL = "http://127.0.0.1:8099/v1/models"
 _TIMEOUT = 4.0
 
 # Leave headroom rather than filling RAM to the last page. A model that
@@ -109,20 +113,7 @@ def _meminfo() -> dict:
     return out
 
 
-def installed_models(url: str = _TAGS_URL) -> Optional[List[dict]]:
-    """Models Ollama reports, or None when it could not be asked.
-
-    None is deliberately distinct from an empty list: an empty list is a real
-    answer meaning "Ollama is running and has no models", while None means
-    "the question was not answered".
-    """
-    try:
-        with urllib.request.urlopen(url, timeout=_TIMEOUT) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        logger.debug("ollama tags unavailable: %s", exc)
-        return None
-
+def _from_ollama(payload: dict) -> List[dict]:
     models = []
     for entry in payload.get("models", []) or []:
         name = entry.get("name")
@@ -137,8 +128,80 @@ def installed_models(url: str = _TAGS_URL) -> Optional[List[dict]]:
             "size_bytes": int(size) if isinstance(size, int) else None,
             "parameters": entry.get("details", {}).get("parameter_size"),
             "family": entry.get("details", {}).get("family"),
+            "backend": "ollama",
         })
     return models
+
+
+def _from_openai(payload: dict) -> List[dict]:
+    """Read an OpenAI-compatible `/v1/models`, which is what llama.cpp serves.
+
+    llama.cpp is listed in `_BACKENDS` as a supported engine, but this function
+    only ever asked Ollama, so a machine running llama.cpp alone reported
+    UNKNOWN for every model it actually had - the same "present but
+    unacknowledged" gap as an ungranted consent key. Size comes from
+    `size_bytes`, or from llama.cpp's own `meta.size_bytes`; a model reported
+    without one is kept and marked, never assumed small.
+    """
+    models = []
+    for entry in payload.get("data", []) or []:
+        name = entry.get("id")
+        if not name:
+            continue
+        size = entry.get("size_bytes")
+        if not isinstance(size, int):
+            meta = entry.get("meta") or {}
+            size = meta.get("size_bytes")
+        models.append({
+            "name": name,
+            "size_bytes": int(size) if isinstance(size, int) else None,
+            "parameters": None,
+            "family": None,
+            "backend": "llama.cpp",
+        })
+    return models
+
+
+# (label, url, parser): where to ask each backend what it has loaded. Ollama
+# first, because it is the default and its /api/tags is what this sense has
+# always used.
+#
+# Not named `_SOURCES`: that is the *model source* table further down
+# (huggingface-cli, ollama - where weights come from, as opposed to which
+# server is running). The two collided, the later definition won, and the
+# loop below unpacked the 2-tuple source table as a 3-tuple endpoint - which
+# only blew up once a real run reached it.
+_MODEL_LISTERS = (
+    ("ollama", _TAGS_URL, _from_ollama),
+    ("llama.cpp", _LLAMA_MODELS_URL, _from_openai),
+)
+
+
+def installed_models(url: Optional[str] = None) -> Optional[List[dict]]:
+    """Models any local backend reports, or None when none could be asked.
+
+    None is deliberately distinct from an empty list: an empty list is a real
+    answer meaning "a backend is running and has no models", while None means
+    "the question was not answered".
+
+    Every source is tried before giving up, so a machine with Ollama *and*
+    llama.cpp reports both rather than whichever happens to answer first.
+    """
+    listers = ((None, url, _from_ollama),) if url else _MODEL_LISTERS
+    answered = False
+    found: List[dict] = []
+    for label, source_url, parse in listers:
+        try:
+            with urllib.request.urlopen(source_url, timeout=_TIMEOUT) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+            logger.debug("%s models unavailable: %s", label, exc)
+            continue
+        answered = True
+        found.extend(parse(payload))
+    if not answered:
+        return None
+    return found
 
 
 # Known local inference backends, and what each one needs before it can
