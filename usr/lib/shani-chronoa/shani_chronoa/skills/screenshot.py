@@ -21,6 +21,7 @@ import os
 import shutil
 import time
 
+from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.screengrab import ScreenCaptureError, capture_screen
 
@@ -40,6 +41,18 @@ def _ensure_output_dir() -> str:
 
 
 def _run(_arguments: dict) -> str:
+    # A capture puts the whole screen - every window, every notification, any
+    # password or half-typed message - into a file, so it is gated on the vision
+    # sense. `capabilities.py` has always advertised this gate and the settings
+    # window has always had the toggle, but nothing here checked it, so the
+    # switch changed the settings screen and not whether a capture happened.
+    config = ChronoaConfig()
+    if not config.sense_allowed("vision"):
+        return (
+            f"Screenshots are not permitted: "
+            f"{config.sense_allowed_reason('vision')}."
+        )
+
     try:
         capture = capture_screen()
     except ScreenCaptureError as e:
