@@ -116,6 +116,20 @@ class TestSinksAreNotSources:
         assert "note: a camera appears among the recording sources" in content
         assert "V4L2 device is an audio capture node" in content
 
+    def test_every_annotation_is_stripped_from_the_name(self, wired):
+        """Only `[vol: …]` was being removed, so a muted device with no volume
+        annotation carried the whole bracket into its name — and the name is
+        what a person reads."""
+        for entry in (audio._parse_status(WPCTL_STATUS)["sinks"]
+                      + audio._parse_status(WPCTL_STATUS)["sources"]):
+            assert "[" not in entry["name"], entry["name"]
+            assert "vol:" not in entry["name"], entry["name"]
+            assert "muted:" not in entry["name"], entry["name"]
+        camera = [s for s in audio._parse_status(WPCTL_STATUS)["sources"]
+                  if "Camera" in s["name"]][0]
+        assert camera["name"] == "Integrated Camera (V4L2)"
+        assert camera["muted"] is True
+
     def test_a_real_microphone_is_not_mistaken_for_the_camera(self, wired, granted):
         sources = [s["name"] for s in audio._parse_status(WPCTL_STATUS)["sources"]]
         assert sum(1 for n in sources if "Microphone" in n) == 2, sources
