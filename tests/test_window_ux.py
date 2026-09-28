@@ -161,8 +161,15 @@ def test_empty_state_names_what_to_do(window):
     first = window._transcript._rows.get_first_child()
     assert "transcript-placeholder" in first.get_css_classes()
     assert first.get_label()
-    # Nothing else should be present - the placeholder is the whole state.
-    assert first.get_next_sibling() is None
+    # The empty state is the placeholder *and* the suggestion chips. What must
+    # still hold is that nothing *else* is there, so a cleared transcript can
+    # never grow stray rows.
+    sibling = first.get_next_sibling()
+    if sibling is not None:
+        assert "suggestion-bar" in sibling.get_css_classes(), (
+            f"unexpected row in the empty state: {sibling.get_css_classes()}"
+        )
+        assert sibling.get_next_sibling() is None
 
 
 def test_first_turn_replaces_the_placeholder(window):

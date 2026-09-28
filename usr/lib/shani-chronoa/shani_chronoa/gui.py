@@ -43,7 +43,7 @@ gi.require_version('GLib', '2.0')
 
 from gi.repository import Gtk, Gdk, GLib, GObject  # type: ignore
 
-from shani_chronoa import markdown_lite
+from shani_chronoa import capabilities, markdown_lite
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +209,221 @@ class ChronoaOrbWidget(Gtk.Button):
         self._halo.add_css_class(f"halo-{state.value}")
 
 
+class SuggestionBar(Gtk.FlowBox):
+    """Clickable example prompts, shown only while the transcript is empty.
+
+    The empty state is the one moment the app can teach itself, and until this
+    existed it taught nothing: a bare "Ask something" label tells a new user
+    nothing about a machine that can move their pointer, set a timer, or check
+    their battery, and the obvious fix - a hardcoded list of example sentences -
+    advertises skills that a given build may not have loaded. The prompts come
+    from `capabilities.startup_suggestions()`, which reads the live registry,
+    so a skill that is not there is not offered.
+
+    Clicking fills the input rather than submitting. Sending straight away would
+    be one click fewer, and would also make the suggestion uneditable and
+    unrecoverable if it guessed wrong, which is the wrong trade for a control
+    that is only being offered to be tried.
+    """
+
+    __gtype_name__ = 'SuggestionBar'
+
+    def __init__(self, suggestions, on_chosen, reduce_motion: bool = False) -> None:
+        super().__init__()
+        self.set_selection_mode(Gtk.SelectionMode.NONE)
+        # Fill, not centre: a FlowBox wraps against the width it is *given*, and
+        # a centred one is handed only its single-line natural width - so it
+        # never had room to wrap and laid out one chip per row regardless of
+        # how wide the window was. Each chip is left at its natural width, so
+        # the row still hugs its contents.
+        self.set_halign(Gtk.Align.FILL)
+        self.set_hexpand(True)
+        self.set_homogeneous(False)
+        self.set_column_spacing(6)
+        self.set_row_spacing(6)
+        self.set_margin_top(6)
+        self.add_css_class("suggestion-bar")
+        self._prompts = list(suggestions)
+        if reduce_motion:
+            self.add_css_class("reduce-motion")
+
+        for suggestion in suggestions:
+            button = Gtk.Button(label=suggestion)
+            button.add_css_class("suggestion-chip")
+            button.set_tooltip_text(f"Send: {suggestion}")
+            button.update_property(
+                [Gtk.AccessibleProperty.LABEL], [f"Suggestion: {suggestion}"]
+            )
+            button.connect("clicked", on_chosen, suggestion)
+            self.append(button)
+
+        # The actual cause of one-chip-per-row: `FlowBox.append` wraps every
+        # child in a `FlowBoxChild` whose halign is FILL, so the child's minimum
+        # width is the whole allocation and nothing can ever share a line. START
+        # makes each one shrink-wrap, which is what lets the row wrap.
+        for child in self.observe_children():
+            child.set_halign(Gtk.Align.START)
+
+        if suggestions:
+            self.reveal()
+
+    def reveal(self) -> None:
+        """Run the entrance animation.
+
+        The class is removed when the animation ends so that a later
+        `reveal()` re-runs it - and so a rebuild does not inherit a
+        finished animation's final frame as its starting state.
+        """
+        if self.get_css_classes().__contains__("reduce-motion"):
+            return
+        self.add_css_class("entering")
+        GLib.timeout_add(400, self._finish_reveal)
+
+    def _finish_reveal(self) -> bool:
+        self.remove_css_class("entering")
+        return GLib.SOURCE_REMOVE
+
+    def prompts(self) -> list[str]:
+        """The suggestions this bar was built with.
+
+        Read from the stored list rather than by walking the widget tree: a
+        `Gtk.FlowBox` wraps every appended widget in a `Gtk.FlowBoxChild`, so
+        the buttons are grandchildren and no amount of `get_first_child()`
+        reaches them. The tree also has nothing authoritative to say about
+        order once a child is wrapped.
+        """
+        return list(self._prompts)
+
+
+class HelpWindow(Gtk.Window):
+    """What Chronoa can do, grouped by intent, with consent state shown.
+
+    Exists because of a specific silence rather than general discoverability:
+    the gated skills - the ones that move the pointer, type text, notify, or
+    capture the screen - **refuse to run** when their consent key is off, and a
+    refusal with no visible reason is indistinguishable from the assistant
+    being broken. A user who asks Chronoa to click something gets silence and no
+    way to find out why. So every gated row names the switch that governs it and
+    says which way that switch is currently set.
+    """
+
+    __gtype_name__ = 'HelpWindow'
+
+    def __init__(self, caps, config, on_try=None, parent=None) -> None:
+        super().__init__(
+            transient_for=parent,
+            modal=True,
+            title="What Shani Chronoa can do",
+        )
+        self.set_default_size(520, 620)
+        self._caps = caps
+        self._on_try = on_try
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(root)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.set_margin_top(14)
+        header.set_margin_bottom(6)
+        header.set_margin_start(14)
+        header.set_margin_end(14)
+        title = Gtk.Label(label="What Shani Chronoa can do")
+        title.add_css_class("cajita-header")
+        title.set_hexpand(True)
+        title.set_halign(Gtk.Align.START)
+        close = Gtk.Button()
+        close.set_icon_name("window-close-symbolic")
+        close.add_css_class("flat")
+        close.set_tooltip_text("Close")
+        close.connect("clicked", lambda _b: self.close())
+        header.append(title)
+        header.append(close)
+        root.append(header)
+
+        summary = Gtk.Label(
+            label=f"{len(self._visible())} available"
+            f"  ·  {len(self._blocked())} need a setting switched on"
+        )
+        summary.add_css_class("cajita-detail")
+        summary.set_halign(Gtk.Align.START)
+        summary.set_margin_start(14)
+        summary.set_margin_bottom(8)
+        root.append(summary)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_vexpand(True)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(self._build_rows(config))
+        root.append(scroller)
+
+    def _visible(self) -> list:
+        return [c for c in self._caps if not c.consent_key]
+
+    def _blocked(self) -> list:
+        return [c for c in self._caps if c.consent_key]
+
+    def _build_rows(self, config) -> Gtk.Box:
+        rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        ordered = [g for g in capabilities.GROUP_ORDER if any(
+            c.group == g for c in self._caps
+        )]
+        for extra in sorted({c.group for c in self._caps} - set(ordered)):
+            ordered.append(extra)
+
+        for group in ordered:
+            group_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            group_box.add_css_class("help-group")
+            heading = Gtk.Label(label=group)
+            heading.add_css_class("help-group-heading")
+            heading.set_halign(Gtk.Align.START)
+            group_box.append(heading)
+            for capability in [c for c in self._caps if c.group == group]:
+                group_box.append(self._build_row(capability, config))
+            rows.append(group_box)
+        return rows
+
+    def _build_row(self, capability, config) -> Gtk.Box:
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        row.add_css_class("help-row")
+
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        name = Gtk.Label(label=capability.label)
+        name.add_css_class("help-row-label")
+        name.set_hexpand(True)
+        name.set_halign(Gtk.Align.START)
+        top.append(name)
+
+        if capability.example and self._on_try is not None:
+            try_button = Gtk.Button(label="Try")
+            try_button.add_css_class("flat")
+            try_button.add_css_class("circular")
+            try_button.set_valign(Gtk.Align.CENTER)
+            try_button.set_tooltip_text(f"Send: {capability.example}")
+            try_button.connect("clicked", self._on_try, capability.example)
+            top.append(try_button)
+
+        row.append(top)
+
+        if capability.description:
+            detail = Gtk.Label(label=capability.description)
+            detail.add_css_class("help-row-detail")
+            detail.set_wrap(True)
+            detail.set_halign(Gtk.Align.START)
+            detail.set_xalign(0.0)
+            row.append(detail)
+
+        if capability.consent_key:
+            open_now = capability.gate_is_open(config)
+            gate = Gtk.Label(label=capability.gate_help(open_now))
+            gate.add_css_class("help-row-gate")
+            gate.add_css_class("help-row-gate-open" if open_now else "help-row-gate-closed")
+            gate.set_wrap(True)
+            gate.set_halign(Gtk.Align.START)
+            gate.set_xalign(0.0)
+            row.append(gate)
+        return row
+
+
 class TranscriptView(Gtk.ScrolledWindow):
     """An append-only list of conversation turns.
 
@@ -219,12 +434,17 @@ class TranscriptView(Gtk.ScrolledWindow):
 
     __gtype_name__ = 'TranscriptView'
 
-    def __init__(self) -> None:
+    def __init__(self, config=None, caps=None, on_suggestion=None,
+                 reduce_motion: bool = False) -> None:
         super().__init__()
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.set_vexpand(True)
         self.set_propagate_natural_height(True)
 
+        self._config = config
+        self._caps = caps or []
+        self._reduce_motion = reduce_motion
+        self._on_suggestion = on_suggestion
         self._rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self._rows.set_margin_top(10)
         self._rows.set_margin_bottom(10)
@@ -235,11 +455,18 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._current_assistant: Gtk.Label | None = None
         self.show_placeholder()
 
-    def show_placeholder(self) -> None:
-        """The empty state.
+    def set_suggestion_handler(self, handler) -> None:
+        self._on_suggestion = handler
+        if self._is_placeholder():
+            self.show_placeholder()
 
-        Deliberately not blank: an empty box reads as a broken window, so the
-        empty state names what to do instead.
+    def show_placeholder(self) -> None:
+        """The empty state: a prompt *and* something to press.
+
+        Deliberately not blank, and deliberately not just words. A single
+        "ask something" line leaves a new user with nothing to act on, so the
+        suggestions are part of the empty state rather than a separate panel
+        that has to be discovered and dismissed.
         """
         self.clear()
         label = Gtk.Label(label="Ask something, or press the orb to speak.")
@@ -247,6 +474,17 @@ class TranscriptView(Gtk.ScrolledWindow):
         label.set_wrap(True)
         label.set_halign(Gtk.Align.CENTER)
         self._rows.append(label)
+
+        suggestions = capabilities.startup_suggestions(self._caps)
+        if suggestions and self._on_suggestion is not None:
+            bar = SuggestionBar(
+                suggestions, self._on_suggestion, self._reduce_motion
+            )
+            bar.update_property(
+                [Gtk.AccessibleProperty.LABEL],
+                ["Suggested questions you can send"],
+            )
+            self._rows.append(bar)
 
     def clear(self) -> None:
         child = self._rows.get_first_child()
@@ -375,12 +613,54 @@ class TranscriptView(Gtk.ScrolledWindow):
 class CajitaWindow(Gtk.ApplicationWindow):
     """The main window: state surface, transcript, and input."""
 
-    def __init__(self, application: Gtk.Application) -> None:
+    def __init__(self, application: Gtk.Application, config=None) -> None:
         super().__init__(application=application)
         self._state = AssistantState.IDLE
+        self._config = config if config is not None else self._default_config()
+        self._caps = self._load_capabilities()
+        self._help_window: HelpWindow | None = None
         self._setup_window()
         self._setup_ui()
         self._sync_from_state()
+
+    @staticmethod
+    def _default_config():
+        """Config for the window, degrading rather than refusing.
+
+        The window has to be constructible without one - a test, or a caller
+        that only wants the visual surface - so a missing config is replaced by
+        one that reports every gate as closed. Closed is the honest answer when
+        consent cannot be read, and it means the help window explains the
+        switches instead of quietly claiming everything is available.
+        """
+        try:
+            from shani_chronoa.config import ChronoaConfig
+            return ChronoaConfig()
+        except Exception:
+            logger.debug("no ChronoaConfig available; gates read as closed",
+                         exc_info=True)
+
+            class _Closed:
+                def sense_allowed(self, key):
+                    return False
+            return _Closed()
+
+    @staticmethod
+    def _load_capabilities() -> list:
+        """Read the live skill registry, tolerating its absence entirely.
+
+        A broken or missing registry must cost the suggestions and the help
+        list, not the window. Both surfaces are additive, so the failure mode
+        is a plainer window rather than a window that will not open.
+        """
+        try:
+            from shani_chronoa.skills import discover_skills
+            tools, _handlers = discover_skills()
+        except Exception:
+            logger.warning("skill registry unavailable; no suggestions or help",
+                           exc_info=True)
+            return []
+        return capabilities.find_capabilities(tools)
 
     def _setup_window(self) -> None:
         self.set_title("Shani Chronoa")
@@ -532,6 +812,89 @@ class CajitaWindow(Gtk.ApplicationWindow):
             border-color: @accent_color;
         }
         .mic-off { color: #ef4444; }
+
+        /* Suggestion chips. Outlined rather than filled so a screen full of
+           them does not compete with the transcript for attention, and so the
+           default-action styling stays reserved for Send. */
+        .suggestion-chip {
+            color: @theme_fg_color;
+            font-size: 13px;
+            padding: 6px 12px;
+            border-radius: 15px;
+            border: 1px solid alpha(@theme_fg_color, 0.25);
+            background-color: alpha(@theme_fg_color, 0.04);
+            transition: background-color 0.18s ease,
+                        border-color 0.18s ease,
+                        color 0.18s ease;
+        }
+        .suggestion-chip:hover {
+            background-color: alpha(@accent_color, 0.16);
+            border-color: alpha(@accent_color, 0.55);
+        }
+        .suggestion-chip:focus-visible {
+            border-color: @accent_color;
+        }
+
+        /* Entrance for the chip row. Staggering is not expressible in GTK CSS,
+           so the whole row fades together - a row that appeared one chip at a
+           time would read as content still loading. */
+        .suggestion-bar.entering {
+            animation: chronoa-reveal 0.32s ease-out;
+        }
+        @keyframes chronoa-reveal {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+
+        /* A new turn arriving, so the transcript does not jump. */
+        .transcript-turn {
+            animation: chronoa-turn-in 0.22s ease-out;
+        }
+        @keyframes chronoa-turn-in {
+            from { opacity: 0; }
+            to   { opacity: 1; }
+        }
+
+        /* Reduce-motion drops the entrances but keeps every colour, border and
+           state cue - the animations here are decoration on top of a layout
+           that is already complete, so removing them loses no information. */
+        .reduce-motion .suggestion-bar.entering,
+        .reduce-motion .suggestion-bar,
+        .reduce-motion .transcript-turn {
+            animation: none;
+        }
+        .reduce-motion .suggestion-chip {
+            transition: none;
+        }
+
+        .help-group-heading {
+            color: @theme_fg_color;
+            font-size: 13px;
+            font-weight: 700;
+            padding: 14px 14px 4px 14px;
+        }
+        .help-row {
+            padding: 6px 14px;
+            border-bottom: 1px solid alpha(@theme_fg_color, 0.07);
+        }
+        .help-row-label {
+            color: @theme_fg_color;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .help-row-detail {
+            color: alpha(@theme_fg_color, 0.72);
+            font-size: 12px;
+        }
+        /* The gate line is the whole reason this window exists, so it is the
+           only coloured text in it: green when the skill is usable, amber when
+           it will silently do nothing. */
+        .help-row-gate {
+            font-size: 12px;
+            padding-top: 2px;
+        }
+        .help-row-gate-open { color: rgba(34,197,94,0.9); }
+        .help-row-gate-closed { color: rgba(245,158,11,0.95); }
         """
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(css_data)
@@ -543,14 +906,56 @@ class CajitaWindow(Gtk.ApplicationWindow):
         """Respect the desktop reduce-motion preference.
 
         Checked once at construction. This is about the assistant announcing
-        itself without movement, not about suppressing every animation in the
-        app, so it is scoped to the orb's pulse.
+        itself without movement, so it is scoped to the window's own animations
+        rather than suppressing every animation in the app: the orb's
+        listening pulse and the level halo are how a voice app shows it is
+        *hearing* you, and a still orb during recording reads as a dead control
+        rather than a considerate one.
         """
         settings = Gtk.Settings.get_default()
         if settings is None:
             return
         if not settings.get_property("gtk-enable-animations"):
             self.add_css_class("reduce-motion")
+
+    def _motion_is_reduced(self) -> bool:
+        return self.get_css_classes().__contains__("reduce-motion")
+
+    def _on_suggestion_clicked(self, _button: Gtk.Button, suggestion: str) -> None:
+        """Put a suggestion in the input, ready to send or edit."""
+        self._input_entry.set_text(suggestion)
+        self._input_entry.grab_focus()
+        self._input_entry.set_position(-1)
+
+    def open_help(self) -> HelpWindow | None:
+        """Open the capability list, or raise the one already open.
+
+        Returns the window so a caller can wait on it; `None` when there is
+        nothing to show, which is a real state - a build whose skill registry
+        failed to load has no capabilities, and an empty help window would be
+        worse than no button.
+        """
+        if not self._caps:
+            logger.info("no capabilities to show; skill registry was empty")
+            return None
+        if self._help_window is not None:
+            self._help_window.present()
+            return self._help_window
+        self._help_window = HelpWindow(
+            self._caps, self._config, self._on_help_try, parent=self
+        )
+        self._help_window.connect("close-request", self._on_help_close)
+        self._help_window.present()
+        return self._help_window
+
+    def _on_help_try(self, _button: Gtk.Button, prompt: str) -> None:
+        self._on_suggestion_clicked(_button, prompt)
+        if self._help_window is not None:
+            self._help_window.close()
+
+    def _on_help_close(self, _window) -> bool:
+        self._help_window = None
+        return False
 
     def _setup_ui(self) -> None:
         main_box = Gtk.Box(
@@ -577,6 +982,16 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._mic_icon.set_tooltip_text("Microphone is in use")
         self._mic_icon.add_css_class("flat")
 
+        help_button = Gtk.Button()
+        help_button.set_icon_name("help-about-symbolic")
+        help_button.add_css_class("flat")
+        help_button.set_valign(Gtk.Align.CENTER)
+        help_button.set_tooltip_text("What can Chronoa do?")
+        help_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["What can Chronoa do?"]
+        )
+        help_button.connect("clicked", lambda _b: self.open_help())
+
         settings_button = Gtk.Button()
         settings_button.set_icon_name("emblem-system-symbolic")
         settings_button.add_css_class("flat")
@@ -586,6 +1001,7 @@ class CajitaWindow(Gtk.ApplicationWindow):
 
         header_row.append(header)
         header_row.append(self._mic_icon)
+        header_row.append(help_button)
         header_row.append(settings_button)
         main_box.append(header_row)
 
@@ -609,7 +1025,12 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._detail_label.set_visible(False)
         main_box.append(self._detail_label)
 
-        self._transcript = TranscriptView()
+        self._transcript = TranscriptView(
+            config=self._config,
+            caps=self._caps,
+            on_suggestion=self._on_suggestion_clicked,
+            reduce_motion=self._motion_is_reduced(),
+        )
         main_box.append(self._transcript)
 
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
