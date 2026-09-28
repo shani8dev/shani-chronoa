@@ -125,6 +125,49 @@ SENSE_LABELS = {
 }
 
 
+# The senses, grouped by what a person would be trying to do, and the order
+# they are offered in.
+#
+# Seventeen switches in one alphabetical list is not a settings page, it is the
+# registry printed out. Nothing in it answers the only question someone opening
+# this has - "which of these do I turn on?" - and the honest answer depends on
+# what they want the assistant to be able to do, not on where its modules sort.
+#
+# `SUGGESTED` is the everyday baseline, and deliberately excludes the senses
+# that observe the room or the machine: those are opt-in on their own merits.
+SENSE_CATEGORIES = [
+    ("Talking to Chronoa",
+     "Hearing you, and remembering what you asked it to keep",
+     ["hearing", "memory"]),
+    ("Looking at things",
+     "Cameras, and reading text out of pictures",
+     ["camera", "vision", "ocr"]),
+    ("Getting work done",
+     "Files, folders and the web - what makes it able to act rather than only answer",
+     ["filesystem", "web"]),
+    ("The screen",
+     "Connected outputs, and setting the backlight",
+     ["display"]),
+    ("Network and wireless",
+     "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
+     ["network", "bluetooth", "rfsense"]),
+    ("The machine itself",
+     "Temperature, fans, power draw, and infrared arrays if one is wired up",
+     ["thermal", "hwmon", "thermalgrid"]),
+    ("Security and privacy",
+     "Which software can act as administrator, and what is already using your camera",
+     ["privilege", "contention"]),
+    ("Models",
+     "What this machine can run, and which model is configured",
+     ["modelfit"]),
+]
+
+# The everyday baseline, offered as a named action. `memory` is already on by
+# default, so the useful part is hearing plus the two that let the assistant do
+# something. Nothing that watches the room or the machine is in here.
+SUGGESTED = ["hearing", "filesystem", "web", "display"]
+
+
 class SettingsWindow(Gtk.Window):
     """Every setting Chronoa has, in one searchable window."""
 
@@ -235,36 +278,110 @@ class SettingsWindow(Gtk.Window):
         enabled_first = sorted(n for n in registry if config.sense_allowed(n))
         disabled = sorted(n for n in registry if not config.sense_allowed(n))
 
-        group = self._group(
-            page, "Senses",
-            "What Chronoa is allowed to perceive. All of these are off by default "
-            "except memory. A sense that is off is never invoked at all - the "
-            "check happens before anything is read, not after.",
+        self._build_suggested(page, registry, config, enabled_first)
+
+        for cat_title, cat_desc, names in SENSE_CATEGORIES:
+            present = [n for n in names if n in registry]
+            if not present:
+                continue
+            ordered = [n for n in enabled_first if n in present] + [
+                n for n in disabled if n in present
+            ]
+            on = sum(1 for n in ordered if config.sense_allowed(n))
+            group = self._group(
+                page, cat_title,
+                f"{cat_desc}. {on} of {len(ordered)} on.",
+            )
+            for name in ordered:
+                self._add_sense_row(group, registry, config, name)
+
+    def _add_sense_row(self, group, registry, config, name: str) -> None:
+        sense = registry[name]
+        key = _SENSE_CONSENT_KEYS.get(name)
+        description = sense.schema.get("function", {}).get("description", "")
+        title, summary = SENSE_LABELS.get(
+            name, (name.replace("_", " ").capitalize(), "")
         )
-        for name in enabled_first + disabled:
-            sense = registry[name]
+        subtitle = summary or (description.split(". ")[0].rstrip(".") if description else "")
+        if sense.is_ambient():
+            subtitle += f" - polled every {int(sense.poll_interval)}s"
+        row = self._switch(
+            group, title, subtitle,
+            bool(key) and config.sense_allowed(name),
+            lambda active, n=name: self._set_sense(n, active),
+            enabled=bool(key),
+            tooltip=description or None,
+        )
+        self._sense_rows[name] = row
+        # The needle carries the module name and the schema text as well as the
+        # title, so someone who knows this code can type "hwmon" and find the
+        # row titled "Hardware sensors".
+        group._needle_extra.append((row, f"{name} {description}".lower()))
+
+    def _build_suggested(self, page, registry, config, enabled_first) -> None:
+        """One action for the everyday case, and only after a confirmation.
+
+        Turning sensing on is a consent decision, so a bulk version of it gets
+        the same care an individual toggle does: the dialog names every sense
+        that will change before anything is written, the change is additive
+        only (it never turns anything *off*, so it cannot quietly revoke a
+        choice), and the button is gone once there is nothing left to suggest.
+        """
+        missing = [n for n in SUGGESTED
+                   if n in registry and n not in enabled_first]
+        group = self._group(
+            page, "Getting started",
+            "Everything here is off by default. A sense that is off is never "
+            "invoked at all - the check happens before anything is read.",
+        )
+        if not missing:
+            self._info_row(
+                group, "Suggested setup is on",
+                ", ".join(SENSE_LABELS.get(n, (n, ""))[0] for n in SUGGESTED
+                          if n in registry) + " are already enabled.",
+            )
+            return
+        names = ", ".join(SENSE_LABELS.get(n, (n, ""))[0] for n in missing)
+        row = Adw.ActionRow(
+            title="Turn on the usual ones",
+            subtitle=f"Would enable: {names}. Nothing else changes.",
+            activatable=True,
+        )
+        row.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"Turn on the suggested senses: {names}"],
+        )
+        row.connect("activated", self._on_suggest_activated, missing)
+        group.add(row)
+        self._suggested_row = row
+
+    def _on_suggest_activated(self, _row, names: list) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Turn these on?",
+            body=(
+                "Chronoa will be able to use:\n\n"
+                + "\n".join(f"  •  {SENSE_LABELS.get(n, (n, ''))[0]}" for n in names)
+                + "\n\nNothing will be turned off, and you can change any of "
+                "these afterwards."
+            ),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("apply", "Turn on")
+        dialog.set_response_appearance("apply", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._on_suggest_response, names)
+        dialog.present(self.get_root() or self)
+        self._suggest_dialog = dialog
+
+    def _on_suggest_response(self, dialog, response: str, names: list) -> None:
+        if response != "apply":
+            return
+        for name in names:
             key = _SENSE_CONSENT_KEYS.get(name)
-            description = sense.schema.get("function", {}).get("description", "")
-            title, summary = SENSE_LABELS.get(
-                name, (name.replace("_", " ").capitalize(), "")
-            )
-            subtitle = summary or (description.split(". ")[0].rstrip(".") if description else "")
-            if sense.is_ambient():
-                subtitle += f" - polled every {int(sense.poll_interval)}s"
-            row = self._switch(
-                group, title, subtitle,
-                bool(key) and config.sense_allowed(name),
-                lambda active, n=name: self._set_sense(n, active),
-                enabled=bool(key),
-                tooltip=description or None,
-            )
-            self._sense_rows[name] = row
-            # Search still answers to the module name and the schema text:
-            # someone who knows this code types "hwmon", and a humanised title
-            # must not lock them out of it.
-            group._needle_extra.append(
-                (row, f"{name} {description}".lower())
-            )
+            if key:
+                self.app.config.set(key, "true")
+        self._refresh_sense_switches()
 
     def _set_sense(self, name: str, active: bool) -> None:
         key = _SENSE_CONSENT_KEYS.get(name)

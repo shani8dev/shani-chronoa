@@ -153,7 +153,18 @@ class TestSettingsWindowIsComplete:
         assert built["entry_count"] > 0
 
     def test_it_is_organised_into_groups(self, built):
-        for expected in ("Senses", "Privacy and network", "Voice", "Models", "System"):
+        """By purpose, not by module name.
+
+        The senses used to be one flat group called "Senses" - the registry
+        printed out, which answers nothing about which one to turn on. They are
+        now grouped by what someone wants the assistant to be able to do, and
+        the non-sense sections are unchanged.
+        """
+        for expected in (
+            "Getting started", "Talking to Chronoa", "Looking at things",
+            "Getting work done", "The machine itself", "Security and privacy",
+            "Privacy and network", "Voice", "Models", "System",
+        ):
             assert expected in built["groups"], f"missing group: {expected}"
 
     def test_there_is_a_search_entry(self, built):
@@ -167,10 +178,18 @@ class TestSearchActuallyFilters:
         `set_text()` does not emit `search-changed`, so an earlier check of
         this appeared to show search was simply broken. It is not - it needs
         the signal the widget emits while a person types.
+
+        Expected group is derived from the category table rather than written
+        out, so regrouping does not make this lie the way a hardcoded name did.
         """
-        assert built["visible_groups"] == ["Senses"], (
-            "searching 'thermal' should leave only the group containing a "
-            f"matching row, got {built['visible_groups']}"
+        from shani_chronoa.settings_window import SENSE_CATEGORIES
+
+        owner = next(
+            title for title, _d, names in SENSE_CATEGORIES if "thermal" in names
+        )
+        assert built["visible_groups"] == [owner], (
+            f"searching 'thermal' should leave only the group holding that "
+            f"sense ({owner!r}), got {built['visible_groups']}"
         )
 
     def test_a_matching_row_inside_a_group_survives(self, built):
