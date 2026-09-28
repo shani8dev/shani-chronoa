@@ -14,6 +14,7 @@ done.
 - `Required verification for a change`
 - `Boundaries`
 - `Commit discipline`
+- `Cross-repo impact`
 
 **Read when your change touches them:**
 - `Rendering the UI to a PNG` — GTK4/Adw init ordering and the capture path

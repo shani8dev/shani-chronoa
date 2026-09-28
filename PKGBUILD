@@ -22,6 +22,19 @@ depends=(
     'upower'
     'bubblewrap'
     'libsecret'
+    # The machine-state senses and the power-profile skill shell out to these.
+    # pciutils in particular was declared in no manifest at all, so the devices
+    # and gpu senses degraded to UNKNOWN on every install. See the fuller
+    # rationale in shani-pkgbuilds/shani-chronoa/PKGBUILD, which is the
+    # manifest that actually ships.
+    'psmisc'
+    'i2c-tools'
+    'polkit'
+    'bluez'
+    'pciutils'
+    'usbutils'
+    'smartmontools'
+    'power-profiles-daemon'
 )
 optdepends=(
     'python-openwakeword: hands-free "hey chronoa" wake-word activation (AUR, not in official repos)'

@@ -3,7 +3,7 @@ Version: 0.1.0
 Section: utils
 Priority: optional
 Architecture: all
-Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, whisper.cpp, piper-tts, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret
+Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, whisper.cpp, piper-tts, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret, psmisc, i2c-tools, policykit-1, bluez, pciutils, usbutils, smartmontools, power-profiles-daemon
 Suggests: python3-openwakeword, python3-numpy, python3-mcp
 Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
 Description: Local AI assistant with privacy-first design, integrated into Shanios
