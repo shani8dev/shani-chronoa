@@ -42,6 +42,88 @@ from shani_chronoa import models
 from shani_chronoa.config import _SENSE_CONSENT_KEYS
 from shani_chronoa.senses import discover_senses
 
+# What each sense is called, and said in a line, in the settings window.
+#
+# A sense's `description` is the LLM's *tool documentation*, not interface copy.
+# Deriving the row from it gave raw module names as titles and subtitles
+# ranging from one clause to a 300-character run-on, and reading the rendered
+# window is the only reason that was noticed. So the visible text is written
+# here and the schema description stays as the tooltip.
+#
+# An unlisted sense falls back to a title-cased name, and a test fails until it
+# is listed: adding a sense should mean deciding what to call it, not
+# inheriting its filename.
+SENSE_LABELS = {
+    "vision": (
+        "Camera",
+        "Take a photo when asked, if a camera is attached",
+    ),
+    "ocr": (
+        "Read text in images",
+        "Extract words from a picture you point it at",
+    ),
+    "filesystem": (
+        "Files and folders",
+        "Find, read and write files on this machine",
+    ),
+    "web": (
+        "Web search",
+        "Look things up online, and open pages",
+    ),
+    "memory": (
+        "Remembering",
+        "Keep facts you ask it to, on this machine only",
+    ),
+    "hearing": (
+        "Listening",
+        "Hear you through the microphone",
+    ),
+    "contention": (
+        "Microphone and camera in use",
+        "Report what currently holds a capture device",
+    ),
+    "privilege": (
+        "Who holds sensitive access",
+        "Report which software can act as administrator",
+    ),
+    "thermal": (
+        "Temperature",
+        "CPU and motherboard thermal zones",
+    ),
+    "display": (
+        "Screen and brightness",
+        "Report connected outputs, and set the backlight",
+    ),
+    "network": (
+        "Network",
+        "Connected interfaces, addresses and DNS",
+    ),
+    "bluetooth": (
+        "Bluetooth",
+        "Adapters, and whether rfkill has blocked them",
+    ),
+    "camera": (
+        "Cameras attached",
+        "List camera devices. Never opens a stream",
+    ),
+    "rfsense": (
+        "Movement",
+        "Sense motion from Wi-Fi signal strength, not what moved",
+    ),
+    "thermalgrid": (
+        "Infrared array",
+        "Thermal grid sensors on the I2C bus, if one is wired up",
+    ),
+    "hwmon": (
+        "Hardware sensors",
+        "Fan speed, temperature, voltage and power",
+    ),
+    "modelfit": (
+        "Which models fit",
+        "What this machine can run, and what is installed",
+    ),
+}
+
 
 class SettingsWindow(Gtk.Window):
     """Every setting Chronoa has, in one searchable window."""
@@ -163,17 +245,26 @@ class SettingsWindow(Gtk.Window):
             sense = registry[name]
             key = _SENSE_CONSENT_KEYS.get(name)
             description = sense.schema.get("function", {}).get("description", "")
-            subtitle = description.split(". ")[0].rstrip(".") if description else ""
+            title, summary = SENSE_LABELS.get(
+                name, (name.replace("_", " ").capitalize(), "")
+            )
+            subtitle = summary or (description.split(". ")[0].rstrip(".") if description else "")
             if sense.is_ambient():
                 subtitle += f" - polled every {int(sense.poll_interval)}s"
             row = self._switch(
-                group, name, subtitle,
+                group, title, subtitle,
                 bool(key) and config.sense_allowed(name),
                 lambda active, n=name: self._set_sense(n, active),
                 enabled=bool(key),
                 tooltip=description or None,
             )
             self._sense_rows[name] = row
+            # Search still answers to the module name and the schema text:
+            # someone who knows this code types "hwmon", and a humanised title
+            # must not lock them out of it.
+            group._needle_extra.append(
+                (row, f"{name} {description}".lower())
+            )
 
     def _set_sense(self, name: str, active: bool) -> None:
         key = _SENSE_CONSENT_KEYS.get(name)

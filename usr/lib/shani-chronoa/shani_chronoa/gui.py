@@ -43,6 +43,8 @@ gi.require_version('GLib', '2.0')
 
 from gi.repository import Gtk, Gdk, GLib, GObject  # type: ignore
 
+from shani_chronoa import markdown_lite
+
 logger = logging.getLogger(__name__)
 
 
@@ -258,14 +260,26 @@ class TranscriptView(Gtk.ScrolledWindow):
         """Append one turn, styled by role, and return its label."""
         if self._is_placeholder():
             self.clear()
-        label = Gtk.Label(label=text)
+        label = Gtk.Label()
         label.set_wrap(True)
+        # A reply arrives with light markdown in it, and showing that verbatim
+        # leaves the user reading `**38G**` and `- / is 32% full` - the most
+        # visibly unfinished thing about a chat window. Only the assistant's
+        # text is rendered: a user's own message is what they typed, and
+        # re-rendering it would change what they see into what they did not
+        # write. Selectable either way, so the text is still reachable without
+        # the copy button.
+        label.set_selectable(True)
+        if role == "user":
+            label.set_text(text)
+        else:
+            label.set_markup(markdown_lite.to_pango(text))
         label.set_xalign(1.0 if role == "user" else 0.0)
         label.add_css_class("transcript-turn")
         label.add_css_class(f"transcript-{role}")
         # A screen reader should announce a finished turn, not every word of
         # a partial one, so the role and label are set explicitly.
-        label.update_property([Gtk.AccessibleProperty.LABEL], [f"{role} said"])
+        label.update_property([Gtk.AccessibleProperty.LABEL], [f"{role} said: {text}"])
         if role == "user":
             self._rows.append(label)
         else:
@@ -337,7 +351,7 @@ class TranscriptView(Gtk.ScrolledWindow):
         the assistant having answered twice.
         """
         if self._current_assistant is not None:
-            self._current_assistant.set_label(text)
+            self._current_assistant.set_markup(markdown_lite.to_pango(text))
             self._scroll_to_end()
             return
         self._current_assistant = self._append_turn("assistant", text)

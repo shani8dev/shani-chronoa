@@ -58,6 +58,13 @@ _HARNESS = textwrap.dedent(
         nodes = walk(w.get_child(), [])
         result["groups"] = [g.get_title() for g in nodes if isinstance(g, Adw.PreferencesGroup)]
         result["switch_titles"] = [r.get_title() for r in nodes if isinstance(r, Adw.SwitchRow)]
+        # Keyed by sense name, so it is the thing to assert reachability
+        # against. Row titles are human-readable now ("Hardware sensors", not
+        # "hwmon") and are presentation; this is the binding.
+        result["sense_rows"] = sorted(w._sense_rows)
+        result["sense_active"] = sorted(
+            n for n, r in w._sense_rows.items() if r.get_active()
+        )
         result["active"] = [r.get_title() for r in nodes
                             if isinstance(r, Adw.SwitchRow) and r.get_active()]
         result["switch_count"] = sum(1 for n in nodes if isinstance(n, Adw.SwitchRow))
@@ -66,13 +73,14 @@ _HARNESS = textwrap.dedent(
         result["default_size"] = (w.get_default_size()[0], w.get_default_size()[1])
 
         groups = [g for g in nodes if isinstance(g, Adw.PreferencesGroup)]
-        rows = {r.get_title(): r for r in nodes if isinstance(r, Adw.SwitchRow)}
         w._search.insert_text("thermal", 0)
 
         def check():
             result["visible_groups"] = [g.get_title() for g in groups if g.get_visible()]
-            result["thermal_visible"] = rows["thermal"].get_visible()
-            result["contention_visible"] = rows["contention"].get_visible()
+            # By sense name: "thermal" is titled "Temperature" and "contention"
+            # is titled "Microphone and camera in use".
+            result["thermal_visible"] = w._sense_rows["thermal"].get_visible()
+            result["contention_visible"] = w._sense_rows["contention"].get_visible()
             a.quit()
             return False
 
@@ -120,11 +128,12 @@ class TestSettingsWindowIsComplete:
         """The gap this replaced: 17 consent keys, 0 switches.
 
         A user who is told a sense is off had no way to turn it on except a
-        terminal. Generated from the registry, so a sense added tomorrow shows
-        up without anyone editing the window.
+        terminal. Asserted against the sense-keyed row map rather than against
+        row titles, because the titles are human-readable by design and are not
+        the property: the property is that a switch is bound to each key.
         """
         missing = [n for n in sorted(_SENSE_CONSENT_KEYS)
-                   if n not in built["switch_titles"]]
+                   if n not in built["sense_rows"]]
         assert missing == [], (
             f"these senses have a consent key but no switch in the settings "
             f"window, so they cannot be granted from the GUI: {missing}"
@@ -133,9 +142,9 @@ class TestSettingsWindowIsComplete:
     def test_only_memory_starts_enabled_among_the_senses(self, built):
         """Everything else is fail-closed on a fresh install, and the window
         must not make a denied sense look available."""
-        senses = set(_SENSE_CONSENT_KEYS)
-        on = [t for t in built["active"] if t in senses]
-        assert on == ["memory"], f"unexpectedly-enabled senses: {on}"
+        assert built["sense_active"] == ["memory"], (
+            f"unexpectedly-enabled senses: {built['sense_active']}"
+        )
 
     def test_rows_are_real_adwaita_widgets(self, built):
         """The previous version hand-rolled Gtk.Box rows: no group semantics,
