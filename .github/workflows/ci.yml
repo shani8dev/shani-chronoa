@@ -49,7 +49,14 @@ jobs:
       # with xvfb alone the runner has an X11 display but no input backend, so
       # _detect_backend() returns None and that test fails. Installing the
       # binary keeps the test honest instead of deleting its subject.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb xdotool
+      # x11-apps and imagemagick are for test_vision_sense's TestTheRealPath,
+      # which takes a REAL screenshot with no stubs. Its skipif only asks whether
+      # there is a display, so once xvfb supplied one the test started running
+      # and then failed on "no X11 screen capture tool is installed (looked for
+      # import, xwd)". Installing the tools keeps that test real; widening the
+      # skipif to also cover a missing capture tool would delete exactly the
+      # thing it exists to check.
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb xdotool x11-apps imagemagick
       system-site-packages: true
     needs: lint
 
