@@ -73,7 +73,6 @@ _SENSE_CONSENT_KEYS = {
     "hearing": "hearing-sense-enabled",
     "capture": "capture-sense-enabled",
     "privilege": "privilege-sense-enabled",
-    "thermal": "thermal-sense-enabled",
     "display": "display-sense-enabled",
     "network": "network-sense-enabled",
     "bluetooth": "bluetooth-sense-enabled",
@@ -86,7 +85,6 @@ _SENSE_CONSENT_KEYS = {
     "link": "link-sense-enabled",
     "cpu": "cpu-sense-enabled",
     "gpu": "gpu-sense-enabled",
-    "cooling": "cooling-sense-enabled",
     "security": "security-sense-enabled",
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
@@ -115,6 +113,13 @@ _SENSE_CONSENT_ALIASES = {
     # same devices from two directions and could disagree about whether one was
     # free.
     "capture": ("camera-sense-enabled", "contention-sense-enabled"),
+    # `thermal` and `cooling` were merged into `hwmon`. The kernel exposes the
+    # same physical sensors twice - once as ACPI thermal zones and once as
+    # hwmon channels - and on this machine they agree exactly (90.0C, 69.0C,
+    # 57.0C), so the same temperature was reported under two names by two
+    # senses. `cooling` also walked /sys/class/hwmon a second time to find fan
+    # channels `hwmon` had already read.
+    "hwmon": ("thermal-sense-enabled", "cooling-sense-enabled"),
 }
 
 # On by default are `memory` and the machine-state senses. `memory` because it is

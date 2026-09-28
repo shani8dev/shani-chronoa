@@ -82,10 +82,6 @@ SENSE_LABELS = {
         "Who holds sensitive access",
         "Report which software can act as administrator",
     ),
-    "thermal": (
-        "Temperature",
-        "CPU and motherboard thermal zones",
-    ),
     "display": (
         "Screen, brightness and monitors",
         "Report connected outputs, and set the backlight",
@@ -105,10 +101,6 @@ SENSE_LABELS = {
     "thermalgrid": (
         "Infrared array",
         "Thermal grid sensors on the I2C bus, if one is wired up",
-    ),
-    "hwmon": (
-        "Hardware sensors",
-        "Fan speed, temperature, voltage and power",
     ),
     "modelfit": (
         "Which models fit",
@@ -134,10 +126,6 @@ SENSE_LABELS = {
         "Graphics",
         "Which GPU this machine has, its driver, and how much video memory",
     ),
-    "cooling": (
-        "Fans and cooling",
-        "Fan speeds, and coolant temperature and pump speed for a liquid cooler",
-    ),
     "security": (
         "Firmware security",
         "Secure Boot, TPM presence, lockdown mode and the security modules in effect",
@@ -153,6 +141,10 @@ SENSE_LABELS = {
     "capture": (
         "Cameras and microphones",
         "Which capture devices exist, and what is holding them open",
+    ),
+    "hwmon": (
+        "Temperatures, fans and power",
+        "Every sensor the firmware exposes, and whether a fan has stopped",
     ),
     "printing": (
         "Printers and scanners",
@@ -189,8 +181,7 @@ SENSE_CATEGORIES = [
      ["link", "network", "audio", "bluetooth", "rfsense"]),
     ("The machine itself",
      "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
-     ["cpu", "power", "storage", "gpu", "thermal", "hwmon",
-      "cooling", "thermalgrid"]),
+     ["cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
      "administrator, and what is already using your camera",

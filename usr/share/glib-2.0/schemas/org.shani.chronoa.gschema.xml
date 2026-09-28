@@ -153,8 +153,8 @@
     </key>
     <key name="cooling-sense-enabled" type="b">
       <default>false</default>
-      <summary>Let Chronoa read the cooling</summary>
-      <description>When true, Chronoa may read fan speeds and, if a liquid cooler is fitted and the liquidctl package is installed, its coolant temperature, pump speed and mode. Off by default, like the other senses that watch the machine, because hwmon already exposes temperatures and this adds fans and coolers rather than anything new about the CPU. Reports a fan at 0 RPM as stopped, which is a real state and not the same as no fan being fitted.</description>
+      <summary>Retired: merged into the hwmon sense</summary>
+      <description>The `cooling` sense was merged into `hwmon`, which reported fan speeds and liquid coolers. The kernel exposes the same sensors through both the thermal-zone and the hwmon trees and they agree, so one sense now reports chips, fans, liquid cooling and thermal zones together. This key is still honoured: setting it to true grants the `hwmon` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
     <key name="security-sense-enabled" type="b">
       <default>true</default>
@@ -228,8 +228,8 @@
     </key>
     <key name="thermal-sense-enabled" type="b">
       <default>false</default>
-      <summary>Let Chronoa read machine temperatures</summary>
-      <description>When true, Chronoa may read the kernel's thermal zones - CPU, board and any named sensor the firmware exposes. Off by default. This is the machine's own heat, not a room: it reports temperature of silicon, not of the air or of any person. No thermal camera is involved and no image of any kind is produced.</description>
+      <summary>Retired: merged into the hwmon sense</summary>
+      <description>The `thermal` sense was merged into `hwmon`, which reported the ACPI thermal-zone view. The kernel exposes the same sensors through both the thermal-zone and the hwmon trees and they agree, so one sense now reports chips, fans, liquid cooling and thermal zones together. This key is still honoured: setting it to true grants the `hwmon` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
     <key name="display-sense-enabled" type="b">
       <default>true</default>

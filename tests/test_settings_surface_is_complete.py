@@ -59,6 +59,16 @@ NOT_EXPOSED = {
     "hardware-profile": "shown read-only in 'In effect right now'; it is "
                         "auto-detected, and overriding it by hand is how a "
                         "user ends up with a model too large for the machine",
+    "thermal-sense-enabled": "retired: the `thermal` sense was merged into "
+                             "`hwmon`, which reports both the hwmon channels "
+                             "and the ACPI thermal zones - the kernel exposes "
+                             "the same sensors twice and they agree. Still "
+                             "honoured: setting it grants `hwmon`",
+    "cooling-sense-enabled": "retired: the `cooling` sense was merged into "
+                             "`hwmon`. Its fan walk was a second traversal of "
+                             "/sys/class/hwmon that hwmon had already done, "
+                             "and its liquidctl half moved with it. Still "
+                             "honoured: setting it grants `hwmon`",
     "smart-sense-enabled": "retired: the `smart` sense was merged into "
                            "`storage`, which has the row. The key is still "
                            "honoured - setting it grants `storage` - but a "

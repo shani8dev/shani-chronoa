@@ -31,7 +31,10 @@ bad reading rather than passed through.
 """
 
 import glob as _glob
+import json
 import logging
+import shutil
+import subprocess
 import os
 import re
 from pathlib import Path
@@ -48,7 +51,11 @@ SENSITIVITY = SENSITIVITY_PUBLIC
 _TTL_SECONDS = 60.0
 _POLL_INTERVAL = 60.0
 
-_GLOB = "/sys/class/hwmon/hwmon*"
+_HWMON_ROOT = Path("/sys/class/hwmon")
+_ZONE_GLOB = "/sys/class/thermal/thermal_zone*"
+_MIN_MILLIC = -40000
+_MAX_MILLIC = 125000
+_LIQUIDCTL_TIMEOUT = 20
 
 # Attribute suffix -> (kind, scale, unit). `scale` converts the kernel's
 # integer into the unit named here.
@@ -108,7 +115,7 @@ def _chips() -> List[Path]:
     does not change identity between polls.
     """
     chips = []
-    for entry in sorted(_glob.glob(_GLOB)):
+    for entry in sorted(_glob.glob(str(_HWMON_ROOT / "hwmon*"))):
         path = Path(entry)
         # Resolve the symlink so attribute access works on the real path.
         try:
@@ -184,17 +191,138 @@ def read_chips() -> List[dict]:
     return out
 
 
+def _read_zone(zone: Path) -> Optional[dict]:
+    try:
+        raw = (zone / "temp").read_text().strip()
+        milli = int(raw)
+    except (OSError, ValueError):
+        return None
+    if not _MIN_MILLIC <= milli <= _MAX_MILLIC:
+        return None
+    try:
+        name = (zone / "type").read_text().strip()
+    except OSError:
+        name = zone.name
+    return {"zone": zone.name, "name": name or zone.name, "celsius": round(milli / 1000.0, 1)}
+
+
+def read_zones() -> list:
+    zones = []
+    # `Path().glob` rejects an absolute pattern outright, which is a
+    # NotImplementedError rather than an empty result, so the stdlib glob is
+    # what actually supports an absolute sysfs pattern.
+    for zone in sorted(Path(p) for p in _glob.glob(_ZONE_GLOB)):
+        reading = _read_zone(zone)
+        if reading is not None:
+            zones.append(reading)
+    return zones
+
+
+
+def fans_from(chips: List[dict]) -> List[dict]:
+    """Fan channels, derived from the chip walk rather than a second one.
+
+    A fan reading zero is a distinct, meaningful state - a stopped fan is not an
+    absent fan - so it is kept and labelled. `read_chips()` already preserves
+    it: the "declared but not populated" rule applies only to temperature
+    channels, so a 0 RPM fan arrives here as a normal reading. That is what
+    makes this a derivation and not a second implementation; walking
+    /sys/class/hwmon a second time in the same sense is exactly the
+    duplication the merge exists to remove.
+    """
+    out: List[dict] = []
+    for chip in chips:
+        for record in chip["channels"].get("fan", []):
+            if record["state"] != "ok":
+                continue
+            value = record.get("value")
+            if value is None:
+                continue
+            out.append({
+                "chip": chip["chip"],
+                "channel": record["channel"],
+                "label": record.get("label") or chip["chip"],
+                "rpm": value,
+                "stopped": value == 0,
+            })
+    return out
+
+
+def _liquidctl() -> Optional[dict]:
+    """One JSON blob of the cooler's own readings, or None.
+
+    `liquidctl list --json` gives the device identifiers and
+    `liquidctl status --json` the readings, and the two are keyed differently
+    between versions, so the status is read and its top-level keys are what is
+    used.
+    """
+    if shutil.which("liquidctl") is None:
+        return None
+    try:
+        proc = subprocess.run(
+            ["liquidctl", "status", "--json"],
+            capture_output=True, text=True, timeout=_LIQUIDCTL_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("liquidctl failed: %s", exc)
+        return None
+    raw = (proc.stdout or "").strip()
+    if not raw:
+        return None
+    import json
+
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _coolant(status: dict) -> List[dict]:
+    """The liquid temperatures, which is the reading hwmon cannot give."""
+    found = []
+    for key, value in (status or {}).items():
+        if not isinstance(value, dict):
+            continue
+        temperature = value.get("Liquid temperature")
+        if not isinstance(temperature, dict):
+            continue
+        entry: Dict[str, object] = {"device": key}
+        for field in ("Liquid temperature", "Temperature"):
+            if isinstance(value.get(field), dict):
+                celsius = value[field].get("celsius")
+                if celsius is not None:
+                    entry["liquid_c"] = celsius
+                    break
+        for field, label in (("FAN speed", "fans"),
+                             ("Pump speed", "pump_rpm")):
+            reading = value.get(field)
+            if isinstance(reading, dict):
+                rpm = reading.get("rpm")
+                if rpm is not None:
+                    entry[label] = rpm
+        if value.get("Speed") is not None:
+            entry["mode"] = value["Speed"]
+        if len(entry) > 1:
+            found.append(entry)
+    return found
+
+
+
 def _run(arguments: dict) -> Union[str, Percept]:
     config = ChronoaConfig()
     if not config.sense_allowed("hwmon"):
         return f"Not reading hardware sensors: {config.sense_allowed_reason('hwmon')}."
 
     chips = read_chips()
-    if not chips:
+    zones = read_zones()
+    fans = fans_from(chips)
+
+    if not chips and not zones:
         return (
-            "No hwmon chip exposed a readable channel. This is normal on a "
-            "machine whose firmware reports temperatures only through the "
-            "thermal zones - the thermal sense covers that case."
+            "No hwmon chip and no thermal zone exposed a readable channel. "
+            "That is a fact about what could be read on this machine, not a "
+            "claim that it has no sensors."
         )
 
     lines = []
@@ -222,6 +350,74 @@ def _run(arguments: dict) -> Union[str, Percept]:
                         f"{record['value']} {record['unit']}"
                     )
 
+    liquidctl_present = shutil.which("liquidctl") is not None
+    status = _liquidctl() if liquidctl_present else None
+    coolers = _coolant(status) if status else []
+
+    if not fans and not coolers and not liquidctl_present:
+        return _SENSE.to_percept(
+            "No fan channel and no liquid cooler were found. hwmon exposes "
+            "nothing here and liquidctl is not installed, so the fans are "
+            "undetermined - the kernel is not reporting any - and the coolant "
+            "is undetermined - the tool is absent. Neither means this machine "
+            "has no cooling.",
+            source="sysfs-hwmon",
+            metadata={"chips": len(chips), "readings": total_readings,
+                      "unpopulated": total_unpopulated, "zones": len(zones),
+                      "fans": 0, "stopped_fans": 0, "coolers": 0,
+                      "liquidctl_present": False},
+        )
+
+    stopped = 0
+    for fan in fans:
+        if fan["stopped"]:
+            stopped += 1
+            lines.append(f"{fan['label']} ({fan['channel']}): stopped, 0 RPM")
+        else:
+            lines.append(f"{fan['label']} ({fan['channel']}): {fan['rpm']} RPM")
+    for cooler in coolers:
+        detail = [cooler["device"]]
+        if "liquid_c" in cooler:
+            detail.append(f"coolant {cooler['liquid_c']}C")
+        if "fans" in cooler:
+            detail.append(f"{cooler['fans']} RPM")
+        if "pump_rpm" in cooler:
+            detail.append(f"pump {cooler['pump_rpm']} RPM")
+        if "mode" in cooler:
+            detail.append(str(cooler["mode"]))
+        lines.append("  " + ", ".join(detail))
+    if stopped:
+        lines.append(
+            f"{stopped} fan channel(s) reading 0 RPM. That is a fan whose power "
+            f"is cut or which has stopped - it is not the same as no fan being "
+            f"fitted, and a declared-but-unwired channel is reported "
+            f"separately above."
+        )
+    if coolers and not fans:
+        lines.append(
+            "no fan channel in hwmon: this machine's fans are reachable only "
+            "through the cooler, not through the kernel's hwmon chips."
+        )
+    if fans or coolers:
+        lines.append(
+            f"{len(fans)} fan channel(s) across hwmon, {len(coolers)} liquid "
+            f"cooler(s) reported by liquidctl"
+        )
+
+    if zones:
+        hottest = max(
+            (z for z in zones if z.get("celsius") is not None),
+            key=lambda z: z["celsius"], default=None)
+        lines.append(
+            f"thermal zones: {len(zones)}"
+            + (f", hottest {hottest['zone']} at {hottest['celsius']}C"
+               if hottest else "")
+        )
+        for zone in zones:
+            if zone.get("celsius") is None:
+                continue
+            lines.append(f"  {zone['zone']}: {zone['celsius']}C")
+
     lines.append(
         f"{total_readings} reading(s) across {len(chips)} chip(s); "
         f"{total_unpopulated} channel(s) declared but not populated"
@@ -233,6 +429,11 @@ def _run(arguments: dict) -> Union[str, Percept]:
             "chips": len(chips),
             "readings": total_readings,
             "unpopulated": total_unpopulated,
+            "zones": len(zones),
+            "fans": len(fans),
+            "stopped_fans": stopped,
+            "coolers": len(coolers),
+            "liquidctl_present": liquidctl_present,
         },
     )
 

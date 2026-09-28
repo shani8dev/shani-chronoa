@@ -138,7 +138,7 @@ class TestTheShippedSensesAllLoad:
 
     @pytest.mark.parametrize(
         "name",
-        ["capture", "thermal", "display", "network", "bluetooth", "privilege"],
+        ["capture", "display", "network", "bluetooth", "privilege"],
     )
     def test_it_is_registered(self, name):
         from shani_chronoa.senses import discover_senses
@@ -147,7 +147,7 @@ class TestTheShippedSensesAllLoad:
 
     @pytest.mark.parametrize(
         "name",
-        ["capture", "thermal", "display", "network", "bluetooth", "privilege"],
+        ["capture", "display", "network", "bluetooth", "privilege"],
     )
     def test_it_declares_a_valid_schema_and_is_ambient(self, name):
         from shani_chronoa.senses import discover_senses, is_valid_schema

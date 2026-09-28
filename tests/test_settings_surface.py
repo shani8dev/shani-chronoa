@@ -73,13 +73,13 @@ _HARNESS = textwrap.dedent(
         result["default_size"] = (w.get_default_size()[0], w.get_default_size()[1])
 
         groups = [g for g in nodes if isinstance(g, Adw.PreferencesGroup)]
-        w._search.insert_text("thermal", 0)
+        w._search.insert_text("hwmon", 0)
 
         def check():
             result["visible_groups"] = [g.get_title() for g in groups if g.get_visible()]
-            # By sense name: "thermal" is titled "Temperature" and "contention"
+            # By sense name: "hwmon" is titled "Temperatures, fans and power"
             # is titled "Microphone and camera in use".
-            result["thermal_visible"] = w._sense_rows["thermal"].get_visible()
+            result["needle_visible"] = w._sense_rows["hwmon"].get_visible()
             result["capture_visible"] = w._sense_rows["capture"].get_visible()
             a.quit()
             return False
@@ -214,17 +214,17 @@ class TestSearchActuallyFilters:
         from shani_chronoa.settings_window import SENSE_CATEGORIES
 
         owner = next(
-            title for title, _d, names in SENSE_CATEGORIES if "thermal" in names
+            title for title, _d, names in SENSE_CATEGORIES if "hwmon" in names
         )
         assert built["visible_groups"] == [owner], (
-            f"searching 'thermal' should leave only the group holding that "
+            f"searching 'hwmon' should leave only the group holding that "
             f"sense ({owner!r}), got {built['visible_groups']}"
         )
 
     def test_a_matching_row_inside_a_group_survives(self, built):
         """The group title does not contain the needle, but a row inside it
         does - hiding the group would bury the only match."""
-        assert built["thermal_visible"] is True
+        assert built["needle_visible"] is True
         assert built["capture_visible"] is False
 
 
