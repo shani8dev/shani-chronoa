@@ -104,7 +104,7 @@ _SENSE_CONSENT_KEYS = {
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
     "memory", "power", "storage", "link", "cpu", "smart", "gpu", "devices",
-    "audio", "security",
+    "audio", "monitors", "security",
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here
