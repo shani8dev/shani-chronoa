@@ -416,14 +416,18 @@ The repo's own `test_sense_scheduler.py` handles this for child processes.
 
 ## Machine-state senses (added 2026-09-28)
 
-Nine senses that read the machine rather than the user's world — `contention`
-(who holds a capture device), `privilege` (who holds a dangerous capability),
-`thermal`, `display`, `network`, `bluetooth`, `camera` (enumeration only),
-`rfsense` (WiFi RSSI spread), `thermalgrid` (MLX90640/AMG8833 over I2C) — plus
-`senses/latch.py` and scheduler de-duplication, so a polled sense that keeps
-saying the same thing is not deposited 1440 times a day.
+Eleven senses that read the machine rather than the user's world —
+`contention` (who holds a capture device), `privilege` (who holds a dangerous
+capability), `thermal`, `display`, `network`, `bluetooth`, `camera`
+(enumeration only), `rfsense` (WiFi RSSI spread), `thermalgrid`
+(MLX90640/AMG8833 over I2C), `hwmon` (fan/temperature/voltage/current from
+`/sys/class/hwmon`) and `modelfit` (available RAM against the models Ollama
+reports) — plus `senses/latch.py` and scheduler de-duplication, so a polled
+sense that keeps saying the same thing is not deposited 1440 times a day.
+`hwmon` and `modelfit` have no external binary: they read the kernel directly,
+so there is nothing that can be missing for them to degrade into.
 
-**Three of the nine were green on the dev box while confidently wrong on the
+**Three of the eleven were green on the dev box while confidently wrong on the
 distribution this actually ships to, and the lesson is not optional to read:**
 `contention` reported every microphone and camera as *free* when `fuser`
 (psmisc) was missing, because the OSError was swallowed into "no holders";
@@ -462,14 +466,28 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (584 passed, 3 skipped),
-**and 35 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28, testbed
-`3ca190e`) — including `privilege-uses-package-manager` PASS with 18 holders
-correctly attributed to packages, which is the check that only exists to catch
-the Arch failure. Real readings from the slot: `eth0: up, carrier`,
+**Verification status:** unit suite green on Ubuntu (645 passed, 3 skipped),
+**and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28, testbed
+`9be7139`, packaging at `shani-pkgbuilds` `031337f` = `shani-chronoa 0.1.0-6`)
+— including `privilege-uses-package-manager` PASS with 18 holders correctly
+attributed to packages, which is the check that only exists to catch the Arch
+failure. Real readings from the slot: `eth0: up, carrier`,
 `DNS: 192.168.31.1`, `SEN2: 90.0C`, `intel_backlight 9514/96000 (10%)`,
-`hci0 (unblocked)`. Repeating it needs `--cgroupns=host` for nspawn and a
-hand-rolled mount for `shani-chronoa` — see `AUDIT-HISTORY.md`.
+`hci0 (unblocked)`, and for `modelfit` `31795 MB RAM total, 25656 MB
+available` read from `/proc/meminfo` while Ollama was unreachable. Repeating it
+needs `--cgroupns=host` for nspawn and a hand-rolled mount for
+`shani-chronoa` — see `AUDIT-HISTORY.md`.
+
+`modelfit` earns one note here rather than in AUDIT-HISTORY, because the slot
+test's handling of it is the lesson. It reports UNKNOWN in its *model list*
+when Ollama does not answer, while the hardware half reads fine — so the
+generic step of the slot test no longer guesses whether that UNKNOWN was
+honest and reports SKIP, and a dedicated check asserts both halves: that the
+sense says UNKNOWN rather than claiming a model count, and that the
+`/proc/meminfo` half is still real. An earlier version of that check asserted
+a *reason* for the UNKNOWN that turned out to be false, and the version before
+it failed senses whose legitimate readings are all one or two digits. A green
+line with an invented explanation is worth less than an admitted SKIP.
 
 ## Audit-verified known issues (confirmed present)
 
