@@ -155,12 +155,25 @@ class TestSettingsWindowIsComplete:
             f"window, so they cannot be granted from the GUI: {missing}"
         )
 
-    def test_only_memory_starts_enabled_among_the_senses(self, built):
-        """Everything else is fail-closed on a fresh install, and the window
-        must not make a denied sense look available."""
-        assert built["sense_active"] == ["memory"], (
-            f"unexpectedly-enabled senses: {built['sense_active']}"
+    def test_only_the_default_on_senses_start_enabled(self, built):
+        """Everything not deliberately enabled is fail-closed on a fresh
+        install, and the window must not make a denied sense look available.
+
+        The expected set is read from `_SENSE_DEFAULT_ENABLED` rather than
+        hardcoded, so a sense added to that set on purpose is expected here
+        rather than fighting this assertion. What is still checked - and what
+        this test is really for - is that nothing enables itself: a sense in the
+        registry but absent from that table must be off.
+        """
+        from shani_chronoa.config import _SENSE_DEFAULT_ENABLED
+        assert set(built["sense_active"]) == set(_SENSE_DEFAULT_ENABLED), (
+            f"active={built['sense_active']}, "
+            f"expected={sorted(_SENSE_DEFAULT_ENABLED)}"
         )
+        # The senses that observe the room or the machine are opt-in.
+        assert not {"vision", "ocr", "filesystem", "web", "camera", "hearing"} & set(
+            built["sense_active"]
+        ), "a sense that watches the user is enabled by default"
 
     def test_rows_are_real_adwaita_widgets(self, built):
         """The previous version hand-rolled Gtk.Box rows: no group semantics,

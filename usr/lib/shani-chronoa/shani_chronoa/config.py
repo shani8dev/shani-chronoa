@@ -82,12 +82,15 @@ _SENSE_CONSENT_KEYS = {
     "thermalgrid": "thermalgrid-sense-enabled",
     "hwmon": "hwmon-sense-enabled",
     "modelfit": "modelfit-sense-enabled",
+    "power": "power-sense-enabled",
 }
 
-# Only memory is on by default: it is local-only and remembering is the point
-# of an assistant. Everything that captures or reads the user's world waits
-# to be asked for.
-_SENSE_DEFAULT_ENABLED = frozenset({"memory"})
+# Two are on by default. `memory` because it is local-only and remembering is
+# the point of an assistant. `power` because it reports the machine's own
+# hardware - charge, wear, whether a charger is plugged in - which is the same
+# class of fact as a disk-free reading and never leaves the machine. Everything
+# that captures or reads the user's world waits to be asked for.
+_SENSE_DEFAULT_ENABLED = frozenset({"memory", "power"})
 
 # Input control is not a sense (it has no percept to emit), so it lives here
 # rather than in `_SENSE_CONSENT_KEYS`. It still needs the same fail-closed

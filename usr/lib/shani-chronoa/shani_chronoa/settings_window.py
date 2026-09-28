@@ -122,6 +122,10 @@ SENSE_LABELS = {
         "Which models fit",
         "What this machine can run, and what is installed",
     ),
+    "power": (
+        "Battery",
+        "Charge, how worn the battery is, and whether a charger is plugged in",
+    ),
 }
 
 
@@ -152,8 +156,8 @@ SENSE_CATEGORIES = [
      "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
      ["network", "bluetooth", "rfsense"]),
     ("The machine itself",
-     "Temperature, fans, power draw, and infrared arrays if one is wired up",
-     ["thermal", "hwmon", "thermalgrid"]),
+     "Battery, temperature, fans, power draw, and infrared arrays if wired up",
+     ["power", "thermal", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Which software can act as administrator, and what is already using your camera",
      ["privilege", "contention"]),

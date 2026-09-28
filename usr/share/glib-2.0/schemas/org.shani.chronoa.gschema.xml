@@ -141,6 +141,11 @@
       <summary>Let Chronoa retrieve web content</summary>
       <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
     </key>
+    <key name="power-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read battery and power state</summary>
+      <description>When true, Chronoa may read your battery charge, wear and cycle count, and whether a mains adapter is online. On by default because it reads the machine, not you: it is the same class of fact as a disk-free reading, and it never leaves the machine. Switch it off to stop even that being polled.</description>
+    </key>
     <key name="memory-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa remember things between sessions</summary>

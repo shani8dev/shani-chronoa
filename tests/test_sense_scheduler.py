@@ -38,6 +38,7 @@ from pathlib import Path
 import pytest
 
 from sense_manifest_support import USER_SITE_PACKAGES
+from shani_chronoa.config import _SENSE_DEFAULT_ENABLED
 from shani_chronoa.senses import (
     SENSITIVITY_PRIVATE,
     SENSITIVITY_PUBLIC,
@@ -658,8 +659,29 @@ def test_the_builtin_registry_is_unchanged_by_the_scheduler_existing(gsettings_e
     # never runs it.
     ambient_expected = {n for n, s in before.items() if s.is_ambient()}
     assert set(scheduler.ambient_senses()) == ambient_expected
-    # Consent defaults every one of them to off, so none is actually polled.
-    assert scheduler.polls == 0 and scheduler.deposited == 0
+
+    # The senses that ship enabled by default DO get polled, so this can no
+    # longer be "nothing was polled". `power` joins `memory` here: both are on
+    # by default, and both are the same class of local machine fact. The
+    # invariant is now the sharper one - nothing outside the default-on set
+    # ever runs, which is what the old "polls == 0" was really checking.
+    default_on = set(_SENSE_DEFAULT_ENABLED) & ambient_expected
+    assert default_on, "no sense is both ambient and enabled by default"
+    polled = {r.name for r in scheduler.results()}
+    assert polled <= default_on, (
+        f"polled senses outside the default-on set: {sorted(polled - default_on)}"
+    )
+    # And a sense that needs consent is tracked but not run. `_refusals` is the
+    # permanent "will never poll" set built at construction; `_denied` is
+    # filled per tick, so the second is the one to check after a tick ran.
+    tracked = set(scheduler._refusals) | set(scheduler._denied)
+    assert tracked & ambient_expected, (
+        "nothing is being held back by consent, so this test no longer checks "
+        "the thing it was written for"
+    )
+    assert not (tracked & default_on), (
+        f"default-on senses are being refused: {sorted(tracked & default_on)}"
+    )
     assert {name: sense.run for name, sense in after.items()} == {
         name: sense.run for name, sense in before.items()
     }
@@ -773,8 +795,18 @@ def test_the_launcher_reports_plainly_when_every_poll_is_refused(gsettings_env):
     """
     completed = _run_cli("ambient", "--once")
 
-    assert completed.returncode == 4
-    assert "refused by consent" in completed.stdout + completed.stderr
+    # Every consent-gated sense is refused, and every refusal is NAMED - the
+    # point of the test. The run itself now succeeds, because `power` ships
+    # enabled and deposits a real percept, so the old "returncode 4" no longer
+    # describes reality.
+    output = completed.stdout + completed.stderr
+    for entry in json.loads(completed.stdout)["data"]["entries"] \
+            if completed.stdout.strip().startswith("{") else []:
+        if not entry["allowed"]:
+            assert entry["denial"], f"{entry['name']} refused without a reason"
+    assert "deny" in output and "turned off" in output, output[-400:]
+    assert "turned off (enable 'bluetooth-sense-enabled')" in output
+    assert completed.returncode == 0, output[-400:]
 
 
 def test_a_registry_with_no_ambient_sense_says_so_instead_of_falling_silent(
