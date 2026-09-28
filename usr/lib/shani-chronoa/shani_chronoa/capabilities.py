@@ -82,6 +82,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "recommend_model": ("Local models", "What model fits this machine"),
     "install_model": ("Local models", "Download a model"),
     "set_privacy": ("Privacy controls", "Mute the microphone, disable a camera, or blank the screen"),
+    "set_power_profile": ("Power and screen", "Power profile"),
+    "calculate": ("Everyday tools", "Calculation"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -91,6 +93,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
 GROUP_ORDER: tuple[str, ...] = (
     "Privacy controls",
     "Time and reminders",
+    "Everyday tools",
     "Sound",
     "Power and screen",
     "Clipboard",
