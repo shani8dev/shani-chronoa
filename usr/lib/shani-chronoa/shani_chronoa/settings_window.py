@@ -38,7 +38,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # type: ignore
 
-from shani_chronoa import models
+from shani_chronoa import models, pipewire
 from shani_chronoa.config import _SENSE_CONSENT_KEYS
 from shani_chronoa.senses import discover_senses
 
@@ -419,6 +419,19 @@ class SettingsWindow(Gtk.Window):
             config.cloud_fallback_enabled,
             lambda a: self._app_toggle("toggle-cloud-fallback", a))
 
+        # The gate every actuator passes through. `triggers.py` refuses any
+        # action without it and names it, so a user whose armed rules do
+        # nothing had no way to turn it on except `gsettings set` from a
+        # terminal - the same trap the seventeen sense switches were in.
+        self._switch(
+            group, "Let Chronoa act on this machine",
+            "Off: Chronoa can answer but cannot run actions. Every trigger "
+            "rule needs this, so an armed rule does nothing until it is on.",
+            self._read_bool("input-control-enabled"),
+            lambda a: self._set_bool("input-control-enabled", a),
+            tooltip="triggers.py refuses every actuator while this is off",
+        )
+
         free = self._group(
             page, "Free cloud providers",
             "Optional. These work without a key at a lower rate limit; a key raises it. "
@@ -460,6 +473,79 @@ class SettingsWindow(Gtk.Window):
             config.barge_in_vad_enabled, lambda a: self._app_toggle("toggle-barge-in-vad", a))
         self._entry(group, "Speech language (whisper.cpp)", "e.g. en, or auto",
                     config.language, lambda t: config.set("language", t.strip()))
+        self._device_picker(group, "input", "Microphone",
+                            config.audio_input_device)
+        self._device_picker(group, "output", "Speakers",
+                            config.audio_output_device)
+
+    def _device_picker(self, group, kind: str, title: str, current: str) -> None:
+        """Choose the microphone or the speakers, from the live graph.
+
+        The app has always honoured these two keys and resolves them against
+        the graph before every capture, because `pw-record` and `pw-play`
+        *silently ignore* an unknown target and use the default device instead
+        - a chosen headset that is unplugged looks honoured while the recording
+        comes from the laptop. All of that machinery was unreachable, because
+        there was no control here to set either key.
+        """
+        if not pipewire.is_available():
+            row = Adw.ActionRow(
+                title=title,
+                subtitle="No PipeWire graph to read. Connect a device and reopen this window.",
+            )
+            group.add(row)
+            return
+
+        try:
+            devices = pipewire.list_inputs() if kind == "input" else pipewire.list_outputs()
+        except Exception as exc:  # noqa: BLE001 - a broken graph must not break settings
+            group.add(Adw.ActionRow(title=title, subtitle=f"Could not read devices: {exc}"))
+            return
+
+        names = [d.name for d in devices]
+        # A ComboRow displays whatever its model holds, and a PipeWire node name
+        # is `alsa_input.pci-0000_00_1f.3.analog-stereo` - so the model carries
+        # the readable label and the node name is kept behind it. A value list
+        # of raw node names would be a settings page nobody can choose from.
+        labels = ["System default"] + [d.label for d in devices]
+        values = [""] + names
+
+        # Gtk.StringList, not Adw.StringList: the latter is libadwaita 1.6 and
+        # this system has 1.5, so naming it would be an AttributeError on the
+        # machine this actually ships to.
+        row = Adw.ComboRow(title=title, model=Gtk.StringList.new(labels))
+        selected = names.index(current) + 1 if current in names else 0
+        row.set_selected(selected)
+        if current and current not in names:
+            row.set_subtitle(
+                f"Saved as '{current}', which is not connected - the system "
+                "default is being used until it is"
+            )
+        else:
+            row.set_subtitle("Which device this capture and playback uses")
+        row._values = values
+        row.connect("notify::selected", self._on_device_selected, kind)
+        group.add(row)
+
+    def _on_device_selected(self, row, kind: str) -> None:
+        index = row.get_selected()
+        values = getattr(row, "_values", None)
+        value = values[index] if values and 0 <= index < len(values) else ""
+        self.app.config.set(f"audio-{kind}-device", value)
+
+    def _read_bool(self, key: str) -> bool:
+        # get_bool(), not get() == "true": ChronoaConfig.get() is documented
+        # for string keys and returns its default for a boolean one, so the
+        # comparison would be False forever and this gate would render itself
+        # permanently off while the setting was on.
+        try:
+            return self.app.config.get_bool(key, False)
+        except Exception:  # noqa: BLE001 - an absent key is simply off
+            return False
+
+    def _set_bool(self, key: str, value: bool) -> None:
+        self.app.config.set(key, "true" if value else "false")
+        self._refresh_sense_switches()
 
     def _build_models(self, page) -> None:
         config = self.app.config
