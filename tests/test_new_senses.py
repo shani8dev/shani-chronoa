@@ -325,11 +325,20 @@ class TestThermalGridProbeHonesty:
         REPORTED, not whether the tool is installed, so the tool's presence is
         stubbed rather than installed.
         """
+        from pathlib import Path
+
         import shani_chronoa.senses.thermalgrid as tg
 
         monkeypatch.setattr(tg.shutil, "which",
                             lambda name, *a, **k: "/usr/sbin/i2cdetect"
                             if name == "i2cdetect" else None)
+        # _buses() globs /dev/i2c-*, and that was the gate that actually mattered.
+        # A dev machine has a dozen of them; a runner has none, so the loop body
+        # never ran and every assertion was made against an empty result - the
+        # mocked subprocess.run was never even called. Pinning only `which`, as
+        # the first attempt at this did, fixes a real early-return but leaves
+        # the scan a no-op, which is why the count did not move.
+        monkeypatch.setattr(tg, "_buses", lambda: [Path("/dev/i2c-1")])
 
     def _fake_run(self, stdout, stderr=""):
         import subprocess as sp
