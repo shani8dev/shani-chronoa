@@ -44,6 +44,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Union
 
+from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,24 @@ def _cameras() -> List[dict]:
 
 
 def _set_camera(enable: bool) -> dict:
+    # Turning a camera *off* is protective and is never gated: a user who asks
+    # for it is the consent, and gating it would mean the one action nobody
+    # objects to is the one an assistant cannot take. Turning one *on* is the
+    # opposite — it re-enables a sensor that may have been deliberately
+    # disabled — so it is refused unless the camera sense is granted, which is
+    # the existing "may Chronoa use the camera" consent rather than a new one
+    # invented for this skill.
+    if enable:
+        config = ChronoaConfig()
+        if not config.sense_allowed("camera"):
+            return {"text": (
+                "Refusing to enable a camera: the camera sense is turned off. "
+                "Turning a sensor on is the opposite of what this skill is "
+                "usually for, and it re-enables something that may have been "
+                "disabled on purpose. Enable 'camera-sense-enabled' in Settings "
+                "if you do want the assistant to use the camera at all. "
+                "Disabling one needs no permission and is always available."
+            ), "changed": [], "unsupported": []}
     cameras = _cameras()
     if not cameras:
         return {"text": (

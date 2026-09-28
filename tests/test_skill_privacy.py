@@ -178,6 +178,64 @@ class TestMuteIsAHardwareClaim:
         assert "Mic" in result
 
 
+class TestEnablingIsNotTheSameAsDisabling:
+    """The asymmetry, which is the whole consent design of this skill.
+
+    Disabling a camera is protective and stays ungated — a user who asks for it
+    is the consent, and gating it would make the one action nobody objects to the
+    one an assistant cannot take. Enabling one re-arms a sensor that may have
+    been disabled deliberately, so it is refused without the camera consent.
+    """
+
+    def test_enabling_is_refused_without_camera_consent(self, tmp_path, monkeypatch):
+        root = _v4l(tmp_path, {"video0": ("Cam", "1")})
+        monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: False)
+        result = privacy._set_camera(True)
+        assert result["changed"] == []
+        assert (root / "video0" / "disable").read_text().strip() == "1", (
+            "the camera was switched on with the camera sense refused"
+        )
+        assert "Refusing to enable a camera" in result["text"]
+
+    def test_the_refusal_says_disabling_needs_no_permission(self, tmp_path, monkeypatch):
+        """Otherwise a user who cannot enable one may think the whole skill is
+        unavailable."""
+        root = _v4l(tmp_path, {"video0": ("Cam", "1")})
+        monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: False)
+        assert "always available" in privacy._set_camera(True)["text"]
+
+    def test_disabling_is_never_gated(self, tmp_path, monkeypatch):
+        """The protective direction must not be gated, or the asymmetry is
+        pointless."""
+        root = _v4l(tmp_path, {"video0": ("Cam", "0")})
+        monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: False)
+        result = privacy._set_camera(False)
+        assert len(result["changed"]) == 1
+        assert (root / "video0" / "disable").read_text().strip() == "1"
+
+    def test_enabling_proceeds_once_consent_is_granted(self, tmp_path, monkeypatch):
+        root = _v4l(tmp_path, {"video0": ("Cam", "1")})
+        monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: True)
+        result = privacy._set_camera(True)
+        assert len(result["changed"]) == 1
+        assert (root / "video0" / "disable").read_text().strip() == "0"
+
+    def test_muting_the_microphone_is_also_ungated(self):
+        """Muting is protective too, so it is not behind the camera consent
+        even though both live in one skill."""
+        import inspect
+        source = inspect.getsource(privacy._mute_mic)
+        assert "sense_allowed" not in source
+
+
 class TestCamerasCannotLie:
     def test_a_camera_with_no_control_is_reported_as_not_disabled(self, tmp_path, monkeypatch):
         """This machine's real state: no `disable` node exists at all."""
@@ -223,7 +281,9 @@ class TestCamerasCannotLie:
     def test_enable_writes_the_other_value(self, tmp_path, monkeypatch):
         root = _v4l(tmp_path, {"video0": ("Cam", "1")})
         monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
-        _text(privacy._set_camera(True))
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: True)
+        privacy._set_camera(True)
         assert (root / "video0" / "disable").read_text().strip() == "0"
 
     def test_no_camera_at_all_is_not_the_same_as_an_unusable_one(self, tmp_path, monkeypatch):
@@ -288,6 +348,8 @@ class TestDispatch:
     def test_every_advertised_action_is_handled(self, monkeypatch, tmp_path):
         monkeypatch.setattr(privacy, "_VIDEO4LINUX", _v4l(tmp_path, {
             "video0": ("Cam", "0")}))
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: True)
         monkeypatch.setattr(privacy.shutil, "which", lambda n: None)
         monkeypatch.setattr(privacy, "_session_type", lambda: "wayland")
         for action in ("mute_mic", "unmute_mic", "disable_camera",
