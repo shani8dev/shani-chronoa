@@ -629,16 +629,34 @@ line with an invented explanation is worth less than an admitted SKIP.
   **Verified live after the fix**: the same fake-key repro is now redacted
   to `$SECRET:CLOUD_LLM_ANTHROPIC`, and the vault file is confirmed to stay
   absent from disk (no second on-disk copy created).
-- **Four of the six 2026-09-18 security/architecture modules are dead code —
+- **Three of the six 2026-09-18 security/architecture modules are dead code —
   built, unit-tested in isolation, and never imported by anything that
-  actually runs.** Confirmed via `grep` across the whole package: none of
-  `ipc.py` (`PeerValidator` — also isn't a real peer-credential check, it's
-  an unkeyed SHA256 hash, not a signature, and Chronoa has no D-Bus/socket
-  IPC surface for it to protect in the first place — the MCP server is
-  explicitly stdio-only/same-user-trusted, see `mcp.py`'s own "Trust model"
-  docstring), `tool_tracking.py` (`ToolCall`), `gateway_supervisor.py`, and
+  actually runs.** Confirmed via `grep` across the whole package (2026-09-28
+  re-verified): none of `ipc.py` (`PeerValidator` — also isn't a real
+  peer-credential check, it's an unkeyed SHA256 hash, not a signature, and
+  Chronoa has no D-Bus/socket IPC surface for it to protect in the first place
+  — the MCP server is explicitly stdio-only/same-user-trusted, see `mcp.py`'s
+  own "Trust model" docstring), `gateway_supervisor.py`, and
   `sandbox/profiles.py` (`AgentProfile`) are referenced from `app.py`,
-  `tools.py`, `assistant.py`, or `mcp.py`. `skills/scan_archive.py`
+  `tools.py`, `assistant.py`, or `mcp.py`. `ipc.py`'s only near-match anywhere
+  in the package is the unrelated string `--unshare-ipc` in
+  `sandbox/executor.py`, which is a sandbox flag, not an import.
+
+  **`tool_tracking.py` is no longer in this list and should not be added back.**
+  It was wired in later the same day: `tools.py:37` imports `ToolTracker,
+  ORIGIN_USER` and `triggers.py:48` imports `ORIGIN_UNATTENDED`, so it is live
+  on both the user-tool and unattended-trigger paths. This entry previously
+  listed it as dead while the Implementation Roadmap below said the same work
+  was DONE — the file contradicted itself, and a reader who trusts the
+  dead-code list (as this file instructs) would delete a live module. Two other
+  modules an audit pass reported as dead are also live and must not be
+  "cleaned up": `markdown_lite.py` (`gui.py` calls
+  `markdown_lite.to_pango`, which is what renders `**bold**` in the
+  transcript) and `verification.py` (`tools.py:166` calls
+  `verification.verify(...)` on **every** skill invocation — security-critical,
+  and its own comment says it "must never kill the action").
+
+  `skills/scan_archive.py`
   (zip-slip protection) is additionally miscategorized: it lives under
   `skills/` but doesn't match the skill contract, so `discover_skills()`
   logs a `Skipping 'builtin:scan_archive': SKILLS must be a list of Skill
