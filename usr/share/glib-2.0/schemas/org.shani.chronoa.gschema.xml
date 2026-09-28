@@ -171,6 +171,11 @@
       <summary>Audio devices</summary>
       <description>When true, Chronoa may read what the machine can play and record, and at what volume. On by default because it reads the machine, not you, and never leaves it. Anything needing a tool that is not installed reports that it was not determined rather than a clean negative.</description>
     </key>
+    <key name="monitors-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read the connected monitors</summary>
+      <description>When true, Chronoa may read which displays are connected, on which connector, at what mode, and - where the connector exposes EDID - the manufacturer, model name, serial number and physical size. On by default because it reads the machine, not you, and never leaves it. A connected monitor with no EDID is reported as connected with its identity undetermined, which is normal for a laptop panel over eDP.</description>
+    </key>
     <key name="cpu-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read processor and load state</summary>

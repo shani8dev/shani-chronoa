@@ -162,6 +162,10 @@ SENSE_LABELS = {
         "Audio devices",
         "What the machine can play and record, and at what volume",
     ),
+    "monitors": (
+        "Monitors",
+        "Which displays are connected, at what mode, and which make they are",
+    ),
 }
 
 
@@ -186,8 +190,8 @@ SENSE_CATEGORIES = [
      "Files, folders and the web - what makes it able to act rather than only answer",
      ["filesystem", "web"]),
     ("The screen",
-     "Connected outputs, and setting the backlight",
-     ["display"]),
+     "Connected monitors, what mode they are in, and the backlight",
+     ["display", "monitors"]),
     ("Network and wireless",
      "Interfaces, audio devices, Bluetooth, and motion from Wi-Fi signal",
      ["link", "network", "audio", "bluetooth", "rfsense"]),
