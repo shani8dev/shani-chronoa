@@ -141,6 +141,11 @@
       <summary>Let Chronoa retrieve web content</summary>
       <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
     </key>
+    <key name="storage-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read disk inventory</summary>
+      <description>When true, Chronoa may read which physical disks this machine has, their capacity, and for NVMe drives how much write endurance is used. On by default because it reads the machine, not you, and never leaves it. This is disk inventory, not health: SMART health needs a tool from an opt-in package and root on most drives, so Chronoa reports health as undetermined rather than guessing.</description>
+    </key>
     <key name="power-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read battery and power state</summary>

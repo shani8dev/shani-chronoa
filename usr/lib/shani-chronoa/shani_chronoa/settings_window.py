@@ -126,6 +126,10 @@ SENSE_LABELS = {
         "Battery",
         "Charge, how worn the battery is, and whether a charger is plugged in",
     ),
+    "storage": (
+        "Disks",
+        "Which drives this machine has, how big, and how worn the NVMe ones are",
+    ),
 }
 
 
@@ -156,8 +160,8 @@ SENSE_CATEGORIES = [
      "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
      ["network", "bluetooth", "rfsense"]),
     ("The machine itself",
-     "Battery, temperature, fans, power draw, and infrared arrays if wired up",
-     ["power", "thermal", "hwmon", "thermalgrid"]),
+     "Battery, disks, temperature, fans, and infrared arrays if wired up",
+     ["power", "storage", "thermal", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Which software can act as administrator, and what is already using your camera",
      ["privilege", "contention"]),

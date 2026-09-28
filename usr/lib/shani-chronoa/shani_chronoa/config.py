@@ -83,6 +83,7 @@ _SENSE_CONSENT_KEYS = {
     "hwmon": "hwmon-sense-enabled",
     "modelfit": "modelfit-sense-enabled",
     "power": "power-sense-enabled",
+    "storage": "storage-sense-enabled",
 }
 
 # Two are on by default. `memory` because it is local-only and remembering is
@@ -90,7 +91,7 @@ _SENSE_CONSENT_KEYS = {
 # hardware - charge, wear, whether a charger is plugged in - which is the same
 # class of fact as a disk-free reading and never leaves the machine. Everything
 # that captures or reads the user's world waits to be asked for.
-_SENSE_DEFAULT_ENABLED = frozenset({"memory", "power"})
+_SENSE_DEFAULT_ENABLED = frozenset({"memory", "power", "storage"})
 
 # Input control is not a sense (it has no percept to emit), so it lives here
 # rather than in `_SENSE_CONSENT_KEYS`. It still needs the same fail-closed
