@@ -272,8 +272,20 @@ class TestRadioSense:
         from shani_chronoa.senses import rfsense
 
         text = rfsense.sensing_ceiling()
-        assert "CSI" in text or "not verified" in text
-        assert "ESP32" in text or "5300" in text or "not verified" in text
+        assert text, "the ceiling must say something at all"
+        # Three honest answers exist, and which one comes back depends on the
+        # machine: the hardware limit for an iwlwifi interface ("...needs an
+        # ESP32-S3 rig or an Intel 5300 with Nexmon"), "not verified here" when
+        # nothing ruled it out, and a plain statement that there is no wireless
+        # interface at all. The runner has no wireless interface, so it gets the
+        # third - which names a real limit and just does not use any of the words
+        # the first two do. Asserting the vocabulary of one branch is how this
+        # passed on a laptop and failed on a runner; what must hold is that the
+        # answer is a specific limit rather than a shrug.
+        honest = ("ESP32" in text or "5300" in text or "not verified" in text
+                  or "no wireless interface" in text
+                  or "no network subsystem" in text)
+        assert honest, f"the ceiling names no limit: {text!r}"
 
 
 class TestThermalGridSense:
