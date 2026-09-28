@@ -114,7 +114,7 @@ _HARNESS = textwrap.dedent(
 
 
 @pytest.fixture(scope="module")
-def surface(tmp_path_factory):
+def surface(tmp_path_factory, compiled_schema_dir):
     import json
 
     work = tmp_path_factory.mktemp("surface")
@@ -125,6 +125,17 @@ def surface(tmp_path_factory):
     env["PYTHONPATH"] = str(pathlib.Path("usr/lib/shani-chronoa").resolve())
     env["XDG_CONFIG_HOME"] = str(work / "config")
     env["XDG_DATA_HOME"] = str(work / "data")
+    # GSETTINGS_SCHEMA_DIR must be handed to the SUBPROCESS explicitly. It
+    # cannot be inherited from conftest's gsettings_env: that fixture's
+    # monkeypatch is function-scoped while this one is module-scoped, so by the
+    # time this env is built the variable is not set. The harness builds its own
+    # ChronoaConfig, which then cannot find org.shani.chronoa and falls back to
+    # "using Python defaults" with an EMPTY _valid_keys - and set() and get_bool()
+    # both return early on a key missing from it. So the write was dropped
+    # without an exception and the read answered False, and the gate looked
+    # permanently off for a reason that had nothing to do with the gate.
+    # compiled_schema_dir is session-scoped, so requesting it costs nothing.
+    env["GSETTINGS_SCHEMA_DIR"] = str(compiled_schema_dir)
     # Inherited, not replaced: PipeWire's socket lives in the session runtime
     # dir, and pointing it elsewhere made `pw-dump` fail.
     env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
