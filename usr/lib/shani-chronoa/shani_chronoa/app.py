@@ -14,7 +14,8 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('Gio', '2.0')
-from gi.repository import Gtk, Gio, GLib  # type: ignore
+gi.require_version('Adw', '1')
+from gi.repository import Gtk, Gio, GLib, Adw  # type: ignore
 
 # Add the package to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -100,6 +101,13 @@ class ChronoaApplication(Gtk.Application):
         # this PyGObject build (TypeError + GLib-GIO-CRITICAL, then a
         # segfault) - the explicit class-qualified call works correctly.
         Gtk.Application.do_startup(self)
+
+        # libadwaita requires adw_init() before any Adw widget exists, and the
+        # settings window is entirely Adw.PreferencesPage/SwitchRow/EntryRow.
+        # The failure mode is silent - the rows fall back to unstyled GTK, so
+        # the dialog looks *less* designed than the plain GTK4 one it replaced
+        # - so this line looks redundant and is not. It is idempotent.
+        Adw.init()
 
         # Initialize components based on hardware and config
         self._init_components()
