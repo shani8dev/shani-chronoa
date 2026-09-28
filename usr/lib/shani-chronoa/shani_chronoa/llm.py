@@ -8,6 +8,7 @@ import httpx
 import json
 from typing import Optional, AsyncIterator
 
+from shani_chronoa import egress
 from shani_chronoa.secrets_manager import secrets_manager
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,18 @@ class OllamaLLM:
         except Exception as e:
             logger.error(f"Ollama chat error: {e}")
             raise
+        finally:
+            # The whole conversation goes to this endpoint, so it is the one
+            # place a local-first user most needs to be able to check. Recorded
+            # even though the default host is local: `egress.is_local` is what
+            # distinguishes it, and a user who has pointed `ollama-host` at
+            # something remote needs the log to show that.
+            egress.record(
+                "llm:ollama",
+                f"{self.host}/api/chat",
+                method="POST",
+                bytes_out=egress.payload_size(payload),
+            )
 
     async def chat(self, messages: list[dict], stream: bool = False) -> str:
         """Send a chat request to Ollama and return the response text.

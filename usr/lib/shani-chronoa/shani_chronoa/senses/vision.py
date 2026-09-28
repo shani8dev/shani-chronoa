@@ -65,6 +65,7 @@ from typing import Optional
 import httpx
 
 from shani_chronoa import argfile, screengrab
+from shani_chronoa import egress
 from shani_chronoa.config import ChronoaConfig, HardwareProfile
 from shani_chronoa.senses import SENSITIVITY_PRIVATE, Percept, Sense
 
@@ -213,6 +214,7 @@ def describe_image(
     """
     _require(bool(image), "the captured image was empty")
     payload = build_chat_payload(model, prompt, image)
+    response = None
     try:
         with httpx.Client(
             base_url=host, timeout=httpx.Timeout(timeout, connect=10.0), transport=transport
@@ -222,6 +224,18 @@ def describe_image(
         raise VisionError(f"cannot reach an Ollama server at {host} ({e})") from e
     except httpx.HTTPError as e:
         raise VisionError(f"the request to {host} failed: {e}") from e
+    finally:
+        # A screenshot is the most sensitive thing this app can send anywhere:
+        # it is whatever was on the user's screen, base64-encoded in the
+        # payload. It goes to the configured vision model and nowhere else, and
+        # this is the record that lets someone check that rather than trust it.
+        egress.record(
+            "senses:vision",
+            f"{host}/api/chat",
+            method="POST",
+            status=getattr(response, "status_code", None),
+            bytes_out=egress.payload_size(payload),
+        )
 
     if response.status_code != 200:
         # Ollama reports "model not found" here, and that message is the only

@@ -33,6 +33,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from shani_chronoa import egress
+
 logger = logging.getLogger(__name__)
 
 # Total request budget, and the subset of it allowed to be spent on connect.
@@ -216,6 +218,8 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
     """
     _check_url(url)
     timeout = httpx.Timeout(FETCH_TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS)
+    status_code: Optional[int] = None
+    body: Optional[bytes] = None
     try:
         with httpx.Client(
             transport=transport,
@@ -233,6 +237,18 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
         raise RetrievalError(f"the request timed out after {FETCH_TIMEOUT_SECONDS:.0f}s") from e
     except httpx.RequestError as e:
         raise RetrievalError(f"the request failed: {e}") from e
+    finally:
+        # Instrumented here rather than in the web sense, because this is the
+        # one place every retrieval passes through: the sense, and anything
+        # else that calls `retrieve`, all land on it. The sense was the only
+        # caller, and a grep for "egress" in it matched a docstring - which is
+        # how this went uninstrumented while looking instrumented.
+        egress.record(
+            "web:retrieve",
+            url,
+            method="GET",
+            status=status_code,
+        )
 
     _check_content_type(content_type)
 
