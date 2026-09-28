@@ -256,6 +256,25 @@ def test_transcript_view_scrolls_to_the_newest_turn(gtk_app):
     pytest.skip("adjustment never became scrollable; nothing to assert headless")
 
 
+def _label_of(row):
+    """The turn's text, whether the row is the label or wraps it.
+
+    An assistant turn is now a row holding the label plus a copy button, so
+    the label is not always the row itself. Unwrapping one level keeps these
+    tests pointed at the behaviour they are about - turns accumulating, a
+    second response updating rather than appending - instead of at the
+    widget tree shape, which is not the contract.
+    """
+    if isinstance(row, Gtk.Label):
+        return row.get_label()
+    child = row.get_first_child()
+    while child is not None:
+        if isinstance(child, Gtk.Label):
+            return child.get_label()
+        child = child.get_next_sibling()
+    return None
+
+
 def _turns(transcript):
     """(role, text) for each real turn, in order, skipping the placeholder."""
     out = []
@@ -264,7 +283,7 @@ def _turns(transcript):
         classes = list(child.get_css_classes())
         if "transcript-placeholder" not in classes:
             role = "user" if "transcript-user" in classes else "assistant"
-            out.append((role, child.get_label()))
+            out.append((role, _label_of(child)))
         child = child.get_next_sibling()
     return out
 

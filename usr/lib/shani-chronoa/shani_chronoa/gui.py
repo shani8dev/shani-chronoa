@@ -266,9 +266,57 @@ class TranscriptView(Gtk.ScrolledWindow):
         # A screen reader should announce a finished turn, not every word of
         # a partial one, so the role and label are set explicitly.
         label.update_property([Gtk.AccessibleProperty.LABEL], [f"{role} said"])
-        self._rows.append(label)
+        if role == "user":
+            self._rows.append(label)
+        else:
+            self._rows.append(self._with_copy_button(label, text))
         self._scroll_to_end()
         return label
+
+    def _with_copy_button(self, label: Gtk.Label, text: str) -> Gtk.Box:
+        """An assistant turn with a copy button beside it.
+
+        The reply is the only thing in the window worth keeping - a command, a
+        path, a sentence to paste somewhere - and selecting wrapped text by
+        dragging across a bubble is the wrong gesture for it. The button is
+        flat and dim until hovered or focused, so a transcript of twenty turns
+        is not twenty competing buttons.
+        """
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        row.set_hexpand(True)
+        label.set_hexpand(True)
+        row.append(label)
+
+        button = Gtk.Button()
+        button.set_icon_name("edit-copy-symbolic")
+        button.add_css_class("flat")
+        button.add_css_class("circular")
+        button.set_valign(Gtk.Align.START)
+        button.set_tooltip_text("Copy this reply")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Copy this reply"]
+        )
+        button.connect("clicked", self._on_copy_clicked, text)
+        row.append(button)
+        return row
+
+    @staticmethod
+    def _on_copy_clicked(button: Gtk.Button, text: str) -> None:
+        """Copy, and say so.
+
+        A copy button that gives no feedback cannot be distinguished from one
+        that did not work, so the icon confirms and reverts. `set_content` is
+        the current clipboard API; `set` is the pre-4.10 one, still needed
+        because the two disagree about which is available.
+        """
+        clipboard = button.get_clipboard()
+        try:
+            clipboard.set_content(Gdk.ContentProvider.new_for_value(text))
+        except AttributeError:
+            clipboard.set(text)
+        button.set_icon_name("object-select-symbolic")
+        GLib.timeout_add(1200, lambda: (button.set_icon_name("edit-copy-symbolic"),
+                                        GLib.SOURCE_REMOVE)[1])
 
     def _is_placeholder(self) -> bool:
         first = self._rows.get_first_child()
@@ -556,6 +604,20 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
         self._input_entry.connect("activate", self._on_input_activate)
+        # Typing must not imply "Enter submits" to everyone: it rules out
+        # on-screen keyboards whose return key inserts a newline, and for a
+        # motor-impaired user it is a gesture to get wrong repeatedly. The
+        # button is the primary action, so it is a real suggested-action and
+        # stays present; Stop still appears only while something is speaking.
+        self._send_button = Gtk.Button()
+        self._send_button.set_icon_name("go-next-symbolic")
+        self._send_button.add_css_class("suggested-action")
+        self._send_button.set_valign(Gtk.Align.CENTER)
+        self._send_button.set_tooltip_text("Send (Enter)")
+        self._send_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Send message"]
+        )
+        self._send_button.connect("clicked", self._on_send_clicked)
 
         # Stop is only meaningful while something is being said, so it appears
         # then and disappears otherwise rather than sitting there disabled.
@@ -569,6 +631,7 @@ class CajitaWindow(Gtk.ApplicationWindow):
 
         input_row.append(self._input_entry)
         input_row.append(self._stop_button)
+        input_row.append(self._send_button)
         main_box.append(input_row)
 
     # ------------------------------------------------------------------
@@ -675,11 +738,28 @@ class CajitaWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------
 
     def _on_input_activate(self, entry: Gtk.Entry) -> None:
-        text = entry.get_text()
-        if text.strip():
-            entry.set_text("")
-            self.add_user_turn(text.strip())
-            self.emit("user-input", text)
+        self._submit_input()
+
+    def _on_send_clicked(self, _button: Gtk.Button) -> None:
+        self._submit_input()
+
+    def _submit_input(self) -> None:
+        """Send whatever is typed, from Enter or the button.
+
+        Both call this rather than duplicating it, so the send button cannot
+        drift from the key binding - the bug class where a control is wired to
+        a slightly different action than the shortcut beside it.
+        """
+        raw = self._input_entry.get_text()
+        text = raw.strip()
+        if not text:
+            return
+        self._input_entry.set_text("")
+        self.add_user_turn(text)
+        # The stripped text, not the raw entry contents: the turn the user can
+        # see is the stripped one, and emitting the raw string meant the
+        # assistant received something the transcript never showed.
+        self.emit("user-input", text)
 
     def get_input_text(self) -> str:
         return self._input_entry.get_text()
