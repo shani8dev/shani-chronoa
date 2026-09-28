@@ -157,3 +157,66 @@ class TestTheStylesheetIsValid:
             isinstance(n, ast.FunctionDef) and n.name == "_apply_css"
             for n in ast.walk(tree)
         )
+
+
+class TestForegroundIsNotInvisibleOnALightTheme:
+    """The defect this file's first version of the fix misattributed.
+
+    `_apply_css` hardcoded near-white foregrounds (`color: #e6e6ef`) for the
+    header, the state line, the detail line and both transcript bubbles. On a
+    light theme that is the same lightness as the background: rendering the
+    window with Adwaita and sampling the header band gives a contrast ratio of
+    **2.80:1**, where WCAG AA wants 4.5:1 and the glyphs are effectively absent.
+    Moving the same pixels to named palette entries measures 11.61:1.
+
+    The `da09897` commit message blamed a hardcoded dark *background* instead.
+    That rule (`window.cajita-window { background-color: #14141f }`) was dead
+    CSS - nothing ever added the class - so the background always followed the
+    theme, and the whole defect lived in the foregrounds. Two of the three
+    things believed about it were wrong, and only rendering and measuring found
+    that: a description of the screenshot called the old header "black text,
+    clearly readable", which the pixel sample contradicts.
+
+    So this asserts the principle rather than the old hex list, because the
+    principle is what was violated: a foreground that is lighter than the
+    lightest theme background cannot be read on a light theme.
+    """
+
+    def _declared_colors(self) -> set[str]:
+        css = _css()
+        return {c.lower() for c in re.findall(r"#[0-9a-fA-F]{6}", css)}
+
+    @pytest.mark.parametrize("prop", ["color", "border-color"])
+    def test_no_near_white_literal_is_used_for_text_or_borders(self, prop):
+        """`#e6e6ef`-and-lighter literals, the band that produced 2.80:1."""
+        offenders = []
+        for rule in re.findall(rf"([^{{}}]*\b{prop}\b[^{{}}]*)\{{([^}}]*)\}}", _css()):
+            body = rule[1]
+            for hexval in re.findall(r"#([0-9a-fA-F]{6})", body):
+                r, g, b = (int(hexval[i:i+2], 16) for i in (0, 2, 4))
+                if (r + g + b) / 3 >= 235:
+                    offenders.append(f"#{hexval} in `{prop}`")
+        assert not offenders, (
+            f"these near-white literals are invisible on a light theme: "
+            f"{offenders}"
+        )
+
+    def test_no_near_black_literal_is_used_as_a_background(self):
+        """The mirror of the same mistake on a dark theme."""
+        offenders = []
+        for rule in re.findall(r"([^{{}}]*background-color[^{{}}]*)\{([^}}]*)\}", _css()):
+            for hexval in re.findall(r"#([0-9a-fA-F]{6})", rule[1]):
+                r, g, b = (int(hexval[i:i+2], 16) for i in (0, 2, 4))
+                if (r + g + b) / 3 <= 20:
+                    offenders.append(f"#{hexval} as background-color")
+        assert not offenders, f"these are invisible on a dark theme: {offenders}"
+
+    def test_text_colours_come_from_the_theme(self):
+        css = _css()
+        assert "@theme_fg_color" in css
+        # Nothing should be setting `color` to a bare hex at all any more.
+        for hexval in re.findall(r"color:\s*#([0-9a-fA-F]{6})", css):
+            assert hexval.lower() not in STATE_PALETTE, (
+                f"#{hexval} is set as a text colour - text takes the theme's "
+                f"foreground, not a fixed value"
+            )

@@ -319,3 +319,65 @@ and all three changes physically present in the shipped Python.
 - No CSI-capable Wi-Fi, thermal array, mmWave, sonar or IR camera attached, so
   `rfsense`'s RSSI ceiling and `thermalgrid`'s I2C reads remain
   capability-only.
+
+---
+
+## 2026-09-28 — Looking at the window, and correcting what I believed about it
+
+Commits `da09897`, `0588b2d`, `7ba022c`. This entry is mostly a correction to
+the previous one, and the correction is the point.
+
+### Rendering the window found what no test could
+
+`DISPLAY=:1` turned out to be a real X11 session on seat0, and GTK can render
+its own widget tree to a PNG through `Gsk.CairoRenderer` without a compositor,
+a window manager, or any input. So for the first time in this repo's history the
+UI was *looked at* rather than asserted about. It immediately showed two things
+no test was asking:
+
+- The sense rows were titled `hwmon`, `modelfit`, `thermalgrid` — module names,
+  in front of a user with no reason to know them — with subtitles drawn from
+  `description.split(". ")[0]`, which is not a sentence extractor and produced
+  anything from a 50-character clause to a 300-character run-on. A sense's
+  schema `description` is the LLM's **tool documentation**; it had been used as
+  interface copy.
+- Replies rendered as `Root has **38G** free` and `- / is 32% full` — the most
+  visibly unfinished thing about a chat window.
+
+Both are now fixed, and the markdown is the narrow subset documented in
+`markdown_lite.py`: escape first, then introduce a fixed set of tags, so the
+model cannot inject one. `[text](url)` is left as literal text on purpose.
+
+### The `da09897` commit message named the wrong cause
+
+It said the hardcoded `window.cajita-window { background-color: #14141f }` made
+a light theme unusable. **That rule was dead CSS.** Nothing anywhere in the
+tree ever added the `cajita-window` class, so it matched no widget and the
+window background always followed the theme.
+
+The real defect was the other half of the same stylesheet: near-white
+*foregrounds* — `color: #e6e6ef` on the header, the state line and the detail
+line. Measured by sampling the rendered header band on a light theme:
+
+| version | darkest px | lightest px | contrast |
+|---|---|---|---|
+| before, Adwaita light | `(146,148,149)` | `(246,245,244)` | **2.80:1** |
+| after, Adwaita light | `(46,52,54)` | `(246,245,244)` | **11.61:1** |
+
+2.80:1 is well under WCAG AA's 4.5:1, and the lightest pixel in the band is
+`(246,245,244)` against a `(246,245,244)` background — the glyphs were the
+same lightness as the page. So the fix was needed and the improvement is real
+and 4x; the explanation attached to it was wrong in its main clause.
+
+**Two of the three things believed about this were wrong**, and only measuring
+found it. I inferred the mechanism from reading the stylesheet. A description
+of the before-screenshot then called the old header "black text, clearly
+readable" — which the pixel sample contradicts outright. The rule the repo has
+kept learning this session holds here too: a green signal, a passing test, and
+a plausible description of a picture are three different kinds of evidence, and
+this time two of them agreed with each other and were both wrong.
+
+`test_window_theming.py` now asserts the *principle* rather than the old hex
+list — no near-white literal in any `color` or `border-color` rule, no
+near-black literal as a `background-color` — because the principle is what was
+violated and a list of eight hexes would only catch those eight.
