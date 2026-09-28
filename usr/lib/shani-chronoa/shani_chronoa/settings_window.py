@@ -158,6 +158,10 @@ SENSE_LABELS = {
         "Connected hardware",
         "What is on the PCI and USB buses, and whether any device has no driver",
     ),
+    "audio": (
+        "Audio devices",
+        "What the machine can play and record, and at what volume",
+    ),
 }
 
 
@@ -185,8 +189,8 @@ SENSE_CATEGORIES = [
      "Connected outputs, and setting the backlight",
      ["display"]),
     ("Network and wireless",
-     "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
-     ["link", "network", "bluetooth", "rfsense"]),
+     "Interfaces, audio devices, Bluetooth, and motion from Wi-Fi signal",
+     ["link", "network", "audio", "bluetooth", "rfsense"]),
     ("The machine itself",
      "Processor load, battery, disks, graphics, temperature, fans, and arrays",
      ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",

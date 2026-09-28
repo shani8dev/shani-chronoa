@@ -166,6 +166,11 @@
       <summary>Let Chronoa inventory the hardware buses</summary>
       <description>When true, Chronoa may list what is on the PCI and USB buses: each device with its class, vendor and device id, the driver bound to it, and for USB the port it is in and its link speed. On by default because it reads the machine, not you, and never leaves it. Flags a PCI device with no driver bound, which is hardware the kernel does not know what to do with, and separates USB root hubs from peripherals.</description>
     </key>
+    <key name="audio-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Audio devices</summary>
+      <description>When true, Chronoa may read what the machine can play and record, and at what volume. On by default because it reads the machine, not you, and never leaves it. Anything needing a tool that is not installed reports that it was not determined rather than a clean negative.</description>
+    </key>
     <key name="cpu-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read processor and load state</summary>
