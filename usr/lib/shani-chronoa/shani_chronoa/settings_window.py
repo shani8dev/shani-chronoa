@@ -130,6 +130,10 @@ SENSE_LABELS = {
         "Disks",
         "Which drives this machine has, how big, and how worn the NVMe ones are",
     ),
+    "link": (
+        "Network links",
+        "Which interfaces exist, which are up, and how fast the wired ones are",
+    ),
 }
 
 
@@ -158,7 +162,7 @@ SENSE_CATEGORIES = [
      ["display"]),
     ("Network and wireless",
      "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
-     ["network", "bluetooth", "rfsense"]),
+     ["link", "network", "bluetooth", "rfsense"]),
     ("The machine itself",
      "Battery, disks, temperature, fans, and infrared arrays if wired up",
      ["power", "storage", "thermal", "hwmon", "thermalgrid"]),

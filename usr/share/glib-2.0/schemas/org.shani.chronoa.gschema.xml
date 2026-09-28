@@ -141,6 +141,11 @@
       <summary>Let Chronoa retrieve web content</summary>
       <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
     </key>
+    <key name="link-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read network link state</summary>
+      <description>When true, Chronoa may read which network interfaces this machine has, whether they are up, and for wired ones the negotiated speed and duplex. On by default because it reads the machine, not you, and never leaves it. Signal strength is deliberately not included here - the separate rfsense sense covers that and is off unless you ask for it.</description>
+    </key>
     <key name="storage-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read disk inventory</summary>
