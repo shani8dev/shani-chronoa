@@ -472,3 +472,54 @@ class TestOnlyMemoryMayBeDurable:
             f"{durable_file} was written for transient percepts: "
             f"{sorted(name for name, _ in transient)}"
         )
+
+
+class TestPollIntervalNeverExceedsTtl:
+    """A polled sense must outlive its own poll gap.
+
+    `poll_interval` is how often the scheduler refreshes a sense;
+    `ttl_seconds` is how long the resulting percept stays visible. If the TTL
+    is the shorter of the two, the fact is *expired* in the store for the gap
+    between one poll and the next - the assistant simply cannot see it, with no
+    error anywhere to say why.
+
+    `display` shipped exactly this: ttl 120 against a poll of 300, so for 180
+    seconds of every 300-second cycle (60% of the time) the display state was
+    absent. Nothing failed, no test went red, and no log line mentioned it -
+    the only symptom was an assistant that intermittently could not answer a
+    question about the screen.
+
+    This is a registry-wide invariant rather than a per-sense assertion so the
+    next sense added with a mismatched pair is caught at the point of the
+    mistake instead of by a user noticing the gap.
+    """
+
+    def test_no_ambient_sense_expires_before_it_is_repolled(self):
+        from shani_chronoa.senses import discover_senses
+
+        offenders = {
+            name: (sense.ttl_seconds, sense.poll_interval)
+            for name, sense in sorted(discover_senses().items())
+            if sense.is_ambient()
+            and sense.ttl_seconds is not None
+            and sense.ttl_seconds < sense.poll_interval
+        }
+        assert not offenders, (
+            "these senses expire before the scheduler refreshes them, so the "
+            f"fact is missing for (poll - ttl) seconds of every cycle: {offenders}"
+        )
+
+    def test_the_invariant_is_not_vacuous(self):
+        """A guard that cannot fail is not a guard: assert the comparison the
+        test relies on actually rejects a bad pair."""
+        class Fake:
+            def __init__(self, ttl, poll):
+                self.ttl_seconds = ttl
+                self.poll_interval = poll
+
+            def is_ambient(self):
+                return self.poll_interval is not None
+
+        good, bad = Fake(300.0, 300.0), Fake(120.0, 300.0)
+        assert not (good.is_ambient() and good.ttl_seconds < good.poll_interval)
+        assert bad.is_ambient() and bad.ttl_seconds < bad.poll_interval

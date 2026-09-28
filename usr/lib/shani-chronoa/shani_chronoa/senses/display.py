@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 
 KIND = "machine-state"
 SENSITIVITY = SENSITIVITY_PUBLIC
-_TTL_SECONDS = 120.0
+# The TTL must be >= the poll interval or the percept expires before the
+# scheduler refreshes it, leaving the display state invisible for the gap. This
+# pair shipped as ttl=120 against poll=300, so the fact was missing for 180s of
+# every 300s cycle. Enforced registry-wide by
+# tests/test_sense_manifest.py::TestPollIntervalNeverExceedsTtl.
+_TTL_SECONDS = 300.0
 _POLL_INTERVAL = 300.0
 
 _BACKLIGHT = "/sys/class/backlight"
