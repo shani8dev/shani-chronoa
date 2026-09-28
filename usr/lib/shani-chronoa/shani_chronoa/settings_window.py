@@ -146,6 +146,10 @@ SENSE_LABELS = {
         "Graphics",
         "Which GPU this machine has, its driver, and how much video memory",
     ),
+    "cooling": (
+        "Fans and cooling",
+        "Fan speeds, and coolant temperature and pump speed for a liquid cooler",
+    ),
 }
 
 
@@ -178,7 +182,7 @@ SENSE_CATEGORIES = [
     ("The machine itself",
      "Processor load, battery, disks, graphics, temperature, fans, and arrays",
      ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",
-      "thermalgrid"]),
+      "cooling", "thermalgrid"]),
     ("Security and privacy",
      "Which software can act as administrator, and what is already using your camera",
      ["privilege", "contention"]),

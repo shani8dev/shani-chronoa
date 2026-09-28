@@ -29,7 +29,7 @@ WATCHES_THE_WORLD = {
     # same class of fact as a disk-free reading and never leave the machine,
     # whereas hwmon and thermalgrid are opt-in because the project treats
     # observing the machine as worth a deliberate yes.
-    "power", "storage", "link", "cpu", "smart", "gpu",
+    "power", "storage", "link", "cpu", "smart", "gpu", "cooling",
 }
 
 

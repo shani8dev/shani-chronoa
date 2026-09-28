@@ -151,6 +151,11 @@
       <summary>Graphics</summary>
       <description>When true, Chronoa may read which gpu this machine has, its driver, and how much video memory. On by default because it reads the machine, not you, and never leaves it. Anything needing a tool that is not installed reports that it was not determined rather than a clean negative.</description>
     </key>
+    <key name="cooling-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read the cooling</summary>
+      <description>When true, Chronoa may read fan speeds and, if a liquid cooler is fitted and the liquidctl package is installed, its coolant temperature, pump speed and mode. Off by default, like the other senses that watch the machine, because hwmon already exposes temperatures and this adds fans and coolers rather than anything new about the CPU. Reports a fan at 0 RPM as stopped, which is a real state and not the same as no fan being fitted.</description>
+    </key>
     <key name="cpu-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read processor and load state</summary>
