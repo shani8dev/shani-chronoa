@@ -88,6 +88,7 @@ _SENSE_CONSENT_KEYS = {
     "cpu": "cpu-sense-enabled",
     "gpu": "gpu-sense-enabled",
     "cooling": "cooling-sense-enabled",
+    "security": "security-sense-enabled",
     "smart": "smart-sense-enabled",
 }
 
@@ -99,7 +100,7 @@ _SENSE_CONSENT_KEYS = {
 # health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
-    "memory", "power", "storage", "link", "cpu", "smart", "gpu",
+    "memory", "power", "storage", "link", "cpu", "smart", "gpu", "security",
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here

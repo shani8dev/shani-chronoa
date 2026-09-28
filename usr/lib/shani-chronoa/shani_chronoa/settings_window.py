@@ -150,6 +150,10 @@ SENSE_LABELS = {
         "Fans and cooling",
         "Fan speeds, and coolant temperature and pump speed for a liquid cooler",
     ),
+    "security": (
+        "Firmware security",
+        "Secure Boot, TPM presence, lockdown mode and the security modules in effect",
+    ),
 }
 
 
@@ -184,8 +188,9 @@ SENSE_CATEGORIES = [
      ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",
       "cooling", "thermalgrid"]),
     ("Security and privacy",
-     "Which software can act as administrator, and what is already using your camera",
-     ["privilege", "contention"]),
+     "Firmware security, which software can act as administrator, and what "
+     "is already using your camera",
+     ["security", "privilege", "contention"]),
     ("Model capability",
      "What this machine can run, and whether the configured model fits",
      ["modelfit"]),
