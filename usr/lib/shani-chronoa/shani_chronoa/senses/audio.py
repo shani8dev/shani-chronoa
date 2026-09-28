@@ -36,6 +36,7 @@ import subprocess
 from typing import Dict, List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
+from shani_chronoa import pipewire
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
 
@@ -51,13 +52,13 @@ _BOX = "│├└─ "
 
 
 def _run_wpctl(*arguments: str) -> Optional[subprocess.CompletedProcess]:
+    # This one keeps the None-on-failure shape the rest of the sense relies on,
+    # so a missing or hung wpctl degrades to UNKNOWN here rather than raising
+    # mid-collection. The invocation itself is shared.
     if shutil.which("wpctl") is None:
         return None
     try:
-        return subprocess.run(
-            ["wpctl", *arguments], capture_output=True, text=True,
-            timeout=_TIMEOUT, check=False,
-        )
+        return pipewire.run_wpctl(*arguments)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.debug("wpctl failed: %s", exc)
         return None

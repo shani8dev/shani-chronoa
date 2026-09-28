@@ -2,13 +2,12 @@
 
 import subprocess
 
+from shani_chronoa import pipewire
 from shani_chronoa.skills import Skill
 
 
 def _run_wpctl(*args: str) -> "subprocess.CompletedProcess[str]":
-    return subprocess.run(
-        ["wpctl", *args], capture_output=True, text=True, timeout=5
-    )
+    return pipewire.run_wpctl(*args)
 
 
 def _run_get_volume(_arguments: dict) -> str:

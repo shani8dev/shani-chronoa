@@ -80,6 +80,28 @@ def _graph_nodes() -> list[dict]:
     ]
 
 
+# `wpctl` is the control-side counterpart to the `pw-dump` discovery above, and
+# it was being invoked through three separate wrappers - in the volume skill, the
+# privacy skill and the audio sense - each with its own timeout. Same binary,
+# same machine, three chances to disagree about how long to wait and whether a
+# failure raises. One wrapper, one timeout.
+WPCTL_TIMEOUT = 10
+
+
+def run_wpctl(*args: str) -> "subprocess.CompletedProcess[str]":
+    """Run `wpctl` and return the completed process.
+
+    Deliberately does not check for the binary's presence: every caller already
+    decides for itself what a missing wpctl means for its own answer (a mute
+    request and a device listing fail differently), and collapsing that decision
+    here would take the wording away from the code that needs to explain it.
+    """
+    return subprocess.run(
+        ["wpctl", *args],
+        capture_output=True, text=True, timeout=WPCTL_TIMEOUT, check=False,
+    )
+
+
 def is_available() -> bool:
     """Whether a live PipeWire graph can be queried."""
     return bool(shutil.which("pw-dump")) and bool(_graph_nodes())

@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
+from shani_chronoa import pipewire
 from shani_chronoa.skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -94,10 +95,7 @@ SCHEMA = {
 
 
 def _wpctl(*arguments: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["wpctl", *arguments],
-        capture_output=True, text=True, timeout=_TIMEOUT, check=False,
-    )
+    return pipewire.run_wpctl(*arguments)
 
 
 def _audio_targets() -> List[dict]:
