@@ -134,6 +134,18 @@ SENSE_LABELS = {
         "Network links",
         "Which interfaces exist, which are up, and how fast the wired ones are",
     ),
+    "cpu": (
+        "Processor and load",
+        "How busy the machine is, what memory is free, and the power governor",
+    ),
+    "smart": (
+        "Drive health",
+        "SMART attributes, wear, and whether a disk is failing",
+    ),
+    "gpu": (
+        "Graphics",
+        "Which GPU this machine has, its driver, and how much video memory",
+    ),
 }
 
 
@@ -164,8 +176,9 @@ SENSE_CATEGORIES = [
      "Interfaces, Bluetooth, and motion sensed from Wi-Fi signal strength",
      ["link", "network", "bluetooth", "rfsense"]),
     ("The machine itself",
-     "Battery, disks, temperature, fans, and infrared arrays if wired up",
-     ["power", "storage", "thermal", "hwmon", "thermalgrid"]),
+     "Processor load, battery, disks, graphics, temperature, fans, and arrays",
+     ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",
+      "thermalgrid"]),
     ("Security and privacy",
      "Which software can act as administrator, and what is already using your camera",
      ["privilege", "contention"]),

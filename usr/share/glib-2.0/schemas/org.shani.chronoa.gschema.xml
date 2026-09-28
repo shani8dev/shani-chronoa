@@ -141,6 +141,21 @@
       <summary>Let Chronoa retrieve web content</summary>
       <description>When true, Chronoa may fetch web pages and read their contents. Off by default. This is the one sense that sends a request off the machine, so it also requires privacy mode to be off.</description>
     </key>
+    <key name="smart-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Drive health</summary>
+      <description>When true, Chronoa may read smart attributes, wear, and whether a disk is failing. On by default because it reads the machine, not you, and never leaves it. Anything that needs a tool which is not installed reports that it was not determined rather than a clean negative.</description>
+    </key>
+    <key name="gpu-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Graphics</summary>
+      <description>When true, Chronoa may read which gpu this machine has, its driver, and how much video memory. On by default because it reads the machine, not you, and never leaves it. Anything needing a tool that is not installed reports that it was not determined rather than a clean negative.</description>
+    </key>
+    <key name="cpu-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read processor and load state</summary>
+      <description>When true, Chronoa may read how many CPUs are online, the load average and how many tasks are runnable, available memory and swap, uptime, and the frequency governor. On by default because it reads the machine, not you, and never leaves it. Load is reported per CPU rather than as a percentage, because load counts runnable tasks and not CPU time.</description>
+    </key>
     <key name="link-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read network link state</summary>

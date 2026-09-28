@@ -85,14 +85,21 @@ _SENSE_CONSENT_KEYS = {
     "power": "power-sense-enabled",
     "storage": "storage-sense-enabled",
     "link": "link-sense-enabled",
+    "cpu": "cpu-sense-enabled",
+    "gpu": "gpu-sense-enabled",
+    "smart": "smart-sense-enabled",
 }
 
-# Two are on by default. `memory` because it is local-only and remembering is
-# the point of an assistant. `power` because it reports the machine's own
-# hardware - charge, wear, whether a charger is plugged in - which is the same
-# class of fact as a disk-free reading and never leaves the machine. Everything
+# On by default are `memory` and the machine-state senses. `memory` because it is
+# local-only and remembering is the point of an assistant; the rest because they
+# report the machine's own hardware and never leave it - the same class of fact
+# as a disk-free reading. `smart` defaults on with smartctl absent, because the
+# sense reports that health was not determined rather than a clean bill of
+# health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
-_SENSE_DEFAULT_ENABLED = frozenset({"memory", "power", "storage", "link"})
+_SENSE_DEFAULT_ENABLED = frozenset({
+    "memory", "power", "storage", "link", "cpu", "smart", "gpu",
+})
 
 # Input control is not a sense (it has no percept to emit), so it lives here
 # rather than in `_SENSE_CONSENT_KEYS`. It still needs the same fail-closed
