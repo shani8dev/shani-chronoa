@@ -89,6 +89,7 @@ _SENSE_CONSENT_KEYS = {
     "gpu": "gpu-sense-enabled",
     "cooling": "cooling-sense-enabled",
     "security": "security-sense-enabled",
+    "devices": "devices-sense-enabled",
     "smart": "smart-sense-enabled",
 }
 

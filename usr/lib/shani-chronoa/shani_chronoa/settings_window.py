@@ -154,6 +154,10 @@ SENSE_LABELS = {
         "Firmware security",
         "Secure Boot, TPM presence, lockdown mode and the security modules in effect",
     ),
+    "devices": (
+        "Connected hardware",
+        "What is on the PCI and USB buses, and whether any device has no driver",
+    ),
 }
 
 
@@ -188,9 +192,9 @@ SENSE_CATEGORIES = [
      ["cpu", "power", "storage", "smart", "gpu", "thermal", "hwmon",
       "cooling", "thermalgrid"]),
     ("Security and privacy",
-     "Firmware security, which software can act as administrator, and what "
-     "is already using your camera",
-     ["security", "privilege", "contention"]),
+     "Firmware security, connected hardware, which software can act as "
+     "administrator, and what is already using your camera",
+     ["security", "devices", "privilege", "contention"]),
     ("Model capability",
      "What this machine can run, and whether the configured model fits",
      ["modelfit"]),
