@@ -313,6 +313,24 @@ class TestThermalGridProbeHonesty:
 
     _DENIED = "Error: Could not open file `/dev/i2c-1': Permission denied\nRun as root?"
 
+    @pytest.fixture(autouse=True)
+    def _i2cdetect_present(self, monkeypatch):
+        """pretend i2cdetect is installed, so the mocked run is actually reached.
+
+        probe() returns early when `shutil.which("i2cdetect") is None`, before
+        it ever calls subprocess. These tests mock subprocess.run precisely so
+        the scan is exercised, but on a runner i2c-tools is absent, so the early
+        return fired and every assertion below was made against an empty result
+        the mock never produced. The point of the class is how a scan is
+        REPORTED, not whether the tool is installed, so the tool's presence is
+        stubbed rather than installed.
+        """
+        import shani_chronoa.senses.thermalgrid as tg
+
+        monkeypatch.setattr(tg.shutil, "which",
+                            lambda name, *a, **k: "/usr/sbin/i2cdetect"
+                            if name == "i2cdetect" else None)
+
     def _fake_run(self, stdout, stderr=""):
         import subprocess as sp
 
