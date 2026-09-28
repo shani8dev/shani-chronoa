@@ -5,6 +5,31 @@ This file applies to any AI coding assistant working in this repository
 before editing, and follow the verification steps before calling any change
 done.
 
+## Start here (fast path)
+
+**Always read these first:**
+- `What this repo is`
+- `Empirical verification (mandatory)` and
+  `Rule: verify by actually running it, not by reading it`
+- `Required verification for a change`
+- `Boundaries`
+- `Commit discipline`
+
+**Read when your change touches them:**
+- `Rendering the UI to a PNG` — GTK4/Adw init ordering and the capture path
+- `Machine-state senses` / `Senses layer` — the sense contract
+- `Settings window`, `Model choice`, `Packaging` — the two naming
+  conventions must not be mixed
+
+**On-demand reference:**
+- `Audit-verified known issues` and `Garuda Cross-Reference Findings` —
+  dated retrospectives. **Grep for the subsystem you are changing.** Full
+  methodology in `AUDIT-HISTORY.md`.
+- `Deliberately not done` — read before proposing a feature, so you don't
+  rebuild something intentionally excluded.
+
+**Never skip:** running it. Reading the diff has never been sufficient here.
+
 ## What this repo is
 
 A local-first GTK4 voice/text AI assistant for Shanios: `whisper.cpp` for
