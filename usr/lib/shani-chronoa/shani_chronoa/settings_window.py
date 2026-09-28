@@ -157,8 +157,8 @@ SENSE_CATEGORIES = [
     ("Security and privacy",
      "Which software can act as administrator, and what is already using your camera",
      ["privilege", "contention"]),
-    ("Models",
-     "What this machine can run, and which model is configured",
+    ("Model capability",
+     "What this machine can run, and whether the configured model fits",
      ["modelfit"]),
 ]
 

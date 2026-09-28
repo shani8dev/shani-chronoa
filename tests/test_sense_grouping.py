@@ -62,12 +62,33 @@ class TestTheGroupingCoversTheRegistryExactly:
         assert [t for t, _d, _n in SENSE_CATEGORIES] == [
             "Talking to Chronoa", "Looking at things", "Getting work done",
             "The screen", "Network and wireless", "The machine itself",
-            "Security and privacy", "Models",
+            "Security and privacy", "Model capability",
         ]
 
     def test_no_group_is_empty(self):
         empty = [t for t, _d, names in SENSE_CATEGORIES if not names]
         assert not empty, f"groups with no senses: {empty}"
+
+    def test_no_category_title_collides_with_another_section(self):
+        """The window also has "Privacy and network", "Voice", "Models",
+        "System" and "In effect right now". A sense category sharing a title
+        with one of those renders two identically-headed groups, and the user
+        cannot tell which one a row belongs to."""
+        others = {
+            "Privacy and network", "Free cloud providers",
+            "Cloud providers that require a key", "Voice", "Models",
+            "In effect right now", "System",
+        }
+        clashes = sorted({t for t, _d, _n in SENSE_CATEGORIES} & others)
+        assert not clashes, (
+            f"a sense category shares its title with a non-sense section, so "
+            f"the window shows two identically-headed groups: {clashes}"
+        )
+
+    def test_no_two_categories_share_a_title(self):
+        titles = [t for t, _d, _n in SENSE_CATEGORIES]
+        dupes = sorted({t for t in titles if titles.count(t) > 1})
+        assert not dupes, f"duplicate category titles: {dupes}"
 
     def test_every_category_has_a_description(self):
         for title, desc, _names in SENSE_CATEGORIES:
