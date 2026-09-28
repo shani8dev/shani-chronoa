@@ -80,7 +80,7 @@ _HARNESS = textwrap.dedent(
             # By sense name: "thermal" is titled "Temperature" and "contention"
             # is titled "Microphone and camera in use".
             result["thermal_visible"] = w._sense_rows["thermal"].get_visible()
-            result["contention_visible"] = w._sense_rows["contention"].get_visible()
+            result["capture_visible"] = w._sense_rows["capture"].get_visible()
             a.quit()
             return False
 
@@ -225,7 +225,7 @@ class TestSearchActuallyFilters:
         """The group title does not contain the needle, but a row inside it
         does - hiding the group would bury the only match."""
         assert built["thermal_visible"] is True
-        assert built["contention_visible"] is False
+        assert built["capture_visible"] is False
 
 
 class TestNoHardcodedTheme:

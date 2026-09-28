@@ -71,13 +71,12 @@ _SENSE_CONSENT_KEYS = {
     "web": "web-sense-enabled",
     "memory": "memory-sense-enabled",
     "hearing": "hearing-sense-enabled",
-    "contention": "contention-sense-enabled",
+    "capture": "capture-sense-enabled",
     "privilege": "privilege-sense-enabled",
     "thermal": "thermal-sense-enabled",
     "display": "display-sense-enabled",
     "network": "network-sense-enabled",
     "bluetooth": "bluetooth-sense-enabled",
-    "camera": "camera-sense-enabled",
     "rfsense": "rfsense-sense-enabled",
     "thermalgrid": "thermalgrid-sense-enabled",
     "hwmon": "hwmon-sense-enabled",
@@ -110,6 +109,12 @@ _SENSE_CONSENT_ALIASES = {
     # `storage` was already reporting NVMe wear from sysfs while `smart`
     # reported the same endurance figure from SMART attribute 233.
     "storage": ("smart-sense-enabled",),
+    # `camera` and `contention` became `capture`. They already shared the holder
+    # lookup - camera imported contention.describe - and contention already
+    # walked both /dev/video* and /dev/snd, so the two senses were reporting the
+    # same devices from two directions and could disagree about whether one was
+    # free.
+    "capture": ("camera-sense-enabled", "contention-sense-enabled"),
 }
 
 # On by default are `memory` and the machine-state senses. `memory` because it is

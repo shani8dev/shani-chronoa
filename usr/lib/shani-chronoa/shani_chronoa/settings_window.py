@@ -78,10 +78,6 @@ SENSE_LABELS = {
         "Transcribe speech",
         "Hear you through the microphone",
     ),
-    "contention": (
-        "Microphone and camera in use",
-        "Report what currently holds a capture device",
-    ),
     "privilege": (
         "Who holds sensitive access",
         "Report which software can act as administrator",
@@ -101,10 +97,6 @@ SENSE_LABELS = {
     "bluetooth": (
         "Bluetooth",
         "Adapters, and whether rfkill has blocked them",
-    ),
-    "camera": (
-        "Connected cameras",
-        "List camera devices. Never opens a stream",
     ),
     "rfsense": (
         "Movement",
@@ -158,6 +150,10 @@ SENSE_LABELS = {
         "Audio devices",
         "What the machine can play and record, and at what volume",
     ),
+    "capture": (
+        "Cameras and microphones",
+        "Which capture devices exist, and what is holding them open",
+    ),
     "printing": (
         "Printers and scanners",
         "Which printers are set up, and which scanners are plugged in",
@@ -180,8 +176,8 @@ SENSE_CATEGORIES = [
      "Hearing you, and remembering what you asked it to keep",
      ["hearing", "memory"]),
     ("Looking at things",
-     "Cameras, and reading text out of pictures",
-     ["camera", "vision", "ocr"]),
+     "Reading text out of pictures, and describing what a camera sees",
+     ["vision", "ocr"]),
     ("Getting work done",
      "Files, folders and the web - what makes it able to act rather than only answer",
      ["filesystem", "web"]),
@@ -198,7 +194,7 @@ SENSE_CATEGORIES = [
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
      "administrator, and what is already using your camera",
-     ["security", "devices", "privilege", "contention"]),
+     ["security", "devices", "privilege", "capture"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),

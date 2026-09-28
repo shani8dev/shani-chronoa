@@ -76,6 +76,7 @@ _POLL_INTERVAL = 60.0
 # like `pcmC0D31p`. The suffix set is open-ended and the device field is not
 # single-digit, so a literal enumeration is wrong by construction; matching the
 # family's shape is what survives contact with a real /dev/snd.
+_VIDEO_DIR = Path("/dev")
 _VIDEO_NODE = re.compile(r"^video\d+$")
 _SOUND_NODE = re.compile(r"^(?:control|hw|pcm|dmix|dsnoop|midi)C\d+D?\d*[a-z]*$")
 
@@ -85,7 +86,7 @@ _SCHEMA = {
         # Named for the consent surface, not for how it reads:
         # `sense_allowed()` builds the key as "<name>-sense-enabled", so a
         # rename here silently leaves the sense permanently ungrantable.
-        "name": "contention",
+        "name": "capture",
         "description": (
             "Report which processes are currently holding this machine's "
             "capture devices open - webcams under /dev/video*, and audio "
@@ -198,10 +199,36 @@ def describe(node: Path) -> Dict[str, object]:
     }
 
 
+def _read_name(node: Path) -> Optional[str]:
+    try:
+        return (node / "name").read_text().strip()
+    except OSError:
+        return None
+
+
+
+def video_labels() -> dict:
+    """`/dev/videoN` -> the name the kernel reports for it, where it knows one.
+
+    Only video nodes are labelled. Sound nodes are named by their own ALSA
+    identity, which is not in the filesystem, and guessing one from the node
+    number would be inventing it.
+    """
+    out = {}
+    try:
+        entries = sorted(_VIDEO_DIR.iterdir())
+    except OSError:
+        return out
+    for entry in entries:
+        if _VIDEO_NODE.match(entry.name):
+            out[str(entry)] = _read_name(entry)
+    return out
+
+
 def _run(arguments: dict) -> Union[str, Percept]:
     config = ChronoaConfig()
-    if not config.sense_allowed("contention"):
-        return f"Not checking device use: {config.sense_allowed_reason('contention')}."
+    if not config.sense_allowed("capture"):
+        return f"Not checking device use: {config.sense_allowed_reason('capture')}."
 
     requested = str(arguments.get("device") or "").strip()
     if requested:
@@ -217,33 +244,48 @@ def _run(arguments: dict) -> Union[str, Percept]:
 
     if not reports:
         return "No capture devices were found on this machine."
+
+    labels = video_labels()
+
     if not busy and all(r["in_use"] is None for r in reports):
-        return (
+        # Every holder lookup failed, so nothing is known - which is not the
+        # same as everything being free, and the two were previously reported
+        # by different senses that could disagree with each other.
+        return _SENSE.to_percept(
             "Could not determine who holds the capture devices open: "
             f"{_FUSER_MISSING or 'the holder lookup is unavailable'}. Whether "
-            "anything is using the camera or microphone is UNKNOWN, not free."
+            "anything is using the camera or microphone is UNKNOWN, not free.",
+            source="device-contention",
+            metadata={"busy": 0, "total": len(reports), "determined": False},
         )
-    if not busy:
-        free = ", ".join(str(r["device"]) for r in reports)
-        return f"No process holds any capture device open ({free} are all free)."
+
+    def _label(device: str) -> str:
+        name = labels.get(device)
+        return f"{device} ({name})" if name else device
 
     lines = []
-    for report in busy:
-        names = ", ".join(
-            f"{h['pid']} ({h['cmdline'] or 'no command line'})" for h in report["holders"]
-        )
-        lines.append(f"{report['device']} is in use by: {names}")
-    summary = "\n".join(lines)
+    for report in reports:
+        device = str(report["device"])
+        if report["in_use"]:
+            names = ", ".join(
+                f"{h['pid']} ({h['cmdline'] or 'no command line'})"
+                for h in report["holders"]
+            )
+            lines.append(f"{_label(device)}: in use by {names}")
+        elif report["in_use"] is False:
+            lines.append(f"{_label(device)}: free")
+    if not busy:
+        lines.append("No process holds any capture device open.")
 
     return _SENSE.to_percept(
-        summary,
+        "\n".join(lines),
         source="device-contention",
-        metadata={"busy": len(busy), "total": len(reports)},
+        metadata={"busy": len(busy), "total": len(reports), "determined": True},
     )
 
 
 _SENSE = Sense(
-    name="contention",
+    name="capture",
     kind=KIND,
     ttl_seconds=_TTL_SECONDS,
     sensitivity=SENSITIVITY,

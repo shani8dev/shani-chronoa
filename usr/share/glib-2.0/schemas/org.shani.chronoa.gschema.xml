@@ -176,6 +176,11 @@
       <summary>Retired: merged into the display sense</summary>
       <description>The `monitors` sense was merged into `display` - both walked /sys/class/drm and both reported which connectors were connected, so one enumeration now reports the backlight and the panel identity together. This key is still honoured: setting it to true grants the `display` sense, so a permission granted before the merge is not revoked by it. It will be removed in a future release once no supported install can still hold it.</description>
     </key>
+    <key name="capture-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read the capture devices and who is holding them</summary>
+      <description>When true, Chronoa may read which capture devices this machine has - cameras and microphones - and which process currently holds each one open. Off by default because this names the applications you are running at this moment, which is about you rather than about the machine. A device that cannot be checked is reported as undetermined and never as free: a missing holder-lookup tool and a genuinely idle camera look identical from here, and only one of them means nobody is watching.</description>
+    </key>
     <key name="printing-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa read which printers and scanners this machine has</summary>
@@ -213,8 +218,8 @@
     </key>
     <key name="contention-sense-enabled" type="b">
       <default>false</default>
-      <summary>Let Chronoa report which programs are using your camera and microphone</summary>
-      <description>When true, Chronoa may list which processes currently hold a capture device open - webcams under /dev/video and audio under /dev/snd - and report the command line of each holder. Off by default. Read-only: it names every holder of every capture device, and acts on none of them. It reports the machine's state to you; it does not grant, revoke or interfere with any device. Polled on an interval, so this is the one sense that observes something outside Chronoa's own use of the machine.</description>
+      <summary>Retired: merged into the capture sense</summary>
+      <description>The `contention` sense was merged into `capture`. They already shared the device-holder lookup - `camera` imported `contention.describe` - and `contention` already walked both the video and the sound nodes, so one sense now reports every capture device, what the kernel calls it, and whether anything holds it open. This key is still honoured: setting it to true grants the `capture` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
     <key name="privilege-sense-enabled" type="b">
       <default>false</default>
@@ -243,8 +248,8 @@
     </key>
     <key name="camera-sense-enabled" type="b">
       <default>false</default>
-      <summary>Let Chronoa enumerate the machine's cameras</summary>
-      <description>When true, Chronoa may list which camera devices exist, what they are called, and whether anything currently holds them open. Off by default. Enumeration only: it captures no frames and reads no image. Actually looking through a camera is a separate, much wider decision than knowing one exists, and is not covered by this key.</description>
+      <summary>Retired: merged into the capture sense</summary>
+      <description>The `camera` sense was merged into `capture`. They already shared the device-holder lookup - `camera` imported `contention.describe` - and `contention` already walked both the video and the sound nodes, so one sense now reports every capture device, what the kernel calls it, and whether anything holds it open. This key is still honoured: setting it to true grants the `capture` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
     <key name="rfsense-sense-enabled" type="b">
       <default>false</default>

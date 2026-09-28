@@ -65,6 +65,15 @@ NOT_EXPOSED = {
                            "second row for the same permission would be a "
                            "switch that appears to do nothing when it is "
                            "turned off, because the other one still allows it",
+    "camera-sense-enabled": "retired: the `camera` sense was merged into "
+                            "`capture`, which has the row. Still honoured - "
+                            "setting it grants `capture` - but a second row "
+                            "for the same permission would be a switch that "
+                            "appears to do nothing when turned off, because "
+                            "the other one still allows it",
+    "contention-sense-enabled": "retired: the `contention` sense was merged "
+                                 "into `capture`, which has the row. Still "
+                                 "honoured - setting it grants `capture`",
     "monitors-sense-enabled": "retired: the `monitors` sense was merged into "
                               "`display`, which now has the row. The key is "
                               "still honoured - setting it grants `display` - "

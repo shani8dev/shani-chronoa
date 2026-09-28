@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.senses import latch  # noqa: E402
-from shani_chronoa.senses.contention import _SOUND_NODE, _VIDEO_NODE  # noqa: E402
+from shani_chronoa.senses.capture import _SOUND_NODE, _VIDEO_NODE  # noqa: E402
 
 
 class TestReArm:
@@ -138,7 +138,7 @@ class TestTheShippedSensesAllLoad:
 
     @pytest.mark.parametrize(
         "name",
-        ["contention", "thermal", "display", "network", "bluetooth", "camera", "privilege"],
+        ["capture", "thermal", "display", "network", "bluetooth", "privilege"],
     )
     def test_it_is_registered(self, name):
         from shani_chronoa.senses import discover_senses
@@ -147,7 +147,7 @@ class TestTheShippedSensesAllLoad:
 
     @pytest.mark.parametrize(
         "name",
-        ["contention", "thermal", "display", "network", "bluetooth", "camera", "privilege"],
+        ["capture", "thermal", "display", "network", "bluetooth", "privilege"],
     )
     def test_it_declares_a_valid_schema_and_is_ambient(self, name):
         from shani_chronoa.senses import discover_senses, is_valid_schema
@@ -164,13 +164,13 @@ class TestDeviceScanCoversBothDirectories:
     *not* catch, because every other test pinned the regex - which was correct
     all along - and none of them asked whether the sound nodes were ever
     candidates. That bug hid every audio device including `pcmC0D0c`, the
-    microphone the contention sense exists to watch, while the sense still
+    microphone the capture sense exists to watch, while the sense still
     loaded, still passed its schema check and still reported a plausible
     answer. So the directories themselves are asserted here, not the pattern.
     """
 
     def test_both_dev_and_dev_snd_are_enumerated(self, monkeypatch):
-        from shani_chronoa.senses import contention
+        from shani_chronoa.senses import capture
 
         listed = []
 
@@ -182,8 +182,8 @@ class TestDeviceScanCoversBothDirectories:
                 return ["controlC0", "pcmC0D0c", "pcmC0D0p", "hwC0D0", "seq", "timer"]
             raise OSError(path)
 
-        monkeypatch.setattr(contention.os, "listdir", _fake_listdir)
-        found = {str(p) for p in contention._dev_nodes()}
+        monkeypatch.setattr(capture.os, "listdir", _fake_listdir)
+        found = {str(p) for p in capture._dev_nodes()}
 
         assert "/dev" in listed, "the video nodes are never looked for"
         assert "/dev/snd" in listed, (
@@ -197,16 +197,16 @@ class TestDeviceScanCoversBothDirectories:
         assert not any(p.endswith(("/seq", "/timer", "/by-path")) for p in found)
 
     def test_an_unreadable_directory_is_skipped_not_raised(self, monkeypatch):
-        from shani_chronoa.senses import contention
+        from shani_chronoa.senses import capture
 
         def _fake_listdir(path):
             if str(path) == "/dev/snd":
                 raise PermissionError(path)
             return ["video0"]
 
-        monkeypatch.setattr(contention.os, "listdir", _fake_listdir)
+        monkeypatch.setattr(capture.os, "listdir", _fake_listdir)
 
-        assert [str(p) for p in contention._dev_nodes()] == ["/dev/video0"]
+        assert [str(p) for p in capture._dev_nodes()] == ["/dev/video0"]
 
 
 class TestRadioSense:
