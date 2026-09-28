@@ -81,6 +81,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "type_text": ("Pointer and keyboard", "Type text"),
     "recommend_model": ("Local models", "What model fits this machine"),
     "install_model": ("Local models", "Download a model"),
+    "set_privacy": ("Privacy controls", "Mute the microphone, disable a camera, or blank the screen"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -88,6 +89,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
 # machine) before what it can drive (the screen, the apps), and the pointer
 # controls last, because they are the ones that move someone's mouse.
 GROUP_ORDER: tuple[str, ...] = (
+    "Privacy controls",
     "Time and reminders",
     "Sound",
     "Power and screen",
