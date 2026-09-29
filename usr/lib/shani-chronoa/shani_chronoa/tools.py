@@ -256,8 +256,39 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     # Hoisted because it is read again at execution time, and a tool with no
     # scoped resource never reaches a branch that would assign it.
     granted_key = None
-    if permissions.session_grant(name, scoped_resource if scoped_resource is not None else "*"):
+    grant_target = scoped_resource if scoped_resource is not None else "*"
+    if permissions.session_grant(name, grant_target):
         granted_key = _consent_key_for(name)
+    else:
+        # Nothing on record, so the tool's own consent key decides. If it is
+        # shut, ask the user rather than returning a refusal they cannot act
+        # on - the whole point of the grant path is that a "no" is the user's
+        # to give, not only the app's.
+        #
+        # Only asked when the key is *definitively* off. `get_bool` says
+        # nothing about the other half of `sense_allowed()` - privacy mode - so
+        # a key that reads true while privacy mode blocks the call must not
+        # prompt. Asking there would put a question to the user whose "yes"
+        # could not possibly work.
+        consent_key = _consent_key_for(name)
+        if (consent_key is not None
+                and permissions.can_ask()
+                and not config_mod.ChronoaConfig().get_bool(consent_key, False)):
+            title = capabilities.tool_title(name) or name
+            granted = permissions.decide(name, scoped_resource, consent_key,
+                                         describe=title.lower())
+            if granted is None:
+                return DispatchResult(
+                    f"The user did not allow {name}. Nothing was done.",
+                    verification.Verdict.UNVERIFIED, False)
+            granted_key = consent_key
+            # Consume the record `decide()` just wrote, so "allow this once"
+            # means once. Without this the grant sat on the books and the *next*
+            # call found it - so allowing once allowed twice, which is the exact
+            # opposite of what the button said and the worst kind of consent bug
+            # to ship silently. `session_grant` deletes a one-shot and leaves a
+            # session grant standing, so one call covers both cases.
+            permissions.session_grant(name, grant_target)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__

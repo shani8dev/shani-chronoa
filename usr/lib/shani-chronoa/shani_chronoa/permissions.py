@@ -182,6 +182,88 @@ def session_grant(action: str, resource: str) -> Optional[str]:
     return decision
 
 
+#: The three answers, in the order they are offered. The last is the safe
+#: default and is also what a dismissal, a timeout or no presenter resolves to.
+ALLOW_ONCE_CHOICE = "Allow this once"
+ALLOW_SESSION_CHOICE = "Allow for this session"
+DENY_CHOICE = "No, don't allow"
+
+#: How long to wait for the user's answer before treating it as a refusal.
+DECISION_TIMEOUT_SECONDS = 120.0
+
+
+def can_ask() -> bool:
+    """Whether there is anybody available to answer a permission question.
+
+    Exposed so the dispatcher can fall through and let the skill produce its own
+    refusal - which names the consent key the user could turn on - instead of
+    replacing a useful message with "the user did not allow", when there was no
+    user to allow anything.
+    """
+    from shani_chronoa import ask_bridge
+    return ask_bridge.has_presenter()
+
+
+def decide(action: str, resource: "str | None", consent_key: str,
+           describe: str = "") -> "str | None":
+    """Ask the user whether to allow one gated call, and record what they said.
+
+    Returns the granted decision, or None when the answer was a refusal or
+    nobody answered. None is the only value a caller may treat as "no", and it
+    is also the result of a timeout, a dismissed prompt and a headless run -
+    all four mean the same thing, which is that nobody said yes.
+
+    A refusal is recorded as a *session* denial rather than simply returning
+    None. Otherwise the model could retry, be refused, and be asked again on
+    the next attempt - the same question four times inside one turn is how a
+    prompt becomes something people click through without reading.
+    """
+    from shani_chronoa import ask_bridge
+
+    # An answer already on record settles it. Without this the denial written
+    # at the end of this function is never read, so the same question is put
+    # again on the next attempt - and, because the tool loop retries, up to
+    # four times inside a single turn. A prompt people click through without
+    # reading is worse than no prompt.
+    if evaluate(action, resource or "*") in (Decision.DENY_ONCE,
+                                              Decision.DENY_SESSION,
+                                              Decision.CANCEL):
+        logger.info("Permission for %s %s already refused this session",
+                    action, resource)
+        return None
+
+    if not ask_bridge.has_presenter():
+        # Nobody to ask. Refusing is the only honest answer, and asking a
+        # question that cannot be answered would hang the turn.
+        return None
+
+    target = f" on {resource}" if resource else ""
+    question = (
+        f"Shani wants to {describe or action}{target}.\n\n"
+        f"That needs the '{consent_key}' permission, which is currently off. "
+        f"Allow it?"
+    )
+    answer = ask_bridge.ask(
+        question,
+        [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE],
+        timeout=DECISION_TIMEOUT_SECONDS,
+    )
+
+    if answer == ALLOW_ONCE_CHOICE:
+        add_rule(action, resource or "*", Decision.ALLOW_ONCE, session_only=True)
+        return Decision.ALLOW_ONCE
+    if answer == ALLOW_SESSION_CHOICE:
+        add_rule(action, resource or "*", Decision.ALLOW_SESSION, session_only=True)
+        return Decision.ALLOW_SESSION
+
+    # A refusal, a dismissal, a timeout: record it so the question is not asked
+    # again this session, and so a later tool call gets a clean, stable refusal
+    # from `permits()` instead of another prompt.
+    add_rule(action, resource or "*", Decision.DENY_SESSION, session_only=True)
+    logger.info("Permission for %s %s refused by the user", action, resource)
+    return None
+
+
 def cancel_requested(action: str, resource: str) -> bool:
     """Whether the user asked to stop the turn rather than just refuse this call."""
     return evaluate(action, resource) == Decision.CANCEL
