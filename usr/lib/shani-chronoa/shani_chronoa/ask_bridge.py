@@ -44,7 +44,30 @@ Presenter = Callable[[str, list[str]], "threading.Event"]
 #: no way for the model to recover.
 DEFAULT_TIMEOUT_SECONDS = 180.0
 
+#: Questions on screen at once. A second is enough for one real conversation; a
+#: pile is not a conversation, and the user cannot answer what they cannot read.
+#:
+#: Past this, a question is refused outright rather than queued. Queueing is what
+#: makes the pile grow, and a queued prompt is one the user will never get to -
+#: it sits behind a window they have already stopped looking at. `assistd` bounds
+#: the same thing for its confirmation prompts with `MAX_PENDING_CONFIRMS = 32`.
+#:
+#: The refusal is a refusal and not a timeout, and `ask` says so: "" means "no
+#: answer was given", which is true, and the caller logs which of the three it was.
+MAX_PENDING = 4
+
+#: Prompts currently on screen. Guarded, because the callers are on whichever
+#: threads the tool loop and the MCP server happen to use.
+_pending: "list[str]" = []
+_pending_lock = threading.Lock()
+
 _presenter: Optional[Presenter] = None
+
+
+def pending_count() -> int:
+    """How many questions are on screen right now."""
+    with _pending_lock:
+        return len(_pending)
 
 
 def set_presenter(fn: Optional[Presenter]) -> None:
@@ -66,11 +89,22 @@ def ask(question: str, options: list, timeout: float = DEFAULT_TIMEOUT_SECONDS) 
     """
     if _presenter is None:
         return ""
+    with _pending_lock:
+        if len(_pending) >= MAX_PENDING:
+            logger.warning(
+                "Refusing a question: %d are already on screen, which is the "
+                "most a person can read at once", len(_pending))
+            return ""
+        _pending.append(question)
     try:
         done = _presenter(question, list(options))
     except Exception as exc:  # noqa: BLE001 - a broken presenter is not a choice
         logger.error("ask_user presenter failed: %s", exc)
         return ""
+    finally:
+        with _pending_lock:
+            if question in _pending:
+                _pending.remove(question)
     if not isinstance(done, threading.Event):
         # A presenter that returns the wrong type used to raise AttributeError
         # out of the tool call, taking the turn with it. Anything that is not a
