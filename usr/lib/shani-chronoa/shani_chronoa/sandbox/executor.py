@@ -6,6 +6,7 @@ Adapted from sayri/adapters/sandbox/executor.py with shani-chronoa paths.
 from __future__ import annotations
 
 import json
+import ctypes
 import os
 import shlex
 import shutil
@@ -120,6 +121,52 @@ def _first_blocked_binary(command: str, blocked_names) -> "str | None":
 
 class SandboxExecutionError(Exception):
     pass
+
+
+#: `prctl(2)` option, and the signal it takes. `PR_SET_PDEATHSIG` makes the kernel
+#: deliver a signal to this process when its parent dies. Linux-only, and not in POSIX.
+_PR_SET_PDEATHSIG = 1
+_SIGTERM = 15
+
+#: The parent pid a freshly forked child should still see. `preexec_fn` is handed no
+#: arguments, so the executor records the parent immediately before spawning and the
+#: child compares against it. Cleared as soon as `Popen` returns, because after that
+#: the value is meaningless and a recycled dict would only invite confusion.
+_EXPECTED_PARENT: "dict" = {}
+
+
+def _die_with_parent() -> None:
+    """Ask the kernel to signal this child if its parent dies.
+
+    `start_new_session=True` is what makes the timeout fix work - it gives the child its
+    own process group, so `os.killpg` reaches a whole `sh -c` tree rather than hitting
+    Chronoa's own group. It also detaches the child from that group, so killing Chronoa
+    does not reach it, and a backgrounded command is the reachable case: the executor
+    returns at once, reports "continues running in the background", and keeps no record
+    beyond that string. Measured on this machine - a backgrounded `sleep 4; touch MARKER`
+    still wrote its marker long after the executor returned.
+
+    The race is the part that is easy to get wrong. If the parent dies between `fork` and
+    this call, the signal is never armed and nothing else would ever notice, so the check
+    below compares `getppid()` against the pid recorded before the spawn and exits at
+    once if they differ. Without it the fix covers the common case and silently misses
+    the one where it matters most.
+    """
+    try:
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+        libc.prctl.restype = ctypes.c_int
+        libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong,
+                               ctypes.c_ulong, ctypes.c_ulong]
+    except OSError:
+        return  # no libc to ask; the child is no worse off than it was before
+    try:
+        if libc.prctl(_PR_SET_PDEATHSIG, _SIGTERM, 0, 0, 0) != 0:
+            return  # unsupported or not permitted; not worth failing the command over
+        expected = _EXPECTED_PARENT.get("pid")
+        if expected is not None and os.getppid() != expected:
+            os._exit(0)  # the parent died before the arm took effect
+    except OSError:
+        return
 
 
 class SandboxExecutor:
@@ -351,11 +398,16 @@ class SandboxExecutor:
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as tmp_out, \
              tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as tmp_err:
             try:
-                proc = subprocess.Popen(
-                    command, shell=True, env=env,
-                    stdout=tmp_out, stderr=tmp_err,
-                    start_new_session=True,
-                )
+                _EXPECTED_PARENT["pid"] = os.getpid()
+                try:
+                    proc = subprocess.Popen(
+                        command, shell=True, env=env,
+                        stdout=tmp_out, stderr=tmp_err,
+                        start_new_session=True,
+                        preexec_fn=_die_with_parent,
+                    )
+                finally:
+                    _EXPECTED_PARENT.clear()
 
                 poll_start = time.monotonic()
                 while time.monotonic() - poll_start < wait_limit:
