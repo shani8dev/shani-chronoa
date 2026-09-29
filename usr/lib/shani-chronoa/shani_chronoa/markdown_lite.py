@@ -102,6 +102,15 @@ _SPOKEN_RULE = re.compile(r"^\s*(?:---+|\*\*\*+|___+)\s*$", re.MULTILINE)
 _SPOKEN_HEADING = re.compile(r"^\s*#{1,6}\s+(.*)$", re.MULTILINE)
 _SPOKEN_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
 
+#: A bare web address, which a model writes unlinked as often as not. The
+#: character before the scheme must not be alphanumeric, or `ahttp://x` and an
+#: address inside a longer token both get mangled.
+_BARE_URL = re.compile(r"(?<![A-Za-z0-9])https?://\S+")
+
+
+def _say_link(match: "re.Match[str]") -> str:
+    return "link"
+
 
 def to_speech(text: str) -> str:
     """Plain text with this module's markdown subset -> text worth hearing.
@@ -131,6 +140,7 @@ def to_speech(text: str) -> str:
     # destination, which is the injection route `to_pango` refuses for the same
     # reason.
     working = _SPOKEN_LINK.sub(r"\1", working)
+    working = _BARE_URL.sub(_say_link, working)
 
     out_lines: List[str] = []
     for line in working.split("\n"):

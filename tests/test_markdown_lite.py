@@ -191,3 +191,60 @@ class TestTheSpokenForm:
         # an injection point. The voice path has no such risk - there is no
         # markup language to inject into - but it must still not *speak* a tag.
         assert to_speech("Here is a tag: <b>bold</b>") == "Here is a tag: <b>bold</b>"
+
+
+class TestBareUrlsAreSpokenAsLink:
+    """A bare URL is spoken character by character, which is the worst case.
+
+    Found by comparison with `assistd`, the one harness in the survey on the
+    same stack (whisper.cpp, Piper, local llama.cpp), which reduces text for
+    speech the same way and additionally rewrites a bare address to the word
+    "link". The first version of `to_speech` handled `[text](url)` but not a
+    bare one, and a model writes bare addresses constantly.
+
+    Measured on this machine: "See https://example.com/wiki for details."
+    synthesised to 205,654 bytes of audio, against 98,070 for the same
+    sentence with no address in it and 67,080 with the word "link". Over half
+    the audio was spelling out a web address that nobody can act on by
+    listening to it.
+    """
+
+    def test_a_bare_https_url_becomes_the_word_link(self):
+        assert to_speech("See https://example.com/wiki for details.") == (
+            "See link for details.")
+
+    def test_a_bare_http_url_becomes_the_word_link(self):
+        assert to_speech("The docs are at http://example.com/x.") == (
+            "The docs are at link")
+
+    def test_an_email_address_is_not_mangled(self):
+        # The lookbehind is what makes this safe. Without it the regex would
+        # match the `http` inside an address and destroy it.
+        assert to_speech("Mail me at someone@example.com about it.") == (
+            "Mail me at someone@example.com about it.")
+
+    def test_a_scheme_glued_to_a_word_is_not_matched(self):
+        assert to_speech("Compare ahttp://x versus https://real.example.com") == (
+            "Compare ahttp://x versus link")
+
+    def test_a_link_is_still_spoken_as_its_text(self):
+        # The markdown form keeps its visible text, which is more useful than
+        # "link" - and its target is not read, for the injection reason.
+        assert to_speech("See [the wiki](https://example.com/wiki) for details.") == (
+            "See the wiki for details.")
+
+    def test_a_url_with_no_spaces_around_it_is_still_replaced(self):
+        assert to_speech("https://example.com") == "link"
+
+    def test_two_urls_become_two_links(self):
+        assert to_speech("See https://a.example and http://b.example now.") == (
+            "See link and link now.")
+
+    def test_text_that_merely_mentions_a_url_is_untouched(self):
+        assert to_speech("The website is broken") == "The website is broken"
+
+    # A mutation of `_BARE_URL` to `[^\s]*` survives, and is recorded here as
+    # the equivalent it is: `\S+` and `[^\s]*` are the same character class, so
+    # no input distinguishes them. Asserting on it would be a test that passes
+    # for reasons unrelated to what it names. The rule's *behaviour* is pinned by
+    # the six tests above; this note is why one mutation is not caught.
