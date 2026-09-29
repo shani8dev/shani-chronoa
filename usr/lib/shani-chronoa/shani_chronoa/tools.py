@@ -100,7 +100,42 @@ def _json_safe(value):
     return str(value)
 
 
-def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin: str = ORIGIN_USER) -> str:
+class DispatchResult(NamedTuple):
+    """What a dispatch actually did, as data rather than as prose.
+
+    `ran` is the field that was missing. Everything Chronoa returned was a
+    string, so "the tool ran and the answer is X" and "the tool never ran" were
+    the same shape, and a caller - or the model - had to infer which from
+    wording. goose carries this as `is_error` on the tool response for the same
+    reason.
+
+    Read with `verdict`, it is two bits rather than one:
+
+    - `ran=True,  VERIFIED`   - ran, and the post-condition held
+    - `ran=True,  UNVERIFIED` - ran, and there is nothing to check it against
+    - `ran=True,  FAILED`     - ran, and the post-condition did not hold
+    - `ran=False, UNVERIFIED` - **never executed**: unknown tool, refused by
+      plan mode, non-zero exit, or an exception
+
+    The last row is the one that was previously indistinguishable from the
+    second. A consent refusal still lands in row two, because the refusal
+    happens inside the skill and the dispatch only sees exit 0 - making that
+    structural means changing all 69 skills, so it is noted rather than faked.
+    """
+
+    text: str
+    verdict: verification.Verdict
+    ran: bool
+    evidence: str = ""
+
+    @property
+    def is_error(self) -> bool:
+        """goose's spelling: did this fail to produce an answer."""
+        return not self.ran
+
+
+def _dispatch(name: str, arguments: dict, by_reference: bool = False,
+             origin: str = ORIGIN_USER) -> DispatchResult:
     """Execute a named tool with the given arguments, returning a short result string.
 
     All execution is sandboxed according to the tool's configured SandboxLevel.
@@ -125,7 +160,7 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
     """
     handler = _HANDLER_FNS.get(name)
     if handler is None:
-        return f"Unknown tool: {name}"
+        return DispatchResult(f"Unknown tool: {name}", verification.Verdict.UNVERIFIED, False)
     if not isinstance(arguments, dict):
         # Arguments come from the LLM and are untrusted; a non-dict value
         # must not reach a skill handler (which would crash on .get()).
@@ -141,7 +176,7 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
     # this is a fact, which is the only reason the mode is worth having.
     refusal = planmode.blocked_reason(name)
     if refusal:
-        return refusal
+        return DispatchResult(refusal, verification.Verdict.UNVERIFIED, False)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
@@ -150,7 +185,7 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
     # Named, not inferred: this list runs unsandboxed, which is a privilege,
     # and a heuristic deciding it would widen without anyone reviewing it.
     if name in _LOCAL_TOOLS:
-        return handler(arguments)
+        return DispatchResult(handler(arguments), verification.Verdict.UNVERIFIED, True)
 
     # A skill may opt into the by-reference transport for its own oversized
     # arguments (see `skills/speak.py:wants_by_reference`). Ask the module
@@ -210,7 +245,8 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         if exit_code != 0:
             _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
-            return output or f"Tool '{name}' failed with exit code {exit_code}"
+            return DispatchResult(output or f"Tool '{name}' failed with exit code {exit_code}",
+                               verification.Verdict.UNVERIFIED, False)
         # The skill's own string is its account of what it did, not evidence
         # that it happened. A module that declares POST_CONDITION gets that
         # checked against real state here, and an action with no post-condition
@@ -232,11 +268,12 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         )
         if checked.verdict is verification.Verdict.FAILED:
             logger.error(f"Tool '{name}' reported success but verification failed: {checked.evidence}")
-        return output + checked.suffix
+        return DispatchResult(output + checked.suffix, checked.verdict, True,
+                             checked.evidence)
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
         _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0, origin=origin)
-        return f"Tool '{name}' failed: {e}"
+        return DispatchResult(f"Tool '{name}' failed: {e}", verification.Verdict.UNVERIFIED, False)
     finally:
         # The payload files hold the argument values themselves, so they go
         # away whatever the child did. cleanup() is idempotent, so this also
@@ -258,6 +295,25 @@ class ToolOutcome(NamedTuple):
     text: str
     verdict: verification.Verdict
     evidence: str = ""
+    ran: bool = True
+
+    @property
+    def is_error(self) -> bool:
+        """goose's spelling: did this fail to produce an answer."""
+        return not self.ran
+
+
+def execute_tool(name: str, arguments: dict, by_reference: bool = False,
+                 origin: str = ORIGIN_USER) -> str:
+    """Execute a named tool, returning the short result string a model reads.
+
+    Prose is the right shape for that - the model reads it. It is the wrong
+    shape for a caller deciding whether the tool ran, which is why `_dispatch`
+    exists and why `execute_tool_outcome` uses it instead of re-reading the
+    string this returns.
+    """
+    return _dispatch(name, arguments, by_reference=by_reference,
+                     origin=origin).text
 
 
 def execute_tool_outcome(
@@ -266,16 +322,15 @@ def execute_tool_outcome(
     by_reference: bool = False,
     origin: str = ORIGIN_USER,
 ) -> ToolOutcome:
-    """`execute_tool`, with the verification verdict as data rather than prose.
+    """`execute_tool`, with the verdict and whether it ran as data.
 
-    The verdict is recovered from the returned string via
-    `verification.verdict_from_text`, which matches the marker
-    `verification.Result.suffix` emits - so this stays correct if that suffix
-    changes, rather than hardcoding a second copy of the string here.
+    The verdict used to be recovered from the returned string by matching a
+    marker, even though the dispatch had computed it exactly one line earlier
+    and thrown it away. Re-deriving it meant a change to the marker's wording
+    silently turned every verdict into UNVERIFIED - which is the failure this
+    class's own docstring warns about, since a caller that forgets to check
+    is then indistinguishable from one that never could.
     """
-    text = execute_tool(name, arguments, by_reference=by_reference, origin=origin)
-    verdict = verification.verdict_from_text(text)
-    evidence = ""
-    if verdict is verification.Verdict.FAILED:
-        evidence = text.split(verification.FAILED_MARKER, 1)[-1].lstrip(": ").rstrip(")")
-    return ToolOutcome(text=text, verdict=verdict, evidence=evidence)
+    result = _dispatch(name, arguments, by_reference=by_reference, origin=origin)
+    return ToolOutcome(text=result.text, verdict=result.verdict,
+                       evidence=result.evidence, ran=result.ran)
