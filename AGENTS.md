@@ -660,7 +660,18 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1353 passed, 6 skipped), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
+**Verification status:** unit suite green on Ubuntu (1518 passed, 6 skipped)
+
+> **MCP protocol handshake is NOT verified in this environment** (recorded
+> 2026-09-29). The `mcp` package is not installed here, so
+> `shani-chronoa-mcp` exits with `mcp package is not installed` and no
+> `initialize`/`tools/list`/`tools/call` exchange has been observed. What *was*
+> verified is the registration path beneath it: 69 tools, zero registration
+> failures, every tool carrying a description and a title, and a working
+> `get_datetime` through the full guarded dispatch. Treat the protocol layer as
+> unverified until it is run somewhere the package exists - a prior session
+> reported it verified, and I could not reproduce that here, so the earlier
+> claim is not carried forward unchecked., **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
 testbed `9be7139`, packaging at `shani-pkgbuilds` `031337f` =
 `shani-chronoa 0.1.0-6`)
 — including `privilege-uses-package-manager` PASS with 18 holders correctly
