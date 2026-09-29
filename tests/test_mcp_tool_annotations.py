@@ -25,6 +25,7 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 from shani_chronoa import tools  # noqa: E402
 from shani_chronoa.capabilities import (  # noqa: E402
     DESTRUCTIVE_CONSENT_KEYS,
+    MUTATING_TOOLS,
     READ_ONLY_TOOLS,
     gated_by,
     tool_annotations,
@@ -93,13 +94,14 @@ class TestUnknownStaysUnknown:
     def test_ungated_non_observational_tools_assert_nothing(self, descriptions):
         """The honest default is no hint, not a guessed false.
 
-        A tool that changes something and is not in either allowlist must return
+        A tool that changes something and is in neither allowlist must return
         all-None, so a client treats it as unknown rather than as a positive
         "this is safe" claim.
         """
         unknown = [n for n in descriptions
                    if gated_by(n, descriptions[n]) is None
-                   and n not in READ_ONLY_TOOLS]
+                   and n not in READ_ONLY_TOOLS
+                   and n not in MUTATING_TOOLS]
         assert unknown, "expected at least one ungated, non-observational tool"
         for name in unknown:
             ann = tool_annotations(name, descriptions[name])
@@ -108,6 +110,48 @@ class TestUnknownStaysUnknown:
             )
             assert ann.get("destructive_hint") is None, (
                 f"{name} has no basis for a destructive claim and must not make one"
+            )
+
+    def test_a_known_actuator_may_say_it_is_not_read_only(self, descriptions):
+        """`read_only_hint: False` is the opposite of a safety claim.
+
+        For a tool in `MUTATING_TOOLS` it is simply true - `write_text_file`
+        writes - and without it the MCP library drops the annotations object
+        entirely, leaving a client with no idea the tool acts. That is how
+        sixteen actuators ended up unannotated over the wire.
+        """
+        mutating = [n for n in descriptions if n in MUTATING_TOOLS]
+        assert mutating, "expected at least one ungated actuator"
+        for name in mutating:
+            ann = tool_annotations(name, descriptions[name])
+            assert ann.get("read_only_hint") is False, (
+                f"{name} is a known actuator and should say it is not read-only"
+            )
+            # The genuine safety claim stays unclaimed, whatever else is known.
+            assert ann.get("destructive_hint") is None, (
+                f"{name} must not claim it is non-destructive - whether an "
+                f"action is hard to undo is a separate question"
+            )
+            assert ann.get("idempotent_hint") is None, (
+                f"{name} must not claim repeating it is safe"
+            )
+
+    def test_no_ungated_writer_claims_it_is_non_destructive(self, descriptions):
+        """The real safety invariant, across every ungated tool that acts.
+
+        Excluding `READ_ONLY_TOOLS` on purpose: a read-only tool *is* non-
+        destructive, and that is a claim the registry can justify, so banning it
+        there would be banning the truth rather than a guess. What must never
+        happen is a tool that changes something asserting that it does not.
+        """
+        writers = [n for n, d in descriptions.items()
+                   if gated_by(n, d) is None and n not in READ_ONLY_TOOLS]
+        assert writers, "expected at least one ungated writer"
+        for name in writers:
+            ann = tool_annotations(name, descriptions[name])
+            assert ann.get("destructive_hint") is None, (
+                f"{name} is ungated and acts, so it must not claim it is "
+                f"non-destructive - that is a positive safety claim"
             )
 
     def test_annotate_only_known_hints(self, descriptions):

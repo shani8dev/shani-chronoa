@@ -660,28 +660,20 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1518 passed, 6 skipped)
+**Verification status:** unit suite green on Ubuntu (1520 passed, 6 skipped)
 
-> **MCP protocol handshake is NOT verified in this environment** (recorded
-> 2026-09-29). The `mcp` package is not installed here, so
-> `shani-chronoa-mcp` exits with `mcp package is not installed` and no
-> `initialize`/`tools/list`/`tools/call` exchange has been observed. What *was*
-> verified is the registration path beneath it: 69 tools, zero registration
-> failures, every tool carrying a description and a title, and a working
-> `get_datetime` through the full guarded dispatch. Treat the protocol layer as
-> unverified until it is run somewhere the package exists - a prior session
-> reported it verified, and I could not reproduce that here, so the earlier
-> claim is not carried forward unchecked., **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
-testbed `9be7139`, packaging at `shani-pkgbuilds` `031337f` =
-`shani-chronoa 0.1.0-6`)
-— including `privilege-uses-package-manager` PASS with 18 holders correctly
-attributed to packages, which is the check that only exists to catch the Arch
-failure. Real readings from the slot: `eth0: up, carrier`,
-`DNS: 192.168.31.1`, `SEN2: 90.0C`, `intel_backlight 9514/96000 (10%)`,
-`hci0 (unblocked)`, and for `modelfit` `31795 MB RAM total, 25656 MB
-available` read from `/proc/meminfo` while Ollama was unreachable. Repeating it
-needs `--cgroupns=host` for nspawn and a hand-rolled mount for
-`shani-chronoa` — see `AUDIT-HISTORY.md`.
+> **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
+> `initialize` (protocol 2024-11-05), `tools/list` (69 tools), and `tools/call`
+> for a normal call, a malformed call, a shut consent gate, an unknown tool, and
+> five identical calls in a row. All 69 tools carry a title and annotations.
+>
+> Running it needs `mcp` installed *alongside* system PyGObject, which is the
+> non-obvious part. A plain venv does not work: `gi` is a system package pip
+> cannot supply, so the server dies with `ModuleNotFoundError: No module named
+> 'gi'`. And `pip install --user` is refused by PEP 668 on this box. What works
+> is a venv *with* system site packages:
+> `python3 -m venv --system-site-packages` then `pip install mcp`. The
+> repository itself needs no change for this.
 
 ⚠️ **The slot run predates the 2026-09-29 sense merges and does not cover
 them.** It was 2026-09-28, at testbed `9be7139`, against the pre-merge

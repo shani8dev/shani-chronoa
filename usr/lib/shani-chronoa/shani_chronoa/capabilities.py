@@ -399,6 +399,27 @@ READ_ONLY_TOOLS = frozenset({
     "list_percepts", "recommend_model", "calculate", "system_info",
 })
 
+#: Tools that change the machine but need no consent key.
+#:
+#: Their absence was the real gap this closes. `READ_ONLY_TOOLS` only ever
+#: granted a *positive* read-only hint, and every other ungated tool fell through
+#: to all-None - which the MCP library then drops entirely, so a client saw no
+#: annotation at all for sixteen tools that demonstrably act: `write_text_file`,
+#: `create_directory`, `move_or_copy_file`, `set_volume`, `open_application` and
+#: the rest. "I do not know" is honest, but for these it was also needlessly
+#: uninformative: they are certainly not read-only, and that is a true statement
+#: rather than a guess.
+#:
+#: `destructive_hint` stays None for all of them. Whether an action is hard to
+#: undo is a separate question, and guessing it is the failure this module was
+#: written to avoid.
+MUTATING_TOOLS = frozenset({
+    "write_text_file", "create_directory", "move_or_copy_file",
+    "create_archive", "extract_archive", "set_clipboard", "set_volume",
+    "set_mute", "set_brightness", "set_power_profile", "set_privacy",
+    "set_timer", "add_reminder", "open_application", "speak", "ask_user",
+})
+
 #: Tools that reach outside this machine.
 OPEN_WORLD_TOOLS = frozenset({
     "web_search", "scan_network", "connect_wifi", "install_model",
@@ -432,10 +453,16 @@ def tool_annotations(tool: str, description: str) -> dict:
             "idempotent_hint": False,
             "open_world_hint": True if tool in OPEN_WORLD_TOOLS else None,
         }
+    read_only = tool in READ_ONLY_TOOLS
+    mutates = tool in MUTATING_TOOLS
     return {
-        "destructive_hint": False if tool in READ_ONLY_TOOLS else None,
-        "read_only_hint": True if tool in READ_ONLY_TOOLS else None,
-        "idempotent_hint": True if tool in READ_ONLY_TOOLS else None,
+        # Not destructiveness - that stays unclaimed - but "it reads, so it
+        # cannot change anything", which is true and which a client needs.
+        "destructive_hint": False if read_only else None,
+        "read_only_hint": True if read_only else False if mutates else None,
+        # Repeating a write is not safe, but "not idempotent" is a claim about
+        # the effect, so it is left unclaimed rather than inferred.
+        "idempotent_hint": True if read_only else None,
         "open_world_hint": True if tool in OPEN_WORLD_TOOLS else None,
     }
 
