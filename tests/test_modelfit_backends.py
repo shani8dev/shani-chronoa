@@ -75,17 +75,17 @@ class TestEveryBackendIsTried:
         # `_SOURCES` is legitimately the model-source table (where weights
         # come from). The endpoint table must be a *different* object, and every
         # entry in it a 3-tuple - the bug was one name pointing at two tables.
-        assert m._MODEL_LISTERS is not m._SOURCES
+        assert m._model_listers() is not m._SOURCES
         assert all(len(e) == 2 for e in m._SOURCES), (
             f"the model-source table changed shape: {m._SOURCES!r}"
         )
-        for entry in m._MODEL_LISTERS:
+        for entry in m._model_listers():
             assert len(entry) == 3, f"malformed lister entry: {entry!r}"
-        urls = [u for _l, u, _p in m._MODEL_LISTERS]
+        urls = [u for _l, u, _p in m._model_listers()]
         assert modelfit._TAGS_URL in urls and modelfit._LLAMA_MODELS_URL in urls
 
     def test_all_listers_report_a_parser(self):
-        for label, _url, parse in modelfit._MODEL_LISTERS:
+        for label, _url, parse in modelfit._model_listers():
             assert callable(parse), f"{label} has no parser"
             assert parse.__name__.startswith("_from_"), (
                 f"{label} parser {parse.__name__} is not a _from_* adapter"
@@ -237,4 +237,63 @@ class TestAgainstTheRealServer:
         budget = int(modelfit._meminfo()["available_mb"] * modelfit._HEADROOM_FRACTION)
         assert modelfit._fits(size, budget) is True, (
             "a 105 MB model on a machine with ~24 GB available must fit"
+        )
+
+
+class TestTheEndpointIsOverridable:
+    """A loopback port is a fact about one machine, not about the software.
+
+    8099 was a port this dev box's own `node server.mjs` happened to bind, and
+    it was hardcoded. A user whose daemon sat on llama.cpp's actual default of
+    8080, or whose Ollama was remapped at install time, got a sense that could
+    not ask the daemon that was right there: it reported UNKNOWN, the state
+    reserved for "nothing is installed", while a reachable service went
+    unasked. That is the same plausible-looking wrong answer this file's
+    header is about, reached by a different route.
+    """
+
+    def test_the_default_is_used_when_the_env_is_unset(self, monkeypatch):
+        monkeypatch.delenv("SHANI_OLLAMA_URL", raising=False)
+        assert modelfit._url("SHANI_OLLAMA_URL", "http://127.0.0.1:11434/api/tags") \
+            == "http://127.0.0.1:11434/api/tags"
+
+    def test_the_env_wins(self, monkeypatch):
+        monkeypatch.setenv("SHANI_OLLAMA_URL", "http://127.0.0.1:8080/api/tags")
+        assert modelfit._url("SHANI_OLLAMA_URL", "http://127.0.0.1:11434/api/tags") \
+            == "http://127.0.0.1:8080/api/tags"
+
+    def test_a_blank_env_falls_back_instead_of_producing_an_empty_url(self, monkeypatch):
+        monkeypatch.setenv("SHANI_OLLAMA_URL", "   ")
+        assert modelfit._url("SHANI_OLLAMA_URL", "http://fallback") == "http://fallback"
+
+    def test_the_override_reaches_the_url_the_sense_actually_uses(self, monkeypatch):
+        """Reloading is the honest test: the constants are bound at import, so
+        setting the env in a fixture and asserting on them without a reload
+        would pass against the value loaded before the override existed."""
+        import importlib
+
+        monkeypatch.setenv("SHANI_OLLAMA_URL", "http://127.0.0.1:21998/api/tags")
+        try:
+            reloaded = importlib.reload(modelfit)
+            assert reloaded._TAGS_URL == "http://127.0.0.1:21998/api/tags"
+        finally:
+            monkeypatch.delenv("SHANI_OLLAMA_URL", raising=False)
+            importlib.reload(modelfit)
+        assert modelfit._TAGS_URL == "http://127.0.0.1:11434/api/tags", (
+            "the module did not go back to its default after the override"
+        )
+
+    def test_a_daemon_on_a_moved_port_reads_unknown_and_names_the_port(self, monkeypatch):
+        """The property the override exists for. A port nothing answers on
+        must be UNKNOWN, never a model count, and the message must name the
+        port it actually tried - quoting a hardcoded one while reporting on a
+        different one is a lie told to the user."""
+        monkeypatch.setattr(modelfit, "_TAGS_URL", "http://127.0.0.1:21998/api/tags")
+        monkeypatch.setattr(modelfit, "_LLAMA_MODELS_URL",
+                            "http://127.0.0.1:21997/v1/models")
+        models = modelfit.installed_models()
+        assert models is None, (
+            f"expected UNKNOWN with both backends unreachable, got {models!r} - "
+            "a model count here means an absent daemon is being reported as a "
+            "populated one"
         )

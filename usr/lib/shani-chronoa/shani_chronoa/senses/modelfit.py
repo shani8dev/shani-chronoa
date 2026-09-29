@@ -60,11 +60,19 @@ SENSITIVITY = SENSITIVITY_PUBLIC
 _TTL_SECONDS = 300.0
 _POLL_INTERVAL = 300.0
 
-_TAGS_URL = "http://127.0.0.1:11434/api/tags"
-# llama.cpp serves an OpenAI-compatible model list. The port is the one the
-# small local server in the dev notes binds; a machine with no llama.cpp
-# simply does not answer, which is the same UNKNOWN path Ollama takes.
-_LLAMA_MODELS_URL = "http://127.0.0.1:8099/v1/models"
+def _url(env_name: str, default: str) -> str:
+    """A loopback port is not a fact about the machine, so it is overridable.
+
+    8099 was a dev box's own arrangement, not llama.cpp's default. A daemon
+    that a user moved to another port must read as UNKNOWN - the same state a
+    machine with no Ollama produces - never as "no models installed", which is
+    the distinction this sense exists to keep.
+    """
+    return os.environ.get(env_name, "").strip() or default
+
+
+_TAGS_URL = _url("SHANI_OLLAMA_URL", "http://127.0.0.1:11434/api/tags")
+_LLAMA_MODELS_URL = _url("SHANI_LLAMACPP_URL", "http://127.0.0.1:8099/v1/models")
 _TIMEOUT = 4.0
 
 # Leave headroom rather than filling RAM to the last page. A model that
@@ -171,10 +179,24 @@ def _from_openai(payload: dict) -> List[dict]:
 # server is running). The two collided, the later definition won, and the
 # loop below unpacked the 2-tuple source table as a 3-tuple endpoint - which
 # only blew up once a real run reached it.
-_MODEL_LISTERS = (
-    ("ollama", _TAGS_URL, _from_ollama),
-    ("llama.cpp", _LLAMA_MODELS_URL, _from_openai),
-)
+def _model_listers():
+    # (label, url, parser): where to ask each backend what it has loaded.
+    # Ollama first, because it is the default and its /api/tags is what this
+    # sense has always used.
+    #
+    # A function rather than a module-level tuple because a tuple built at
+    # import captures the URLs as values while the prose quotes the constants;
+    # redirect one and the sense asks the old port while explaining the new one.
+    #
+    # Not named `_SOURCES`: that is the *model source* table further down
+    # (huggingface-cli, ollama - where weights come from, as opposed to which
+    # server is running). The two collided, the later definition won, and the
+    # loop below unpacked the 2-tuple source table as a 3-tuple endpoint - which
+    # only blew up once a real run reached it.
+    return (
+        ("ollama", _TAGS_URL, _from_ollama),
+        ("llama.cpp", _LLAMA_MODELS_URL, _from_openai),
+    )
 
 
 def installed_models(url: Optional[str] = None) -> Optional[List[dict]]:
@@ -187,7 +209,7 @@ def installed_models(url: Optional[str] = None) -> Optional[List[dict]]:
     Every source is tried before giving up, so a machine with Ollama *and*
     llama.cpp reports both rather than whichever happens to answer first.
     """
-    listers = ((None, url, _from_ollama),) if url else _MODEL_LISTERS
+    listers = ((None, url, _from_ollama),) if url else _model_listers()
     answered = False
     found: List[dict] = []
     for label, source_url, parse in listers:
