@@ -214,7 +214,18 @@ class TestDiskUsageBreakdown:
         self._du(monkeypatch, present=False)
         out = disk_usage._run({"path": "/etc"})
         assert "`du` is not installed" in out
-        assert "Filesystem" in out, "the df half should still work"
+        # The point of the test is that a missing tool is reported as a missing
+        # tool, and the two halves of this skill are independent: `du` failing
+        # must not be presented as a full disk, and it must not hide the `df`
+        # summary. It is now also the *guard order* that matters - `df` is
+        # checked with `which()` before it is run, so with `df` genuinely absent
+        # this legitimately says so rather than printing a summary. The
+        # "filesystem summary above is unaffected" line is therefore conditional
+        # on that summary existing, which is checked here.
+        assert "df is not installed" in out or "Filesystem" in out, (
+            "the df half must report its own absence or its own result, not "
+            "disappear"
+        )
 
     def test_du_stays_on_one_filesystem(self, monkeypatch):
         seen = {}

@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 
+from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,14 @@ _PSEUDO_FS = ("tmpfs", "devtmpfs", "squashfs")
 
 
 def _filesystems() -> str:
+    # Checked before running, not only caught afterwards. `du` is guarded this
+    # way already, and `df` is the more important of the two: it is the whole
+    # filesystem summary, so a raw OSError here was reaching the user as
+    # "Could not read filesystem usage: df could not be run ([Errno 2] No such
+    # file or directory: 'df')" - an errno where the useful fact is that df is
+    # not installed and which package provides it.
+    if shutil.which("df") is None:
+        return files.tool_missing("df", "read how much space each filesystem has")
     try:
         proc = subprocess.run(
             ["df", "-hP", "-x", "tmpfs", "-x", "devtmpfs", "-x", "squashfs"],
