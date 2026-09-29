@@ -369,3 +369,77 @@ def capability_for(capabilities: list[Capability], tool: str) -> Capability | No
         if capability.tool == tool:
             return capability
     return None
+
+
+#: Consent keys whose capability cannot be undone. This is the set that earns a
+#: client-side "this will change something permanently" warning, so it is written
+#: out explicitly rather than inferred from a name pattern - an inferred rule that
+#: silently widened would put a false warning on a read, which trains people to
+#: dismiss the ones that matter.
+DESTRUCTIVE_CONSENT_KEYS = frozenset({
+    "file-delete-enabled",
+    "process-kill-enabled",
+    "window-close-enabled",
+    "service-control-enabled",
+    "mount-control-enabled",
+    "trash-empty-enabled",
+    "bulk-edit-enabled",
+})
+
+#: Tools that only observe. Kept as an allowlist rather than "anything ungated",
+#: because not needing consent does not mean changing nothing: `open_application`
+#: and `speak` are ungated and both act.
+READ_ONLY_TOOLS = frozenset({
+    "get_datetime", "get_volume", "get_battery_status", "get_clipboard",
+    "list_apps", "list_directory", "find_files", "search_file_contents",
+    "read_text_file", "open_file", "disk_usage", "system_info",
+    "list_processes", "list_windows", "focus_window", "list_wifi_networks",
+    "list_services", "read_logs", "check_updates", "compute_hash",
+    "list_percepts", "recommend_model", "calculate", "system_info",
+})
+
+#: Tools that reach outside this machine.
+OPEN_WORLD_TOOLS = frozenset({
+    "web_search", "scan_network", "connect_wifi", "install_model",
+    "translate_text", "print_file",
+})
+
+
+def tool_annotations(tool: str, description: str) -> dict:
+    """MCP tool annotations, derived from what this module already knows.
+
+    The MCP specification lets a server tell the *host* what a tool does before
+    it is called, so a client can show a warning for a destructive action instead
+    of passing the call straight through. Chronoa already knows this: it has a
+    consent key per risky action, and a skill that needs one is by definition
+    changing something.
+
+    Every hint is left as None unless this module can actually justify it. None
+    is the honest value - a client is expected to treat an absent hint as
+    unknown, whereas a guessed `read_only_hint: false` is a positive safety
+    claim that this project has repeatedly been wrong about in the other
+    direction.
+
+    Not a substitute for the consent check. The key still gates the call; this
+    only lets the host show the user what they are about to allow.
+    """
+    key = gated_by(tool, description)
+    if key is not None:
+        return {
+            "destructive_hint": True if key in DESTRUCTIVE_CONSENT_KEYS else None,
+            "read_only_hint": False,
+            "idempotent_hint": False,
+            "open_world_hint": True if tool in OPEN_WORLD_TOOLS else None,
+        }
+    return {
+        "destructive_hint": False if tool in READ_ONLY_TOOLS else None,
+        "read_only_hint": True if tool in READ_ONLY_TOOLS else None,
+        "idempotent_hint": True if tool in READ_ONLY_TOOLS else None,
+        "open_world_hint": True if tool in OPEN_WORLD_TOOLS else None,
+    }
+
+
+def tool_title(tool: str) -> str:
+    """The human-facing label for a tool, for hosts that show one."""
+    entry = _GROUPS.get(tool)
+    return entry[1] if entry else tool

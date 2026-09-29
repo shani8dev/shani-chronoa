@@ -140,7 +140,22 @@ def build_server() -> "MCPServer":
         if fn is None:
             continue
         function_schema = schema["function"]
-        server.add_tool(fn, name=function_schema.get("name"), description=function_schema.get("description"))
+        name = function_schema.get("name")
+        description = function_schema.get("description")
+        # Derived from the consent key already maintained, so a client's warning
+        # cannot drift from the gate that actually enforces it.
+        kwargs = {}
+        try:
+            from mcp.types import ToolAnnotations
+
+            from shani_chronoa.capabilities import tool_annotations, tool_title
+
+            kwargs["annotations"] = ToolAnnotations(
+                **tool_annotations(name, description))
+            kwargs["title"] = tool_title(name)
+        except Exception:  # noqa: BLE001 - never let a hint break the server
+            logger.debug("Could not attach annotations to %s", name, exc_info=True)
+        server.add_tool(fn, name=name, description=description, **kwargs)
     return server
 
 
