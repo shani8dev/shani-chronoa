@@ -50,6 +50,7 @@ CONTROLLED = {
     "wifi-connect-enabled",
     "service-control-enabled",
     "bulk-edit-enabled",
+    "mount-control-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",

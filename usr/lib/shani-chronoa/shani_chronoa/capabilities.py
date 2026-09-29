@@ -60,6 +60,7 @@ GATED: dict[str, str] = {
     "connect_wifi": "wifi-connect-enabled",
     "control_service": "service-control-enabled",
     "find_and_replace": "bulk-edit-enabled",
+    "manage_mount": "mount-control-enabled",
 }
 
 # Tool name -> (group heading, short menu label). A tool missing from this table
@@ -90,6 +91,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_logs": ("Services and logs", "Read the system log"),
     "create_archive": ("Files", "Make or extract an archive"),
     "find_and_replace": ("Files", "Find and replace"),
+    "list_percepts": ("What Chronoa knows", "What it perceives"),
+    "compute_hash": ("Files", "Checksum a file"),
+    "manage_mount": ("Files", "Mount or unmount"),
+    "translate_text": ("Everyday tools", "Translate text"),
     "get_battery_status": ("Power and screen", "Battery status"),
     "set_brightness": ("Power and screen", "Screen brightness"),
     "get_volume": ("Sound", "Output volume"),
@@ -137,6 +142,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Files",
     "Processes and windows",
     "Services and logs",
+    "What Chronoa knows",
     "System",
     "Web",
     "Local models",
@@ -159,6 +165,7 @@ GATE_NAMES: dict[str, str] = {
     "wifi-connect-enabled": "Let Chronoa change WiFi",
     "service-control-enabled": "Let Chronoa change system services",
     "bulk-edit-enabled": "Let Chronoa edit many files at once",
+    "mount-control-enabled": "Let Chronoa mount disks",
 }
 
 

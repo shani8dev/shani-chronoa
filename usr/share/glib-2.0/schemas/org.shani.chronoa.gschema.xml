@@ -271,6 +271,11 @@
       <summary>Let Chronoa check which language models this machine can actually run</summary>
       <description>When true, Chronoa may ask the local Ollama which models are installed, compare their on-disk size against this machine's available memory, and report whether the model currently configured is present and fits. Off by default. Read-only: it reports and recommends, and never downloads, loads, unloads or changes a model. This exists because the configured model is otherwise chosen by a two-way hardware tier that never checks what is installed or whether it fits - on a 31GB machine that still selects the same 2.5GB model it would choose on a 16GB one, and reports nothing if that model is not present at all.</description>
     </key>
+    <key name="mount-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa mount and unmount filesystems</summary>
+      <description>When true, Chronoa may mount or unmount a filesystem through the desktop disk service, so that service's own authorisation rules apply. Off by default: mounting runs code from a device that was not there a moment ago, and unmounting something in use can lose work. Listing what is mounted needs no permission.</description>
+    </key>
     <key name="service-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa change system services</summary>
@@ -280,6 +285,16 @@
       <default>false</default>
       <summary>Let Chronoa edit many files at once</summary>
       <description>When true, Chronoa may replace a string across every file matching a pattern. Off by default, and separate from writing one named file: a pattern that matches in forty files rewrites forty files, and that blast radius is not knowable in advance. Without this, find_and_replace still runs as a dry run and lists what it would change.</description>
+    </key>
+    <key name="usb-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read the USB devices attached to this machine</summary>
+      <description>Reads the USB bus for attached devices, with their class, vendor, product and negotiated link speed. On by default like the other bus and disk senses. Covers what is plugged into ports, which the PCI inventory does not.</description>
+    </key>
+    <key name="resources-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa check for resources running out</summary>
+      <description>Reports zombie processes that were never reaped, whether swap is in use, and how close the open file-descriptor limit is. On by default: none of these look like high usage, which is why nothing else notices them.</description>
     </key>
     <key name="filesystems-sense-enabled" type="b">
       <default>true</default>

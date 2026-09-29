@@ -74,6 +74,7 @@ _IMPL = {
     "list_wifi_networks": "shani_chronoa.skills.list_wifi_networks",
     "control_service": "shani_chronoa.skills.control_service",
     "find_and_replace": "shani_chronoa.skills.find_and_replace",
+    "manage_mount": "shani_chronoa.skills.manage_mount",
 }
 
 

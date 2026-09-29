@@ -151,6 +151,14 @@ SENSE_LABELS = {
         "Whether the system clock is synchronised, which every reminder and "
         "timer depends on",
     ),
+    "usb": (
+        "USB devices",
+        "What is plugged into a port, with its class and the speed it negotiated",
+    ),
+    "resources": (
+        "Running out of things",
+        "Zombies, swap in use, and file-descriptor pressure - none look busy",
+    ),
     "network": (
         "Network and DNS",
         "Every interface, its link speed, whether it is wireless, and the resolvers",
@@ -185,6 +193,10 @@ SENSE_CATEGORIES = [
     ("Is anything broken",
      "Which system services systemd has marked as failed, and why",
      ["services"]),
+    ("Plugged in and running out",
+     "What is attached by USB, and the ways a machine runs out of something "
+     "without ever looking busy",
+     ["usb", "resources"]),
     ("The screen",
      "Connected monitors, what mode they are in, and the backlight",
      ["display"]),
@@ -496,6 +508,11 @@ class SettingsWindow(Gtk.Window):
              "Off: Chronoa can list and focus windows but cannot ask one to "
              "close, which can discard unsaved work.",
              "close_window refuses while this is off"),
+            ("Let Chronoa mount disks", "mount-control-enabled",
+             "Off: Chronoa can list what is mounted but cannot mount or "
+             "unmount anything. Mounting runs code from a device that was not "
+             "there a moment ago.",
+             "manage_mount refuses while this is off"),
             ("Let Chronoa change system services", "service-control-enabled",
              "Off: Chronoa can list services and read their logs but cannot "
              "start, stop or restart one. These are root-owned units, and the "

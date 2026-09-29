@@ -67,7 +67,8 @@ class TestTheGroupingCoversTheRegistryExactly:
         part of the data, not an accident of dict order."""
         assert [t for t, _d, _n in SENSE_CATEGORIES] == [
             "Talking to Chronoa", "Looking at things", "Getting work done",
-            "Is anything broken", "The screen", "Network and wireless",
+            "Is anything broken", "Plugged in and running out",
+            "The screen", "Network and wireless",
             "Disks and room", "The machine itself",
             "Security and privacy", "Printers and scanners", "Model capability",
         ]
