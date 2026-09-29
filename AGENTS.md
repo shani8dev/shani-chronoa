@@ -660,7 +660,7 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1802 passed, 6 skipped)
+**Verification status:** unit suite green on Ubuntu (1807 passed, 6 skipped)
 
 > **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
 > `initialize` (protocol 2024-11-05), `tools/list` (70 tools), and `tools/call`

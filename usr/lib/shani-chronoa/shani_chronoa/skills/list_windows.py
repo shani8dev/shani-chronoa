@@ -141,7 +141,14 @@ def _via_accessibility(arguments: dict | None = None) -> str:
             "sense to list windows this way instead."
         )
     try:
-        windows, _ = accessibility.read_window_titles()
+        windows, _ = accessibility._bounded(accessibility.read_window_titles)
+    except accessibility._TimedOut:
+        return (
+            f"Could not list windows: the accessibility tree walk did not return "
+            f"within {accessibility._TIMEOUT_SECONDS:g}s, so it was given up on. "
+            f"That is not the same as there being no windows - something on the "
+            f"bus stopped answering. It will clear when that application does."
+        )
     except accessibility._Unavailable as exc:
         return f"Could not list windows: {exc}"
 

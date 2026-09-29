@@ -18,6 +18,7 @@ way to raise or close one, and those skills continue to refuse.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -174,3 +175,74 @@ class TestTheControlHalfIsUnchanged:
             "the reason there is no control fallback should be recorded where "
             "someone will read it before adding one"
         )
+
+
+class TestTheFallbackIsAlsoBounded:
+    """The sense got a timeout; the skill that calls it did not.
+
+    `_bounded` was added to the `accessibility` sense so a wedged AT-SPI bus
+    could not hang the sense. `read_window_titles` - the function this skill
+    calls - was left unbounded, so the more exposed path still hung: a skill
+    runs in the assistant's turn and in an MCP client's request, and either
+    waits forever on a bus that is not answering.
+
+    The honest-reporting property is the point, as it is for the sense. An
+    empty window list means "no windows are open", which is a claim about the
+    user's screen; a timeout is an admission of not looking.
+    """
+
+    def test_a_wedged_walk_gives_up_rather_than_hanging(self, monkeypatch, no_display):
+        _enable_accessibility(monkeypatch)
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+
+        def wedged():
+            time.sleep(30)
+            return [], False
+
+        monkeypatch.setattr(A, "read_window_titles", wedged)
+        started = time.monotonic()
+        out = LW._run({})
+        elapsed = time.monotonic() - started
+        assert elapsed < 5, f"the call took {elapsed:.1f}s against a 0.3s budget"
+        assert "did not return within" in out
+
+    def test_a_timeout_does_not_become_an_empty_window_list(self, monkeypatch, no_display):
+        _enable_accessibility(monkeypatch)
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(A, "read_window_titles",
+                            lambda: (time.sleep(30), ([], False))[1])
+        out = LW._run({})
+        assert "not the same as there being no windows" in out
+        assert "0 visible window" not in out, \
+            "a timeout was reported as an empty screen"
+
+    def test_the_filter_does_not_turn_a_timeout_into_no_matches(self, monkeypatch,
+                                                                no_display):
+        # The filtered path has its own "nothing matched" message, which would be
+        # a second wrong answer for the same timeout.
+        _enable_accessibility(monkeypatch)
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(A, "read_window_titles",
+                            lambda: (time.sleep(30), ([], False))[1])
+        out = LW._run({"title_contains": "anything"})
+        assert "No window's title" not in out
+        assert "did not return within" in out
+
+    def test_a_fast_walk_is_untouched(self, monkeypatch, no_display):
+        _enable_accessibility(monkeypatch)
+        monkeypatch.setattr(A, "read_window_titles",
+                            lambda: ([("App", "A Window")], False))
+        out = LW._run({})
+        assert "A Window" in out
+        assert "did not return within" not in out
+
+    def test_a_bus_that_raises_is_still_reported_as_raising(self, monkeypatch, no_display):
+        _enable_accessibility(monkeypatch)
+
+        def boom():
+            raise A._Unavailable("the accessibility bus did not answer (test)")
+
+        monkeypatch.setattr(A, "read_window_titles", boom)
+        out = LW._run({})
+        assert "did not answer (test)" in out
+        assert "did not return within" not in out
