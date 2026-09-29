@@ -511,26 +511,49 @@ and `app.py` will not import. Pass `PYTHONPATH=$HOME/.local/lib/python3.12/
 site-packages` (or use a `venv --system-site-packages`) when probing by hand.
 The repo's own `test_sense_scheduler.py` handles this for child processes.
 
-## Machine-state senses (added 2026-09-28)
+## Machine-state senses (added 2026-09-28, merged 2026-09-29)
 
-Eleven senses that read the machine rather than the user's world —
-`contention` (who holds a capture device), `privilege` (who holds a dangerous
-capability), `thermal`, `display`, `network`, `bluetooth`, `camera`
-(enumeration only), `rfsense` (WiFi RSSI spread), `thermalgrid`
-(MLX90640/AMG8833 over I2C), `hwmon` (fan/temperature/voltage/current from
-`/sys/class/hwmon`) and `modelfit` (available RAM against the models Ollama
-reports) — plus `senses/latch.py` and scheduler de-duplication, so a polled
-sense that keeps saying the same thing is not deposited 1440 times a day.
-`hwmon` and `modelfit` have no external binary: they read the kernel directly,
-so there is nothing that can be missing for them to degrade into.
+Twenty-three senses read the machine rather than the user's world. The
+machine-state set added that day was `privilege` (who holds a dangerous
+capability), `display`, `network`, `bluetooth`, `rfsense` (WiFi RSSI spread),
+`thermalgrid` (MLX90640/AMG8833 over I2C), `hwmon` (fan/temperature/voltage/
+current from `/sys/class/hwmon`) and `modelfit` (available RAM against the
+models Ollama reports), on top of the pre-existing `memory`, `power`, `storage`,
+`cpu`, `gpu`, `security`, `devices` and `audio` — plus `senses/latch.py` and
+scheduler de-duplication, so a polled sense that keeps saying the same thing is
+not deposited 1440 times a day. `hwmon` and `modelfit` have no external binary:
+they read the kernel directly, so there is nothing that can be missing for them
+to degrade into.
 
-**Three of the eleven were green on the dev box while confidently wrong on the
-distribution this actually ships to, and the lesson is not optional to read:**
-`contention` reported every microphone and camera as *free* when `fuser`
-(psmisc) was missing, because the OSError was swallowed into "no holders";
-`privilege` used Debian's `dpkg-query`, so on Arch — which is what ShaniOS is —
-it found no package owner for anything and reported **every process as
-unmanaged third-party software**, burying the one real finding; `bluetooth`
+**Seven senses were merged away on 2026-09-29, taking the registry from 28
+modules to 23** (28 − 7 retired + 2 new, `capture` and `printing`), and this
+file was corrected rather than left to mislead the next reader. `contention`,
+`camera`, `thermal` and `cooling` no longer exist as modules, so the lesson
+below refers to code that moved:
+
+| Gone | Now |
+|---|---|
+| `contention` + `camera` | `capture` |
+| `thermal` + `cooling` | `hwmon` |
+| `monitors` | `display` |
+| `smart` | `storage` |
+| `link` | `network` |
+
+Each retired consent key **still grants its successor** via
+`config._SENSE_CONSENT_ALIASES`, because a rename that silently ungrants a
+capability is a permission revocation wearing a refactor's clothes. Every
+retired key now defaults `false` in the schema, and that is a fix rather than an
+inconsistency: three of them (`monitors`, `smart`, `link`) used to default
+*true*, which let the alias override the live key and made the settings switch
+appear to do nothing. A test asserts every retired key defaults false.
+
+**Three of the original set were green on the dev box while confidently wrong on
+the distribution this actually ships to, and the lesson is not optional to
+read:** `contention` (now `capture`) reported every microphone and camera as
+*free* when `fuser` (psmisc) was missing, because the OSError was swallowed into
+"no holders"; `privilege` used Debian's `dpkg-query`, so on Arch — which is what
+ShaniOS is — it found no package owner for anything and reported **every process
+as unmanaged third-party software**, burying the one real finding; `bluetooth`
 reported "0 devices" when `bluetoothctl` was simply not installed. 584 passing
 unit tests caught none of it, because the tests ran on the wrong distro.
 
@@ -563,9 +586,10 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (645 passed, 3 skipped),
-**and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28, testbed
-`9be7139`, packaging at `shani-pkgbuilds` `031337f` = `shani-chronoa 0.1.0-6`)
+**Verification status:** unit suite green on Ubuntu (1261 passed, 4 skipped, as
+of `875359c`), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
+testbed `9be7139`, packaging at `shani-pkgbuilds` `031337f` =
+`shani-chronoa 0.1.0-6`)
 — including `privilege-uses-package-manager` PASS with 18 holders correctly
 attributed to packages, which is the check that only exists to catch the Arch
 failure. Real readings from the slot: `eth0: up, carrier`,
@@ -574,6 +598,13 @@ failure. Real readings from the slot: `eth0: up, carrier`,
 available` read from `/proc/meminfo` while Ollama was unreachable. Repeating it
 needs `--cgroupns=host` for nspawn and a hand-rolled mount for
 `shani-chronoa` — see `AUDIT-HISTORY.md`.
+
+⚠️ **The slot run predates the 2026-09-29 sense merges and does not cover
+them.** It was 2026-09-28, at testbed `9be7139`, against the pre-merge
+packaging. Ten senses were merged after it, so no real-hardware run has yet
+exercised `capture`, `hwmon`, `storage` or `network` as the single senses they
+now are. The unit suite covers the merges; the honest gap is real-hardware
+coverage of the merged ones, and it needs a slot run to close.
 
 `modelfit` earns one note here rather than in AUDIT-HISTORY, because the slot
 test's handling of it is the lesson. It reports UNKNOWN in its *model list*
