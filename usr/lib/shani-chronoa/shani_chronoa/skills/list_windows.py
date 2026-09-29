@@ -45,10 +45,24 @@ SCHEMA = {
         "name": "list_windows",
         "description": (
             "List the windows currently open, with their title, class and "
-            "geometry. X11 only - it reports plainly when it cannot work on "
-            "this session rather than returning a partial list."
+            "geometry. Pass title_contains to narrow the list to windows "
+            "matching some text in their title or application - a desktop "
+            "usually has more windows open than are worth reading. Where "
+            "xdotool cannot see the session it falls back to the accessibility "
+            "bus and says so, because that list is not complete."
         ),
-        "parameters": {"type": "object", "properties": {}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title_contains": {
+                    "type": "string",
+                    "description": (
+                        "Only list windows whose title or application contains "
+                        "this text, case-insensitively. Omit to list every window."
+                    ),
+                },
+            },
+        },
     },
 }
 
@@ -73,7 +87,33 @@ def session_problem() -> str:
     return ""
 
 
-def _via_accessibility() -> str:
+def _text_argument(arguments: dict, name: str) -> str:
+    """A string argument, or "" for anything that is not one.
+
+    A model can send a number, a list or null for a parameter the schema calls a
+    string. Reading it as text without this check raises `AttributeError` on
+    `.strip()` and takes the whole turn down, which is a crash over a mistyped
+    argument. Anything non-string is treated as absent, which is also what the
+    rest of this codebase does with a malformed call.
+    """
+    value = arguments.get(name) if isinstance(arguments, dict) else None
+    return value if isinstance(value, str) else ""
+
+
+def _matches_filter(row: "tuple", needle: str) -> bool:
+    """Whether a `(id, name, class, geometry)` row matches a title filter.
+
+    Case-insensitive substring over the title and the class, because "which
+    window is Slack" is asked with either. An empty or absent filter matches
+    everything, so the unfiltered call is unchanged.
+    """
+    if not needle:
+        return True
+    haystack = " ".join(part for part in (row[1], row[2]) if part).lower()
+    return needle.strip().lower() in haystack
+
+
+def _via_accessibility(arguments: dict | None = None) -> str:
     """Window titles from the AT-SPI bus, for a session xdotool cannot serve.
 
     The fallback exists because the X11 path has a specific failure mode this
@@ -105,6 +145,19 @@ def _via_accessibility() -> str:
     except accessibility._Unavailable as exc:
         return f"Could not list windows: {exc}"
 
+    needle = _text_argument(arguments or {}, "title_contains")
+    if needle:
+        before = len(windows)
+        windows = [(app, title) for app, title in windows
+                   if needle.strip().lower()
+                   in f"{app} {title}".lower()]
+        if not windows:
+            return (
+                f"No window's title or application contains {needle!r}. "
+                f"{before} window(s) are on the accessibility bus - call "
+                f"list_windows with no filter to see them all."
+            )
+
     if not windows:
         return (
             "No window reported a title on the accessibility bus. Some windows "
@@ -134,7 +187,7 @@ def _run(arguments: dict) -> str:
         # Listing is read-only, so there is a real alternative on a Wayland or
         # headless session. Saying "could not" and stopping would be accurate
         # but wasteful when a different mechanism can answer the same question.
-        return _via_accessibility()
+        return _via_accessibility(arguments)
     try:
         proc = subprocess.run(
             ["xdotool", "search", "--onlyvisible", "--name", ""],
@@ -167,6 +220,24 @@ def _run(arguments: dict) -> str:
         cls = ask("getwindowclassname")
         geo = ask("getwindowgeometry")
         rows.append((wid, name, cls, geo))
+
+    # A desktop routinely has more windows than anyone wants to read, and the
+    # answer to "which window is Slack" should not carry all twenty-two of them.
+    # Filtering after collecting rather than before means the xdotool search
+    # stays a single call, and the count reported is of everything found, so a
+    # filter that matches nothing is distinguishable from a filter that was
+    # ignored.
+    title_filter = ""
+    title_filter = _text_argument(arguments, "title_contains")
+    matched = [row for row in rows if _matches_filter(row, title_filter)]
+    if title_filter and not matched:
+        return (
+            f"No visible window's title or class contains {title_filter!r}. "
+            f"{len(rows)} window(s) are open - call list_windows with no "
+            f"filter to see them all."
+        )
+    if len(matched) != len(rows):
+        rows = matched
 
     lines = [f"{len(ids)} visible window(s); showing {len(rows)}:"]
     for wid, name, cls, geo in rows:
