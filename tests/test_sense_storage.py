@@ -15,6 +15,9 @@ reports "3 disks" on a machine with one drive.
 sector-to-bytes factor is asserted rather than assumed.
 """
 
+import shutil
+import subprocess
+
 import pytest
 
 from shani_chronoa.senses import storage
@@ -144,7 +147,17 @@ class TestNvmeWear:
 class TestEndToEnd:
     def test_it_states_that_health_was_not_determined(self, root, monkeypatch):
         """SMART needs an opt-in package and root. The sense says so rather
-        than letting silence imply a healthy disk."""
+        than letting silence imply a healthy disk.
+
+        `shutil.which` is stubbed rather than left to the host. This test used
+        to pass only because the dev box had no `smartctl` installed - it was
+        green for an environmental reason, not because it verified the
+        absent-tool path, and it went red the moment smartctl appeared. A test
+        that depends on a package being missing is not testing its subject.
+        """
+        real_which = shutil.which
+        monkeypatch.setattr(storage.shutil, "which",
+                            lambda name: None if name == "smartctl" else real_which(name))
         _block(root, "nvme0n1", model="KBG40ZNT512G TOSHIBA MEMORY")
         _block(root, "dm-0", slaves=("nvme0n1p3",))
         monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
@@ -152,8 +165,46 @@ class TestEndToEnd:
         percept = storage._run({})
         assert percept.metadata["disks"] == 1
         assert percept.metadata["layers"] == 1
+        assert percept.metadata["smartctl_present"] is False
         assert "SMART health was not determined" in percept.content
         assert "not separate disks" in percept.content
+
+    def test_an_unreadable_drive_is_reported_as_unreadable_not_healthy(
+            self, root, monkeypatch):
+        """The same invariant once the tool *is* installed.
+
+        With `smartctl` present but the drive not openable, the sense says so
+        with a reason instead of falling back to the tool-absent wording, and
+        critically does not report the drive as healthy. This path is reachable
+        on any ordinary desktop account, so unlike the 0x00 and 0x08 paths in
+        `classify()` it needs no root to exercise.
+        """
+        _block(root, "nvme0n1", model="KBG40X026")
+        _block(root, "dm-0", slaves=("nvme0n1p3",))
+        monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
+                            lambda self, s: True)
+        monkeypatch.setattr(
+            storage, "_run_smartctl",
+            lambda device: subprocess.CompletedProcess(
+                args=["smartctl", "-H", "-A", device], returncode=2,
+                stdout="",
+                stderr="Smartctl open device: /dev/nvme0n1 failed: "
+                       "Permission denied"))
+        percept = storage._run({})
+        assert percept.metadata["smartctl_present"] is True
+        assert percept.metadata["healthy"] == 0
+        assert percept.metadata["failing"] == 0
+        assert percept.metadata["undetermined"] == 1
+        lines = percept.content.splitlines()
+        drive_lines = [l for l in lines if l.startswith("/dev/")]
+        assert drive_lines, "the unreadable drive is not named at all"
+        assert "not-determined" in drive_lines[0]
+        assert "healthy" not in drive_lines[0]
+        assert "Permission denied" in percept.content, (
+            "the tool's own reason is discarded, so the user is told a drive is "
+            "unreadable without being told why"
+        )
+        assert "not the same as healthy" in percept.content
 
     def test_it_refuses_when_consent_is_off(self, monkeypatch):
         monkeypatch.setattr(storage.ChronoaConfig, "sense_allowed",
