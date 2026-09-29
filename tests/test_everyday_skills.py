@@ -32,7 +32,13 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, "usr/lib/shani-chronoa")
+# Absolute, derived from this file, so the module resolves no matter which
+# directory pytest was invoked from. A relative path here made the whole file
+# fail - 40 failures and 27 collection errors - when the suite was run from
+# anywhere but the repo root, which is a fragility the other test files in this
+# repo do not have.
+_REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.config import ChronoaConfig  # noqa: E402
 from shani_chronoa.skills import (  # noqa: E402
@@ -459,7 +465,8 @@ class TestEveryGatedSkillHasAKeyAndALabel:
             assert key in capabilities.GATE_NAMES, f"{key} has no human label"
 
     def test_each_gate_is_reachable_from_the_settings_window(self):
-        source = Path("usr/lib/shani-chronoa/shani_chronoa/settings_window.py").read_text()
+        source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
+                  / "settings_window.py").read_text()
         for key in ("file-delete-enabled", "process-kill-enabled",
                     "window-close-enabled", "wifi-connect-enabled"):
             assert f'"{key}"' in source, (
