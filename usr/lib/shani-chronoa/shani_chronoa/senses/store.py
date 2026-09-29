@@ -41,6 +41,14 @@ PERCEPT_DIR = Path(
 )
 DURABLE_FILE = PERCEPT_DIR / "memory.jsonl"
 
+#: What the app is holding *right now*, published so a separate process can
+#: see it. The durable file only ever holds the memory sense's facts, so on its
+#: own it understates what is in context by every polled percept - which is most
+#: of them. A skill runs in a subprocess and cannot see the app's memory, so
+#: without this it would answer "what are you perceiving?" with the smaller and
+#: less interesting half, and say so confidently.
+LIVE_FILE = PERCEPT_DIR / "live.json"
+
 # Bounded so a long-running ambient session cannot grow without limit. A
 # transient percept is only useful while fresh, so a small window is not a
 # real loss - anything older should have been persisted as a durable
@@ -111,9 +119,13 @@ class PerceptStore:
     def __init__(
         self,
         durable_path: Optional[Path] = None,
+        live_path: Optional[Path] = None,
         transient_capacity: int = _TRANSIENT_CAPACITY,
     ) -> None:
         self._durable_path = Path(durable_path) if durable_path else DURABLE_FILE
+        # Per instance, not read from the module at write time: a global lookup
+        # lets a store with a custom durable_path publish into a shared location.
+        self._live_path = Path(live_path) if live_path else LIVE_FILE
         self._transient: "deque[Percept]" = deque(maxlen=transient_capacity)
         self._durable: list[Percept] = []
         self._loaded = False
@@ -158,6 +170,33 @@ class PerceptStore:
         else:
             with _LOCK:
                 self._transient.append(percept)
+        self._publish_live()
+
+    def _publish_live(self) -> None:
+        """Write what is currently held, so another process can read it.
+
+        Best effort by design. A failure here must not cost a percept: the
+        store is the thing that matters, and this exists only so the answer to
+        "what is being perceived" is available outside this process. Renamed
+        into place rather than written in place, because a reader - a skill
+        running concurrently with a poll - must never see half a file and
+        report it as the truth.
+        """
+        try:
+            with _LOCK:
+                snapshot = {
+                    "written_at": time.time(),
+                    "pid": os.getpid(),
+                    "transient": [_as_dict(p) for p in self._transient],
+                    "durable_count": len(self._durable),
+                }
+            self._live_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self._live_path.with_name(f"{self._live_path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(snapshot), encoding="utf-8")
+            os.replace(tmp, self._live_path)
+        except OSError as e:
+            logger.debug("Could not publish the live percept view to %s: %s",
+                         self._live_path, e)
 
     def extend(self, percepts: Iterable[Percept]) -> None:
         for percept in percepts:
@@ -203,6 +242,7 @@ class PerceptStore:
         """Drop every transient percept. Durable memories are untouched."""
         with _LOCK:
             self._transient.clear()
+        self._publish_live()
 
     def forget(self, predicate) -> int:
         """Remove durable percepts matching `predicate`; return how many.

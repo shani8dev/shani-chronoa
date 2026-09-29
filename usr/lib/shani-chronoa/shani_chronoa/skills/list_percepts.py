@@ -54,24 +54,59 @@ SCHEMA = {
 }
 
 
+#: A live view older than this is from a process that is gone or wedged, and
+#: saying "right now" about it would be its own small lie.
+_LIVE_STALE_SECONDS = 300.0
+
+
+def _load_live(now: float):
+    """(percepts, provenance) from the app's published view, or ([], "")."""
+    import json
+
+    from shani_chronoa.senses.context import Percept
+    from shani_chronoa.senses.store import LIVE_FILE
+
+    try:
+        payload = json.loads(LIVE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], ""
+    written = payload.get("written_at")
+    if not isinstance(written, (int, float)):
+        return [], ""
+    rows = []
+    for entry in payload.get("transient", []):
+        try:
+            rows.append(Percept(**entry))
+        except (TypeError, ValueError):
+            continue
+    age = now - written
+    if age > _LIVE_STALE_SECONDS:
+        return rows, (f"published {age:.0f}s ago by a process that is no longer "
+                     f"running, so this is a leftover rather than a live view")
+    return rows, f"live, published {age:.0f}s ago by the running app (pid {payload.get('pid')})"
+
+
 def _run(arguments: dict) -> str:
     from shani_chronoa.config import ChronoaConfig
-    from shani_chronoa.senses.context import ContextBuilder
     from shani_chronoa.senses.store import PerceptStore
 
     config = ChronoaConfig()
     store = PerceptStore()
     now = time.time()
 
-    everything = store.all() if hasattr(store, "all") else list(store.active(now)) + list(store.durable())
+    transient, provenance = _load_live(now)
+    durable = store.durable()
+    everything = transient + durable
     if not everything:
         return (
-            "Nothing is being perceived right now. The percept store is empty, "
-            "which is different from Chronoa having nothing to say - a sense "
-            "produces a fact when it is polled and has something new to report."
+            "Nothing is being perceived right now, and there are no stored "
+            "facts. That is different from Chronoa having nothing to say - a "
+            "sense produces a fact when it is polled and has something new to "
+            "report."
         )
 
     needle = (arguments.get("sense_filter") or "").strip().lower()
+    what = f" from '{needle}'" if needle else ""
     include_expired = bool(arguments.get("include_expired"))
 
     rows, live, expired = [], 0, 0
@@ -98,7 +133,6 @@ def _run(arguments: dict) -> str:
             break
 
     if not rows:
-        what = f" from '{needle}'" if needle else ""
         if expired:
             return (f"No live percepts{what}; {expired} had expired. Pass "
                     f"include_expired to see them.")
@@ -107,9 +141,15 @@ def _run(arguments: dict) -> str:
     permitted = [r for r in rows if config.sense_allowed(r[0])]
     withheld = [r for r in rows if not config.sense_allowed(r[0])]
 
+    source_note = provenance or (
+        "no running app is publishing a live view, so this is the stored facts "
+        "only - a sense polled by a running app holds its transient percepts in "
+        "memory, and this process cannot see them"
+    )
     lines = [
         f"{len(rows)} percept(s) held{what}: {len(permitted)} would be sent with "
         f"the next reply, {len(withheld)} are withheld by current consent.",
+        f"Source: {source_note}.",
         "",
     ]
     for sense, kind, content, life, sens in rows:
