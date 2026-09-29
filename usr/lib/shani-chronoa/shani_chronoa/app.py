@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
-from shani_chronoa import pipewire, planmode, sessions
+from shani_chronoa import markdown_lite, pipewire, planmode, sessions
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
@@ -740,7 +740,7 @@ class ChronoaApplication(Gtk.Application):
             self.window.set_status("")
 
         if speaking:
-            self._async.run(self._speak(response))
+            self._async.run(self._speak(markdown_lite.to_speech(response)))
 
         return GLib.SOURCE_REMOVE
 

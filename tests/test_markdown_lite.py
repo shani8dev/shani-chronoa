@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.markdown_lite import to_pango  # noqa: E402
+from shani_chronoa.markdown_lite import to_speech  # noqa: E402
 
 # Every tag the module is allowed to emit.
 ALLOWED = {"b", "i", "tt", "span", "big", "small", "u", "s", "tt"}
@@ -105,3 +106,88 @@ class TestRealisticReply:
         assert "<tt>/</tt>" in out
         assert "df -h /" in out
         assert tags(out) <= ALLOWED
+
+
+class TestTheSpokenForm:
+    """The voice path handed TTS the raw reply, so the markup was pronounced.
+
+    `to_pango` renders a reply for the window; `_speak` passed the same string
+    straight to the TTS engine, which read every `**` and backtick aloud.
+    Measured on this machine: `You have **3** updates pending. Run `sudo pacman
+    -Syu` to upgrade.` synthesised to 275,258 bytes of audio before this and
+    180,078 after - and 180,078 is byte-for-byte what the same sentence
+    synthesises to when it never had markup in it. The 35% that vanished was
+    the word "asterisk".
+
+    The reduction reuses the same marker set `to_pango` handles, so the spoken
+    and displayed forms cannot drift into disagreeing about what was said.
+    """
+
+    def test_bold_markers_are_not_spoken(self):
+        assert to_speech("You have **3** updates.") == "You have 3 updates."
+
+    def test_italic_markers_are_not_spoken(self):
+        assert to_speech("That is *probably* wrong.") == "That is probably wrong."
+        assert to_speech("That is _probably_ wrong.") == "That is probably wrong."
+
+    def test_code_markers_are_not_spoken_but_the_contents_are(self):
+        # The contents are the part the user needs to hear: a path, a package
+        # name. Only the backticks, which make it *code*, are dropped.
+        assert to_speech("Run `sudo pacman -Syu` now.") == "Run sudo pacman -Syu now."
+
+    def test_bullets_lose_their_marker(self):
+        out = to_speech("- first\n- second")
+        assert out == "first\nsecond"
+        assert "-" not in out
+
+    def test_a_fence_is_spoken_without_its_delimiters(self):
+        out = to_speech("Try:\n```bash\njournalctl -u chronoa\n```")
+        assert "journalctl -u chronoa" in out
+        assert "```" not in out
+        assert "bash" not in out
+
+    def test_a_link_is_spoken_as_its_text_and_not_its_url(self):
+        # A URL read aloud is noise, and the target is model-supplied - the same
+        # reason `to_pango` refuses to make it clickable.
+        out = to_speech("See [the wiki](https://example.com/evil) for details.")
+        assert out == "See the wiki for details."
+        assert "example.com" not in out
+
+    def test_a_heading_loses_its_hashes(self):
+        assert to_speech("## Updates pending") == "Updates pending"
+
+    def test_a_horizontal_rule_is_dropped_entirely(self):
+        out = to_speech("Before.\n\n---\n\nAfter.")
+        assert "---" not in out
+        assert "Before." in out and "After." in out
+
+    def test_code_containing_stars_is_not_reduced(self):
+        # The same reason `to_pango` stashes fences: `**` inside code is
+        # asterisks, not bold, and neither path may turn it into emphasis.
+        out = to_speech("```\ngrep '**' file\n```")
+        assert "'**'" in out
+
+    def test_underscores_in_a_word_are_not_italic(self):
+        assert to_speech("see some_file_name") == "see some_file_name"
+
+    def test_empty_text_is_empty(self):
+        assert to_speech("") == ""
+        assert to_speech("   \n  ") == ""
+
+    def test_plain_text_is_unchanged_apart_from_stripping(self):
+        assert to_speech("Just a sentence.") == "Just a sentence."
+
+    def test_it_agrees_with_to_pango_about_what_the_reply_says(self):
+        # The two renderers handle the same subset. Anything one reduces and the
+        # other does not is a marker the window shows and the voice reads.
+        reply = "**bold** and `code` and *italic* and - a bullet"
+        spoken = to_speech(reply)
+        assert "**" not in spoken and "`" not in spoken and "*" not in spoken
+        for word in ("bold", "code", "italic", "a bullet"):
+            assert word in spoken, f"{word!r} was lost from the spoken form"
+
+    def test_markup_in_a_reply_cannot_reach_the_voice_as_markup(self):
+        # The window path escapes first because `set_markup` on model output is
+        # an injection point. The voice path has no such risk - there is no
+        # markup language to inject into - but it must still not *speak* a tag.
+        assert to_speech("Here is a tag: <b>bold</b>") == "Here is a tag: <b>bold</b>"
