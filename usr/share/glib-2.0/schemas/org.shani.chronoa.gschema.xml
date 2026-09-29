@@ -241,6 +241,11 @@
       <summary>Let Chronoa read local network interface state</summary>
       <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
     </key>
+    <key name="accessibility-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa list the applications the desktop exposes on its accessibility bus</summary>
+      <description>When true, Chronoa may enumerate applications over AT-SPI, reporting each one's name, role and window count. Off by default: application names and window titles reveal what the user is working on. This reads the accessibility bus only - it does not press buttons, type, or move focus, and it is never polled on a timer. If the bus is unreachable it says so rather than reporting that nothing is open.</description>
+    </key>
     <key name="bluetooth-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa list paired and nearby Bluetooth devices</summary>

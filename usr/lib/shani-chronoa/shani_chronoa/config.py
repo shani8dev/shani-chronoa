@@ -76,6 +76,9 @@ _SENSE_CONSENT_KEYS = {
     "display": "display-sense-enabled",
     "network": "network-sense-enabled",
     "bluetooth": "bluetooth-sense-enabled",
+    # Off by default: window titles and application names say what the
+    # user is working on, which is personal on any reading.
+    "accessibility": "accessibility-sense-enabled",
     "rfsense": "rfsense-sense-enabled",
     "thermalgrid": "thermalgrid-sense-enabled",
     "hwmon": "hwmon-sense-enabled",
