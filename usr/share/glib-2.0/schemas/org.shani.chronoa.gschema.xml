@@ -192,9 +192,9 @@
       <description>When true, Chronoa may read how many CPUs are online, the load average and how many tasks are runnable, available memory and swap, uptime, and the frequency governor. On by default because it reads the machine, not you, and never leaves it. Load is reported per CPU rather than as a percentage, because load counts runnable tasks and not CPU time.</description>
     </key>
     <key name="link-sense-enabled" type="b">
-      <default>true</default>
-      <summary>Let Chronoa read network link state</summary>
-      <description>When true, Chronoa may read which network interfaces this machine has, whether they are up, and for wired ones the negotiated speed and duplex. On by default because it reads the machine, not you, and never leaves it. Signal strength is deliberately not included here - the separate rfsense sense covers that and is off unless you ask for it.</description>
+      <default>false</default>
+      <summary>Retired: merged into the network sense</summary>
+      <description>The `link` sense was merged into `network` - both walked /sys/class/net and both printed the same per-interface state line, with `link` adding the negotiated speed and `network` adding the wireless flag and DNS. One enumeration now reports interface state, link speed, wireless, DNS and whether this is a bridge or container network. This key is still honoured: setting it to true grants the `network` sense, so an install that allowed `link` before the merge keeps that permission. Its default is false, deliberately: `link` used to default to true, and a retired key that defaults to true would silently override `network-sense-enabled`, making the switch in the settings window appear to do nothing. The default-on behaviour now lives on `network-sense-enabled`, which is the one a user actually sees.</description>
     </key>
     <key name="storage-sense-enabled" type="b">
       <default>true</default>
@@ -237,7 +237,7 @@
       <description>When true, Chronoa may read display state from sysfs - backlight brightness, whether an output is connected, and the current mode. Off by default. This reads the panel's own backlight setting; it is not a light sensor and cannot tell you how bright the room is.</description>
     </key>
     <key name="network-sense-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa read local network interface state</summary>
       <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
     </key>

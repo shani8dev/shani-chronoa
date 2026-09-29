@@ -86,10 +86,6 @@ SENSE_LABELS = {
         "Screen, brightness and monitors",
         "Report connected outputs, and set the backlight",
     ),
-    "network": (
-        "Internet and DNS",
-        "Connected interfaces, addresses and DNS",
-    ),
     "bluetooth": (
         "Bluetooth",
         "Adapters, and whether rfkill has blocked them",
@@ -113,10 +109,6 @@ SENSE_LABELS = {
     "storage": (
         "Disks",
         "Which drives this machine has, how big, and how worn the NVMe ones are",
-    ),
-    "link": (
-        "Network link speed",
-        "Which interfaces exist, which are up, and how fast the wired ones are",
     ),
     "cpu": (
         "Processor and load",
@@ -145,6 +137,10 @@ SENSE_LABELS = {
     "hwmon": (
         "Temperatures, fans and power",
         "Every sensor the firmware exposes, and whether a fan has stopped",
+    ),
+    "network": (
+        "Network and DNS",
+        "Every interface, its link speed, whether it is wireless, and the resolvers",
     ),
     "printing": (
         "Printers and scanners",
@@ -177,8 +173,8 @@ SENSE_CATEGORIES = [
      "Connected monitors, what mode they are in, and the backlight",
      ["display"]),
     ("Network and wireless",
-     "Interfaces, audio devices, Bluetooth, and motion from Wi-Fi signal",
-     ["link", "network", "audio", "bluetooth", "rfsense"]),
+     "Interfaces and resolvers, audio devices, Bluetooth, and motion from Wi-Fi signal",
+     ["network", "audio", "bluetooth", "rfsense"]),
     ("The machine itself",
      "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
      ["cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),

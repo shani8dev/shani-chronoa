@@ -82,7 +82,7 @@ _SENSE_CONSENT_KEYS = {
     "modelfit": "modelfit-sense-enabled",
     "power": "power-sense-enabled",
     "storage": "storage-sense-enabled",
-    "link": "link-sense-enabled",
+    "network": "network-sense-enabled",
     "cpu": "cpu-sense-enabled",
     "gpu": "gpu-sense-enabled",
     "security": "security-sense-enabled",
@@ -120,6 +120,12 @@ _SENSE_CONSENT_ALIASES = {
     # senses. `cooling` also walked /sys/class/hwmon a second time to find fan
     # channels `hwmon` had already read.
     "hwmon": ("thermal-sense-enabled", "cooling-sense-enabled"),
+    # `link` was merged into `network`. Both walked /sys/class/net and printed
+    # the same per-interface "<name>: <operstate>, carrier" line; link added the
+    # speed and the duplicate-address check, network added the wireless flag and
+    # DNS. Measured on this machine, the two lists were byte-identical apart
+    # from those extras.
+    "network": ("link-sense-enabled",),
 }
 
 # On by default are `memory` and the machine-state senses. `memory` because it is
@@ -130,7 +136,7 @@ _SENSE_CONSENT_ALIASES = {
 # health, and a missing tool must not be what decides a default. Everything
 # that captures or reads the user's world waits to be asked for.
 _SENSE_DEFAULT_ENABLED = frozenset({
-    "memory", "power", "storage", "link", "cpu", "gpu", "devices",
+    "memory", "power", "storage", "network", "cpu", "gpu", "devices",
     "audio", "display", "security",
 })
 

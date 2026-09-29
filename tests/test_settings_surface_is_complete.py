@@ -59,6 +59,11 @@ NOT_EXPOSED = {
     "hardware-profile": "shown read-only in 'In effect right now'; it is "
                         "auto-detected, and overriding it by hand is how a "
                         "user ends up with a model too large for the machine",
+    "link-sense-enabled": "retired: the `link` sense was merged into "
+                          "`network`, which has the row. Its default is false "
+                          "so it cannot silently re-grant the network sense and "
+                          "make that row's switch do nothing. Still honoured: "
+                          "setting it grants `network`",
     "thermal-sense-enabled": "retired: the `thermal` sense was merged into "
                              "`hwmon`, which reports both the hwmon channels "
                              "and the ACPI thermal zones - the kernel exposes "
