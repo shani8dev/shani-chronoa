@@ -97,6 +97,8 @@ _SENSE_CONSENT_KEYS = {
     "faults": "faults-sense-enabled",
     "sessions": "sessions-sense-enabled",
     "snapshots": "snapshots-sense-enabled",
+    "coredumps": "coredumps-sense-enabled",
+    "firewall": "firewall-sense-enabled",
 }
 
 # Retired consent keys, still honoured.
@@ -152,7 +154,7 @@ _SENSE_DEFAULT_ENABLED = frozenset({
     # Default-on with the rest of the machine's own state: `updates` reads the
     # local package database, `faults` reads the local journal, and `snapshots`
     # reads the filesystem layout. None of them leaves the machine.
-    "updates", "faults", "snapshots",
+    "updates", "faults", "snapshots", "coredumps", "firewall",
     # `sessions` defaults OFF deliberately, and is the only machine-state sense
     # that does. It reports who *else* is on this machine and what is running as
     # root outside the service tree - that is other people's presence, not this

@@ -132,6 +132,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "extract_archive": ("Files", "Unpack a tar or zip archive"),
     "trash_file": ("Files", "Move a file or folder to the trash, recoverably"),
     "set_theme": ("Appearance", "Switch the desktop between light and dark"),
+    "set_wallpaper": ("Appearance", "Change the desktop wallpaper"),
+    "set_scaling": ("Appearance", "Change the text size"),
+    "toggle_night_light": ("Appearance", "Turn the blue-light filter on or off"),
+    "set_screensaver": ("Power and screen", "Change when the screen blanks and locks"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
 }
 
@@ -183,6 +187,7 @@ GATE_NAMES: dict[str, str] = {
     "trash-empty-enabled": "Let Chronoa empty the trash",
     "appearance-control-enabled": "Let Chronoa change the desktop look",
     "timezone-control-enabled": "Let Chronoa change the timezone",
+    "idle-timeout-enabled": "Let Chronoa change when the screen blanks",
 }
 
 

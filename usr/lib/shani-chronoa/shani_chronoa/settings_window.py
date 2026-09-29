@@ -155,6 +155,14 @@ SENSE_LABELS = {
         "USB devices",
         "What is plugged into a port, with its class and the speed it negotiated",
     ),
+    "coredumps": (
+        "Crashes",
+        "Programs that actually crashed, and whether crashes are recorded at all",
+    ),
+    "firewall": (
+        "Firewall",
+        "Whether packets are being filtered, not just whether a firewall is installed",
+    ),
     "resources": (
         "Running out of things",
         "Zombies, swap in use, and file-descriptor pressure - none look busy",
@@ -209,7 +217,7 @@ SENSE_CATEGORIES = [
     ("Is anything broken",
      "Failed services, errors the system has logged, and updates that are "
      "waiting - the three ways a machine says it needs attention",
-     ["services", "faults", "updates"]),
+     ["services", "faults", "updates", "coredumps"]),
     ("Plugged in and running out",
      "What is attached by USB, and the ways a machine runs out of something "
      "without ever looking busy",
@@ -231,7 +239,7 @@ SENSE_CATEGORIES = [
      "Firmware security, connected hardware, which software can act as "
      "administrator, what is already using your camera, and who else is "
      "currently on this machine",
-     ["security", "devices", "privilege", "capture", "sessions"]),
+     ["security", "devices", "privilege", "capture", "sessions", "firewall"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),
@@ -531,6 +539,12 @@ class SettingsWindow(Gtk.Window):
              "unmount anything. Mounting runs code from a device that was not "
              "there a moment ago.",
              "manage_mount refuses while this is off"),
+            ("Let Chronoa change when the screen blanks", "idle-timeout-enabled",
+             "Off: Chronoa can report the current idle timeout and whether the "
+             "screen locks, but cannot change either. Its own key rather than "
+             "sharing the lock skill's, because whether the machine locks itself "
+             "is a standing policy decision, not a one-off action.",
+             "set_screensaver refuses while this is off"),
             ("Let Chronoa change the desktop look", "appearance-control-enabled",
              "Off: Chronoa can report whether the desktop is set to light or dark "
              "but cannot change it. Restyling a desktop unasked, mid-document, is "

@@ -81,6 +81,13 @@ _IMPL = {
     "empty_trash": "shani_chronoa.skills.empty_trash",
     "set_theme": "shani_chronoa.skills.set_theme",
     "set_timezone": "shani_chronoa.skills.set_timezone",
+    "set_screensaver": "shani_chronoa.skills.set_screensaver",
+    # All three share `appearance-control-enabled` with set_theme: they are the
+    # same permission, "change how this desktop looks", and three separate keys
+    # for it would imply a distinction the user cannot act on.
+    "set_wallpaper": "shani_chronoa.skills.set_wallpaper",
+    "set_scaling": "shani_chronoa.skills.set_scaling",
+    "toggle_night_light": "shani_chronoa.skills.toggle_night_light",
     # Shares `file-delete-enabled` with permanent deletion: it does remove the
     # file from where it was, and the difference is only that this is
     # recoverable. Refusing to gate it separately would let "clear this out" be

@@ -276,7 +276,12 @@
       <summary>Let Chronoa mount and unmount filesystems</summary>
       <description>When true, Chronoa may mount or unmount a filesystem through the desktop disk service, so that service's own authorisation rules apply. Off by default: mounting runs code from a device that was not there a moment ago, and unmounting something in use can lose work. Listing what is mounted needs no permission.</description>
     </key>
-        <key name="appearance-control-enabled" type="b">
+        <key name="idle-timeout-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change when the screen blanks</summary>
+      <description>Off: Chronoa can report the current idle timeout and whether the screen locks, but cannot change either. It has its own key rather than sharing the lock skill's, because whether the machine locks itself is a standing policy decision rather than a one-off action.</description>
+    </key>
+    <key name="appearance-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa change the desktop appearance</summary>
       <description>Off: Chronoa can report whether the desktop is set to a light or dark appearance but cannot change it. Restyling a desktop unasked, mid-document, is disruptive in a way that reading it is not.</description>
@@ -320,6 +325,16 @@
       <default>true</default>
       <summary>Let Chronoa read the USB devices attached to this machine</summary>
       <description>Reads the USB bus for attached devices, with their class, vendor, product and negotiated link speed. On by default like the other bus and disk senses. Covers what is plugged into ports, which the PCI inventory does not.</description>
+    </key>
+    <key name="coredumps-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa report programs that crashed</summary>
+      <description>Reports recorded crashes from the last week, and states whether crash recording is even enabled - a machine that records nothing is not a machine where nothing crashed. On by default: it reads the local crash store and never leaves the machine.</description>
+    </key>
+    <key name="firewall-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa report whether a firewall is actually enforcing</summary>
+      <description>Checks ufw, firewalld and the nftables/iptables ruleset, distinguishing a firewall that is installed from one that is enforcing, and reporting UNKNOWN rather than "unprotected" when a tool needs root. On by default: it reads the local firewall configuration.</description>
     </key>
     <key name="updates-sense-enabled" type="b">
       <default>true</default>
