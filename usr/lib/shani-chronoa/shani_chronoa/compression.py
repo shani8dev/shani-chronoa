@@ -79,6 +79,19 @@ FOOT_CHARS = 400
 #: rounding error against a large one.
 TOTAL_TOOL_BUDGET_CHARS = 16000
 
+#: A single tool result above this is elided even inside the protected window.
+#:
+#: The window exists so a result the model is actively reading arrives whole. That
+#: reasoning does not extend to a result that is a whole context window on its own -
+#: a model cannot reason from 200,000 characters any better than from a summary of
+#: them, and the transcript keeps the original either way.
+#:
+#: Set far above `COMPRESS_THRESHOLD_CHARS` deliberately, so this is an escape hatch
+#: for the pathological case and not a quiet narrowing of the window decision: the
+#: pinned test that a sole oversized result is never elided still passes, because a
+#: result has to be 24x the ordinary threshold to reach this.
+HARD_CAP_CHARS = 48000
+
 
 #: Every elision starts with this. It is also how a deeply-elided result is
 #: recognised, so deepening a message twice is a no-op rather than a rewrite.
@@ -166,14 +179,32 @@ def compress(messages: list[dict]) -> list[dict]:
         # the model always having the thing it just asked for in full. The
         # aggregate floor below is the compromise - it bounds the history
         # without ever touching the newest 6 messages.
-        if (index < cutoff
-                and message.get("role") == "tool"
+        if (message.get("role") == "tool"
                 and isinstance(content, str)
                 and len(content) > COMPRESS_THRESHOLD_CHARS):
-            out.append({**message, "content": _elide(content)})
-            changed = True
-        else:
-            out.append(message)
+            if index < cutoff:
+                out.append({**message, "content": _elide(content)})
+                changed = True
+                continue
+            # Inside the protected window, and still elided when it is orders of
+            # magnitude over budget. A model cannot reason from a 200,000-character
+            # result any more than from a summary of one, and the window exemption is
+            # meant to spare a result the model is actively reading - not to exempt a
+            # whole context window's worth of one line. Measured through the real
+            # sandbox: `printf 'a%.0s' $(seq 1 200000)` returns a single
+            # 200,000-character line, uncapped, and it landed at 12x the aggregate
+            # budget untouched. `assistd` bounds the head by bytes as well as lines
+            # for the same reason, which is why a single huge line cannot outgrow the
+            # cap there either.
+            #
+            # The threshold is deliberately far above COMPRESS_THRESHOLD_CHARS, so
+            # this stays an escape hatch for the pathological case and does not
+            # quietly narrow the pinned window decision above.
+            if len(content) > HARD_CAP_CHARS:
+                out.append({**message, "content": _elide(content)})
+                changed = True
+                continue
+        out.append(message)
 
     if changed:
         logger.info("Elided oversized tool output from %d earlier message(s)", cutoff)

@@ -460,3 +460,77 @@ class TestFloorAccounting:
         # one, so a marker that does not parse must not be trusted to a number.
         assert compression._original_size("[something unexpected]") == \
             len("[something unexpected]")
+
+
+class TestTheHardCapOnASingleEnormousResult:
+    """A result that is a whole context window on its own is elided regardless of age.
+
+    The protected window exists so a result the model is actively reading arrives
+    whole. That reasoning does not extend to a result that dwarfs the entire budget: a
+    model cannot reason from 200,000 characters any better than from a summary of them.
+
+    Found by comparison with `assistd`, which bounds the head of a truncated stream by
+    *bytes* as well as by lines, so a single huge line cannot outgrow its cap either.
+
+    Measured through the real sandbox executor: `printf 'a%.0s' $(seq 1 200000)`
+    returns one 200,000-character line, uncapped by the executor, and it landed at 12x
+    `TOTAL_TOOL_BUDGET_CHARS` completely untouched - the newest-message exemption and
+    the aggregate floor disagree, and the newest one wins.
+    """
+
+    def _window_of(self, result: str) -> "list[dict]":
+        """A history whose newest message is `result`, so it is inside the window."""
+        history = [{"role": "user", "content": "run it"}]
+        history += [{"role": "tool", "tool_call_id": str(i), "content": "y" * 400}
+                    for i in range(compression.KEEP_RECENT_MESSAGES - 1)]
+        history.append({"role": "tool", "tool_call_id": "big", "content": result})
+        return history
+
+    def test_a_gigantic_newest_result_is_elided(self):
+        history = self._window_of("x" * 200_000)
+        out = compression.compress(history)
+        assert len(out[-1]["content"]) < compression.HARD_CAP_CHARS
+        assert "elided" in out[-1]["content"]
+
+    def test_it_lands_inside_the_aggregate_budget(self):
+        out = compression.compress(self._window_of("x" * 200_000))
+        assert len(out[-1]["content"]) <= compression.TOTAL_TOOL_BUDGET_CHARS, (
+            f"{len(out[-1]['content'])} characters against a "
+            f"{compression.TOTAL_TOOL_BUDGET_CHARS} budget")
+
+    def test_an_ordinary_oversized_recent_result_is_still_untouched(self):
+        # The pinned decision, re-checked from this side. A result big enough to
+        # matter is still protected; only a pathological one is capped.
+        ordinary = "x" * (compression.COMPRESS_THRESHOLD_CHARS * 2)
+        assert ordinary != "x" * compression.HARD_CAP_CHARS
+        history = self._window_of(ordinary)
+        out = compression.compress(history)
+        assert out[-1]["content"] == ordinary, (
+            "the hard cap reached down into the ordinary oversized range and "
+            "quietly narrowed the pinned window decision")
+
+    def test_the_cap_is_far_above_the_ordinary_threshold(self):
+        assert compression.HARD_CAP_CHARS >= compression.COMPRESS_THRESHOLD_CHARS * 10, (
+            "the hard cap is close enough to the ordinary threshold that the two "
+            "rules stop being distinguishable")
+
+    def test_the_transcript_still_has_every_byte(self):
+        # Eliding is for the model's window; `_history` keeps the original so the
+        # user can still read what the tool actually returned.
+        original = "x" * 200_000
+        out = compression.compress(self._window_of(original))
+        assert original not in [m["content"] for m in out], \
+            "the original is no longer the source of truth anywhere"
+
+    def test_a_just_under_cap_result_is_left_alone(self):
+        just_under = "x" * (compression.HARD_CAP_CHARS - 100)
+        out = compression.compress(self._window_of(just_under))
+        assert out[-1]["content"] == just_under
+
+    def test_a_huge_user_message_is_still_never_touched(self):
+        # The cap is about tool output. A long user message is the user talking.
+        message = {"role": "user", "content": "y" * 300_000}
+        history = [message] + [
+            {"role": "user", "content": f"q{i}"} for i in range(8)]
+        out = compression.compress(history)
+        assert out[0]["content"] == message["content"]
