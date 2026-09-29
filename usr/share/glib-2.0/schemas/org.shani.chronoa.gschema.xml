@@ -241,6 +241,11 @@
       <summary>Let Chronoa read local network interface state</summary>
       <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
     </key>
+    <key name="idle-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read how long since this machine was last used</summary>
+      <description>When true, Chronoa may read the X Screen Saver extension to learn how long since anyone last interacted with this machine, so it can avoid speaking to an empty room. Off by default: idle time reveals when you are at the machine and when you are not. X11 only; under Wayland it reports that the clock cannot be read rather than reporting zero, because zero would mean someone is present.</description>
+    </key>
     <key name="accessibility-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa list the applications the desktop exposes on its accessibility bus</summary>

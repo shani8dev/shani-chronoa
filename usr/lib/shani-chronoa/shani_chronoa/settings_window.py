@@ -86,6 +86,10 @@ SENSE_LABELS = {
         "Screen, brightness and monitors",
         "Report connected outputs, and set the backlight",
     ),
+    "idle": (
+        "Whether anyone is at this machine",
+        "How long since anyone last used the keyboard or mouse",
+    ),
     "accessibility": (
         "Which applications are open",
         "Which applications the desktop is showing, read over the "
@@ -230,7 +234,7 @@ SENSE_CATEGORIES = [
     ("The screen",
      "Connected monitors, what mode they are in, the backlight, and which "
      "applications the desktop is currently showing",
-     ["display", "accessibility"]),
+     ["display", "accessibility", "idle"]),
     ("Network and wireless",
      "Interfaces and resolvers, audio devices, Bluetooth, and motion from Wi-Fi signal",
      ["network", "audio", "bluetooth", "rfsense"]),

@@ -79,6 +79,9 @@ _SENSE_CONSENT_KEYS = {
     # Off by default: window titles and application names say what the
     # user is working on, which is personal on any reading.
     "accessibility": "accessibility-sense-enabled",
+    # Idle time draws the shape of someone's day: when they arrive,
+    # when they leave. Personal, and off until asked for.
+    "idle": "idle-sense-enabled",
     "rfsense": "rfsense-sense-enabled",
     "thermalgrid": "thermalgrid-sense-enabled",
     "hwmon": "hwmon-sense-enabled",
