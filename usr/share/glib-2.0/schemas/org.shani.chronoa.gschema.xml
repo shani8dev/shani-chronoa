@@ -276,6 +276,26 @@
       <summary>Let Chronoa mount and unmount filesystems</summary>
       <description>When true, Chronoa may mount or unmount a filesystem through the desktop disk service, so that service's own authorisation rules apply. Off by default: mounting runs code from a device that was not there a moment ago, and unmounting something in use can lose work. Listing what is mounted needs no permission.</description>
     </key>
+    <key name="bluetooth-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa switch the Bluetooth adapter</summary>
+      <description>Off: Chronoa can report which Bluetooth devices are paired and whether the adapter is on, but cannot turn it off. Separate from the bluetooth sense's own permission, because noticing a headset and being willing to have it disconnected mid-call are different agreements.</description>
+    </key>
+    <key name="mic-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa mute the microphone</summary>
+      <description>Off: Chronoa can report whether the microphone is muted but cannot change it. Output volume and mute are separate skills that need no such permission; this covers the input side, which is the more privacy-relevant of the two.</description>
+    </key>
+    <key name="screen-lock-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa lock this session</summary>
+      <description>Off: Chronoa cannot lock the screen. It has its own permission rather than sharing input control, because it does not act on the interface - it ends the current session's access to the machine, and a person mid-sentence loses the floor.</description>
+    </key>
+    <key name="trash-empty-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa empty the trash</summary>
+      <description>Off: Chronoa can list what is in the trash but cannot empty it. Not the same permission as deleting files - everything in the trash was already removed from where it was and is recoverable, and emptying it is the step that makes it unrecoverable.</description>
+    </key>
     <key name="service-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa change system services</summary>
@@ -290,6 +310,26 @@
       <default>true</default>
       <summary>Let Chronoa read the USB devices attached to this machine</summary>
       <description>Reads the USB bus for attached devices, with their class, vendor, product and negotiated link speed. On by default like the other bus and disk senses. Covers what is plugged into ports, which the PCI inventory does not.</description>
+    </key>
+    <key name="updates-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa check for waiting package updates</summary>
+      <description>Reports how many updates are waiting, and how old the package database the comparison was made against is. On by default: it reads the local package database and never leaves the machine.</description>
+    </key>
+    <key name="faults-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read recent system errors</summary>
+      <description>Reports errors and warnings the system journal has recorded recently, and states how far back the journal reaches. On by default: an empty error list from a machine whose journal could not be read is the failure this is designed to avoid, so it needs to be running for that distinction to be available.</description>
+    </key>
+    <key name="snapshots-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa list rollback points</summary>
+      <description>Lists btrfs snapshots and which subvolume is currently booted, which is what makes a rollback possible. Read-only - it never creates or deletes one. On by default: it reads filesystem metadata only.</description>
+    </key>
+    <key name="sessions-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa see who else is on this machine</summary>
+      <description>Reports who is logged in and which processes run as root outside the init system's own service tree. Off by default, and the only machine-state sense that is: this reports other people's presence on the machine rather than the machine's own hardware, so it waits to be asked for.</description>
     </key>
     <key name="resources-sense-enabled" type="b">
       <default>true</default>

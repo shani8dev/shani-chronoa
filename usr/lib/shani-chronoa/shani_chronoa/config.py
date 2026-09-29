@@ -93,6 +93,10 @@ _SENSE_CONSENT_KEYS = {
     "timebase": "timebase-sense-enabled",
     "usb": "usb-sense-enabled",
     "resources": "resources-sense-enabled",
+    "updates": "updates-sense-enabled",
+    "faults": "faults-sense-enabled",
+    "sessions": "sessions-sense-enabled",
+    "snapshots": "snapshots-sense-enabled",
 }
 
 # Retired consent keys, still honoured.
@@ -145,6 +149,17 @@ _SENSE_DEFAULT_ENABLED = frozenset({
     # own state, and `services` reports only failures rather than the whole
     # service list, so it is not the noise a default-on sense should avoid.
     "filesystems", "services", "timebase", "usb", "resources",
+    # Default-on with the rest of the machine's own state: `updates` reads the
+    # local package database, `faults` reads the local journal, and `snapshots`
+    # reads the filesystem layout. None of them leaves the machine.
+    "updates", "faults", "snapshots",
+    # `sessions` defaults OFF deliberately, and is the only machine-state sense
+    # that does. It reports who *else* is on this machine and what is running as
+    # root outside the service tree - that is other people's presence, not this
+    # machine's own hardware, and it belongs to the "reads the user's world" side
+    # of the line rather than the "reports a disk-free reading" side.
+    #
+    # ("sessions" is intentionally absent from this frozenset.)
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here

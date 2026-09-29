@@ -124,6 +124,12 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "disk_usage": ("System", "Report filesystem and directory space use"),
     "system_info": ("System", "Describe this machine"),
     "scan_network": ("System", "Find other devices on the local network"),
+    "toggle_bluetooth": ("Devices", "Turn the Bluetooth adapter on or off"),
+    "set_mic_mute": ("Sound", "Mute or unmute the microphone input"),
+    "set_keyboard_layout": ("Pointer and keyboard", "Change the keyboard layout"),
+    "lock_screen": ("Power and screen", "Lock this session"),
+    "empty_trash": ("Files", "Permanently empty the desktop trash"),
+    "extract_archive": ("Files", "Unpack a tar or zip archive"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -135,6 +141,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Time and reminders",
     "Everyday tools",
     "Sound",
+    "Devices",
     "Power and screen",
     "Clipboard",
     "Screen",
@@ -166,6 +173,10 @@ GATE_NAMES: dict[str, str] = {
     "service-control-enabled": "Let Chronoa change system services",
     "bulk-edit-enabled": "Let Chronoa edit many files at once",
     "mount-control-enabled": "Let Chronoa mount disks",
+    "bluetooth-control-enabled": "Let Chronoa switch Bluetooth",
+    "mic-control-enabled": "Let Chronoa mute the microphone",
+    "screen-lock-enabled": "Let Chronoa lock this session",
+    "trash-empty-enabled": "Let Chronoa empty the trash",
 }
 
 

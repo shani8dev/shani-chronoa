@@ -555,7 +555,7 @@ The repo's own `test_sense_scheduler.py` handles this for child processes.
 
 ## Machine-state senses (added 2026-09-28, merged 2026-09-29)
 
-Twenty-eight senses read the machine rather than the user's world. The
+Thirty-two senses read the machine rather than the user's world. The
 machine-state set added that day was `privilege` (who holds a dangerous
 capability), `display`, `network`, `bluetooth`, `rfsense` (WiFi RSSI spread),
 `thermalgrid` (MLX90640/AMG8833 over I2C), `hwmon` (fan/temperature/voltage/
@@ -578,6 +578,17 @@ of something without `cpu` or `memory` looking busy). On the dev box `usb`
 found the integrated camera and the Intel wireless device, which no other sense
 reported, and `resources` found a `zypak-sandbox` zombie and 810 MiB of swap in
 use — all invisible to every pre-existing sense.
+
+Four more arrived 2026-09-29: `updates` (pending package updates, and the age
+of the database the count came from - a stale database makes the number a floor,
+not an answer), `faults` (recent journal errors, grouped by the unit named in
+the message rather than by the emitting pid, because every unit systemd starts
+logs as `systemd[1]` and grouping by pid reported a count of pids as a count of
+things that broke), `snapshots` (btrfs subvolumes and which one is booted - the
+rollback safety net, which nothing could previously report existed) and
+`sessions`. `sessions` defaults **off** and is the only machine-state sense that
+does: it reports who *else* is on the machine, which is other people's presence
+rather than this machine's own hardware.
 
 **`filesystem` vs `filesystems` are not duplicates and must not be merged.**
 `filesystem` reads one text file the user names, confined to their home
@@ -649,8 +660,7 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1351 passed, 6 skipped, as
-of `163ced2`), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
+**Verification status:** unit suite green on Ubuntu (1353 passed, 6 skipped), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
 testbed `9be7139`, packaging at `shani-pkgbuilds` `031337f` =
 `shani-chronoa 0.1.0-6`)
 — including `privilege-uses-package-manager` PASS with 18 holders correctly

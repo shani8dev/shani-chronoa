@@ -51,6 +51,10 @@ CONTROLLED = {
     "service-control-enabled",
     "bulk-edit-enabled",
     "mount-control-enabled",
+    "bluetooth-control-enabled",
+    "mic-control-enabled",
+    "screen-lock-enabled",
+    "trash-empty-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",

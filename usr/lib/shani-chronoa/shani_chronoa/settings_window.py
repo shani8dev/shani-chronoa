@@ -159,6 +159,22 @@ SENSE_LABELS = {
         "Running out of things",
         "Zombies, swap in use, and file-descriptor pressure - none look busy",
     ),
+    "faults": (
+        "Recent errors",
+        "What the system journal has complained about recently",
+    ),
+    "updates": (
+        "Waiting updates",
+        "Updates waiting, and how old the database behind that count is",
+    ),
+    "snapshots": (
+        "Rollback points",
+        "Btrfs rollback points and the subvolume currently booted",
+    ),
+    "sessions": (
+        "Who is on this machine",
+        "Logged-in sessions, and what runs as root outside the service tree",
+    ),
     "network": (
         "Network and DNS",
         "Every interface, its link speed, whether it is wireless, and the resolvers",
@@ -191,8 +207,9 @@ SENSE_CATEGORIES = [
      "Files, folders and the web - what makes it able to act rather than only answer",
      ["filesystem", "web"]),
     ("Is anything broken",
-     "Which system services systemd has marked as failed, and why",
-     ["services"]),
+     "Failed services, errors the system has logged, and updates that are "
+     "waiting - the three ways a machine says it needs attention",
+     ["services", "faults", "updates"]),
     ("Plugged in and running out",
      "What is attached by USB, and the ways a machine runs out of something "
      "without ever looking busy",
@@ -206,14 +223,15 @@ SENSE_CATEGORIES = [
     ("Disks and room",
      "What is mounted, how much of it is left, and whether the clock can be "
      "trusted - so a reminder means what it says",
-     ["filesystems", "timebase"]),
+     ["filesystems", "timebase", "snapshots"]),
     ("The machine itself",
      "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
      ["cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
-     "administrator, and what is already using your camera",
-     ["security", "devices", "privilege", "capture"]),
+     "administrator, what is already using your camera, and who else is "
+     "currently on this machine",
+     ["security", "devices", "privilege", "capture", "sessions"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),
@@ -513,6 +531,29 @@ class SettingsWindow(Gtk.Window):
              "unmount anything. Mounting runs code from a device that was not "
              "there a moment ago.",
              "manage_mount refuses while this is off"),
+            ("Let Chronoa switch Bluetooth", "bluetooth-control-enabled",
+             "Off: Chronoa can report which Bluetooth devices are paired and "
+             "whether the adapter is on, but cannot turn it off. Separate from "
+             "the bluetooth sense's own permission, because noticing a headset "
+             "and agreeing to have it disconnected mid-call are different "
+             "things.",
+             "toggle_bluetooth refuses to switch while this is off"),
+            ("Let Chronoa mute the microphone", "mic-control-enabled",
+             "Off: Chronoa can report whether the microphone is muted but "
+             "cannot change it. Output volume and mute need no such permission; "
+             "this covers the input side, which is the more privacy-relevant of "
+             "the two.",
+             "set_mic_mute refuses while this is off"),
+            ("Let Chronoa lock this session", "screen-lock-enabled",
+             "Off: Chronoa cannot lock the screen. Its own permission rather "
+             "than sharing input control, because it does not act on the "
+             "interface - it ends the session's access to the machine.",
+             "lock_screen refuses while this is off"),
+            ("Let Chronoa empty the trash", "trash-empty-enabled",
+             "Off: Chronoa can list what is in the trash but cannot empty it. "
+             "Not the same permission as deleting files: the trash is already "
+             "recoverable, and emptying it is what makes it not.",
+             "empty_trash refuses while this is off"),
             ("Let Chronoa change system services", "service-control-enabled",
              "Off: Chronoa can list services and read their logs but cannot "
              "start, stop or restart one. These are root-owned units, and the "

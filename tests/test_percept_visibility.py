@@ -125,3 +125,85 @@ class TestTheAnswerNamesItsSource:
         out = _answer()
         assert out, "a corrupt snapshot produced no answer at all"
         assert "no running app" in out or "Nothing is being perceived" in out
+
+
+class TestConcurrentPublishesStayValid:
+    """Two threads publishing at once must not corrupt `live.json`.
+
+    Found by review, not by the single-threaded tests: `_publish_live` built the
+    snapshot under `_LOCK` and then wrote the file *outside* it, naming the temp
+    file with `os.getpid()` - which is the same for every thread in a process. So
+    the GTK main thread and the ambient scheduler thread could write the same
+    temp file concurrently, and the loser's bytes got renamed into place. The
+    resulting file was not valid JSON.
+
+    The nastiness is what that failure reports as. `list_percepts` treats
+    unparseable JSON as "no running app is publishing", so a corruption caused by
+    two threads racing announces itself as the *absence* of an app - a
+    confidently wrong answer rather than an error.
+
+    This is probabilistic because the bug is a race. It reproduced at roughly
+    1 in 60 rounds before the fix and 0 in 400 after, so the round count here is
+    set well above the rate that used to show it up.
+    """
+
+    def test_no_round_produces_unparseable_json(self, tmp_path, live_path):
+        import threading
+
+        from shani_chronoa.senses.context import Percept
+
+        rounds, threads_per_round = 60, 8
+        corrupted = []
+
+        for attempt in range(rounds):
+            store = PerceptStore(durable_path=tmp_path / "m.jsonl",
+                                 live_path=live_path)
+            live_path.unlink(missing_ok=True)
+
+            def publish(n):
+                for j in range(12):
+                    store.add(Percept(
+                        sense="cpu", kind="state", created_at=time.time(),
+                        content=f"{n}-{j} " + "x" * 400,
+                        sensitivity="public", ttl_seconds=60.0))
+
+            workers = [threading.Thread(target=publish, args=(n,))
+                       for n in range(threads_per_round)]
+            for w in workers:
+                w.start()
+            for w in workers:
+                w.join()
+
+            try:
+                json.loads(live_path.read_text())
+            except Exception as exc:  # noqa: BLE001 - the point is any failure
+                corrupted.append((attempt, type(exc).__name__))
+
+        assert not corrupted, (
+            f"live.json was not valid JSON in {len(corrupted)} of {rounds} "
+            f"concurrent rounds: {corrupted[:5]}")
+
+    def test_no_temp_file_is_orphaned(self, tmp_path, live_path):
+        """A publisher that is interrupted must not leave debris for the next one."""
+        import threading
+
+        from shani_chronoa.senses.context import Percept
+
+        store = PerceptStore(durable_path=tmp_path / "m.jsonl", live_path=live_path)
+
+        def publish(n):
+            for j in range(20):
+                store.add(Percept(sense="cpu", kind="state",
+                                  created_at=time.time(),
+                                  content=f"{n}-{j} " + "y" * 600,
+                                  sensitivity="public", ttl_seconds=60.0))
+
+        workers = [threading.Thread(target=publish, args=(n,)) for n in range(8)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+
+        leftovers = [p.name for p in live_path.parent.iterdir()
+                     if p.name.endswith(".tmp")]
+        assert not leftovers, f"orphaned temp files: {leftovers}"

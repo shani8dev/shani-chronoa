@@ -75,6 +75,14 @@ _IMPL = {
     "control_service": "shani_chronoa.skills.control_service",
     "find_and_replace": "shani_chronoa.skills.find_and_replace",
     "manage_mount": "shani_chronoa.skills.manage_mount",
+    "toggle_bluetooth": "shani_chronoa.skills.toggle_bluetooth",
+    "set_mic_mute": "shani_chronoa.skills.set_mic_mute",
+    "lock_screen": "shani_chronoa.skills.lock_screen",
+    "empty_trash": "shani_chronoa.skills.empty_trash",
+    # Reuses `input-control-enabled` rather than minting a layout key: the layout
+    # decides what every later keystroke produces, which is the same argument
+    # `press_key` gives for sharing that gate.
+    "set_keyboard_layout": "shani_chronoa.skills.set_keyboard_layout",
 }
 
 
