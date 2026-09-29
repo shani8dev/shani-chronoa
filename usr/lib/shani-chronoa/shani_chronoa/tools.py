@@ -32,7 +32,8 @@ import shlex
 import sys
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
-                              permissions, planmode, verification)
+                              guardrail, permissions, planmode,
+                              verification)
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -52,6 +53,7 @@ TOOLS, _HANDLER_FNS = discover_skills()
 #: short explicit set rather than anything derived - a rule that decided this
 #: automatically would widen the exemption without anyone reviewing it.
 _LOCAL_TOOLS = frozenset({"ask_user"})
+
 
 # Module-level sandbox executor singleton
 _SANDBOX = SandboxExecutor()
@@ -168,6 +170,14 @@ def _resource_for(name: str, arguments: dict):
     return str(value) if value else None
 
 
+def _schema_for(name: str) -> "dict | None":
+    """The declared parameter schema for a tool, or None if it declares none."""
+    for entry in TOOLS:
+        function = entry.get("function") or {}
+        if function.get("name") == name:
+            return function.get("parameters") or None
+    return None
+
 def _consent_key_for(name: str) -> "str | None":
     """The consent key gating this tool, or None if it is not gated.
 
@@ -233,6 +243,14 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     # from here would bypass the consent key the user has switched off, and the
     # whole point of those keys is that a skill cannot talk its way past them.
     # Grants are consulted by each skill's own gate instead.
+    # Before any policy question is even asked. A malformed call is not a
+    # permission problem, and letting one through means the failure surfaces as
+    # a traceback inside a subprocess - which tells the model nothing it can
+    # act on, where the reason here names the argument and what was expected.
+    malformed = guardrail.check(name, arguments, _schema_for(name) or {})
+    if malformed:
+        return DispatchResult(malformed, verification.Verdict.UNVERIFIED, False)
+
     scoped_resource = _resource_for(name, arguments)
     if scoped_resource is not None:
         allowed, why = permissions.permits(name, scoped_resource)

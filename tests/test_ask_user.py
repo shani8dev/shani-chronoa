@@ -129,8 +129,24 @@ class TestMalformedCalls:
         assert "at least 2" in out
 
     def test_no_question_is_refused(self):
+        """The skill refuses a missing question on its own.
+
+        Called in-process, deliberately. Through `execute_tool` this is now
+        caught earlier by the guardrail, which is the better place for it - but
+        "the dispatcher noticed" must not quietly become "the skill stopped
+        checking". A skill that relies on being called correctly is one schema
+        edit away from crashing, and the gate has to be the skill's own.
+        """
+        from shani_chronoa.skills.ask_user import _run
+        assert "no question" in _run({"options": ["a", "b"]})
+
+    def test_the_dispatcher_also_catches_it_before_dispatch(self):
+        """Belt and braces, and the outer layer is the one that reports first."""
         out = execute_tool("ask_user", {"options": ["a", "b"]})
-        assert "no question" in out
+        assert "required argument 'question'" in out
+        assert "It accepts: options, question." in out, (
+            "the refusal should tell the model what the tool does accept"
+        )
 
     def test_empty_options_are_refused(self):
         out = execute_tool("ask_user", {"question": "Which?", "options": []})

@@ -1,0 +1,128 @@
+"""A check that runs between the model deciding and the tool running.
+
+Everything else in the dispatch path answers a question about *authority*: is
+this tool allowed, is this resource permitted, is the consent key open. Those
+are all policy lookups and all of them are right.
+
+This is the other question - is the call even well-formed - answered the same
+way every time with no model involved. A prompt would be a promise the model may
+or may not keep, and when it breaks nothing observable has failed: the tool runs
+with `dry_run` silently missing and does something adjacent to what was asked.
+The plan-mode block already states the reasoning; this is the same one applied
+to shape rather than permission.
+
+A second half of this was written and removed: a tripwire that stopped a tool
+being called identically three times running. It seemed well-motivated - a model
+that has misunderstood a tool does not try something else, it retries - and
+measuring it showed it was not worth having. `MAX_TOOL_ROUNDS = 4` already bounds
+the assistant's own loop, so inside a turn it saved nothing at all. Its only
+remaining scope was the MCP host and the trigger rules, which is exactly where
+repeating a call is legitimate work, and there it refused a request for five
+screenshots in a row by failing the fourth. It also broke thirteen unrelated
+tests before that was noticed. The tests below record the absence on purpose.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
+
+from shani_chronoa import guardrail  # noqa: E402
+from shani_chronoa.tools import execute_tool_outcome  # noqa: E402
+
+SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "recursive": {"type": "boolean"},
+        "count": {"type": "integer"},
+        "mode": {"type": ["string", "null"]},
+    },
+    "required": ["path"],
+}
+
+
+class TestMalformedCallsAreCaught:
+    def test_a_wrong_type_is_rejected(self):
+        reason = guardrail.check("read_text_file", {"path": 12345}, SCHEMA)
+        assert reason is not None
+        assert "path" in reason
+
+    def test_the_reason_names_the_argument_and_the_expectation(self):
+        """A traceback in a subprocess tells the model nothing it can use."""
+        reason = guardrail.check("read_text_file", {"path": 12345}, SCHEMA)
+        assert "wants string" in reason
+        assert "int" in reason
+
+    def test_a_missing_required_argument_is_rejected(self):
+        reason = guardrail.check("read_text_file", {}, SCHEMA)
+        assert "required" in reason
+        assert "path" in reason
+
+    def test_a_boolean_is_not_an_integer(self):
+        """bool subclasses int, so a declared "integer" would accept True."""
+        reason = guardrail.check("x", {"path": "/a", "count": True}, SCHEMA)
+        assert reason is not None
+        assert "boolean" in reason
+
+    def test_a_union_type_allows_either(self):
+        """`["string", "null"]` is legitimate and appears in real schemas."""
+        assert guardrail.check("x", {"path": "/a", "mode": None}, SCHEMA) is None
+        assert guardrail.check("x", {"path": "/a", "mode": "fast"}, SCHEMA) is None
+
+
+class TestWhatIsNotRejected:
+    def test_a_well_formed_call_passes(self):
+        assert guardrail.check("read_text_file",
+                               {"path": "/tmp/a", "recursive": True}, SCHEMA) is None
+
+    def test_an_undeclared_argument_is_allowed_by_default(self):
+        """JSON Schema allows extras unless told otherwise.
+
+        A skill that ignores a field it did not declare is not thereby unsafe,
+        and refusing would break calls the skill handles perfectly well.
+        """
+        assert guardrail.check("x", {"path": "/a", "surprise": 1}, SCHEMA) is None
+
+    def test_extras_are_refused_only_when_the_schema_says_so(self):
+        strict = {**SCHEMA, "additionalProperties": False}
+        reason = guardrail.check("x", {"path": "/a", "surprise": 1}, strict)
+        assert reason is not None and "surprise" in reason
+
+    def test_no_schema_means_nothing_to_check(self):
+        assert guardrail.check("x", {"anything": object()}, {}) is None
+        assert guardrail.check("x", {"anything": object()}, None) is None
+
+    def test_an_unknown_type_is_left_unconstrained(self):
+        """Guessing at a schema we do not understand would reject good calls."""
+        odd = {"type": "object", "properties": {"x": {"type": "wat"}},
+               "required": []}
+        assert guardrail.check("x", {"x": 5}, odd) is None
+
+
+class TestThroughTheDispatcher:
+    def test_a_malformed_call_never_reaches_the_skill(self):
+        out = execute_tool_outcome("read_text_file", {"path": 12345}).text
+        assert "wrong type" in out
+
+    def test_a_normal_call_still_works(self):
+        assert "wrong type" not in execute_tool_outcome("get_datetime", {}).text
+
+    def test_repeating_the_same_call_is_not_refused(self):
+        """A host doing repeated identical work must not be cut off.
+
+        There was a tripwire here that stopped the fourth identical call. It is
+        gone, and this test is the reason: `MAX_TOOL_ROUNDS = 4` already bounds
+        the assistant's own loop, so within a turn it saved nothing, while
+        across the MCP host and trigger rules it refused legitimate work - a
+        request for five screenshots in a row failed on the fourth. It broke
+        thirteen unrelated tests before anyone noticed, which is also the point.
+        """
+        outcomes = [execute_tool_outcome("get_datetime", {}).text
+                    for _ in range(5)]
+        assert not any("Stopping" in o for o in outcomes)
