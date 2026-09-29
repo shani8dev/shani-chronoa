@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
-from shani_chronoa import pipewire
+from shani_chronoa import pipewire, sessions
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
@@ -230,6 +230,7 @@ class ChronoaApplication(Gtk.Application):
             self.llm,
             percept_store=self.percept_store,
             context_builder=self.percept_context,
+            session_path=sessions.TRANSCRIPT,
         )
 
         # Initialize TTS

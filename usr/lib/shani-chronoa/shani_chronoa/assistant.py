@@ -25,9 +25,11 @@ byte-for-byte what it was before the senses layer existed.
 
 import json
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 from shani_chronoa.llm import OllamaLLM
+from shani_chronoa import sessions
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
 
@@ -71,6 +73,7 @@ class Assistant:
         llm: OllamaLLM,
         percept_store: "Optional[PerceptStore]" = None,
         context_builder: Optional[ContextBuilder] = None,
+        session_path: "Optional[Path]" = None,
     ) -> None:
         self.llm = llm
         self._history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -80,10 +83,41 @@ class Assistant:
         # durable file. Renaming it later would silently break both.
         self.percept_store = percept_store
         self.context_builder = context_builder if context_builder is not None else ContextBuilder()
+        # Restore the transcript before the first request, so a restart is a
+        # pause rather than an amnesia. `_saved` is the system prompt this
+        # Assistant starts from, so reset() returns to exactly that.
+        # None means *no* transcript, not "the default one". A default here
+        # would let any Assistant built without the argument - a test, a script,
+        # an embedder - read and overwrite the real user's conversation, which
+        # is the first version's actual behaviour and nobody would have chosen it.
+        self._session_path = session_path
+        self._saved = self._history[:1]
+        restored = ([m for m in sessions.load(session_path)
+                     if m.get("role") != "system"] if session_path else [])
+        if restored:
+            self._history = self._saved + restored
+            logger.info("Restored %d message(s) from the saved conversation", len(restored))
 
     def reset(self) -> None:
-        """Clear conversation history back to just the system prompt."""
-        self._history = self._history[:1]
+        """Clear conversation history back to just the system prompt.
+
+        Also removes the saved transcript. Leaving it would mean the next
+        process to start reads back a conversation the user just discarded.
+        """
+        self._history = self._saved[:]
+        if self._session_path is not None:
+            sessions.clear(self._session_path)
+
+    def _record(self, message: dict) -> None:
+        """Add a message to the conversation and to the saved transcript.
+
+        Every history append goes through here, so a crash cannot leave a gap:
+        the transcript is written as the turn happens, which is the only moment
+        worth having it.
+        """
+        self._history.append(message)
+        if self._session_path is not None and message.get("role") != "system":
+            sessions.append(message, self._session_path)
 
     def active_percepts(self) -> "list[Percept]":
         """Every percept still within its lifetime, or [] if sensing is off.
@@ -146,12 +180,12 @@ class Assistant:
         mid-turn - is reflected in the very next request without being
         recorded in the conversation.
         """
-        self._history.append({"role": "user", "content": text})
+        self._record({"role": "user", "content": text})
         self._trim_history()
 
         for _ in range(MAX_TOOL_ROUNDS):
             message = await self.llm.chat_message(self.build_messages(), tools=TOOLS)
-            self._history.append(message)
+            self._record(message)
 
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
@@ -180,9 +214,9 @@ class Assistant:
                 # cloud_llm.py, which can't build a valid tool_result block
                 # without it. Empty string for backends (e.g. Ollama) that
                 # don't emit an id on their tool_calls at all.
-                self._history.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
+                self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
 
         # Ran out of tool rounds - ask once more for a final plain answer.
         message = await self.llm.chat_message(self.build_messages(), tools=None)
-        self._history.append(message)
+        self._record(message)
         return message.get("content", "")
