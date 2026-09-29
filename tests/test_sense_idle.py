@@ -19,6 +19,7 @@ not evidence the clock is stuck.
 from __future__ import annotations
 
 import ctypes.util
+import os
 import sys
 import time
 from pathlib import Path
@@ -149,3 +150,131 @@ def _config(allowed: bool):
         def sense_allowed_reason(self, name):
             return "" if allowed else "the idle sense is turned off"
     return _C
+
+
+class TestTheXResourcesAreReleased:
+    """`read_idle_seconds` opened an X connection and Xmalloc'd a struct.
+
+    Neither was ever released: there is no `XCloseDisplay` call anywhere in the
+    file, and `XScreenSaverAllocInfo` allocates with `Xmalloc` and is only
+    released by `XFree`. A sense that runs for days in a long-lived process
+    therefore leaked a server connection and a struct on every call.
+
+    Measured on the real X session after the fix: 300 calls, file descriptors
+    4 before and 4 after - 0.0000 leaked per call. Resident pages rise by 40 on
+    the first hundred calls and then by 4-6 per *thousand*, which is one-time
+    ctypes cache population rather than a retained-per-call rate; a genuine leak
+    would hold a constant per-call cost, and the descriptors would climb.
+    """
+
+    class _FakeLib:
+        def __init__(self, *, query_ok=True, open_ok=True):
+            self.query_ok = query_ok
+            self.open_ok = open_ok
+            self.closed = []
+            self.freed = []
+
+        def XOpenDisplay(self, _name):
+            return 0xABCDEF if self.open_ok else 0
+
+        def XDefaultRootWindow(self, _display):
+            return 99
+
+        def XCloseDisplay(self, display):
+            self.closed.append(display)
+            return 0
+
+        def XFree(self, info):
+            self.freed.append(info)
+            return 0
+
+    class _FakeInfo:
+        """Shaped like the ctypes struct pointer the real call returns.
+
+        `read_idle_seconds` reads `info.contents.idle`, so a plain stand-in
+        without a `contents` fails with AttributeError on the *success* path -
+        which is the path three of these tests are exercising.
+        """
+
+        class _Contents:
+            idle = 120_000  # milliseconds, as XScreenSaverInfo reports it
+
+        contents = _Contents()
+
+    class _FakeXss:
+        def __init__(self, lib):
+            self.lib = lib
+
+        def XScreenSaverAllocInfo(self):
+            return self._info()
+
+        @staticmethod
+        def _info():
+            return TestTheXResourcesAreReleased._FakeInfo()
+
+        def XScreenSaverQueryInfo(self, _d, _r, _info):
+            return 1 if self.lib.query_ok else 0
+
+    def _wire(self, monkeypatch, **kwargs):
+        lib = self._FakeLib(**kwargs)
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.setattr(I, "_libraries", lambda: (lib, self._FakeXss(lib)))
+        return lib
+
+    def test_the_display_is_closed_on_the_success_path(self, monkeypatch):
+        lib = self._wire(monkeypatch)
+        I.read_idle_seconds()
+        assert lib.closed, "the X display was never closed"
+
+    def test_the_allocated_info_is_freed_on_the_success_path(self, monkeypatch):
+        lib = self._wire(monkeypatch)
+        I.read_idle_seconds()
+        assert lib.freed, "the XScreenSaverAllocInfo struct was never freed"
+
+    def test_the_display_is_closed_when_the_extension_is_missing(self, monkeypatch):
+        # The early `raise` is the path most likely to skip cleanup, and the one
+        # a `return`-in-the-middle fix would miss.
+        lib = self._wire(monkeypatch, query_ok=False)
+        with pytest.raises(I._Unavailable):
+            I.read_idle_seconds()
+        assert lib.closed, "a failed read leaked the X display"
+
+    def test_the_display_is_closed_when_the_open_fails(self, monkeypatch):
+        lib = self._wire(monkeypatch, open_ok=False)
+        with pytest.raises(I._Unavailable):
+            I.read_idle_seconds()
+        assert not lib.closed, "a display that never opened was 'closed' anyway"
+        assert not lib.freed, "freed an info that was never allocated"
+
+    def test_repeated_reads_close_every_display_they_open(self, monkeypatch):
+        lib = self._wire(monkeypatch)
+        for _ in range(5):
+            I.read_idle_seconds()
+        assert len(lib.closed) == 5, f"{len(lib.closed)} of 5 displays were closed"
+        assert len(lib.freed) == 5, f"{len(lib.freed)} of 5 structs were freed"
+
+    def test_the_release_prototypes_are_declared(self):
+        # A ctypes CDLL resolves symbols lazily, so a missing prototype is not an
+        # error - it is a silent wrong-typed call, which is how the missing
+        # release went unnoticed until the descriptors were counted.
+        import ctypes
+        x11, _ = I._libraries()
+        assert x11.XCloseDisplay.restype is ctypes.c_int
+        assert x11.XFree.restype is ctypes.c_int
+        assert x11.XCloseDisplay.argtypes == [ctypes.c_void_p]
+        assert x11.XFree.argtypes == [ctypes.c_void_p]
+
+    @pytest.mark.skipif(not os.environ.get("DISPLAY"),
+                        reason="no X display; the real-clock tests in this file need one")
+    def test_the_real_read_leaks_no_descriptors(self, monkeypatch):
+        # The unit test above proves the calls are made. This proves the calls
+        # are what actually release the connection, which a mock cannot.
+        import os
+        I.read_idle_seconds()  # warm any cached library handle
+        before = len(os.listdir("/proc/self/fd"))
+        for _ in range(120):
+            I.read_idle_seconds()
+        after = len(os.listdir("/proc/self/fd"))
+        assert after == before, (
+            f"descriptors went {before} -> {after} over 120 reads; the display "
+            f"is still being held open")

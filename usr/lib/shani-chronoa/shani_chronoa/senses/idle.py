@@ -100,9 +100,16 @@ def _libraries():
     x11.XDefaultRootWindow.restype = ctypes.c_ulong
     x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
     xss.XScreenSaverAllocInfo.restype = ctypes.POINTER(_ScreenSaverInfo)
+    xss.XScreenSaverAllocInfo.argtypes = []
     xss.XScreenSaverQueryInfo.argtypes = [
         ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(_ScreenSaverInfo),
     ]
+    # These release the two resources `read_idle_seconds` acquires below, and
+    # nothing else in the codebase calls either.
+    x11.XCloseDisplay.restype = ctypes.c_int
+    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    x11.XFree.restype = ctypes.c_int
+    x11.XFree.argtypes = [ctypes.c_void_p]
     return x11, xss
 
 
@@ -118,6 +125,7 @@ def read_idle_seconds() -> float:
         raise _Unavailable(
             "no X display is available, so there is no idle clock to read"
         )
+    x11 = xss = display = info = None
     try:
         x11, xss = _libraries()
         display = x11.XOpenDisplay(None)
@@ -137,6 +145,11 @@ def read_idle_seconds() -> float:
         # systems. Same meaning, so it is translated rather than allowed to
         # escape as something the caller has never heard of.
         raise _Unavailable(f"the idle clock could not be opened ({exc})") from exc
+    finally:
+        if xss is not None and info:
+            x11.XFree(info)
+        if x11 is not None and display:
+            x11.XCloseDisplay(display)
 
 
 def _describe(seconds: float) -> str:
