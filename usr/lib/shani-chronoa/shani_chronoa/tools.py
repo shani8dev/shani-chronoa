@@ -31,7 +31,7 @@ import logging
 import shlex
 import sys
 
-from shani_chronoa import argfile, verification
+from shani_chronoa import argfile, planmode, verification
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -135,6 +135,13 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         config = _get_sandbox_config(name)
         handler_module = handler.__module__
         handler_func = handler.__name__
+
+    # Plan mode is checked here, in the dispatch path, rather than asked for in
+    # the system prompt. A prompt is a promise the model may or may not keep;
+    # this is a fact, which is the only reason the mode is worth having.
+    refusal = planmode.blocked_reason(name)
+    if refusal:
+        return refusal
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__

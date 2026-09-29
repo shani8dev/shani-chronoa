@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
-from shani_chronoa import pipewire, sessions
+from shani_chronoa import pipewire, planmode, sessions
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
@@ -269,6 +269,14 @@ class ChronoaApplication(Gtk.Application):
         privacy_action.connect("activate", self._toggle_privacy)
         self.add_action(privacy_action)
 
+        # Plan mode: the assistant may read the machine but not change it, so
+        # "what would you do about X" can be answered without granting the
+        # permission to do it. Reachable as an action because a mode the user
+        # cannot see is worse than not having one.
+        plan_action = Gio.SimpleAction.new("toggle-plan-mode", None)
+        plan_action.connect("activate", self._toggle_plan_mode)
+        self.add_action(plan_action)
+
         # Wake-word (hands-free) toggle action - no settings UI exists yet
         # to flip this, so it's reachable via a keyboard accelerator too,
         # same gap as toggle-privacy already had.
@@ -367,6 +375,21 @@ class ChronoaApplication(Gtk.Application):
         self.player.stop()
         if self.window and self.window.get_state() is AssistantState.SPEAKING:
             self.window.set_state(AssistantState.IDLE)
+
+    def _toggle_plan_mode(self, _action: Gio.SimpleAction, _param: object) -> None:
+        """Enter or leave plan mode, and say which in the status bar.
+
+        The status line is not decoration. A mode that removes capabilities
+        without saying so would look like a bug the first time the assistant
+        declined something the user had explicitly permitted.
+        """
+        now_on = planmode.set_enabled(not planmode.is_enabled())
+        if self.window:
+            if now_on:
+                self.window.set_status(
+                    "Plan mode: ON - Chronoa can read but not change anything")
+            else:
+                self.window.set_status(self._llm_status_text())
 
     def _toggle_privacy(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle privacy mode."""
