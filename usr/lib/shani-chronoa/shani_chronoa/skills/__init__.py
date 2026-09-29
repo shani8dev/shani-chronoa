@@ -34,6 +34,18 @@ from typing import Callable, NamedTuple
 
 logger = logging.getLogger(__name__)
 
+#: Module-level marker meaning "this file lives in the skills package but is
+#: deliberately not a skill", so `discover_skills()` skips it without
+#: complaining. It exists because `scan_archive` - a zip-slip guard for a
+#: skill-download feature this project does not have - has no `SKILLS` list, and
+#: so logged `Skipping 'builtin:scan_archive': SKILLS must be a list of Skill
+#: entries` on *every* startup of the app and the MCP server. A warning that
+#: always fires is a warning nobody reads, and the genuine malformed-skill
+#: warnings it drowns out are the ones worth seeing.
+#:
+#: Honoured for built-ins only. See `discover_skills()`.
+NOT_A_SKILL = "_CHRONOA_NOT_A_SKILL"
+
 
 class Skill(NamedTuple):
     name: str
@@ -159,12 +171,25 @@ def discover_skills() -> "tuple[list, dict]":
         except Exception as e:
             logger.error(f"Failed to load built-in skill '{path.stem}': {e}")
             continue
+        if getattr(module, NOT_A_SKILL, False):
+            logger.debug("'%s' declares itself a non-skill; not registered", path.stem)
+            continue
         _register(module, f"builtin:{path.stem}", tools, handlers)
 
     if _USER_SKILLS_DIR.is_dir():
         for path in sorted(_USER_SKILLS_DIR.glob("*.py")):
             module = _load_module_from_path(path)
-            if module:
-                _register(module, f"user:{path.name}", tools, handlers)
+            if not module:
+                continue
+            if getattr(module, NOT_A_SKILL, False):
+                # Deliberately not honoured for user modules. A user who drops a
+                # file into the skills directory has said "this is a skill", and
+                # honouring a marker in it would drop that skill silently - the
+                # one outcome worse than a log line nobody reads.
+                logger.warning(
+                    "Ignoring %s: a user skill cannot declare itself a non-skill",
+                    path.name)
+                continue
+            _register(module, f"user:{path.name}", tools, handlers)
 
     return tools, handlers

@@ -5,6 +5,13 @@ import zipfile
 from pathlib import Path
 from typing import List
 
+# Read as `skills.NOT_A_SKILL` by `discover_skills()`. This is a helper for a
+# skill-*download* path that does not exist in this project yet, which is why
+# there is no `SKILLS` list here. Without the marker it was treated as a
+# malformed skill, logging a warning on every startup of the app and the MCP
+# server.
+_CHRONOA_NOT_A_SKILL = True
+
 logger = logging.getLogger(__name__)
 
 

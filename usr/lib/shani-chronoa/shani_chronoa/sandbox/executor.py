@@ -20,6 +20,36 @@ from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.secrets_manager import secrets_manager
 
 
+def _child_pythonpath() -> str:
+    """`PYTHONPATH` that lets a child process import `shani_chronoa`.
+
+    Every skill is invoked as `python3 -c "from shani_chronoa.skills.X import
+    Y"`, in a *fresh* interpreter that inherits the environment but not the
+    parent's `sys.path`. The package installs to `/usr/lib/shani-chronoa/`,
+    which is not a default `site-packages` entry, so without this the child
+    dies with `ModuleNotFoundError: No module named 'shani_chronoa'` before the
+    skill runs at all.
+
+    This was invisible for the life of the project for two compounding reasons.
+    The launcher scripts fix `sys.path` with `sys.path.insert`, which affects
+    only the server process and is never exported; and
+    `secrets_manager.inject_environment()` copies the parent environment, so a
+    developer who happened to have `PYTHONPATH` set saw every call succeed
+    while a real `.desktop` launch saw every call fail. The whole MCP surface
+    was affected - `tools/list` answered with all 27 tools and every single
+    `tools/call` failed.
+
+    Computed in one place because the confined and host paths each had their own
+    copy, and the host one was missing. An existing `PYTHONPATH` is appended to
+    rather than replaced, so a caller's own entries still resolve.
+    """
+    package = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    existing = os.environ.get("PYTHONPATH", "")
+    return f"{package}{os.pathsep}{existing}" if existing else package
+
+
+
 def _bwrap_usable() -> bool:
     """Whether bubblewrap can actually create the namespaces it needs.
 
@@ -260,9 +290,7 @@ class SandboxExecutor:
         env.update(
             {
                 "LANLOCK_ALLOWED_PATHS": json.dumps([list(p) for p in paths]),
-                "PYTHONPATH": os.path.dirname(
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                ),
+                "PYTHONPATH": _child_pythonpath(),
             }
         )
         for key in ("HOME", "USER", "LANG", "LC_ALL"):
@@ -290,9 +318,14 @@ class SandboxExecutor:
         self, command: str, timeout: int, start_time: float, elevated: bool = False
     ) -> Tuple[int, str, float]:
         env = secrets_manager.inject_environment()
+        # Set outright, not added to the passthrough loop below. That loop only
+        # copies a key when it is absent, and `inject_environment` has already
+        # put the parent's PYTHONPATH there - so a passthrough entry for it
+        # would silently do nothing, which is the shape of the bug this fixes.
+        env["PYTHONPATH"] = _child_pythonpath()
         for k in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
-                   "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP",
-                   "HOME", "USER"):
+                  "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP",
+                  "HOME", "USER"):
             if k in os.environ and k not in env:
                 env[k] = os.environ[k]
 
