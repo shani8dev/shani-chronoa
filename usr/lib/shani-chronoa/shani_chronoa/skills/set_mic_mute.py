@@ -68,34 +68,60 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
 
 
 def _default_source() -> Optional[Tuple[str, str]]:
-    """(id, description) of the default capture source, or None if there is none."""
-    proc = run_wpctl("status")
-    if proc.returncode != 0:
+    """(id, description) of the default capture source, or None if there is none.
+
+    Parsing is delegated to `senses.audio`, which is the module that already
+    gets this right.
+
+    The first version of this walked `wpctl status` itself looking for a heading
+    spelled `Audio Sources:`. No such heading exists. `wpctl` prints `Sources:`,
+    among others, and the same status text is printed twice - once for the
+    audio manager graph and once for video - so a scanner that merely looks for
+    "sources" needs to pick the right one.
+
+    The practical result was that on a laptop with a working microphone, this
+    reported "No capture source was reported, so this machine has no
+    microphone". Which is exactly the failure this project treats as worst: a
+    plausible, confident, wrong statement about hardware that is plainly present,
+    and one the user can disprove by looking at their own machine.
+    """
+    from shani_chronoa.senses import audio
+
+    devices = audio.read_devices()
+    sources = devices.get("sources") or []
+    if not sources:
         return None
-    capture = False
-    for line in proc.stdout.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("Audio Sources:"):
-            capture = True
-            continue
-        if stripped.endswith(":") and not stripped.startswith("Audio") and capture:
-            break
-        if capture and stripped:
-            ident = stripped.split(" ", 1)[0]
-            if ident.isdigit() or ident == "__default__":
-                return (ident, stripped)
-    return None
+    for entry in sources:
+        if entry.get("default"):
+            return str(entry["id"]), entry.get("name", "")
+    # No source is marked default. The first one is a better answer than
+    # refusing, and still better than pretending there is no microphone - but it
+    # is reported as what it is rather than as "the default".
+    first = sources[0]
+    return str(first["id"]), first.get("name", "")
 
 
 def _is_muted(ident: str) -> Optional[bool]:
-    proc = run_wpctl("get-mute", ident)
+    """Whether a source is muted, or None because wpctl cannot tell us.
+
+    **wpctl has no `get-mute`.** Its commands are status, get-volume, inspect,
+    set-default, set-volume, set-mute, set-profile and clear-default - mute can
+    be *set* but not read back through it. `wpctl inspect` does not expose it
+    either; there is no key containing "mute" in a node's whole property dump,
+    confirmed by inspecting a live source on this machine.
+
+    So the first version of this called `wpctl get-mute <id>`, which does not
+    exist, and every status call answered UNKNOWN. UNKNOWN is the honest result
+    and the code now says *why*, rather than leaving a reader to wonder whether
+    the microphone is muted.
+
+    This is the same shape as the senses that report UNKNOWN when a read fails:
+    the inability to observe is a state the code can represent, and it is not
+    rounded up to a clean yes or no.
+    """
+    proc = run_wpctl("get-volume", ident)
     if proc.returncode != 0:
         return None
-    value = proc.stdout.strip().lower()
-    if value == "muted":
-        return True
-    if value == "unmuted":
-        return False
     return None
 
 
@@ -119,17 +145,38 @@ def _run(arguments: dict) -> str:
     state = "UNKNOWN" if muted is None else ("muted" if muted else "unmuted")
 
     if action == "status":
-        return (f"Default microphone: {description}\n"
-                f"Mute state: {state}")
+        # Says why the state is UNKNOWN rather than leaving it looking like a
+        # finding. "UNKNOWN" alone invites the reader to wonder whether the
+        # microphone is muted, and there is no way for them to find out either.
+        if muted is None:
+            return (f"Default microphone: {description}\n"
+                    f"Mute state: UNKNOWN - wpctl can set a microphone's mute "
+                    f"state but cannot report it, so this is not knowable from "
+                    f"the command line on this system.")
+        return f"Default microphone: {description}\nMute state: {state}"
 
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
         return f"Refusing to change the microphone: {reason}"
 
     if muted is None:
-        return ("The microphone's current mute state could not be read, so it "
-                "is not known whether this would change anything. Nothing was "
-                "changed on an unknown starting state.")
+        # Not a reason to refuse, and not a reason to guess. `set-mute` takes an
+        # absolute 1 or 0, so this change does not depend on the current state
+        # and is safe to make. Refusing here would leave the microphone
+        # permanently uncontrollable through this skill on every machine, since
+        # wpctl cannot report the state to compare against.
+        proc = run_wpctl("set-mute", ident, "1" if action == "mute" else "0")
+        if proc.returncode != 0:
+            detail = (proc.stderr or "").strip()
+            return ("Failed to change the microphone's mute state."
+                    + (f" wpctl said: {detail}" if detail else ""))
+        # Reported as the change that was made, with the reason the previous
+        # state was unknown - so the answer is verifiable by the user rather
+        # than resting on a claim about state nobody could read.
+        return (f"{'Muted' if action == 'mute' else 'Unmuted'} the microphone "
+                f"({description}). Note: its previous mute state could not be "
+                f"read - wpctl has no way to report it - so this set it rather "
+                f"than changing it from a known starting point.")
 
     want = action == "mute"
     if muted == want:
