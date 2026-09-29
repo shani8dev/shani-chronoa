@@ -311,6 +311,18 @@ class Assistant:
                 return message.get("content", "")
 
             for call in tool_calls:
+                # Checked here as well as between model calls, because a single
+                # tool call can outlast the whole budget. `ask_user` blocks for up
+                # to `ask_bridge.DEFAULT_TIMEOUT_SECONDS` waiting for a user who
+                # may not be there, and that wait happens inside this loop, where
+                # nothing else was watching. Without this, one turn could block for
+                # hours: 4 rounds x 10 asking calls x 180s, while the 300s turn
+                # budget sat unused because it was only ever consulted between model
+                # calls. `assistd` bounds the same thing from the other side with a
+                # 120s prompt timeout and a cap on pending confirmations.
+                over = self._over_budget(deadline)
+                if over:
+                    return over
                 function = call.get("function", {})
                 name = function.get("name", "")
                 arguments = function.get("arguments", {})
