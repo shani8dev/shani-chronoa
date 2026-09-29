@@ -285,3 +285,78 @@ class TestDebugModeWiring:
             root.setLevel(logging.INFO)
             for handler in root.handlers:
                 handler.setLevel(logging.INFO)
+
+class TestTheConsentKeyTableIsWrittenOnce:
+    """Two merge artifacts in one dict literal.
+
+    `network` and `display` were each listed twice. Python keeps the last value
+    and raises nothing, so a duplicate is invisible at runtime and invisible to
+    any test that imports the dict - only the source says anything. Reading the
+    literal with `ast` is the only way to see it, and seeing it matters: a
+    duplicated row is where a half-finished rename hides.
+    """
+
+    def _literal_entries(self):
+        import ast
+        from pathlib import Path
+
+        path = Path(__file__).resolve().parents[1] / (
+            "usr/lib/shani-chronoa/shani_chronoa/config.py")
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Assign) and getattr(
+                    node.targets[0], "id", "") == "_SENSE_CONSENT_KEYS":
+                return [k.value for k in node.value.keys]
+        raise AssertionError("_SENSE_CONSENT_KEYS literal not found")
+
+    def test_no_consent_key_is_listed_twice(self):
+        keys = self._literal_entries()
+        dupes = sorted({k for k in keys if keys.count(k) > 1})
+        assert not dupes, f"listed more than once in _SENSE_CONSENT_KEYS: {dupes}"
+
+    def test_it_is_a_bijection_with_the_live_senses(self):
+        from shani_chronoa.senses import discover_senses
+
+        keys = set(self._literal_entries())
+        live = set(discover_senses())
+        assert live <= keys, f"senses with no consent key: {sorted(live - keys)}"
+        assert keys <= live, f"consent keys for no sense: {sorted(keys - live)}"
+
+
+class TestTheRefusalOnlyNamesASwitchThatExists:
+    """A refusal is an instruction, so it may only name a real switch.
+
+    The reason string listed retired aliases alongside the live key, which sent
+    a user to enable a setting that has no row in the settings window. The
+    aliases are still honoured - that is what keeps a pre-merge grant alive -
+    they are simply not things to tell someone to go and do.
+    """
+
+    def test_it_names_the_live_key_and_no_retired_one(self, chronoa_config):
+        from shani_chronoa.config import _SENSE_CONSENT_ALIASES, _SENSE_CONSENT_KEYS
+
+        for sense in sorted(_SENSE_CONSENT_ALIASES):
+            chronoa_config.set("privacy-mode", "false")
+            chronoa_config.set(f"{sense}-sense-enabled", "false")
+            for alias in _SENSE_CONSENT_ALIASES[sense]:
+                chronoa_config.set(alias, "false")
+            reason = chronoa_config.sense_allowed_reason(sense)
+            assert f"'{_SENSE_CONSENT_KEYS[sense]}'" in reason, (
+                f"{sense} refusal does not name its own key: {reason}")
+            for alias in _SENSE_CONSENT_ALIASES[sense]:
+                assert alias not in reason, (
+                    f"{sense} refusal tells the user to enable the retired "
+                    f"key '{alias}', which has no row in the settings window")
+
+    def test_a_retired_grant_is_still_honoured(self, chronoa_config):
+        """The compatibility mechanism itself, which the message now omits on
+        purpose - so it needs its own test or the two get conflated."""
+        from shani_chronoa.config import _SENSE_CONSENT_ALIASES
+
+        for sense, aliases in _SENSE_CONSENT_ALIASES.items():
+            chronoa_config.set("privacy-mode", "false")
+            chronoa_config.set(f"{sense}-sense-enabled", "false")
+            for alias in aliases:
+                chronoa_config.set(alias, "true")
+                assert chronoa_config.sense_allowed(sense) is True, (
+                    f"{alias} no longer grants {sense}; a pre-merge install "
+                    "would silently lose a capability it had enabled")

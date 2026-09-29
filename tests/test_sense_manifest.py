@@ -43,6 +43,7 @@ assertion they explain.
 """
 
 import json
+import ast
 import os
 import subprocess
 import sys
@@ -523,3 +524,67 @@ class TestPollIntervalNeverExceedsTtl:
         good, bad = Fake(300.0, 300.0), Fake(120.0, 300.0)
         assert not (good.is_ambient() and good.ttl_seconds < good.poll_interval)
         assert bad.is_ambient() and bad.ttl_seconds < bad.poll_interval
+
+
+class TestEveryConsentGateNamesALiveSense:
+    """A consent gate keyed on a sense that no longer exists is always closed.
+
+    `privacy.py` checked `sense_allowed("camera")` after `camera` was merged
+    into `capture`. The alias makes `camera-sense-enabled` grant *capture*, not
+    *camera*, so the lookup returned False for every possible setting and the
+    refusal told the user to enable a key with no row in the settings window.
+    Enabling a camera was impossible, and the tests missed it because they
+    stubbed `sense_allowed` wholesale - which validates the behaviour and
+    never the argument.
+
+    So this checks the argument, across the whole shipped tree, rather than
+    patching one call site. A future merge that orphans a caller fails here
+    instead of shipping a permission that can never be granted.
+    """
+
+    def test_no_shipped_gate_names_an_unregistered_sense(self):
+        from shani_chronoa.senses import discover_senses
+
+        live = set(discover_senses())
+        root = Path(__file__).resolve().parents[1] / (
+            "usr/lib/shani-chronoa/shani_chronoa")
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            # Parsed, not grepped: a docstring in capture.py legitimately writes
+            # `sense_allowed("contention")` while explaining the alias, and a
+            # text scan cannot tell that from a live call. Only a real Call
+            # node is a gate.
+            tree = ast.parse(path.read_text())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                name = getattr(func, "attr", getattr(func, "id", None))
+                if name not in ("sense_allowed", "sense_allowed_reason"):
+                    continue
+                if not node.args or not isinstance(node.args[0], ast.Constant):
+                    continue
+                sense = node.args[0].value
+                if not isinstance(sense, str):
+                    continue
+                if sense not in live:
+                    offenders.append(
+                        f"{path.relative_to(root)}:{node.lineno} gates on "
+                        f"'{sense}', which is not a registered sense")
+        assert not offenders, "\n".join(offenders)
+
+    def test_the_camera_gate_is_keyed_on_capture(self):
+        """Named explicitly as well, so the intent survives the next merge.
+
+        The generic check above proves no gate dangles; this one records which
+        sense the camera consent actually lives in.
+        """
+        from shani_chronoa.senses import discover_senses
+
+        assert "capture" in discover_senses()
+        assert "camera" not in discover_senses()
+        source = (Path(__file__).resolve().parents[1] / (
+            "usr/lib/shani-chronoa/shani_chronoa/skills/privacy.py")
+        ).read_text()
+        assert 'sense_allowed("capture")' in source
+        assert "capture-sense-enabled' in Settings" in source

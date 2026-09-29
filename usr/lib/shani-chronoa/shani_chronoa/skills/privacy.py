@@ -238,17 +238,24 @@ def _set_camera(enable: bool) -> dict:
     # for it is the consent, and gating it would mean the one action nobody
     # objects to is the one an assistant cannot take. Turning one *on* is the
     # opposite — it re-enables a sensor that may have been deliberately
-    # disabled — so it is refused unless the camera sense is granted, which is
+    # disabled — so it is refused unless the camera consent is granted, which is
     # the existing "may Chronoa use the camera" consent rather than a new one
     # invented for this skill.
+    #
+    # That consent is the `capture` sense. It was `camera` until the camera
+    # enumeration and device-contention senses were merged, and leaving the old
+    # name here made this path permanently unreachable: `camera` is no longer a
+    # registered sense, so `sense_allowed("camera")` is False no matter what any
+    # key is set, and the refusal below told the user to enable a setting that
+    # no longer has a row. Consent gates are a naming contract, not a lookup.
     if enable:
         config = ChronoaConfig()
-        if not config.sense_allowed("camera"):
+        if not config.sense_allowed("capture"):
             return {"text": (
-                "Refusing to enable a camera: the camera sense is turned off. "
+                "Refusing to enable a camera: the capture sense is turned off. "
                 "Turning a sensor on is the opposite of what this skill is "
                 "usually for, and it re-enables something that may have been "
-                "disabled on purpose. Enable 'camera-sense-enabled' in Settings "
+                "disabled on purpose. Enable 'capture-sense-enabled' in Settings "
                 "if you do want the assistant to use the camera at all. "
                 "Disabling one needs no permission and is always available."
             ), "changed": [], "unsupported": []}

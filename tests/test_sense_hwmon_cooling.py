@@ -53,6 +53,23 @@ def _chip(root, driver, *, fans):
     return chip
 
 
+def _temp_only_chip(root, driver="acpitz", celsius=40):
+    """A chip with a readable temperature and no fan channel at all.
+
+    Needed to reach the "no fans and no coolers" branch: a chip with no fan is
+    not enough on its own, because a chip that exposes nothing readable is
+    turned away earlier as "no hwmon chip exposed a readable channel".
+    """
+    index = _CHIP_INDEX[0]
+    _CHIP_INDEX[0] += 1
+    chip = root / f"hwmon{index}"
+    chip.mkdir(parents=True, exist_ok=True)
+    (chip / "name").write_text(driver + "\n")
+    (chip / "temp1_input").write_text(f"{celsius * 1000}\n")
+    (chip / "temp1_label").write_text(f"{driver}\n")
+    return chip
+
+
 def _with_liquidctl(monkeypatch, stdout):
     monkeypatch.setattr(hwmon.shutil, "which",
                         lambda n: "/usr/bin/liquidctl" if n == "liquidctl" else None)
@@ -296,3 +313,38 @@ class TestPwmIsReadNeverWritten:
         _chip_with_pwm(hwmon_root)
         metadata = hwmon._run({}).metadata
         assert metadata["pwm_channels"] == 1
+
+
+class TestLiquidctlAnsweredButNamedNoCooler:
+    """The distinction the merge flattened, and the case it lost.
+
+    Every other liquidctl test here supplies a fan, so the "no fans and no
+    coolers" branch is never reached. That is why losing it went unnoticed: the
+    branch was already unreachable from the rest of this file. A machine with
+    `liquidctl` installed and no AIO - a passively cooled laptop, or cooling
+    driven by firmware the kernel does not expose - lands exactly there, and
+    was being told its coolant was "undetermined - the tool is absent" about a
+    tool that was present and had just answered.
+    """
+
+    def test_liquidctl_present_and_no_cooler_is_not_reported_as_absent(
+            self, hwmon_root, monkeypatch, granted):
+        _temp_only_chip(hwmon_root)                   # a readable channel, no fan
+        _with_liquidctl(monkeypatch, "")              # installed, names nothing
+        percept = hwmon._run({})
+        assert percept.metadata["liquidctl_present"] is True
+        assert percept.metadata["coolers"] == 0
+        assert "the tool is absent" not in percept.content
+        assert "passively cooled" in percept.content
+        assert "firmware" in percept.content
+        assert percept.source == "hwmon+liquidctl", (
+            "a percept that consulted liquidctl must say so in its source")
+
+    def test_liquidctl_really_absent_still_says_so(self, hwmon_root, granted):
+        """The other half: the two cases must stay distinguishable, or
+        restoring one is indistinguishable from collapsing both."""
+        _temp_only_chip(hwmon_root)
+        percept = hwmon._run({})
+        assert percept.metadata["liquidctl_present"] is False
+        assert "the tool is absent" in percept.content
+        assert "passively cooled" not in percept.content

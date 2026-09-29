@@ -82,14 +82,12 @@ _SENSE_CONSENT_KEYS = {
     "modelfit": "modelfit-sense-enabled",
     "power": "power-sense-enabled",
     "storage": "storage-sense-enabled",
-    "network": "network-sense-enabled",
     "cpu": "cpu-sense-enabled",
     "gpu": "gpu-sense-enabled",
     "security": "security-sense-enabled",
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
     "printing": "printing-sense-enabled",
-    "display": "display-sense-enabled",
 }
 
 # Retired consent keys, still honoured.
@@ -366,8 +364,12 @@ class ChronoaConfig:
         granted = self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED) or any(
             self.get_bool(alias, False) for alias in aliases)
         if not granted:
-            either = f"'{key}'" + "".join(f" or '{a}'" for a in aliases)
-            return f"the {sense} sense is turned off (enable {either})"
+            # Name the live key only. Retired aliases are honoured in the
+            # check above but have no row in the settings window, so naming one
+            # sends the user looking for a switch that does not exist. They are
+            # a compatibility mechanism, not an instruction - do not "simplify"
+            # the alias branch above away on the grounds that this ignores it.
+            return f"the {sense} sense is turned off (enable '{key}')"
         if sense in _NETWORKED_SENSES and self.privacy_mode:
             return (
                 f"the {sense} sense needs privacy mode off because it reaches "

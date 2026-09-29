@@ -442,18 +442,31 @@ def _run(arguments: dict) -> Union[str, Percept]:
     status = _liquidctl() if liquidctl_present else None
     coolers = _coolant(status) if status else []
 
-    if not fans and not coolers and not liquidctl_present:
+    if not fans and not coolers:
+        common = {"chips": len(chips), "readings": total_readings,
+                  "unpopulated": total_unpopulated, "zones": len(zones),
+                  "fans": 0, "stopped_fans": 0, "coolers": 0}
+        if not liquidctl_present:
+            return _SENSE.to_percept(
+                "No fan channel and no liquid cooler were found. hwmon exposes "
+                "nothing here and liquidctl is not installed, so the fans are "
+                "undetermined - the kernel is not reporting any - and the "
+                "coolant is undetermined - the tool is absent. Neither means "
+                "this machine has no cooling.",
+                source="sysfs-hwmon",
+                metadata={**common, "liquidctl_present": False},
+            )
+        # liquidctl answered and named no cooler - not the same as the tool
+        # being absent. This was its own branch before the merge flattened it
+        # into the case above, which claimed "the tool is absent" about a tool
+        # that had just replied.
         return _SENSE.to_percept(
-            "No fan channel and no liquid cooler were found. hwmon exposes "
-            "nothing here and liquidctl is not installed, so the fans are "
-            "undetermined - the kernel is not reporting any - and the coolant "
-            "is undetermined - the tool is absent. Neither means this machine "
-            "has no cooling.",
-            source="sysfs-hwmon",
-            metadata={"chips": len(chips), "readings": total_readings,
-                      "unpopulated": total_unpopulated, "zones": len(zones),
-                      "fans": 0, "stopped_fans": 0, "coolers": 0,
-                      "liquidctl_present": False},
+            "hwmon exposes no fan channel and liquidctl reports no cooler. A "
+            "passively cooled machine looks like this, and so does one whose "
+            "cooling is driven entirely through a firmware the kernel does not "
+            "expose.",
+            source="hwmon+liquidctl",
+            metadata={**common, "liquidctl_present": True},
         )
 
     stopped = 0
