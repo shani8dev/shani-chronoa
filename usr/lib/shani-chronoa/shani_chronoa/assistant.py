@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 from shani_chronoa.llm import OllamaLLM
+from shani_chronoa.loops import LoopDetector
 from shani_chronoa import compression, sessions
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
@@ -291,6 +292,10 @@ class Assistant:
         self._turn_started = time.monotonic()
         self._turn_overran = False
         self._usage = None
+        # One detector per turn. Not carried across turns: a conversation may legitimately
+        # make the same call at the start of one turn and the start of the next, and only a
+        # run *within* a turn means the turn is failing to make progress.
+        loop = LoopDetector()
 
         for _ in range(MAX_TOOL_ROUNDS):
             over = self._over_budget(deadline)
@@ -315,6 +320,11 @@ class Assistant:
                     except json.JSONDecodeError:
                         arguments = {}
                 logger.info(f"Tool call: {name}({arguments})")
+                # Counted *after* the call is dispatched below, so the number in the
+                # message is the number that actually ran. Checking first would stop the
+                # turn before the Nth call, and then claim N calls in a row when only
+                # N-1 had happened.
+                loop.repeat(name, arguments)
                 if on_tool_call:
                     try:
                         on_tool_call(name, arguments)
@@ -329,6 +339,9 @@ class Assistant:
                 # without it. Empty string for backends (e.g. Ollama) that
                 # don't emit an id on their tool_calls at all.
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
+                if loop.stopped:
+                    self._turn_deadline = None
+                    return loop.explain()
 
         # Ran out of tool rounds - ask once more for a final plain answer.
         over = self._over_budget(deadline)
