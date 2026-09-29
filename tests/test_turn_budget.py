@@ -156,11 +156,29 @@ class TestTurnStats:
         assert stats["model_seconds"] > 0
         assert stats["wall_seconds"] >= stats["model_seconds"]
 
-    def test_no_money_figure_is_invented(self, transcript, monkeypatch):
-        """Pricing depends on the provider and model; a wrong number is worse
-        than none, so the stats report work done and leave pricing alone."""
+    def test_an_unpriced_call_reports_unknown_rather_than_zero(self, transcript,
+                                                               monkeypatch):
+        """The invariant that actually matters, and the reason for it.
+
+        This test used to assert that no money figure ever appears, written when
+        the token counts were still being discarded and pricing was refused
+        outright. Both are no longer true: the counts are captured, and a cost
+        appears when - and only when - a price table covers the model.
+
+        What must never happen is the unpriced call reporting $0.00. That is a
+        claim, and for a local model it is false: inference costs electricity
+        and the user's time. "I do not know what this cost" is the honest
+        answer, and `priced: False` with no `cost_usd` key is how the code says
+        it. A caller can then show nothing, or look the price up itself.
+        """
         monkeypatch.setattr(assistant_mod, "MAX_TURN_SECONDS", 600.0)
         a = Assistant(_Answers(), session_path=transcript)
         asyncio.run(a.handle("hi"))
-        assert not any("cost" in k or "usd" in k or "price" in k
-                       for k in a.turn_stats())
+        stats = a.turn_stats()
+        reported = stats.get("usage")
+        assert reported is None or reported["priced"] is False
+        if reported is not None:
+            assert "cost_usd" not in reported, (
+                "an unpriced call reported a cost, which is worse than "
+                "reporting none: it is a false claim rather than an admission"
+            )

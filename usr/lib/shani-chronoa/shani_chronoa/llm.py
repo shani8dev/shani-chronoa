@@ -8,7 +8,7 @@ import httpx
 import json
 from typing import Optional, AsyncIterator
 
-from shani_chronoa import egress
+from shani_chronoa import egress, usage as usage_mod
 from shani_chronoa.secrets_manager import secrets_manager
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 class OllamaLLM:
     """LLM inference via Ollama."""
+
+    #: Token counts from the most recent call, or None before the first
+    #: one. See `usage.py` for why this is not part of the returned message.
+    last_usage: "usage_mod.Usage | None" = None
 
     def __init__(self, host: str = "http://localhost:11434", model: str = "llama3", context_window: int = 4096) -> None:
         self.host = host.rstrip("/")
@@ -73,6 +77,11 @@ class OllamaLLM:
             response = await client.post("/api/chat", json=payload)
             response.raise_for_status()
             data = response.json()
+            # The token counts sit beside the message in Ollama's body, not
+            # inside it, so returning `data["message"]` discarded them. Kept
+            # beside the returned message rather than inside it, so they never
+            # reach `_history` and get re-sent as context on later turns.
+            self.last_usage = usage_mod.from_ollama(data)
             return data.get("message", {})
         except httpx.ConnectError:
             logger.error(f"Cannot connect to Ollama at {self.host}")

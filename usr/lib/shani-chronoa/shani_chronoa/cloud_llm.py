@@ -96,7 +96,7 @@ from typing import NamedTuple, Optional
 
 import httpx
 
-from shani_chronoa import egress
+from shani_chronoa import egress, usage as usage_mod
 from shani_chronoa.secrets_manager import secrets_manager
 from shani_chronoa.skills import is_valid_schema
 
@@ -175,6 +175,11 @@ class OpenAICompatibleLLM:
     token when no key is configured, same as before.
     """
 
+    #: Token counts from the most recent call, or None before the first
+    #: one. See `usage.py` for why this is not part of the returned message.
+    last_usage: "usage_mod.Usage | None" = None
+
+
     def __init__(self, provider: CloudProvider, model: Optional[str] = None, api_key: str = "") -> None:
         self.provider = provider
         self.model = model or provider.default_model
@@ -250,6 +255,10 @@ class OpenAICompatibleLLM:
         choices = data.get("choices") or []
         if not choices:
             raise CloudLLMError(f"{self.provider.name}: response had no choices")
+        # Every provider here speaks the OpenAI shape, so `usage` is uniform.
+        # Recorded beside the message, not inside it: a message is appended to
+        # history and re-sent as context on later turns.
+        self.last_usage = usage_mod.from_openai(data)
         return choices[0].get("message", {})
 
     async def check_health(self) -> bool:
@@ -266,6 +275,11 @@ class AnthropicLLM:
     """Anthropic's native Messages API - see module docstring for why this
     isn't `OpenAICompatibleLLM` and what's actually been verified.
     """
+
+    #: Token counts from the most recent call, or None before the first
+    #: one. See `usage.py` for why this is not part of the returned message.
+    last_usage: "usage_mod.Usage | None" = None
+
 
     def __init__(self, api_key: str, model: str = _ANTHROPIC_DEFAULT_MODEL) -> None:
         # A CloudProvider-shaped attribute purely so CloudLLMChain's logging
@@ -413,6 +427,10 @@ class AnthropicLLM:
                     },
                 })
 
+        # Anthropic names the same two counts `input_tokens`/`output_tokens`
+        # rather than `prompt_tokens`/`completion_tokens`, so it gets its own
+        # extractor instead of being folded into the OpenAI-compatible one.
+        self.last_usage = usage_mod.from_anthropic(data)
         message: dict = {"role": "assistant", "content": "".join(text_parts)}
         if tool_calls:
             message["tool_calls"] = tool_calls

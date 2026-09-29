@@ -224,13 +224,22 @@ class Assistant:
     def _note_model_call(self, seconds: float) -> None:
         """Record a model call's duration and running totals for the turn.
 
-        Local inference costs no money but is not free, and when the cloud
-        fallback is on it costs real money. Either way the turn's cost is
-        currently invisible, so this is the smallest honest accounting: how many
-        calls, how long, and what the turn has spent so far.
+        Counts the call, times it, and picks up whatever token usage the
+        backend reported. The token counts were being discarded by every backend
+        - Ollama counts them beside the message, the cloud providers send a
+        `usage` block, and all three were thrown away. See `usage.py`.
         """
         self._model_calls = getattr(self, "_model_calls", 0) + 1
         self._model_seconds = getattr(self, "_model_seconds", 0.0) + seconds
+
+        # Token counts, if the backend reported any. `Usage.__add__` is what
+        # keeps this honest: a sum of a priced and an unpriced call comes back
+        # unpriced rather than quietly reporting only the part that was known.
+        reported = getattr(self.llm, "last_usage", None)
+        if reported is not None:
+            self._usage = getattr(self, "_usage", None)
+            self._usage = reported if self._usage is None else self._usage + reported
+
         logger.debug("Model call %d took %.2fs (turn total %.2fs over %d calls)",
                      self._model_calls, seconds, self._model_seconds,
                      self._model_calls)
@@ -245,6 +254,8 @@ class Assistant:
         """
         return {
             "model_calls": getattr(self, "_model_calls", 0),
+            "usage": (getattr(self, "_usage", None).as_dict()
+                      if getattr(self, "_usage", None) is not None else None),
             "model_seconds": round(getattr(self, "_model_seconds", 0.0), 3),
             "wall_seconds": round(
                 time.monotonic() - getattr(self, "_turn_started", time.monotonic()), 3),
@@ -279,6 +290,7 @@ class Assistant:
         self._turn_deadline = deadline
         self._turn_started = time.monotonic()
         self._turn_overran = False
+        self._usage = None
 
         for _ in range(MAX_TOOL_ROUNDS):
             over = self._over_budget(deadline)
