@@ -323,8 +323,24 @@ class SandboxExecutor:
         # put the parent's PYTHONPATH there - so a passthrough entry for it
         # would silently do nothing, which is the shape of the bug this fixes.
         env["PYTHONPATH"] = _child_pythonpath()
+        # GSETTINGS_* travel with the child because a skill's own consent gate
+        # runs in that child, reading the same schema this process reads. Left
+        # out, a run with a non-default schema directory - a build tree, or a
+        # system that keeps its schemas somewhere unusual - gave the parent one
+        # set of answers and the child another, so a gated skill refused for a
+        # reason the parent could not reproduce. Same reasoning as PYTHONPATH
+        # above: the child must import and read what the parent reads.
+        # The XDG_* directories travel too, for the same reason as GSETTINGS_*:
+        # a caller that redirects them - a test isolating its own writes, or a
+        # run with a relocated data directory - got a child that ignored the
+        # redirection and wrote to the real ~/.local/share instead. That made
+        # the suite non-hermetic: a dispatched screenshot landed in the
+        # developer's own home rather than the fixture directory.
         for k in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
                   "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP",
+                  "GSETTINGS_SCHEMA_DIR", "GSETTINGS_BACKEND",
+                  "GSETTINGS_BACKEND_MEMORY", "GSETTINGS_KEYFILE_BACKEND",
+                  "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
                   "HOME", "USER"):
             if k in os.environ and k not in env:
                 env[k] = os.environ[k]

@@ -170,6 +170,19 @@ _SENSE_DEFAULT_ENABLED = frozenset({
 _INPUT_CONTROL_KEY = "input-control-enabled"
 
 
+#: Names the single consent key a user grant opened for this process. Set by the
+#: dispatcher in the child it is about to run, not in the parent - the parent
+#: handles many calls at once, so a process-wide value there would be whichever
+#: call happened to be in flight.
+CONSENT_GRANT_ENV = "SHANI_CHRONOA_CONSENT_GRANT"
+
+
+def granted_consent_key() -> Optional[str]:
+    """The consent key a user grant opened for this process, if any."""
+    return os.environ.get(CONSENT_GRANT_ENV) or None
+
+
+
 class ChronoaConfig:
     """Configuration manager using GSettings.
 
@@ -281,7 +294,25 @@ class ChronoaConfig:
             return False
 
     def get_bool(self, key: str, default: bool = False) -> bool:
-        """Get a boolean configuration value (schema type "b")."""
+        """Get a boolean configuration value (schema type "b").
+
+        A per-turn grant may open exactly one consent key, and only for the
+        process it was granted to. `SHANI_CHRONOA_CONSENT_GRANT` names a single
+        key - the one gating the tool the user just said yes to - and only that
+        key reads as open. Every other key, and every other process, sees the
+        stored value untouched.
+
+        The scope is the point. `get_bool` has 35 callers, and the same
+        `sense_allowed` that gates a web search is read by the scheduler, the
+        senses and the settings window. A grant that flipped a boolean outright
+        would leave a background sense running and a settings checkbox that
+        disagrees with what the process is doing - a UI that lies is worse than
+        a feature that is missing. Naming one key confines it to the tool call
+        the user actually approved.
+        """
+        if granted_consent_key() == key and key in self._valid_keys:
+            logger.info("Consent key %s opened for this call by user grant", key)
+            return True
         if self._settings is None or key not in self._valid_keys:
             return default
         value = self._settings.get_value(key)

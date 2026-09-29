@@ -153,6 +153,35 @@ def permits(action: str, resource: str) -> Tuple[bool, Optional[str]]:
     return True, None
 
 
+def session_grant(action: str, resource: str) -> Optional[str]:
+    """A grant the *user gave this session* that covers this request, if any.
+
+    Deliberately reads only the `_grants` bucket. A standing rule can narrow
+    what is allowed and must never be able to re-open a door the user closed -
+    config saying "allow" is not the user saying yes. Only an answer collected
+    during this session counts as consent here.
+
+    A one-shot grant is consumed by being returned, so "yes, this once" means
+    once: the next identical call finds nothing and asks again.
+    """
+    with _lock:
+        decision = Decision.FALL_THROUGH
+        index = -1
+        for i, (rule_action, pattern, rule_decision) in enumerate(_grants):
+            if rule_action not in (action, "*"):
+                continue
+            if not _matches(pattern, resource):
+                continue
+            decision, index = rule_decision, i
+        if decision not in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
+            return None
+        if decision == Decision.ALLOW_ONCE:
+            # Drop it now, not after the call returns, so a concurrent second
+            # call cannot also see it.
+            del _grants[index]
+    return decision
+
+
 def cancel_requested(action: str, resource: str) -> bool:
     """Whether the user asked to stop the turn rather than just refuse this call."""
     return evaluate(action, resource) == Decision.CANCEL

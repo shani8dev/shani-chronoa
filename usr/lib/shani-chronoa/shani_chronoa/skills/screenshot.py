@@ -25,7 +25,20 @@ from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.screengrab import ScreenCaptureError, capture_screen
 
-_OUTPUT_DIR = os.path.expanduser("~/.local/share/shani-chronoa/screenshots")
+# `$XDG_DATA_HOME/shani-chronoa/screenshots`, falling back to
+# `~/.local/share/shani-chronoa/screenshots` when the variable is unset or
+# relative. A hardcoded `~` ignored the relocation a caller had deliberately
+# asked for: a test that redirected `XDG_DATA_HOME` to a fixture directory
+# still got its screenshot written into the real `~/.local/share`, which made
+# the suite non-hermetic and left the developer's home as the only record of it.
+def _data_home() -> str:
+    configured = os.environ.get("XDG_DATA_HOME", "")
+    if configured and os.path.isabs(configured):
+        return configured
+    return os.path.expanduser("~/.local/share")
+
+
+_OUTPUT_DIR = os.path.join(_data_home(), "shani-chronoa", "screenshots")
 _PREFIX = "chronoa-screenshot-"
 
 

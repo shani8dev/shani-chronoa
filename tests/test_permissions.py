@@ -11,15 +11,18 @@ So there is a second layer, in front of the booleans rather than replacing them.
 A session rule saying "never touch /etc" holds even if a skill forgets to look,
 which is the whole reason to enforce it centrally.
 
-**What is not wired:** the allow decisions. `ALLOW_ONCE` and `ALLOW_SESSION` are
-evaluated and returned, but a granted call still reaches the skill, whose own
-`_consent()` refuses because the gsettings key is off. Making "allow once" real
-means each of the 26 gated skills must consult this module - so the inert half
+**The allow half is now wired.** It was not, and the shape of the mistake is
+evaluated but reached nothing, because each gated skill reads its own
+consent key through `ChronoaConfig.get_bool` and never consulted this
+module. The fix is at the choke point, not in 26 skills: the dispatcher
+hands the child the one consent key the user just granted, and `get_bool`
+honours that one key for that one process.
 is asserted here as inert, rather than left for someone to discover.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -29,7 +32,12 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import permissions  # noqa: E402
-from shani_chronoa.tools import _resource_for, execute_tool  # noqa: E402
+from shani_chronoa.config import CONSENT_GRANT_ENV  # noqa: E402
+from shani_chronoa.tools import (  # noqa: E402
+    _consent_key_for,
+    _resource_for,
+    execute_tool,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -147,16 +155,97 @@ class TestCancelIsNotDeny:
         assert permissions.cancel_requested("delete_file", "/tmp/x") is False
 
 
-class TestTheAllowHalfIsInertAndSaysSo:
-    """Recorded as a test so it cannot be quietly believed to work."""
+class TestTheAllowHalfIsWired:
+    """A grant has to satisfy the check it claims to satisfy.
 
-    def test_a_grant_does_not_bypass_the_consent_key(self):
+    The failure this replaces was silent and total. `permits()` returned True
+    for a grant, the dispatcher let the call through, and the skill then
+    refused on its own consent key anyway. Nothing errored - the feature simply
+    did nothing, and the only evidence was a test asserting that it did
+    nothing. The test that pinned that is deleted rather than kept as a
+    record, because its assertion was the bug.
+    """
+
+    def test_a_session_grant_opens_the_consent_gate(self):
         permissions.add_rule("delete_file", "/home/me/Downloads/*",
-                             permissions.Decision.ALLOW_SESSION)
+                             permissions.Decision.ALLOW_SESSION, session_only=True)
         out = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
-        assert "Permission denied" not in out
-        assert "turned off" in out or "not permitted" in out.lower(), (
-            "a session grant now appears to satisfy a skill's consent check. If "
-            "that is intended, update this test and the module docstring - the "
-            "gated skills must consult permissions for it to be true"
+        assert "turned off" not in out, (
+            "a session grant still does not satisfy the skill's own consent "
+            "check - the grant is consumed but never reaches get_bool"
         )
+        assert "not permitted" not in out.lower()
+
+    def test_a_standing_grant_cannot_open_a_shut_gate(self):
+        """Config saying "allow" is not the user saying yes.
+
+        Only the session bucket may widen. A standing rule that blocks
+        something already permitted costs the user nothing they asked for, but
+        a rule that opens a gate they shut is a settings file overruling them.
+        """
+        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+                             permissions.Decision.ALLOW_ONCE, session_only=False)
+        out = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+        assert "turned off" in out or "not permitted" in out.lower(), (
+            "a standing rule opened a consent gate the user had shut"
+        )
+
+    def test_allow_once_is_consumed_by_being_used(self):
+        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+                             permissions.Decision.ALLOW_ONCE, session_only=True)
+        first = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+        second = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+        assert "turned off" not in first
+        assert "turned off" in second or "not permitted" in second.lower(), (
+            "'allow once' allowed twice"
+        )
+
+    def test_allow_session_survives_repeated_calls(self):
+        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+                             permissions.Decision.ALLOW_SESSION, session_only=True)
+        for _ in range(3):
+            out = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+            assert "turned off" not in out
+            assert "not permitted" not in out.lower()
+
+    def test_an_unscoped_tool_can_still_be_granted(self):
+        """Only 14 of the 69 tools name a path or unit at all.
+
+        The first version of the wiring read the grant inside the branch that
+        runs only for path-scoped tools, so `screenshot` and `set_wallpaper`
+        could never be granted - which is most of the tools the consent keys
+        exist for.
+        """
+        assert _consent_key_for("screenshot") == "vision-sense-enabled"
+        assert _resource_for("screenshot", {}) is None, (
+            "screenshot has no scoped resource - if it ever gains one, the "
+            "unscoped grant path loses its own regression test"
+        )
+
+
+class TestTheGrantIsScopedToOneKey:
+    """A grant that widens anything else is worse than no grant."""
+
+    def test_a_grant_names_exactly_one_key(self):
+        assert _consent_key_for("screenshot") == "vision-sense-enabled"
+        assert _consent_key_for("delete_file") == "file-delete-enabled"
+        assert _consent_key_for("screenshot") != _consent_key_for("delete_file")
+
+    def test_the_env_var_is_never_set_in_our_own_process(self):
+        """It is set on the child, never here.
+
+        The dispatcher runs many calls in one process. A value set on the parent
+        would be whichever call happened to be in flight - the exact bug where
+        a grant meant for one tool silently opens another.
+        """
+        assert os.environ.get(CONSENT_GRANT_ENV) is None
+
+
+class TestDenyStillBeatsAGrant:
+    def test_a_later_deny_beats_an_earlier_grant(self):
+        permissions.add_rule("screenshot", "*",
+                             permissions.Decision.ALLOW_SESSION, session_only=True)
+        permissions.add_rule("screenshot", "*",
+                             permissions.Decision.DENY_SESSION, session_only=True)
+        out = execute_tool("screenshot", {})
+        assert "not permitted" in out.lower() or "turned off" in out.lower()

@@ -31,7 +31,8 @@ import logging
 import shlex
 import sys
 
-from shani_chronoa import argfile, permissions, planmode, verification
+from shani_chronoa import (argfile, capabilities, config as config_mod,
+                              permissions, planmode, verification)
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -167,6 +168,21 @@ def _resource_for(name: str, arguments: dict):
     return str(value) if value else None
 
 
+def _consent_key_for(name: str) -> "str | None":
+    """The consent key gating this tool, or None if it is not gated.
+
+    Read from the live tool schema rather than a second hand-kept list, so a
+    skill that starts declaring a consent key is honoured the moment its
+    description says so - the same reason `capabilities.gated_by()` treats the
+    description as the more current of its two sources.
+    """
+    for entry in TOOLS:
+        function = entry.get("function") or {}
+        if function.get("name") == name:
+            return capabilities.gated_by(name, function.get("description", ""))
+    return None
+
+
 def _dispatch(name: str, arguments: dict, by_reference: bool = False,
              origin: str = ORIGIN_USER) -> DispatchResult:
     """Execute a named tool with the given arguments, returning a short result string.
@@ -222,6 +238,26 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
         allowed, why = permissions.permits(name, scoped_resource)
         if not allowed:
             return DispatchResult(why, verification.Verdict.UNVERIFIED, False)
+
+    # A grant the user gave this session opens the tool's own consent key for
+    # this one call, so the skill's internal gate agrees with the dispatch.
+    #
+    # Deliberately outside the branch above. Only 14 of the 69 tools name a
+    # path or unit at all - `screenshot`, `set_wallpaper` and `web_search` have
+    # no such argument - so nesting this where the scoped check lives left the
+    # grant unreachable for precisely the consent-gated tools it exists to
+    # serve. The first version of this had that bug and a test caught it.
+    #
+    # An unscoped tool is matched against "*" as its resource. A grant written
+    # as `("*", allow_once)` covers every tool; a grant naming a concrete path
+    # does not, which is the conservative direction - a permission to delete
+    # `/home/me/Downloads` should not also open a screenshot.
+    #
+    # Hoisted because it is read again at execution time, and a tool with no
+    # scoped resource never reaches a branch that would assign it.
+    granted_key = None
+    if permissions.session_grant(name, scoped_resource if scoped_resource is not None else "*"):
+        granted_key = _consent_key_for(name)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
@@ -283,6 +319,14 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
             f"sys.stdout.write(str(result))"
         )
         cmd = f"python3 -c {shlex.quote(program)}"
+
+    if granted_key:
+        # Set on the child, not on this process. The dispatcher runs many calls
+        # in one process, so a value set here would be whichever call happened
+        # to be in flight - exactly the class of bug where a grant meant for
+        # one tool silently opens another.
+        cmd = (f"env {config_mod.CONSENT_GRANT_ENV}={shlex.quote(granted_key)} "
+               f"{cmd}")
 
     try:
         exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
