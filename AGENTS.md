@@ -492,6 +492,30 @@ oversights and are not:
   `_SENSE_CONSENT_KEYS` before the filter was added, so it withholds nothing
   legitimate.
 
+**A skill cannot see the app's transient percepts, and the durable file is the
+wrong instrument for the question.** `list_percepts` shipped claiming to show
+"every fact held right now" and how many "would be sent with the next reply".
+Both were false. A skill runs in a subprocess, so it built its own
+`PerceptStore` and read `memory.jsonl` — which only ever holds the `memory`
+sense's facts. Every transient percept, i.e. what a running app is mostly
+holding, was structurally invisible, so it would have under-reported the answer
+while stating it as complete. `PerceptStore` now publishes `live.json` beside
+the durable file on every `add()` and `clear_transient()`, renamed into place
+so a concurrent reader never sees half a file.
+
+  - `clear_transient()` must publish **after** clearing. Publishing before it
+    restates exactly the facts the caller just discarded, so a reader landing
+    between the two lines is told the opposite of the truth.
+  - `_live_path` is a **per-instance** attribute, not a module global read at
+    write time. With a global, a store constructed with a custom
+    `durable_path` — the parameter tests already use — still publishes into the
+    shared location; that is how a test run wrote a fabricated snapshot
+    (`pid 424242`) into a real user's `~/.local/share/shani-chronoa/percepts/`.
+  - `list_percepts` must name its provenance. A view older than 5 minutes is
+    reported as a leftover from a process that is gone, not as the present, and
+    an absent view says no app is publishing. A smaller *honest* answer is the
+    requirement; a confident wrong one is the failure.
+
 **Verified by running, not by reading:** the real `ChronoaApplication()` (a
 genuine `Gtk.Application`, not `__new__`) through the real `_init_components()`,
 with a real `Percept` added to the app's own store, produced a prompt
@@ -531,7 +555,7 @@ The repo's own `test_sense_scheduler.py` handles this for child processes.
 
 ## Machine-state senses (added 2026-09-28, merged 2026-09-29)
 
-Twenty-three senses read the machine rather than the user's world. The
+Twenty-eight senses read the machine rather than the user's world. The
 machine-state set added that day was `privilege` (who holds a dangerous
 capability), `display`, `network`, `bluetooth`, `rfsense` (WiFi RSSI spread),
 `thermalgrid` (MLX90640/AMG8833 over I2C), `hwmon` (fan/temperature/voltage/
@@ -542,6 +566,27 @@ scheduler de-duplication, so a polled sense that keeps saying the same thing is
 not deposited 1440 times a day. `hwmon` and `modelfit` have no external binary:
 they read the kernel directly, so there is nothing that can be missing for them
 to degrade into.
+
+Five more were added after the merges below took the registry to 23:
+`filesystems` (what is mounted, and real room per filesystem — `storage` walks
+`/sys/block` and reports *disks*, which is not the same question), `services`
+(`systemctl` units and whether they are enabled), `timebase` (NTP sync and
+timezone), `usb` (the USB bus — `devices` walks PCI, which is the *internal*
+bus, so nothing covered what was actually plugged in) and `resources` (zombie
+processes, swap in use, file-descriptor pressure: the ways a machine runs out
+of something without `cpu` or `memory` looking busy). On the dev box `usb`
+found the integrated camera and the Intel wireless device, which no other sense
+reported, and `resources` found a `zypak-sandbox` zombie and 810 MiB of swap in
+use — all invisible to every pre-existing sense.
+
+**`filesystem` vs `filesystems` are not duplicates and must not be merged.**
+`filesystem` reads one text file the user names, confined to their home
+directory; `filesystems` reports mounts and room. The names differ by one
+letter, so the settings labels are deliberately distinct — "Files and folders"
+against "Filesystems and room". Do not rename either to tidy this up: the
+consent key is `<sense-name>-sense-enabled` and is derived from the name, so a
+rename silently makes a sense permanently ungrantable (see the alias rule
+below).
 
 **Seven senses were merged away on 2026-09-29, taking the registry from 28
 modules to 23** (28 − 7 retired + 2 new, `capture` and `printing`), and this
@@ -604,8 +649,8 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1261 passed, 4 skipped, as
-of `875359c`), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
+**Verification status:** unit suite green on Ubuntu (1351 passed, 6 skipped, as
+of `163ced2`), **and 42 pass / 0 fail on a real booted ShaniOS slot** (2026-09-28,
 testbed `9be7139`, packaging at `shani-pkgbuilds` `031337f` =
 `shani-chronoa 0.1.0-6`)
 — including `privilege-uses-package-manager` PASS with 18 holders correctly
@@ -619,10 +664,19 @@ needs `--cgroupns=host` for nspawn and a hand-rolled mount for
 
 ⚠️ **The slot run predates the 2026-09-29 sense merges and does not cover
 them.** It was 2026-09-28, at testbed `9be7139`, against the pre-merge
-packaging. Ten senses were merged after it, so no real-hardware run has yet
-exercised `capture`, `hwmon`, `storage` or `network` as the single senses they
-now are. The unit suite covers the merges; the honest gap is real-hardware
-coverage of the merged ones, and it needs a slot run to close.
+packaging. Ten senses were merged after it, and five more (`filesystems`,
+`services`, `timebase`, `usb`, `resources`) were added after that, so no
+real-hardware run has yet exercised `capture`, `hwmon`, `storage` or `network`
+as the single senses they now are, nor any of the five newest. The unit suite
+covers the merges; the honest gap is real-hardware coverage of the merged and
+newly-added ones, and it needs a slot run to close.
+
+`usb` and `resources` are the two whose value is least provable from a unit
+test, because both exist to surface *this* machine's actual condition — the
+integrated camera and Intel wireless device on the USB bus, the
+`zypak-sandbox` zombie and 810 MiB of swap. Those readings came off the dev
+box, not a slot. A slot run should confirm both degrade honestly when the
+sysfs tree or `ps` output looks unfamiliar, rather than reporting clean.
 
 `modelfit` earns one note here rather than in AUDIT-HISTORY, because the slot
 test's handling of it is the lesson. It reports UNKNOWN in its *model list*
