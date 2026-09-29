@@ -291,6 +291,11 @@
       <summary>Let Chronoa change when the screen blanks</summary>
       <description>Off: Chronoa can report the current idle timeout and whether the screen locks, but cannot change either. It has its own key rather than sharing the lock skill's, because whether the machine locks itself is a standing policy decision rather than a one-off action.</description>
     </key>
+    <key name="sleep-inhibit-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa hold the machine awake</summary>
+      <description>Off: Chronoa can report what is currently holding the machine awake, but cannot take a hold of its own. Its own key rather than sharing the idle timeout's, because a bounded hold for the next few minutes is a different decision from changing the machine's idle policy. Every hold it takes is bounded and lapses on its own, so an enabled key cannot leave the machine unable to sleep.</description>
+    </key>
     <key name="appearance-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa change the desktop appearance</summary>

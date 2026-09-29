@@ -137,6 +137,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_scaling": ("Appearance", "Change the text size"),
     "toggle_night_light": ("Appearance", "Turn the blue-light filter on or off"),
     "set_screensaver": ("Power and screen", "Change when the screen blanks and locks"),
+    "set_sleep_inhibit": ("Power and screen",
+                           "Hold the machine awake for a bounded time"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
 }
 
@@ -189,6 +191,7 @@ GATE_NAMES: dict[str, str] = {
     "appearance-control-enabled": "Let Chronoa change the desktop look",
     "timezone-control-enabled": "Let Chronoa change the timezone",
     "idle-timeout-enabled": "Let Chronoa change when the screen blanks",
+    "sleep-inhibit-enabled": "Let Chronoa hold the machine awake",
 }
 
 
@@ -413,6 +416,12 @@ READ_ONLY_TOOLS = frozenset({
 #: `destructive_hint` stays None for all of them. Whether an action is hard to
 #: undo is a separate question, and guessing it is the failure this module was
 #: written to avoid.
+#: Ungated actuators. A consent-gated tool does NOT belong here even though it acts:
+#: `tool_annotations` already gives any gated tool `read_only_hint: False` from the gate,
+#: and the gated branch is the one that also claims `idempotent_hint: False`. Putting a
+#: gated tool in both sets makes it the first tool to hit both branches at once, and the
+#: two disagree about idempotency. `set_sleep_inhibit` was that tool; keeping the sets
+#: disjoint is what stops the question arising.
 MUTATING_TOOLS = frozenset({
     "write_text_file", "create_directory", "move_or_copy_file",
     "create_archive", "extract_archive", "set_clipboard", "set_volume",

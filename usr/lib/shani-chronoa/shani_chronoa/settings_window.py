@@ -555,6 +555,11 @@ class SettingsWindow(Gtk.Window):
              "sharing the lock skill's, because whether the machine locks itself "
              "is a standing policy decision, not a one-off action.",
              "set_screensaver refuses while this is off"),
+            ("Let Chronoa hold the machine awake", "sleep-inhibit-enabled",
+             "Off: Chronoa can report what is holding the machine awake, but cannot "
+             "take a hold of its own. Every hold is bounded and lapses on its own, "
+             "so turning this on cannot leave the machine unable to sleep.",
+             "set_sleep_inhibit refuses while this is off"),
             ("Let Chronoa change the desktop look", "appearance-control-enabled",
              "Off: Chronoa can report whether the desktop is set to light or dark "
              "but cannot change it. Restyling a desktop unasked, mid-document, is "

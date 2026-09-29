@@ -82,6 +82,7 @@ _IMPL = {
     "set_theme": "shani_chronoa.skills.set_theme",
     "set_timezone": "shani_chronoa.skills.set_timezone",
     "set_screensaver": "shani_chronoa.skills.set_screensaver",
+    "set_sleep_inhibit": "shani_chronoa.skills.set_sleep_inhibit",
     # All three share `appearance-control-enabled` with set_theme: they are the
     # same permission, "change how this desktop looks", and three separate keys
     # for it would imply a distinction the user cannot act on.

@@ -660,12 +660,12 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1691 passed, 6 skipped)
+**Verification status:** unit suite green on Ubuntu (1735 passed, 6 skipped)
 
 > **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
-> `initialize` (protocol 2024-11-05), `tools/list` (69 tools), and `tools/call`
+> `initialize` (protocol 2024-11-05), `tools/list` (70 tools), and `tools/call`
 > for a normal call, a malformed call, a shut consent gate, an unknown tool, and
-> five identical calls in a row. All 69 tools carry a title and annotations.
+> five identical calls in a row. All 70 tools carry a title and annotations.
 >
 > Running it needs `mcp` installed *alongside* system PyGObject, which is the
 > non-obvious part. A plain venv does not work: `gi` is a system package pip

@@ -58,6 +58,7 @@ CONTROLLED = {
     "appearance-control-enabled",
     "timezone-control-enabled",
     "idle-timeout-enabled",
+    "sleep-inhibit-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",
