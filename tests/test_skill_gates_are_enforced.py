@@ -72,6 +72,8 @@ _IMPL = {
     # Scanning is passive but is still a radio operation, so it reuses the
     # `network` sense consent rather than minting a scanning key.
     "list_wifi_networks": "shani_chronoa.skills.list_wifi_networks",
+    "control_service": "shani_chronoa.skills.control_service",
+    "find_and_replace": "shani_chronoa.skills.find_and_replace",
 }
 
 

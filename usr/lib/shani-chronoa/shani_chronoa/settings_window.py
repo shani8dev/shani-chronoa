@@ -138,6 +138,19 @@ SENSE_LABELS = {
         "Temperatures, fans and power",
         "Every sensor the firmware exposes, and whether a fan has stopped",
     ),
+    "filesystems": (
+        "Filesystems and room",
+        "What is mounted, and how much space and how many files remain",
+    ),
+    "services": (
+        "Service health",
+        "Which system services systemd has marked as failed, with the reason",
+    ),
+    "timebase": (
+        "Clock trustworthiness",
+        "Whether the system clock is synchronised, which every reminder and "
+        "timer depends on",
+    ),
     "network": (
         "Network and DNS",
         "Every interface, its link speed, whether it is wireless, and the resolvers",
@@ -169,12 +182,19 @@ SENSE_CATEGORIES = [
     ("Getting work done",
      "Files, folders and the web - what makes it able to act rather than only answer",
      ["filesystem", "web"]),
+    ("Is anything broken",
+     "Which system services systemd has marked as failed, and why",
+     ["services"]),
     ("The screen",
      "Connected monitors, what mode they are in, and the backlight",
      ["display"]),
     ("Network and wireless",
      "Interfaces and resolvers, audio devices, Bluetooth, and motion from Wi-Fi signal",
      ["network", "audio", "bluetooth", "rfsense"]),
+    ("Disks and room",
+     "What is mounted, how much of it is left, and whether the clock can be "
+     "trusted - so a reminder means what it says",
+     ["filesystems", "timebase"]),
     ("The machine itself",
      "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
      ["cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
@@ -476,6 +496,15 @@ class SettingsWindow(Gtk.Window):
              "Off: Chronoa can list and focus windows but cannot ask one to "
              "close, which can discard unsaved work.",
              "close_window refuses while this is off"),
+            ("Let Chronoa change system services", "service-control-enabled",
+             "Off: Chronoa can list services and read their logs but cannot "
+             "start, stop or restart one. These are root-owned units, and the "
+             "wrong one can take down something another person is using.",
+             "control_service refuses while this is off"),
+            ("Let Chronoa edit many files at once", "bulk-edit-enabled",
+             "Off: find-and-replace runs as a dry run and only lists what it "
+             "would change. Writing one named file still works without this.",
+             "find_and_replace refuses to write while this is off"),
             ("Let Chronoa change WiFi", "wifi-connect-enabled",
              "Off: Chronoa can list nearby networks but cannot join or leave "
              "one. Changing the connection changes what this machine can reach.",

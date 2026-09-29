@@ -506,7 +506,15 @@ class TestToolTrackerTolerance:
 
 
 class TestInlinePathUnchanged:
-    """The JSON path must be byte-for-byte what it was, for every real skill."""
+    """The inline path must be byte-for-byte what it is, for every real skill.
+
+    The argument literal is Python source, not JSON. It used to be written with
+    `json.dumps`, which emits `true`/`false`/`null` - the program still
+    compiled, because those parse as bare names, and then died at runtime with
+    `NameError`. So the `set_mute` expectation below is `True`, not `true`: the
+    old expectation was pinning the bug. The quotes are single because that is
+    what `repr` produces, and `shlex.quote` then escapes the whole program.
+    """
 
     @pytest.mark.parametrize("name,args,expected", [
         ("get_datetime", {},
@@ -518,15 +526,12 @@ class TestInlinePathUnchanged:
         ("get_volume", {},
          "python3 -c 'from shani_chronoa.skills.volume import _run_get_volume; import sys; "
          "result = _run_get_volume({}); sys.stdout.write(str(result))'"),
-        ("set_volume", {"percent": 42},
-         "python3 -c 'from shani_chronoa.skills.volume import _run_set_volume; import sys; "
-         "result = _run_set_volume({\"percent\": 42}); sys.stdout.write(str(result))'"),
-        ("set_mute", {"mute": True},
-         "python3 -c 'from shani_chronoa.skills.volume import _run_set_mute; import sys; "
-         "result = _run_set_mute({\"mute\": true}); sys.stdout.write(str(result))'"),
-        ("set_timer", {"seconds": 90, "label": "pasta"},
-         "python3 -c 'from shani_chronoa.skills.timer import _run; import sys; "
-         "result = _run({\"seconds\": 90, \"label\": \"pasta\"}); sys.stdout.write(str(result))'"),
+        ("set_volume", {'percent': 42},
+         'python3 -c \'from shani_chronoa.skills.volume import _run_set_volume; import sys; result = _run_set_volume({\'"\'"\'percent\'"\'"\': 42}); sys.stdout.write(str(result))\''),
+        ("set_mute", {'mute': True},
+         'python3 -c \'from shani_chronoa.skills.volume import _run_set_mute; import sys; result = _run_set_mute({\'"\'"\'mute\'"\'"\': True}); sys.stdout.write(str(result))\''),
+        ("set_timer", {'seconds': 90, 'label': 'pasta'},
+         'python3 -c \'from shani_chronoa.skills.timer import _run; import sys; result = _run({\'"\'"\'seconds\'"\'"\': 90, \'"\'"\'label\'"\'"\': \'"\'"\'pasta\'"\'"\'}); sys.stdout.write(str(result))\''),
     ])
     def test_command_string_is_unchanged(self, monkeypatch, name, args, expected):
         import shani_chronoa.tools as tools_mod
@@ -537,23 +542,66 @@ class TestInlinePathUnchanged:
         tools_mod.execute_tool(name, args)
         assert captured["cmd"] == expected
 
-    def test_an_injection_shaped_argument_is_still_inert(self, monkeypatch):
-        # Given: the historical hand-quoted program that let a payload's own
-        #       quotes reach the shell, now pinned against regression
+    def test_an_injection_shaped_argument_is_still_inert(self, monkeypatch, tmp_path):
+        """The payload must be data, and provably so.
+
+        The old version of this asserted the hostile substring was *absent* from
+        the command. That was a proxy for inertness which stopped being true for
+        the wrong reason: the argument is now rendered with `repr`, so the text
+        legitimately appears inside the program as a quoted string. Substring
+        absence measured quoting style, not safety.
+
+        This checks the property itself. The command is a single `python3 -c`
+        shell word; the program inside it parses as Python; and the payload
+        occurs only inside a string literal, never as executable source. A
+        payload that could break out would have to appear as something the AST
+        treats as code - an attribute access, a call, an import - and that is
+        what is ruled out here.
+        """
+        import ast
+        import shlex
+
         import shani_chronoa.tools as tools_mod
+
         captured = {}
         monkeypatch.setattr(tools_mod._SANDBOX, "execute", lambda cmd, config, agent_id="default": (
             captured.__setitem__("cmd", cmd), (0, "ok", 1.0))[1])
         monkeypatch.setattr(tools_mod._TRACKER, "record_call", lambda *a, **k: None)
-        hostile = '"; import os; os.system("touch /tmp/chronoa-pwned") #'
+        marker = tmp_path / "pwned"
+        hostile = f'"; import os; os.system("touch {marker}") #'
         tools_mod.execute_tool("set_timer", {"seconds": 5, "label": hostile})
-        # Then: the payload is escaped data inside the quoted program, and the
-        #       command is still a single python3 -c invocation
-        assert hostile not in captured["cmd"]
-        assert captured["cmd"].startswith("python3 -c '")
-        assert captured["cmd"].endswith("'")
-        assert len(captured["cmd"].split("python3 -c ")) == 2
 
+        cmd = captured["cmd"]
+        # 1. one shell word: the whole program is a single quoted argument.
+        parts = shlex.split(cmd)
+        assert parts[0] == "python3" and parts[1] == "-c", parts[:3]
+        assert len(parts) == 3, f"the command is not a single python3 -c: {cmd[:120]}"
+        program = parts[2]
+
+        # 2. it is valid Python.
+        tree = ast.parse(program)
+
+        # 3. the payload lives only inside string literals.
+        literal_text = "".join(
+            node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str))
+        assert "touch" in literal_text, (
+            "the payload should still be present, as data - if it vanished the "
+            "argument is being dropped rather than quoted")
+
+        # Nothing executable may reference the payload's identifiers. If the
+        # quoting ever fails, `os` and `system` become attribute accesses and a
+        # call node rather than part of a string.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in ("system", "popen"):
+                raise AssertionError(
+                    f"the payload escaped into executable code: {ast.dump(node)}")
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                imported = getattr(node, "module", None) or ""
+                names = [a.name for a in node.names]
+                assert "os" not in (imported, *names), (
+                    f"the payload became an import: {ast.dump(node)}")
+        assert not marker.exists(), "the payload executed"
 
 _EMPTY_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 

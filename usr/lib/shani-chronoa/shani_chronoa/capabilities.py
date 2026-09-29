@@ -58,6 +58,8 @@ GATED: dict[str, str] = {
     "kill_process": "process-kill-enabled",
     "close_window": "window-close-enabled",
     "connect_wifi": "wifi-connect-enabled",
+    "control_service": "service-control-enabled",
+    "find_and_replace": "bulk-edit-enabled",
 }
 
 # Tool name -> (group heading, short menu label). A tool missing from this table
@@ -83,6 +85,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "connect_wifi": ("System", "Join a WiFi network"),
     "print_file": ("System", "Print a file"),
     "add_reminder": ("Time and reminders", "Add a reminder"),
+    "list_services": ("Services and logs", "System services"),
+    "control_service": ("Services and logs", "Start or stop a service"),
+    "read_logs": ("Services and logs", "Read the system log"),
+    "create_archive": ("Files", "Make or extract an archive"),
+    "find_and_replace": ("Files", "Find and replace"),
     "get_battery_status": ("Power and screen", "Battery status"),
     "set_brightness": ("Power and screen", "Screen brightness"),
     "get_volume": ("Sound", "Output volume"),
@@ -129,6 +136,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Apps",
     "Files",
     "Processes and windows",
+    "Services and logs",
     "System",
     "Web",
     "Local models",
@@ -149,6 +157,8 @@ GATE_NAMES: dict[str, str] = {
     "process-kill-enabled": "Let Chronoa stop processes",
     "window-close-enabled": "Let Chronoa close windows",
     "wifi-connect-enabled": "Let Chronoa change WiFi",
+    "service-control-enabled": "Let Chronoa change system services",
+    "bulk-edit-enabled": "Let Chronoa edit many files at once",
 }
 
 

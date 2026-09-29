@@ -88,6 +88,9 @@ _SENSE_CONSENT_KEYS = {
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
     "printing": "printing-sense-enabled",
+    "filesystems": "filesystems-sense-enabled",
+    "services": "services-sense-enabled",
+    "timebase": "timebase-sense-enabled",
 }
 
 # Retired consent keys, still honoured.
@@ -136,6 +139,10 @@ _SENSE_CONSENT_ALIASES = {
 _SENSE_DEFAULT_ENABLED = frozenset({
     "memory", "power", "storage", "network", "cpu", "gpu", "devices",
     "audio", "display", "security",
+    # Default-on alongside `storage` and `cpu`: this is the machine's
+    # own state, and `services` reports only failures rather than the whole
+    # service list, so it is not the noise a default-on sense should avoid.
+    "filesystems", "services", "timebase",
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here

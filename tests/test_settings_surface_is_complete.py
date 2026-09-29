@@ -48,6 +48,8 @@ CONTROLLED = {
     "process-kill-enabled",
     "window-close-enabled",
     "wifi-connect-enabled",
+    "service-control-enabled",
+    "bulk-edit-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",

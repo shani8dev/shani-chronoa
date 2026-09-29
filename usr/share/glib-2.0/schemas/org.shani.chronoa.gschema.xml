@@ -271,6 +271,31 @@
       <summary>Let Chronoa check which language models this machine can actually run</summary>
       <description>When true, Chronoa may ask the local Ollama which models are installed, compare their on-disk size against this machine's available memory, and report whether the model currently configured is present and fits. Off by default. Read-only: it reports and recommends, and never downloads, loads, unloads or changes a model. This exists because the configured model is otherwise chosen by a two-way hardware tier that never checks what is installed or whether it fits - on a 31GB machine that still selects the same 2.5GB model it would choose on a 16GB one, and reports nothing if that model is not present at all.</description>
     </key>
+    <key name="service-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change system services</summary>
+      <description>When true, Chronoa may start, stop, restart, enable or disable a system service. Off by default: these are root-owned units, the wrong one can take down something another person is relying on, and stopping the wrong one on a remote machine can lock you out. Listing services and reading their logs need no permission.</description>
+    </key>
+    <key name="bulk-edit-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa edit many files at once</summary>
+      <description>When true, Chronoa may replace a string across every file matching a pattern. Off by default, and separate from writing one named file: a pattern that matches in forty files rewrites forty files, and that blast radius is not knowable in advance. Without this, find_and_replace still runs as a dry run and lists what it would change.</description>
+    </key>
+    <key name="filesystems-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read what is mounted and how much room is left</summary>
+      <description>Reads the mount table and each filesystem's space and remaining inodes. On by default: this is the machine's own state, like the disk and power senses, and a filesystem can have bytes free while being unable to create another file.</description>
+    </key>
+    <key name="services-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read which system services have failed</summary>
+      <description>Reads systemd's own view of which units are in a failed state, with the last few log lines from each. On by default because only failures are reported, not the whole service list.</description>
+    </key>
+    <key name="timebase-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa check whether the system clock is trustworthy</summary>
+      <description>Reads the time zone and whether the clock is synchronised to a network time source. On by default: every reminder and timer is downstream of it, and an unsynchronised clock is invisible otherwise.</description>
+    </key>
     <key name="file-delete-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa delete files</summary>

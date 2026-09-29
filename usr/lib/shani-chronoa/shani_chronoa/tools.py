@@ -73,6 +73,24 @@ def _get_sandbox_config(tool_name: str) -> SandboxConfig:
     return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=30)
 
 
+def _json_safe(value):
+    """Coerce a decoded argument tree to types `repr` renders as Python source.
+
+    Arguments arrive from JSON, so they are already only str/int/float/bool/
+    None/list/dict - except that `default=str` used to be passed to
+    `json.dumps`, which implies non-JSON types can reach here, and a skill
+    argument is untrusted input from a model. Anything else becomes its `str`
+    so the child program still compiles.
+    """
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin: str = ORIGIN_USER) -> str:
     """Execute a named tool with the given arguments, returning a short result string.
 
@@ -141,11 +159,22 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         # is not defined`. Only zero-argument skills worked. shlex.quote
         # escapes the whole program correctly whatever the LLM put in the
         # arguments.
-        args_json = json.dumps(arguments, default=str)
+        # A *Python* literal, not JSON. `json.dumps` writes `true`, `false`
+        # and `null`, which are not Python: the child program still compiles,
+        # because `true` parses as a name, and then dies at runtime with
+        # `NameError: name 'true' is not defined`. So every skill called with a
+        # boolean or null argument - `dry_run`, `overwrite`, `failed_only`,
+        # `include_hidden` - failed over MCP while working perfectly in the
+        # unit tests, which call the handler in-process and never serialise.
+        #
+        # `repr` is the right conversion for the other direction: arguments
+        # arrive as JSON, so they are only ever str/int/float/bool/None/list/
+        # dict, and `repr` renders every one of those as valid Python source.
+        args_literal = repr(_json_safe(arguments))
         program = (
             f"from {handler_module} import {handler_func}; "
             f"import sys; "
-            f"result = {handler_func}({args_json}); "
+            f"result = {handler_func}({args_literal}); "
             f"sys.stdout.write(str(result))"
         )
         cmd = f"python3 -c {shlex.quote(program)}"
