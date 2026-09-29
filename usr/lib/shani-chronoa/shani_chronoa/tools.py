@@ -31,7 +31,7 @@ import logging
 import shlex
 import sys
 
-from shani_chronoa import argfile, planmode, verification
+from shani_chronoa import argfile, permissions, planmode, verification
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -134,6 +134,39 @@ class DispatchResult(NamedTuple):
         return not self.ran
 
 
+
+#: Which argument names the resource a skill would touch, so a permission rule
+#: can be written against a path or a unit rather than against the tool alone.
+#: Skills not listed fall through with `None` and are unaffected by rules.
+_RESOURCE_ARGUMENT = {
+    "delete_file": "path",
+    "trash_file": "path",
+    "move_or_copy_file": "source",
+    "write_text_file": "path",
+    "read_text_file": "path",
+    "find_files": "root",
+    "search_file_contents": "root",
+    "find_and_replace": "path",
+    "extract_archive": "archive",
+    "list_directory": "path",
+    "manage_mount": "device",
+    "control_service": "unit",
+    "print_file": "path",
+    "open_file": "path",
+}
+
+
+def _resource_for(name: str, arguments: dict):
+    """The path or unit this call would touch, or None if it is not scoped."""
+    if not isinstance(arguments, dict):
+        return None
+    key = _RESOURCE_ARGUMENT.get(name)
+    if not key:
+        return None
+    value = arguments.get(key)
+    return str(value) if value else None
+
+
 def _dispatch(name: str, arguments: dict, by_reference: bool = False,
              origin: str = ORIGIN_USER) -> DispatchResult:
     """Execute a named tool with the given arguments, returning a short result string.
@@ -177,6 +210,18 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     refusal = planmode.blocked_reason(name)
     if refusal:
         return DispatchResult(refusal, verification.Verdict.UNVERIFIED, False)
+
+    # Scoped deny rules are a pre-filter here, for the same reason: a rule the
+    # user set for this session should hold even if the skill forgets to look.
+    # Only *deny* is enforced centrally. An allow is deliberately not - granting
+    # from here would bypass the consent key the user has switched off, and the
+    # whole point of those keys is that a skill cannot talk its way past them.
+    # Grants are consulted by each skill's own gate instead.
+    scoped_resource = _resource_for(name, arguments)
+    if scoped_resource is not None:
+        allowed, why = permissions.permits(name, scoped_resource)
+        if not allowed:
+            return DispatchResult(why, verification.Verdict.UNVERIFIED, False)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
