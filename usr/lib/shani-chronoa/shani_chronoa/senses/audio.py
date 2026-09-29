@@ -69,6 +69,22 @@ def _parse_status(text: str) -> Dict[str, List[dict]]:
     found: Dict[str, List[dict]] = {"sinks": [], "sources": []}
     if not text.strip():
         return found
+    # `wpctl status` groups its output into top-level blocks - Audio, Video,
+    # Settings - and *both* Audio and Video carry their own `Sinks:` and
+    # `Sources:` headings. Only the Audio block describes microphones and
+    # speakers; this machine's `Integrated Camera (V4L2)` is a Video-block
+    # source, and treating it as a microphone put a camera in front of
+    # `set_mic_mute`, which picks its target from this list.
+    #
+    # A block name is a bare word at column 0, while its sub-headings sit
+    # indented behind a box-drawing branch, and the banner line above the
+    # blocks carries spaces and quotes and is therefore not one. `block` stays
+    # None when no header is recognised, and None is *accepted* - so a future
+    # format change that drops the headers falls back to reading every
+    # Sinks/Sources rather than reporting no devices at all. Being strict here
+    # would recreate the exact failure the module docstring describes: a
+    # machine with seven devices reported as having none.
+    block = None
     section = None
     for raw in text.splitlines():
         line = raw.strip()
@@ -78,10 +94,17 @@ def _parse_status(text: str) -> Dict[str, List[dict]]:
         for character in _BOX:
             bare = bare.replace(character, " ")
         bare = bare.replace("*", " ").strip()
+        if raw and not raw[0].isspace() and bare.isalpha():
+            block = bare
+            section = None
+            continue
         if bare.endswith(":"):
             heading = bare.rstrip(":").strip()
-            section = "sinks" if heading == "Sinks" else (
-                "sources" if heading == "Sources" else None)
+            if block not in (None, "Audio"):
+                section = None
+            else:
+                section = "sinks" if heading == "Sinks" else (
+                    "sources" if heading == "Sources" else None)
             continue
         if section is None:
             continue

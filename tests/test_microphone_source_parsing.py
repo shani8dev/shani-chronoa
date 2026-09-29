@@ -139,14 +139,27 @@ class TestItFindsTheMicrophone:
 
         A test whose fake data does not contain what the code looks for proves
         nothing, and this bug was precisely a heading that did not exist.
+
+        **Was 3, now 2** (2026-09-29). This fixture carries a `Video` block with
+        its own `Sources:` heading, and the parser tracked only "am I inside
+        Sources" - so the integrated camera was counted as a third microphone.
+        That is the bug `senses.audio` now fixes by tracking the top-level block,
+        and this assertion had been pinned to the buggy count. Two is the correct
+        number: 55 and 56 are the microphones, 49 is a video device. A webcam
+        that genuinely exposes an audio stream is still kept when PipeWire lists
+        it under `Audio`; the filter is by block, not by name.
         """
         from shani_chronoa.senses.audio import _parse_status
         parsed = _parse_status(STATUS)
-        assert len(parsed["sources"]) == 3, (
+        assert len(parsed["sources"]) == 2, (
             f"the fixture no longer looks like real wpctl output - it parsed "
             f"to {parsed['sources']}. The heading this bug was about is "
             f"spelled differently again, or the parser no longer matches the "
             f"characters wpctl actually prints."
+        )
+        assert [s["id"] for s in parsed["sources"]] == ["55", "56"], (
+            "the two microphones must be the sources; a video device reached "
+            "the microphone list"
         )
 
     def test_the_fixture_lists_a_non_default_first(self, status):
