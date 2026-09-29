@@ -150,6 +150,49 @@ def read_applications(limit: int = _MAX_APPS) -> "tuple[list, bool]":
     return apps, False
 
 
+def read_window_titles() -> "tuple[list, bool]":
+    """Titled top-level windows, as `(app, title)` pairs.
+
+    Separate from `read_applications` because a window is a child of an
+    application, and the two are wanted for different questions: "is anything
+    running" and "what is actually on screen" are not the same question. A
+    desktop with one browser open and nine windows satisfies both differently.
+
+    Windows with no title are skipped rather than reported as `(no title)`.
+    An empty list here means "nothing reported a title", which is not the same
+    as "no windows" - so the caller is given the chance to say so.
+    """
+    desktop = _desktop()
+    try:
+        total = desktop.get_child_count()
+    except Exception as exc:  # noqa: BLE001
+        raise _Unavailable(f"the accessibility bus did not answer ({exc})") from exc
+
+    windows: list = []
+    for index in range(total):
+        app = desktop.get_child_at_index(index)
+        if app is None:
+            continue
+        try:
+            app_name = app.get_name() or "(unnamed)"
+            child_count = app.get_child_count()
+        except Exception:  # noqa: BLE001
+            continue
+        for child_index in range(child_count):
+            window = app.get_child_at_index(child_index)
+            if window is None:
+                continue
+            try:
+                title = window.get_name()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("accessibility: window %d/%d unreadable: %s",
+                             index, child_index, exc)
+                continue
+            if title:
+                windows.append((app_name, title))
+    return windows, False
+
+
 def _run(arguments: dict) -> str:
     config = ChronoaConfig()
     if not config.sense_allowed("accessibility"):

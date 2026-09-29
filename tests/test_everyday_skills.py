@@ -353,20 +353,59 @@ class TestCreateDirectoryIsIdempotent:
 class TestTheDesktopSkillsRefuseWhenTheyCannotWork:
     """No partial lists, and no guessing which window."""
 
-    def test_windows_refuse_under_wayland(self, monkeypatch, granted):
+    def test_window_control_refuses_under_wayland(self, monkeypatch, granted):
+        """The *control* skills still refuse. Listing no longer does.
+
+        `list_windows` gained an AT-SPI fallback, so under Wayland it now
+        answers with titled windows from the accessibility bus - and labels
+        them as a different, incomplete observation. That is the point: a
+        partial list honestly labelled beats a refusal when a real alternative
+        exists, and the two xdotool cannot provide.
+
+        Focusing and closing have no such alternative. AT-SPI exposes no
+        `WindowAction` interface on any window inspected on this machine, so
+        there is no portable way to raise or close one, and these must keep
+        refusing rather than half-work.
+        """
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
-        # Consent is granted deliberately: `close_window` checks its gate before
-        # the session, which is the right order - a refusal must not report
-        # whether the window exists or whether this session could drive it.
         close_window.ChronoaConfig = lambda: granted
         try:
-            for out in (list_windows._run({}),
-                        focus_window._run({"title_contains": "x"}),
+            for out in (focus_window._run({"title_contains": "x"}),
                         close_window._run({"window_id": "1"})):
-                assert "Wayland" in out, f"a partial list was offered instead: {out[:80]}"
+                assert "Wayland" in out, (
+                    f"a control skill offered a partial result: {out[:80]}"
+                )
         finally:
             close_window.ChronoaConfig = ChronoaConfig
+
+    def test_listing_under_wayland_never_returns_an_unlabelled_partial(self,
+                                                                     monkeypatch):
+        """Whatever it answers, it must not pass for the xdotool list.
+
+        Measured disagreement on this machine: 23 windows by xdotool, 11 titled
+        windows on the bus. A response that reads like the former while being
+        the latter is the exact quiet wrongness this project avoids.
+        """
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+        monkeypatch.delenv("DISPLAY", raising=False)
+
+        class _Off:
+            def sense_allowed(self, name):
+                return False
+
+            def sense_allowed_reason(self, name):
+                return "the accessibility sense is turned off"
+
+        import shani_chronoa.senses.accessibility as accessibility
+        monkeypatch.setattr(accessibility, "ChronoaConfig", lambda: _Off())
+        out = list_windows._run({})
+        # With the bus unavailable the answer must be a refusal or a labelled
+        # list - never an unmarked partial one.
+        assert ("accessibility" in out) or ("Wayland" in out), (
+            f"an unlabelled partial list was offered: {out[:100]}"
+        )
 
     def test_a_consent_refusal_comes_before_the_session_check(self, monkeypatch):
         """The ordering is a privacy property, so it is asserted rather than

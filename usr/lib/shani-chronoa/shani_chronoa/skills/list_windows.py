@@ -2,13 +2,29 @@
 
 The first of three window skills, and the only one that only reads.
 
-**X11 only, and it says so.** `xdotool` drives X11; under Wayland it is either
-absent or, worse, present and talking to an Xwayland server that only knows
-about X11 clients - so it would list a fraction of the windows and look like it
-had listed them all. The skill therefore detects Wayland first and refuses,
-rather than returning a plausible partial list. This is a known limitation of
-the whole window group, and pretending otherwise on a GNOME, Plasma or COSMIC
-session would be exactly the kind of quiet wrongness this project avoids.
+**Listing works on Wayland; controlling does not.** `xdotool` drives X11. Under
+Wayland it is either absent or, worse, present and talking to an Xwayland server
+that only knows about X11 clients - so it would list a fraction of the windows
+and look like it had listed them all. Detecting that and returning the fraction
+is the quiet wrongness this project avoids.
+
+So there are two paths, and they answer slightly different questions.
+
+Under X11, `xdotool` is authoritative: window ids, geometry, and every window
+whether or not it implements accessibility.
+
+Where `xdotool` cannot see the session, the titles come from the AT-SPI
+accessibility bus instead - which is D-Bus and works under both. That is a
+*different observation*, not a repaired version of the same one, and the message
+says so: an app that does not implement AT-SPI is absent from that list, and a
+desktop that mirrors a window can report it twice. Measured here, the two paths
+disagree - 23 windows by xdotool against 11 titled windows on the bus - which is
+exactly why neither is presented as the other.
+
+**The control half is still X11 only.** `focus_window` and `close_window` have no
+fallback: AT-SPI exposes no `WindowAction` interface on any window inspected on
+this machine, so there is no portable way to raise or close one. Those skills
+continue to refuse rather than pretend.
 """
 
 from __future__ import annotations
@@ -57,10 +73,68 @@ def session_problem() -> str:
     return ""
 
 
+def _via_accessibility() -> str:
+    """Window titles from the AT-SPI bus, for a session xdotool cannot serve.
+
+    The fallback exists because the X11 path has a specific failure mode this
+    codebase refuses to paper over: under Wayland, xdotool is either absent or
+    present and talking to Xwayland, which knows only about X11 clients. It
+    would then list a fraction of the windows and look like it had listed them
+    all.
+
+    What comes back here is a *different* observation, not a repaired version of
+    the same one, and the message says so. These are the windows that expose
+    themselves on the accessibility bus: an app that does not implement AT-SPI
+    is absent from this list, and one window can appear twice if the desktop
+    mirrors it (the frames window here does, alongside the real one). Calling
+    that a partial view is the honest description; calling it the window list
+    would be the quiet wrongness the module docstring exists to avoid.
+    """
+    from shani_chronoa.config import ChronoaConfig
+    from shani_chronoa.senses import accessibility
+
+    config = ChronoaConfig()
+    if not config.sense_allowed("accessibility"):
+        return (
+            "xdotool cannot see this session, and the accessibility bus that "
+            "could is turned off. Enable the 'accessibility-sense-enabled' "
+            "sense to list windows this way instead."
+        )
+    try:
+        windows, _ = accessibility.read_window_titles()
+    except accessibility._Unavailable as exc:
+        return f"Could not list windows: {exc}"
+
+    if not windows:
+        return (
+            "No window reported a title on the accessibility bus. Some windows "
+            "really do have no title set, and apps that do not implement "
+            "AT-SPI are not listed at all, so this is not proof the desktop is "
+            "empty."
+        )
+
+    kept, withheld = files.cap_list(
+        [f"{app} - {title}" for app, title in windows], _MAX_WINDOWS
+    )
+    body = "\n".join(f"  {row}" for row in kept)
+    note = files.withheld_note(
+        "window", withheld,
+        widen="ask for the window list again, or raise _MAX_WINDOWS",
+    )
+    return (
+        f"{len(windows)} window(s) reported a title on the accessibility bus "
+        f"(xdotool cannot see this session, so these come from the a11y bus; "
+        f"apps that do not implement AT-SPI are not in this list):\n{body}\n{note}"
+    )
+
+
 def _run(arguments: dict) -> str:
     problem = session_problem()
     if problem:
-        return f"Could not list windows: {problem}"
+        # Listing is read-only, so there is a real alternative on a Wayland or
+        # headless session. Saying "could not" and stopping would be accurate
+        # but wasteful when a different mechanism can answer the same question.
+        return _via_accessibility()
     try:
         proc = subprocess.run(
             ["xdotool", "search", "--onlyvisible", "--name", ""],
