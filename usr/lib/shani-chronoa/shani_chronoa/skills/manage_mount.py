@@ -99,7 +99,11 @@ def _run(arguments: dict) -> str:
                     "That is not the same as nothing being mounted.")
         real = [m for m in rows if m["fstype"] not in ("proc", "sysfs", "devtmpfs", "tmpfs")]
         lines = [f"{len(real)} mounted filesystem(s), excluding the usual pseudo ones:"]
-        lines += [f"  {m['target']}  ({m['fstype']} from {m['source']})" for m in real[:40]]
+        shown, withheld = files.cap_list(real, 40)
+        lines += [f"  {m['target']}  ({m['fstype']} from {m['source']})" for m in shown]
+        note = files.withheld_note("filesystem", withheld)
+        if note:
+            lines.append(f"  {note}")
         lines.append("  Use the 'filesystems' sense for space and inode detail.")
         return "\n".join(lines)
 

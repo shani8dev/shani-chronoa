@@ -28,6 +28,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -117,7 +118,11 @@ def _run(arguments: dict) -> str:
             lines.append("The adapter's own state could not be read from "
                          "bluetoothctl, so this is UNKNOWN rather than off.")
         lines.append(f"{len(paired)} paired device(s):")
-        lines += [f"  {d}" for d in paired[:20]] or ["  none reported"]
+        shown, withheld = files.cap_list(paired, 20)
+        lines += [f"  {d}" for d in shown] or ["  none reported"]
+        note = files.withheld_note("device", withheld)
+        if note:
+            lines.append(note)
         lines.append("Use the 'bluetooth' sense for adapter and device detail.")
         return "\n".join(lines)
 

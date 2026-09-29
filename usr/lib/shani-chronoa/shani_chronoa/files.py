@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 
 #: Never act on these, whatever the caller says. A typo that resolves to `/`
 #: must not delete a home directory, and a skill reachable by an LLM needs this
@@ -189,3 +189,36 @@ def iter_lines(text: str) -> Iterable[str]:
         line = raw.strip()
         if line:
             yield line
+
+
+def cap_list(rows: list, limit: int) -> Tuple[list, int]:
+    """First `limit` rows, and how many were withheld.
+
+    A `limit` of zero or less means *no cap*, not *show nothing*: every caller
+    here passes a positive constant, and a zero that silently hid everything
+    would be the more dangerous of the two surprises.
+
+    Returns `(shown, withheld)` rather than just the slice so a caller cannot
+    cap a list without also learning the count. A silently shortened list is
+    indistinguishable from a complete one, and the model reads it as the whole
+    answer - so the two values travel together on purpose, and the caller's
+    next line is expected to say what the number is.
+    """
+    rows = list(rows)
+    if limit <= 0 or len(rows) <= limit:
+        return rows, 0
+    return rows[:limit], len(rows) - limit
+
+
+def withheld_note(what: str, count: int, widen: str = "") -> str:
+    """The line that discloses a capped list, or "" when nothing was withheld.
+
+    `widen` is how to get the rest - naming the flag that raises the limit, or
+    the skill to use instead. Without it the disclosure tells the model the
+    answer is incomplete but not how to complete it, which is only half useful.
+    """
+    if count <= 0:
+        return ""
+    plural = "" if count == 1 else "s"
+    return (f"... and {count} more {what}{plural} not shown."
+            + (f" {widen}" if widen else ""))
