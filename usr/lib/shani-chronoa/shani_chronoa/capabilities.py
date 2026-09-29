@@ -119,6 +119,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_privacy": ("Privacy controls", "Mute the microphone, disable a camera, or blank the screen"),
     "set_power_profile": ("Power and screen", "Power profile"),
     "calculate": ("Everyday tools", "Calculation"),
+    "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
     "disk_usage": ("System", "Report filesystem and directory space use"),

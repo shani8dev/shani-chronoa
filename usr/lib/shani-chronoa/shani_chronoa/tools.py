@@ -43,6 +43,15 @@ TOOLS: list[dict]
 _HANDLER_FNS: dict
 TOOLS, _HANDLER_FNS = discover_skills()
 
+#: Tools that run in this process instead of the sandbox subprocess, because
+#: what they do cannot cross that boundary. `ask_user` has to put a question in
+#: the window the user is looking at and block until they answer.
+#:
+#: This is a privilege list. Anything named here is unsandboxed, so it stays a
+#: short explicit set rather than anything derived - a rule that decided this
+#: automatically would widen the exemption without anyone reviewing it.
+_LOCAL_TOOLS = frozenset({"ask_user"})
+
 # Module-level sandbox executor singleton
 _SANDBOX = SandboxExecutor()
 
@@ -123,9 +132,18 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False, origin:
         logger.warning(f"Tool '{name}' called with non-dict arguments; ignoring them")
         arguments = {}
 
+        config = _get_sandbox_config(name)
+        handler_module = handler.__module__
+        handler_func = handler.__name__
+
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
     handler_func = handler.__name__
+
+    # Named, not inferred: this list runs unsandboxed, which is a privilege,
+    # and a heuristic deciding it would widen without anyone reviewing it.
+    if name in _LOCAL_TOOLS:
+        return handler(arguments)
 
     # A skill may opt into the by-reference transport for its own oversized
     # arguments (see `skills/speak.py:wants_by_reference`). Ask the module

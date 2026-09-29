@@ -1033,6 +1033,15 @@ class CajitaWindow(Gtk.ApplicationWindow):
         )
         main_box.append(self._transcript)
 
+        # Where an `ask_user` question appears. Hidden until a question is
+        # actually pending, so it costs nothing the rest of the time.
+        self._question_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._question_row.add_css_class("cajita-question")
+        self._question_row.set_visible(False)
+        main_box.append(self._question_row)
+        self._pending_question = None
+        self._question_widgets: list = []
+
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._input_entry = Gtk.Entry()
         self._input_entry.set_placeholder_text("Type a message…")
@@ -1190,11 +1199,75 @@ class CajitaWindow(Gtk.ApplicationWindow):
         if not text:
             return
         self._input_entry.set_text("")
+        if self._pending_question is not None:
+            # Answering out loud or typing both land here, and both resolve the
+            # question rather than opening a new turn - the turn is still blocked
+            # inside the tool waiting for exactly this.
+            self._resolve_question(text)
+            return
         self.add_user_turn(text)
         # The stripped text, not the raw entry contents: the turn the user can
         # see is the stripped one, and emitting the raw string meant the
         # assistant received something the transcript never showed.
         self.emit("user-input", text)
+
+    def show_question(self, question: str, options: list, resolve) -> None:
+        """Put a question with its options on screen, resolved by `resolve`.
+
+        `resolve` is passed in rather than returned because the caller is
+        off-thread: it has to hold the event *now* and queue the widget work for
+        the GTK thread, so a method that returned the event would be read before
+        GLib had run it.
+        """
+        if self._pending_question is not None:
+            self._resolve_question("")
+
+        self._clear_question_widgets()
+
+        label = Gtk.Label(label=question)
+        label.set_wrap(True)
+        label.set_xalign(0.0)
+        self._question_widgets.append(label)
+        self._question_row.append(label)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for option in options:
+            btn = Gtk.Button(label=option)
+            btn.set_hexpand(True)
+            btn.connect("clicked", lambda _b, o=option: self._resolve_question(o))
+            buttons.append(btn)
+        self._question_widgets.append(buttons)
+        self._question_row.append(buttons)
+
+        hint = Gtk.Label(label="Tap an option, or just say your answer.")
+        hint.add_css_class("dim-label")
+        hint.set_xalign(0.0)
+        self._question_widgets.append(hint)
+        self._question_row.append(hint)
+
+        self._question_row.set_visible(True)
+        self._input_entry.set_placeholder_text("Say or type your answer…")
+        self._pending_question = resolve
+
+    def _clear_question_widgets(self) -> None:
+        """Drop the prompt's widgets.
+
+        GTK4's `Gtk.Box` has no `get_children()` - that is GTK3 - so the widgets
+        are tracked as they are added and removed by reference.
+        """
+        for widget in self._question_widgets:
+            self._question_row.remove(widget)
+        self._question_widgets = []
+
+    def _resolve_question(self, answer: str) -> None:
+        resolve = self._pending_question
+        self._pending_question = None
+        if resolve is not None:
+            resolve(answer)
+        self._clear_question_widgets()
+        self._question_row.set_visible(False)
+        self._input_entry.set_placeholder_text("Type a message…")
+        self._input_entry.grab_focus()
 
     def get_input_text(self) -> str:
         return self._input_entry.get_text()
