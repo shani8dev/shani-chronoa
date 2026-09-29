@@ -25,6 +25,7 @@ byte-for-byte what it was before the senses layer existed.
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -49,6 +50,16 @@ SYSTEM_PROMPT = (
 
 MAX_TOOL_ROUNDS = 4
 
+#: Wall-clock ceiling for one turn. `MAX_TOOL_ROUNDS` bounds how many times the
+#: model may act, not how long any of those may take - four rounds against a
+#: 4B model on a cold start, or one slow tool on a spinning disk, is minutes
+#: with nothing watching it. A turn that cannot finish is a turn the user
+#: cannot interrupt, because the UI has no idea it is still working.
+#:
+#: Generous on purpose: this is a backstop against a run that is not going to
+#: end, not a target. Exceeding it stops the turn and says so.
+MAX_TURN_SECONDS = 300.0
+
 # _history grew unboundedly across a session before this - combined with a
 # small num_ctx that was previously hardcoded, a long session would
 # silently truncate context (Ollama drops rather than errors) well before
@@ -57,6 +68,19 @@ MAX_TOOL_ROUNDS = 4
 # some OpenAI-compatible backends reject a conversation with a dangling
 # tool_calls/tool message.
 MAX_HISTORY_MESSAGES = 40
+
+
+def _seconds(value: float) -> str:
+    """A duration a person can read, without rounding it into a different number.
+
+    `{x:.0f}` turned a 0.6 second budget into "1 seconds" - wrong, and
+    ungrammatical besides. Whole seconds stay whole; anything else keeps a
+    decimal, because a message about time that misstates the time is worse than
+    no message.
+    """
+    if value >= 10:
+        return f"{int(round(value))} seconds"
+    return f"{value:.1f} seconds"
 
 
 class Assistant:
@@ -166,6 +190,60 @@ class Assistant:
             turns.pop(0)
         self._history = [system] + [msg for turn in turns for msg in turn]
 
+    def _over_budget(self, deadline: float) -> "str | None":
+        """An honest stop, or None while there is time left.
+
+        Returning the message rather than raising is deliberate: the turn's
+        contract is to return an answer, and a string that says the budget ran
+        out is a truthful answer to "what happened" - where an exception would
+        leave the window showing a spinner with no explanation.
+        """
+        left = deadline - time.monotonic()
+        if left > 0:
+            return None
+        spent = time.monotonic() - getattr(self, "_turn_started", deadline)
+        self._turn_deadline = None
+        self._turn_overran = True
+        logger.warning("Turn exceeded its %s budget after %s",
+                       _seconds(MAX_TURN_SECONDS), _seconds(spent))
+        return (
+            f"This turn ran out of time: it had {_seconds(MAX_TURN_SECONDS)} "
+            f"and used about {_seconds(spent)} of them without reaching an answer. "
+            f"Nothing further was done. Ask for something narrower, or raise "
+            f"MAX_TURN_SECONDS in the source if this was not a stuck turn."
+        )
+
+    def _note_model_call(self, seconds: float) -> None:
+        """Record a model call's duration and running totals for the turn.
+
+        Local inference costs no money but is not free, and when the cloud
+        fallback is on it costs real money. Either way the turn's cost is
+        currently invisible, so this is the smallest honest accounting: how many
+        calls, how long, and what the turn has spent so far.
+        """
+        self._model_calls = getattr(self, "_model_calls", 0) + 1
+        self._model_seconds = getattr(self, "_model_seconds", 0.0) + seconds
+        logger.debug("Model call %d took %.2fs (turn total %.2fs over %d calls)",
+                     self._model_calls, seconds, self._model_seconds,
+                     self._model_calls)
+
+    def turn_stats(self) -> dict:
+        """What this turn has cost so far in time and calls.
+
+        Deliberately not a money figure. When the cloud fallback is on, per-call
+        cost depends on the provider and the model, and a wrong number invented
+        here would be worse than none - so the token counts and durations are
+        reported and the pricing is left to whoever knows it.
+        """
+        return {
+            "model_calls": getattr(self, "_model_calls", 0),
+            "model_seconds": round(getattr(self, "_model_seconds", 0.0), 3),
+            "wall_seconds": round(
+                time.monotonic() - getattr(self, "_turn_started", time.monotonic()), 3),
+            "budget_seconds": MAX_TURN_SECONDS,
+            "over_budget": bool(getattr(self, "_turn_overran", False)),
+        }
+
     async def handle(self, text: str, on_tool_call: Optional[Callable[[str, dict], None]] = None) -> str:
         """Process one user utterance, executing tool calls, return the reply text.
 
@@ -175,6 +253,10 @@ class Assistant:
         Runs synchronously on whatever thread `handle()` itself runs on
         (the caller's async loop, not necessarily the GTK main thread).
 
+        Bounded by `MAX_TURN_SECONDS` in wall-clock time as well as by
+        `MAX_TOOL_ROUNDS` in rounds. When the budget runs out the turn stops and
+        says so, rather than returning a partial answer that looks complete.
+
         Each request in the tool loop calls `build_messages()` again rather
         than reusing one list, so a percept added mid-turn - or expired
         mid-turn - is reflected in the very next request without being
@@ -183,8 +265,20 @@ class Assistant:
         self._record({"role": "user", "content": text})
         self._trim_history()
 
+        # The clock starts here, not at process start: a turn's budget is about
+        # how long *this* turn may take, and an idle assistant is not late.
+        deadline = time.monotonic() + MAX_TURN_SECONDS
+        self._turn_deadline = deadline
+        self._turn_started = time.monotonic()
+        self._turn_overran = False
+
         for _ in range(MAX_TOOL_ROUNDS):
+            over = self._over_budget(deadline)
+            if over:
+                return over
+            started = time.monotonic()
             message = await self.llm.chat_message(self.build_messages(), tools=TOOLS)
+            self._note_model_call(time.monotonic() - started)
             self._record(message)
 
             tool_calls = message.get("tool_calls") or []
@@ -217,6 +311,12 @@ class Assistant:
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
 
         # Ran out of tool rounds - ask once more for a final plain answer.
+        over = self._over_budget(deadline)
+        if over:
+            return over
+        started = time.monotonic()
         message = await self.llm.chat_message(self.build_messages(), tools=None)
+        self._note_model_call(time.monotonic() - started)
         self._record(message)
+        self._turn_deadline = None
         return message.get("content", "")
