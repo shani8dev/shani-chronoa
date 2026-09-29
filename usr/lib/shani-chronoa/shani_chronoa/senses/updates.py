@@ -31,6 +31,8 @@ Honesty rules:
 from __future__ import annotations
 
 import logging
+import os
+import re
 import shutil
 import subprocess
 import time
@@ -110,6 +112,77 @@ def read_pending() -> Optional[List[str]]:
     return out
 
 
+_KERNEL_PACKAGES = ("linux", "linux-lts", "linux-zen", "linux-hardened")
+_RELEASE_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
+
+def _release(full: str) -> Optional[str]:
+    """The leading major.minor.patch of a kernel string, or None.
+
+    Arch's installed version and `uname -r` never compare as plain strings: the
+    package reports `6.9.1.arch1-1` and the running kernel reports
+    `6.9.1-arch1-1`. The same release number is written with a dot in one and a
+    dash in the other, and the flavour and pkgrel differ too, so a direct
+    comparison reports a mismatch on every machine including a fully up-to-date
+    one. Only the release number is comparable, so only that is compared - and
+    both full strings are printed, so a person can check the reasoning.
+    """
+    match = _RELEASE_RE.search(full or "")
+    return match.group(0) if match else None
+
+
+def read_kernel_state() -> Optional[dict]:
+    """Running and installed kernel, or None when it cannot be established."""
+    running = os.uname().release
+    installed = None
+    installed_from = None
+    for name in _KERNEL_PACKAGES:
+        if shutil.which("pacman") is None:
+            break
+        try:
+            proc = subprocess.run(["pacman", "-Q", name], capture_output=True,
+                                  text=True, timeout=_TIMEOUT, check=False)
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        if proc.returncode == 0 and proc.stdout.strip():
+            parts = proc.stdout.split()
+            if len(parts) >= 2:
+                installed = parts[1]
+                installed_from = name
+                break
+    if installed is None:
+        return {"running": running, "installed": None, "package": None,
+                "running_release": _release(running), "installed_release": None}
+    return {"running": running, "installed": installed,
+            "package": installed_from,
+            "running_release": _release(running),
+            "installed_release": _release(installed)}
+
+
+def _reboot_verdict(state: dict) -> str:
+    """The honest wording for the running-versus-installed comparison."""
+    if state["installed"] is None:
+        return ("  A newer kernel is installed: UNKNOWN - no installed kernel "
+                "package could be identified among "
+                + ", ".join(_KERNEL_PACKAGES)
+                + ". The running kernel is " + state["running"] + ".")
+    run_rel, inst_rel = state["running_release"], state["installed_release"]
+    if run_rel is None or inst_rel is None:
+        return (f"  Running kernel {state['running']}, installed "
+                f"{state['package']} {state['installed']} - the release numbers "
+                f"could not be compared, so whether a reboot would pick up a new "
+                f"kernel is UNKNOWN.")
+    if run_rel == inst_rel:
+        return (f"  Running kernel {state['running']} matches the installed "
+                f"{state['package']} {state['installed']}, so a reboot would not "
+                f"change the kernel.")
+    return (f"  A reboot would change the kernel: running {state['running']} "
+            f"(release {run_rel}), installed {state['package']} "
+            f"{state['installed']} (release {inst_rel}). Compared on the release "
+            f"number only, because Arch writes the same version with a dot in the "
+            f"package and a dash in `uname -r`.")
+
+
 def _run(arguments: dict) -> Union[str, Percept]:
     if shutil.which("pacman") is None:
         return (
@@ -139,6 +212,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
 
     age = time.time() - db.stat().st_mtime
     stale = age > _STALE_SECONDS
+    kernel = read_kernel_state()
 
     if not pending:
         verdict = (f"No updates are waiting against a package database that is "
@@ -162,10 +236,15 @@ def _run(arguments: dict) -> Union[str, Percept]:
                 "and probably higher."
             )
 
+    if kernel is not None:
+        verdict += "\n" + _reboot_verdict(kernel)
+
     return _SENSE.to_percept(
         verdict,
         source="pacman",
         metadata={
+            "kernel_running": None if kernel is None else kernel["running"],
+            "kernel_installed": None if kernel is None else kernel["installed"],
             "pending": len(pending),
             "pending_sample": pending[:40],
             "database_age_seconds": None if db is None else int(age),

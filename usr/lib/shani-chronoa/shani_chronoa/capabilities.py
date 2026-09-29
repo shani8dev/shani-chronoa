@@ -130,6 +130,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "lock_screen": ("Power and screen", "Lock this session"),
     "empty_trash": ("Files", "Permanently empty the desktop trash"),
     "extract_archive": ("Files", "Unpack a tar or zip archive"),
+    "trash_file": ("Files", "Move a file or folder to the trash, recoverably"),
+    "set_theme": ("Appearance", "Switch the desktop between light and dark"),
+    "set_timezone": ("Time and reminders", "Report or change the system timezone"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -141,6 +144,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Time and reminders",
     "Everyday tools",
     "Sound",
+    "Appearance",
     "Devices",
     "Power and screen",
     "Clipboard",
@@ -177,6 +181,8 @@ GATE_NAMES: dict[str, str] = {
     "mic-control-enabled": "Let Chronoa mute the microphone",
     "screen-lock-enabled": "Let Chronoa lock this session",
     "trash-empty-enabled": "Let Chronoa empty the trash",
+    "appearance-control-enabled": "Let Chronoa change the desktop look",
+    "timezone-control-enabled": "Let Chronoa change the timezone",
 }
 
 

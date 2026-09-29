@@ -79,6 +79,13 @@ _IMPL = {
     "set_mic_mute": "shani_chronoa.skills.set_mic_mute",
     "lock_screen": "shani_chronoa.skills.lock_screen",
     "empty_trash": "shani_chronoa.skills.empty_trash",
+    "set_theme": "shani_chronoa.skills.set_theme",
+    "set_timezone": "shani_chronoa.skills.set_timezone",
+    # Shares `file-delete-enabled` with permanent deletion: it does remove the
+    # file from where it was, and the difference is only that this is
+    # recoverable. Refusing to gate it separately would let "clear this out" be
+    # answered with the irreversible tool whenever the permanent one is allowed.
+    "trash_file": "shani_chronoa.skills.trash_file",
     # Reuses `input-control-enabled` rather than minting a layout key: the layout
     # decides what every later keystroke produces, which is the same argument
     # `press_key` gives for sharing that gate.

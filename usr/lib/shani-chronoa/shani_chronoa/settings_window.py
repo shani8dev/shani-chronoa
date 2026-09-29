@@ -531,6 +531,16 @@ class SettingsWindow(Gtk.Window):
              "unmount anything. Mounting runs code from a device that was not "
              "there a moment ago.",
              "manage_mount refuses while this is off"),
+            ("Let Chronoa change the desktop look", "appearance-control-enabled",
+             "Off: Chronoa can report whether the desktop is set to light or dark "
+             "but cannot change it. Restyling a desktop unasked, mid-document, is "
+             "disruptive in a way that reading it is not.",
+             "set_theme refuses to change it while this is off"),
+            ("Let Chronoa change the timezone", "timezone-control-enabled",
+             "Off: Chronoa can report the current timezone and list what is "
+             "available, but cannot change it. It is a system-wide change that "
+             "moves every timestamp at once, and it needs root.",
+             "set_timezone refuses while this is off"),
             ("Let Chronoa switch Bluetooth", "bluetooth-control-enabled",
              "Off: Chronoa can report which Bluetooth devices are paired and "
              "whether the adapter is on, but cannot turn it off. Separate from "

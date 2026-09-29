@@ -55,6 +55,8 @@ CONTROLLED = {
     "mic-control-enabled",
     "screen-lock-enabled",
     "trash-empty-enabled",
+    "appearance-control-enabled",
+    "timezone-control-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",

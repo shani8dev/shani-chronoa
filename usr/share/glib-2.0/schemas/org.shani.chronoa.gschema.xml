@@ -276,7 +276,17 @@
       <summary>Let Chronoa mount and unmount filesystems</summary>
       <description>When true, Chronoa may mount or unmount a filesystem through the desktop disk service, so that service's own authorisation rules apply. Off by default: mounting runs code from a device that was not there a moment ago, and unmounting something in use can lose work. Listing what is mounted needs no permission.</description>
     </key>
-    <key name="bluetooth-control-enabled" type="b">
+        <key name="appearance-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change the desktop appearance</summary>
+      <description>Off: Chronoa can report whether the desktop is set to a light or dark appearance but cannot change it. Restyling a desktop unasked, mid-document, is disruptive in a way that reading it is not.</description>
+    </key>
+    <key name="timezone-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change the system timezone</summary>
+      <description>Off: Chronoa can report the current timezone and list the available ones but cannot change it. It is a system-wide change that moves every timestamp on the machine at once, and it needs root.</description>
+    </key>
+<key name="bluetooth-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa switch the Bluetooth adapter</summary>
       <description>Off: Chronoa can report which Bluetooth devices are paired and whether the adapter is on, but cannot turn it off. Separate from the bluetooth sense's own permission, because noticing a headset and being willing to have it disconnected mid-call are different agreements.</description>
