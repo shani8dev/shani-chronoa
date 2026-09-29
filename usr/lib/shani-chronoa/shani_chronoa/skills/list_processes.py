@@ -35,8 +35,10 @@ SCHEMA = {
         "name": "list_processes",
         "description": (
             "List the processes running on this machine, with their pid, name, "
-            "owner, CPU and memory use, sorted by CPU. Use this to find what is "
-            "using the machine, or the pid of something you want to stop."
+            "owner, CPU and memory use, sorted by CPU unless sort_by says "
+            "otherwise. Use this to find what is using the machine - pass "
+            "sort_by='memory' for the RAM question, which CPU order does not "
+            "answer - or the pid of something you want to stop."
         ),
         "parameters": {
             "type": "object",
@@ -44,6 +46,14 @@ SCHEMA = {
                 "name_filter": {
                     "type": "string",
                     "description": "Only processes whose name or command contains this.",
+                },
+                "sort_by": {
+                    "type": "string",
+                    "description": (
+                        "'cpu' (the default) or 'memory'. Use 'memory' to answer "
+                        "'what is using my RAM' - the two questions have "
+                        "different answers."
+                    ),
                 },
                 "limit": {
                     "type": "integer",
@@ -141,13 +151,30 @@ def _run(arguments: dict) -> str:
             return f"{base} Nothing here matches {needle!r} by name or command line."
         return base
 
-    rows.sort(key=lambda r: r["cpu"], reverse=True)
+    # "What is eating my RAM" and "what is hogging the CPU" are different
+    # questions, and the answer to one is not the answer to the other: on this
+    # machine the biggest CPU user and the biggest memory user are the same
+    # process today, but that is luck, not a property of the machine. Sorting by
+    # memory is what makes the first question answerable at all, so it is an
+    # argument rather than a second tool.
+    #
+    # "size" is an alias for "memory" because that is the word people use, and a
+    # model asked "what is using the most memory" will reach for either.
+    sort_by = str(arguments.get("sort_by") or "cpu").strip().lower()
+    if sort_by in ("memory", "size", "mem", "rss"):
+        rows.sort(key=lambda r: r["rss"], reverse=True)
+        ordering = "memory use"
+    else:
+        # Anything unrecognised falls back to CPU rather than being refused: the
+        # default is the useful one, and an error here would be about a word.
+        rows.sort(key=lambda r: r["cpu"], reverse=True)
+        ordering = "CPU use"
     total_rss = sum(r["rss"] for r in rows)
     total_cpu = sum(r["cpu"] for r in rows) or 1.0
     shown = rows[:limit]
 
     lines = [
-        f"{len(rows)} process(es); showing {len(shown)} by CPU use.",
+        f"{len(rows)} process(es); showing {len(shown)} by {ordering}.",
         f"{'PID':>8}  {'CPU%':>6}  {'MEM':>9}  {'USER':>6}  NAME",
     ]
     me = os.getuid()
