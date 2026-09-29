@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
 from shani_chronoa.llm import OllamaLLM
-from shani_chronoa import sessions
+from shani_chronoa import compression, sessions
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
 
@@ -170,10 +170,18 @@ class Assistant:
         store holding nothing live, the returned list is content-identical to
         `_history` - this is the no-op path and it must stay free of any
         extra message, empty system turn or placeholder text.
+
+        The returned list is then compressed (`compression.compress`), which
+        elides old oversized tool *output* only. This is the same
+        copy-not-mutate contract as the percept insertion above, and for the
+        same reason: `_history` and the transcript keep every byte, so an
+        elision here is a transport saving and never a record that something
+        was lost.
         """
-        if self.percept_store is None:
-            return list(self._history)
-        return self.context_builder.build_messages(self._history, self.active_percepts())
+        messages = self.context_builder.build_messages(
+            self._history, self.active_percepts()) if self.percept_store is not None \
+            else list(self._history)
+        return compression.compress(messages)
 
     def _trim_history(self) -> None:
         """Drop the oldest complete turns once history grows past the cap."""
