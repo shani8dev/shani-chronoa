@@ -48,6 +48,8 @@ as a complete one.
 from __future__ import annotations
 
 import logging
+import threading
+from queue import Empty, Queue
 
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
@@ -95,6 +97,44 @@ _SCHEMA = {
 
 class _Unavailable(Exception):
     """The bus could not be reached - unknown, not empty."""
+
+
+class _TimedOut(Exception):
+    """The walk did not return within the budget - unknown, not empty."""
+
+
+def _bounded(work, *args):
+    """Run one bus call on a worker thread and give up after the budget.
+
+    The timeout bounds how long the *caller* waits; it cannot kill the worker
+    thread, because a thread blocked in a D-Bus round trip is not killable from
+    Python. `daemon=True` is what keeps that from leaking into process lifetime:
+    `concurrent.futures` registers an `atexit` hook that joins every worker it
+    ever started, which `senses/filesystem.py` measured here turning a
+    5-second refusal into a 60-second process. A daemon thread is not joined, so
+    a wedged read dies with the interpreter.
+
+    This is a plain thread rather than a `ThreadPoolExecutor` for that measured
+    reason, and it is why this helper exists at all: `_TIMEOUT_SECONDS` was
+    declared with a justification and then never applied, so a wedged bus hung
+    the sense for as long as the process lived.
+    """
+    slot: Queue = Queue(maxsize=1)
+
+    def _work() -> None:
+        try:
+            slot.put(work(*args))
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the caller's thread
+            slot.put(exc)
+
+    threading.Thread(target=_work, daemon=True).start()
+    try:
+        result = slot.get(timeout=_TIMEOUT_SECONDS)
+    except Empty:
+        raise _TimedOut from None
+    if isinstance(result, BaseException):
+        raise result
+    return result
 
 
 def _desktop():
@@ -204,7 +244,19 @@ def _run(arguments: dict) -> str:
         )
 
     try:
-        apps, truncated = read_applications()
+        apps, truncated = _bounded(read_applications)
+    except _TimedOut:
+        # Its own message, because the causes differ and a user who turns off a
+        # screen reader to try again needs to be told which fault it was. Still
+        # an admission of not looking - never "no applications are running",
+        # which is a claim about the user's screen that this cannot support.
+        return (
+            f"Not reading the accessibility bus: the tree walk did not return "
+            f"within {_TIMEOUT_SECONDS:g}s, so it was given up on. That means I "
+            f"could not look, not that nothing is open - something on the bus "
+            f"stopped answering, which is what a wedged application looks like "
+            f"from here."
+        )
     except _Unavailable as exc:
         # The load-bearing distinction. An empty list here would mean "no
         # applications are running", which is a claim about the user's screen

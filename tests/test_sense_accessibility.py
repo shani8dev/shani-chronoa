@@ -18,6 +18,8 @@ The three things pinned below are the ones that could quietly go wrong:
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -207,3 +209,100 @@ def _config_returning(allowed: bool):
         def sense_allowed_reason(self, name):
             return "" if allowed else "the accessibility sense is turned off"
     return _C
+
+
+class TestTheWalkIsBounded:
+    """`_TIMEOUT_SECONDS` was declared with a justification and never applied.
+
+    The constant sat next to "A tree walk that has not returned promptly is worse
+    than no tree: it holds a D-Bus round trip open against a process that may be
+    wedged" - and every D-Bus call was unbounded. A wedged application on the bus
+    hung the sense for as long as the process lived, which is the failure the
+    comment claimed to be preventing.
+
+    The bound is a plain daemon thread rather than a `ThreadPoolExecutor`, for
+    the reason `senses/filesystem.py` already recorded here: `concurrent.futures`
+    registers an `atexit` hook that joins every worker it ever started, which was
+    measured turning a 5-second refusal into a 60-second process.
+    """
+
+    def test_a_wedged_walk_gives_up_instead_of_hanging(self, monkeypatch):
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+
+        def wedged(limit=10):
+            time.sleep(30)
+            return [], False
+
+        monkeypatch.setattr(A, "read_applications", wedged)
+        started = time.monotonic()
+        out = A._run({})
+        elapsed = time.monotonic() - started
+        assert elapsed < 5, f"the call took {elapsed:.1f}s; the budget was 0.3s"
+        assert "did not return within" in out
+
+    def test_a_timeout_never_claims_nothing_is_open(self, monkeypatch):
+        # The load-bearing honesty property, under the new failure mode. An empty
+        # list means "no applications are running", which is a claim about the
+        # user's screen; a timeout is an admission of not looking.
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(A, "read_applications",
+                            lambda limit=10: (time.sleep(30), ([], False))[1])
+        out = A._run({})
+        assert "not that nothing is open" in out
+        assert "reports no applications" not in out
+
+    def test_the_timeout_is_named_so_the_user_can_act_on_it(self, monkeypatch):
+        # Distinct from "the desktop is not reporting through AT-SPI": one is a
+        # bus that is absent, the other a bus that is present and wedged, and the
+        # things a user would try are different.
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(A, "read_applications",
+                            lambda limit=10: (time.sleep(30), ([], False))[1])
+        out = A._run({})
+        assert str(A._TIMEOUT_SECONDS) in out
+        assert "stopped answering" in out
+
+    def test_the_worker_thread_is_a_daemon(self, monkeypatch):
+        # A non-daemon thread blocked in D-Bus is joined at interpreter exit, so
+        # the sense's budget would bound the caller while still hanging the whole
+        # process on the way out.
+        before = {t for t in threading.enumerate()}
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "_TIMEOUT_SECONDS", 0.3)
+        monkeypatch.setattr(A, "read_applications",
+                            lambda limit=10: (time.sleep(30), ([], False))[1])
+        A._run({})
+        new = [t for t in threading.enumerate() if t not in before]
+        assert new, "the walk did not run on a worker thread at all"
+        assert all(t.daemon for t in new), "a non-daemon thread was left behind"
+
+    def test_a_fast_walk_is_untouched(self, monkeypatch):
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "read_applications", lambda limit=10: ([("App", "x", 1)], False))
+        out = A._run({})
+        assert "App" in out
+        assert "did not return within" not in out
+
+    def test_a_worker_exception_is_re_raised_on_the_callers_thread(self, monkeypatch):
+        # The result crosses threads through a Queue, so an exception raised in the
+        # walk has to travel with the value rather than vanish into the thread.
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+
+        def boom(limit=10):
+            raise A._Unavailable("the accessibility bus did not answer (test)")
+
+        monkeypatch.setattr(A, "read_applications", boom)
+        out = A._run({})
+        assert "did not answer (test)" in out, "the worker's exception was lost"
+
+    def test_a_bus_that_raises_is_not_reported_as_a_timeout(self, monkeypatch):
+        monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
+        monkeypatch.setattr(A, "read_applications",
+                            lambda limit=10: (_ for _ in ()).throw(
+                                A._Unavailable("not reporting through AT-SPI")))
+        out = A._run({})
+        assert "not reporting through AT-SPI" in out
+        assert "did not return within" not in out
