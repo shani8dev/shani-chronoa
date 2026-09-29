@@ -44,6 +44,18 @@ _IMPL = {
     "click_pointer": "shani_chronoa.skills.input_control",
     "type_text": "shani_chronoa.skills.input_control",
     "notify": "shani_chronoa.skills.notify",
+    # The everyday-task skills that act rather than read. `press_key` reuses the
+    # existing input-control gate rather than minting its own: a key combination
+    # can do anything a person at the machine could, so splitting it from the
+    # pointer and typing would imply finer control than exists.
+    "press_key": "shani_chronoa.skills.press_key",
+    "delete_file": "shani_chronoa.skills.delete_file",
+    "kill_process": "shani_chronoa.skills.kill_process",
+    "close_window": "shani_chronoa.skills.close_window",
+    "connect_wifi": "shani_chronoa.skills.connect_wifi",
+    # Scanning is passive but is still a radio operation, so it reuses the
+    # `network` sense consent rather than minting a scanning key.
+    "list_wifi_networks": "shani_chronoa.skills.list_wifi_networks",
 }
 
 

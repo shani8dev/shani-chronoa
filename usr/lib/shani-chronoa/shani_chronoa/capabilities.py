@@ -54,12 +54,35 @@ GATED: dict[str, str] = {
     "type_text": "input-control-enabled",
     "notify": "notification-enabled",
     "screenshot": "vision-sense-enabled",
+    "delete_file": "file-delete-enabled",
+    "kill_process": "process-kill-enabled",
+    "close_window": "window-close-enabled",
+    "connect_wifi": "wifi-connect-enabled",
 }
 
 # Tool name -> (group heading, short menu label). A tool missing from this table
 # is not dropped: `find_capabilities()` files it under `OTHER` so an unexpected
 # skill is still discoverable.
 _GROUPS: dict[str, tuple[str, str]] = {
+    "list_directory": ("Files", "List a folder"),
+    "find_files": ("Files", "Find files by name"),
+    "search_file_contents": ("Files", "Search inside files"),
+    "read_text_file": ("Files", "Read a text file"),
+    "write_text_file": ("Files", "Write a text file"),
+    "create_directory": ("Files", "Create a folder"),
+    "move_or_copy_file": ("Files", "Move or copy"),
+    "delete_file": ("Files", "Delete"),
+    "open_file": ("Files", "Open a file"),
+    "list_processes": ("Processes and windows", "Running processes"),
+    "kill_process": ("Processes and windows", "Stop a process"),
+    "list_windows": ("Processes and windows", "Open windows"),
+    "focus_window": ("Processes and windows", "Focus a window"),
+    "close_window": ("Processes and windows", "Close a window"),
+    "press_key": ("Processes and windows", "Press a key"),
+    "list_wifi_networks": ("System", "WiFi networks"),
+    "connect_wifi": ("System", "Join a WiFi network"),
+    "print_file": ("System", "Print a file"),
+    "add_reminder": ("Time and reminders", "Add a reminder"),
     "get_battery_status": ("Power and screen", "Battery status"),
     "set_brightness": ("Power and screen", "Screen brightness"),
     "get_volume": ("Sound", "Output volume"),
@@ -104,6 +127,8 @@ GROUP_ORDER: tuple[str, ...] = (
     "Clipboard",
     "Screen",
     "Apps",
+    "Files",
+    "Processes and windows",
     "System",
     "Web",
     "Local models",
@@ -120,6 +145,10 @@ GATE_NAMES: dict[str, str] = {
     "vision-sense-enabled": "Allow the screen sense",
     "web-sense-enabled": "Allow web lookups",
     "microphone-sense-enabled": "Allow the microphone sense",
+    "file-delete-enabled": "Let Chronoa delete files",
+    "process-kill-enabled": "Let Chronoa stop processes",
+    "window-close-enabled": "Let Chronoa close windows",
+    "wifi-connect-enabled": "Let Chronoa change WiFi",
 }
 
 

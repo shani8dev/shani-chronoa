@@ -460,6 +460,31 @@ class SettingsWindow(Gtk.Window):
             tooltip="triggers.py refuses every actuator while this is off",
         )
 
+        # Every new destructive action needs a row here, or the key exists in
+        # the schema and nowhere a person can reach it - which is the same trap
+        # as a refusal that names a setting with no switch.
+        for label, key, blurb, tip in (
+            ("Let Chronoa delete files", "file-delete-enabled",
+             "Off: Chronoa can read, search, create and move files but never "
+             "delete one. Deletion here is permanent and does not use the trash.",
+             "delete_file refuses while this is off"),
+            ("Let Chronoa stop processes", "process-kill-enabled",
+             "Off: Chronoa can list running processes but cannot stop one. A "
+             "wrong process id can take down unsaved work.",
+             "kill_process refuses while this is off"),
+            ("Let Chronoa close windows", "window-close-enabled",
+             "Off: Chronoa can list and focus windows but cannot ask one to "
+             "close, which can discard unsaved work.",
+             "close_window refuses while this is off"),
+            ("Let Chronoa change WiFi", "wifi-connect-enabled",
+             "Off: Chronoa can list nearby networks but cannot join or leave "
+             "one. Changing the connection changes what this machine can reach.",
+             "connect_wifi refuses while this is off"),
+        ):
+            self._switch(group, label, blurb, self._read_bool(key),
+                         (lambda k: (lambda a: self._set_bool(k, a)))(key),
+                         tooltip=tip)
+
         free = self._group(
             page, "Free cloud providers",
             "Optional. These work without a key at a lower rate limit; a key raises it. "

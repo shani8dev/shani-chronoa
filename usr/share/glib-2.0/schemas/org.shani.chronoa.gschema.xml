@@ -271,6 +271,26 @@
       <summary>Let Chronoa check which language models this machine can actually run</summary>
       <description>When true, Chronoa may ask the local Ollama which models are installed, compare their on-disk size against this machine's available memory, and report whether the model currently configured is present and fits. Off by default. Read-only: it reports and recommends, and never downloads, loads, unloads or changes a model. This exists because the configured model is otherwise chosen by a two-way hardware tier that never checks what is installed or whether it fits - on a 31GB machine that still selects the same 2.5GB model it would choose on a 16GB one, and reports nothing if that model is not present at all.</description>
     </key>
+    <key name="file-delete-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa delete files</summary>
+      <description>When true, Chronoa may permanently delete files and directories it is asked to remove. Off by default, and separate from the general file-access permission: reading a directory and removing what is in it are different risks. Delete is not reversible through Chronoa itself - the filesystem's trash is not used.</description>
+    </key>
+    <key name="process-kill-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa stop processes</summary>
+      <description>When true, Chronoa may send a stop or kill signal to a running process. Off by default. A wrong process id can take down unsaved work, and Chronoa cannot tell an unsaved document from a saved one.</description>
+    </key>
+    <key name="window-close-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa close windows</summary>
+      <description>When true, Chronoa may ask a window to close. Off by default: closing a window can discard unsaved work, and the request is a polite ask rather than something Chronoa can verify was safe.</description>
+    </key>
+    <key name="wifi-connect-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change WiFi connections</summary>
+      <description>When true, Chronoa may join, leave or change the machine's WiFi network. Off by default: this changes what the machine can reach, and a network change made on a spoken or misread instruction is not obvious to undo by looking at the screen.</description>
+    </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>

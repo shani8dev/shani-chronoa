@@ -43,6 +43,11 @@ CONTROLLED = {
     "notification-enabled",    # written directly; gates the notify skill
     # the actuator consent gate, written directly
     "input-control-enabled",
+    # the destructive-action gates, each with its own row in the actions group
+    "file-delete-enabled",
+    "process-kill-enabled",
+    "window-close-enabled",
+    "wifi-connect-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",
