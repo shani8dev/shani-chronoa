@@ -220,7 +220,12 @@ class ChronoaApplication(Gtk.Application):
         # `shani-chronoa-sense remember` and the memory sense write to, so
         # anything persisted by the CLI is already live on the next turn here.
         self.percept_store = PerceptStore()
-        self.percept_context = ContextBuilder()
+        # The `consent=` argument is load-bearing: omitted, it silently reverts
+        # to injecting a percept after its sense is withdrawn. Do not "simplify"
+        # this back to a bare ContextBuilder() - every test constructs one, and
+        # that is not a licence to do so here.
+        self.percept_context = ContextBuilder(
+            consent=lambda sense: self.config.sense_allowed(sense))
         self.assistant = Assistant(
             self.llm,
             percept_store=self.percept_store,

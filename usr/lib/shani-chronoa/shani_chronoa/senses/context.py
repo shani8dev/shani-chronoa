@@ -28,7 +28,7 @@ thing to shed first.
 """
 
 import logging
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 from shani_chronoa.senses import (
     SENSITIVITY_PRIVATE,
@@ -64,10 +64,45 @@ class ContextBuilder:
         budget_chars: int = DEFAULT_BUDGET_CHARS,
         max_percepts: int = 24,
         include_sensitivity_labels: bool = True,
+        consent: Optional[Callable[[str], bool]] = None,
     ) -> None:
         self.budget_chars = budget_chars
         self.max_percepts = max_percepts
         self.include_sensitivity_labels = include_sensitivity_labels
+        self.consent = consent
+
+    def _permitted(self, percepts: Sequence[Percept]) -> list:
+        """Drop anything whose sense is no longer allowed to be *sent*.
+
+        Consent was only ever checked when a percept was recorded, so a fact
+        captured while `memory-sense-enabled` was true kept being injected into
+        every prompt after the user set it to false - verified by running it,
+        not by reading it. Perception and disclosure are different acts, and
+        only the first one was gated.
+
+        This withholds rather than deletes: the percept stays in the local
+        store and reappears if consent is granted again, so withdrawing a
+        permission costs the user nothing they did not ask to lose.
+
+        `consent` is `None` for callers with no configuration to consult, which
+        keeps this a pure renderer for the CLI and for tests. Every path that
+        actually sends to a model must supply one - `app.py` does, and a wiring
+        test asserts it, because a forgotten argument here would silently
+        restore the old behaviour and nothing else would notice.
+        """
+        if self.consent is None:
+            return list(percepts)
+        allowed, withheld = [], 0
+        for percept in percepts:
+            if self.consent(percept.sense):
+                allowed.append(percept)
+            else:
+                withheld += 1
+        if withheld:
+            logger.debug(
+                "Withheld %d percept(s) whose sense is no longer permitted",
+                withheld)
+        return allowed
 
     def _rank(self, percept: Percept) -> "tuple[int, float]":
         """Order percepts for inclusion: least private first, then freshest.
@@ -92,7 +127,11 @@ class ContextBuilder:
         if not percepts:
             return ""
 
-        ordered = sorted(percepts, key=self._rank)[: self.max_percepts]
+        permitted = self._permitted(percepts)
+        if not permitted:
+            return ""
+
+        ordered = sorted(permitted, key=self._rank)[: self.max_percepts]
 
         lines: list[str] = []
         used = 0

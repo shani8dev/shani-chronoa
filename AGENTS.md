@@ -468,11 +468,29 @@ oversights and are not:
   makes perception the assistant already has *visible* to the turn. A
   percept recorded by the CLI (or by any future in-GUI producer) is now live
   on the next turn, but the GUI still cannot itself *ask* a sense anything.
-- **Consent is still checked only at perception time**, in
-  `ChronoaConfig.sense_allowed()`. Nothing yet re-checks a *stored* percept
-  against the current consent state before it is sent, so a fact remembered
-  while the memory sense was on is still sent after it is switched off. That
-  is an open decision, not a finished design.
+- **Consent is now re-checked when a percept is *sent*, not only when it was
+  recorded** (decided 2026-09-29). This was previously recorded here as an
+  open decision, and it was a real gap: `ContextBuilder` had no consent check
+  at all, so a fact captured while `memory-sense-enabled` was true kept being
+  injected into every prompt after the user set it to false. Proven by running
+  it, not by reading it. `ContextBuilder` now takes a `consent` predicate and
+  drops anything whose sense is no longer permitted, on every turn.
+
+  This **withholds rather than deletes**: the percept stays in the local store
+  and reappears if consent is granted again, so withdrawing a permission costs
+  the user nothing they did not ask to lose. Two traps worth knowing:
+
+  - The `consent=` argument in `app.py` is load-bearing. Omitted, the
+    behaviour reverts silently and nothing else notices — which is how
+    `privacy.py` came to gate on a sense name that no longer existed. A test
+    constructs the real application and asserts the argument is present.
+  - `consent=None` keeps `ContextBuilder` a pure renderer, because the CLI and
+    the unit tests construct a bare one. Only the path that actually sends to a
+    model supplies a predicate.
+
+  Every sense name stamped on a percept was checked against
+  `_SENSE_CONSENT_KEYS` before the filter was added, so it withholds nothing
+  legitimate.
 
 **Verified by running, not by reading:** the real `ChronoaApplication()` (a
 genuine `Gtk.Application`, not `__new__`) through the real `_init_components()`,

@@ -412,3 +412,86 @@ class TestDurableFactsAreWrittenExactlyOnce:
         assert stored.ttl_seconds is None, "memory is the only durable sense"
         assert self._lines()[0]["ttl_seconds"] is None
         assert self._lines()[0]["content"] == "honest reporting"
+
+
+class TestConsentIsRecheckedWhenPerceptsAreSent:
+    """Withdrawing a permission must stop the disclosure, not just the capture.
+
+    Consent was checked only where a percept was *recorded*. Nothing re-checked
+    it on the way out, so a fact captured while `memory-sense-enabled` was true
+    kept being injected into every prompt after the user set it to false -
+    confirmed by running it, not by reading it. Perception and disclosure are
+    separate acts and only the first was gated.
+    """
+
+    def test_a_withdrawn_sense_is_withheld_from_the_prompt(self, chronoa_config):
+        from shani_chronoa.senses.context import ContextBuilder, Percept
+
+        chronoa_config.set("privacy-mode", "false")
+        chronoa_config.set("memory-sense-enabled", "true")
+        chronoa_config.set("power-sense-enabled", "true")
+        builder = ContextBuilder(
+            consent=lambda s: chronoa_config.sense_allowed(s))
+        secret = Percept(sense="memory", kind="fact", created_at=time.time(),
+                         content="the meeting is at 4pm in the annex",
+                         sensitivity="private")
+        permitted = Percept(sense="power", kind="state", created_at=time.time(),
+                            content="battery 100%", sensitivity="public")
+
+        assert "4pm" in builder.render([secret, permitted])
+        chronoa_config.set("memory-sense-enabled", "false")
+        after = builder.render([secret, permitted])
+        assert "4pm" not in after, "a private fact is still sent after withdrawal"
+        assert "battery 100%" in after, (
+            "withholding one sense must not silence an unrelated permitted one")
+
+    def test_withholding_is_not_deleting(self, chronoa_config):
+        """Re-granting must bring it back, so withdrawal costs the user nothing
+        they did not ask to lose."""
+        from shani_chronoa.senses.context import ContextBuilder, Percept
+
+        chronoa_config.set("privacy-mode", "false")
+        chronoa_config.set("memory-sense-enabled", "true")
+        builder = ContextBuilder(
+            consent=lambda s: chronoa_config.sense_allowed(s))
+        secret = Percept(sense="memory", kind="fact", created_at=time.time(),
+                         content="4pm", sensitivity="private")
+        chronoa_config.set("memory-sense-enabled", "false")
+        assert "4pm" not in builder.render([secret])
+        chronoa_config.set("memory-sense-enabled", "true")
+        assert "4pm" in builder.render([secret]), (
+            "the percept was destroyed rather than withheld")
+
+    def test_a_builder_without_consent_still_renders_everything(self):
+        """The CLI and the unit tests construct a bare builder; it must stay a
+        pure renderer rather than silently withholding."""
+        from shani_chronoa.senses.context import ContextBuilder, Percept
+
+        secret = Percept(sense="memory", kind="fact", created_at=time.time(),
+                         content="4pm", sensitivity="private")
+        assert "4pm" in ContextBuilder().render([secret])
+
+    def test_the_real_app_withholds_after_withdrawal(self, real_app):
+        """The wiring itself, through the real `_init_components()`.
+
+        Omitting the `consent=` argument restores the old behaviour silently and
+        nothing else would notice - which is exactly how `privacy.py` came to
+        gate on a sense name that no longer existed. So the argument is asserted
+        here rather than trusted.
+        """
+        app = real_app
+        builder = app.percept_context
+        assert builder.consent is not None, (
+            "the app builds its ContextBuilder without a consent predicate, so "
+            "every stored percept is sent regardless of current consent")
+
+        from shani_chronoa.senses.context import Percept
+
+        app.percept_store.add(Percept(
+            sense="memory", kind="fact", created_at=time.time(),
+            content="a private thing", sensitivity="private"))
+        app.config.set("privacy-mode", "false")
+        app.config.set("memory-sense-enabled", "true")
+        assert "a private thing" in builder.render(app.percept_store.active())
+        app.config.set("memory-sense-enabled", "false")
+        assert "a private thing" not in builder.render(app.percept_store.active())
