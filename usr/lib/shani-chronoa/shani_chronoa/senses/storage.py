@@ -34,13 +34,20 @@ sysfs genuinely says (identity, capacity, rotational claim, queue depth) and
 says plainly that health was not determined, rather than inferring health from
 a temperature that hwmon already covers.
 
-**The SMART bitmask has not been verified against the installed binary.** The exit
-status is a bitmask, not a verdict, and the failing-disk bit is 3 while a
-failure-to-open bit is 1 - so a bare non-zero check is unsafe in both
-directions. `classify()` below decodes it explicitly, but the mapping has not
-been confirmed against a real `smartctl` on this machine, so a drive reported
-here as healthy is a drive smartctl exited 0 on, not a drive independently
-proven good.
+**The SMART exit status is a bitmask, not a verdict, and it is now verified.**
+Every one of the eight `BIT_*` values below was checked against the EXIT STATUS
+table in the installed `smartctl` 7.4 man page, and two of them were then
+observed from real invocations rather than from documentation: an actual
+`/dev/nvme0n1` as a non-root user exits **2** (device open failed), and a
+device smartctl cannot even type exits **1** (command line did not parse /
+unable to detect). Both land on not-determined, which is the whole point: a
+drive nobody can read is neither healthy nor failing.
+
+What is still unexercised, and is not claimed to be verified: the **0** (healthy)
+and **8** (disk failing) paths. Reaching them needs root on a real drive, or a
+drive that is genuinely failing. So a drive reported here as healthy is a drive
+smartctl exited 0 on, not a drive independently proven good - that caveat stands
+and is narrower than it was, not gone.
 """
 
 import logging

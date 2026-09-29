@@ -12,6 +12,9 @@ drive as healthy. The second is the dangerous direction. Both tests below exist
 because either mistake is silent.
 """
 
+import shutil
+import subprocess
+
 import pytest
 
 from shani_chronoa.senses import storage
@@ -109,14 +112,60 @@ class TestTheBitmask:
                 f"status {status} classified as healthy without the failing bit"
             )
 
-    def test_the_bitmask_constants_are_documented_as_unverified(self):
-        """`smartctl` is not installed here, so these values come from the
-        smartmontools documentation and have not been checked against a real
-        binary. Recorded rather than implied to be verified."""
-        assert storage.BIT_DISK_FAILING == 0x08
-        assert storage.BIT_OPEN_FAILED == 0x02
+    def test_the_bitmask_constants_match_the_smartmontools_table(self):
+        """Every bit, checked against the documented meaning of each one.
+
+        Transcribed from the EXIT STATUS table in the smartmontools man page,
+        which is the authoritative source for these values - not from the
+        device, which cannot be read without root, and not from memory.
+        """
+        assert storage.BIT_USAGE == 0x01            # command line did not parse
+        assert storage.BIT_OPEN_FAILED == 0x02      # device open failed
+        assert storage.BIT_COMMAND_FAILED == 0x04   # a SMART/ATA command failed
+        assert storage.BIT_DISK_FAILING == 0x08     # SMART status: DISK FAILING
+        assert storage.BIT_PREFAIL_PAST == 0x10     # prefail attrs <= threshold
+        assert storage.BIT_PREFAIL_PAST_ONCE == 0x20  # ...at some time in the past
+        assert storage.BIT_ERROR_LOG == 0x40        # device error log has errors
+        assert storage.BIT_SELF_TEST_LOG == 0x80    # self-test log has errors
+
+    def test_the_mapping_is_verified_against_the_installed_binary(self):
+        """`smartctl` is installed here now, so the docstring's claim is checked
+        rather than taken on trust - and the two bits reachable without root
+        were observed from real invocations, not inferred.
+
+        A drive nobody can read is the case this whole function exists for, and
+        it is the one a dev machine can actually produce, so it is the one that
+        gets exercised against the real binary rather than a fixture.
+        """
+        binary = shutil.which("smartctl")
+        if not binary:
+            pytest.skip("smartctl is not installed; nothing to verify against")
+
+        proc = subprocess.run([binary, "-H", "/definitely-not-a-disk"],
+                              capture_output=True, text=True, timeout=30)
+        # A device smartctl cannot even type exits 1, not a drive verdict.
+        assert proc.returncode == 0x01, (
+            f"smartctl {proc.returncode} for an undetectable device; the "
+            "constants in storage.py are pinned to the documented 7.4 table and "
+            "a behaviour change here is a real signal, not a test to relax"
+        )
+        assert storage.classify(proc.returncode) == "not-determined"
+
         source = storage.__doc__ or ""
-        assert "not been verified against the installed binary" in source
+        assert "is now verified" in source
+        assert "not been verified against the installed binary" not in source
+
+    def test_the_healthy_and_failing_paths_are_still_declared_unexercised(self):
+        """The remaining caveat must stay written down.
+
+        Verifying 0x01 and 0x02 against a real binary does not verify 0x00 or
+        0x08: those need root on a real drive, or a drive that is genuinely
+        failing. Dropping the caveat because two of eight bits were checked is
+        how a partial verification turns into an implied full one.
+        """
+        source = storage.__doc__ or ""
+        assert "unexercised" in source
+        assert "0x00" in source or "**0**" in source
 
 
 class TestAttributeParsing:
