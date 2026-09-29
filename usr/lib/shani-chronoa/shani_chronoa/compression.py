@@ -35,6 +35,8 @@ deterministic head-plus-footer elision cannot hallucinate.
 
 from __future__ import annotations
 
+import re
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -58,15 +60,64 @@ HEAD_CHARS = 600
 #: went wrong.
 FOOT_CHARS = 400
 
+#: Total budget for tool output older than the protected window, in characters.
+#:
+#: `COMPRESS_THRESHOLD_CHARS` is a *per-message* rule, and on its own it is
+#: blind to a history made of many merely-large messages. Forty tool results of
+#: 1,999 characters each is 79,960 characters - roughly 20,000 tokens - and not
+#: one of them crosses the per-message threshold, so nothing is compressed.
+#: `MAX_HISTORY_MESSAGES` does not rescue it either, because 40 messages is
+#: exactly the cap.
+#:
+#: This is the aggregate floor, and it is the part that actually bounds the
+#: window. gemini-cli masks on the same principle for the same reason: the
+#: trigger is the total of prunable tool output, not the size of any one result.
+#:
+#: The figure is deliberately small, because Chronoa is local-first and may be
+#: talking to a small model with a modest context. 16,000 characters is about
+#: 4,000 tokens, which is a substantial share of a small model's window and a
+#: rounding error against a large one.
+TOTAL_TOOL_BUDGET_CHARS = 16000
 
-def _elide(content: str) -> str:
+
+#: Every elision starts with this. It is also how a deeply-elided result is
+#: recognised, so deepening a message twice is a no-op rather than a rewrite.
+ELISION_MARKER = "["
+
+#: The shallow note records the size of the result it replaced, as
+#: "[<dropped> of <total> characters elided ...]". The deep pass has to report
+#: the *original* size, not the size of the intermediate elision it is
+#: deepening - otherwise a 1,999-character result is described to the model as
+#: 1,227 characters, which is the same lie as a silent truncation.
+_SHALLOW_SIZE_RE = re.compile(r"^\[\d+ of (\d+) characters elided")
+
+#: The deep note records the original size directly. Reading it back makes
+#: `_original_size` total over every form the elider produces, and re-deepening
+#: a note idempotent - so the honesty of the reported size no longer depends on
+#: the caller remembering to skip notes.
+_DEEP_SIZE_RE = re.compile(r"^\[(\d+) characters of this result elided in full")
+
+
+def _elide(content: str, deep: bool = False) -> str:
     """A deterministic, honest stand-in for a long tool result.
 
     Says what was removed and how much, because a model reasoning from this
     needs to know the rest of the answer exists and is not being hidden from
     it. Truncation that looks like completeness is how a model concludes a file
     was 600 lines long because it was.
+
+    `deep=True` keeps the note and nothing else. Head and foot are the parts a
+    model reads first and last, so they are the last thing to go - but the
+    aggregate floor cannot always be met with them intact, and a floor that
+    cannot be met is not a floor.
     """
+    if deep:
+        total = _original_size(content)
+        return (
+            f"[{total} characters of this result elided in full; it is kept in "
+            f"the conversation transcript. Call the tool again, with a narrower "
+            f"request, if you need it.]"
+        )
     total = len(content)
     dropped = total - HEAD_CHARS - FOOT_CHARS
     lines = content.count("\n") + 1
@@ -98,6 +149,23 @@ def compress(messages: list[dict]) -> list[dict]:
 
     for index, message in enumerate(messages):
         content = message.get("content")
+        # The protection window is absolute, and deliberately so.
+        #
+        # I tried relaxing this for recent-but-oversized results - a fresh
+        # conversation whose first action reads a 50,000-character file sits in
+        # context at full size until the history reaches 7 messages, which is
+        # real and measurable. Two tests here argue against it:
+        # `test_a_sole_recent_result_is_never_elided` is marked "pinned
+        # deliberately, because it looks like a bug and is not", and its
+        # reasoning holds: nothing in a one-message history is old, the model is
+        # reasoning about that result right now, and eliding it means reasoning
+        # from a summary of a fact it needed in full.
+        #
+        # So the trade is real and unresolved, not an oversight to fix: a large
+        # recent result costs context for the length of a turn, in exchange for
+        # the model always having the thing it just asked for in full. The
+        # aggregate floor below is the compromise - it bounds the history
+        # without ever touching the newest 6 messages.
         if (index < cutoff
                 and message.get("role") == "tool"
                 and isinstance(content, str)
@@ -107,10 +175,119 @@ def compress(messages: list[dict]) -> list[dict]:
         else:
             out.append(message)
 
-    if not changed:
+    if changed:
+        logger.info("Elided oversized tool output from %d earlier message(s)", cutoff)
+        return out
+
+    # The aggregate floor. Nothing was individually oversized, so the loop above
+    # left everything alone - and a history of many merely-large results can
+    # still be enormous. Oldest first, until the remaining prunable tool output
+    # is inside the budget.
+    #
+    # Two passes, because one is not enough. Each elision keeps HEAD_CHARS plus
+    # FOOT_CHARS plus the note, so every elided message still costs about 1,250
+    # characters. Thirty-four of them cost 42,000 - more than the budget, so a
+    # single pass exhausts every candidate and stops well short of the line. The
+    # second pass drops the retained head and foot from the oldest survivors,
+    # which is what makes the floor reachable.
+    budget = _prunable_tool_chars(messages, cutoff)
+    if budget <= TOTAL_TOOL_BUDGET_CHARS:
         return list(messages)
-    logger.info("Elided oversized tool output from %d earlier message(s)", cutoff)
+
+    excess = budget - TOTAL_TOOL_BUDGET_CHARS
+    reduced = 0
+    for index in range(cutoff):
+        message = out[index]
+        if message.get("role") != "tool":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        elided = _elide(content)
+        out[index] = {**message, "content": elided}
+        # Credit what was actually *removed*, not the original size. Subtracting
+        # the original stopped the loop as soon as the running total of original
+        # sizes covered the excess, which left 59,888 characters against a
+        # 16,000 budget - the floor was in the right place and off by nearly 4x
+        # in how far it went.
+        excess -= len(content) - len(elided)
+        reduced += 1
+        if excess <= 0:
+            break
+
+    # Second pass: still over budget, so strip the retained head and foot from
+    # the oldest survivors. The full text is still in _history and in the
+    # transcript, so nothing is lost - it is simply further away.
+    if _prunable_tool_chars(out, cutoff) > TOTAL_TOOL_BUDGET_CHARS:
+        deepened = 0
+        for index in range(cutoff):
+            if _prunable_tool_chars(out, cutoff) <= TOTAL_TOOL_BUDGET_CHARS:
+                break
+            message = out[index]
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content")
+            # `_is_deeply_elided` is redundant now that `_original_size` reads
+            # both note forms, so deepening a note twice is idempotent: removing
+            # this guard produces byte-identical output, verified with the
+            # budget forced to 1 so the loop runs to the end. It stays as an
+            # O(n) saving, and as insurance if the note format ever changes - at
+            # which point re-deepening would start rewriting notes and the
+            # equivalence would stop holding.
+            if not isinstance(content, str) or not content or _is_deeply_elided(content):
+                continue
+            out[index] = {**message, "content": _elide(content, deep=True)}
+            deepened += 1
+        reduced += deepened
+
+    remaining = _prunable_tool_chars(out, cutoff)
+    if remaining > TOTAL_TOOL_BUDGET_CHARS:
+        # Every candidate is already down to a bare note and it still does not
+        # fit. Say so, rather than logging a floor that was quietly missed.
+        logger.warning(
+            "Prunable tool output is %d characters, still over the %d budget "
+            "after eliding every result; the window is bounded by message "
+            "count, not by this budget", remaining, TOTAL_TOOL_BUDGET_CHARS,
+        )
+    logger.info(
+        "Prunable tool output was %d characters, over the %d budget; elided "
+        "%d result(s), leaving %d", budget, TOTAL_TOOL_BUDGET_CHARS, reduced,
+        remaining,
+    )
     return out
+
+
+def _original_size(content: str) -> int:
+    """The size of the result `content` stands in for, in characters.
+
+    For untouched content that is simply its length. For an existing elision it
+    is the total the elision recorded, so a note about a note still describes
+    the result the model actually asked for. Falls back to the length when the
+    marker is unreadable, which is the honest direction: over-reporting an
+    unknown size is safer than under-reporting a known one.
+    """
+    for pattern in (_SHALLOW_SIZE_RE, _DEEP_SIZE_RE):
+        match = pattern.match(content)
+        if match:
+            return int(match.group(1))
+    return len(content)
+
+
+def _is_deeply_elided(content: str) -> bool:
+    """True when the result is already just a note, with nothing left to strip."""
+    return content.startswith(ELISION_MARKER) and "\n" not in content
+
+
+def _prunable_tool_chars(messages: "list[dict]", cutoff: int) -> int:
+    """Characters of tool output before the protected window."""
+    total = 0
+    for message in messages[:cutoff]:
+        if message.get("role") != "tool":
+            continue
+        content = message.get("content")
+        if isinstance(content, str):
+            total += len(content)
+    return total
 
 
 def context_size(messages: list[dict]) -> int:
