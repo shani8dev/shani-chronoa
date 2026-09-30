@@ -407,17 +407,17 @@
       <description>Reads the memory, CPU and process-count limits from the cgroup controller files, on v2 or v1. On by default: it is this machine's own configuration, and it is the only sense that can explain an OOM kill or a model that will not load on a container capped far below the host. Reports the literal string 'max' as unlimited, and reports UNKNOWN rather than falling back to physical memory, which would invert the answer.</description>
     </key>
     <key name="containers-sense-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa report what containers are running</summary>
       <description>Lists containers - running and exited - with exit codes, whether any was OOM-killed, and the disk their images and volumes hold. On by default: it talks only to a local container runtime. Reports UNKNOWN rather than zero containers when no runtime is installed or its socket cannot be reached, because a machine that has never run a container and a machine whose runtime is broken look identical from here.</description>
     </key>
     <key name="listeners-sense-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa list what is listening on this machine's ports</summary>
       <description>Lists TCP sockets in the LISTEN state with the process holding each, read from /proc/net/tcp and /proc/net/tcp6 cross-referenced against /proc/&lt;pid&gt;/fd. On by default: it is the machine's own posture and needs no helper package. Reports UNKNOWN - never 'nothing is listening' - when the socket table cannot be read, and reports a port held by another user as 'owner unknown' rather than as unowned.</description>
     </key>
     <key name="stale-sense-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa check for programs running after being replaced</summary>
       <description>Reports processes still executing a binary that has been replaced or removed on disk, confirming it by comparing the running inode against the file now at that path, so a file merely named with a ' (deleted)' suffix is not a false positive. On by default. Inspects only this account's processes, and reports how many of them and how many other users' processes were not inspected - an unreadable scan is never reported as zero.</description>
     </key>

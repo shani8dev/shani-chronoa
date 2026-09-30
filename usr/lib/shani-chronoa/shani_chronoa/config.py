@@ -246,14 +246,20 @@ _SENSE_DEFAULT_ENABLED = frozenset({
     # reads the filesystem layout. None of them leaves the machine.
     "updates", "faults", "snapshots", "coredumps", "firewall",
     # Default-on: the machine's own immutable and current facts. Identity, the
-    # running kernel, the limits this process is held to, what containers are
-    # up, what is listening on the ports, which running binaries no longer
-    # match their file on disk, and when it last booted. All of them read the
-    # kernel's own view of the machine and none of them leaves it.
-    #
-    # ("git" is intentionally absent - see `_SENSE_CONSENT_KEYS`.)
-    "hardware", "kernel", "cgroup", "containers", "listeners", "stale",
-    "boots",
+    # running kernel, the limits this process is held to, and when it last
+    # booted. Each reads a kernel-owned value and none of them leaves the
+    # machine.
+    "hardware", "kernel", "cgroup", "boots",
+    # `containers`, `listeners` and `stale` were moved OFF here on 2026-09-30.
+    # They sat with the block above under the claim that they "read the kernel's
+    # own view of the machine", which measurement contradicts: `listeners`
+    # resolves each socket to an OWNER PROCESS NAME and PID, `stale` reports a
+    # per-PID EXECUTABLE PATH, and `containers` reports names and images. That is
+    # process identity and the user's work - which is why all three already
+    # declared themselves SENSITIVITY_PERSONAL and so contradicted the default
+    # they shipped with. `SENSITIVITY` is declared and enforced nowhere, so the
+    # default was the only thing deciding this. ("git" is off for the same
+    # class of reason - see `_SENSE_CONSENT_KEYS`.)
     # `sessions` defaults OFF deliberately. It reports who *else* is on this
     # machine and what is running as root outside the service tree - that is
     # other people's presence, not this machine's own hardware, and it belongs to

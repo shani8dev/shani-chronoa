@@ -71,6 +71,16 @@ NEW_SENSES = ("hardware", "kernel", "cgroup", "containers",
 #: so a sense cannot drift from the reasoning that set its tier.
 PUBLIC_TIER = ("hardware", "kernel", "cgroup", "boots")
 
+#: Of the eight, the four that default OFF because what they report is the
+#: software the user chose to run rather than the machine's own hardware, which
+#: is the same line PUBLIC_TIER draws and the same reason `git` has always been
+#: off. Measured, not assumed: `listeners` resolves each socket to an owner
+#: process name and PID, `stale` reports a per-PID executable path, and
+#: `containers` reports names and images. All three already declared themselves
+#: SENSITIVITY_PERSONAL, and that declaration is enforced nowhere, so the
+#: default was the only thing deciding it.
+DEFAULT_OFF = ("containers", "listeners", "stale", "git")
+
 #: A path that cannot exist, standing in for "the kernel will not tell us".
 #: `/proc` and `/sys` cannot be made unreadable by a test, but a sense that
 #: swallows an `OSError` from them would swallow one from here too, and that is
@@ -1202,13 +1212,14 @@ class TestRegistration:
                 f"permanently ungrantable"
             )
 
-    def test_git_is_off_and_the_rest_are_on(self):
+    def test_the_four_software_facts_are_off_and_the_hardware_facts_are_on(self):
         for name in NEW_SENSES:
             default = name in _SENSE_DEFAULT_ENABLED
-            assert default is (name != "git"), (
-                f"{name} defaults to {'on' if default else 'off'}; all of these "
-                f"are on by default except git, whose filenames and branch "
-                f"names are the user's work product"
+            assert default is (name not in DEFAULT_OFF), (
+                f"{name} defaults to {'on' if default else 'off'}; of these, "
+                f"{', '.join(DEFAULT_OFF)} report the software the user chose "
+                f"to run - a process name, a PID, an executable path, a "
+                f"container name - and the rest are the machine's own hardware"
             )
 
     def test_the_schema_agrees_with_the_python_default(self):
@@ -1227,7 +1238,7 @@ class TestRegistration:
                 f"discards the whole file on a malformed key, and a key the "
                 f"schema does not declare makes the sense permanently ungrantable"
             )
-            assert defaults[key] is (name != "git"), (
+            assert defaults[key] is (name not in DEFAULT_OFF), (
                 f"{key} defaults to {defaults[key]} in the schema, disagreeing "
                 f"with config._SENSE_DEFAULT_ENABLED"
             )
