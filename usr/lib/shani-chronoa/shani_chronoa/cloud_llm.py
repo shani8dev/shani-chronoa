@@ -227,6 +227,7 @@ class OpenAICompatibleLLM:
                 method="POST",
                 status=status,
                 bytes_out=egress.payload_size(payload),
+                privacy_mode=egress.privacy_mode_enabled(),
             )
 
         try:
@@ -399,6 +400,7 @@ class AnthropicLLM:
                 method="POST",
                 status=status,
                 bytes_out=egress.payload_size(payload),
+                privacy_mode=egress.privacy_mode_enabled(),
             )
 
         try:

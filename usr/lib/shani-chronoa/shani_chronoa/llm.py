@@ -100,6 +100,7 @@ class OllamaLLM:
                 f"{self.host}/api/chat",
                 method="POST",
                 bytes_out=egress.payload_size(payload),
+                privacy_mode=egress.privacy_mode_enabled(),
             )
 
     async def chat(self, messages: list[dict], stream: bool = False) -> str:

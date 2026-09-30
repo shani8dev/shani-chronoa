@@ -155,6 +155,18 @@ _RESOURCE_ARGUMENT = {
     "control_service": "unit",
     "print_file": "path",
     "open_file": "path",
+    # The file-touching skills added 2026-09-30. An entry here is what lets a
+    # resource-scoped permission rule pre-filter them; without it they run.
+    "edit_file": "path",
+    "undo_last_change": "path",
+    "get_file_info": "path",
+    "directory_tree": "path",
+    "find_recently_modified": "path",
+    "git_inspect": "path",
+    # `compare_files` is deliberately absent: it takes `path_a` AND `path_b`,
+    # and this maps one skill to one argument. Registering either would let a
+    # scoped rule match on half the files the call actually reads, which is
+    # worse than not scoping it here at all.
 }
 
 

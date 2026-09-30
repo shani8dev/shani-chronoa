@@ -48,6 +48,46 @@ def resolve(raw: str) -> Path:
         raise PathProblem(f"Could not resolve {raw!r}: {exc}") from exc
 
 
+def expand(raw: str) -> Path:
+    """`~`, `$VARS` and `.`/`..` expanded, but **symlinks left alone**.
+
+    The half of `resolve()` that stops short. A caller that needs to know
+    whether something *is* a symlink - rather than what it points at - cannot
+    use `resolve()`, because resolving is exactly the operation that erases
+    the fact. The confinement check is still done on the *resolved* path;
+    this is only for the path whose own `lstat` is the answer.
+    """
+    if raw is None or not str(raw).strip():
+        raise PathProblem("No path was given.")
+    text = os.path.expandvars(os.path.expanduser(str(raw).strip()))
+    return Path(os.path.abspath(text))
+
+
+def resolve_in_home(raw: str) -> Path:
+    """`resolve()`, then refuse anything that lands outside the home directory.
+
+    The confinement check is `Path.is_relative_to` on the *already resolved*
+    path, never a string prefix test on the raw one. A prefix test is defeated
+    by `~/link-to-etc`, by `..`, and by any path that only becomes a
+    different path once symlinks are followed - and `resolve()` is what
+    collapses all three into the one path that will actually be opened.
+
+    Used where a skill exposes the same data class a consent-gated sense
+    already restricts to the home directory. The ungated file skills above do
+    *not* use this, deliberately: widening or narrowing one of them would
+    change a permission the user already has, which is a different decision
+    from adding a new skill.
+    """
+    path = resolve(raw)
+    home = Path.home().resolve()
+    if not path.is_relative_to(home):
+        raise PathProblem(
+            f"Not touching {path}: it is outside your home directory ({home}). "
+            f"Chronoa only reaches files inside your home."
+        )
+    return path
+
+
 def refuse_catalogue(path: Path, verb: str) -> None:
     """Refuse to `verb` a filesystem root or the user's entire home directory.
 

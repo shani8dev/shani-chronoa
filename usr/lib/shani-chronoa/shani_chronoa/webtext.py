@@ -12,6 +12,16 @@ body is read through a byte cap rather than `response.content`, and the text
 handed to the model is capped with a visible truncation note - a silently
 shortened page would let the model answer confidently from half a document.
 
+**Where the URL is allowed to point, and which hop it points at.** `_check_url`
+is the gate, and it is applied to *every* URL this module requests, not just
+the one it was handed - `retrieve` walks the redirect chain itself precisely so
+that a `Location` header cannot move the fetch somewhere unchecked
+(gemini-cli's `validateUrlDestination()`, assistd's `follow_redirect()`). The
+policy itself is `egress.check_destination`, which allows this machine and the
+LAN behind it and refuses the cloud metadata address; the reasoning for that
+polarity - and why it is the opposite of the obvious one - is on the ranges it
+is built from, in `egress`.
+
 **Known limits of the stdlib stripper** (see `_TextExtractor`): no
 boilerplate removal, so nav/footer/cookie-banner/region-picker text is
 included; `<template>`/`<svg>` subtrees are dropped entirely, and one that is
@@ -34,6 +44,7 @@ from urllib.parse import urlparse
 import httpx
 
 from shani_chronoa import egress
+from shani_chronoa.egress import DestinationRefused, check_destination
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,9 @@ MAX_RESPONSE_BYTES = 256 * 1024
 MAX_TEXT_CHARS = 4000
 
 USER_AGENT = "ShaniChronoa/1.0 (local-first assistant)"
+
+# Was httpx's `max_redirects=5`; counted here now that `retrieve` walks the hops.
+MAX_REDIRECTS = 5
 
 # Subtrees whose text is markup or code, never prose.
 _SKIP_TAGS = frozenset(
@@ -159,6 +173,10 @@ def _check_url(url: str) -> None:
         )
     if not parsed.netloc:
         raise RetrievalError(f"that is not a complete web address: {url!r}")
+    try:
+        check_destination(url)
+    except DestinationRefused as e:
+        raise RetrievalError(f"it will not fetch that: {e}") from e
 
 
 def _read_capped(response: httpx.Response) -> Tuple[bytes, bool]:
@@ -211,43 +229,88 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
     `transport` exists so a test can substitute `httpx.MockTransport`; the
     production callers never pass it.
 
+    **Redirects are walked here, not handed to httpx.** This used to pass
+    `follow_redirects=True`, which checked the destination of the URL it was
+    handed and then followed the `Location` chain on trust. That makes the
+    check worthless as a security property: an approved host can 302 you
+    anywhere, and everything downstream - the guard, the egress log's `host`
+    field, the `local` flag, the `violation` alarm - would then be describing
+    a request that was never sent. assistd's `follow_redirect()`
+    (`assistd-tools/src/commands/web.rs:172-183`) re-evaluates the policy on
+    every hop for the same reason, and refuses to leave the approved set with
+    an actionable message rather than a bare failure.
+
+    So the loop is here, each hop is re-checked by `_check_url` (and therefore
+    by `egress.check_destination`) *before* it is requested, and the URL that
+    reaches the egress log and the returned `Page` is the last one actually
+    fetched - which is the only one of the two that is true.
+
     Raises `RetrievalError` with a message fit to show the model. It never
     raises `httpx.HTTPError` to a caller that does not expect it - a tool
-    result is a string, and an unhandled exception there would surface as
-    a bare `ERROR(exit=1)` from the sandbox with no explanation in it.
+    result is a string, and an unhandled exception there would surface as a
+    bare `ERROR(exit=1)` from the sandbox with no explanation in it.
     """
-    _check_url(url)
     timeout = httpx.Timeout(FETCH_TIMEOUT_SECONDS, connect=CONNECT_TIMEOUT_SECONDS)
     status_code: Optional[int] = None
     body: Optional[bytes] = None
+    content_type = ""
+    bytes_truncated = False
+    fetched_url = url
     try:
         with httpx.Client(
             transport=transport,
             timeout=timeout,
-            follow_redirects=True,
-            max_redirects=5,
+            follow_redirects=False,
             headers={"User-Agent": USER_AGENT, "Accept": "text/html,*/*;q=0.8"},
         ) as client:
-            with client.stream("GET", url) as response:
-                if response.status_code >= 400:
-                    raise RetrievalError(f"the server returned HTTP {response.status_code}")
-                body, bytes_truncated = _read_capped(response)
-                content_type = response.headers.get("content-type", "")
+            hop_url = url
+            hops = 0
+            while True:
+                _check_url(hop_url)
+                fetched_url = hop_url
+                with client.stream("GET", hop_url) as response:
+                    status_code = response.status_code
+                    if response.has_redirect_location:
+                        hops += 1
+                        if hops > MAX_REDIRECTS:
+                            raise RetrievalError(
+                                f"it redirected more than {MAX_REDIRECTS} times without "
+                                f"arriving anywhere"
+                            )
+                        nxt = response.next_request
+                        if nxt is None:  # pragma: no cover - httpx sets both together
+                            raise RetrievalError(
+                                "the server redirected, but to somewhere unreadable"
+                            )
+                        hop_url = str(nxt.url)
+                        continue
+                    if status_code >= 400:
+                        raise RetrievalError(f"the server returned HTTP {status_code}")
+                    body, bytes_truncated = _read_capped(response)
+                    content_type = response.headers.get("content-type", "")
+                    break
     except httpx.TimeoutException as e:
         raise RetrievalError(f"the request timed out after {FETCH_TIMEOUT_SECONDS:.0f}s") from e
     except httpx.RequestError as e:
         raise RetrievalError(f"the request failed: {e}") from e
+    except httpx.InvalidURL as e:
+        raise RetrievalError(f"the address is not something that can be fetched: {e}") from e
     finally:
         # Instrumented here rather than in the web sense, because this is the
         # one place every retrieval passes through: the sense, and anything
         # else that calls `retrieve`, all land on it. The sense was the only
         # caller, and a grep for "egress" in it matched a docstring - which is
         # how this went uninstrumented while looking instrumented.
+        #
+        # `fetched_url` and not `url`: after a redirect those differ, and it is
+        # `fetched_url` that `is_local()` has to classify for `local`,
+        # `host` and `violation` to be worth reading.
         egress.record(
             "web:retrieve",
-            url,
+            fetched_url,
             method="GET",
             status=status_code,
+            privacy_mode=egress.privacy_mode_enabled(),
         )
 
     _check_content_type(content_type)
@@ -257,18 +320,18 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
         extractor.feed(_decode(body, content_type))
         extractor.close()
     except Exception as e:  # noqa: BLE001 - a bad page must not crash a tool call
-        logger.warning("HTML extraction failed for %s: %s", url, e)
+        logger.warning("HTML extraction failed for %s: %s", fetched_url, e)
         raise RetrievalError(f"the page could not be parsed as HTML: {e}") from e
 
     full_text = extractor.text()
     if not full_text:
         raise RetrievalError(
-            f"{url} returned {len(body)} bytes of "
+            f"{fetched_url} returned {len(body)} bytes of "
             f"{content_type or 'unknown type'} with no readable text in it"
         )
     clipped = full_text[:MAX_TEXT_CHARS]
     return Page(
-        url=url,
+        url=fetched_url,
         title=extractor.title(),
         text=clipped,
         chars_dropped=len(full_text) - len(clipped),
