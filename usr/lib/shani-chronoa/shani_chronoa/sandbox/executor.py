@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import ctypes
 import os
-import shlex
+import re
 import shutil
 import signal
 import subprocess
@@ -97,25 +97,110 @@ def _landlock_abi() -> int:
 DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
 
 
-def _first_blocked_binary(command: str, blocked_names) -> "str | None":
-    """The first blocklisted binary `command` would actually run, if any.
+#: A leading `VAR=value` word, as in `FOO=bar python3 ...`.
+_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
-    Matching on `blocked in command.split()` looks right and is not. It
-    compares whole tokens, so it blocks the bare word `mkfs` and sails
-    straight past `mkfs.ext4` - which is how mkfs is invoked in every real
-    command, and the only form anyone types. The same gap let `/sbin/dd` and
-    `/bin/mount` through. Verified rather than assumed: with exact-token
-    matching, `mkfs.ext4 /dev/sda` reached the executor and ran.
+#: Programs whose meaning depends on a script string this module cannot resolve.
+_SHELL_PROGRAMS = ("sh", "bash", "dash", "zsh", "ksh")
 
-    So compare the *basename* of each token, and treat a dotted variant
-    (`mkfs.ext4`, `mount.fuse`) as the same binary it is named after. Still no
-    substring matching: `add` and `ddrescue` are not `dd`.
+#: Constructs that hide the real program from any static reading of a script.
+_EXPANSION = ("$(", "`", "${")
+
+#: Launchers that return immediately instead of waiting for the program.
+_BACKGROUND_PROGRAMS = ("gtk-launch", "xdg-open")
+
+#: Chronoa's own management tools, which an isolated sandbox may not reach.
+#: Named once because guard 3 and guard 6 both apply it and the two must not
+#: drift apart - that is how the shell opt-in came to bypass the escalation
+#: check in the first place.
+_INTERNAL_BINARIES = ("shani-skills", "shani-plugins", "shani-settings",
+                      "shani", "pkill", "killall")
+
+
+def _program(argv: "list[str]") -> str:
+    """The program this argv will actually exec.
+
+    `env FOO=bar python3 ...` and `FOO=bar python3 ...` both run python3, so a
+    guard that read only argv[0] would see `env`, match nothing, and wave the
+    real program straight through. Leading assignments and one leading `env` are
+    therefore skipped to find the program the kernel will exec.
     """
-    for token in command.split():
-        name = token.rsplit("/", 1)[-1]
-        for blocked in blocked_names:
-            if name == blocked or name.startswith(blocked + "."):
-                return name
+    index = 0
+    while index < len(argv):
+        word = argv[index]
+        if index == 0 and os.path.basename(word) == "env":
+            index += 1
+            continue
+        if _ENV_ASSIGNMENT.match(word):
+            index += 1
+            continue
+        break
+    return argv[index] if index < len(argv) else ""
+
+
+def _name_matches(name: str, blocked_names) -> bool:
+    """Whether `name` is one of `blocked_names`.
+
+    Basename first, so `/sbin/dd` is `dd`. Still no substring matching, so `add`
+    and `ddrescue` are not `dd`; and a dotted variant (`mkfs.ext4`,
+    `mount.fuse`) counts as the binary it is named after, which is the form
+    anyone actually types.
+    """
+    base = os.path.basename(name)
+    return any(base == blocked or base.startswith(blocked + ".") for blocked in blocked_names)
+
+
+def _blocked_binary(argv: "list[str]", blocked_names) -> "str | None":
+    r"""The blocklisted program this argv would run, if any.
+
+    argv[0] and nothing else. The previous version split a *shell string* on
+    whitespace and compared tokens, which meant the check was defeated by
+    writing the name in any form a shell would expand: measured against the real
+    executor, `dd status=...` was refused with 126 while `$(echo dd) status=...`
+    and `d\d status=...` both reached the real system `dd`, which then complained
+    about its own arguments. There is no spelling of `dd` that reaches argv[0]
+    here without being the program that runs.
+    """
+    program = _program(argv)
+    if program and _name_matches(program, blocked_names):
+        return os.path.basename(program)
+    return None
+
+
+def _shell_script(argv: "list[str]") -> "str | None":
+    """The script of an explicit `sh -c ...` argv, or None if this is not one.
+
+    The shell stays reachable on purpose, because a blocklist never could police
+    a shell string - so the honest move is to make the shell *visible* in the argv
+    rather than keep a filter that appears to work. Everything below exists to
+    stop that visibility from being a hole.
+    """
+    program = _program(argv)
+    if os.path.basename(program) not in _SHELL_PROGRAMS:
+        return None
+    try:
+        return argv[argv.index("-c") + 1]
+    except (ValueError, IndexError):
+        return None
+
+
+def _unresolvable_script(script: str) -> "str | None":
+    """Why a literal shell script cannot be policed, or None if it can be.
+
+    An expansion construct makes the program unknowable by reading the text: that
+    is precisely how the previous string filter was walked past, since
+    `$(echo dd) ...` names no blocked binary anywhere in the string. Rather than
+    guess, the script is refused. The cost is real and deliberate - `sh -c "echo
+    $(date)"` is refused too - and the alternative is a check that silently fails
+    on the input it exists to catch.
+    """
+    for construct in _EXPANSION:
+        if construct in script:
+            return (
+                f"an explicit shell script contains {construct!r}, so the program it "
+                "would run is not knowable from the argv; pass the program directly "
+                "instead of a shell string"
+            )
     return None
 
 
@@ -179,16 +264,39 @@ class SandboxExecutor:
 
     def execute(
         self,
-        command: str,
+        argv: "list[str]",
         config: SandboxConfig,
         agent_id: str = "default",
     ) -> Tuple[int, str, float]:
         """Executes a command under the specified sandbox level.
 
+        `argv` is a list of arguments, never a command string. Every policy guard
+        below is a property of the program the kernel will exec, which is a
+        field of argv rather than something recovered by parsing text - so a
+        check can no longer be defeated by writing the same name in a form a
+        shell would have expanded.
+
+        A string is refused rather than quietly shelled for exactly that reason:
+        all four guards used to read a shell string, and every one of them could
+        be walked past (`$(echo sudo) reboot` cleared the escalation check;
+        `$(echo dd) status=...` ran the real `dd`).
+
         Returns: (exit_code, output, duration_ms)
         """
         start_time = time.monotonic()
-        raw_cmd = command.strip()
+
+        if isinstance(argv, str):
+            return (
+                126,
+                "Security error: execute() takes an argv list, not a command string. "
+                "A shell string is the shape the policy guards could not read; pass "
+                "the program and its arguments separately.",
+                0.0,
+            )
+        argv = [str(argument) for argument in argv]
+        if not argv:
+            return (126, "Security error: an empty argv has no program to execute.", 0.0)
+        program = _program(argv)
 
         # 1. Level 0: Total Prohibition
         if config.level == SandboxLevel.LEVEL_0_NO_EXEC:
@@ -200,7 +308,7 @@ class SandboxExecutor:
             )
 
         # 2. Prevent Privilege Escalation for non-Level 4
-        if ("sudo " in raw_cmd or "pkexec " in raw_cmd or raw_cmd.startswith("su ") or " su " in raw_cmd) \
+        if _name_matches(program, ("sudo", "pkexec", "su")) \
                 and config.level != SandboxLevel.LEVEL_4_HOST_ROOT:
             return (
                 126,
@@ -212,18 +320,16 @@ class SandboxExecutor:
         # 3. Block internal manager binaries in isolated sandboxes
         is_isolated = config.level in (SandboxLevel.LEVEL_1_READONLY, SandboxLevel.LEVEL_2_ISOLATED_DEV)
         if is_isolated:
-            internal_blocked = ("shani-skills", "shani-plugins", "shani-settings", "shani", "pkill", "killall")
-            cmd_words = set(raw_cmd.split())
-            for b in internal_blocked:
-                if b in cmd_words or f"/{b}" in raw_cmd:
-                    return (
-                        126,
-                        f"Security error: The internal management tool '{b}' is blocked in the sandbox '{config.level.value}'.",
-                        0.0,
-                    )
+            if _name_matches(program, _INTERNAL_BINARIES):
+                return (
+                    126,
+                    f"Security error: The internal management tool '{os.path.basename(program)}' "
+                    f"is blocked in the sandbox '{config.level.value}'.",
+                    0.0,
+                )
 
         # 4. Explicit blocked binaries check
-        blocked = _first_blocked_binary(raw_cmd, config.blocked_binaries)
+        blocked = _blocked_binary(argv, config.blocked_binaries)
         if blocked is not None:
             return (
                 126,
@@ -232,13 +338,38 @@ class SandboxExecutor:
             )
 
         # 5. Dangerous binary blocklist
-        blocked = _first_blocked_binary(raw_cmd, DANGEROUS_BINARIES)
+        blocked = _blocked_binary(argv, DANGEROUS_BINARIES)
         if blocked is not None:
             return (
                 126,
                 f"Security error: The command '{blocked}' is blocked by the sandbox policy.",
                 0.0,
             )
+
+        # 6. The explicit shell opt-in. Guard #5 above read argv[0], which for
+        # `sh -c "..."` is just `sh` - so without this the opt-in would undo the
+        # whole migration: `sh -c "mkfs.ext4 /dev/sda"` names the binary in plain
+        # text and used to be refused by the old string filter. A script whose
+        # program cannot be read at all is refused outright; one that can be read
+        # is held to exactly the same blocklists as a direct execution.
+        script = _shell_script(argv)
+        if script is not None:
+            unresolvable = _unresolvable_script(script)
+            if unresolvable is not None:
+                return (126, f"Security error: {unresolvable}.", 0.0)
+            script_blocked = list(config.blocked_binaries) + list(DANGEROUS_BINARIES)
+            if config.level != SandboxLevel.LEVEL_4_HOST_ROOT:
+                script_blocked += ["sudo", "pkexec", "su"]
+            if is_isolated:
+                script_blocked += list(_INTERNAL_BINARIES)
+            for word in script.split():
+                if _name_matches(word, script_blocked):
+                    return (
+                        126,
+                        f"Security error: The command '{os.path.basename(word)}' inside an "
+                        f"explicit shell script is blocked by the sandbox policy.",
+                        0.0,
+                    )
 
         # A level that promises isolation must never degrade to plain host
         # execution. Landlock counts: it is unprivileged and needs no user
@@ -262,17 +393,19 @@ class SandboxExecutor:
 
         timeout = max(1, config.timeout_seconds)
 
-        # 6. Level 4: Elevated Host with pkexec
+        # 7. Level 4: Elevated Host with pkexec
         if config.level == SandboxLevel.LEVEL_4_HOST_ROOT:
-            if raw_cmd.startswith("sudo "):
-                raw_cmd = "pkexec " + raw_cmd[5:]
-            elif not raw_cmd.startswith("pkexec "):
-                raw_cmd = "pkexec " + raw_cmd
-            return self._run_host(raw_cmd, timeout, start_time, elevated=True)
+            # `sudo X` becomes `pkexec X`; a program that is already pkexec is
+            # left alone rather than wrapped twice.
+            if os.path.basename(program) == "sudo":
+                argv = ["pkexec"] + argv[argv.index(program) + 1:]
+            elif os.path.basename(program) != "pkexec":
+                argv = ["pkexec"] + argv
+            return self._run_host(argv, timeout, start_time, elevated=True)
 
-        # 7. Level 3: Host as Current User
+        # 8. Level 3: Host as Current User
         if config.level == SandboxLevel.LEVEL_3_HOST_USER:
-            return self._run_host(raw_cmd, timeout, start_time, elevated=False)
+            return self._run_host(argv, timeout, start_time, elevated=False)
 
         # Levels 1 and 2 exist to be isolated. If bubblewrap is missing they
         # cannot be, and running them anyway is the worst outcome available:
@@ -293,12 +426,12 @@ class SandboxExecutor:
         # unavailable wherever namespaces are restricted - the opposite of what
         # a confinement level is for.
         return self._run_landlock(
-            raw_cmd, config, agent_id, timeout, start_time, use_bwrap=self.bwrap_available
+            argv, config, agent_id, timeout, start_time, use_bwrap=self.bwrap_available
         )
 
     def _run_landlock(
         self,
-        command: str,
+        argv: "list[str]",
         config: SandboxConfig,
         agent_id: str,
         timeout: int,
@@ -321,17 +454,24 @@ class SandboxExecutor:
         with open(wrapper, "w", encoding="utf-8") as handle:
             handle.write(_landlock.get_landlock_wrapper())
 
-        # exec a shell rather than the command itself: `command` is a shell
-        # string, and the wrapper takes argv. The ruleset is already in force by
-        # the time /bin/sh runs.
-        inner = f"{shlex.quote(sys.executable)} {shlex.quote(wrapper)} /bin/sh -c {shlex.quote(command)}"
+        # The wrapper ends in `os.execvp(sys.argv[1], sys.argv[1:])`, so the
+        # command's own argv reaches the kernel untouched. This used to build a
+        # shell string and run it with `shell=True`, wrapping a `/bin/sh -c` in
+        # another shell - two parse steps between the policy check and the exec,
+        # which is exactly where a string check stops meaning anything.
+        inner_argv = [sys.executable, wrapper, *argv]
         use_bwrap = use_bwrap and _bwrap_usable()
         if use_bwrap:
-            inner = (
-                "bwrap --ro-bind / / --bind " + shlex.quote(workspace) + " "
-                + workspace + " --dev-bind /dev /dev --proc /proc --die-with-parent -- "
-                + inner
-            )
+            inner_argv = [
+                "bwrap",
+                "--ro-bind", "/", "/",
+                "--bind", workspace, workspace,
+                "--dev-bind", "/dev", "/dev",
+                "--proc", "/proc",
+                "--die-with-parent",
+                "--",
+                *inner_argv,
+            ]
 
         env = secrets_manager.inject_environment()
         env.update(
@@ -346,7 +486,7 @@ class SandboxExecutor:
 
         try:
             proc = subprocess.run(
-                inner, shell=True, env=env, capture_output=True, text=True, timeout=timeout
+                inner_argv, env=env, capture_output=True, text=True, timeout=timeout
             )
         except subprocess.TimeoutExpired:
             return (124, f"Error: Command timed out after {timeout}s and was terminated.", 0.0)
@@ -362,7 +502,7 @@ class SandboxExecutor:
         return (proc.returncode, out, duration)
 
     def _run_host(
-        self, command: str, timeout: int, start_time: float, elevated: bool = False
+        self, argv: "list[str]", timeout: int, start_time: float, elevated: bool = False
     ) -> Tuple[int, str, float]:
         env = secrets_manager.inject_environment()
         # Set outright, not added to the passthrough loop below. That loop only
@@ -392,7 +532,19 @@ class SandboxExecutor:
             if k in os.environ and k not in env:
                 env[k] = os.environ[k]
 
-        is_bg = command.rstrip().endswith("&") or command.startswith("gtk-launch ") or command.startswith("xdg-open ")
+        # A trailing `&` cannot appear in an argv - it is a shell operator, and
+        # there is no shell here to interpret it. A caller that genuinely wants
+        # background semantics now says so explicitly with `["sh", "-c", "... &"]`,
+        # which is visible in the argv instead of hidden in a string. The two
+        # launchers that return immediately are recognised by program.
+        is_bg = os.path.basename(_program(argv)) in _BACKGROUND_PROGRAMS
+        if not is_bg:
+            # A trailing `&` inside an explicit shell script still means
+            # background, and dropping that would make the assistant *wait* for a
+            # command it used to return from at once. It stays visible in the
+            # argv rather than hiding in a command string.
+            script = _shell_script(argv)
+            is_bg = script is not None and script.rstrip().endswith("&")
         wait_limit = min(timeout, 2.5) if is_bg else timeout
 
         with tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace") as tmp_out, \
@@ -401,7 +553,7 @@ class SandboxExecutor:
                 _EXPECTED_PARENT["pid"] = os.getpid()
                 try:
                     proc = subprocess.Popen(
-                        command, shell=True, env=env,
+                        argv, env=env,
                         stdout=tmp_out, stderr=tmp_err,
                         start_new_session=True,
                         preexec_fn=_die_with_parent,
@@ -448,10 +600,11 @@ class SandboxExecutor:
 
                     return (0, msg, duration)
 
-                # Foreground command exceeded its timeout: kill the whole
-                # process group (shell=True spawns a shell whose children
-                # would otherwise survive proc.kill()) rather than silently
-                # reporting success while it keeps running unbounded.
+                # Foreground command exceeded its timeout: kill the whole process
+                # group, not just the direct child, or its own children survive
+                # proc.kill() - rather than silently reporting success while it
+                # keeps running unbounded. `start_new_session=True` puts the
+                # child in its own group, which is what makes the group reachable.
                 try:
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                 except ProcessLookupError:
@@ -470,7 +623,7 @@ class SandboxExecutor:
 
     def _run_bwrap(
         self,
-        command: str,
+        argv: "list[str]",
         config: SandboxConfig,
         agent_id: str,
         timeout: int,
@@ -497,11 +650,10 @@ class SandboxExecutor:
         if not config.allow_network:
             bwrap_args.append("--unshare-net")
 
-        sync_command = command.strip()
-        if sync_command.endswith("&"):
-            sync_command = sync_command[:-1].strip()
-
-        bwrap_args.extend(["--", "bash", "-c", sync_command])
+        # Straight to the program. This used to append `["--", "bash", "-c", cmd]`,
+        # which put a shell back between the policy check and the exec and made
+        # this the one path the argv migration would have quietly left open.
+        bwrap_args.extend(["--", *argv])
 
         try:
             res = subprocess.run(

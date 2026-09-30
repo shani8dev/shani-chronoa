@@ -757,7 +757,7 @@ class TestTheRealPath:
 
         def _spy(module, function, arguments, by_reference=False):
             payload = real_reference_command(module, function, arguments, by_reference)
-            commands.append(payload.command)
+            commands.append(payload.argv)
             return payload
 
         monkeypatch.setattr(vision_mod.argfile, "reference_command", _spy)
@@ -770,7 +770,10 @@ class TestTheRealPath:
         # base64 a naive JSON transport would have interpolated into the source
         assert isinstance(result, Percept)
         assert len(commands) == 1
-        command = commands[0]
+        # `argv` is a list of arguments, so `in` would test whole-element
+        # equality rather than substring containment. Join it to ask the question
+        # the test is actually asking: is any of the image in the command at all?
+        command = " ".join(commands[0])
         assert "run_from_file" in command
         assert _png()[:64].hex() not in command
         assert base64.b64encode(_png()).decode()[:64] not in command

@@ -335,28 +335,28 @@ class TestToolExecutionGuards:
 
     def test_execute_tool_non_dict_arguments_are_ignored(self, monkeypatch):
         # Given: execute_tool routes every call through the sandbox executor as
-        # a subprocess command string (SandboxExecutor.execute), not an
-        # in-process function call - so this must assert on the command it
-        # builds rather than on a directly-observable handler invocation.
+        # a subprocess argv list (SandboxExecutor.execute), not an in-process
+        # function call - so this must assert on the argv it builds rather than
+        # on a directly-observable handler invocation.
         import shani_chronoa.tools as tools_mod
         captured = {}
 
-        def fake_execute(cmd, config, agent_id="default"):
-            captured["cmd"] = cmd
+        def fake_execute(argv, config, agent_id="default"):
+            captured["argv"] = argv
             return (0, "ok", 1.0)
 
         monkeypatch.setattr(tools_mod._SANDBOX, "execute", fake_execute)
         handler_name = next(iter(tools_mod._HANDLER_FNS))
         # When: it is called with a non-dict arguments value
         result = tools_mod.execute_tool(handler_name, "not-a-dict")
-        # Then: the arguments are treated as empty (`{}`) in the command built
+        # Then: the arguments are treated as empty (`{}`) in the program built
         # for the sandbox, instead of crashing or forwarding the non-dict value.
         # The result also carries the post-condition verdict (see verification.py):
         # a skill with no POST_CONDITION is reported as unverified rather than
         # letting the sandbox's "ok" stand in for evidence that anything happened.
         assert result.startswith("ok")
         assert "unverified" in result
-        assert "({})" in captured["cmd"]
+        assert "({})" in captured["argv"][2]
 
 
 class TestMuteCoercion:

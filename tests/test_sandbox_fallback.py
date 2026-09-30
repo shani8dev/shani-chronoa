@@ -14,7 +14,7 @@ from pathlib import Path
 from shani_chronoa.sandbox.executor import (
     DANGEROUS_BINARIES,
     SandboxExecutor,
-    _first_blocked_binary,
+    _blocked_binary,
 )
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 
@@ -43,7 +43,7 @@ def no_bwrap(monkeypatch):
 def test_levels_that_promise_isolation_refuse_without_bubblewrap(no_bwrap):
     for level in (SandboxLevel.LEVEL_1_READONLY, SandboxLevel.LEVEL_2_ISOLATED_DEV):
         code, out, _ = no_bwrap.execute(
-            "echo hi", SandboxConfig(level=level, timeout_seconds=5), "test"
+            ["echo", "hi"], SandboxConfig(level=level, timeout_seconds=5), "test"
         )
 
         assert code == EXIT_SECURITY_ERROR, f"{level} ran unisolated instead of refusing"
@@ -54,7 +54,7 @@ def test_levels_that_promise_isolation_refuse_without_bubblewrap(no_bwrap):
 
 def test_the_refusal_never_reveals_command_output(no_bwrap):
     code, out, _ = no_bwrap.execute(
-        "echo SECRET-CANARY", SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
+        ["echo", "SECRET-CANARY"], SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
     )
 
     assert code == EXIT_SECURITY_ERROR
@@ -66,7 +66,7 @@ def test_level_3_still_runs_because_it_promises_no_isolation(no_bwrap):
     # and display to reach `speak` and `open_application`. Refusing it would
     # break every skill, so the exemption is deliberate, not an oversight.
     code, out, _ = no_bwrap.execute(
-        "echo hi", SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=5), "t"
+        ["echo", "hi"], SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=5), "t"
     )
 
     assert code == 0
@@ -78,7 +78,7 @@ def test_blocked_binaries_are_refused_even_with_bubblewrap_present(monkeypatch):
     monkeypatch.setattr(executor, "bwrap_available", True, raising=False)
 
     code, out, _ = executor.execute(
-        "mkfs.ext4 /dev/sda", SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
+        ["mkfs.ext4", "/dev/sda"], SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
     )
 
     assert code == EXIT_SECURITY_ERROR
@@ -86,33 +86,35 @@ def test_blocked_binaries_are_refused_even_with_bubblewrap_present(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "command",
+    "argv",
     [
-        "mkfs.ext4 /dev/sda",
-        "/sbin/mkfs.btrfs /dev/sdb",
-        "dd if=/dev/zero of=/dev/sda",
-        "/bin/dd if=/dev/zero of=/dev/sda",
-        "mount /dev/sda /mnt",
-        "/bin/mount -o loop /dev/loop0 /mnt",
-        "umount /mnt",
-        "shutdown -h now",
-        "reboot",
+        ["mkfs.ext4", "/dev/sda"],
+        ["/sbin/mkfs.btrfs", "/dev/sdb"],
+        ["dd", "if=/dev/zero", "of=/dev/sda"],
+        ["/bin/dd", "if=/dev/zero", "of=/dev/sda"],
+        ["mount", "/dev/sda", "/mnt"],
+        ["/bin/mount", "-o", "loop", "/dev/loop0", "/mnt"],
+        ["umount", "/mnt"],
+        ["shutdown", "-h", "now"],
+        ["reboot"],
     ],
 )
-def test_dangerous_binaries_cannot_avoid_the_blocklist_by_being_realistic(command):
+def test_dangerous_binaries_cannot_avoid_the_blocklist_by_being_realistic(argv):
     # `blocked in command.split()` matched whole tokens, so it blocked the bare
     # word `mkfs` and let `mkfs.ext4` through - which is the only form anyone
     # actually types. Verified live: `mkfs.ext4 /dev/sda` reached the executor
     # and ran. These are the forms that must now be caught.
-    assert _first_blocked_binary(command, DANGEROUS_BINARIES) is not None
+    assert _blocked_binary(argv, DANGEROUS_BINARIES) is not None
 
 
 @pytest.mark.parametrize(
-    "command", ["echo add", "ddrescue /dev/sda", "echo mounting", "ls /mnt", "get_datetime"]
+    "argv",
+    [["echo", "add"], ["ddrescue", "/dev/sda"], ["echo", "mounting"], ["ls", "/mnt"],
+     ["get_datetime"]],
 )
-def test_ordinary_commands_are_not_false_positives(command):
+def test_ordinary_commands_are_not_false_positives(argv):
     # No substring matching: `add` and `ddrescue` are not `dd`.
-    assert _first_blocked_binary(command, DANGEROUS_BINARIES) is None
+    assert _blocked_binary(argv, DANGEROUS_BINARIES) is None
 
 
 def test_a_refused_command_is_never_executed_even_when_the_binary_exists(monkeypatch):
@@ -122,11 +124,12 @@ def test_a_refused_command_is_never_executed_even_when_the_binary_exists(monkeyp
     executor = SandboxExecutor()
     monkeypatch.setattr(executor, "bwrap_available", True, raising=False)
 
-    for command in ("mkfs.ext4 /dev/sda", "/sbin/mkfs.btrfs /dev/sdb", "/bin/dd if=/dev/zero of=/dev/sda"):
+    for argv in (["mkfs.ext4", "/dev/sda"], ["/sbin/mkfs.btrfs", "/dev/sdb"],
+                 ["/bin/dd", "if=/dev/zero", "of=/dev/sda"]):
         code, out, _ = executor.execute(
-            command, SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
+            argv, SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, timeout_seconds=5), "t"
         )
-        assert code == EXIT_SECURITY_ERROR, f"{command!r} was not blocked"
+        assert code == EXIT_SECURITY_ERROR, f"{argv!r} was not blocked"
         assert "/dev/sda" not in out or "blocked" in out.lower()
 
 
@@ -174,7 +177,7 @@ class TestTheConfinedLevelsActuallyConfine:
             isolated_dir=str(workspace),
         )
 
-        code, out, _ = executor.execute(f"cat {target}", config, "probe")
+        code, out, _ = executor.execute(["cat", target], config, "probe")
 
         assert code == 0, f"the workspace must stay readable: {out}"
         assert "visible" in out
@@ -192,7 +195,7 @@ class TestTheConfinedLevelsActuallyConfine:
             isolated_dir=str(workspace),
         )
 
-        code, out, _ = executor.execute(f"cat {outside}", config, "probe")
+        code, out, _ = executor.execute(["cat", outside], config, "probe")
 
         assert code != 0, f"a read outside the workspace was allowed: {out!r}"
         assert "TOP-SECRET" not in out, "the contents leaked into the output"
@@ -206,7 +209,7 @@ class TestTheConfinedLevelsActuallyConfine:
             isolated_dir=str(tmp_path),
         )
 
-        code, out, _ = executor.execute("cat /etc/hostname", config, "probe")
+        code, out, _ = executor.execute(["cat", "/etc/hostname"], config, "probe")
 
         assert code == EXIT_SECURITY_ERROR
         assert "unconfined" in out, "the refusal must say it declined to run unconfined"
@@ -219,7 +222,7 @@ class TestTheConfinedLevelsActuallyConfine:
         executor = self._executor(monkeypatch, bwrap_usable=False)
         config = SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=15)
 
-        code, out, _ = executor.execute("echo alive", config, "probe")
+        code, out, _ = executor.execute(["echo", "alive"], config, "probe")
 
         assert code == 0
         assert out.strip() == "alive"

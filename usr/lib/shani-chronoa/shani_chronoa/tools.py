@@ -28,7 +28,6 @@ against real subprocesses, not assumed).
 import importlib
 import json
 import logging
-import shlex
 import sys
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
@@ -337,18 +336,21 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     payload = argfile.reference_command(handler_module, handler_func, arguments, by_reference)
 
     if payload is not None:
-        cmd = payload.command
+        argv = payload.argv
     else:
         # Build a command string that invokes the handler in a subprocess.
         # This allows SandboxExecutor to wrap it with bwrap for sandboxed levels.
         #
-        # The program is quoted with shlex, not wrapped in hand-written double
-        # quotes: the JSON arguments contain double quotes of their own, which
-        # the shell stripped, so every call with a dict argument reached the
-        # child as `_run({query: foo})` and died with `NameError: name 'query'
-        # is not defined`. Only zero-argument skills worked. shlex.quote
-        # escapes the whole program correctly whatever the LLM put in the
-        # arguments.
+        # Kept because the bug was real, not because the fix is still needed.
+        # This used to be `shlex.quote`d into a command string, and the JSON
+        # arguments contain double quotes of their own which the shell stripped,
+        # so every call with a dict argument reached the child as
+        # `_run({query: foo})` and died with `NameError: name 'query' is not
+        # defined`. Only zero-argument skills worked. There is no shell between
+        # here and the exec now, so each element of the argv carries its own
+        # bytes and that class of stripping is structurally impossible - the
+        # bug cannot come back in this form, but a new transport could
+        # reintroduce the same mistake somewhere else.
         # A *Python* literal, not JSON. `json.dumps` writes `true`, `false`
         # and `null`, which are not Python: the child program still compiles,
         # because `true` parses as a name, and then dies at runtime with
@@ -367,18 +369,17 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
             f"result = {handler_func}({args_literal}); "
             f"sys.stdout.write(str(result))"
         )
-        cmd = f"python3 -c {shlex.quote(program)}"
+        argv = ["python3", "-c", program]
 
     if granted_key:
         # Set on the child, not on this process. The dispatcher runs many calls
         # in one process, so a value set here would be whichever call happened
         # to be in flight - exactly the class of bug where a grant meant for
         # one tool silently opens another.
-        cmd = (f"env {config_mod.CONSENT_GRANT_ENV}={shlex.quote(granted_key)} "
-               f"{cmd}")
+        argv = ["env", f"{config_mod.CONSENT_GRANT_ENV}={granted_key}", *argv]
 
     try:
-        exit_code, output, duration_ms = _SANDBOX.execute(cmd, config)
+        exit_code, output, duration_ms = _SANDBOX.execute(argv, config)
         result = output if exit_code == 0 else f"ERROR(exit={exit_code}): {output}"
         if exit_code != 0:
             _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)

@@ -177,20 +177,23 @@ class TestNoUntrustedInterpolation:
     def test_the_child_program_contains_no_argument_data(self, argfiles_root):
         payload = argfile.reference_command("a_module", "a_function", {"x": b"SECRET-BYTES"}, by_reference=True)
         try:
-            program = payload.command.split("-c ", 1)[1].rsplit(" ", 1)[0]
-            assert "SECRET-BYTES" not in payload.command
+            program = payload.argv[2]
+            assert "SECRET-BYTES" not in " ".join(payload.argv)
             assert "a_module" not in program
             assert "a_function" not in program
         finally:
             payload.cleanup()
 
-    def test_the_envelope_path_is_shell_quoted_not_interpolated_into_source(self, argfiles_root):
+    def test_the_envelope_path_is_its_own_argv_entry(self, argfiles_root):
         payload = argfile.reference_command("m", "f", {"x": b"y"}, by_reference=True)
         try:
-            # The path is its own argv entry, after the quoted program.
-            assert payload.command.startswith("python3 -c '")
-            assert payload.envelope_path in payload.command
-            assert payload.envelope_path not in payload.command.split("-c ", 1)[1].split("'", 2)[1]
+            # The path is its own argv element, after the program. There is no
+            # shell left to quote it for, so what used to be a quoting assertion
+            # is now a structural one: the path is a separate argument, not text
+            # interpolated into the program source.
+            assert payload.argv[:2] == ["python3", "-c"]
+            assert payload.envelope_path in payload.argv
+            assert payload.envelope_path not in payload.argv[2]
         finally:
             payload.cleanup()
 
@@ -513,34 +516,38 @@ class TestInlinePathUnchanged:
     compiled, because those parse as bare names, and then died at runtime with
     `NameError`. So the `set_mute` expectation below is `True`, not `true`: the
     old expectation was pinning the bug. The quotes are single because that is
-    what `repr` produces, and `shlex.quote` then escapes the whole program.
+    what `repr` produces, and the program is now a single argv element with no
+    shell anywhere near it.
     """
 
-    @pytest.mark.parametrize("name,args,expected", [
+    @pytest.mark.parametrize("name,args,expected_program", [
         ("get_datetime", {},
-         "python3 -c 'from shani_chronoa.skills.clock import _run; import sys; "
-         "result = _run({}); sys.stdout.write(str(result))'"),
+         "from shani_chronoa.skills.clock import _run; import sys; "
+         "result = _run({}); sys.stdout.write(str(result))"),
         ("get_battery_status", {},
-         "python3 -c 'from shani_chronoa.skills.battery import _run; import sys; "
-         "result = _run({}); sys.stdout.write(str(result))'"),
+         "from shani_chronoa.skills.battery import _run; import sys; "
+         "result = _run({}); sys.stdout.write(str(result))"),
         ("get_volume", {},
-         "python3 -c 'from shani_chronoa.skills.volume import _run_get_volume; import sys; "
-         "result = _run_get_volume({}); sys.stdout.write(str(result))'"),
+         "from shani_chronoa.skills.volume import _run_get_volume; import sys; "
+         "result = _run_get_volume({}); sys.stdout.write(str(result))"),
         ("set_volume", {'percent': 42},
-         'python3 -c \'from shani_chronoa.skills.volume import _run_set_volume; import sys; result = _run_set_volume({\'"\'"\'percent\'"\'"\': 42}); sys.stdout.write(str(result))\''),
+         "from shani_chronoa.skills.volume import _run_set_volume; import sys; "
+         "result = _run_set_volume({'percent': 42}); sys.stdout.write(str(result))"),
         ("set_mute", {'mute': True},
-         'python3 -c \'from shani_chronoa.skills.volume import _run_set_mute; import sys; result = _run_set_mute({\'"\'"\'mute\'"\'"\': True}); sys.stdout.write(str(result))\''),
+         "from shani_chronoa.skills.volume import _run_set_mute; import sys; "
+         "result = _run_set_mute({'mute': True}); sys.stdout.write(str(result))"),
         ("set_timer", {'seconds': 90, 'label': 'pasta'},
-         'python3 -c \'from shani_chronoa.skills.timer import _run; import sys; result = _run({\'"\'"\'seconds\'"\'"\': 90, \'"\'"\'label\'"\'"\': \'"\'"\'pasta\'"\'"\'}); sys.stdout.write(str(result))\''),
+         "from shani_chronoa.skills.timer import _run; import sys; "
+         "result = _run({'seconds': 90, 'label': 'pasta'}); sys.stdout.write(str(result))"),
     ])
-    def test_command_string_is_unchanged(self, monkeypatch, name, args, expected):
+    def test_the_argv_is_unchanged(self, monkeypatch, name, args, expected_program):
         import shani_chronoa.tools as tools_mod
         captured = {}
-        monkeypatch.setattr(tools_mod._SANDBOX, "execute", lambda cmd, config, agent_id="default": (
-            captured.__setitem__("cmd", cmd), (0, "ok", 1.0))[1])
+        monkeypatch.setattr(tools_mod._SANDBOX, "execute", lambda argv, config, agent_id="default": (
+            captured.__setitem__("argv", argv), (0, "ok", 1.0))[1])
         monkeypatch.setattr(tools_mod._TRACKER, "record_call", lambda *a, **k: None)
         tools_mod.execute_tool(name, args)
-        assert captured["cmd"] == expected
+        assert captured["argv"] == ["python3", "-c", expected_program]
 
     def test_an_injection_shaped_argument_is_still_inert(self, monkeypatch, tmp_path):
         """The payload must be data, and provably so.
@@ -551,32 +558,30 @@ class TestInlinePathUnchanged:
         legitimately appears inside the program as a quoted string. Substring
         absence measured quoting style, not safety.
 
-        This checks the property itself. The command is a single `python3 -c`
-        shell word; the program inside it parses as Python; and the payload
-        occurs only inside a string literal, never as executable source. A
+        This checks the property itself. The program is a single `python3 -c`
+        argv element; it parses as Python; and the payload occurs only inside a
+        string literal, never as executable source. A
         payload that could break out would have to appear as something the AST
         treats as code - an attribute access, a call, an import - and that is
         what is ruled out here.
         """
         import ast
-        import shlex
 
         import shani_chronoa.tools as tools_mod
 
         captured = {}
-        monkeypatch.setattr(tools_mod._SANDBOX, "execute", lambda cmd, config, agent_id="default": (
-            captured.__setitem__("cmd", cmd), (0, "ok", 1.0))[1])
+        monkeypatch.setattr(tools_mod._SANDBOX, "execute", lambda argv, config, agent_id="default": (
+            captured.__setitem__("argv", argv), (0, "ok", 1.0))[1])
         monkeypatch.setattr(tools_mod._TRACKER, "record_call", lambda *a, **k: None)
         marker = tmp_path / "pwned"
         hostile = f'"; import os; os.system("touch {marker}") #'
         tools_mod.execute_tool("set_timer", {"seconds": 5, "label": hostile})
 
-        cmd = captured["cmd"]
-        # 1. one shell word: the whole program is a single quoted argument.
-        parts = shlex.split(cmd)
-        assert parts[0] == "python3" and parts[1] == "-c", parts[:3]
-        assert len(parts) == 3, f"the command is not a single python3 -c: {cmd[:120]}"
-        program = parts[2]
+        argv = captured["argv"]
+        # 1. the program is a single argv element - nothing to un-quote.
+        assert argv[:2] == ["python3", "-c"], argv[:3]
+        assert len(argv) == 3, f"the argv is not a single python3 -c: {argv[:3]!r}"
+        program = argv[2]
 
         # 2. it is valid Python.
         tree = ast.parse(program)

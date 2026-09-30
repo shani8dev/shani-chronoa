@@ -725,12 +725,11 @@ line with an invented explanation is worth less than an admitted SKIP.
 ## Audit-verified known issues (confirmed present)
 
 
-- **`SandboxExecutor`: all four of its policy guards scan a shell *string*, so
-  shell expansion defeats every one of them — NOT FIXED, deliberately left open
-  (2026-09-30).** `execute()` takes `command: str` and the guards run on
-  `raw_cmd` before the command is handed to `/bin/sh -c` (and, in
-  `_run_landlock`, to a shell nested inside `subprocess.run(inner, shell=True)`
-  — two shells deep). Four separate checks have the same shape:
+- **`SandboxExecutor`: the four policy guards scanned a shell *string*, so shell
+  expansion defeated every one of them — FIXED (2026-09-30) by taking `argv`
+  instead of a string.** The four checks below are the *pre-fix* shape, kept
+  because the reasoning is what explains the fix and because a future change
+  that reintroduces string matching should be recognisable as the same mistake:
 
   | # | Guard | Method |
   |---|---|---|
@@ -747,35 +746,57 @@ line with an invented explanation is worth less than an admitted SKIP.
   `$(echo sudo) reboot`, `` `echo pkexec` id ``, `su${IFS}-c id` and
   `sud\o reboot` all pass it.
 
-  **This is latent, not a live hole, and the distinction matters.** Both
+  **This was latent, not a live hole, and the distinction mattered.** Both
   production call sites `shlex.quote` everything untrusted:
   `tools.py:370` builds `python3 -c {shlex.quote(program)}` and
   `argfile.py:380` builds `python3 -c {shlex.quote(_REFERENCE_PROGRAM)}
   {shlex.quote(envelope_path)}`, writing untrusted *values* into an `O_EXCL`
   0600 JSON envelope rather than into the command string. No skill module uses
   `shell=True` with interpolated values. So on the production path the guards
-  inspect `python3 -c '<quoted program>'` and are very nearly a no-op.
+  inspected `python3 -c '<quoted program>'` and were very nearly a no-op — which
+  is exactly why this survived so long unnoticed, and why "the guards are on" was
+  never the same claim as "the guards work".
 
-  Recorded rather than quietly patched because the correct fix is not a filter.
-  Two traps, both measured rather than assumed:
+  It was recorded rather than quietly patched because the correct fix is not a
+  filter. Two traps, both measured rather than assumed, and both of which decided
+  the shape of the fix:
 
   - The obvious repair — refuse any command containing `$`, a backtick, `\` or
     `${` — false-positives on valid calls, because `shlex.quote` does not strip
     those characters, it only wraps the program in single quotes. Argument
     *data* carrying `$(...)`, a backtick, a regex backslash or `$5` lands
-    verbatim inside the quoted program; all four were confirmed to reach the
-    guard as literal text and all four currently pass.
-  - The real fix is to stop passing shell strings: take `argv`, drop
-    `shell=True`, and check `argv[0]`. That is not mechanical, though, because
-    `tests/test_sandbox_parent_death.py` calls
-    `_run_host("sleep N; touch MARKER &")` and depends on `;` sequencing and
-    `&` backgrounding, neither of which argv can express. Whoever does this has
-    to decide whether an explicit `sh -c` stays reachable as a visible opt-in
-    (which is honest — a blocklist never could police a shell string) or is
-    removed outright.
+    verbatim inside the quoted program. This is why the fix inspects `argv` and
+    never the text, and why `test_a_python_program_carrying_metacharacters_is_not_refused`
+    exists: a python program whose *payload* contains a metacharacter is a
+    legitimate call and must still run.
+  - The fix was not mechanical, because `tests/test_sandbox_parent_death.py`
+    calls `_run_host("sleep N; touch MARKER &")` and depends on `;` sequencing
+    and `&` backgrounding, neither of which argv can express. **That decision
+    was resolved as: an explicit `sh -c` stays reachable as a visible opt-in**,
+    which is honest — a blocklist never could police a shell string — and is why
+    `_shell_script()` exists and why it is tested to fire only for a real shell.
 
   Do not "fix" one guard in isolation. They share a root cause and a fix that
   patches only #5 leaves #2 — the privilege-escalation one — just as bypassable.
+  That is exactly what happened: all four moved to `argv` together.
+
+  **What the fix actually is.** `execute()` now takes `argv: list[str]` and
+  returns `(126, ...)` for a `str`, so the old shape cannot be used by accident.
+  The program is resolved with `_program(argv)`, which skips leading
+  `VAR=value` assignments and one leading `env` — `env FOO=bar python3 ...` and
+  `FOO=bar python3 ...` both run python3, so a guard reading only `argv[0]`
+  would see `env`, match nothing, and wave the real program through. Matching is
+  still basename-based with dotted variants treated as the binary they are named
+  after (`mkfs.ext4`), and still never substring, so `add` and `ddrescue` are not
+  `dd`. An explicit shell script is accepted, but `_unresolvable_script()` refuses
+  one containing `$(`, a backtick or `${` rather than guessing — the cost is real
+  and deliberate (`sh -c "echo $(date)"` is refused too), and the alternative is a
+  check that silently fails on the input it exists to catch.
+
+  Verified by running, not by reading: 46 cases in `test_sandbox_argv_policy.py`,
+  and three mutations were run to confirm the suite can actually fail — reverting
+  `_program()` to a naive `argv[0]` fails 5, re-allowing a `str` fails 2, and
+  emptying the `_EXPANSION` tuple fails 3.
 
 - **`SandboxExecutor._run_host()`: `timeout_seconds` was never actually
   enforced for LEVEL_3_HOST_USER (the default level for every skill call)

@@ -58,7 +58,7 @@ _CHILD_SLEEP = 4
 _SETTLE = _CHILD_SLEEP + 3
 
 
-def _run_in_a_child_that_is_killed(command: str, marker: str) -> "tuple[str, int]":
+def _run_in_a_child_that_is_killed(argv, marker: str) -> "tuple[str, int]":
     """Spawn the real executor in a child, SIGKILL that child, return its output.
 
     The kill is `SIGKILL` on purpose: no atexit handler, no `__del__`, no chance for
@@ -68,7 +68,7 @@ def _run_in_a_child_that_is_killed(command: str, marker: str) -> "tuple[str, int
 import os, sys, signal
 sys.path.insert(0, {_PKG_DIR_REPR})
 from shani_chronoa.sandbox.executor import SandboxExecutor
-exit_code, out, _ = SandboxExecutor()._run_host({command!r}, 10, __import__('time').monotonic())
+exit_code, out, _ = SandboxExecutor()._run_host({argv!r}, 10, __import__('time').monotonic())
 print(out.strip()[:70], flush=True)
 os.kill(os.getpid(), signal.SIGKILL)
 """
@@ -86,7 +86,7 @@ class TestAChildCannotOutliveTheApp:
         marker = tempfile.mktemp(suffix=".marker")
         try:
             reported, returncode = _run_in_a_child_that_is_killed(
-                f"sleep {_CHILD_SLEEP}; touch {marker} &", marker)
+                ["sh", "-c", f"sleep {_CHILD_SLEEP}; touch {marker} &"], marker)
             assert returncode == -signal.SIGKILL, (
                 f"the simulated app exited {returncode}, not by SIGKILL; the test "
                 f"did not reproduce a force-quit")
@@ -105,7 +105,7 @@ class TestAChildCannotOutliveTheApp:
         marker = tempfile.mktemp(suffix=".marker")
         try:
             reported, _ = _run_in_a_child_that_is_killed(
-                f"sleep {_CHILD_SLEEP}; touch {marker} &", marker)
+                ["sh", "-c", f"sleep {_CHILD_SLEEP}; touch {marker} &"], marker)
             assert "continues running in the background" in reported, (
                 f"expected the background-running report, got {reported!r}")
         finally:
@@ -123,7 +123,7 @@ class TestOrdinaryCommandsAreUnaffected:
 
     def test_a_plain_command_still_works(self):
         exit_code, out, _ = SandboxExecutor()._run_host(
-            "echo hello-from-sandbox", 10, time.monotonic())
+            ["echo", "hello-from-sandbox"], 10, time.monotonic())
         assert exit_code == 0, f"exit {exit_code}: {out!r}"
         assert "hello-from-sandbox" in out
 
@@ -149,7 +149,7 @@ print("clean")
         try:
             executor_mod._PR_SET_PDEATHSIG = -1  # EINVAL
             exit_code, out, _ = SandboxExecutor()._run_host(
-                "echo still-works", 10, time.monotonic())
+                ["echo", "still-works"], 10, time.monotonic())
             assert exit_code == 0, f"exit {exit_code}: {out!r}"
             assert "still-works" in out
         finally:
@@ -160,7 +160,7 @@ class TestTheExpectedParentIsRecordedAndCleared:
     def test_it_is_empty_after_a_spawn(self):
         # A stale entry would make a later, unrelated child compare against the wrong
         # pid and exit for no reason.
-        SandboxExecutor()._run_host("echo x", 10, time.monotonic())
+        SandboxExecutor()._run_host(["echo", "x"], 10, time.monotonic())
         assert not executor_mod._EXPECTED_PARENT, (
             f"the expected-parent record survived the spawn: "
             f"{executor_mod._EXPECTED_PARENT}")

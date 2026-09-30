@@ -80,7 +80,6 @@ import importlib
 import json
 import logging
 import os
-import shlex
 import shutil
 import sys
 import tempfile
@@ -132,11 +131,14 @@ _MODULE_ROOT = str(Path(__file__).resolve().parent.parent)
 # no module name, no function name, no argument, no path. Those arrive as data
 # through `sys.argv[1]`, so there is nothing here for untrusted input to
 # escape into. The one interpolated value is `_MODULE_ROOT`, this module's own
-# location on disk, and it is `repr()`-quoted because this is Python source
-# that a shell later sees as one opaque argument - `shlex.quote()` here would
-# produce a *shell* literal and the child would die with
-# `SyntaxError: invalid syntax`, which is exactly what it did before this line
-# was corrected (found by running the real child, not by reading it).
+# location on disk, and it is `repr()`-quoted because this is Python source.
+# `shlex.quote()` here would produce a *shell* literal and the child would die
+# with `SyntaxError: invalid syntax`, which is exactly what it did before this
+# line was corrected (found by running the real child, not by reading it).
+# That reasoning predates the move to argv, where the program is its own argv
+# element and no shell reads it at all - `repr()` is now simply the correct
+# quoting for Python source, and the shell-quoting hazard it once guarded
+# against is gone because the shell is gone.
 _REFERENCE_PROGRAM = (
     f"import sys; sys.path.insert(0, {_MODULE_ROOT!r}); "
     f"from {__name__} import run_from_file; "
@@ -193,7 +195,10 @@ class ArgumentPayload(NamedTuple):
     unconditionally without tracking whether it already ran.
     """
 
-    command: str
+    #: An argv list, not a command string. The sandbox executor's policy guards
+    #: read the program out of argv, so a pre-quoted string here would hand them
+    #: back the thing they were changed to stop reading.
+    argv: "list[str]"
     envelope_path: str
     directory: str
 
@@ -377,8 +382,10 @@ def reference_command(
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(envelope, handle)
 
-        command = f"python3 -c {shlex.quote(_REFERENCE_PROGRAM)} {shlex.quote(envelope_path)}"
-        return ArgumentPayload(command, envelope_path, directory)
+        # Each element is its own argv entry, so nothing here needs quoting and
+        # no shell exists between this and the exec.
+        argv = ["python3", "-c", _REFERENCE_PROGRAM, envelope_path]
+        return ArgumentPayload(argv, envelope_path, directory)
     except BaseException:
         # A half-built directory is a directory nobody will ever clean up.
         shutil.rmtree(directory, ignore_errors=True)

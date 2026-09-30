@@ -315,10 +315,12 @@ def _describe_via_child(
 ) -> str:
     """Hand the image to a child interpreter by reference and read its answer.
 
-    `shell=True` because that is the transport `argfile` produces and
-    `tools.py` already runs this way: the command is a fixed program with one
-    shlex-quoted path argument, and every untrusted value - the image - is
-    inside the envelope file, not in the command.
+    The transport is `argfile`'s argv list, passed straight through with no
+    shell: a fixed program with one path argument, and every untrusted value -
+    the image - inside the envelope file rather than in the command. This ran
+    `subprocess.run(payload.command, shell=True)` until the sandbox executor's
+    argv migration, which is how a `shell=True` reached production here without
+    any of the executor's policy guards in the path at all.
     """
     payload = argfile.reference_command(
         __name__,
@@ -339,8 +341,7 @@ def _describe_via_child(
     )
     try:
         completed = subprocess.run(
-            payload.command,
-            shell=True,
+            payload.argv,
             capture_output=True,
             text=True,
             timeout=timeout + CHILD_GRACE_SECONDS,

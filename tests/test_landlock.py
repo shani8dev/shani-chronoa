@@ -268,7 +268,7 @@ def test_a_failed_ruleset_application_stops_the_command_instead_of_running_it():
         try:
             sandbox = executor_mod.SandboxExecutor(sandboxes_root=os.path.join(tmp, "sb"))
             rc, out, _ = sandbox.execute(
-                f"touch {canary}",
+                ["touch", canary],
                 SandboxConfig(level=SandboxLevel.LEVEL_1_READONLY, isolated_dir=workspace),
                 agent_id="canary",
             )
