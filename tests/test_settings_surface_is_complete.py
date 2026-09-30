@@ -137,6 +137,21 @@ NOT_EXPOSED = {
     "expiry-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
     "containerrun-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
     "unithealth-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
+    "sandbox-seccomp-enabled": "no row yet: the seccomp syscall filter "
+                               "(`sandbox/seccomp.py`) is on by default and "
+                               "off-switchable by key. It has no row because "
+                               "the change that added it was scoped to the "
+                               "sandbox layer and `settings_window.py` was out "
+                               "of scope, exactly as with the five trigger "
+                               "gates above - and for the same reason it is "
+                               "listed rather than quietly added: a switch "
+                               "whose side effect is that a machine starts "
+                               "refusing every skill call on a kernel that "
+                               "cannot filter is a decision a user should make "
+                               "deliberately. Grantable by key and named in "
+                               "every refusal (`gsettings set "
+                               "org.shani.chronoa sandbox-seccomp-enabled "
+                               "true`); needs a row in the security group",
 }
 
 

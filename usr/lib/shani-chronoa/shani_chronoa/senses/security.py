@@ -187,6 +187,100 @@ def read_seccomp() -> Optional[str]:
     return None
 
 
+def read_sandbox_seccomp() -> dict:
+    """What the *sandbox* does about seccomp, as distinct from what the kernel reports.
+
+    `read_seccomp()` answers "is this process filtered", and the honest
+    answer for the assistant itself is almost always no - the filter is
+    installed in the forked child that runs a command, so a long-lived app
+    reading its own `/proc/self/status` reports `0` while every skill call is
+    filtered. Reporting that as "seccomp mode for this process: 0" next to a
+    setting that is on would be two true facts that read as a contradiction,
+    so this returns the policy state separately and the two are never
+    conflated.
+
+    Four fields, and the fourth is the one that matters:
+
+    - `enabled`: the `sandbox-seccomp-enabled` gsetting, which defaults to
+      `false`.
+    - `available`: whether a filter could be built on this machine at all
+      (x86_64, and a libc to call through). `None` when the gate could not be
+      read, which is a third state rather than a `False` - the same
+      distinction this module's docstring is about, applied to a setting.
+    - `unavailable_reason`: why not, when there is a reason. Carries the
+      architecture and the syscall-table caveat.
+    - `denied`: how many syscalls the filter would deny, so "on" is
+      informative rather than a bare boolean.
+    """
+    record: Dict[str, object] = {"enabled": False, "available": None,
+                                 "unavailable_reason": None, "denied": 0}
+    try:
+        from shani_chronoa.sandbox import seccomp as _seccomp
+    except Exception as exc:  # noqa: BLE001 - a sense reports, it does not raise
+        record["unavailable_reason"] = f"the seccomp module could not be imported: {exc}"
+        return record
+
+    record["denied"] = len(_seccomp.blocked_numbers())
+    record["unavailable_reason"] = _seccomp.unavailable_reason()
+    record["available"] = record["unavailable_reason"] is None
+
+    try:
+        from shani_chronoa.config import ChronoaConfig
+        record["enabled"] = bool(ChronoaConfig().get_bool(_seccomp.SECCOMP_SETTING, False))
+    except Exception as exc:  # noqa: BLE001
+        record["enabled"] = None
+        record["unavailable_reason"] = (
+            f"the {_seccomp.SECCOMP_SETTING} setting could not be read: {exc}")
+    return record
+
+
+def _sandbox_seccomp_lines(kernel_mode: Optional[str]) -> List[str]:
+    """The sandbox-filter lines, or nothing at all when the kernel read failed.
+
+    Gated on `kernel_mode` for a reason that is not tidiness.
+    `TestSeccomp::test_a_missing_status_is_simply_omitted` holds that a
+    `/proc/self/status` with no `Seccomp:` line produces no seccomp claim
+    anywhere in this sense, and that invariant is right: this sense reports the
+    *machine's* security posture, and a machine whose seccomp state cannot be
+    read at all is a machine this sense has no business quoting a syscall
+    filter for. Reading a gsetting is easy and reading the kernel is what
+    failed, so letting the easy read stand in for the hard one is exactly the
+    substitution that invariant exists to prevent.
+
+    So the consequence is a missing line, never a wrong one. The policy state
+    is still reachable - `read_sandbox_seccomp()` answers it directly, and it is
+    what a caller should use for that question.
+    """
+    if kernel_mode is None:
+        return []
+    state = read_sandbox_seccomp()
+    if state["enabled"] is None:
+        return [
+            "sandbox seccomp filter: the setting could not be read, so whether "
+            "commands are being filtered is undetermined rather than off"
+        ]
+    if not state["enabled"]:
+        return [
+            "sandbox seccomp filter: off by default - sandboxed commands are not "
+            "syscall-filtered, and the filesystem rules (Landlock) are the only "
+            "confinement they get"
+        ]
+    if state["available"]:
+        return [
+            f"sandbox seccomp filter: on - each sandboxed command runs under a "
+            f"filter denying {state['denied']} syscalls, and the filter itself "
+            f"cannot be widened or replaced from inside the command. This "
+            f"process still reads {kernel_mode} above, which is expected: the "
+            f"filter is installed in the command's own process, not here."
+        ]
+    return [
+        f"sandbox seccomp filter: on, but NO FILTER CAN BE BUILT on this machine "
+        f"({state['unavailable_reason']}), so every sandboxed command is refused "
+        f"rather than run unfiltered. Expect skills to fail until the setting is "
+        f"turned off."
+    ]
+
+
 def _run(arguments: dict) -> Union[str, Percept]:
     config = ChronoaConfig()
     if not config.sense_allowed("security"):
@@ -196,6 +290,9 @@ def _run(arguments: dict) -> Union[str, Percept]:
     lsms = read_lsms()
     tpm = read_tpm()
     seccomp = read_seccomp()
+    # Read unconditionally so the metadata is populated even when the lines are
+    # withheld below; `_sandbox_seccomp_lines` decides whether to print them.
+    sandbox = read_sandbox_seccomp()
 
     if not boot.get("efivars_present") and not lsms and tpm is None:
         return _SENSE.to_percept(
@@ -248,6 +345,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
         )
     if seccomp:
         lines.append(f"seccomp mode for this process: {seccomp} (2 means filter)")
+    lines.extend(_sandbox_seccomp_lines(seccomp))
 
     lines.append(
         "these are the settings as reported, not a judgement about them: a "
@@ -265,6 +363,8 @@ def _run(arguments: dict) -> Union[str, Percept]:
             "tpm": bool(tpm),
             "lsms_configured": len(lsms.get("configured", [])),
             "lsms_active": len(lsms.get("active", [])),
+            "sandbox_seccomp_enabled": sandbox["enabled"] if seccomp else None,
+            "sandbox_seccomp_denied": sandbox["denied"] if seccomp else 0,
         },
     )
 
@@ -283,7 +383,10 @@ _SCHEMA = {
             "no EFI variables, since that means it booted without UEFI rather "
             "than that firmware security is off. Reports the LSM lists as they "
             "are without ranking them, because a configured LSM with no policy "
-            "attached does nothing."
+            "attached does nothing. Also reports the seccomp mode of this "
+            "process and, separately, whether Chronoa's own sandbox filters "
+            "syscalls at all - two different questions, since the filter is "
+            "installed in each command's process rather than in the assistant."
         ),
         "parameters": {"type": "object", "properties": {}},
     },

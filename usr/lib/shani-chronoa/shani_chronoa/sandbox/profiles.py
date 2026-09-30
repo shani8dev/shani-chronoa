@@ -44,6 +44,19 @@ evidence of anything. The reason is concrete rather than a shrug:
   a user namespace that this development box cannot create (bwrap already dies
   with "setting up uid map" here).
 
+**This module's third bullet above is now half-answered, and the half that
+changed did not change the conclusion.** `sandbox/seccomp.py` exists and is
+applied in the child's `preexec_fn` when the `sandbox-seccomp-enabled` gsetting
+is on (default off). It filters 29 syscalls plus `seccomp(2)` and
+`prctl(PR_SET_SECCOMP)` - and `socket(2)` is deliberately **not** one of them.
+The original reasoning is not superseded, it is measured: `strace` of
+`python3 -c`, `sh -c 'a; b'`, `dd`, `env`, `git`, `wpctl`, `pw-record` and
+`systemctl --user` found no use of any denied syscall, while a filtered child
+still binds a socket, starts a thread and spawns a subprocess - which is what
+Ollama, the web-search tools and the PipeWire audio stack each need. So the
+network field remains *declared and unenforced*, exactly as stated, and
+`network_access` is still not evidence of anything.
+
 Rather than pick one and call it a network sandbox, `SandboxExecutor` logs a
 warning naming the profile every time a no-network profile runs on a path that
 cannot isolate the network. The field is therefore *reported* as unenforced on

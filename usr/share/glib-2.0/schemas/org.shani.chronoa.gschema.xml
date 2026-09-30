@@ -496,5 +496,10 @@
       <summary>Let Chronoa arm automatic rules</summary>
       <description>When true, Chronoa may add, remove and clear rules that run a whitelisted action when a perception matches. Off by default, and this is the sharpest edge in the schema: an armed rule acts without asking again, so a rule written once from a spoken instruction keeps firing unattended long after the conversation that created it. Listing what is already armed needs no such permission - only changing it does. A rule can name only an already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt.</description>
     </key>
+    <key name="sandbox-seccomp-enabled" type="b">
+      <default>false</default>
+      <summary>Filter the syscalls a sandboxed skill may make</summary>
+      <description>When true, every command Chronoa runs through the sandbox gets a seccomp filter denying the syscalls that escape the filesystem layer or reach into the kernel - mount, the new mount API, memfd_create (which measurably executes a binary with no pathname from inside this app's own Landlock ruleset, because a rule granted on a path never matches an inode that has none), the module and kexec calls, bpf, perf_event_open, the io_uring path a filter cannot see into, ptrace onto another process, process_vm_readv/writev, pidfd_getfd, unshare, setns - plus seccomp(2) and prctl(PR_SET_SECCOMP), so the command cannot widen or replace its own filter. Off by default: it is a new control on a path every skill call takes, and a filter that denies one syscall too many breaks skills with no visible cause. It does not restrict the network, and it is not applied at the elevated level, because seccomp requires PR_SET_NO_NEW_PRIVS and that is what makes pkexec's setuid stop working. With it on, a machine whose kernel cannot provide a filter refuses every command rather than running it unfiltered; with it off, nothing about the sandbox changes. It cannot stop a command that creates a user namespace with clone(CLONE_NEWUSER), which is a real and stated gap.</description>
+    </key>
   </schema>
 </schemalist>

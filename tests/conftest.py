@@ -78,6 +78,33 @@ def compiled_schema_dir(tmp_path_factory):
     return schema_dir
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _schema_visible_from_the_first_test(compiled_schema_dir):
+    """Make the repo schema resolvable before *any* test constructs a config.
+
+    `Gio.SettingsSchemaSource.get_default()` memoises its answer for the life of
+    the process, including the answer "no schemas found". So the first test that
+    builds a `ChronoaConfig` without `gsettings_env` - which is most of them -
+    resolves it with no `GSETTINGS_SCHEMA_DIR` set, caches the empty result, and
+    every later `ChronoaConfig()` in the run silently falls back to hardcoded
+    Python defaults. Measured: a lookup that returns None with no schema dir keeps
+    returning None after the variable is set correctly.
+
+    The damage is confined to whichever tests happen to run after the first
+    config construction, which is why it is invisible in isolation and why it has
+    survived: 7 tests in `test_config_gsettings.py` pass alone and fail in a full
+    run on an unmodified tree (verified against a pristine `git archive HEAD`).
+
+    This is a real fix rather than a workaround - the alternative is that a
+    setting is readable in production and unreadable under test, which is the
+    same class of lie this repo keeps recording. `GSETTINGS_BACKEND` is set here
+    too, because without a keyfile backend the writes have nowhere to go and
+    there is no session bus to fall back to.
+    """
+    os.environ["GSETTINGS_SCHEMA_DIR"] = str(compiled_schema_dir)
+    os.environ["GSETTINGS_BACKEND"] = "keyfile"
+
+
 @pytest.fixture
 def gsettings_env(compiled_schema_dir, monkeypatch):
     """Point gsettings at the temp compiled schema via the keyfile backend."""

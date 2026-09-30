@@ -21,6 +21,8 @@ from typing import Tuple
 
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.sandbox.profiles import AgentProfile, ResourceCeiling, profile_for_origin
+from shani_chronoa.sandbox.seccomp import SeccompError
+from shani_chronoa.sandbox import seccomp as _seccomp
 from shani_chronoa.tool_tracking import ORIGIN_USER
 from shani_chronoa.secrets_manager import secrets_manager
 
@@ -503,6 +505,23 @@ def _disable_core_dumps(libc) -> None:
     libc.setrlimit(_RLIMIT_CORE, ctypes.byref(no_core))
 
 
+#: Whether the next spawned child must install a seccomp filter. `preexec_fn`
+#: is handed no arguments, so the decision the parent made reaches the forked
+#: child the same way the profile ceiling does: written here immediately before
+#: the spawn, cleared in `execute()`'s `finally`.
+_PENDING_SECCOMP: "dict" = {}
+
+#: `LEVEL_4_HOST_ROOT` is not a level a filter can be applied to, and saying so
+#: loudly matters more than applying it would. `PR_SET_NO_NEW_PRIVS` - which
+#: seccomp cannot be installed without - makes the kernel refuse to honour
+#: `setuid`, and `setuid` is exactly how `pkexec` elevates. A filter installed
+#: before it would leave a level whose entire purpose is privilege elevation
+#: silently broken, and the failure would surface as a polkit prompt that never
+#: appears. So the filter is skipped there and the skip is named, once, rather
+#: than being applied or ignored.
+_SECCOMP_SKIPPED_LEVELS: "set" = set()
+
+
 def _harden_child() -> None:
     """The single `preexec_fn` for every child this module spawns.
 
@@ -512,6 +531,13 @@ def _harden_child() -> None:
     own dumpable flag or lower its own rlimits at all. Anything done in the
     parent instead would harden Chronoa itself, which is the opposite of the
     intent.
+
+    The seccomp filter goes last, and only if `_PENDING_SECCOMP` says this call
+    asked for it. Last because a filter installed earlier would be in force
+    while the calls above it run, and the rule is that a control must not be
+    able to break the setup that installs it. It is also irreversible for the
+    life of the process, which is why it cannot be a decision the parent
+    reverses.
     """
     _die_with_parent()
     _apply_profile_ceiling()
@@ -525,6 +551,95 @@ def _harden_child() -> None:
     libc.setrlimit.restype = ctypes.c_int
     libc.setrlimit.argtypes = [ctypes.c_int, ctypes.POINTER(_Rlimit)]
     _disable_core_dumps(libc)
+    # Raises SeccompError on failure, which the spawn paths turn into a 126.
+    # Deliberately not wrapped in a bare `except`: a filter that was asked for
+    # and could not be installed must not degrade into running the command
+    # unfiltered, and the only way to guarantee that is to have no path that
+    # swallows this.
+    if _PENDING_SECCOMP.get("enabled"):
+        try:
+            count = _seccomp.apply()
+        except _seccomp.SeccompError as exc:
+            # CPython does not re-raise a `preexec_fn` exception: it collects it
+            # in the child, writes "Exception occurred in preexec_fn." to the
+            # error pipe and raises a bare `SubprocessError` in the parent. The
+            # type and the message are both gone, so the reason is written to a
+            # file the parent reads back. Measured, not assumed - the first
+            # draft caught this as `except SeccompError` in the spawn path,
+            # which can never fire for exactly this reason.
+            report = _PENDING_SECCOMP.get("report")
+            if report:
+                try:
+                    with open(report, "w", encoding="utf-8") as handle:
+                        handle.write(str(exc))
+                except OSError:
+                    pass
+            raise
+        logger.debug("sandbox: installed a %d-instruction seccomp filter in the child",
+                     count)
+
+
+def _seccomp_requested() -> bool:
+    """Whether the `sandbox-seccomp-enabled` gsetting asks for the filter.
+
+    Read per call rather than cached at import, so a user who flips the switch
+    does not have to restart the assistant - the same reason the sense
+    consent gates are read per call.
+
+    An unreadable setting is `False`, and that is the correct direction rather
+    than a convenient one: the schema default is `false`, so failing to read it
+    can only mean the user never turned the filter on. The opposite fallback
+    would be a machine that filters every skill call because GSettings was
+    unavailable, which is a much worse answer to the same error.
+    """
+    try:
+        from shani_chronoa.config import ChronoaConfig
+        return bool(ChronoaConfig().get_bool(_seccomp.SECCOMP_SETTING, False))
+    except Exception as exc:  # noqa: BLE001 - a gate must never raise into a command
+        logger.warning("Cannot read the %s setting; treating it as off (%s)",
+                       _seccomp.SECCOMP_SETTING, exc)
+        return False
+
+
+def _seccomp_refusal(exc: SeccompError) -> Tuple[int, str, float]:
+    """Turn an uninstallable filter into a 126 rather than an opaque exit 1.
+
+    126 because this is the same shape as every other refusal in this executor:
+    the caller asked for a sandbox, the sandbox could not exist, and the
+    command did not run. A generic "Execution error on the host" would report
+    the same fact in a form that reads like the command itself had failed.
+    """
+    return (
+        126,
+        f"Security error: the '{_seccomp.SECCOMP_SETTING}' setting is on, so this "
+        f"command must run under a seccomp filter, and no filter was installed: "
+        f"{exc}",
+        0.0,
+    )
+
+
+def _seccomp_child_failure() -> "SeccompError | None":
+    """The reason the child could not install a filter, if it wrote one.
+
+    Paired with the handler in `_harden_child`. Returns None when no filter was
+    requested, so the spawn paths can call it unconditionally on any spawn
+    failure and only change their answer when this is what went wrong.
+    """
+    report = _PENDING_SECCOMP.pop("report", None)
+    if not report:
+        return None
+    text = ""
+    try:
+        with open(report, encoding="utf-8") as handle:
+            text = handle.read().strip()
+    except OSError:
+        return None
+    finally:
+        try:
+            os.unlink(report)
+        except OSError:
+            pass
+    return SeccompError(text) if text else None
 
 
 class ProfileLimitError(RuntimeError):
@@ -858,6 +973,37 @@ class SandboxExecutor:
         if ceiling_refusal is not None:
             return (126, f"Security error: {ceiling_refusal}", 0.0)
         timeout = ceiling.timeout_seconds
+
+        # The seccomp gate, decided in the parent for the same reason as the
+        # ceiling above: a setting that says "on" and then quietly runs the
+        # command unfiltered is the defect this whole layer exists to prevent,
+        # so when it is on and the filter cannot be built, the call is refused
+        # before a child exists. Refusing *every* call is the point, not a
+        # side effect - a partially filtered machine is the state to avoid.
+        seccomp_wanted = _seccomp_requested()
+        seccomp_applies = seccomp_wanted
+        if seccomp_wanted and config.level == SandboxLevel.LEVEL_4_HOST_ROOT:
+            seccomp_applies = False
+            if config.level.value not in _SECCOMP_SKIPPED_LEVELS:
+                _SECCOMP_SKIPPED_LEVELS.add(config.level.value)
+                logger.warning(
+                    "The '%s' setting is on but this call is at %s, where the "
+                    "filter is deliberately not installed: seccomp requires "
+                    "PR_SET_NO_NEW_PRIVS, which makes the kernel refuse setuid, "
+                    "and setuid is how pkexec elevates. Installing it would "
+                    "break this level silently. The command runs unfiltered.",
+                    _seccomp.SECCOMP_SETTING, config.level.value)
+        if seccomp_applies:
+            reason = _seccomp.unavailable_reason()
+            if reason is not None:
+                return (
+                    126,
+                    f"Security error: the '{_seccomp.SECCOMP_SETTING}' setting "
+                    f"is on, so this command must run under a seccomp filter, and "
+                    f"one cannot be provided: {reason}. The command was not run. "
+                    f"Turn the setting off to run commands without the filter.",
+                    0.0,
+                )
         logger.debug(
             "sandbox: profile=%s origin=%s level=%s tool=%r timeout=%ds "
             "(caller asked %ds, profile ceiling %ds, memory=%dMiB cpu=%ds)",
@@ -869,6 +1015,12 @@ class SandboxExecutor:
         _PENDING_CEILING["limits"] = limits
         _PENDING_CEILING["profile"] = active.name
         _PENDING_CEILING["cpu_seconds"] = ceiling.cpu_seconds
+        _PENDING_SECCOMP["enabled"] = seccomp_applies
+        _report = None
+        if seccomp_applies:
+            _fd, _report = tempfile.mkstemp(prefix="chronoa-seccomp-", suffix=".refusal")
+            os.close(_fd)
+            _PENDING_SECCOMP["report"] = _report
         try:
             if config.level == SandboxLevel.LEVEL_4_HOST_ROOT:
                 # `sudo X` becomes `pkexec X`; a program that is already pkexec is
@@ -908,7 +1060,21 @@ class SandboxExecutor:
             # Cleared here rather than inside the spawn helpers so that
             # `_run_host` can still read `_PENDING_CEILING` while it runs, which
             # is how a SIGXCPU gets a sentence naming the budget that caused it.
+            # `_PENDING_SECCOMP` goes in the same breath: a stale `True` left
+            # behind would filter the *next* command, which did not ask for it,
+            # and a filter cannot be removed once installed.
             _PENDING_CEILING.clear()
+            _PENDING_SECCOMP.clear()
+            if _report:
+                # Unlinked on both paths: the spawn may have failed, in which
+                # case `_seccomp_child_failure` already read and removed it, or
+                # it may have succeeded, in which case the empty file is ours to
+                # clean up. A refusal reason left on disk would outlive the
+                # command and read as a pending failure on the next one.
+                try:
+                    os.unlink(_report)
+                except OSError:
+                    pass
 
     def _run_landlock(
         self,
@@ -982,6 +1148,9 @@ class SandboxExecutor:
         except subprocess.TimeoutExpired:
             return (124, f"Error: Command timed out after {timeout}s and was terminated.", 0.0)
         except Exception as exc:  # noqa: BLE001
+            child = _seccomp_child_failure()
+            if child is not None:
+                return _seccomp_refusal(child)
             return (1, f"Execution error in the confined scope: {exc}", 0.0)
 
         duration = (time.monotonic() - start_time) * 1000.0
@@ -1129,6 +1298,9 @@ class SandboxExecutor:
 
             except Exception as exc:
                 duration = (time.monotonic() - start_time) * 1000.0
+                child = _seccomp_child_failure()
+                if child is not None:
+                    return (*_seccomp_refusal(child)[:2], duration)
                 return (1, f"Execution error on the host: {exc}", duration)
 
     def _run_bwrap(
