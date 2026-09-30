@@ -660,7 +660,27 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1850 passed, 6 skipped)
+**Verification status:** unit suite green on Ubuntu (1873 passed, 6 skipped)
+
+**Run the suite with `XDG_STATE_HOME` set, or it writes to the real home
+directory.** `skills/timer.py` resolves its store from `XDG_STATE_HOME`,
+falling back to `~/.local/state` — and it is *not* the timer tests that leak:
+run in isolation they leave nothing, but a full suite run without the
+variable set leaves a real `~/.local/state/shani-chronoa/timers.json`
+containing fixture data (`pasta`, plus a `'; touch /tmp/pytest-of-...`
+shell-injection probe label). Pointing `XDG_STATE_HOME` at a temp dir
+contained it completely. `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are not
+enough — only `XDG_STATE_HOME` reaches this store. Note the same variable
+gates the durable percept store documented above, which has already
+contaminated a real user's `percepts/` directory once.
+
+Related trap from this pass: an ad-hoc `python3 -c` probe run **without**
+`PYTHONDONTWRITEBYTECODE=1` leaves `.pyc` files inside the package, which
+makes `test_no_pycache_in_packaged_payload` and
+`test_no_bytecode_files_in_packaged_payload` fail on the *next* full run. The
+suite itself leaks nothing. Clean the tree before trusting a red packaging
+test — and check whether the bytecode is yours before assuming the repo is
+broken.
 
 > **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
 > `initialize` (protocol 2024-11-05), `tools/list` (70 tools), and `tools/call`

@@ -305,11 +305,29 @@ class BargeInMonitor:
     # itself raises the effective noise floor further than plain silence.
     _PLAYBACK_MARGIN = 1.5
 
+    #: How long the monitor waits for `begin_playback()` before deciding the speaker
+    #: is audible on its own. Long enough for `start()` and the first samples of
+    #: audio to have happened; short enough that a caller who never plays anything
+    #: does not leave the thread parked.
+    _PRE_PLAYBACK_GUARD_SECONDS = 1.0
+
+    def begin_playback(self) -> None:
+        """Mark the speaker as audible; from here frames may be the assistant's voice.
+
+        Until this is called, every frame is the room, because nothing has been played
+        yet. That is the window the noise floor has to be calibrated from: sampled after
+        playback starts it is Chronoa's own voice, which measured 25x the floor of a
+        quiet room, and every later frame is then compared against the assistant
+        speaking to itself.
+        """
+        self._playing.set()
+
     def __init__(self, target: Optional[str] = None) -> None:
         self._backend = self._detect_backend()
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._playing = threading.Event()
         # Must match the recorder's device: barge-in that listens to a
         # different microphone than the one recording would fire on the room
         # rather than on the user.
@@ -342,6 +360,7 @@ class BargeInMonitor:
 
         self._proc = proc
         self._stop.clear()
+        self._playing.clear()
         self._thread = threading.Thread(target=self._monitor_loop, args=(proc, on_interrupt), daemon=True)
         self._thread.start()
         return True
@@ -358,6 +377,14 @@ class BargeInMonitor:
                     return
                 calib_frames.append(chunk)
             threshold = calibrate_noise_floor(calib_frames) * self._PLAYBACK_MARGIN
+
+            # Re-read the floor once the speaker is live. The frames above are only
+            # the room if playback had not already started, and `start()` does not
+            # wait for this thread before the audio begins. Calibrating on the
+            # assistant's own voice measures the assistant, and then every frame it
+            # hears is judged against itself - which is the false self-interruption
+            # this whole class is off by default to avoid.
+            self._playing.wait(timeout=self._PRE_PLAYBACK_GUARD_SECONDS)
 
             while not self._stop.is_set():
                 chunk = stdout.read(_FRAME_BYTES) if stdout else b""

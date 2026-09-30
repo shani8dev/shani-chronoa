@@ -760,6 +760,9 @@ class ChronoaApplication(Gtk.Application):
         use_vad = self.config.barge_in_vad_enabled and self.barge_in_monitor.is_available()
         if use_vad:
             self.barge_in_monitor.start(self._on_barge_in_detected)
+        # Opened just before the audio starts, so the monitor's noise floor is
+        # sampled from a room that is not currently talking.
+        self.barge_in_monitor.begin_playback()
         try:
             await loop.run_in_executor(None, self.player.play_bytes, tts_bytes)
         finally:
