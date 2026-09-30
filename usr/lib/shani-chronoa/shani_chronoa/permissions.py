@@ -49,7 +49,8 @@ from __future__ import annotations
 import fnmatch
 import logging
 import threading
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from typing import List, NamedTuple, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,19 @@ def clear(session_only: bool = False) -> None:
         else:
             _standing.clear()
             _grants.clear()
+        _reasons.clear()
+
+
+def reasons() -> dict:
+    """The reasons the user gave this session, keyed (action, pattern)."""
+    with _lock:
+        return dict(_reasons)
+
+
+def rejection_reason(action: str, resource: Optional[str]) -> str:
+    """Why the user refused this, if they said."""
+    with _lock:
+        return _reasons.get((action, resource or "*"), "")
 
 
 def rules() -> List[Tuple[str, str, str]]:
@@ -139,6 +153,10 @@ def permits(action: str, resource: str) -> Tuple[bool, Optional[str]]:
     layer has no objection. The caller still runs the skill's own gate, so a
     session grant can only ever *widen* what the user has already agreed to
     this session, never bypass a setting they have left off.
+
+    The refusal text carries the user's own reason when there is one, so a
+    declined call tells the model *why* and it can do something else instead of
+    re-proposing the same thing.
     """
     decision = evaluate(action, resource)
     if decision in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
@@ -146,9 +164,14 @@ def permits(action: str, resource: str) -> Tuple[bool, Optional[str]]:
     if decision in (Decision.DENY_ONCE, Decision.DENY_SESSION, Decision.CANCEL):
         scope = ("for the rest of this session" if decision in _SESSION_SCOPED
                  else "this time")
+        refused = decision == Decision.CANCEL
+        said = rejection_reason(action, resource)
         return False, (
-            f"Permission denied {scope}: a rule for {action} on {resource} says "
-            f"{decision}. Ask the user whether to allow it, or do something else."
+            f"Permission {'cancelled' if refused else 'denied'} {scope}: a rule "
+            f"for {action} on {resource} says {decision}. "
+            + (f"The user said: {said} " if said else "")
+            + ("Do not try a variant of it." if refused else
+               "Do something else instead, or ask the user what to do instead.")
         )
     return True, None
 
@@ -188,8 +211,212 @@ ALLOW_ONCE_CHOICE = "Allow this once"
 ALLOW_SESSION_CHOICE = "Allow for this session"
 DENY_CHOICE = "No, don't allow"
 
+#: codex's `Cancel`/`Abort`, which is a different act from `DENY_CHOICE`: a
+#: denial says "not that" and the turn carries on so the model can adapt, this
+#: ends the turn. `cancel_requested()` tells them apart afterwards, and without
+#: this answer nothing can ever write a `Decision.CANCEL`.
+CANCEL_CHOICE = "No, and stop this turn"
+
 #: How long to wait for the user's answer before treating it as a refusal.
 DECISION_TIMEOUT_SECONDS = 120.0
+
+#: Separates a rejection's free-text reason from the choice it accompanies. The
+#: answer channel is a single string, so the reason travels inside it; a newline
+#: is unambiguous because no choice constant contains one.
+REASON_SEPARATOR = "\n"
+
+#: The three stages, named after opencode's `permission.tsx`. Each exists
+#: because the stage before it leaves something specific unsaid: what is about to
+#: happen, exactly what "always" would persist and for how long, and the fact
+#: that declining can carry a reason the model can act on.
+STAGE_PERMISSION = "permission"
+STAGE_ALWAYS = "always"
+STAGE_REJECT = "reject"
+
+
+def encode_rejection(message: str = "") -> str:
+    """The string a presenter resolves with for "no", carrying the reason.
+
+    Optional by construction: an empty message is exactly `DENY_CHOICE`, so a
+    presenter with nowhere to type has nothing to do differently.
+    """
+    reason = (message or "").strip()
+    return f"{DENY_CHOICE}{REASON_SEPARATOR}{reason}" if reason else DENY_CHOICE
+
+
+class Reply(NamedTuple):
+    """What the user actually said, separated into a decision and a reason.
+
+    opencode sends `{reply: "reject", message}`; this is the same pair. Keeping
+    the reason beside the decision rather than inside it is what lets a decline
+    carry "use the trash instead" without the refusal machinery having to parse
+    prose back out of a label.
+    """
+
+    reply: str
+    message: str = ""
+
+    @property
+    def is_refusal(self) -> bool:
+        return self.reply in (Decision.DENY_ONCE, Decision.DENY_SESSION,
+                              Decision.CANCEL)
+
+
+def parse_reply(answer: str) -> Reply:
+    """Turn whatever the presenter handed back into a decision and a reason.
+
+    Anything unrecognised is a rejection - including the empty string, which is
+    what a dismissal, a timeout and a missing presenter all resolve to. Escape
+    therefore takes the same path as pressing "no", and this is the only place
+    that mapping exists: "is there a path where an unknown answer becomes an
+    allow" has to have one answer.
+    """
+    text = answer if isinstance(answer, str) else ""
+    head, separator, message = text.partition(REASON_SEPARATOR)
+    head, message = head.strip(), message.strip()
+    if head == ALLOW_ONCE_CHOICE:
+        return Reply(Decision.ALLOW_ONCE, message)
+    if head == ALLOW_SESSION_CHOICE:
+        return Reply(Decision.ALLOW_SESSION, message)
+    if head == CANCEL_CHOICE:
+        return Reply(Decision.CANCEL, message)
+    # DENY_CHOICE and every non-answer land here together, on purpose.
+    return Reply(Decision.DENY_SESSION, message)
+
+
+def always_patterns(action: str, resource: Optional[str]) -> List[Tuple[str, str]]:
+    """The exact (action, pattern) pairs an "allow for this session" would write.
+
+    Returned rather than described in prose so what the prompt claims and what
+    `add_rule()` records cannot drift.
+    """
+    return [(action, resource or "*")]
+
+
+def scope_is_narrow(action: str, resource: Optional[str]) -> bool:
+    """Whether a session grant would cover exactly one target rather than all.
+
+    False is the case that matters. Nine of the twelve consent-gated tools name
+    no path, unit or device, so their grant is written against `*` and covers
+    *every* call to that tool for the session - a much larger permission than
+    the button implies.
+    """
+    return bool(resource) and not any(c in resource for c in "*?[")
+
+
+@dataclass(frozen=True)
+class ApprovalRequest:
+    """One permission question, composed as its three stages.
+
+    Built here and rendered wherever a presenter lives, because what must not be
+    dropped - the specific target, the exact patterns, the lifetime, the fact
+    that Escape means no - is an obligation on the *content*, not on a dialog
+    implementation. A presenter showing `question` and `options` cannot omit them.
+    """
+
+    action: str
+    resource: Optional[str]
+    consent_key: str
+    describe: str = ""
+
+    @property
+    def subject(self) -> str:
+        """What is about to happen, in enough detail to judge it.
+
+        Says plainly when there is no specific target, because a sentence that
+        simply omits the object reads as "nothing in particular" rather than
+        "everything it can reach".
+        """
+        action = self.describe or self.action
+        if self.resource:
+            return f"{action}: {self.resource}"
+        return (f"{action} - no specific target, this action is decided by what "
+                "it does when it runs")
+
+    @property
+    def narrow(self) -> bool:
+        return scope_is_narrow(self.action, self.resource)
+
+    @property
+    def always_lines(self) -> List[str]:
+        """The scope of a session grant, enumerated rather than implied."""
+        patterns = always_patterns(self.action, self.resource)
+        if self.narrow:
+            return [f"Allowing for this session covers {self.action} on "
+                    f"{self.resource} only - no other target, no other action."]
+        return [f"Allowing for this session covers EVERY {self.action} for the "
+                f"rest of the session ({', '.join(p for _, p in patterns)} "
+                "matches any target), because this action names no specific one."]
+
+    @property
+    def lifetime_line(self) -> str:
+        return ("It lasts until Chronoa quits. Nothing is written to disk and "
+                "nothing survives a restart - deliberately narrower than a "
+                "permanent setting, and the way to make it permanent is the "
+                f"'{self.consent_key}' switch in Settings.")
+
+    @property
+    def reject_line(self) -> str:
+        return ("Saying no tells Chronoa why if you add a reason, so it can do "
+                "something else instead. It does not end the conversation.")
+
+    @property
+    def escape_line(self) -> str:
+        return ("Closing this question without answering counts as no, never as "
+                "yes.")
+
+    @property
+    def options(self) -> List[str]:
+        """The three answers, refusal last - ordering carries meaning, and a
+        value matching none of them is a refusal, so nothing is granted by
+        default."""
+        return [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE]
+
+    def options_with_cancel(self) -> List[str]:
+        """The three plus codex's Cancel, for a presenter offering the split."""
+        return [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE,
+                CANCEL_CHOICE]
+
+    @property
+    def stages(self) -> List[Tuple[str, str]]:
+        """The three stages as addressable units, in the order the user meets them.
+
+        A presenter that lays the prompt out as separate widgets reads this; one
+        that wants a single block reads `question`, which is composed from these
+        bodies and so cannot say anything the stages do not.
+        """
+        return [
+            (STAGE_PERMISSION, "\n".join([
+                f"Shani wants to {self.subject}.",
+                "",
+                f"That needs the '{self.consent_key}' permission, which is "
+                f"currently off. Allow it?",
+            ])),
+            (STAGE_ALWAYS, "\n".join([
+                f"If you allow this once - {self.action} runs this time, and the "
+                "next one asks again.",
+                *self.always_lines,
+                self.lifetime_line,
+            ])),
+            (STAGE_REJECT, "\n".join([self.reject_line, self.escape_line])),
+        ]
+
+    @property
+    def question(self) -> str:
+        """The composed prompt: all three stages, in order."""
+        return "\n\n".join(body for _stage, body in self.stages)
+
+
+def approval_request(action: str, resource: Optional[str], consent_key: str,
+                     describe: str = "") -> ApprovalRequest:
+    """The question `decide()` will put, as data rather than as a string."""
+    return ApprovalRequest(action=action, resource=resource,
+                           consent_key=consent_key, describe=describe)
+
+
+#: Why the user said no, per (action, pattern). Cleared with the rules it
+#: belongs to, so a reason cannot outlive the refusal that produced it.
+_reasons: dict = {}
 
 
 def can_ask() -> bool:
@@ -205,18 +432,27 @@ def can_ask() -> bool:
 
 
 def decide(action: str, resource: "str | None", consent_key: str,
-           describe: str = "") -> "str | None":
+           describe: str = "", offer_cancel: bool = False) -> "str | None":
     """Ask the user whether to allow one gated call, and record what they said.
 
     Returns the granted decision, or None when the answer was a refusal or
     nobody answered. None is the only value a caller may treat as "no", and it
     is also the result of a timeout, a dismissed prompt and a headless run -
-    all four mean the same thing, which is that nobody said yes.
+    all four mean the same thing, which is that nobody said yes. The mapping is
+    `parse_reply()`'s, so Escape, a timeout and a nonsense answer all take the
+    refusal path rather than falling through to an allow by omission.
 
     A refusal is recorded as a *session* denial rather than simply returning
     None. Otherwise the model could retry, be refused, and be asked again on
     the next attempt - the same question four times inside one turn is how a
-    prompt becomes something people click through without reading.
+    prompt becomes something people click through without reading. The reason the
+    user gave rides along in `reasons()` so the model can adapt instead of
+    retrying the thing they objected to.
+
+    `offer_cancel` adds codex's Cancel as a fourth answer, which is what writes
+    a `Decision.CANCEL` that `cancel_requested()` can then report. It is opt-in
+    because a caller that never showed the option cannot have declined to pick
+    it, and a choice the user was not offered is not a choice they made.
     """
     from shani_chronoa import ask_bridge
 
@@ -237,30 +473,27 @@ def decide(action: str, resource: "str | None", consent_key: str,
         # question that cannot be answered would hang the turn.
         return None
 
-    target = f" on {resource}" if resource else ""
-    question = (
-        f"Shani wants to {describe or action}{target}.\n\n"
-        f"That needs the '{consent_key}' permission, which is currently off. "
-        f"Allow it?"
-    )
-    answer = ask_bridge.ask(
-        question,
-        [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE],
+    request = approval_request(action, resource, consent_key, describe)
+    reply = parse_reply(ask_bridge.ask(
+        request.question,
+        request.options_with_cancel() if offer_cancel else request.options,
         timeout=DECISION_TIMEOUT_SECONDS,
-    )
+    ))
 
-    if answer == ALLOW_ONCE_CHOICE:
-        add_rule(action, resource or "*", Decision.ALLOW_ONCE, session_only=True)
-        return Decision.ALLOW_ONCE
-    if answer == ALLOW_SESSION_CHOICE:
-        add_rule(action, resource or "*", Decision.ALLOW_SESSION, session_only=True)
-        return Decision.ALLOW_SESSION
+    if reply.reply in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
+        add_rule(action, resource or "*", reply.reply, session_only=True)
+        return reply.reply
 
-    # A refusal, a dismissal, a timeout: record it so the question is not asked
-    # again this session, and so a later tool call gets a clean, stable refusal
-    # from `permits()` instead of another prompt.
-    add_rule(action, resource or "*", Decision.DENY_SESSION, session_only=True)
-    logger.info("Permission for %s %s refused by the user", action, resource)
+    pattern = resource or "*"
+    if reply.reply == Decision.CANCEL:
+        add_rule(action, pattern, Decision.CANCEL, session_only=True)
+    else:
+        add_rule(action, pattern, Decision.DENY_SESSION, session_only=True)
+    if reply.message:
+        with _lock:
+            _reasons[(action, pattern)] = reply.message
+    logger.info("Permission for %s %s refused by the user: %s",
+                action, resource, reply.message or "(no reason given)")
     return None
 
 

@@ -1,13 +1,14 @@
 """RED tests: a registered sense must be fully wired, not merely declared.
 
 This module exists because of a class of bug this repo has demonstrable
-history with. `ipc.py`'s `PeerValidator`, `tool_tracking.py`'s `ToolCall`,
-`gateway_supervisor.py` and `sandbox/profiles.py`'s `AgentProfile` were all
-fully built, passed module-level unit tests, and were never imported by
-anything that runs - four "features" that were pure dead weight. The stated
-project rule (see this repo's `AGENTS.md`) is: *do not treat a `feat:` commit
-message or a passing module-level unit test as proof something is live -
-grep for real callers first.*
+history with. `tool_tracking.py`'s `ToolCall`, `gateway_supervisor.py` and
+`sandbox/profiles.py`'s `AgentProfile` were all fully built, passed
+module-level unit tests, and were never imported by anything that runs -
+"features" that were pure dead weight, and a fourth of the same kind has since
+been deleted outright rather than wired in. The stated project rule (see this
+repo's `AGENTS.md`) is: *do not treat a `feat:` commit message or a passing
+module-level unit test as proof something is live - grep for real callers
+first.*
 
 The senses layer has exactly the same shape of hazard, and worse, because a
 sense that exists but is never reachable is a **privacy** hazard rather than a
@@ -266,14 +267,15 @@ class TestEverySenseHasARealCaller:
                 if "shani_chronoa.senses" in text or "discover_senses" in text:
                     consumers.append(path)
         # When/Then: something that actually runs imports the layer.
-        # `ipc.py`, `tool_tracking.py`, `gateway_supervisor.py` and
-        # `sandbox/profiles.py` all passed their own unit tests with zero
-        # entries here; this is the check that would have caught them.
+        # `tool_tracking.py`, `gateway_supervisor.py` and `sandbox/profiles.py`
+        # all passed their own unit tests with zero entries here; this is the
+        # check that would have caught them.
         assert consumers, (
             "nothing outside shani_chronoa/senses/ imports the senses layer or "
             "calls discover_senses() - the whole layer is dead code of exactly "
-            "the kind this repo has shipped four times already (ipc.PeerValidator, "
-            "tool_tracking.ToolCall, gateway_supervisor, sandbox/profiles.AgentProfile). "
+            "the kind this repo has shipped three times already "
+            "(tool_tracking.ToolCall, gateway_supervisor, "
+            "sandbox/profiles.AgentProfile). "
             "Wire it into a launcher (e.g. usr/bin/shani-chronoa-sense) or delete it."
         )
 

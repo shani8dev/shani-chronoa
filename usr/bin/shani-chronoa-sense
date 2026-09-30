@@ -79,7 +79,12 @@ from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
 from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
 from shani_chronoa import egress, models  # noqa: E402
-from shani_chronoa.triggers import TriggerEngine, TriggerRule, build_rule  # noqa: E402
+from shani_chronoa.triggers import (  # noqa: E402
+    EventEngine,
+    TriggerEngine,
+    TriggerRule,
+    build_rule,
+)
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -697,9 +702,17 @@ def _trigger_run(args: argparse.Namespace, engine: TriggerEngine, store: Percept
 def _ambient_scheduler(
     args: argparse.Namespace, registered: "dict[str, Sense]", store: PerceptStore
 ) -> AmbientScheduler:
-    """The scheduler for this invocation, narrowed to `--sense` when given."""
+    """The scheduler for this invocation, narrowed to `--sense` when given.
+
+    An `EventEngine` is always attached, which is what makes armed event rules
+    (`triggers.EventEngine`) reachable from a real command rather than only
+    from `read_event_signal`'s own unit tests. Constructing one is free when
+    nothing is armed: `EventRuleStore` only reads, and `DurableFingerprints`
+    only writes when a rule actually records a fingerprint.
+    """
+    engine = None if getattr(args, "no_event_triggers", False) else EventEngine()
     if not args.sense:
-        return AmbientScheduler(senses=registered, store=store)
+        return AmbientScheduler(senses=registered, store=store, event_engine=engine)
 
     name = args.sense
     if name not in registered:
@@ -723,6 +736,7 @@ def _ambient_scheduler(
     return AmbientScheduler(
         senses={name: sense},
         store=store,
+        event_engine=engine,
         arguments={name: parse_arguments(args.arguments, sense.schema)},
     )
 
@@ -767,6 +781,30 @@ def _ambient_report(
     if summary["denied"]:
         for name, reason in sorted(summary["denied"].items()):
             lines.append(f"  {name:<12} deny  {reason}")
+
+    # Event rules are reported in full - fired, suppressed and censored alike -
+    # because a rule that is denied every poll and a rule that is not being
+    # polled at all look identical from the outside otherwise, and only the
+    # first is a consent decision the user can act on.
+    events = summary["event_triggers"]
+    if events["enabled"]:
+        lines.append(
+            f"  event rules: {events['polls']} poll(s) of {len(events['rules'])} "
+            f"armed rule(s) every {events['interval_seconds']:g}s, "
+            f"{events['fired']} firing(s)"
+        )
+        for evaluation in scheduler.event_results():
+            if getattr(evaluation, "fired", False):
+                state = "FIRED"
+            elif getattr(evaluation, "censored", False):
+                state = "REFUSED"
+            elif getattr(evaluation, "signal_status", "ok") != "ok":
+                state = "NO-SIGNAL"
+            else:
+                state = getattr(evaluation, "layer", None) or "suppressed"
+            lines.append(
+                f"    {evaluation.rule.name:<20} {state:<18} {evaluation.reason}"
+            )
 
     polled_any = summary["polls"] > 0 or bool(results)
     if not polled_any and not summary["denied"]:
@@ -950,6 +988,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help="start the scheduler and poll for N seconds of real time",
+    )
+    ambient_parser.add_argument(
+        "--no-event-triggers",
+        action="store_true",
+        help=(
+            "poll senses only, and do not evaluate armed event rules. Event "
+            "rules are polled by default; this exists so a run that should "
+            "change nothing at all can say so."
+        ),
     )
     ambient_parser.add_argument(
         "--sense", metavar="NAME", help="restrict polling to one registered sense"

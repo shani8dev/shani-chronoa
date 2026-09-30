@@ -98,6 +98,14 @@ _IMPL = {
     # decides what every later keystroke produces, which is the same argument
     # `press_key` gives for sharing that gate.
     "set_keyboard_layout": "shani_chronoa.skills.set_keyboard_layout",
+    # Both directions of a single-file edit, sharing one key.
+    "edit_file": "shani_chronoa.skills.edit_file",
+    "undo_last_change": "shani_chronoa.skills.undo_last_change",
+    # Reuses the `git` sense's key, so the two surfaces reporting uncommitted
+    # filenames cannot disagree about whether that is permitted.
+    "git_inspect": "shani_chronoa.skills.git_inspect",
+    "todo_list": "shani_chronoa.skills.todo_list",
+    "manage_triggers": "shani_chronoa.skills.manage_triggers",
 }
 
 

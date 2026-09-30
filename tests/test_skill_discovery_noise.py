@@ -1,18 +1,27 @@
 """A warning that fires on every startup is a warning nobody reads.
 
-`scan_archive` lives in the skills package but is not a skill: it is a zip-slip
-guard for a skill-download feature this project does not have, so it has no
-`SKILLS` list. `discover_skills()` therefore logged
+`NOT_A_SKILL` is the opt-out that keeps a built-in helper which lives in the
+skills package without being a skill from logging
 
-    Skipping 'builtin:scan_archive': SKILLS must be a list of Skill entries
+    Skipping 'builtin:X': SKILLS must be a list of Skill entries
 
-on every single start of the app and of the MCP server, for the life of the
-project. The cost is not the noise itself but what it trains people to ignore:
-the genuine malformed-skill warnings next to it are the ones worth seeing.
+on every single start of the app and of the MCP server. The cost is not the
+noise itself but what it trains people to ignore: the genuine malformed-skill
+warnings next to it are the ones worth seeing.
 
-The fix is an explicit opt-out marker for built-ins - and *only* for built-ins,
-because honouring it in a user module would silently drop a skill the user
-explicitly asked for.
+The marker is honoured for built-ins - and *only* for built-ins, because
+honouring it in a user module would silently drop a skill the user explicitly
+asked for. That half is exercised below with real user modules written into a
+temp skills directory.
+
+No built-in carries the marker today. The one that needed it was a zip-slip
+guard superseded by the stricter checks `extract_archive` already applies
+inline, so it was deleted rather than left as a second, weaker copy of the same
+guard on the same path. The marker stays - a built-in is allowed to say it is
+not a skill, and it is the user-module half that must never be able to - and
+the built-in half is covered from the other side: no built-in may log a skip
+warning at all, which still fails the moment a helper is added beside the skills
+without the marker.
 """
 
 import logging
@@ -23,18 +32,18 @@ from shani_chronoa import skills as skills_pkg
 from shani_chronoa.skills import NOT_A_SKILL, discover_skills
 
 
-def _records(caplog, level=logging.WARNING):
+def _builtin_skip_warnings(caplog, level=logging.WARNING):
     return [r for r in caplog.records
-            if r.levelno >= level and "scan_archive" in r.getMessage()]
+            if r.levelno >= level and "Skipping 'builtin:" in r.getMessage()]
 
 
-class TestTheBuiltInNonSkillIsSkippedQuietly:
-    def test_it_does_not_warn(self, caplog):
+class TestNoBuiltInIsSkippedWithAWarning:
+    def test_no_built_in_logs_a_skip_warning(self, caplog):
         with caplog.at_level(logging.DEBUG, logger="shani_chronoa.skills"):
             discover_skills()
-        assert not _records(caplog), (
+        assert not _builtin_skip_warnings(caplog), (
             f"still warning on every startup: "
-            f"{[r.getMessage() for r in _records(caplog)]}")
+            f"{[r.getMessage() for r in _builtin_skip_warnings(caplog)]}")
 
     def test_it_still_registers_every_real_skill(self):
         tools, handlers = discover_skills()

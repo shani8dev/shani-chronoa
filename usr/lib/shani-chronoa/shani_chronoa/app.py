@@ -23,7 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
-from shani_chronoa import markdown_lite, pipewire, planmode, sessions
+from shani_chronoa import markdown_lite, pipewire, planmode, sessions, ask_bridge
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.llm import OllamaLLM
@@ -33,7 +33,8 @@ from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.senses.store import PerceptStore
 from shani_chronoa.tts import PiperTTS
 from shani_chronoa.wakeword import WakeWordListener
-from shani_chronoa.gui import AssistantState, CajitaWindow, ChronoaOrbWidget
+from shani_chronoa.gui import (AssistantState, CajitaWindow, ChronoaOrbWidget,
+                              make_question_presenter)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,14 @@ class ChronoaApplication(Gtk.Application):
         # - so this line looks redundant and is not. It is idempotent.
         Adw.init()
 
+        # `do_startup`, not `_open_settings`: the settings window is built lazily
+        # on first Ctrl+, so a presenter installed there would not exist for a
+        # normal run - dead code behind an even rarer one. This hook runs on every
+        # launch, before any tool can be dispatched. The window itself does not
+        # exist yet (`do_activate` builds it), which is why the presenter takes a
+        # getter rather than a window.
+        ask_bridge.set_presenter(make_question_presenter(lambda: self.window))
+
         # Initialize components based on hardware and config
         self._init_components()
 
@@ -120,6 +129,12 @@ class ChronoaApplication(Gtk.Application):
     def do_shutdown(self) -> None:
         """Release background mic/playback resources before the app exits."""
         logger.info("Shani Chronoa shutting down...")
+        # Answer a prompt that is still on screen. The window is about to be
+        # destroyed, so nobody is ever going to click it, and the tool loop is
+        # blocked on that answer - `AsyncBridge.shutdown()` below joins its
+        # thread, so an unanswered event is minutes of a quit that looks hung.
+        if self.window is not None:
+            self.window.abandon_pending_question()
         self.wakeword.stop()
         self.player.stop()
         self.barge_in_monitor.stop()

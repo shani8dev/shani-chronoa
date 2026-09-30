@@ -6,8 +6,8 @@ exposed through the headless CLI - and completely invisible to the assistant.
 percept produced by `shani-chronoa-sense` died in that one-shot process and
 never appeared in a single LLM request. The CLI was the layer's only consumer,
 which is exactly the shape of hazard this repo has demonstrable history with
-(`ipc.py`, `tool_tracking.py`, `gateway_supervisor.py`,
-`sandbox/profiles.py`; see `test_sense_manifest.py`).
+(`tool_tracking.py`, `gateway_supervisor.py`, `sandbox/profiles.py`; see
+`test_sense_manifest.py`).
 
 These tests pin the two halves of the fix:
 
