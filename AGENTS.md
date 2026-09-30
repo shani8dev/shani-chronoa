@@ -725,6 +725,58 @@ line with an invented explanation is worth less than an admitted SKIP.
 ## Audit-verified known issues (confirmed present)
 
 
+- **`SandboxExecutor`: all four of its policy guards scan a shell *string*, so
+  shell expansion defeats every one of them — NOT FIXED, deliberately left open
+  (2026-09-30).** `execute()` takes `command: str` and the guards run on
+  `raw_cmd` before the command is handed to `/bin/sh -c` (and, in
+  `_run_landlock`, to a shell nested inside `subprocess.run(inner, shell=True)`
+  — two shells deep). Four separate checks have the same shape:
+
+  | # | Guard | Method |
+  |---|---|---|
+  | 2 | privilege escalation (`sudo`/`pkexec`/`su`) | `"sudo " in raw_cmd` |
+  | 3 | internal binaries, isolated levels | `set(raw_cmd.split())` |
+  | 4 | `config.blocked_binaries` | `_first_blocked_binary` |
+  | 5 | `DANGEROUS_BINARIES` | `_first_blocked_binary` |
+
+  Verified by running, against the real `SandboxExecutor` at
+  `LEVEL_3_HOST_USER` (the default for every skill call): plain `dd` is refused
+  with `126`, while `$(echo dd) status=...` and `d\d status=...` both reach the
+  **real system `dd`**, which then errors on its arguments — proof it ran, not
+  proof the filter declined. Check #2's predicate was tested the same way and
+  `$(echo sudo) reboot`, `` `echo pkexec` id ``, `su${IFS}-c id` and
+  `sud\o reboot` all pass it.
+
+  **This is latent, not a live hole, and the distinction matters.** Both
+  production call sites `shlex.quote` everything untrusted:
+  `tools.py:370` builds `python3 -c {shlex.quote(program)}` and
+  `argfile.py:380` builds `python3 -c {shlex.quote(_REFERENCE_PROGRAM)}
+  {shlex.quote(envelope_path)}`, writing untrusted *values* into an `O_EXCL`
+  0600 JSON envelope rather than into the command string. No skill module uses
+  `shell=True` with interpolated values. So on the production path the guards
+  inspect `python3 -c '<quoted program>'` and are very nearly a no-op.
+
+  Recorded rather than quietly patched because the correct fix is not a filter.
+  Two traps, both measured rather than assumed:
+
+  - The obvious repair — refuse any command containing `$`, a backtick, `\` or
+    `${` — false-positives on valid calls, because `shlex.quote` does not strip
+    those characters, it only wraps the program in single quotes. Argument
+    *data* carrying `$(...)`, a backtick, a regex backslash or `$5` lands
+    verbatim inside the quoted program; all four were confirmed to reach the
+    guard as literal text and all four currently pass.
+  - The real fix is to stop passing shell strings: take `argv`, drop
+    `shell=True`, and check `argv[0]`. That is not mechanical, though, because
+    `tests/test_sandbox_parent_death.py` calls
+    `_run_host("sleep N; touch MARKER &")` and depends on `;` sequencing and
+    `&` backgrounding, neither of which argv can express. Whoever does this has
+    to decide whether an explicit `sh -c` stays reachable as a visible opt-in
+    (which is honest — a blocklist never could police a shell string) or is
+    removed outright.
+
+  Do not "fix" one guard in isolation. They share a root cause and a fix that
+  patches only #5 leaves #2 — the privilege-escalation one — just as bypassable.
+
 - **`SandboxExecutor._run_host()`: `timeout_seconds` was never actually
   enforced for LEVEL_3_HOST_USER (the default level for every skill call)
   — FIXED (2026-09-18).** A foreground command that ran past its configured
