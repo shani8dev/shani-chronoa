@@ -465,6 +465,11 @@ class CloudLLMChain:
             backends.append(OpenAICompatibleLLM(provider, api_key=key))
         self._backends = backends
         self.model = ", ".join(b.model for b in self._backends) or "(none)"
+        #: Proxied from whichever backend answered the last call. `assistant.py`
+        #: reads this with `getattr(self.llm, "last_usage", None)`, so without it
+        #: every cloud-fallback turn reports zero tokens - indistinguishable from
+        #: a provider that sent no `usage` block at all.
+        self.last_usage: "usage_mod.Usage | None" = None
 
     _MAX_RETRY_WAIT = 10.0  # cap how long we'll wait on a provider's own retry_after hint
 
@@ -478,6 +483,10 @@ class CloudLLMChain:
             for attempt in range(2):  # one retry after a provider's own retry_after hint, then move on
                 try:
                     message = await backend.chat_message(sanitized_messages, tools=tools, stream=stream)
+                    # Set unconditionally, including to None: a backend that sends
+                    # no usage block must clear the previous call's numbers rather
+                    # than let the assistant count them twice.
+                    self.last_usage = getattr(backend, "last_usage", None)
                     logger.info(f"Cloud LLM fallback answered via {backend.provider.name} ({backend.model})")
                     return message
                 except CloudLLMError as e:

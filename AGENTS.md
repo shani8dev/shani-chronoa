@@ -660,7 +660,7 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1875 passed, 6 skipped)
+**Verification status:** unit suite green on Ubuntu (1878 passed, 6 skipped)
 
 **Run the suite with `XDG_STATE_HOME` set, or it writes to the real home
 directory.** `skills/timer.py` resolves its store from `XDG_STATE_HOME`,

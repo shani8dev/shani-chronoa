@@ -155,3 +155,123 @@ class TestAShapeThatWouldBeMissed:
         body = {"message": {}, "prompt_eval_count": 42, "eval_count": 7}
         assert U.from_openai(body).total_tokens == 0
         assert U.from_ollama(body).total_tokens == 49
+
+
+class TestTheChainDoesNotSwallowItsBackendsUsage:
+    """`CloudLLMChain` is what `app.py` actually installs as `self.llm`.
+
+    Both leaf adapters record `self.last_usage` when a provider sends a `usage`
+    block, and `assistant.py` reads it back with
+    `getattr(self.llm, "last_usage", None)` to accumulate a turn's cost. But the
+    chain returns the backend's message and nothing else, so on the cloud-fallback
+    path the number is dropped between the adapter and the assistant - and
+    `getattr` returns `None`, which is indistinguishable from a provider that
+    reported no usage at all.
+
+    The tests above cover `OllamaLLM` and the OpenAI/Anthropic extractors, so the
+    suite was green with the whole cloud-fallback path reporting zero cost.
+    """
+
+    def _chain_with(self, backend):
+        from shani_chronoa.cloud_llm import CloudLLMChain
+
+        # A real key so the provider is built rather than skipped; the backend is
+        # swapped out immediately, so nothing here touches the network.
+        chain = CloudLLMChain(provider_ids=("openai",), api_keys={"openai": "sk-test"})
+        chain._backends = [backend]
+        return chain
+
+    def test_the_chain_reports_what_its_backend_reported(self):
+        import asyncio
+        from types import SimpleNamespace
+
+        reported = U.Usage(input_tokens=11, output_tokens=5, source="openai-compatible")
+
+        class _Backend:
+            model = "stub-model"
+            provider = SimpleNamespace(name="Stub")
+
+            def __init__(self):
+                self.last_usage = reported
+
+            async def chat_message(self, messages, tools=None, stream=False):
+                return {"role": "assistant", "content": "ok"}
+
+        backend = _Backend()
+        chain = self._chain_with(backend)
+        asyncio.run(chain.chat_message([{"role": "user", "content": "hi"}]))
+
+        assert backend.last_usage is reported, (
+            "the stub backend was never consulted, so this test proves nothing")
+        got = getattr(chain, "last_usage", None)
+        assert got is not None, (
+            "CloudLLMChain dropped the usage its backend reported; assistant.py's "
+            "getattr(self.llm, 'last_usage', None) now reads None and the whole "
+            "cloud-fallback path reports zero tokens as if usage were unsupported")
+        assert (got.input_tokens, got.output_tokens) == (11, 5)
+
+    def test_a_backend_reporting_nothing_clears_the_previous_numbers(self):
+        """Pinned because the naive fix double-counts instead.
+
+        The chain now assigns `last_usage` on every success, including when the
+        answering backend sent no `usage` block. Had it only assigned when a
+        value was present, the previous call's counts would linger and
+        `assistant.py` would add them into the turn a second time - turning a
+        missing number into a confidently wrong one.
+        """
+        import asyncio
+        from types import SimpleNamespace
+
+        class _Backend:
+            model = "stub-model"
+            provider = SimpleNamespace(name="Stub")
+
+            def __init__(self, usage):
+                self.last_usage = usage
+
+            async def chat_message(self, messages, tools=None, stream=False):
+                return {"role": "assistant", "content": "ok"}
+
+        chain = self._chain_with(_Backend(U.Usage(input_tokens=11, output_tokens=5)))
+        asyncio.run(chain.chat_message([{"role": "user", "content": "hi"}]))
+        assert getattr(chain, "last_usage", None) is not None, "precondition"
+
+        chain._backends = [_Backend(None)]  # same chain, a backend that reports nothing
+        asyncio.run(chain.chat_message([{"role": "user", "content": "again"}]))
+        assert getattr(chain, "last_usage", None) is None, (
+            "the previous call's token counts survived a call that reported none, "
+            "so the assistant would add them to this turn as well")
+
+    def test_the_turn_reports_the_cost_when_the_chain_is_the_backend(self):
+        """The end-to-end claim: a cloud-fallback turn reports what it spent.
+
+        Everything above tests the chain in isolation. This is the path that
+        actually reaches a user - `app.py` installs the chain as `self.llm`, and
+        `assistant.py` accumulates `getattr(self.llm, "last_usage", None)` into
+        `turn_stats()["usage"]`.
+        """
+        import asyncio
+        from types import SimpleNamespace
+
+        from shani_chronoa.assistant import Assistant
+
+        class _Backend:
+            model = "stub-model"
+            provider = SimpleNamespace(name="Stub")
+
+            def __init__(self):
+                self.last_usage = U.Usage(
+                    input_tokens=11, output_tokens=5, source="openai-compatible")
+
+            async def chat_message(self, messages, tools=None, stream=False):
+                return {"role": "assistant", "content": "ok"}
+
+        a = Assistant(self._chain_with(_Backend()))
+        asyncio.run(a.handle("what did you spend?"))
+        stats = a.turn_stats()
+        assert stats["usage"] is not None, (
+            "a turn served by CloudLLMChain reported no usage at all; the "
+            "provider's numbers never reached turn_stats()")
+        assert stats["usage"]["input_tokens"] == 11
+        assert stats["usage"]["output_tokens"] == 5
+        assert stats["usage"]["source"] == "openai-compatible"
