@@ -36,12 +36,14 @@ logger = logging.getLogger(__name__)
 
 #: Module-level marker meaning "this file lives in the skills package but is
 #: deliberately not a skill", so `discover_skills()` skips it without
-#: complaining. It exists because `scan_archive` - a zip-slip guard for a
-#: skill-download feature this project does not have - has no `SKILLS` list, and
-#: so logged `Skipping 'builtin:scan_archive': SKILLS must be a list of Skill
-#: entries` on *every* startup of the app and the MCP server. A warning that
-#: always fires is a warning nobody reads, and the genuine malformed-skill
-#: warnings it drowns out are the ones worth seeing.
+#: complaining. A built-in helper placed beside the skills rather than being one
+#: has no `SKILLS` list, and so logged `Skipping 'builtin:X': SKILLS must be a
+#: list of Skill entries` on *every* startup of the app and the MCP server. A
+#: warning that always fires is a warning nobody reads, and the genuine
+#: malformed-skill warnings it drowns out are the ones worth seeing. The first
+#: helper to need this has since been deleted as a superseded duplicate, so
+#: nothing carries the marker today; it stays because a built-in is allowed to
+#: say it is not a skill, and a user module is not.
 #:
 #: Honoured for built-ins only. See `discover_skills()`.
 NOT_A_SKILL = "_CHRONOA_NOT_A_SKILL"

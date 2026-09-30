@@ -10,9 +10,10 @@ Uses Python's own `zipfile` and `tarfile` rather than shelling out to `zip` and
 
 **Zip-slip is checked on the way in and refused**, not extracted-then-validated:
 an archive whose entries escape the destination is the one genuinely dangerous
-thing an archive can carry, and this will not unpack it. `scan_archive` (a
-module in the skills package, deliberately not a skill) is the same idea, kept
-here inline because this is the only caller.
+thing an archive can carry, and this will not unpack it. The check is inline
+here (`_escapes`) because this module owns the `extract` action; `extract_archive`
+carries a stricter one for the unpack-only case, refusing link, device and FIFO
+members as well.
 
 Honesty rules: what was added and what was skipped are both reported, because
 an archive that silently omits unreadable files is worse than one that fails.
