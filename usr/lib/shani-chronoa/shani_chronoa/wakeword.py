@@ -33,6 +33,12 @@ import subprocess
 import threading
 from typing import Callable, Optional
 
+# Shared rather than redeclared: this listener and the turn recorder read the
+# same microphone, so they have to be invoked with the same capture ring. See
+# `_CAPTURE_LATENCY` there for the finding behind the value and for what was
+# not verified about it.
+from shani_chronoa.audio import _CAPTURE_LATENCY
+
 logger = logging.getLogger(__name__)
 
 _FRAME_SAMPLES = 1280  # 80ms @ 16kHz mono s16le - openWakeWord's expected chunk size
@@ -89,6 +95,8 @@ class WakeWordListener:
         self._proc: Optional[subprocess.Popen] = None
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        self._generation = 0
+        self._stop_epoch = 0
 
     def _detect_backend(self) -> Optional[str]:
         if shutil.which("pw-record"):
@@ -105,8 +113,20 @@ class WakeWordListener:
         self._target = target or None
 
     def _record_cmd(self) -> list:
+        # `--latency` is pinned for the same reason and with the same caveats as
+        # `audio.py`'s `_CAPTURE_LATENCY`: the capture ring should not depend on
+        # which PipeWire version is installed. Two code paths record from the
+        # same microphone (the recorder's turn, and this always-on listener), so
+        # they have to agree on the ring or the two disagree about what they
+        # heard. `arecord` takes no such option here, as in `audio.py`.
         if self._backend == "pw-record":
-            cmd = ["pw-record", "--rate", "16000", "--channels", "1", "--format", "s16"]
+            cmd = [
+                "pw-record",
+                "--rate", "16000",
+                "--channels", "1",
+                "--format", "s16",
+                "--latency", _CAPTURE_LATENCY,
+            ]
             if self._target:
                 cmd += ["--target", self._target]
             cmd.append("-")
@@ -114,7 +134,16 @@ class WakeWordListener:
         return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", "16000", "-c", "1", "-"]
 
     def start(self, on_detected: Callable[[], None]) -> bool:
-        """Start the continuous listen loop on a background thread."""
+        """Start the continuous listen loop on a background thread.
+
+        Bumps the generation, so a `on_detected` that belongs to an earlier
+        session cannot reach the caller. `stop()`'s join is bounded at two
+        seconds and it clears `self._thread` regardless, so a listener still
+        blocked in `read()` when the join expires leaves the object looking
+        idle; the next `start()` is then accepted and two listen loops run at
+        once. Only the current generation may report a detection, so the older
+        loop cannot open a microphone for a turn the user has moved on from.
+        """
         if not self.is_available() or self._thread is not None:
             return False
 
@@ -140,14 +169,17 @@ class WakeWordListener:
 
         self._proc = proc
         self._stop.clear()
+        self._generation += 1
         self._thread = threading.Thread(
-            target=self._listen_loop, args=(proc, on_detected), daemon=True
+            target=self._listen_loop, args=(proc, on_detected, self._generation), daemon=True
         )
         self._thread.start()
         logger.info(f"Wake-word listening started (model={self._wakeword_model}, backend={self._backend})")
         return True
 
-    def _listen_loop(self, proc: subprocess.Popen, on_detected: Callable[[], None]) -> None:
+    def _listen_loop(
+        self, proc: subprocess.Popen, on_detected: Callable[[], None], generation: int = 0
+    ) -> None:
         stdout = proc.stdout
         if stdout is None:
             return
@@ -161,7 +193,13 @@ class WakeWordListener:
 
         try:
             while not self._stop.is_set():
+                # A frame already in flight when `stop()` arrived predates the
+                # stop, so it is dropped rather than scored: a stopped listener
+                # must not be able to open a microphone.
+                boundary = self._stop_epoch
                 chunk = stdout.read(_FRAME_BYTES)
+                if self._stop_epoch != boundary:
+                    return
                 if not chunk or len(chunk) < _FRAME_BYTES:
                     break
                 audio = np.frombuffer(chunk, dtype=np.int16)
@@ -170,6 +208,9 @@ class WakeWordListener:
                 except Exception as e:
                     logger.error(f"Wake-word inference failed: {e}")
                     continue
+                if self._generation != generation:
+                    logger.info("Wake word: dropping a detection from a superseded session")
+                    return
                 # Exactly one model is loaded (see start()), but its score-dict
                 # key is the resolved filename stem (e.g. "hey_jarvis_v0.1"),
                 # not the short config name - confirmed by actually loading
@@ -184,6 +225,8 @@ class WakeWordListener:
     def stop(self) -> None:
         """Stop listening and release the mic and model."""
         self._stop.set()
+        self._stop_epoch += 1
+        self._generation += 1
         proc, self._proc = self._proc, None
         if proc is not None:
             proc.terminate()

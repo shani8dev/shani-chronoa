@@ -11,11 +11,13 @@ the user command, ensuring the parent Chronoa process remains unrestricted.
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import ctypes.util
 import errno
 import json
 import os
+import stat
 import sys
 from typing import List, Tuple, Optional
 
@@ -48,6 +50,22 @@ class RulesetAttr(ctypes.Structure):
 
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
+
+class PathBeneathAttr(ctypes.Structure):
+    """`struct landlock_path_beneath_attr`, packed, in the kernel's field order.
+
+    `allowed_access` comes FIRST, not `parent_fd`; and `parent_fd` is a 32-bit
+    int in a packed struct, so it is NOT 8 bytes. Both were wrong at one point,
+    so the kernel read garbage for `allowed_access` and rejected every rule with
+    EINVAL - which looks exactly like a kernel without Landlock.
+    """
+
+    _pack_ = 1
+    _fields_ = [
+        ("allowed_access", ctypes.c_int64),
+        ("parent_fd", ctypes.c_int32),
+    ]
+
 # Landlock access rights (filesystem) - these are defined by the ABI
 # We will define the known rights and allow the ABI to tell us which are valid.
 # The low 16 bits are filesystem rights in ABI 1.
@@ -76,8 +94,28 @@ _LANDLOCK_ACCESS_FS_CONNECT_TCP = 1 << 17  # May connect to TCP ports (ABI 4)
 # exist in the ABI but belong to `handled_access_net`, not this field.
 _LANDLOCK_ACCESS_FS_ALL_KNOWN = 0xFFFF
 
+# Rights that can only mean anything on a directory. See `access_for_path_fd`.
+_DIRECTORY_ONLY_RIGHTS = (
+    _LANDLOCK_ACCESS_FS_READ_DIR
+    | _LANDLOCK_ACCESS_FS_REMOVE_DIR
+    | _LANDLOCK_ACCESS_FS_MAKE_DIR
+    | _LANDLOCK_ACCESS_FS_REFER
+)
+
 # Landlock creation flags
 _LANDLOCK_CREATE_RULESET_VERSION = 1
+
+# Landlock's own documentation recommends `O_PATH` for `parent_fd`: it names an
+# object without opening it, so it needs no read permission and works whatever
+# the type. `O_NOFOLLOW` is the half that makes the descriptor name the object
+# policy asked for, and `O_CLOEXEC` keeps it from leaking into the exec'd
+# command. Linux-only, as Landlock itself is; the 0 defaults keep a non-Linux
+# import from raising at module scope.
+_O_PATH = getattr(os, "O_PATH", 0)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+
+_PIN_FLAGS = _O_PATH | _O_NOFOLLOW | _O_CLOEXEC
 
 # Return values for landlock_create_ruleset
 # On success, returns the ABI version (>=1).
@@ -192,6 +230,97 @@ def _get_filesystem_rights(abi: int) -> int:
     return base_rights & _LANDLOCK_ACCESS_FS_ALL_KNOWN
 
 
+def _pin_path(path: str) -> int:
+    """Return a descriptor naming exactly the object `path` names, and nothing else.
+
+    A Landlock rule is granted per **inode**. Anything that resolves a name and
+    then acts on the name a second time can be redirected in between, and the
+    whole point of pinning is that there is no second resolution: the descriptor
+    is the rule's `parent_fd`, so the grant is on whatever inode this returned.
+
+    The walk is one component at a time, each opened `O_NOFOLLOW` relative to
+    the descriptor of the previous one, because `O_NOFOLLOW` only covers the
+    **final** component - a plain `open()` follows every component. Pinning the
+    parent first means a rename-and-symlink swap of a component cannot redirect
+    the rest of the walk: the swap would have to land on the pinned inode.
+
+    Symlinked components are refused rather than followed. Following one would
+    hand the grant to whatever the link names, which is the attack; and refusing
+    is fail-closed in a way that is easy to act on, since the error names the
+    component. Verified on this kernel rather than assumed: a rule added from an
+    `O_PATH|O_NOFOLLOW` descriptor of a symlink is rejected by `landlock_add_rule`
+    with a bare EINVAL, indistinguishable from a malformed attribute struct.
+
+    Consequence, deliberate: a workspace reached through a symlinked component
+    (a symlinked `$HOME`, say) now fails loudly instead of confining a different
+    directory than the one policy named. Trusted constants are canonicalised by
+    `get_default_allowed_paths` before they get here, so `/bin` and friends still
+    resolve on a merged-`/usr` system.
+    """
+    if not path.startswith("/"):
+        raise OSError(
+            errno.EINVAL,
+            f"allowlist entry {path!r} is not an absolute path, so it cannot be pinned",
+        )
+    components = [part for part in path.split("/") if part not in ("", ".")]
+    if ".." in components:
+        raise OSError(
+            errno.EINVAL,
+            f"allowlist entry {path!r} contains '..', which cannot be resolved without "
+            "following a symlink back out of the component already pinned",
+        )
+
+    held = [os.open("/", os.O_RDONLY | os.O_DIRECTORY | _O_CLOEXEC)]
+    try:
+        for component in components:
+            fd = os.open(component, _PIN_FLAGS, dir_fd=held[-1])
+            held.append(fd)
+            if stat.S_ISLNK(os.fstat(fd).st_mode):
+                raise OSError(
+                    errno.ELOOP,
+                    f"allowlist entry {path!r} resolves through the symlink component "
+                    f"{component!r}; a rule is granted per inode, so naming the link "
+                    "would grant whatever it points at rather than what was asked for",
+                )
+        return held.pop()
+    finally:
+        for fd in held:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
+def access_for_path_fd(fd: int, access_rights: int, path: str) -> int:
+    """The rights a rule may carry for the object `fd` actually names.
+
+    The rights in an allowlist entry were chosen somewhere else, by someone
+    looking at a *pathname*, and in this codebase that is a different process:
+    `get_default_allowed_paths()` runs in the parent and the rules are applied in
+    the confined child. If those two disagree about what an entry is, the grant
+    is not the grant that was decided on.
+
+    Directory-only rights are where the disagreement bites, because they are the
+    rights that are meaningless on the wrong kind of object - `READ_DIR` on a
+    file, `MAKE_DIR` under one - and a grant carrying them would silently grant
+    less than the policy believes it granted. Refused rather than masked: a mask
+    turns "these two disagreed" into a quiet downgrade, and this module's rule is
+    that a check which cannot fail must not be replaced by one which cannot fail
+    loudly.
+    """
+    mode = os.fstat(fd).st_mode
+    if stat.S_ISDIR(mode):
+        return access_rights
+    directory_only = access_rights & _DIRECTORY_ONLY_RIGHTS
+    if not directory_only:
+        return access_rights
+    raise OSError(
+        errno.ENOTDIR,
+        f"allowlist entry {path!r} grants directory-only rights "
+        f"0x{directory_only:x} but the pinned descriptor names mode "
+        f"0x{stat.S_IFMT(mode):o}, not a directory; the entry resolved differently "
+        "when its rights were chosen than when the rule was built",
+    )
+
+
 def apply_filesystem_allowlist(
     allowed_paths: List[Tuple[str, int]],
     *,
@@ -247,74 +376,37 @@ def apply_filesystem_allowlist(
         0,
     )
 
+    # Pin every entry before any rule is added, so an entry that cannot be pinned
+    # aborts with nothing granted rather than leaving a half-built allowlist.
+    pinned: List[Tuple[str, int, int]] = []
     try:
         for path, access_rights in allowed_paths:
-            # Check that the requested rights are subset of known rights
             if access_rights & ~known_rights:
                 raise ValueError(
                     f"Access rights 0x{access_rights:x} includes bits not known "
                     f"for ABI {abi} (known: 0x{known_rights:x})"
                 )
-
-            # Add a rule for this path
-            # We need to create a struct landlock_path_beneath_attr
-            # For simplicity, we'll use the fact that the kernel accepts
-            # a pointer to a struct and we can pass the file descriptor
-            # of the path and the access rights.
-            # However, the syscall expects a pointer to a struct.
-            # We'll define the struct using ctypes.
-
-            # Define the path_beneath_attr struct
-            class PathBeneathAttr(ctypes.Structure):
-                # `struct landlock_path_beneath_attr` is
-                #   { __s64 allowed_access; __s32 parent_fd; } __attribute__((packed))
-                # - allowed_access comes FIRST, not parent_fd.
-                # - parent_fd is a 32-bit int, and the struct is packed, so it is
-                #   NOT 8 bytes. Both were wrong, so the kernel read garbage for
-                #   allowed_access and rejected every rule with EINVAL.
-                _pack_ = 1
-                _fields_ = [
-                    ("allowed_access", ctypes.c_int64),
-                    ("parent_fd", ctypes.c_int32),
-                ]
-
-            # Open the path to get a file descriptor
-            # We need to open it in a way that allows us to get a fd.
-            # For directories, we can open with O_RDONLY | O_DIRECTORY.
-            # For files, we can open with O_RDONLY.
-            # However, we don't know if it's a file or directory.
-            # We'll try to open it as a directory first, then as a file.
-            # But note: the Landlock rule requires the fd to be of the directory
-            # containing the file, or the file itself? Actually, the documentation
-            # says: "The file descriptor must refer to a file or directory in
-            # the hierarchy that you want to restrict access to."
-            # And the access rights are relative to that fd.
-            # For simplicity, we'll open the path with O_RDONLY and hope it works.
-            # For directories, this is fine. For files, it also works.
-            # We do not follow symlinks.
+            fd = _pin_path(path)
             try:
-                fd = os.open(path, os.O_RDONLY)
-            except OSError as e:
-                raise OSError(
-                    e.errno,
-                    f"Cannot open path '{path}' for Landlock rule: {e.strerror}"
-                )
-
-            try:
-                attr = PathBeneathAttr(parent_fd=fd, allowed_access=access_rights)
-                # landlock_add_rule(ruleset_fd, rule_type, rule_attr, flags).
-                # All four arguments are required: omitting rule_type passed the
-                # attr pointer in its place and the kernel rejected the call with
-                # EINVAL, so no rule was ever added and nothing was confined.
-                _syscall(
-                    _LANDLOCK_SYSCALL_ADD_RULE,
-                    ruleset_fd,
-                    _LANDLOCK_RULE_PATH_BENEATH,
-                    ctypes.addressof(attr),
-                    0,  # flags
-                )
-            finally:
+                rights = access_for_path_fd(fd, access_rights, path)
+            except BaseException:
                 os.close(fd)
+                raise
+            pinned.append((path, rights, fd))
+
+        for path, rights, fd in pinned:
+            rule = PathBeneathAttr(parent_fd=fd, allowed_access=rights)
+            # landlock_add_rule(ruleset_fd, rule_type, rule_attr, flags).
+            # All four arguments are required: omitting rule_type passed the
+            # attr pointer in its place and the kernel rejected the call with
+            # EINVAL, so no rule was ever added and nothing was confined.
+            _syscall(
+                _LANDLOCK_SYSCALL_ADD_RULE,
+                ruleset_fd,
+                _LANDLOCK_RULE_PATH_BENEATH,
+                ctypes.addressof(rule),
+                0,  # flags
+            )
 
         # Restrict self with the ruleset
         _syscall(
@@ -323,6 +415,9 @@ def apply_filesystem_allowlist(
             0,  # flags
         )
     finally:
+        for _, _, fd in pinned:
+            with contextlib.suppress(OSError):
+                os.close(fd)
         os.close(ruleset_fd)
 
 
@@ -380,7 +475,7 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
         _LANDLOCK_ACCESS_FS_EXECUTE
     )
 
-    return [
+    fixed = [
         # Traverse and run, but do NOT read. A READ_FILE rule on "/" makes every
         # file on the machine readable, which voids read confinement entirely
         # while still reporting a confined child - verified: with this entry
@@ -402,7 +497,29 @@ def get_default_allowed_paths(workspace: str) -> List[Tuple[str, int]]:
         (workspace, read_write_execute),
         ("/tmp", write_execute),
         ("/run", write_execute),
-    ] + _interpreter_read_paths(read_only)
+    ]
+
+    # Resolve the hardcoded system names to the inodes they name. `_pin_path`
+    # refuses a symlinked component, and on a merged-/usr system `/bin`,
+    # `/sbin`, `/lib` and `/lib64` are all symlinks - so without this, every
+    # modern Linux would fail to confine at all. These are literals in this
+    # function, not anything a caller supplies, which is the only reason
+    # resolving them here is safe. Duplicates collapse because a Landlock grant
+    # is per inode: `/usr/bin` is already covered by the `/usr` entry.
+    resolved: List[Tuple[str, int]] = []
+    seen = set()
+    for path, rights in fixed + _interpreter_read_paths(read_only):
+        # The workspace is deliberately NOT resolved. Resolving it would open
+        # the very window pinning closes: a swap performed before this call
+        # would be baked in here and the child would faithfully pin the
+        # attacker's target. Left alone, the child walks it directly and
+        # refuses it if it is a symlink at that moment.
+        target = path if path == workspace else os.path.realpath(path)
+        if target in seen:
+            continue
+        seen.add(target)
+        resolved.append((target, rights))
+    return resolved
 
 
 def _interpreter_read_paths(read_only: int) -> List[Tuple[str, int]]:
