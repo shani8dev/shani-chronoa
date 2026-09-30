@@ -59,6 +59,11 @@ CONTROLLED = {
     "timezone-control-enabled",
     "idle-timeout-enabled",
     "sleep-inhibit-enabled",
+    # `file-edit-enabled` backs two rows (edit_file, undo_last_change), so it
+    # is one key listed once - not a duplicate to prune.
+    "file-edit-enabled",
+    "todo-list-enabled",
+    "trigger-control-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",
@@ -105,13 +110,33 @@ NOT_EXPOSED = {
     "contention-sense-enabled": "retired: the `contention` sense was merged "
                                  "into `capture`, which has the row. Still "
                                  "honoured - setting it grants `capture`",
-    "monitors-sense-enabled": "retired: the `monitors` sense was merged into "
+"monitors-sense-enabled": "retired: the `monitors` sense was merged into "
                               "`display`, which now has the row. The key is "
                               "still honoured - setting it grants `display` - "
-                              "but a second row for the same permission would "
-                              "be a switch that appears to do nothing when it "
-                              "is turned off, because the other one still "
-                              "allows it",
+                              "but a second row for the same permission would be "
+                              "a switch that appears to do nothing when turned "
+                              "off, because the other one still allows it",
+    # The five trigger event-type gates, added 2026-09-30 alongside
+    # `config._EVENT_CONSENT_KEYS`. Listed here as *unaccounted for*, not as
+    # decided-against: they have no row in the window yet, because
+    # `settings_window.py` was out of scope for the change that registered
+    # them. They are the one loose end that change left - each needs a row in
+    # the automatic-rules group next to `trigger-control-enabled`.
+    #
+    # Until then they are still reachable and still named: every refusal from
+    # `triggers.py` quotes the key, and `gsettings set org.shani.chronoa
+    # fswatch-sense-enabled true` opens it. What is missing is the switch, so
+    # a user who is told to enable one has to open a terminal to do it.
+    "fswatch-sense-enabled": "no row yet: the per-event-type trigger gates were "
+                             "registered in the same change that made the five "
+                             "inert event types armable, and `settings_window.py` "
+                             "was not in scope for it. Grantable by key, named "
+                             "in every refusal; needs a switch in the "
+                             "automatic-rules group",
+    "failure-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
+    "expiry-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
+    "containerrun-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
+    "unithealth-sense-enabled": "no row yet: see `fswatch-sense-enabled`",
 }
 
 

@@ -61,7 +61,27 @@ GATED: dict[str, str] = {
     "control_service": "service-control-enabled",
     "find_and_replace": "bulk-edit-enabled",
     "manage_mount": "mount-control-enabled",
+    # One key for both directions of a single-file edit. `undo_last_change` is
+    # the strictly safer half - it restores what an edit recorded - so two
+    # switches would imply the user can allow the risky direction and refuse
+    # the safe one, which is not a choice anyone makes on purpose.
+    "edit_file": "file-edit-enabled",
+    "undo_last_change": "file-edit-enabled",
+    # The `git` sense's own key, not a skill-specific one: the sense and this
+    # skill report the same facts, and separate keys would let a fresh install
+    # ship one open and the other shut.
+    "git_inspect": "git-sense-enabled",
+    "todo_list": "todo-list-enabled",
+    "manage_triggers": "trigger-control-enabled",
 }
+
+# The per-event-type trigger gates are *not* in `GATED` above, and deliberately
+# so. `GATED` is one key per tool, and `manage_triggers` arms all six event
+# types; listing any one of their keys here would tell a user that switching
+# "watch files" on lets them arm `unithealth` rules, which is not what that
+# switch does. They gate a rule rather than a skill, so they are labels the
+# refusal can name - see `GATE_NAMES` - and nothing in the menu is bound to
+# them.
 
 # Tool name -> (group heading, short menu label). A tool missing from this table
 # is not dropped: `find_capabilities()` files it under `OTHER` so an unexpected
@@ -140,6 +160,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_sleep_inhibit": ("Power and screen",
                            "Hold the machine awake for a bounded time"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
+    "git_inspect": ("Code and git", "What changed in a git repository"),
+    "todo_list": ("Code and git", "Keep a list of tasks to do"),
+    "compare_files": ("Files", "Compare two files"),
+    "get_file_info": ("Files", "File size, age and permissions"),
+    "directory_tree": ("Files", "Show a folder's shape"),
+    "find_recently_modified": ("Files", "What changed today"),
+    "edit_file": ("Files", "Change one exact piece of text"),
+    "undo_last_change": ("Files", "Undo Chronoa's last change to a file"),
+    "manage_triggers": ("Code and git", "Arm an automatic rule"),
+    "list_capabilities": ("What Chronoa knows", "What it can do right now"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -158,6 +188,7 @@ GROUP_ORDER: tuple[str, ...] = (
     "Screen",
     "Apps",
     "Files",
+    "Code and git",
     "Processes and windows",
     "Services and logs",
     "What Chronoa knows",
@@ -192,6 +223,20 @@ GATE_NAMES: dict[str, str] = {
     "timezone-control-enabled": "Let Chronoa change the timezone",
     "idle-timeout-enabled": "Let Chronoa change when the screen blanks",
     "sleep-inhibit-enabled": "Let Chronoa hold the machine awake",
+    "file-edit-enabled": "Let Chronoa edit your files",
+    "git-sense-enabled": "Let Chronoa read your git working tree",
+    "todo-list-enabled": "Let Chronoa keep a task list",
+    "trigger-control-enabled": "Let Chronoa arm automatic rules",
+    # The five trigger event types. Phrased as the thing the user is agreeing
+    # to rather than as the event type, because a refusal from `triggers.py`
+    # quotes this string verbatim and "fswatch" is not a word a user has ever
+    # had to learn. "watch files" also says *when* it happens, which is the
+    # part a user is actually being asked about.
+    "fswatch-sense-enabled": "Let Chronoa watch files for changes",
+    "failure-sense-enabled": "Let Chronoa act on system failures",
+    "expiry-sense-enabled": "Let Chronoa watch stored deadlines",
+    "containerrun-sense-enabled": "Let Chronoa act on container runs",
+    "unithealth-sense-enabled": "Let Chronoa watch system units",
 }
 
 
@@ -388,6 +433,11 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
     "mount-control-enabled",
     "trash-empty-enabled",
     "bulk-edit-enabled",
+    # `undo_last_change` shares 'file-edit-enabled' and is deliberately NOT in
+    # this set: restoring is the recoverable direction of the same permission,
+    # and a client warning on it would be warning on the safe half.
+    "file-edit-enabled",
+    "trigger-control-enabled",
 })
 
 #: Tools that only observe. Kept as an allowlist rather than "anything ungated",
@@ -400,6 +450,11 @@ READ_ONLY_TOOLS = frozenset({
     "list_processes", "list_windows", "focus_window", "list_wifi_networks",
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
+    # Read-only, and deliberately not gated: a user must be able to see what
+    # the machine will do, and what is armed, without first being granted
+    # permission to do any of it.
+    "get_file_info", "directory_tree", "compare_files",
+    "find_recently_modified", "list_capabilities",
 })
 
 #: Tools that change the machine but need no consent key.

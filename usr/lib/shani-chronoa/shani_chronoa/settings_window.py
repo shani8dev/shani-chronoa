@@ -30,6 +30,18 @@ rows in one scroll is not navigable; API-key rows that can reveal what you
 pasted instead of leaving you unable to check it; and a Models section showing
 which model is *actually* in effect and why, via `models.py`, so the hardware
 tier's guess is visible as a guess rather than presented as a decision.
+
+## What this window is not
+
+There is deliberately no "approve this" dialog here. The prompt that appears
+while Chronoa is waiting on an answer is raised from the assistant's tool loop
+and rendered by the main window's presenter, and a second dialog built in a
+settings window would be a second place where Escape could mean something
+different - which is the exact ambiguity the three-stage approval flow exists to
+remove. What belongs here is the *policy view*: what the three answers are, what
+"allow for this session" would actually permit for each capability, whether
+anyone is present to answer at all, and what has already been answered this
+session.
 """
 
 import gi
@@ -38,7 +50,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # type: ignore
 
-from shani_chronoa import models, pipewire
+from shani_chronoa import capabilities, models, permissions, pipewire
 from shani_chronoa.config import _SENSE_CONSENT_KEYS
 from shani_chronoa.senses import discover_senses
 
@@ -200,6 +212,43 @@ SENSE_LABELS = {
         "Printers and scanners",
         "Which printers are set up, and which scanners are plugged in",
     ),
+    # The machine's own immutable and current facts. `git` is the exception and
+    # the only one of this batch that is off by default - see its own entry.
+    "hardware": (
+        "Machine identity",
+        "The make and model of this machine, from the firmware",
+    ),
+    "kernel": (
+        "Kernel and boot",
+        "Which kernel is running, and whether this is a container",
+    ),
+    "cgroup": (
+        "Resource limits",
+        "The memory, CPU and process limits this process is held to",
+    ),
+    "containers": (
+        "Containers",
+        "Which containers are running, and which were killed",
+    ),
+    "listeners": (
+        "Listening ports",
+        "Which programs are listening on this machine's ports",
+    ),
+    "stale": (
+        "Outdated programs",
+        "Programs still running a version that has been replaced",
+    ),
+    "boots": (
+        "Boot history",
+        "When it last booted, and whether it shut down cleanly",
+    ),
+    # Off by default, unlike the seven above: filenames, the branch and the
+    # unpushed count are the user's work product. Same reasoning as
+    # `accessibility` and `idle` - see `config._SENSE_CONSENT_KEYS`.
+    "git": (
+        "Git working trees",
+        "Whether your working tree is clean, and how far it has drifted",
+    ),
 }
 
 
@@ -221,16 +270,19 @@ SENSE_CATEGORIES = [
      "Reading text out of pictures, and describing what a camera sees",
      ["vision", "ocr"]),
     ("Getting work done",
-     "Files, folders and the web - what makes it able to act rather than only answer",
-     ["filesystem", "web"]),
+     "Files, folders, git and the web - what makes it able to act rather than "
+     "only answer",
+     ["filesystem", "git", "web"]),
     ("Is anything broken",
-     "Failed services, errors the system has logged, and updates that are "
-     "waiting - the three ways a machine says it needs attention",
-     ["services", "faults", "updates", "coredumps"]),
+     "Failed services, errors the system has logged, updates that are waiting, "
+     "and the running code and containers that have died - the ways a machine "
+     "says it needs attention",
+     ["services", "faults", "updates", "coredumps", "stale", "containers"]),
     ("Plugged in and running out",
-     "What is attached by USB, and the ways a machine runs out of something "
-     "without ever looking busy",
-     ["usb", "resources"]),
+     "What is attached by USB, and the ways a process runs out of something "
+     "without the machine ever looking busy - including the limits it is held "
+     "to rather than the memory it can see",
+     ["usb", "resources", "cgroup"]),
     ("The screen",
      "Connected monitors, what mode they are in, the backlight, and which "
      "applications the desktop is currently showing",
@@ -243,13 +295,17 @@ SENSE_CATEGORIES = [
      "trusted - so a reminder means what it says",
      ["filesystems", "timebase", "snapshots"]),
     ("The machine itself",
-     "Processor load, battery, disks and their health, graphics, temperature, fans, and arrays",
-     ["cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
+     "Which machine this is, the kernel it is running, its processor load, "
+     "battery, disks and their health, graphics, temperature, fans, arrays, and "
+     "when it last booted",
+     ["hardware", "kernel", "boots",
+      "cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
-     "administrator, what is already using your camera, and who else is "
-     "currently on this machine",
-     ["security", "devices", "privilege", "capture", "sessions", "firewall"]),
+     "administrator, what is already using your camera, which ports are open "
+     "to the network, and who else is currently on this machine",
+     ["security", "devices", "privilege", "capture", "sessions", "firewall",
+      "listeners"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),
@@ -262,6 +318,16 @@ SENSE_CATEGORIES = [
 # default, so the useful part is hearing plus the two that let the assistant do
 # something. Nothing that watches the room or the machine is in here.
 SUGGESTED = ["hearing", "filesystem", "web", "display"]
+
+
+#: A believable value for each resource argument, so the sample prompt on
+#: screen reads like something a user would recognise rather than a placeholder.
+#: Read by argument *name*, so a new scoped tool gets one without an edit.
+_EXAMPLE_TARGETS = {
+    "path": "/home/you/notes.txt",
+    "unit": "nginx.service",
+    "device": "/dev/sdb1",
+}
 
 
 class SettingsWindow(Gtk.Window):
@@ -298,6 +364,7 @@ class SettingsWindow(Gtk.Window):
         page = Adw.PreferencesPage()
         self._build_senses(page)
         self._build_privacy(page)
+        self._build_approvals(page)
         self._build_voice(page)
         self._build_models(page)
         self._build_system(page)
@@ -307,6 +374,8 @@ class SettingsWindow(Gtk.Window):
         scrolled.set_vexpand(True)
         outer.append(scrolled)
         self.set_child(outer)
+
+        self.connect("notify::visible", self._on_window_visible)
 
     def _group(self, page, title, description="") -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(
@@ -733,6 +802,193 @@ class SettingsWindow(Gtk.Window):
     def _set_bool(self, key: str, value: bool) -> None:
         self.app.config.set(key, "true" if value else "false")
         self._refresh_sense_switches()
+
+    # -- the approval policy, as a view rather than a second dialog -----------
+
+    def _build_approvals(self, page) -> None:
+        """Show what an approval question is and what answering it would permit.
+
+        Every row here is either read live from `permissions.py` or generated
+        from the same constants the runtime prompt is composed from, so this
+        page cannot describe a policy the app does not enforce. The only control
+        is one that revokes - forgetting this session's answers - because a
+        user who has over-trusted needs the un-grant and has no other way to
+        reach it; there is deliberately no switch here that *grants* anything,
+        since every grant in this app belongs to a consent-key row above and a
+        second path to one would be two switches disagreeing.
+        """
+        self._approvals_page = page
+        group = self._group(
+            page, "Approvals",
+            "What happens when Chronoa needs a permission it does not have. The "
+            "question appears in the main window, not here.",
+        )
+        self._info_row(group, "What a question looks like",
+                       self._example_request().question)
+
+        asking = permissions.can_ask()
+        self._info_row(
+            group, "Who can answer",
+            "Somebody is listening - Chronoa will ask before running a gated "
+            "action."
+            if asking else
+            "Nobody is listening. A gated action is refused rather than asked "
+            "about, and the refusal names the switch that would allow it. This "
+            "is the state a headless run and a trigger rule that fires "
+            "unprompted are always in.",
+        )
+
+        self._info_row(
+            group, "How long a question waits",
+            f"{int(permissions.DECISION_TIMEOUT_SECONDS)} seconds, then it is "
+            "treated as no. An unanswered question is never an allow.",
+        )
+
+        for action, key in sorted(capabilities.GATED.items()):
+            self._info_row(group, capabilities.tool_title(action),
+                           self._scope_sentence(action, key))
+
+        self._forget_group = self._group(
+            page, "Answers given this session",
+            "Grants and refusals recorded while Chronoa has been running. All of "
+            "them die when it quits; none of them is written to disk.",
+        )
+        self._approvals_state = None
+        self._render_session_answers()
+
+    def _example_request(self) -> permissions.ApprovalRequest:
+        """A real composed prompt, built from a capability that actually exists.
+
+        Picked from `capabilities.GATED` and `tools._RESOURCE_ARGUMENT` rather
+        than written out, so the sample on screen is the prompt a gated tool
+        would really produce - including the fact that a scoped one enumerates
+        one target while an unscoped one does not.
+        """
+        for action, key in sorted(capabilities.GATED.items()):
+            argument = self._resource_argument(action)
+            if argument is None:
+                continue
+            return permissions.approval_request(
+                action, _EXAMPLE_TARGETS.get(argument, f"a {argument}"),
+                key, capabilities.tool_title(action).lower())
+        return permissions.approval_request(
+            next(iter(sorted(capabilities.GATED)), "an action"), None,
+            "a permission")
+
+    def _scope_sentence(self, action: str, key: str) -> str:
+        """What 'allow for this session' would cover, for one capability.
+
+        Read from `permissions.always_patterns()` rather than described here, so
+        the pattern named on screen is the pattern `add_rule()` writes.
+        """
+        patterns = permissions.always_patterns(action, None)
+        wildcard = patterns[0][1]
+        target = self._resource_argument(action)
+        if target is None:
+            return (f"Needs '{key}'. If you allow it for the session it covers "
+                    f"every {action} until Chronoa quits, because this action "
+                    f"names no specific target.")
+        return (f"Needs '{key}'. If you allow it for the session it is written "
+                f"against '{target}' - a {target} value with a wildcard in it "
+                f"would widen the grant, and '{wildcard}' would widen it to "
+                f"everything.")
+
+    def _resource_argument(self, action: str):
+        """Which argument names this tool's target, or None if it names none.
+
+        Read from `tools._RESOURCE_ARGUMENT` because that is the table the
+        dispatch path actually uses to build the grant, so a hand-kept copy here
+        would drift from the permission it describes.
+        """
+        try:
+            from shani_chronoa import tools
+            return tools._RESOURCE_ARGUMENT.get(action)
+        except Exception:  # noqa: BLE001 - an unreadable table is not a blank page
+            return None
+
+    def _session_state(self):
+        return (tuple(permissions.rules()), permissions.can_ask())
+
+    def _render_session_answers(self) -> None:
+        group = self._forget_group
+        for row in getattr(group, "_rows", []):
+            group.remove(row)
+        group._needle_extra = []
+        rows = []
+        rules = permissions.rules()
+        said = permissions.reasons()
+
+        if not rules:
+            self._info_row(group, "Nothing has been allowed or refused yet",
+                           "The first time Chronoa needs a permission, it will "
+                           "ask rather than refuse.")
+            rows.append(group._needle_extra[-1][0])
+        for action, pattern, decision in rules:
+            verdict = {
+                permissions.Decision.ALLOW_ONCE: "allowed once",
+                permissions.Decision.ALLOW_SESSION: "allowed for the session",
+                permissions.Decision.DENY_ONCE: "refused",
+                permissions.Decision.DENY_SESSION: "refused",
+                permissions.Decision.CANCEL: "refused, and the turn was stopped",
+            }.get(decision, decision)
+            scope = f"on {pattern}" if pattern != "*" else "on any target"
+            reason = said.get((action, pattern), "")
+            row = self._info_row(
+                group, f"{action} {scope} - {verdict}",
+                f"You said: {reason}" if reason else
+                f"Pattern on record: {action} / {pattern}",
+            )
+            rows.append(row)
+
+        if rules:
+            forget = Adw.ActionRow(
+                title="Forget these answers",
+                subtitle=f"Forgets the {len(rules)} answer(s) above so the next "
+                         "time asks again. It does not change any switch.",
+                activatable=True,
+            )
+            forget.update_property(
+                [Gtk.AccessibleProperty.LABEL],
+                ["Forget every permission answer given this session"],
+            )
+            forget.connect("activated", self._on_forget_answers, list(rules))
+            group.add(forget)
+            group._needle_extra.append(
+                (forget, "forget answers revoke clear".lower()))
+            rows.append(forget)
+
+        group._rows = rows
+        self._approvals_state = self._session_state()
+
+    def _on_forget_answers(self, _row, rules: list) -> None:
+        dialog = Adw.AlertDialog(
+            heading="Forget these answers?",
+            body=("Chronoa will ask again about:\n\n"
+                  + "\n".join(
+                      f"  •  {action} on {pattern}"
+                      for action, pattern, _decision in rules)
+                  + "\n\nNo switch changes. Nothing was written to disk, so this "
+                    "only forgets what is in memory right now."),
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("forget", "Forget them")
+        dialog.set_response_appearance("forget",
+                                       Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", self._on_forget_response)
+        dialog.present(self.get_root() or self)
+        self._forget_dialog = dialog
+
+    def _on_forget_response(self, _dialog, response: str) -> None:
+        if response != "forget":
+            return
+        permissions.clear(session_only=True)
+        self._render_session_answers()
+
+    def _on_window_visible(self, window, _param) -> None:
+        if window.get_visible() and self._session_state() != self._approvals_state:
+            self._render_session_answers()
 
     def _build_models(self, page) -> None:
         config = self.app.config

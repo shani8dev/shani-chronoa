@@ -369,7 +369,7 @@
     <key name="sessions-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa see who else is on this machine</summary>
-      <description>Reports who is logged in and which processes run as root outside the init system's own service tree. Off by default, and the only machine-state sense that is: this reports other people's presence on the machine rather than the machine's own hardware, so it waits to be asked for.</description>
+      <description>Reports who is logged in and which processes run as root outside the init system's own service tree. Off by default: this reports other people's presence on the machine rather than the machine's own hardware, so it waits to be asked for. `git-sense-enabled` is off for the same class of reason.</description>
     </key>
     <key name="resources-sense-enabled" type="b">
       <default>true</default>
@@ -390,6 +390,71 @@
       <default>true</default>
       <summary>Let Chronoa check whether the system clock is trustworthy</summary>
       <description>Reads the time zone and whether the clock is synchronised to a network time source. On by default: every reminder and timer is downstream of it, and an unsynchronised clock is invisible otherwise.</description>
+    </key>
+    <key name="hardware-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa identify this machine</summary>
+      <description>Reads the firmware's DMI table for the model and vendor, falling back to the device-tree model on hardware with no DMI. The serial number and UUID are deliberately NOT read: they identify the individual unit rather than describing the machine. On by default: the model is a property of the hardware. Reports UNKNOWN rather than substituting the CPU architecture, which is identical on every machine of that instruction set.</description>
+    </key>
+    <key name="kernel-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read which kernel this booted with</summary>
+      <description>Reads the kernel release, the distribution's name, the build string, the boot arguments, and whether a container marker is present. On by default: all four are immutable facts about this boot. Boot arguments after root=, and any rd.luks argument anywhere, are withheld, because they can name encrypted volumes and carry key options, and this percept is sent to a model.</description>
+    </key>
+    <key name="cgroup-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read the limits this process is held to</summary>
+      <description>Reads the memory, CPU and process-count limits from the cgroup controller files, on v2 or v1. On by default: it is this machine's own configuration, and it is the only sense that can explain an OOM kill or a model that will not load on a container capped far below the host. Reports the literal string 'max' as unlimited, and reports UNKNOWN rather than falling back to physical memory, which would invert the answer.</description>
+    </key>
+    <key name="containers-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa report what containers are running</summary>
+      <description>Lists containers - running and exited - with exit codes, whether any was OOM-killed, and the disk their images and volumes hold. On by default: it talks only to a local container runtime. Reports UNKNOWN rather than zero containers when no runtime is installed or its socket cannot be reached, because a machine that has never run a container and a machine whose runtime is broken look identical from here.</description>
+    </key>
+    <key name="listeners-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa list what is listening on this machine's ports</summary>
+      <description>Lists TCP sockets in the LISTEN state with the process holding each, read from /proc/net/tcp and /proc/net/tcp6 cross-referenced against /proc/&lt;pid&gt;/fd. On by default: it is the machine's own posture and needs no helper package. Reports UNKNOWN - never 'nothing is listening' - when the socket table cannot be read, and reports a port held by another user as 'owner unknown' rather than as unowned.</description>
+    </key>
+    <key name="stale-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa check for programs running after being replaced</summary>
+      <description>Reports processes still executing a binary that has been replaced or removed on disk, confirming it by comparing the running inode against the file now at that path, so a file merely named with a ' (deleted)' suffix is not a false positive. On by default. Inspects only this account's processes, and reports how many of them and how many other users' processes were not inspected - an unreadable scan is never reported as zero.</description>
+    </key>
+    <key name="git-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read your git working tree</summary>
+      <description>Reports whether a repository is clean, how many files are staged, modified or untracked, the current branch, and how far ahead of or behind its upstream it is. Off by default: uncommitted filenames, branch names and the shape of uncommitted work are your work product, not this machine's state - the same class as the open-window and idle-time permissions. Confined to paths inside your home directory. Reports UNKNOWN - never 'clean tree' - when git is absent, when the path is not a repository, or when git fails, and keeps a deleted upstream distinct from being up to date.</description>
+    </key>
+    <key name="boots-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa read this machine's boot history</summary>
+      <description>Reports this boot's id and start time, how many boots the login database records, and how many ended without a shutdown record - which is how a machine losing power or panicking shows up. On by default: it reads the kernel's boot id and the local login records, and it does not report uptime, which the processor sense already owns. Reports UNKNOWN rather than 'never rebooted' when the login database cannot be read.</description>
+    </key>
+    <key name="fswatch-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa watch files for changes</summary>
+      <description>When true, a rule may watch a path or a single file for changes and run a whitelisted action when it changes. Off by default, and separate from the filesystem sense that reads a file you name: a watch reports that something changed without being asked which thing, and the point of arming one is that it runs later, on your absence. Reported as unavailable rather than as 'nothing changed' when the path is unreadable.</description>
+    </key>
+    <key name="failure-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on system failures</summary>
+      <description>When true, a rule may act on a recorded verdict or on one of a fixed table of checks - the package database being unreadable, the init system having failed units. Off by default. The table is closed: a rule cannot name its own command, so this is not a way to run anything the fixed skill whitelist would not allow. An unreadable verdict file is reported as unavailability, never as a pass.</description>
+    </key>
+    <key name="expiry-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa watch stored deadlines</summary>
+      <description>When true, a rule may read a deadline you have stored and act as it approaches. Off by default, because the thing being watched is usually a credential or a certificate. A deadline may only ever be told to you: a machine that noticed its own credential was about to expire and then re-authorised itself unattended is the capability this key exists to prevent, so a rule of this type is refused every actuator except sending a notification.</description>
+    </key>
+    <key name="containerrun-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on container runs</summary>
+      <description>When true, a rule may act when a container it names stops or changes state. Off by default. Two limits are separate from this key and hold even when it is on: killing a container is refused outright, because stopping something is not reversible by the thing that stopped it, and no such rule may be armed at all from a conversation - only from a hand-edited rules file.</description>
+    </key>
+    <key name="unithealth-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa watch system units</summary>
+      <description>When true, a rule may watch an init system unit and act when it becomes active, inactive or failed. Off by default: a unit's state is the machine's own, but a rule that fires on it runs while you are not there, and a wrong unit name is a wrong action. A unit the init system cannot be asked about is reported as unavailable, never as healthy.</description>
     </key>
     <key name="file-delete-enabled" type="b">
       <default>false</default>
@@ -415,6 +480,21 @@
       <default>false</default>
       <summary>Let Chronoa control the pointer and keyboard</summary>
       <description>When true, Chronoa may move the pointer, click, and type text as named actions. Off by default, and deliberately separate from the vision sense: seeing a screen and controlling it are different risks, and together they would let any prompt injection in a web page or a file reach the machine. Every action is logged to the per-user tool-call audit log.</description>
+    </key>
+    <key name="file-edit-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa edit your files</summary>
+      <description>When true, Chronoa may rewrite the contents of a file it is asked to change, and may undo a change it recorded. Off by default, and separate from the general file-access permission: reading a file and changing what it says are different risks, and a wrong edit discards work that nothing here can put back. One key covers both directions on purpose - undoing an edit is the strictly safer half, so two switches would let a user allow the risky direction and refuse the safe one, which is not a choice anyone makes deliberately. Undo restores only what Chronoa itself wrote and recorded: it is not git, and it cannot undo a change made in an editor, a shell or another program.</description>
+    </key>
+    <key name="todo-list-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa keep a task list</summary>
+      <description>When true, Chronoa may add to, change and remove entries in a task list it keeps between turns and across restarts. Off by default: this writes something that outlives the conversation, which is a different kind of record from the session transcript. Reading files and listing folders needs no such permission. The list is a plain local file under this account's state directory, bounded in both item count and item length.</description>
+    </key>
+    <key name="trigger-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa arm automatic rules</summary>
+      <description>When true, Chronoa may add, remove and clear rules that run a whitelisted action when a perception matches. Off by default, and this is the sharpest edge in the schema: an armed rule acts without asking again, so a rule written once from a spoken instruction keeps firing unattended long after the conversation that created it. Listing what is already armed needs no such permission - only changing it does. A rule can name only an already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt.</description>
     </key>
   </schema>
 </schemalist>

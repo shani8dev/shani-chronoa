@@ -63,7 +63,10 @@ _NETWORKED_SENSES = frozenset({"web"})
 # The authoritative sense -> consent-key table. Written out rather than
 # composed as f"{sense}-sense-enabled" so that adding a sense is one visible
 # line here, and so a sense with no declared key is denied outright instead
-# of silently probing a setting that does not exist.
+# of silently probing a setting that does not exist. It stays exactly a
+# bijection with the senses the registry can discover - `git` is in it because
+# `git` is a real sense, not because a trigger event type happens to share
+# its name.
 _SENSE_CONSENT_KEYS = {
     "vision": "vision-sense-enabled",
     "ocr": "ocr-sense-enabled",
@@ -105,7 +108,88 @@ _SENSE_CONSENT_KEYS = {
     "snapshots": "snapshots-sense-enabled",
     "coredumps": "coredumps-sense-enabled",
     "firewall": "firewall-sense-enabled",
+    "hardware": "hardware-sense-enabled",
+    "kernel": "kernel-sense-enabled",
+    "cgroup": "cgroup-sense-enabled",
+    "containers": "containers-sense-enabled",
+    "listeners": "listeners-sense-enabled",
+    "stale": "stale-sense-enabled",
+    # Off by default, and deliberately so. Filenames, branch names and
+    # uncommitted work are the user's work product, not the machine's state -
+    # the same class as `accessibility` (which window titles are open) and
+    # `idle` (the shape of someone's day). "Is my tree dirty" is a fair
+    # question, but the answer is theirs, not the hardware's.
+    "git": "git-sense-enabled",
+    "boots": "boots-sense-enabled",
 }
+
+# Trigger event types that are not senses, and the key gating each one.
+#
+# `triggers.EventRule.sense` returns the rule's *event type*, and both
+# `TriggerEngine._consent` and `EventEngine._consent` hand that straight to
+# `sense_allowed()`. So an event type with no row in a table here was refused
+# at both arm time and fire time, forever: five of the six event types
+# (`fswatch`, `failure`, `expiry`, `containerrun`, `unithealth`) shipped
+# unarmable and the defect was invisible, because a gate that is shut looks
+# exactly like a gate that is working.
+#
+# A separate table rather than five more rows in `_SENSE_CONSENT_KEYS`, because
+# that dict is asserted to be exactly the set of names `discover_senses()`
+# knows. Folding events into it would make the settings window, the sense
+# registry sweep and the manifest tests believe there are 43 senses rather
+# than 38. The key *names* stay `-sense-enabled` because the gate that reads
+# them is `sense_allowed()` and the refusal it produces says "sense" - a key
+# called `fswatch-event-enabled` would send a user after a switch that the
+# message never mentions.
+#
+# `git` is deliberately absent: it is a real sense with its own key, and one
+# key must gate one thing. `git-sense-enabled` already governs git event rules
+# through the `sense` property above, and a second key for the same word would
+# let a user permit one and not the other without being able to say why.
+_EVENT_CONSENT_KEYS = {
+    "fswatch": "fswatch-sense-enabled",
+    "failure": "failure-sense-enabled",
+    "expiry": "expiry-sense-enabled",
+    "containerrun": "containerrun-sense-enabled",
+    "unithealth": "unithealth-sense-enabled",
+}
+
+# Deliberately empty, and written out rather than omitted.
+#
+# Every sense above that reports the machine's own hardware ships on; every
+# event type here ships off. An event rule acts with nobody asking, so a
+# default-on entry would arm unattended behaviour on a fresh install with no
+# switch ever touched. `git` is off for the same reason it is off as a sense:
+# what a rule fires *on* here is the user's files, their work product and a
+# credential deadline, not a disk-free reading.
+_EVENT_DEFAULT_ENABLED = frozenset()
+
+
+def _consent_key_for(name: str) -> Optional[str]:
+    """The consent key gating `name`, or None if nothing declares one.
+
+    Two tables because a sense and an event type are different things; one
+    lookup because the caller - `triggers.py`, which owns `EventRule.sense` -
+    hands us an event type through the *sense* gate and cannot be changed from
+    here. A name in neither table denies, which is the fail-closed direction
+    and the reason a seventh event type is inert rather than unguarded.
+    """
+    return _SENSE_CONSENT_KEYS.get(name) or _EVENT_CONSENT_KEYS.get(name)
+
+
+def _default_on(name: str, key: str) -> bool:
+    """Whether `name` is permitted on an install that has granted nothing.
+
+    Resolved through the key rather than through the name alone, so an event
+    type can never inherit `_SENSE_DEFAULT_ENABLED` by sharing a name with a
+    sense that happens to be default-on. `get_bool` returns this for any key
+    the running schema does not declare, so it is also what an older installed
+    schema falls back to.
+    """
+    if key in frozenset(_SENSE_CONSENT_KEYS.values()):
+        return name in _SENSE_DEFAULT_ENABLED
+    return name in _EVENT_DEFAULT_ENABLED
+
 
 # Retired consent keys, still honoured.
 #
@@ -161,13 +245,23 @@ _SENSE_DEFAULT_ENABLED = frozenset({
     # local package database, `faults` reads the local journal, and `snapshots`
     # reads the filesystem layout. None of them leaves the machine.
     "updates", "faults", "snapshots", "coredumps", "firewall",
-    # `sessions` defaults OFF deliberately, and is the only machine-state sense
-    # that does. It reports who *else* is on this machine and what is running as
-    # root outside the service tree - that is other people's presence, not this
-    # machine's own hardware, and it belongs to the "reads the user's world" side
-    # of the line rather than the "reports a disk-free reading" side.
+    # Default-on: the machine's own immutable and current facts. Identity, the
+    # running kernel, the limits this process is held to, what containers are
+    # up, what is listening on the ports, which running binaries no longer
+    # match their file on disk, and when it last booted. All of them read the
+    # kernel's own view of the machine and none of them leaves it.
     #
-    # ("sessions" is intentionally absent from this frozenset.)
+    # ("git" is intentionally absent - see `_SENSE_CONSENT_KEYS`.)
+    "hardware", "kernel", "cgroup", "containers", "listeners", "stale",
+    "boots",
+    # `sessions` defaults OFF deliberately. It reports who *else* is on this
+    # machine and what is running as root outside the service tree - that is
+    # other people's presence, not this machine's own hardware, and it belongs to
+    # the "reads the user's world" side of the line rather than the "reports a
+    # disk-free reading" side. `git` defaults off for the same class of reason:
+    # uncommitted filenames and branch names are the user's work product.
+    #
+    # ("sessions" and "git" are intentionally absent from this frozenset.)
 })
 
 # Input control is not a sense (it has no percept to emit), so it lives here
@@ -400,14 +494,20 @@ class ChronoaConfig:
           screen must not act while the user believes the machine is
           local-only.
 
+        `name` may also be a trigger *event* type rather than a sense:
+        `triggers.EventRule.sense` returns one, and the engines hand it here
+        unchanged. The second gate does not apply to those - every event type
+        reads this machine only, which is the same argument that leaves
+        `git` out of `_NETWORKED_SENSES`.
+
         `get_bool` returns the supplied default for a key the running schema
         does not declare, so an older installed schema denies the new senses
         rather than silently allowing them.
         """
-        key = _SENSE_CONSENT_KEYS.get(sense)
+        key = _consent_key_for(sense)
         if key is None:
             return False
-        granted = self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED)
+        granted = self.get_bool(key, _default_on(sense, key))
         for alias in _SENSE_CONSENT_ALIASES.get(sense, ()):
             # Either key is enough. A merged sense keeps the permissions both
             # of its halves had, rather than the narrower of the two.
@@ -420,11 +520,11 @@ class ChronoaConfig:
 
     def sense_allowed_reason(self, sense: str) -> str:
         """A user-facing explanation of why `sense` is or isn't permitted."""
-        key = _SENSE_CONSENT_KEYS.get(sense)
+        key = _consent_key_for(sense)
         if key is None:
             return f"there is no '{sense}' sense"
         aliases = _SENSE_CONSENT_ALIASES.get(sense, ())
-        granted = self.get_bool(key, sense in _SENSE_DEFAULT_ENABLED) or any(
+        granted = self.get_bool(key, _default_on(sense, key)) or any(
             self.get_bool(alias, False) for alias in aliases)
         if not granted:
             # Name the live key only. Retired aliases are honoured in the
