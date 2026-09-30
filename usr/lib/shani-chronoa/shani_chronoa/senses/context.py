@@ -28,6 +28,7 @@ thing to shed first.
 """
 
 import logging
+import time
 from typing import Callable, Optional, Sequence
 
 from shani_chronoa.senses import (
@@ -104,14 +105,24 @@ class ContextBuilder:
                 withheld)
         return allowed
 
-    def _rank(self, percept: Percept) -> "tuple[int, float]":
-        """Order percepts for inclusion: least private first, then freshest.
+    def _rank(self, percept: Percept) -> "tuple[int, float, float]":
+        """Order percepts for inclusion: least private, then most confident, then freshest.
 
         Returned as a sort key ascending, so private percepts are considered
         first and therefore dropped first when the budget is exceeded.
+
+        `confidence` sits between sensitivity and freshness rather than last
+        because it is the only one of the three that says anything about the
+        percept's *content*: a fact the user stated verbatim should not lose a
+        tie to one a regular expression guessed. It is a tie-break and nothing
+        more, so it cannot promote a less relevant percept over a more relevant
+        one - and because `Percept.confidence` defaults to a single uniform
+        midpoint, every percept that predates the field keeps exactly the
+        ordering it had, which is what stops this from silently re-budgeting
+        every existing turn.
         """
         rank = _SENSITIVITY_RANK.get(percept.sensitivity, 2)
-        return (rank, -percept.created_at)
+        return (rank, -percept.confidence, -percept.created_at)
 
     def render(self, percepts: Sequence[Percept]) -> str:
         """Render percepts to the text block injected into context.
@@ -121,13 +132,29 @@ class ContextBuilder:
         near its length rendered an empty block, silently dropping all
         perception rather than degrading to fewer percepts.
 
+        Expired percepts are dropped here as well as in `store.active()`,
+        because a stale fact quoted into a prompt is the one failure this
+        module cannot have: the model reads it as current, has no way to know
+        its window closed, and states it back. The redundancy is deliberate -
+        `render()` is handed a list by callers other than the store's own
+        `active()`, and a stale percept is a privacy-adjacent correctness
+        problem rather than a rendering preference.
+
         Returns "" only when there is genuinely nothing to inject, so the
         caller can skip the message instead of sending an empty system turn.
         """
         if not percepts:
             return ""
 
-        permitted = self._permitted(percepts)
+        current = time.time()
+        fresh = [p for p in percepts if not p.is_expired(current)]
+        if len(fresh) != len(percepts):
+            logger.debug(
+                "Dropped %d percept(s) past their ttl or valid_until before rendering",
+                len(percepts) - len(fresh),
+            )
+
+        permitted = self._permitted(fresh)
         if not permitted:
             return ""
 
@@ -182,13 +209,26 @@ class ContextBuilder:
         Used by the headless CLI and by debug logging. Deliberately shows
         the age of every percept, because a stale percept presented as
         current is the failure mode most likely to mislead.
+
+        Expired percepts are listed and marked here even though `render()`
+        drops them, and that asymmetry is the point: the model must not be
+        told a stale fact, but the *user* has to be able to see that one is
+        sitting in the store, so that "the assistant no longer mentions my
+        standup room" is answerable without reading the code. A fact that
+        vanished and a fact that was never there have to look different.
         """
         if not percepts:
             return "(no live percepts)"
-        parts = [
-            f"{p.sense}/{p.kind} age={p.age_seconds():.0f}s ttl={p.ttl_seconds}"
-            for p in sorted(percepts, key=self._rank)
-        ]
+        now = time.time()
+        parts = []
+        for p in sorted(percepts, key=self._rank):
+            life = f"ttl={p.ttl_seconds}"
+            if p.valid_until is not None:
+                life += f" valid_until={p.valid_until:.0f}"
+            if p.is_expired(now):
+                parts.append(f"{p.sense}/{p.kind} age={p.age_seconds():.0f}s {life} EXPIRED")
+            else:
+                parts.append(f"{p.sense}/{p.kind} age={p.age_seconds():.0f}s {life}")
         return "\n".join(parts)
 
 
@@ -206,6 +246,17 @@ def sanitize_percepts(
     so a secret that was never redacted on the way in would be re-emitted to
     a provider on the way out. The existing redaction only runs on the path
     *to* an LLM, which persistence sits upstream of.
+
+    **The rebuild below lists every field explicitly, and a field added to
+    `Percept` and forgotten here is dropped silently.** Not raised, not
+    warned about - the dataclass happily applies its default, so a
+    `valid_until` written to disk unredacted-forever, or a `confidence` reset
+    to the midpoint, is indistinguishable from one that was never set. That is
+    the reason
+    `tests/test_percept_schema_extension.py::test_the_redaction_rebuild_preserves_every_field`
+    exists and why it compares against `dataclasses.fields(Percept)` rather
+    than against a list typed out here: a test that enumerated the fields
+    would need the same edit and would be wrong in the same way.
     """
     if sanitizer is None or not callable(sanitizer):
         return list(percepts)
@@ -231,6 +282,9 @@ def sanitize_percepts(
                 source=percept.source,
                 sensitivity=percept.sensitivity,
                 metadata=percept.metadata,
+                valid_until=percept.valid_until,
+                confidence=percept.confidence,
+                last_accessed_at=percept.last_accessed_at,
             )
         )
     return redacted

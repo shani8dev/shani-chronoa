@@ -61,16 +61,81 @@ _VALID_SENSITIVITY = frozenset(
     (SENSITIVITY_PUBLIC, SENSITIVITY_PERSONAL, SENSITIVITY_PRIVATE)
 )
 
+# `kind` is deliberately a free string rather than a closed enum. A user
+# drop-in under `~/.config/shani-chronoa/senses/` may declare whatever it
+# likes, and a closed set would silently skip the whole module over a naming
+# preference - the same shape of harm as a renamed sense silently becoming
+# ungrantable. These names are therefore the *documented vocabulary* of the
+# memory layer, exported so a reader can see the shapes that are expected
+# without inferring them from the regexes in `memory.py`, and asserted
+# against in the tests rather than enforced at load.
+#
+#   fact       - a standing statement about the user ("my editor is neovim")
+#   procedure  - a task plus the sequence that worked, which a plain fact
+#                cannot express: the steps are the content, not the outcome
+#   entity     - a named thing the user referred to, with no claim about it
+#                yet ("the bike co-op" before anything is known about it)
+#   state      - a mid-task checkpoint, true of a moment rather than a person
+#   preference - a correction, which is why it is its own kind: a fact has no
+#                way to say *not*. "I no longer take sugar" is not the absence
+#                of a fact, it is a fact that must be able to win against one
+#   validity   - a statement about how long something else stays true, which is
+#                what `valid_until` on a `fact` expresses without a second row
+MEMORY_KIND_FACT = "fact"
+MEMORY_KIND_PROCEDURE = "procedure"
+MEMORY_KIND_ENTITY = "entity"
+MEMORY_KIND_STATE = "state"
+MEMORY_KIND_PREFERENCE = "preference"
+MEMORY_KIND_VALIDITY = "validity"
+
+MEMORY_KINDS = frozenset(
+    (
+        MEMORY_KIND_FACT,
+        MEMORY_KIND_PROCEDURE,
+        MEMORY_KIND_ENTITY,
+        MEMORY_KIND_STATE,
+        MEMORY_KIND_PREFERENCE,
+        MEMORY_KIND_VALIDITY,
+    )
+)
+
+# The midpoint, and the honest reading of "nobody said". A percept whose
+# producer expressed no opinion is neither trusted nor distrusted, and giving
+# it anything else would let an unset field rank as a real measurement. It
+# also has to be uniform, because `confidence` is a *tie-break*: a uniform
+# default leaves every pre-existing percept's ordering exactly as it was.
+CONFIDENCE_UNSTATED = 0.5
+
 
 @dataclass(frozen=True)
 class Percept:
     """A single observation, with its own lifetime and provenance.
 
-    `ttl_seconds` is the load-bearing field. `None` means durable (memory);
-    a number means the percept is stale that many seconds after
-    `created_at` and `PerceptStore` will drop it on read. A screen capture
-    and a remembered preference are the same type with different lifetimes,
-    which is what lets one context path serve both.
+    Four fields carry how long something is good for and how much it is worth,
+    and they answer different questions, which is why they are four fields and
+    not one:
+
+    - `ttl_seconds` is about the *observation*: a screen grab is worthless
+      thirty seconds after it was taken. `None` means durable (memory).
+    - `valid_until` is about the *claim*: a job title, a tool, a standup room
+      can all be true when it was recorded and false months later with nothing
+      about its age revealing it. Without this a stale fact can only be
+      *replaced*, never noticed, and is quoted as current until the user
+      bothers to correct it. Both are evaluated on read, with no timer and no
+      background thread, so a store nobody is polling still answers correctly.
+    - `confidence` is how much the producer trusts its own claim, and it
+      breaks *ties* in ranking rather than overriding relevance. A fact
+      extracted by a regular expression is not as trustworthy as one the user
+      stated verbatim, and before this existed the only tie-break was
+      `created_at`, so the regex wins whenever it is newer.
+    - `last_accessed_at` is when a durable fact was last actually recalled, and
+      exists so the durable tier can be bounded by use rather than by age.
+      It is deliberately *not* stamped by `active()`: every durable fact is
+      re-sent on every turn, so stamping there would mark the whole store
+      equally recent and collapse the ordering to insertion order.
+
+    A screen capture and a remembered preference are the same type with
+    different lifetimes, which is what lets one context path serve both.
     """
 
     sense: str
@@ -81,21 +146,45 @@ class Percept:
     source: str = ""
     sensitivity: str = SENSITIVITY_PUBLIC
     metadata: Optional[dict] = None
+    valid_until: Optional[float] = None
+    confidence: float = CONFIDENCE_UNSTATED
+    last_accessed_at: Optional[float] = None
 
     def is_expired(self, now: Optional[float] = None) -> bool:
-        """True once this percept is older than its TTL.
+        """True once this percept is outside the window it is good for.
 
-        Durable percepts (`ttl_seconds is None`) never expire.
+        Two independent reasons, checked separately and never inferred from
+        one another. `valid_until` is an absolute instant, not a duration: a
+        deadline is a moment, and storing it as a length would make "valid for
+        a week" mean "one week after whenever this record happened to be
+        rewritten", which is exactly the drift `forget()`'s rewrite would
+        introduce.
+
+        `None` on either field means "no bound", so a percept with neither
+        is permanent. That is the memory sense's default, and it is why the
+        durable tier is bounded by *count* in `store.py` rather than by age.
         """
+        current = time.time() if now is None else now
+        if self.valid_until is not None and current >= self.valid_until:
+            return True
         if self.ttl_seconds is None:
             return False
-        current = time.time() if now is None else now
         return (current - self.created_at) > self.ttl_seconds
 
     def age_seconds(self, now: Optional[float] = None) -> float:
         """Seconds since this percept was created."""
         current = time.time() if now is None else now
         return max(0.0, current - self.created_at)
+
+    def access_key(self) -> float:
+        """The instant this percept was last *used*, for least-recently-used.
+
+        Falls back to `created_at` for a fact nobody has recalled, which is
+        what makes eviction mean something: among facts no one has asked for,
+        the oldest goes first, and a fact that has been asked for repeatedly
+        outranks a newer one that has not.
+        """
+        return self.created_at if self.last_accessed_at is None else self.last_accessed_at
 
 
 class Sense(NamedTuple):

@@ -33,15 +33,74 @@ redact nothing at all.
 What `recall` is, and is not
 ----------------------------
 There is no embedding model, vector index, or similarity code anywhere in
-this codebase and adding one is out of scope. `recall` is **keyword
-overlap plus recency**: it scores a fact by how many of the query's
-content words appear in it, breaks ties newest-first, and returns nothing
-for a query with no shared word. That is a literal filter, not relevance
-ranking - "what do I drink?" will not find "The user's order: a flat
-white", because they share no tokens. The cost of that honesty is that a
-good paraphrase is invisible; the alternative was to call substring
-matching "semantic search", which reads as a feature and behaves as a
-no-op.
+this codebase and adding one is out of scope. `recall` is **weighted
+keyword overlap**: it scores a fact by how much of the query's
+*information* it shares, breaks ties by confidence then newest-first, and
+returns nothing for a query with no shared word. It is still a literal
+filter, not semantic ranking - "what do I drink?" will not find "The user's
+order: a flat white", because they share no tokens. The cost of that
+honesty is that a good paraphrase is invisible; the alternative was to call
+substring matching "semantic search", which reads as a feature and behaves as
+a no-op.
+
+What stemming does, and what it cannot
+--------------------------------------
+`_stem` closes the *cheap* half of that gap: both sides of a match are
+reduced to a root first, so "editors" finds "my editor is neovim" and
+"cities" finds "city". It cannot do the expensive half, and it is worth being
+precise about why, because "the assistant now understands what you mean"
+would be a false description of it. "What do I drink?" and "a flat white"
+share no root in any language, so no suffix rule reaches across that gap and
+a larger rule set would only add wrong matches without closing it. Stemming
+answers *did you say this word, differently*, never *did you mean this*.
+
+That is the same limit the rest of the module states, at a different
+boundary, and the two together are what a user can rely on: if the words
+overlap, the ranking is meaningful; if they do not, the answer is an honest
+"no stored fact shares a content word" rather than a confident wrong one.
+`forget_facts` deliberately does **not** stem, because the same widening that
+makes recall one candidate more useful makes an irreversible delete one fact
+too wide.
+
+What the score is, and why it is not a count
+---------------------------------------------
+It used to be `len(wanted & keywords)`, and the number that came out was
+*not* a relevance score. Two properties of a bare set size made it
+useless as one:
+
+- **A count cannot be divided.** For a fixed query, `|Q and D|` and
+  `|Q and D| / |Q|` order candidates identically - so normalising by the
+  query alone rescales the numbers and reorders nothing. A threshold
+  written against it would mean a different thing for every query, which
+  is why there was no threshold to write.
+- **It does not know which word matched.** "The user's editor: neovim"
+  and "The user prefers: filter coffee" both score 1 for
+  "the user's coffee", because both happen to contain one of the query's
+  two words, and the score cannot tell that one of those words is in
+  nearly every stored fact and the other is in exactly one.
+
+The second one is not hypothetical here: a fact written by `extract_fact`
+starts with the label "The user...", so a store fed by the extraction path
+is seeded with its own hub words. And because a raw count ties constantly
+in a store this small, `created_at` was doing the actual ranking - the top
+five of a nine-way tie were simply the five most recent.
+
+So each token carries an IDF weight, and a candidate's score is the
+**Sørensen-Dice coefficient over those weights** - twice the shared mass
+over the combined mass of the query and the fact. The divisor is derived
+per candidate from the query and the fact themselves rather than being a
+constant, which is what keeps every score in [0, 1] and comparable to
+every other: a fact matching the query exactly scores 1.0, one sharing
+nothing scores 0.0, and adding a further signal later widens the same
+denominator instead of rescaling what is already there.
+
+That choice is a trade and the losing side is real: Dice is
+precision-weighted, so a long, thoroughly on-topic fact now ranks *below*
+a terse fact that answers the same question outright. Coverage-weighted
+BM25 was measured against the same fixtures and rejected - with matching
+done on token *sets* there is no term frequency to saturate, so its
+length prior gives a long fact a multiplier above 1.0 and it ranked the
+verbose fact first. See `tests/test_memory_recall_ranking.py`.
 
 Three operations, one lifetime contract
 ---------------------------------------
@@ -56,6 +115,7 @@ and `forget` return explicitly short-lived Percepts so that cannot happen.
 """
 
 import logging
+import math
 import re
 import time
 from pathlib import Path
@@ -63,7 +123,13 @@ from typing import NamedTuple, Optional
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.secrets_manager import secrets_manager
-from shani_chronoa.senses import SENSITIVITY_PRIVATE, Percept, Sense
+from shani_chronoa.senses import (
+    CONFIDENCE_UNSTATED,
+    MEMORY_KIND_FACT,
+    SENSITIVITY_PRIVATE,
+    Percept,
+    Sense,
+)
 from shani_chronoa.senses.context import sanitize_percepts
 from shani_chronoa.senses.store import PerceptStore
 
@@ -75,6 +141,17 @@ logger = logging.getLogger(__name__)
 # `config.py` cannot be asked about "remember-sense-enabled" without
 # editing a verified file.
 CONSENT_SENSE = "memory"
+
+# How much each write path trusts its own output, and the reason `Percept.
+# confidence` is a tie-break at all: `extract_fact` is a set of regular
+# expressions over one sentence, while `remember` takes the user's own words
+# verbatim. Both can be right, and they are not equally good evidence, so
+# ranking them by `created_at` alone would let a regex guess from this turn
+# outrank a statement the user made last month about the same subject - the
+# same "recency is doing the ranking" failure the scoring section below
+# describes, one level up.
+CONFIDENCE_STATED = 0.9
+CONFIDENCE_EXTRACTED = 0.6
 
 # Recall results and forget confirmations are rendered text handed to the
 # model, not new facts about the user. See the module docstring.
@@ -146,13 +223,17 @@ class Fact(NamedTuple):
     `text` is what the model reads back; `span` is the user's original
     wording, which keyword search needs and the label phrasing drops;
     `key` supersedes an earlier fact about the same subject; `source` is
-    provenance.
+    provenance; `confidence` is how much this path trusts itself; and
+    `valid_until` is when the claim itself stops being true, which is
+    orthogonal to how long the record is kept.
     """
 
     text: str
     span: str
     key: str
     source: str
+    confidence: float = CONFIDENCE_UNSTATED
+    valid_until: Optional[float] = None
 
 
 _STORE: Optional[PerceptStore] = None
@@ -178,8 +259,90 @@ def _target(store: Optional[PerceptStore]) -> PerceptStore:
     return get_store() if store is None else store
 
 
+# Suffix rules, longest first. Deliberately a stripper and nothing more - no
+# Porter stemmer, no dictionary, no model - for one reason stated plainly:
+# the module docstring's standing limit is that "what do I drink?" does not
+# find "flat white", and no amount of suffix stripping changes that, because
+# the two share no root. What this buys is the cheap half of the recall gap
+# ("editor"/"editors", "editing"/"edit", "cities"/"city") and it buys only
+# that. Every rule is a miss if it is too timid and a false match if it is too
+# bold, and of those only one is a correctness bug.
+#
+# `or` is the boldest entry and is here for the "editor"/"editors"/"edit"
+# case specifically: without it, `editing` reduces to `edit` while `editors`
+# reduces to `editor`, and the two halves of one word stop meeting. It also
+# merges author/auth and vendor/vend, which is a false match - the same root
+# meaning two things - and is accepted as the cheaper of the two errors.
+_SUFFIX_RULES = (("ies", "y"), ("sses", "ss"), ("ing", ""), ("ed", ""), ("or", ""), ("s", ""))
+
+# A trailing "s" that is part of the word rather than a plural. "analysis" is
+# not "analysi" and "address" is not "addres".
+_NOT_A_PLURAL = ("ss", "us", "is")
+
+# Below this, a stripped remainder is not a word: "thing" -> "th", "ed" -> "e".
+# This is also what stops the "s" rule turning "gas" into "ga".
+_MIN_STEM = 3
+
+# A remainder with no vowel is a fragment, not a word. This is what stops
+# "string" -> "str" and "ring" -> "r".
+_VOWELS = frozenset("aeiouy")
+
+
+def _stem(token: str) -> str:
+    """`token` reduced to a root by suffix stripping, for word-shape matching.
+
+    Applied to a fixpoint, and that is the whole design rather than an
+    implementation detail: a single-application stripper is not closed under
+    composition, so `editors` would become `editor` while `editor` became
+    `edit`, and the two words a person would call the same would stop
+    matching. Iterating until nothing changes makes the function idempotent -
+    the stem of a stem is the stem - which is what lets stored keywords be
+    stems already without a second, different reduction on the way out.
+    """
+    current = token
+    for _ in range(4):  # bounded: no English word is four suffixes deep, and
+                        # the fixpoint makes the bound unreachable in practice
+        for suffix, replacement in _SUFFIX_RULES:
+            if not current.endswith(suffix):
+                continue
+            if suffix == "s" and current[-2:] in _NOT_A_PLURAL:
+                continue
+            if len(current) - len(suffix) < _MIN_STEM:
+                continue
+            candidate = current[: -len(suffix)] + replacement
+            if not _VOWELS & set(candidate):
+                continue
+            current = candidate
+            break
+        else:
+            break
+    return current
+
+
 def _tokens(text: str) -> "set[str]":
-    """Content words in `text`, lowercased, with stopwords and short tokens out."""
+    """Content *stems* in `text`: lowercased, stopworded, suffix-reduced.
+
+    The name is historical; what it returns is a root, not a surface form.
+    Every caller is either matching against it or persisting it, and both need
+    "editor" and "editors" to be the same thing, so stemming lives here rather
+    than being sprinkled over the two call sites that need it.
+    """
+    return {
+        _stem(token)
+        for token in _TOKEN_RE.findall(text.lower())
+        if len(token) > 2 and token not in _STOPWORDS
+    }
+
+
+def _words(text: str) -> "set[str]":
+    """Content words in `text`, unstemmed.
+
+    Kept separate from `_tokens` for exactly one caller, `forget_facts`, and
+    the reason is that forgetting is irreversible. A query of "my editor"
+    stemmed matches a stored "I edited the deck", which is a fact the user did
+    not ask to have deleted; a recall that returns one extra candidate is a
+    ranking nuisance, a forget that matches one extra fact is data loss.
+    """
     return {
         token
         for token in _TOKEN_RE.findall(text.lower())
@@ -188,9 +351,84 @@ def _tokens(text: str) -> "set[str]":
 
 
 def _keywords(percept: Percept) -> "set[str]":
-    """A fact's searchable vocabulary: its recorded keywords plus its own text."""
+    """A fact's searchable vocabulary as stems: its recorded keywords plus its text.
+
+    The stored keywords are run through `_stem` as well, so a fact written
+    before stemming existed - whose `metadata["keywords"]` hold surface forms -
+    reduces to the same root as one written after it. Without that, the
+    expansion would only work for facts stored after the deploy that introduced
+    it, and the older half of a user's memory would be silently unreachable by
+    a differently-inflected query.
+    """
+    return {_stem(word) for word in _raw_keywords(percept)}
+
+
+def _raw_keywords(percept: Percept) -> "set[str]":
+    """A fact's vocabulary as the words were actually written, unstemmed.
+
+    The counterpart to `_keywords` for `forget_facts`, which must not widen
+    its match. It matters that this is a *union* of the recorded keywords and
+    the content's own words: `extract_fact` drops the user's wording in
+    favour of a label ("my espresso order" becomes "The user's order"), so the
+    recorded keywords are the only place a query word like "espresso" survives
+    - and after stemming they hold a root, which is why a query word is
+    compared here as the user typed it and not reduced.
+    """
     stored = (percept.metadata or {}).get("keywords") or ()
-    return set(stored) | _tokens(percept.content)
+    return set(stored) | _words(percept.content)
+
+
+def _idf(doc_count: int, doc_freq: int) -> float:
+    """How much a token distinguishes facts, given how many contain it.
+
+    Lucene's variant of inverse document frequency, `ln(1 + (N - df + 0.5) /
+    (df + 0.5))`, chosen over the textbook `ln(N / df)` for one concrete
+    reason: it is **never zero and never negative**, including for a token
+    every single fact contains. A token in all N facts therefore still
+    carries a small positive weight instead of collapsing the divisor to
+    zero - and the `ln(N / df)` form does divide by zero on exactly the
+    query such a store is most prone to, because a fact written by
+    `extract_fact` is prefixed "The user's ..." and that prefix is in all
+    of them. (`ln(N / df)` also goes *negative* for a token in more than
+    half the store, which is not a weight at all.) The explicit `remember`
+    operation stores the fact verbatim and carries no prefix; the label
+    belongs to the extraction path, and this module is its ranking.
+
+    The corollary is the point of the whole exercise: a hub word is not
+    erased, it is made nearly worthless, so a fact that matches a query
+    only on such a word scores near zero instead of tying with a fact that
+    matched on a word unique to it.
+    """
+    return math.log(1.0 + (doc_count - doc_freq + 0.5) / (doc_freq + 0.5))
+
+
+def _relevance(shared: float, query_mass: float, document_mass: float) -> float:
+    """IDF-weighted Sørensen-Dice coefficient: 2 x shared / (query + document).
+
+    The Sørensen-Dice coefficient is the one similarity measure that is
+    symmetric and bounded by 1 without a parameter: it is 1 exactly when
+    the two sides carry the same mass and every query token is present.
+    The factor 2 is not a fudge - without it a query and a fact that are
+    identical would score 0.5, and "1.0 means the fact is exactly what
+    was asked for" is the only reading of the ceiling that survives
+    someone adding a threshold later.
+
+    **The divisor is the point.** It is computed from the query and the
+    candidate, not fixed, which is what makes scores comparable: a
+    one-word query and a twelve-word query, a two-fact store and a
+    two-hundred-fact store, all land in the same [0, 1] and mean the same
+    thing. `shared` cannot exceed either side by construction, so the
+    result is at most 1.0; the `min` is not a correction, it is a guard
+    against a float rounding a hair over on an exact match.
+
+    Adding a signal later means adding its mass to *both* sides rather
+    than adding a constant to a raw count, so the ceiling stays 1.0 and
+    the ordering of already-comparable scores does not silently rescale.
+    """
+    total = query_mass + document_mass
+    if shared <= 0.0 or total <= 0.0:
+        return 0.0
+    return min(1.0, 2.0 * shared / total)
 
 
 def _consent_error() -> str:
@@ -282,13 +520,15 @@ def _memory_percept(fact: Fact) -> Percept:
     """
     return Percept(
         sense=CONSENT_SENSE,
-        kind="fact",
+        kind=MEMORY_KIND_FACT,
         content=fact.text,
         created_at=time.time(),
         ttl_seconds=None,
         source=fact.source,
         sensitivity=SENSITIVITY_PRIVATE,
         metadata={"key": fact.key, "keywords": sorted(_tokens(fact.span))},
+        valid_until=fact.valid_until,
+        confidence=fact.confidence,
     )
 
 
@@ -308,6 +548,11 @@ def _note(content: str) -> Percept:
         ttl_seconds=_TRANSIENT_TTL,
         source=CONSENT_SENSE,
         sensitivity=SENSITIVITY_PRIVATE,
+        # A rendered answer is text this module just composed from facts the
+        # user asked for, not a claim about the world, so it carries no
+        # opinion of its own. Stating that explicitly beats leaving it to the
+        # default and hoping the two agree.
+        confidence=CONFIDENCE_UNSTATED,
     )
 
 
@@ -333,7 +578,13 @@ def extract_fact(text: str) -> Optional[Fact]:
             f"The user's {supersession}" if key == "attribute" else _FACT_LABEL[key]
         )
         span = text[match.start() : match.end()].strip()
-        return Fact(f"{label}: {value}", span, supersession, "turn-extract")
+        return Fact(
+            f"{label}: {value}",
+            span,
+            supersession,
+            "turn-extract",
+            CONFIDENCE_EXTRACTED,
+        )
     return None
 
 
@@ -344,6 +595,11 @@ def store_fact(fact: Fact, store: Optional[PerceptStore] = None) -> Optional[Per
     from the raw one. This is the single write path: the consent gate and
     the redaction both live here, so no caller can reach the store around
     them.
+
+    `valid_until` passes through unredacted, and that is correct rather than an
+    oversight: it is a number the caller supplied, not text derived from
+    anything the user wrote, so there is nothing in it for a substring
+    sanitizer to find.
 
     Returns the persisted percept, or None when the sense is not permitted
     or redaction could not be proven.
@@ -364,13 +620,18 @@ def store_fact(fact: Fact, store: Optional[PerceptStore] = None) -> Optional[Per
     target = _target(store)
     if key:
         target.forget(lambda p: (p.metadata or {}).get("key") == key)
-    percept = _memory_percept(Fact(content, span, key, fact.source))
+    percept = _memory_percept(
+        Fact(content, span, key, fact.source, fact.confidence, fact.valid_until)
+    )
     target.add(percept)
     return percept
 
 
 def remember_fact(
-    fact: str, source: str = "user-stated", store: Optional[PerceptStore] = None
+    fact: str,
+    source: str = "user-stated",
+    store: Optional[PerceptStore] = None,
+    valid_until: Optional[float] = None,
 ) -> Optional[Percept]:
     """Persist `fact` verbatim, as asked. None if refused.
 
@@ -380,11 +641,19 @@ def remember_fact(
     so an already-lowercased key no longer matches `sk-...-AbC` and sails
     through unredacted. That was a real bug here, caught by reading the raw
     file rather than by a passing assertion on the returned content.
+
+    `valid_until` is an absolute epoch instant, not a length, for the reason
+    `Percept.is_expired` gives: a fact's validity ends at a moment, and a
+    duration measured from whenever the record was last rewritten would move
+    every time `forget()` touched the file.
     """
     content = fact.strip()
     if not content:
         return None
-    return store_fact(Fact(content, content, content, source), store)
+    return store_fact(
+        Fact(content, content, content, source, CONFIDENCE_STATED, valid_until),
+        store,
+    )
 
 
 def remember_from_turn(text: str, store: Optional[PerceptStore] = None) -> Optional[Percept]:
@@ -402,30 +671,117 @@ def remember_from_turn(text: str, store: Optional[PerceptStore] = None) -> Optio
     return store_fact(found, store)
 
 
-def recall(
-    query: str, store: Optional[PerceptStore] = None, limit: int = 5
-) -> list[Percept]:
-    """Stored facts sharing content words with `query`, best overlap first.
+class RecallReport(NamedTuple):
+    """What one recall found, and what it found but refused to quote.
 
-    Literal keyword overlap, then newest-first for ties. NOT semantic search
-    and NOT relevance ranking - see the module docstring for what that
-    costs. A query sharing no content word returns nothing rather than
-    everything, because an assistant that answers every question with its
-    whole database is worse than one that admits it does not know.
+    `expired` is the reason this is a NamedTuple instead of the bare list
+    `recall()` returns. A fact past its `valid_until` matches the query
+    exactly as well as one inside its window, and the only difference between
+    them is that quoting the first as current is a lie the model then repeats.
+    Dropping it silently makes "your standup moved to the annex" and "you
+    never told me where standup is" answer the user identically, and the
+    second of those is the one that sends them off to ask again.
+    """
+
+    facts: list[Percept]
+    expired: list[Percept]
+
+
+def recall_report(
+    query: str, store: Optional[PerceptStore] = None, limit: int = 5
+) -> RecallReport:
+    """`recall()` plus the matching facts whose validity window has closed.
+
+    Expiry is evaluated on read, exactly as `PerceptStore.active()` does it,
+    and for the same reason: a store nobody is polling still has to answer
+    correctly, so there is no timer and no thread here. The expired facts stay
+    on disk - this is relevance, not permission - and a fact whose window is
+    reopened comes back.
+
+    Recalled facts are stamped as accessed. That is the one read in the whole
+    senses layer that means "the user asked for this and got it", so it is
+    the only signal the durable tier's eviction order can honestly use.
     """
     wanted = _tokens(query)
     if not wanted or limit <= 0:
-        return []
-    scored = [
-        (len(wanted & _keywords(percept)), percept)
-        for percept in _target(store).durable()
-    ]
+        return RecallReport([], [])
+    target = _target(store)
+    candidates = target.durable()
+    if not candidates:
+        return RecallReport([], [])
+    vocabularies = [_keywords(percept) for percept in candidates]
+    total_docs = len(vocabularies)
+
+    # One pass for document frequencies, then a memoised IDF lookup, so the
+    # log() is evaluated once per distinct token rather than once per
+    # (token, fact) pair. Both are O(tokens in the store), which is a few
+    # hundred for any memory store a person could plausibly accumulate.
+    doc_freq: dict[str, int] = {}
+    for vocabulary in vocabularies:
+        for token in vocabulary:
+            doc_freq[token] = doc_freq.get(token, 0) + 1
+    weights: dict[str, float] = {}
+
+    def weight(token: str) -> float:
+        if token not in weights:
+            weights[token] = _idf(total_docs, doc_freq.get(token, 0))
+        return weights[token]
+
+    now = time.time()
+    query_mass = sum(weight(token) for token in wanted)
+    scored, expired = [], []
+    for percept, vocabulary in zip(candidates, vocabularies):
+        shared = sum(weight(token) for token in wanted if token in vocabulary)
+        if not shared:
+            continue
+        if percept.is_expired(now):
+            expired.append(percept)
+            continue
+        document_mass = sum(weight(token) for token in vocabulary)
+        scored.append(
+            (_relevance(shared, query_mass, document_mass), percept)
+        )
     ranked = sorted(
-        (pair for pair in scored if pair[0]),
-        key=lambda pair: (pair[0], pair[1].created_at),
+        scored,
+        key=lambda pair: (pair[0], pair[1].confidence, pair[1].created_at),
         reverse=True,
     )
-    return [percept for _, percept in ranked[:limit]]
+    found = [percept for _, percept in ranked[:limit]]
+    target.mark_accessed(found, now=now)
+    return RecallReport(found, expired)
+
+
+def recall(
+    query: str, store: Optional[PerceptStore] = None, limit: int = 5
+) -> list[Percept]:
+    """Stored facts sharing content words with `query`, most relevant first.
+
+    Ranked by the IDF-weighted Dice coefficient in `_relevance`, NOT by how
+    many of the query's words a fact happens to contain: see the module
+    docstring for why a count was not a score. `confidence` breaks the ties
+    that relevance leaves, and `created_at` breaks the ones confidence leaves;
+    the module docstring's scoring section is what makes the second of those
+    honest rather than the ranker in disguise.
+
+    Query and fact are both stemmed to a root before anything is compared, so
+    "editors" finds "my editor is neovim". That is word-shape matching and
+    nothing more - see the module docstring for the limit it does not cross.
+
+    NOT semantic search. Nothing here can see that "what do I drink?" and
+    "The user's order: a flat white" are about the same thing, and no
+    embedding model is being added to fix that. What a query word found in
+    no stored fact does is worth stating precisely, because it looks like a
+    bug and is not: it raises the query's mass and therefore lowers every
+    candidate's score equally. The *order* is unaffected; only the number
+    moves, which is the honest reading of "most of this question is not
+    something I have stored".
+
+    A query sharing no content word returns nothing rather than everything,
+    because an assistant that answers every question with its whole
+    database is worse than one that admits it does not know. Callers that can
+    report *why* they got nothing should use `recall_report()`.
+    """
+    return recall_report(query, store, limit).facts
 
 
 def forget_facts(query: str, store: Optional[PerceptStore] = None) -> int:
@@ -433,14 +789,17 @@ def forget_facts(query: str, store: Optional[PerceptStore] = None) -> int:
 
     Matching requires *all* of the query's content words to appear in the
     fact, or the whole query to appear verbatim - deliberately narrower than
-    recall's "any word" rule. Forgetting is destructive and irreversible
-    here, so the weakest match that would remove a memory is not the
-    weakest one worth honouring. `PerceptStore.forget()` rewrites the
-    durable file rather than filtering a read, which is the only acceptable
-    behaviour for "forget this"; see its own docstring.
+    recall's "any word" rule, and unlike recall it does **not** stem. Both of
+    those narrowings exist for the same reason: forgetting is destructive and
+    irreversible here, so the weakest match that would remove a memory is not
+    the weakest one worth honouring. Stemming would widen this query from
+    "editor" to also match "I edited the deck", which is a fact nobody asked
+    to lose. `PerceptStore.forget()` rewrites the durable file rather than
+    filtering a read, which is the only acceptable behaviour for "forget
+    this"; see its own docstring.
     """
     phrase = query.strip().lower()
-    wanted = _tokens(query)
+    wanted = _words(query)
     if not phrase and not wanted:
         return 0
 
@@ -448,10 +807,41 @@ def forget_facts(query: str, store: Optional[PerceptStore] = None) -> int:
         content = percept.content.lower()
         if phrase and phrase in content:
             return True
-        return bool(wanted) and wanted <= _keywords(percept)
+        return bool(wanted) and wanted <= _raw_keywords(percept)
 
     return _target(store).forget(matches)
 
+
+
+def _recall_body(report: RecallReport) -> str:
+    """The body of a recall answer, which must never conflate three outcomes.
+
+    "Found nothing", "found something and will not quote it any more" and
+    "never had it" are three different states of the world, and a caller
+    acting on the answer cannot recover the difference from a single line. The
+    middle one is the one this function exists for: an expired fact is *in*
+    the store, so reporting it as absent sends the user off to state again
+    something they already said, while reporting it as current is a lie the
+    model then repeats back.
+    """
+    if report.facts:
+        body = "\n".join(f"- {p.content}" for p in report.facts)
+        if not report.expired:
+            return body
+        return (
+            f"{body}\n\nNot quoted, because the fact itself is no longer "
+            f"stated to be true ({len(report.expired)} of them, still on "
+            f"disk): {'; '.join(p.content for p in report.expired[:3])}"
+            f"{'; ...' if len(report.expired) > 3 else ''}"
+        )
+    if report.expired:
+        return (
+            f"Nothing current. {len(report.expired)} stored fact(s) matched "
+            f"but their stated validity has run out, so they are not quoted as "
+            f"true: {'; '.join(p.content for p in report.expired[:3])}"
+            f"{'; ...' if len(report.expired) > 3 else ''}"
+        )
+    return "Nothing stored.\nNo stored fact shares a content word with that query."
 
 
 def _run(arguments: dict) -> Percept:
@@ -470,8 +860,17 @@ def _run(arguments: dict) -> Percept:
     fact = str(arguments.get("fact") or "").strip()
     match operation:
         case "remember":
+            valid_for = arguments.get("valid_for_minutes")
+            try:
+                minutes = float(valid_for) if valid_for else None
+            except (TypeError, ValueError):
+                minutes = None
             stored = remember_fact(
-                fact, source=str(arguments.get("source") or "user-stated")
+                fact,
+                source=str(arguments.get("source") or "user-stated"),
+                valid_until=(
+                    None if minutes is None else time.time() + minutes * 60.0
+                ),
             )
             if stored is not None:
                 # The stored fact itself, not a transient acknowledgement of
@@ -487,13 +886,10 @@ def _run(arguments: dict) -> Percept:
             )
         case "recall":
             limit = arguments.get("limit")
-            found = recall(query, limit=int(limit) if limit else 5)
-            body = (
-                "\n".join(f"- {p.content}" for p in found)
-                if found
-                else "No stored fact shares a content word with that query."
+            report = recall_report(query, limit=int(limit) if limit else 5)
+            return _note(
+                f"What is remembered about that:\n{_recall_body(report)}"
             )
-            return _note(f"What is remembered about that:\n{body}")
         case "forget":
             removed = forget_facts(query)
             said = (
@@ -526,10 +922,14 @@ SENSES = [
                     "Durable memory about the user, kept on this machine across "
                     "restarts. operation='remember' stores one fact (only what "
                     "the user asked you to keep); operation='recall' looks "
-                    "stored facts up by keyword - literal word overlap, so "
-                    "rephrase the query using words the fact actually "
-                    "contains; operation='forget' erases matching facts from "
-                    "disk permanently."
+                    "stored facts up by keyword - matching is literal word "
+                    "overlap on word roots, so plurals and verb endings match "
+                    "but a paraphrase does not, ranked by how much of the "
+                    "query's information each fact shares, so rephrase the "
+                    "query using words the fact actually contains. A fact "
+                    "whose valid_for_minutes has run out is reported as "
+                    "expired rather than quoted; operation='forget' erases "
+                    "matching facts from disk permanently."
                 ),
                 "parameters": {
                     "type": "object",
@@ -554,6 +954,20 @@ SENSES = [
                         "source": {
                             "type": "string",
                             "description": "Provenance for 'remember', e.g. 'user-stated'.",
+                        },
+                        "valid_for_minutes": {
+                            "type": "number",
+                            "description": (
+                                "operation='remember' only. How long this fact "
+                                "stays true, in minutes - use it for a job "
+                                "title, a tool, a meeting room or a standup "
+                                "location, anything likely to change without "
+                                "being corrected. After this time the fact is "
+                                "no longer quoted as current, and recall says "
+                                "so rather than pretending it was never "
+                                "stored. Omit it for something that does not "
+                                "expire."
+                            ),
                         },
                     },
                     "required": ["operation"],

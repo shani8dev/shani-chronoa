@@ -235,6 +235,7 @@ def describe_image(
             method="POST",
             status=getattr(response, "status_code", None),
             bytes_out=egress.payload_size(payload),
+            privacy_mode=egress.privacy_mode_enabled(),
         )
 
     if response.status_code != 200:

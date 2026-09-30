@@ -108,6 +108,15 @@ DURABLE_SENSE_NAME = "memory"
 # future registry change; it costs one wake-up a second.
 _IDLE_TICK_SECONDS = 1.0
 
+# How often armed *event* rules are re-read, when an event engine is supplied.
+# Deliberately not `_IDLE_TICK_SECONDS`: `read_event_signal` shells out to
+# `git status` and `systemctl show` (`_SIGNAL_TIMEOUT_SECONDS` is 10s because
+# both are unbounded in the kernel), so polling them at the idle tick would
+# make a background thread run `git status` once a second for as long as the
+# loop lived. Matched to `triggers.HEARTBEAT_BUCKET_SECONDS` so a heartbeat
+# bucket and a poll cannot alias into double-reporting the same transition.
+_EVENT_POLL_SECONDS = 15.0
+
 # A sense that raises is logged at ERROR once, then at DEBUG until it starts
 # succeeding again. An ambient sense that fails on every tick would otherwise
 # write one stack trace per interval, which is how a real fault gets missed.
@@ -248,6 +257,8 @@ class AmbientScheduler:
         arguments: Optional[Mapping[str, dict]] = None,
         poll_immediately: bool = True,
         rearm_seconds: float = _DEFAULT_REARM_SECONDS,
+        event_engine=None,
+        event_poll_seconds: float = _EVENT_POLL_SECONDS,
     ) -> None:
         self._senses: dict[str, Sense] = dict(senses if senses is not None else discover_senses())
         self._store = store if store is not None else PerceptStore()
@@ -282,6 +293,24 @@ class AmbientScheduler:
         self._failures: dict[str, int] = {}
         self.polls = 0
         self.deposited = 0
+
+        # Armed *event* rules (`triggers.EventEngine`), injected rather than
+        # imported: this module has no dependency on `triggers`, on `Assistant`,
+        # or on any sense, and `test_percepts_never_reach_assistant_history`
+        # asserts the first two by AST on the parsed tree. An engine supplied
+        # here is polled on the same thread and the same tick as the senses, so
+        # there is still one thread and one wake-up. `None` - the default -
+        # means exactly what it meant before this existed: no event rules are
+        # read, and every existing construction site is unchanged.
+        self._event_engine = event_engine
+        self._event_seconds = max(0.0, float(event_poll_seconds))
+        self._last_event_poll = (
+            (now - self._event_seconds) if poll_immediately else now
+        ) if event_engine is not None else now
+        self._event_results: "deque[object]" = deque(maxlen=_RESULT_HISTORY)
+        self._event_failures = 0
+        self.event_polls = 0
+        self.event_fired = 0
 
     # --- what will and will not be polled -----------------------------------
 
@@ -447,6 +476,53 @@ class AmbientScheduler:
     def _note_success(self, name: str) -> None:
         self._failures.pop(name, None)
 
+    def _poll_event_rules(self, now: float) -> "list[object]":
+        """Re-read every armed event rule's signal, and dispatch what fired.
+
+        A no-op unless an event engine was injected. Two things are borrowed
+        from `poll()` on purpose and one is deliberately *not*:
+
+        - the interval check and the stamp-after-the-run, so `event_poll_seconds`
+          means the same thing here as `poll_interval` does for a sense;
+        - the same log-then-go-quiet failure policy, because a corrupt rules
+          file must not turn every ambient run into a stack trace.
+
+        Consent is **not** checked here. `EventEngine._consent` re-reads it per
+        rule per event, and a refusal recorded there is auditable - it names the
+        key that is off on the rule that was denied. Skipping the poll at this
+        level would be quieter and would throw that record away, which is the
+        one outcome a consent gate must never produce.
+
+        A raised exception is contained here rather than allowed out: this runs
+        inside the sense loop, and one unreadable rules file must not stop the
+        senses from being polled.
+        """
+        if self._event_engine is None:
+            return []
+        if now - self._last_event_poll < self._event_seconds:
+            return []
+        self._last_event_poll = time.monotonic()
+        try:
+            # `poll()` reads the signals and runs the anti-noise layers;
+            # `run_due()` dispatches the debounced runs whose delay elapsed,
+            # re-checking consent and cooldown at the moment they act.
+            out = list(self._event_engine.poll())
+            out.extend(self._event_engine.run_due())
+        except Exception as exc:  # noqa: BLE001 - the sense loop must survive
+            self._event_failures += 1
+            message = "Event trigger poll failed: %s: %s"
+            if self._event_failures <= _FAILURE_LOG_CEILING:
+                logger.error(message, type(exc).__name__, exc, exc_info=True)
+            else:
+                logger.debug(message, type(exc).__name__, exc)
+            return []
+
+        self._event_failures = 0
+        self.event_polls += 1
+        self.event_fired += sum(1 for r in out if getattr(r, "fired", False))
+        self._event_results.extend(out)
+        return out
+
     def poll_due(self, now: Optional[float] = None) -> "list[PollResult]":
         """Poll every ambient sense whose interval has elapsed.
 
@@ -478,16 +554,32 @@ class AmbientScheduler:
                 continue
             self._results.append(result)
             results.append(result)
+        self._poll_event_rules(current)
         return results
 
     def seconds_until_next_due(self, now: Optional[float] = None) -> Optional[float]:
-        """Seconds until the earliest sense is due; None if nothing is ambient."""
+        """Seconds until the earliest sense - or event rule - is due.
+
+        `None` only when there is genuinely nothing to wait for. An event
+        engine with no ambient senses is still something to wait for, so it
+        keeps the loop waking on its own interval instead of falling back to
+        the one-second idle tick.
+        """
         current = time.monotonic() if now is None else now
         remaining = [
             max(0.0, (sense.poll_interval or 0.0) - (current - self._last_poll.get(name, current)))
             for name, sense in self.ambient_senses().items()
         ]
+        if self._event_engine is not None:
+            remaining.append(
+                max(0.0, self._event_seconds - (current - self._last_event_poll))
+            )
         return min(remaining) if remaining else None
+
+    def event_results(self) -> "list[object]":
+        """Recent event-rule outcomes, oldest first. Safe from any thread."""
+        with self._lock:
+            return list(self._event_results)
 
     # --- lifecycle -----------------------------------------------------------
 
@@ -576,6 +668,15 @@ class AmbientScheduler:
             "ambient_senses": sorted(self.ambient_senses()),
             "refused": dict(self._refusals),
             "denied": dict(self._denied),
+            "event_triggers": {
+                "enabled": self._event_engine is not None,
+                "interval_seconds": self._event_seconds,
+                "polls": self.event_polls,
+                "fired": self.event_fired,
+                "rules": sorted(
+                    r.name for r in self._event_engine.store().all()
+                ) if self._event_engine is not None else [],
+            },
             "polls": polls,
             "deposited": deposited,
             "last_results": [result.as_dict() for result in self.results()],
