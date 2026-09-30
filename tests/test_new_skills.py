@@ -12,8 +12,10 @@ and false, which is the failure this codebase cares about most:
   so anything that reaches the interpreter is arbitrary code execution.
 """
 
+import json
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
@@ -362,3 +364,47 @@ class TestSystemdProbe:
         monkeypatch.setattr(timer.shutil, "which", lambda n: "/usr/bin/systemctl")
         monkeypatch.setattr(timer.subprocess, "run", boom)
         assert timer._systemd_available() is False
+
+
+class TestTheTimerStoreCannotEscapeTheTestRun:
+    """Guards the autouse `_isolate_timer_store` fixture in `conftest.py`.
+
+    Every other timer test in this file patches `timer._DATA` through the
+    `state` fixture, which is exactly why all of them were clean while a full
+    suite run still wrote fixture data into a real user's state directory.
+    These two deliberately do *not* patch it.
+
+    `timer._DATA` is resolved at **import** time from `$XDG_STATE_HOME`, so the
+    per-test `HOME` isolation cannot reach it, and no fixture set
+    `XDG_STATE_HOME` at all. Observed leak: a real
+    `~/.local/state/shani-chronoa/timers.json` holding fixture data, including
+    the `'; touch .../pwned; '` label from the shell-injection test in
+    `test_skills.py`. Asserting against `Path.home()` here would be vacuous —
+    `_hermetic_env` has already replaced `HOME` with a tmp dir by the time a
+    test body runs — so this asserts the store is under pytest's own base temp
+    directory, which is what actually distinguishes "redirected" from "not".
+    """
+
+    def test_the_store_points_into_pytests_temp_dir(self, tmp_path_factory):
+        base = Path(str(tmp_path_factory.getbasetemp())).resolve()
+        assert Path(timer._DATA).resolve().is_relative_to(base), (
+            f"timer._DATA is {timer._DATA}, which is outside pytest's base temp "
+            f"dir {base}; the _isolate_timer_store fixture is not being applied "
+            f"and a test can write into the real ~/.local/state")
+
+    def test_an_unpatched_caller_writes_only_to_the_isolated_store(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(timer, "_systemd_available", lambda: True)
+        monkeypatch.setattr(
+            timer, "_schedule", lambda ident, secs, label="timer": (True, ""))
+        monkeypatch.setattr(timer, "_unschedule", lambda ident: None)
+
+        store = Path(timer._DATA)
+        assert not store.exists(), "the isolated store should start empty"
+        timer.set_timer(600, "hermeticity-probe")
+        assert store.exists(), (
+            "set_timer did not write to the redirected store at all, so this "
+            "test cannot tell a working fixture from a broken one")
+        labels = [t.get("label") for t in json.loads(store.read_text())]
+        assert labels == ["hermeticity-probe"]

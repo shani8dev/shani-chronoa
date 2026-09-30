@@ -236,3 +236,30 @@ def _isolate_trigger_rule_store(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(
         triggers, "RULES_FILE", tmp_path_factory.mktemp("rules") / "rules.json", raising=False
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_timer_store(tmp_path_factory, monkeypatch):
+    """Keep the countdown-timer store out of the developer's real state dir.
+
+    `skills/timer.py` resolves `_DATA` at *import* time from `$XDG_STATE_HOME`,
+    falling back to `~/.local/state`. Two reasons the per-test `HOME` above is
+    not enough: the constant is captured before any fixture runs, and
+    `XDG_STATE_HOME` is not set by any fixture at all.
+
+    Observed here: a full suite run without the variable set wrote a real
+    `~/.local/state/shani-chronoa/timers.json` holding fixture data - two
+    `pasta` labels and the `'; touch /tmp/pytest-of-.../pwned; '` label from
+    the shell-injection test. The timer tests are clean in isolation, so the
+    write comes from a test that reaches `set_timer` through the real skill
+    path; isolating only the timer test module would not have caught it.
+
+    Same class as `_isolate_trigger_rule_store` above and
+    `PerceptStore.DURABLE_FILE`, so this is autouse and repo-wide.
+    """
+    timer = pytest.importorskip("shani_chronoa.skills.timer")
+    monkeypatch.setattr(
+        timer, "_DATA",
+        tmp_path_factory.mktemp("timers") / "shani-chronoa" / "timers.json",
+        raising=False,
+    )
