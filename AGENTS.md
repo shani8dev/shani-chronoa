@@ -444,7 +444,7 @@ and exposed through the headless CLI - and reached **no LLM turn at all**.
 `app.py`, `assistant.py`, `tools.py` and `mcp.py` imported none of it, so
 `shani_chronoa-sense` was its only consumer and every percept it produced died
 in the one-shot process that made it. This is the same dead-code class as
-`ipc.py`/`tool_tracking.py`/`gateway_supervisor.py`/`sandbox/profiles.py`
+`tool_tracking.py`/`gateway_supervisor.py`/`sandbox/profiles.py`
 below, and `test_sense_manifest.py` only passed because the CLI counted.
 
 Fixed: `Assistant` takes an optional `percept_store` + `context_builder`, and
@@ -838,20 +838,48 @@ line with an invented explanation is worth less than an admitted SKIP.
   **Verified live after the fix**: the same fake-key repro is now redacted
   to `$SECRET:CLOUD_LLM_ANTHROPIC`, and the vault file is confirmed to stay
   absent from disk (no second on-disk copy created).
-- **Three of the six 2026-09-18 security/architecture modules are dead code —
-  built, unit-tested in isolation, and never imported by anything that
-  actually runs.** Confirmed via `grep` across the whole package (2026-09-28
-  re-verified): none of `ipc.py` (`PeerValidator` — also isn't a real
-  peer-credential check, it's an unkeyed SHA256 hash, not a signature, and
-  Chronoa has no D-Bus/socket IPC surface for it to protect in the first place
-  — the MCP server is explicitly stdio-only/same-user-trusted, see `mcp.py`'s
-  own "Trust model" docstring), `gateway_supervisor.py`, and
-  `sandbox/profiles.py` (`AgentProfile`) are referenced from `app.py`,
-  `tools.py`, `assistant.py`, or `mcp.py`. `ipc.py`'s only near-match anywhere
-  in the package is the unrelated string `--unshare-ipc` in
-  `sandbox/executor.py`, which is a sandbox flag, not an import.
+- **The 2026-09-18 security/architecture modules that were built, unit-tested
+  in isolation, and never imported by anything that actually runs: two were
+  deleted (2026-09-30), and the other two are mid-wiring — grep before you
+  trust this list.** Confirmed by `grep` for real callers across the whole
+  package, not by a `feat:` message and not by a passing module-level test.
 
-  **`tool_tracking.py` is no longer in this list and should not be added back.**
+  - **`ipc.py` — DELETED (2026-09-30).** `PeerValidator.sign_message()` was a
+    bare `hashlib.sha256(payload)` with **no key**, so signing and verifying
+    were the same operation and anyone could forge a "signed" message.
+    Wiring it in would have made Chronoa *appear* to have authenticated IPC
+    while providing none, which is worse than having none. There was also
+    nothing for it to protect: no D-Bus or socket IPC surface exists, the MCP
+    server is explicitly stdio-only/same-user-trusted (see `mcp.py`'s own
+    "Trust model" docstring), and the package's only near-match was the
+    unrelated string `--unshare-ipc` in `sandbox/executor.py` — a bwrap flag,
+    not an import. This was Implementation Roadmap item 4's own explicit
+    choice: "decide whether there's a real integration point before wiring it
+    in, or remove it."
+  - **`skills/scan_archive.py` — DELETED (2026-09-30).** A superseded
+    duplicate, not an orphan. `extract_archive._check_members()` already
+    rejects `..` components, absolute paths and paths resolving outside the
+    destination, refuses symlink/hardlink/device/FIFO members, and caps member
+    count — strictly better on every count than the deleted copy, which had
+    only the first two checks. Two overlapping guards on one path is the
+    failure mode this file keeps warning about, where one gets hardened and the
+    other silently does not. `tests/test_scan_archive.py` went with the module,
+    which briefly left the zip-slip guard itself exercised by no test —
+    `tests/test_extract_archive.py` now covers it directly (20 tests), including
+    the symlink-through-destination escape the stdlib does not save you from.
+  - **`gateway_supervisor.py` and `sandbox/profiles.py` (`AgentProfile`) —
+    BOTH WIRED (2026-09-30); do not add either back to the dead-code list.**
+    They were dead when first measured; both now have real callers:
+    `sandbox/executor.py:23` for `AgentProfile`, `audio.py:42`/`:105` for
+    `GatewaySupervisor`. Re-measure with
+    `grep -rn 'gateway_supervisor\|AgentProfile' usr/` and trust that output
+    over any list here. This entry has already contradicted itself twice, in
+    both directions — see `tool_tracking.py` below, which was listed as dead
+    while live and would have been deleted by a reader who trusted the list as
+    this file instructs. That is the direction that actually destroys work, so
+    a stale "dead" label is worse than a missing "live" one.
+
+  **`tool_tracking.py` is not in this list and must not be added back.**
   It was wired in later the same day: `tools.py:37` imports `ToolTracker,
   ORIGIN_USER` and `triggers.py:48` imports `ORIGIN_UNATTENDED`, so it is live
   on both the user-tool and unattended-trigger paths. This entry previously
@@ -865,21 +893,19 @@ line with an invented explanation is worth less than an admitted SKIP.
   `verification.verify(...)` on **every** skill invocation — security-critical,
   and its own comment says it "must never kill the action").
 
-  `skills/scan_archive.py`
-  (zip-slip protection) is additionally miscategorized: it lives under
-  `skills/` but doesn't match the skill contract, so `discover_skills()`
-  logs a `Skipping 'builtin:scan_archive': SKILLS must be a list of Skill
-  entries` warning on every startup — harmless (doesn't break skill
-  loading, verified live) but pure noise, and correct anyway since there is
-  no skill-download feature in Chronoa for it to guard (only
-  `~/.config/shani-chronoa/skills/` local drop-in, per this file's own "What
-  this repo is" section). Do not treat a `feat: add X` commit or a passing
-  module-level unit test as proof `X` is live in the running app — grep for
-  real callers first, per this file's own verify-by-running rule above.
-  Wiring these in (or deciding they're not worth wiring in) is still open
-  work, not done — see the Implementation Roadmap section below, which was
-  written under the same mistaken assumption and needs re-reading with this
-  in mind.
+  The `NOT_A_SKILL` opt-out marker in `skills/__init__.py` is **kept**, and
+  `tests/test_skill_discovery_noise.py` still covers it, including the rule
+  that only a built-in may use it — a user module that declares itself a
+  non-skill is dropped loudly, never silently. No built-in carries the marker
+  now that `scan_archive` is gone; the built-in half of the behaviour is
+  covered from the other side, by asserting that no built-in logs a skip
+  warning at all. (An earlier version of this file claimed the deleted module
+  logged a `Skipping 'builtin:scan_archive'` warning on every startup. That
+  was already stale before the deletion — the marker was suppressing it.)
+
+  Do not treat a `feat: add X` commit or a passing module-level unit test as
+  proof `X` is live in the running app — grep for real callers first, per this
+  file's own verify-by-running rule above.
 - **`tests/`: two more pre-existing bugs found and fixed the same pass.**
   Fourteen `.pyc` files under `usr/lib/shani-chronoa/shani_chronoa/**/__pycache__/`
   were committed to git (`git ls-files | grep __pycache__` — the
@@ -1004,12 +1030,17 @@ genuinely done). Items 4, 6, 8 remain implemented as standalone modules but
 confirmed (via `grep` for real callers) **never imported by anything that
 runs** — dead code, not done, and deliberately left that way (each needs a
 real design decision - see the entries below and the "Deliberately not
-done" section - not a mechanical wire-up like item 7 got). Item 5 is
-dead-but-harmless (gracefully skipped, logs a warning). Don't take a `feat:`
+done" section - not a mechanical wire-up like item 7 got). Don't take a `feat:`
 commit message or this list's prose as proof of "done" — grep for real
 callers first, and check what the default arguments actually do when
 nothing overrides them (item 7's `/var/log` default was the second
 "passes its own unit test, crashes for real" bug found this pass).
+
+**Later update (2026-09-30):** items 4 and 5 are no longer modules at all —
+both were deleted, after deciding not to wire them in. See "Audit-verified
+known issues" above for what replaced each and why. Items 6 and 8 are being
+wired in a concurrent pass, so this paragraph's claim about them is a
+statement about the 2026-09-18 measurement, not about the tree today.
 
 1. ~~**Sandbox Executor** (P0, 2-3 days)~~ **Module exists and IS wired into
    `tools.py`'s `execute_tool()` path, but its timeout enforcement for
@@ -1029,27 +1060,36 @@ nothing overrides them (item 7's `/var/log` default was the second
    x3), but was a silent no-op against real keys until item 2's fix above
    made the vault aware of them — DONE as of 2026-09-18.**
 
-4. **Peer-Validated IPC** (P3, 1 day) — `ipc.py`'s `PeerValidator` exists but
-   is dead code: never imported anywhere, isn't a real peer-credential check
-   (unkeyed SHA256 hash, not a signature), and Chronoa has no D-Bus/socket
-   IPC surface for it to protect — the MCP server is explicitly stdio-only,
-   same-user-trusted (see `mcp.py`'s "Trust model" docstring). Still open;
-   decide whether there's a real integration point before wiring it in, or
-   remove it (roadmap #28).
+4. **Peer-Validated IPC** (P3, 1 day) — **DECIDED AND CLOSED (2026-09-30):
+   removed rather than wired in** (roadmap #28). `ipc.py`'s `PeerValidator` was
+   never imported anywhere and was not a real peer-credential check — an unkeyed
+   SHA256 hash, so signing and verifying were the same operation. Chronoa also
+   has no D-Bus/socket IPC surface for it to protect: the MCP server is
+   explicitly stdio-only, same-user-trusted (see `mcp.py`'s "Trust model"
+   docstring). See "Audit-verified known issues" for the full reasoning. The
+   *capability* gap versus sayri's single-instance socket remains real; the
+   fix for that is a real socket with peer-credential checks, which is a new
+   subsystem and not this module.
 
 5. **Zip-Slip Protection + Skill Download Validation** (P3, 1 day) —
-   `skills/scan_archive.py` exists, is correct, but is unused and
-   miscategorized: it lives under `skills/` without matching the skill
-   contract, so it's skipped with a harmless warning log on every startup.
-   There is still no skill-download feature in Chronoa (only local
-   `~/.config/shani-chronoa/skills/` drop-in) for it to guard. Still open
-   (roadmap #29).
+   **PARTIALLY CLOSED (2026-09-30)** (roadmap #29). The protection half is done
+   and stronger than the roadmap assumed: `extract_archive` checks every member
+   before writing anything, and refuses `..` components, absolute paths,
+   paths resolving outside the destination, link/device/FIFO members and
+   oversized listings. `skills/scan_archive.py` was deleted as a superseded
+   duplicate of exactly that. The *validation* half — a store to download
+   skills from — is still not done, and still is not wanted without its own
+   design decision: Chronoa only supports local
+   `~/.config/shani-chronoa/skills/` drop-in.
 
 6. **Gateway Supervisor Architecture** (P2, 2-3 days, only if external
-   channels are planned) — `gateway_supervisor.py` exists but is dead code,
-   never imported. Not needed for the current local-first design; still
-   open only if Discord/Telegram/Matrix integration ever becomes a goal
-   (roadmap #22).
+   channels are planned) — **the heartbeat half is now WIRED (2026-09-30).**
+   `audio.py:42` imports `GatewaySupervisor` and `:105` holds a module-level
+   `_SUPERVISOR`, supervising the real `pw-record`/`pw-play` children — a hung
+   `pw-record` means the assistant silently stops listening with nothing
+   reporting it. `register_agent`/`broadcast_message` remain dead: they imply a
+   multi-agent surface Chronoa does not have, and none was invented for them.
+   Discord/Telegram/Matrix integration is still not a goal (roadmap #22).
 
 7. ~~**Tool Call Tracking** (P2, 1 day)~~ **DONE (2026-09-18).** Wired
    `ToolTracker` into `tools.py:execute_tool()` — every call (success,
@@ -1068,9 +1108,15 @@ nothing overrides them (item 7's `/var/log` default was the second
    call produced a matching entry in both `_TRACKER.get_calls()` and the
    on-disk log file (roadmap #20).
 
-8. **Per-Agent Sandbox Profiles** (P2, 2 days) — `sandbox/profiles.py`'s
-   `AgentProfile` dataclass exists but is dead code, never imported by the
-   sandbox executor or anything else. Still open (roadmap #21).
+8. **Per-Agent Sandbox Profiles** (P2, 2 days) — **WIRED (2026-09-30).**
+   `sandbox/executor.py:23` imports `AgentProfile`/`ResourceCeiling`/
+   `profile_for_origin` and enforces a per-**origin** profile, so an unattended
+   trigger action gets a stricter sandbox than a user-initiated one. No profile
+   field can *loosen* a guard: `ceiling()` only tightens the timeout, no
+   allowlist widens, and the blocklist is not runtime-extensible. `memory_limit`
+   /`cpu_limit` are enforced with `setrlimit` rather than left decorative —
+   wiring the profile in without enforcing them would have created a new piece
+   of dead config that merely looks configured. (roadmap #21)
 
 9. **LICENSE file** (P3, 5 min) — **DONE.** A `LICENSE` file is present
    (audit-verified 2026-09-18); the master-roadmap #31 "4 repos missing a
