@@ -268,8 +268,9 @@ class TestCalculatorIsNotEval:
         result = calculate._run({"expression": hostile})
         assert "Could not evaluate" in result or "not valid arithmetic" in result
 
-    def test_a_name_that_is_not_pi_is_refused(self):
-        assert "Only 'pi' is available by name" in calculate._run({"expression": "x+1"})
+    def test_a_name_that_is_not_a_constant_is_refused(self):
+        out = calculate._run({"expression": "x+1"})
+        assert "Only pi, e and tau are available by name" in out and "solve_math" in out
 
     def test_an_unknown_function_lists_the_known_ones(self):
         assert "sqrt" in calculate._run({"expression": "bogus(2)"})

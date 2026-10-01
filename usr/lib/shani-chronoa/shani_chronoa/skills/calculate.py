@@ -100,6 +100,40 @@ _FUNCTIONS = {
     "sqrt": math.sqrt, "abs": abs, "log": math.log10, "log2": math.log2,
     "ln": math.log, "sin": math.sin, "cos": math.cos, "tan": math.tan,
     "round": round, "floor": math.floor, "ceil": math.ceil,
+    "exp": math.exp, "log10": math.log10, "cbrt": lambda x: math.copysign(abs(x) ** (1 / 3), x),
+    "asin": math.asin, "acos": math.acos, "atan": math.atan, "atan2": math.atan2,
+    "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh, "hypot": math.hypot,
+    "degrees": math.degrees, "radians": math.radians, "min": min, "max": max,
+}
+
+# Integer functions answer exactly - factorial(25) is 15511210043330985984000000,
+# not 1.55112e+25 - so they return ints rather than floats, and their inputs are
+# bounded: factorial(10**7) is millions of digits and would hold the skill for
+# minutes. Permutations and combinations are the n-choose-k people ask for.
+_INT_LIMIT = 10000
+
+
+def _whole(x, name):
+    if isinstance(x, float):
+        if not x.is_integer():
+            raise ValueError(f"{name} needs whole numbers")
+        x = int(x)
+    if x < 0:
+        raise ValueError(f"{name} needs numbers that are not negative")
+    if x > _INT_LIMIT:
+        raise ValueError(f"{name} is limited to numbers up to {_INT_LIMIT}")
+    return x
+
+
+_INT_FUNCTIONS = {
+    "factorial": lambda n: math.factorial(_whole(n, "factorial")),
+    "comb": lambda n, k: math.comb(_whole(n, "comb"), _whole(k, "comb")),
+    "ncr": lambda n, k: math.comb(_whole(n, "nCr"), _whole(k, "nCr")),
+    "perm": lambda n, k=None: math.perm(_whole(n, "perm"), None if k is None else _whole(k, "perm")),
+    "npr": lambda n, k: math.perm(_whole(n, "nPr"), _whole(k, "nPr")),
+    "gcd": lambda *a: math.gcd(*[int(_whole(abs(x), "gcd")) for x in a]),
+    "lcm": lambda *a: math.lcm(*[int(_whole(abs(x), "lcm")) for x in a]),
+    "isqrt": lambda n: math.isqrt(_whole(n, "isqrt")),
 }
 
 # Longest first, so "kib" is not read as "k" plus a stray "ib".
@@ -232,21 +266,26 @@ def _walk(node) -> float:
         if not isinstance(node.func, ast.Name):
             # An attribute call like `os.system(...)` is not a whitelisted name.
             raise ValueError("only the listed functions may be called")
-        function = _FUNCTIONS.get(node.func.id.lower())
+        key = node.func.id.lower()
+        if node.keywords:
+            raise ValueError("functions take no keyword arguments")
+        if key in _INT_FUNCTIONS:
+            return _INT_FUNCTIONS[key](*[_walk(a) for a in node.args])
+        function = _FUNCTIONS.get(key)
         if function is None:
             raise ValueError(
                 f"'{node.func.id}' is not a known function; available: "
-                f"{', '.join(sorted(_FUNCTIONS))}"
+                f"{', '.join(sorted(set(_FUNCTIONS) | set(_INT_FUNCTIONS)))}"
             )
-        if node.keywords:
-            raise ValueError("functions take no keyword arguments")
         return float(function(*[_walk(a) for a in node.args]))
     if isinstance(node, ast.Name):
-        if node.id.lower() == "pi":
-            return math.pi
+        constant = {"pi": math.pi, "e": math.e, "tau": math.tau}.get(node.id.lower())
+        if constant is not None:
+            return constant
         raise ValueError(
-            f"'{node.id}' is not a number or a known function. Only 'pi' is "
-            f"available by name."
+            f"'{node.id}' is not a number or a known function. Only pi, e and "
+            f"tau are available by name; for algebra with variables (x, y), "
+            f"derivatives, integrals or limits, use solve_math."
         )
     if isinstance(node, ast.IfExp):
         # `x if c else y` is a conditional, which has no place in arithmetic.
@@ -264,8 +303,11 @@ SCHEMA = {
         "name": "calculate",
         "description": (
             "Evaluate arithmetic, or convert between units. Handles the four "
-            "operations, parentheses, and sqrt, log, ln, sin, cos, tan, abs, "
-            "round, floor, ceil and pi. Converts length, mass, volume, time, "
+            "operations, powers, parentheses, factorial, permutations and "
+            "combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, "
+            "trig and inverse trig, and pi/e/tau - exact for whole numbers. "
+            "For algebra with variables, derivatives, integrals, limits or "
+            "equations, use solve_math. Converts length, mass, volume, time, "
             "data, pressure, frequency, power, energy and temperature, in the "
             "units a person actually meets - say '200 km to miles' or '70kg in "
             "lb'. Runs entirely on this machine with no network call. Refuses "
@@ -326,10 +368,15 @@ def _run(arguments: dict) -> str:
         )
     except (ValueError, SyntaxError, ArithmeticError) as exc:
         return (
-            f"Could not evaluate {expression!r}: {exc}. This handles the four "
-            f"operations, parentheses, and sqrt/log/ln/sin/cos/tan/abs/round/"
-            f"floor/ceil and pi."
+            f"Could not evaluate {expression!r}: {exc}. This handles arithmetic, "
+            f"powers, factorial/comb/perm/gcd/lcm, sqrt/exp/log/ln, trig and "
+            f"inverse trig, and pi/e/tau; for symbolic maths (x, derivatives, "
+            f"integrals, limits, equations) use solve_math."
         )
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
     if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
         return str(int(value))
     return f"{value:g}"

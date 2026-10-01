@@ -37,6 +37,7 @@ depends=(
     'power-profiles-daemon'
 )
 optdepends=(
+    'python-sympy: solve_math - derivatives, integrals, limits, equations, series'
     'geoclue: where this computer is, for get_location and local weather (GNOME’s location service)'
     'gpsd: a GPS receiver’s fix for get_location, when one is attached'
 # The speech engines are optional on purpose, and the distinction is load-bearing.

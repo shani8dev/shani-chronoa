@@ -147,6 +147,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_power_profile": ("Power and screen", "Power profile"),
     "calculate": ("Everyday tools", "Calculation"),
     "convert_units": ("Everyday tools", "Convert units"),
+    "solve_math": ("Everyday tools", "Algebra and calculus"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
@@ -345,6 +346,7 @@ _EXAMPLES: dict[str, str] = {
     "get_weather": "What's the weather today?",
     "get_world_time": "What time is it in Tokyo?",
     "convert_units": "How many miles is 100 km?",
+    "solve_math": "What is the integral of x squared?",
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
@@ -474,7 +476,7 @@ READ_ONLY_TOOLS = frozenset({
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",
-    "convert_currency", "lookup_wikipedia", "define_word",
+    "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
