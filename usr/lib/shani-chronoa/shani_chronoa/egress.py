@@ -471,9 +471,24 @@ def record(
     try:
         directory = _egress_dir()
         log = _egress_log()
+        # mkdir then chmod, not mkdir(mode=...): the mode argument is masked by
+        # the process umask and silently lands permissive, which is the same
+        # reasoning documented in triggers._ensure_state_dir.
         directory.mkdir(parents=True, exist_ok=True)
-        with open(log, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.to_dict()) + "\n")
+        try:
+            directory.chmod(0o700)
+        except OSError as exc:
+            logger.debug("egress log directory chmod failed: %s", exc)
+        line = json.dumps(event.to_dict()) + "\n"
+        # Created with 0600 rather than chmod'd afterwards, so there is no window
+        # in which a freshly created log is group/world readable under a
+        # permissive umask. The chmod below is kept anyway, because it also
+        # tightens a file left loose by an older build.
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, line.encode("utf-8"))
+        finally:
+            os.close(fd)
         try:
             log.chmod(0o600)
         except OSError:
