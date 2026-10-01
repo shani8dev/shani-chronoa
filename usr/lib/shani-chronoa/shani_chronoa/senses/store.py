@@ -185,7 +185,19 @@ class PerceptStore:
         self._durable_path = Path(durable_path) if durable_path else DURABLE_FILE
         # Per instance, not read from the module at write time: a global lookup
         # lets a store with a custom durable_path publish into a shared location.
-        self._live_path = Path(live_path) if live_path else LIVE_FILE
+        # Being an attribute is not the same as being *derived* from the durable
+        # path - an earlier fix did the first and left this fallback as the
+        # module global, so `PerceptStore(durable_path=tmp)` still published on
+        # every `add()` into the real `~/.local/share/shani-chronoa/percepts/
+        # live.json` (observed: a test run rewrote that file with a fabricated
+        # vision snapshot). A caller who names a scratch file asked to be told
+        # about that file, so both halves of the store follow it.
+        if live_path:
+            self._live_path = Path(live_path)
+        elif durable_path:
+            self._live_path = self._durable_path.with_name(LIVE_FILE.name)
+        else:
+            self._live_path = LIVE_FILE
         self._transient: "deque[Percept]" = deque(maxlen=transient_capacity)
         self._durable: list[Percept] = []
         self._durable_capacity = (

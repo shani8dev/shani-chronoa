@@ -290,3 +290,39 @@ def _isolate_timer_store(tmp_path_factory, monkeypatch):
         tmp_path_factory.mktemp("timers") / "shani-chronoa" / "timers.json",
         raising=False,
     )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_percept_store(tmp_path_factory, monkeypatch):
+    """Keep the percept store out of the developer's real data directory.
+
+    `store.PERCEPT_DIR` is built from `os.path.expanduser("~/.local/share/...")`
+    at *import* time, so it captures the real `$HOME` before any fixture runs,
+    and it does not read `XDG_DATA_HOME` - verified: exporting that variable
+    changes nothing here. `DURABLE_FILE` and `LIVE_FILE` are derived from it at
+    import time too, and `PerceptStore.__init__` reads those globals, so the
+    per-test `HOME` above cannot reach them either.
+
+    The consequence is a live view written into a real user's
+    `~/.local/share/shani-chronoa/percepts/live.json` on every `add()`, from
+    any test that constructs `PerceptStore()` with no arguments -
+    `test_vision_sense.py` and `test_sense_scheduler.py` both do. It happened
+    twice: that file was rewritten at 01:19 and again at 01:57 by test runs,
+    holding a snapshot whose content was a verbatim match for a vision fixture
+    in `test_vision_sense.py`.
+
+    Patching the module global is not a substitute for the per-instance rule
+    this repo's own `test_percept_path_isolation.py` pins; it is the second
+    layer, for the tests that legitimately pass no paths at all. Both are
+    needed: the global stops `PerceptStore()` leaking, the instance rule stops
+    `PerceptStore(durable_path=...)` leaking.
+
+    Same class as `_isolate_trigger_rule_store` and `_isolate_timer_store`
+    above, so this is autouse and repo-wide rather than added to the one test
+    module that happened to trip it.
+    """
+    store = pytest.importorskip("shani_chronoa.senses.store")
+    percept_dir = tmp_path_factory.mktemp("percepts")
+    monkeypatch.setattr(store, "PERCEPT_DIR", percept_dir, raising=False)
+    monkeypatch.setattr(store, "DURABLE_FILE", percept_dir / "memory.jsonl", raising=False)
+    monkeypatch.setattr(store, "LIVE_FILE", percept_dir / "live.json", raising=False)
