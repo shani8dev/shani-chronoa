@@ -66,7 +66,7 @@ CONTROLLED = {
     "todo-list-enabled",
     "trigger-control-enabled",
     # entry rows
-    "model", "vision-model", "whisper-model", "language", "wake-word-model",
+    "model", "vision-model", "whisper-model", "language", "wake-phrase",
     "piper-voice", "ollama-host",
     # Read by `stt.build_stt`, not written by a row. Listed here rather than in
     # NOT_EXPOSED because it is *meant* to be user-settable - the whole point

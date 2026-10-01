@@ -11,9 +11,11 @@ the machine unless you switch it twice on purpose.
 
 ## Features
 
-- **Wake-word detection** — optional hands-free wake-word activation via
-  `python-openwakeword` (AUR); the default wake-word model is "hey_jarvis"
-  (no dedicated "hey chronoa" model has been trained yet).
+- **Wake phrase** — optional hands-free activation: say "hey chronoa" (or
+  any phrase you set). whisper.cpp transcribes each short utterance locally,
+  biased toward the phrase, and the phrase must begin what you said; the
+  utterance is discarded. Needs only what speech input needs (`whisper-cpp`
+  and a model) - no wake-word engine and nothing to train.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — Ollama integration with tool-calling, so Chronoa can
   act on your machine rather than just chatting about it. **80 callable
@@ -365,7 +367,6 @@ See [`PKGBUILD`](PKGBUILD) for the full dependency list.
   Qwen3: `qwen3:4b` on capable hardware, `qwen3:1.7b` on the lowest tier.
   `config.model` and `config.whisper_model` both default to `""`, which means
   auto-detect rather than pinning a name.
-- `python-openwakeword` (plus `python-numpy`) — wake-word detection
 - `python-mcp` — needed only to run `shani-chronoa-mcp`; the MCP server is an
   optional second entry point, not part of the assistant itself
 - a local Ollama **vision** model (for example `qwen3-vl:2b`) — the
@@ -403,14 +404,14 @@ rest of Shanios. The schema id is `org.shani.chronoa`:
 # List all Chronoa keys
 dconf dump /org/shani/chronoa/
 
-# Example: change the wake-word model
-gsettings set org.shani.chronoa wake-word-model "hey_jarvis"
+# Example: change the wake phrase
+gsettings set org.shani.chronoa wake-phrase "hey computer"
 
 # Example: select a Piper voice
 gsettings set org.shani.chronoa piper-voice "en_US-lessac-medium"
 ```
 
-Both key names above (`wake-word-model`, `piper-voice`) exist in the schema,
+Both key names above (`wake-phrase`, `piper-voice`) exist in the schema,
 and so do the three that let you override the models (`model`,
 `whisper-model`, `vision-model`), all defaulting to `""`.
 

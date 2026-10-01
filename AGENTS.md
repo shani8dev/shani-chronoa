@@ -42,8 +42,10 @@ done.
 A local-first GTK4 voice/text AI assistant for Shanios: `whisper.cpp` for
 STT, Ollama for LLM inference and tool-calling, Piper for TTS, real mic
 capture and audio playback via `pw-record`/`pw-play` (falling back to
-`arecord`/`aplay`), plus optional hands-free wake-word activation
-(`wakeword.py`, openWakeWord). Listening auto-stops on silence
+`arecord`/`aplay`), plus optional hands-free wake-phrase activation
+(`wakeword.py`: vad.py segments utterances, whisper.cpp transcribes each one
+biased toward the phrase, matched at the start; openWakeWord was dropped
+2026-10-01 - neither it nor onnxruntime/tflite is in Arch's official repos). Listening auto-stops on silence
 (`AudioRecorder.start_auto_stop`, `vad.py`) rather than requiring a second
 button press - pressing the orb again while listening just ends the turn
 early (`cancel_auto_stop`). Barge-in has two layers: talking again always

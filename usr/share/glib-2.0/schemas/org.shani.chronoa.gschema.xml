@@ -69,12 +69,12 @@
     <key name="wake-word-enabled" type="b">
       <default>false</default>
       <summary>Enable hands-free wake-word activation</summary>
-      <description>When true and openWakeWord is installed, listens continuously for the wake word instead of requiring a button press.</description>
+      <description>When true, listens continuously for the wake phrase instead of requiring a button press. Needs whisper.cpp (whisper-cli) and a whisper model; each utterance is transcribed locally and discarded.</description>
     </key>
-    <key name="wake-word-model" type="s">
-      <default>'hey_jarvis'</default>
-      <summary>Wake-word model to listen for</summary>
-      <description>The openWakeWord pretrained model name to activate on. No dedicated "hey chronoa" model has been trained yet, so this defaults to one of openWakeWord's bundled phrases.</description>
+    <key name="wake-phrase" type="s">
+      <default>'hey chronoa'</default>
+      <summary>Wake phrase to listen for</summary>
+      <description>What you say to start listening. It must begin what you say: "hey chronoa, what time is it" wakes Chronoa, "I told chronoa" does not. A leading hey, hi, hello, ok or okay are interchangeable. Any words work; nothing has to be trained.</description>
     </key>
     <key name="cloud-fallback-enabled" type="b">
       <default>false</default>

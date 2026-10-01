@@ -383,31 +383,23 @@ class TestBargeInAndWakeWordGenerations:
         return _Capture([_pcm(_SILENT) for _ in range(_CALIBRATION_FRAMES)] + [_pcm(_LOUD)])
 
     @staticmethod
-    def _wakeword(monkeypatch, score: float = 0.9):
-        class _Numpy:
-            int16 = "int16"  # the loop passes `dtype=np.int16`
-
-            @staticmethod
-            def frombuffer(chunk, dtype=None):
-                return list(struct.unpack(f"<{len(chunk) // 2}h", chunk))
-
-        class _Model:
-            def predict(self, audio):
-                return {"hey_jarvis_v0.1": score}
-
-        # numpy and openwakeword are not installed here, so the loop cannot be executed at all
-        # without them. They are the only things substituted: framing, the threshold
-        # comparison, the generation check and the dispatch are all shipped code.
-        monkeypatch.setattr(wakeword_mod, "np", _Numpy())
+    def _wakeword(monkeypatch, heard: str = "Hey Chronoa."):
+        # whisper.cpp is the only thing substituted: it is not installed here, and what it
+        # would transcribe is the input under test, not the code. Calibration, utterance
+        # segmentation, the phrase match, the generation check and the dispatch are all
+        # shipped code.
         listener = wakeword_mod.WakeWordListener()
         listener._backend = "pw-record"
         listener._generation = 3
-        listener._model = _Model()
+        monkeypatch.setattr(listener, "_transcribe", lambda pcm: heard)
         return listener
 
     @staticmethod
     def _wakeword_stream() -> _Capture:
-        return _Capture([_pcm(_LOUD) for _ in range(3)])
+        # a quiet room to calibrate on, a short utterance, then the silence that ends it
+        return _Capture([_pcm(_SILENT) for _ in range(wakeword_mod._CALIBRATION_FRAMES)]
+                        + [_pcm(_LOUD) for _ in range(6)]
+                        + [_pcm(_SILENT) for _ in range(wakeword_mod._END_SILENCE_FRAMES)])
 
     @staticmethod
     def _drive(target, proc, capture, fired, generation):
@@ -530,14 +522,19 @@ class TestBargeInAndWakeWordGenerations:
         listener = self._wakeword(monkeypatch)
         parked = threading.Event()
         release = threading.Event()
-        first = _pcm(_LOUD)
+        # Parked on the silent frame that ENDS a real utterance: without the stop-epoch
+        # check, that frame is what sends the utterance to be judged and fires.
+        last = _pcm(_SILENT)
 
         def _park(chunk):
-            if chunk is first:
+            if chunk is last:
                 parked.set()
                 release.wait(20)
 
-        capture = _HookedCapture([first, _pcm(_LOUD), _pcm(_LOUD)], _park)
+        frames = ([_pcm(_SILENT) for _ in range(wakeword_mod._CALIBRATION_FRAMES)]
+                  + [_pcm(_LOUD) for _ in range(6)]
+                  + [_pcm(_SILENT) for _ in range(wakeword_mod._END_SILENCE_FRAMES - 1)] + [last])
+        capture = _HookedCapture(frames, _park)
         fired: list = []
         thread = threading.Thread(
             target=listener._listen_loop,

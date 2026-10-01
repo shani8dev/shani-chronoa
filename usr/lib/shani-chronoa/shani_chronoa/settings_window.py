@@ -1126,8 +1126,8 @@ class SettingsWindow(Gtk.Window):
         group = self._group(page, "Voice", "How Chronoa listens and speaks.")
         self._switch(group, "Wake-word activation", "Start listening without being clicked",
                      app._wake_word_active, lambda a: self._app_toggle("toggle-wake-word", a))
-        self._entry(group, "Wake-word model", "openWakeWord model file",
-                    config.wake_word_model, lambda t: config.set("wake-word-model", t.strip()))
+        self._entry(group, "Wake phrase", "What you say to start listening, e.g. \"hey chronoa\"",
+                    config.wake_phrase, self._set_wake_phrase)
         self._switch(
             group, "Speak answers aloud",
             "Read replies and timers back through Piper. The notify skill also "
@@ -1679,6 +1679,14 @@ class SettingsWindow(Gtk.Window):
                      config.debug_mode, lambda a: self._app_toggle("toggle-debug", a))
 
     # -- behaviour -----------------------------------------------------------
+
+    def _set_wake_phrase(self, text: str) -> None:
+        """Save the phrase and hand it to the live listener: the next utterance uses it."""
+        phrase = text.strip()
+        if not phrase:
+            return
+        self.app.config.set("wake-phrase", phrase)
+        self.app.wakeword.set_phrase(phrase)
 
     def _app_toggle(self, action: str, active: bool) -> None:
         """Route a switch through the app's own action.

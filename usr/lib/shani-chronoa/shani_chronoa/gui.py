@@ -1046,6 +1046,9 @@ class CajitaWindow(Gtk.ApplicationWindow):
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._input_entry = Gtk.Entry()
         self._input_entry.set_placeholder_text("Type a message…")
+        # A placeholder is not an accessible name: a screen reader announced
+        # this field as just "text" (shani-testbed a11y-lint, chronoa-voice)
+        self._input_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"])
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
         self._input_entry.connect("activate", self._on_input_activate)

@@ -67,12 +67,12 @@ class TestStringQuoting:
         # Then: it must be the plain locale, not the GVariant-quoted value
         assert language == "en"
 
-    def test_wake_word_model_default_is_unquoted(self, chronoa_config):
-        # Given: a fresh config (schema default wake-word-model='hey_jarvis')
-        # When: the wake-word-model property is read
-        wake_word_model = chronoa_config.wake_word_model
-        # Then: it must be the plain model id, not the GVariant-quoted value
-        assert wake_word_model == "hey_jarvis"
+    def test_wake_phrase_default_is_unquoted(self, chronoa_config):
+        # Given: a fresh config (schema default wake-phrase='hey chronoa')
+        # When: the wake-phrase property is read
+        wake_phrase = chronoa_config.wake_phrase
+        # Then: it must be the plain phrase, not the GVariant-quoted value
+        assert wake_phrase == "hey chronoa"
 
     def test_boolean_settings_parse_correctly(self, chronoa_config):
         # Baseline: booleans already round-trip (gsettings prints them unquoted).

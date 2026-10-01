@@ -99,7 +99,7 @@ class ChronoaApplication(Gtk.Application):
         self.player = AudioPlayer(target=out_target or None)
         self.barge_in_monitor = BargeInMonitor(target=in_target or None)
         self.wakeword = WakeWordListener(
-            wakeword_model=self.config.wake_word_model, target=in_target or None
+            phrase=self.config.wake_phrase, target=in_target or None
         )
         self._listening = False
         self._wake_word_active = False
@@ -330,7 +330,7 @@ class ChronoaApplication(Gtk.Application):
             logger.warning("No audio playback backend (pw-play/aplay) found - spoken replies disabled")
 
         if not self.wakeword.is_available():
-            logger.info("Wake-word engine unavailable (openWakeWord/numpy not installed) - push-to-talk only")
+            logger.info(f"Wake phrase unavailable ({self.wakeword.unavailable_reason()}) - push-to-talk only")
         elif self.config.wake_word_enabled:
             self._set_wake_word_active(True)
 
@@ -567,7 +567,7 @@ class ChronoaApplication(Gtk.Application):
         """Start or stop the background wake-word listener and persist the choice."""
         if active:
             if not self.wakeword.is_available():
-                logger.warning("Cannot enable wake word - openWakeWord not installed")
+                logger.warning(f"Cannot enable the wake phrase: {self.wakeword.unavailable_reason()}")
                 if self.window:
                     self.window.set_status("Wake word unavailable")
                 return

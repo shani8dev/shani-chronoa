@@ -677,9 +677,9 @@ class ChronoaConfig:
         return self.get_bool("wake-word-enabled", False)
 
     @property
-    def wake_word_model(self) -> str:
-        """Get the openWakeWord model name to listen for."""
-        return self.get("wake-word-model", "hey_jarvis")
+    def wake_phrase(self) -> str:
+        """The spoken phrase that starts listening (matched at the start of what was said)."""
+        return self.get("wake-phrase", "hey chronoa")
 
     @property
     def cloud_fallback_enabled(self) -> bool:

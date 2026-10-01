@@ -4,7 +4,7 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, espeak-ng, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret, psmisc, i2c-tools, policykit-1, bluez, pciutils, usbutils, smartmontools, power-profiles-daemon, udisks2, cups-client, sane-utils, nmap, network-manager
-Suggests: whisper.cpp (voice input (speech recognition)), piper-tts (a better TTS voice; espeak-ng is used when absent), python3-openwakeword, python3-numpy, python3-mcp, translate-shell
+Suggests: whisper.cpp (voice input (speech recognition) and the wake phrase), piper-tts (a better TTS voice; espeak-ng is used when absent), python3-mcp, translate-shell
 Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
 Description: Local AI assistant with privacy-first design, integrated into Shanios
  Shani Chronoa is a local-first AI assistant for the Shanios ecosystem.
