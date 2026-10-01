@@ -491,6 +491,11 @@
       <summary>Let Chronoa stop processes</summary>
       <description>When true, Chronoa may send a stop or kill signal to a running process. Off by default. A wrong process id can take down unsaved work, and Chronoa cannot tell an unsaved document from a saved one.</description>
     </key>
+    <key name="app-install-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa install and remove apps</summary>
+      <description>When true, Chronoa may install or remove Flatpak apps from Flathub for this user (no administrator password, nothing system-wide), and only by an exact app ID a search has shown. Off by default: an install downloads and runs new software. Searching and listing apps work either way.</description>
+    </key>
     <key name="power-control-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa suspend, restart or shut down</summary>

@@ -984,6 +984,10 @@ class SettingsWindow(Gtk.Window):
              "Off: Chronoa can list running processes but cannot stop one. A "
              "wrong process id can take down unsaved work.",
              "kill_process refuses while this is off"),
+            ("Let Chronoa install and remove apps", "app-install-enabled",
+             "Off: Chronoa can search Flathub and list your apps, but cannot install "
+             "or remove one. Installs are per user and need an exact app ID.",
+             "install_app refuses while this is off"),
             ("Let Chronoa suspend, restart or shut down", "power-control-enabled",
              "Off: Chronoa cannot suspend, restart or shut down. On, restart and "
              "shut down wait one minute and can be cancelled.",

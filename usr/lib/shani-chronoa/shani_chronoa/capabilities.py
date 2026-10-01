@@ -58,6 +58,8 @@ GATED: dict[str, str] = {
     "kill_process": "process-kill-enabled",
     "close_window": "window-close-enabled",
     "power_action": "power-control-enabled",
+    "install_app": "app-install-enabled",
+    "vpn_control": "wifi-connect-enabled",
     "connect_wifi": "wifi-connect-enabled",
     "control_service": "service-control-enabled",
     "find_and_replace": "bulk-edit-enabled",
@@ -163,6 +165,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_document": ("Files", "Read a PDF or picture"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
     "edit_image": ("Files", "Resize, compress or edit a picture"),
+    "encode_text": ("Everyday tools", "Encode or decode text"),
+    "convert_color": ("Everyday tools", "Colour codes"),
+    "find_emoji": ("Everyday tools", "Find an emoji"),
+    "calendar_month": ("Time and reminders", "Month calendar"),
+    "stopwatch": ("Time and reminders", "Stopwatch"),
+    "cleanup_report": ("Files", "What could be cleaned up"),
+    "bluetooth_devices": ("Devices", "Bluetooth devices"),
+    "vpn_control": ("System", "VPN connections"),
+    "tailscale_status": ("System", "Tailscale"),
+    "install_app": ("Apps", "Install and remove apps"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
@@ -242,6 +254,7 @@ GATE_NAMES: dict[str, str] = {
     "process-kill-enabled": "Let Chronoa stop processes",
     "window-close-enabled": "Let Chronoa close windows",
     "power-control-enabled": "Let Chronoa suspend, restart or shut down",
+    "app-install-enabled": "Let Chronoa install and remove apps",
     "wifi-connect-enabled": "Let Chronoa change WiFi",
     "service-control-enabled": "Let Chronoa change system services",
     "bulk-edit-enabled": "Let Chronoa edit many files at once",
@@ -369,6 +382,9 @@ _EXAMPLES: dict[str, str] = {
     "accessibility": "Turn on the screen reader",
     "date_math": "How many days until 25 December?",
     "random_pick": "Flip a coin",
+    "find_emoji": "Emoji for a red heart",
+    "bluetooth_devices": "Connect my headphones",
+    "cleanup_report": "What can I clean up to free space?",
     "do_not_disturb": "Turn on Do Not Disturb",
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
@@ -503,6 +519,7 @@ READ_ONLY_TOOLS = frozenset({
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
     "date_math", "random_pick", "my_ip_address", "read_document",
+    "encode_text", "convert_color", "calendar_month", "cleanup_report", "tailscale_status",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -537,6 +554,7 @@ MUTATING_TOOLS = frozenset({
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
     "generate_password", "do_not_disturb", "convert_media", "edit_image",
+    "find_emoji", "stopwatch", "bluetooth_devices",
 })
 
 #: Tools that reach outside this machine.

@@ -49,6 +49,7 @@ CONTROLLED = {
     "process-kill-enabled",
     "window-close-enabled",
     "power-control-enabled",
+    "app-install-enabled",
     "wifi-connect-enabled",
     "service-control-enabled",
     "bulk-edit-enabled",
