@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # raised PermissionError on a real, unprivileged install). Use the same
 # per-user XDG data location the sandbox executor already uses for its
 # own state (~/.local/share/shani-chronoa/...).
-LOG_DIR = Path(os.path.expanduser("~/.local/share/shani-chronoa/logs"))
+LOG_DIR = files.data_home() / "shani-chronoa" / "logs"
 LOG_FILE = LOG_DIR / "tool_calls.log"
 
 # Who asked for this call. The audit trail's whole point for the trigger

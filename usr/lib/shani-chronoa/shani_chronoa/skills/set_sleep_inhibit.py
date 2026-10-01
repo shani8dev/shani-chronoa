@@ -70,6 +70,7 @@ from pathlib import Path
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import files
 
 _CONSENT_KEY = "sleep-inhibit-enabled"
 _TIMEOUT = 20
@@ -99,7 +100,7 @@ _WHO = "Shani Chronoa"
 #: skill is reached through several processes - the assistant, the MCP server, the settings
 #: window - and a global would be a hold that release could not see from another one.
 _STATE_FILE = Path(
-    os.path.expanduser("~/.local/share/shani-chronoa/sleep-inhibit.json"))
+    files.data_home() / "shani-chronoa" / "sleep-inhibit.json")
 
 
 def _sanitize_reason(reason: str) -> str:

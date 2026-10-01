@@ -86,6 +86,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 # Total serialized size of one call's arguments above which the inline JSON
@@ -110,7 +112,7 @@ MAX_INLINE_VALUE_BYTES = 32 * 1024
 # levels `--ro-bind / /` and then `--tmpfs /tmp`, so an envelope under `/tmp`
 # would not exist at all for a sandboxed skill, while a path under the user's
 # own data dir is visible in every level.
-_ARGFILE_ROOT = Path(os.path.expanduser("~/.local/share/shani-chronoa/argfiles"))
+_ARGFILE_ROOT = files.data_home() / "shani-chronoa" / "argfiles"
 
 # The envelope's own key names. Both are reserved: a value carrying either is
 # escaped, so a model cannot forge either one.

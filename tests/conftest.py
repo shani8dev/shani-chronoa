@@ -326,3 +326,37 @@ def _isolate_percept_store(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(store, "PERCEPT_DIR", percept_dir, raising=False)
     monkeypatch.setattr(store, "DURABLE_FILE", percept_dir / "memory.jsonl", raising=False)
     monkeypatch.setattr(store, "LIVE_FILE", percept_dir / "live.json", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
+    """Point every XDG data path at a temp dir, so the suite is self-consistent.
+
+    Seven modules resolved their persisted paths from a hardcoded
+    `~/.local/share` and have just been changed to honour `$XDG_DATA_HOME`. Two
+    tests then failed, and both were the tests being wrong rather than the
+    change: they set a fake `$HOME` and asserted against `<home>/.local/share`,
+    which is only where the files landed while nothing consulted the variable.
+    A developer running the suite with `XDG_DATA_HOME` set - the documented way
+    to sandbox a run - got a red suite from correct code.
+
+    Redirecting the variable is the honest repair rather than weakening either
+    assertion. These constants are captured at *import*, before any fixture
+    runs, so monkeypatching the module attribute is what actually moves them;
+    setting the variable alone would arrive too late, which is the same trap
+    `_isolate_trigger_rule_store` above documents.
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg-data")))
+    for module_name, attribute in (
+        ("shani_chronoa.senses.store", "PERCEPT_DIR"),
+        ("shani_chronoa.tool_tracking", "LOG_DIR"),
+        ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
+        ("shani_chronoa.sessions", "SESSION_DIR"),
+        ("shani_chronoa.skills.add_reminder", "_STORE"),
+        ("shani_chronoa.skills.set_sleep_inhibit", "STATE_FILE"),
+    ):
+        module = pytest.importorskip(module_name)
+        if hasattr(module, attribute):
+            monkeypatch.setattr(
+                module, attribute, tmp_path_factory.mktemp("xdg") / "state", raising=False
+            )

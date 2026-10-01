@@ -37,9 +37,11 @@ import os
 from pathlib import Path
 from typing import Iterator, List, Optional
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
-SESSION_DIR = Path(os.path.expanduser("~/.local/share/shani-chronoa/sessions"))
+SESSION_DIR = files.data_home() / "shani-chronoa" / "sessions"
 #: One file, holding the most recent conversation. A single assistant on one
 #: machine is one conversation; a per-id scheme would be scaffolding for a
 #: multi-session feature that does not exist yet.

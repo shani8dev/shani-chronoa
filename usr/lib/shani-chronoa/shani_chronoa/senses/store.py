@@ -56,7 +56,7 @@ from shani_chronoa.senses import CONFIDENCE_UNSTATED, Percept
 logger = logging.getLogger(__name__)
 
 PERCEPT_DIR = Path(
-    os.path.expanduser("~/.local/share/shani-chronoa/percepts")
+    files.data_home() / "shani-chronoa" / "percepts"
 )
 DURABLE_FILE = PERCEPT_DIR / "memory.jsonl"
 

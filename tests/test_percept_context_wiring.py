@@ -327,9 +327,16 @@ class TestTheCliAndTheAssistantShareOneStore:
         # it at the same place the child will write. Same file, both sides.
         monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
         monkeypatch.setenv(
-            "PYTHONPATH", os.pathsep.join([str(PKG_DIR), USER_SITE_PACKAGES])
-        )
-        durable = Path(os.environ["HOME"]) / ".local/share/shani-chronoa/percepts/memory.jsonl"
+            "PYTHONPATH", os.pathsep.join([str(PKG_DIR), USER_SITE_PACKAGES]))
+        # Same file, both sides. The launcher resolves its store from
+        # `$XDG_DATA_HOME` and this process holds it as an import-time constant,
+        # so the variable decides where the child writes and the patch decides
+        # where this process reads - and the two only agree if both are derived
+        # from the same directory. Deriving this one from `$HOME` instead split
+        # them the moment the store learned to honour XDG, which is the whole
+        # point of the test: what crossed the process boundary.
+        monkeypatch.setenv("XDG_DATA_HOME", str(Path(os.environ["HOME"]) / ".local" / "share"))
+        durable = Path(os.environ["XDG_DATA_HOME"]) / "shani-chronoa" / "percepts" / "memory.jsonl"
         monkeypatch.setattr(store_mod, "DURABLE_FILE", durable)
 
         # When: the user remembers something out-of-band

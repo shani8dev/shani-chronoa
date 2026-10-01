@@ -122,6 +122,42 @@ def human_size(num_bytes: float) -> str:
     return f"{value:.1f} TiB"  # pragma: no cover - loop always returns above
 
 
+def data_home() -> Path:
+    """`$XDG_DATA_HOME`, or `~/.local/share` when unset, empty or relative.
+
+    Resolved per call and never at import, which is the whole point. Three
+    modules already worked this out separately - `egress.py`, `compression.py`
+    and `skills/timer.py` - and this is the fourth thing they all say in prose:
+    a path built from a hardcoded `~/.local/share` gives a test no way to
+    relocate the data, and the documented way to sandbox a run is the XDG
+    variable. `egress.py` recorded the cost in incident terms, a suite run with
+    only `XDG_STATE_HOME` redirected still appended every fixture record to the
+    real user's audit log.
+
+    A relative value counts as unset, per the spec: `XDG_DATA_HOME=""` is a
+    common way to end up resolving against the working directory, and state
+    written relative to the CWD is untraceable and missed by any test looking
+    for it.
+
+    Import-time capture is the subtler version of the same bug, and it is why
+    this is a function. A module is imported once per process while the
+    environment it read is not, so a module constant would make the answer
+    depend on collection order.
+    """
+    configured = os.environ.get("XDG_DATA_HOME", "")
+    if configured and os.path.isabs(configured):
+        return Path(configured)
+    return Path.home() / ".local" / "share"
+
+
+def state_home() -> Path:
+    """`$XDG_STATE_HOME`, or `~/.local/state`; same reasoning as `data_home`."""
+    configured = os.environ.get("XDG_STATE_HOME", "")
+    if configured and os.path.isabs(configured):
+        return Path(configured)
+    return Path.home() / ".local" / "state"
+
+
 def ensure_private_dir(path: Path) -> None:
     """Create `path` (and its parents) and make it owner-only.
 

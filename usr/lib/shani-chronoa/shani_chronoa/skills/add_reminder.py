@@ -26,7 +26,7 @@ from pathlib import Path
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
-_STORE = Path(os.path.expanduser("~/.local/share/shani-chronoa/reminders.jsonl"))
+_STORE = files.data_home() / "shani-chronoa" / "reminders.jsonl"
 _MAX_CHARS = 500
 
 SCHEMA = {

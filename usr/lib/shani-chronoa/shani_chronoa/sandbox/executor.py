@@ -773,7 +773,7 @@ class SandboxExecutor:
     """Executes commands adhering to fine-grained SandboxLevel configurations."""
 
     def __init__(self, sandboxes_root: str | None = None) -> None:
-        self.sandboxes_root = sandboxes_root or os.path.expanduser("~/.local/share/shani-chronoa/sandboxes")
+        self.sandboxes_root = sandboxes_root or files.data_home() / "shani-chronoa" / "sandboxes"
         # mkdir then chmod, not mkdir(mode=...): the mode argument is masked by
         # the process umask and lands permissive without error. Measured at umask
         # 002 this was 0775, putting the exec'd Landlock wrapper within reach of
