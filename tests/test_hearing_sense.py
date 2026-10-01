@@ -105,18 +105,23 @@ def _fake_stt(
     binary=None,
     model=None,
 ):
-    """Replace `WhisperSTT` with a recording stand-in. Returns its constructor log.
+    """Replace the STT factory with a recording stand-in. Returns its constructor log.
 
     `binary`/`model` default to a real file that exists, so the default
     stand-in is a *working* STT; pass a path under `/nonexistent` to simulate
     each missing capability separately.
+
+    Patched at `stt.build_stt` rather than at a backend class, because that is
+    the seam `hearing.build_stt` now goes through - a patch on a class the
+    module no longer names would stop applying and the tests would go on
+    exercising the real thing.
     """
     constructed: list = []
     binary_path = __file__ if binary is None else binary
     model_file = __file__ if model is None else model
 
     class _STT:
-        def __init__(self, model="base", whisper_path=None, language="en"):
+        def __init__(self, model="base", language="en", backend=""):
             self.model = model
             self.language = language
             self.whisper_path = binary_path
@@ -133,7 +138,10 @@ def _fake_stt(
                 raise raises
             return text
 
-    monkeypatch.setattr(hearing_mod, "WhisperSTT", _STT)
+    monkeypatch.setattr(
+        hearing_mod.stt, "build_stt",
+        lambda model, language="en", backend="": _STT(model, language, backend),
+    )
     return constructed
 
 

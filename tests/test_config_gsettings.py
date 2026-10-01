@@ -133,7 +133,7 @@ class TestHardwareProfileOverride:
         stubbed_app.hardware = hw
         # When: components are initialized
         with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls, \
-             patch("shani_chronoa.app.WhisperSTT") as mock_stt_cls:
+             patch("shani_chronoa.stt.build_stt") as mock_stt_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             model = mock_llm_cls.call_args.kwargs["model"]

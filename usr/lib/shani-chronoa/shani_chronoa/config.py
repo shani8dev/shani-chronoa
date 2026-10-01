@@ -603,8 +603,25 @@ class ChronoaConfig:
 
         Same reasoning as `model` above - was never actually read by
         `_init_components`, which always used `HardwareProfile.get_whisper_model()`.
+
+        The name is kept even though the value is now backend-dependent: it is
+        the model *tier*, and `stt.build_stt` passes it to whichever backend
+        `stt_backend` selects. Renaming it would ungrant every existing user's
+        override, which is the permission-revocation-in-a-refactor's-clothes
+        mistake this repo records for the retired sense consent keys.
         """
         return self.get("whisper-model", "")
+
+    @property
+    def stt_backend(self) -> str:
+        """Which local speech-to-text engine to use.
+
+        `"whisper"` (the default, and the only value that existed before
+        Parakeet) or `"parakeet"`. Anything blank or unrecognised is passed
+        through to `stt.build_stt`, which falls back to whisper and logs - so
+        a bad value degrades to today's behaviour rather than to no speech.
+        """
+        return self.get("stt-backend", "whisper")
 
     @property
     def piper_voice(self) -> str:

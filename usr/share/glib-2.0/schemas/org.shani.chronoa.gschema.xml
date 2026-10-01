@@ -31,6 +31,11 @@
       <summary>Whisper.cpp model override</summary>
       <description>The whisper.cpp model to use for transcription. Empty means auto-select based on hardware capabilities; set explicitly (e.g. "tiny", "base", "medium") to override.</description>
     </key>
+    <key name="stt-backend" type="s">
+      <default>'whisper'</default>
+      <summary>Local speech-to-text engine</summary>
+      <description>Which local engine transcribes: "whisper" (whisper.cpp, the default and the behaviour that predates this key) or "parakeet" (NVIDIA Parakeet TDT via the same whisper-cpp package). Any other value falls back to whisper with a log line rather than failing. Applies to offline transcription only - Parakeet's streaming variant is deliberately not offered, because its licence is unresolved. Read by `stt.build_stt`, which is the single place that chooses a backend.</description>
+    </key>
     <key name="piper-voice" type="s">
       <default>'en_US-lessac-medium'</default>
       <summary>Piper TTS voice to use</summary>

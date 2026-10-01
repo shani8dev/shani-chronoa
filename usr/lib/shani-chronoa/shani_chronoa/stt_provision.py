@@ -52,6 +52,8 @@ logger = logging.getLogger(__name__)
 # content-addressed CDN host, so the redirect walk below re-checks each hop.
 _BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
 
+PARAKEET_BASE_URL = "https://huggingface.co/ggml-org/parakeet-GGUF/resolve/main"
+
 _USER_AGENT = "shani-chronoa/0.1 (STT model provisioning)"
 
 # A model is a few tens to a few hundred MB. 1 GiB is far above any real ggml
@@ -74,6 +76,10 @@ class ModelSpec:
     size_bytes: int
     sha256: str
     note: str = ""
+    #: Empty means `_BASE_URL`. Set only where a model lives in a different
+    #: repository, which is the whole reason Parakeet is a separate table
+    #: rather than three more entries in `MODELS`.
+    base_url: str = ""
 
 
 # Sizes are the HF LFS `size` for each blob; digests are the same field's
@@ -103,6 +109,38 @@ MODELS: Dict[str, ModelSpec] = {
 
 DEFAULT_MODEL = "base-q5_1"
 
+# Parakeet (NVIDIA TDT v3) is the second backend, from `stt_parakeet.py`. It is
+# served from a different repository, so it cannot join `MODELS` above without
+# that dict's URL becoming per-spec - and the download, consent gating and
+# digest verification are shared, not reimplemented.
+#
+# Sizes are the HF LFS `size` and digests the same field's `sha256`, read from
+# the HuggingFace LFS API for `ggml-org/parakeet-GGUF`. Only q4_0 and q8_0 are
+# offered: the f16 build is 1.26 GB and f32 2.51 GB, which is not something to
+# pull on a first utterance, and nothing here needs more precision than that.
+PARAKEET_MODELS: Dict[str, ModelSpec] = {
+    spec.key: spec
+    for spec in (
+        ModelSpec(
+            "parakeet-q4_0", "ggml-parakeet-tdt-0.6b-v3-q4_0.bin", 355_615_679,
+            "aa7fe2f5fb47d863ca23e8b1d490632d63a2599f515268b6d6bd656158dad45e",
+            "smallest; the default balance", PARAKEET_BASE_URL,
+        ),
+        ModelSpec(
+            "parakeet-q8_0", "ggml-parakeet-tdt-0.6b-v3-q8_0.bin", 668_757_119,
+            "4d64e9e96c2792186d072fde0034df0ad670cf680a2f53069052ead827fd600e",
+            "more accurate, ~2x the download", PARAKEET_BASE_URL,
+        ),
+    )
+}
+
+PARAKEET_DEFAULT_MODEL = "parakeet-q4_0"
+
+# `ParakeetSTT`'s default model is the bare `tdt-0.6b-v3`; the quantized
+# filenames above are what this backend downloads. Mapping one onto the other
+# is what stops the provisioner writing a file the reader never looks for.
+PARAKEET_MODEL_STEM = "tdt-0.6b-v3"
+
 # `HardwareProfile.get_whisper_model()` returns bare tier names ("tiny",
 # "base", "medium"); `stt.py` looks for `ggml-<tier>.bin` and then the
 # quantized spellings. This maps a tier onto the small file we would actually
@@ -121,6 +159,12 @@ def resolve_key(name: str) -> str:
 # distro-packaged one. This module must not invent a third location, or a model
 # written here would be invisible to the code that reads it.
 _SYSTEM_DIR = Path("/usr/share/whisper/models")
+
+# The same two directories for the Parakeet backend, matching
+# `stt_parakeet.py`'s `_get_model_path`. Separate because the two backends'
+# models are different files with different names; one shared list would let a
+# whisper lookup resolve into the parakeet directory.
+_PARAKEET_SYSTEM_DIR = Path("/usr/share/parakeet/models")
 
 
 class ProvisionError(Exception):
@@ -160,6 +204,51 @@ def is_provisioned(key: str = DEFAULT_MODEL) -> bool:
         return model_path(key).is_file()
     except ProvisionError:
         return False
+
+
+def parakeet_model_dir() -> Path:
+    """The user Parakeet model directory - the one `stt_parakeet.py` reads."""
+    return files.data_home() / "parakeet" / "models"
+
+
+def parakeet_model_path(key: str = PARAKEET_DEFAULT_MODEL) -> Path:
+    """Where the Parakeet `key` lives, or would live.
+
+    Mirrors `model_path` for the Parakeet backend, including its preference
+    for the user's directory, for the same reason: writing where the reader
+    looks is what makes `ParakeetSTT.is_available()` true.
+    """
+    spec = _parakeet_spec(key)
+    user = parakeet_model_dir() / spec.filename
+    if user.exists():
+        return user
+    return _PARAKEET_SYSTEM_DIR / spec.filename
+
+
+def is_parakeet_provisioned(key: str = PARAKEET_DEFAULT_MODEL) -> bool:
+    """Whether a Parakeet model file exists - the user's or the distro's."""
+    try:
+        return parakeet_model_path(key).is_file()
+    except ProvisionError:
+        return False
+
+
+def _parakeet_spec(key: str) -> ModelSpec:
+    """Resolve a Parakeet key, accepting the bare model stem `stt.py` uses.
+
+    `ParakeetSTT` searches for `ggml-parakeet-<stem>[-qN].bin`, so a caller that
+    passes `stt.build_stt`'s model through unchanged must still land on a
+    provisionable key rather than an error naming two unrelated models.
+    """
+    spec = PARAKEET_MODELS.get(key)
+    if spec is None and key in (PARAKEET_MODEL_STEM, ""):
+        spec = PARAKEET_MODELS[PARAKEET_DEFAULT_MODEL]
+    if spec is None:
+        raise ProvisionError(
+            f"there is no provisionable Parakeet model called {key!r}; "
+            f"choose one of {', '.join(sorted(PARAKEET_MODELS))}"
+        )
+    return spec
 
 
 def _spec(key: str) -> ModelSpec:
@@ -207,31 +296,88 @@ def provision(
     `transport` exists for tests; production callers leave it None.
     """
     key = resolve_key(key)
-    spec = _spec(key)
+    return _install(
+        _spec(key),
+        user_dir=model_dir(),
+        system_dir=_SYSTEM_DIR,
+        existing=_existing(key, model_path),
+        config=config,
+        progress=progress,
+        transport=transport,
+    )
 
-    # Read from wherever `stt.py` would, but always WRITE to the user's own
-    # directory: `model_path` falls back to /usr/share when the user has no
-    # copy, and installing there would need root and would put a per-user
-    # download into a system location. `stt.py` prefers the user directory, so
-    # writing there is what makes `is_available()` true with no change to it.
-    destination = model_dir() / spec.filename
-    if model_path(key).is_file():
-        logger.info("STT model %s is already present at %s", spec.key, model_path(key))
-        return model_path(key)
+
+def provision_parakeet(
+    key: str = PARAKEET_DEFAULT_MODEL,
+    *,
+    config=None,
+    progress: Optional[Callable[[int, int], None]] = None,
+    transport=None,
+) -> Path:
+    """Fetch and verify the Parakeet `key`, then return where it now lives.
+
+    `provision` verbatim with a different spec table, directory and host. The
+    verification is deliberately *not* a second implementation: consent gating,
+    the size check, the digest check, the private temp and the atomic rename all
+    live in `_install`, so a Parakeet download is refused by exactly the same
+    rules as a whisper one. A backend that skipped verification would be a
+    security regression, and a copy of this function is how that would happen.
+    """
+    return _install(
+        _parakeet_spec(key),
+        user_dir=parakeet_model_dir(),
+        system_dir=_PARAKEET_SYSTEM_DIR,
+        existing=_existing(key, parakeet_model_path),
+        config=config,
+        progress=progress,
+        transport=transport,
+    )
+
+
+def _existing(key, resolve) -> Optional[Path]:
+    """Where `key` already is, or None. Read-only; `_install` writes the rest."""
+    found = resolve(key)
+    if found.is_file():
+        logger.info("STT model %s is already present at %s", key, found)
+        return found
+    return None
+
+
+def _install(
+    spec: ModelSpec,
+    *,
+    user_dir: Path,
+    system_dir: Path,
+    existing: Optional[Path],
+    config=None,
+    progress: Optional[Callable[[int, int], None]] = None,
+    transport=None,
+) -> Path:
+    """The shared body of `provision` and `provision_parakeet`.
+
+    Reads from wherever the reader would (`existing`, resolved by the caller
+    against this backend's own `model_path`), but always WRITES to the user's
+    directory: falling back to a system location would need root and would put
+    a per-user download into one. Both readers prefer the user directory, so
+    writing there is what makes `is_available()` true with no change to them.
+    """
+    if existing is not None:
+        return existing
+    destination = user_dir / spec.filename
 
     allowed, reason = _consent(config)
     if not allowed:
         raise ConsentRequired(
-            f"{reason} — expected it at {model_dir()} or {_SYSTEM_DIR} as "
+            f"{reason} — expected it at {user_dir} or {system_dir} as "
             f"{spec.filename}"
         )
 
-    files.ensure_private_dir(model_dir())
+    files.ensure_private_dir(user_dir)
 
     # A private temp in the *destination directory*, so the final rename stays
     # within one filesystem and is therefore atomic.
     handle, tmp_name = tempfile.mkstemp(
-        dir=str(model_dir()), prefix=f".{spec.filename}.", suffix=".part"
+        dir=str(user_dir), prefix=f".{spec.filename}.", suffix=".part"
     )
     tmp = Path(tmp_name)
     digest = hashlib.sha256()
@@ -285,7 +431,7 @@ def provision(
 
 def spec_url(spec: ModelSpec) -> str:
     """The canonical download URL for `spec`."""
-    return f"{_BASE_URL}/{spec.filename}"
+    return f"{spec.base_url or _BASE_URL}/{spec.filename}"
 
 
 def _stream(spec, progress, transport, url, digest, seen):

@@ -81,7 +81,9 @@ from typing import Optional
 from shani_chronoa.audio import AudioRecorder
 from shani_chronoa.config import ChronoaConfig, HardwareProfile
 from shani_chronoa.senses import SENSITIVITY_PRIVATE, Percept, Sense
-from shani_chronoa.stt import WhisperSTT
+from shani_chronoa import stt, stt_provision
+from shani_chronoa.stt import STT
+from shani_chronoa.stt_parakeet import ParakeetSTT
 
 logger = logging.getLogger(__name__)
 
@@ -188,35 +190,51 @@ def resolve_whisper_model(config: ChronoaConfig) -> str:
         return "base"
 
 
-def build_stt(config: Optional[ChronoaConfig] = None) -> WhisperSTT:
+def build_stt(config: Optional[ChronoaConfig] = None) -> STT:
     """Construct the STT this sense transcribes with.
 
-    A real `WhisperSTT` either way; `is_available()` is the honest question
-    about whether it can actually run, and answering it with a fabricated
-    object would just move the failure somewhere less obvious.
+    A real STT object either way; `is_available()` is the honest question about
+    whether it can actually run, and answering it with a fabricated object
+    would just move the failure somewhere less obvious.
+
+    Goes through `stt.build_stt` rather than naming a backend, so the hearing
+    sense transcribes with the engine the user actually selected. Constructing
+    `WhisperSTT` here directly would have meant the assistant's speech input
+    and this sense disagreed about what "the" backend is on any machine with
+    Parakeet selected - the two halves of one feature.
     """
     cfg = config or ChronoaConfig()
-    return WhisperSTT(model=resolve_whisper_model(cfg), language=cfg.language)
+    backend = getattr(cfg, "stt_backend", "whisper")
+    if backend == "parakeet":
+        model = stt_provision.PARAKEET_DEFAULT_MODEL
+    else:
+        model = resolve_whisper_model(cfg)
+    return stt.build_stt(model=model, language=cfg.language, backend=backend)
 
 
-def stt_problem(stt: WhisperSTT) -> str:
+def stt_problem(engine_stt: STT) -> str:
     """Why this STT cannot transcribe, or '' if it can.
 
-    `WhisperSTT.is_available()` is a single boolean over two independent
-    causes - no whisper.cpp binary, or no downloaded model - and the two have
-    completely different fixes. Collapsing them into one "unavailable" is how
-    a user ends up reinstalling whisper-cpp on a machine that already has it
-    and never downloads the model. Checks the same two paths the boolean does.
+    `is_available()` is a single boolean over two independent causes - no
+    engine binary, or no downloaded model - and the two have completely
+    different fixes. Collapsing them into one "unavailable" is how a user ends
+    up reinstalling whisper-cpp on a machine that already has it and never
+    downloads the model. Checks the same two paths the boolean does.
+
+    The parameter is not named `stt` because that is the module imported at the
+    top of this file, and shadowing it inside a function that reasons about
+    engines is the kind of quiet trap this repo keeps paying for.
     """
-    if not stt.whisper_path or not os.path.exists(stt.whisper_path):
+    engine = "parakeet-cli" if isinstance(engine_stt, ParakeetSTT) else "whisper.cpp"
+    if not engine_stt.whisper_path or not os.path.exists(engine_stt.whisper_path):
         return (
-            "whisper.cpp is not installed (Arch: 'whisper-cpp'; "
+            f"{engine} is not installed (Arch: 'whisper-cpp'; "
             "Debian: 'whisper-cpp')"
         )
-    if not stt.model_path or not os.path.exists(stt.model_path):
+    if not engine_stt.model_path or not os.path.exists(engine_stt.model_path):
         return (
-            f"the whisper.cpp model {os.path.basename(stt.model_path or '')} "
-            f"is not downloaded (expected at {stt.model_path})"
+            f"the {engine} model {os.path.basename(engine_stt.model_path or '')} "
+            f"is not downloaded (expected at {engine_stt.model_path})"
         )
     return ""
 
@@ -264,30 +282,31 @@ def capture_utterance(recorder: AudioRecorder, max_seconds: float, silence_secon
     return captured[0]
 
 
-def transcribe(stt: WhisperSTT, audio_path: str) -> str:
+def transcribe(engine_stt: STT, audio_path: str) -> str:
     """Transcribe one recording, raising `HearingError` with a readable reason.
 
-    `WhisperSTT.transcribe` already swallows its own subprocess failures and
-    returns "", and raises `FileNotFoundError` for a missing file or model.
-    Both become reasons here, so the caller never has to distinguish "the
-    model vanished between the check and the call" from "whisper produced no
-    text", and neither reaches the user as a traceback.
+    `STT.transcribe` already swallows its own subprocess failures and returns
+    "", and raises `FileNotFoundError` for a missing file or model. Both become
+    reasons here, so the caller never has to distinguish "the model vanished
+    between the check and the call" from "the engine produced no text", and
+    neither reaches the user as a traceback.
     """
+    engine = "parakeet-cli" if isinstance(engine_stt, ParakeetSTT) else "whisper.cpp"
     try:
-        text = stt.transcribe(audio_path)
+        text = engine_stt.transcribe(audio_path)
     except FileNotFoundError as e:
         raise HearingError(str(e)) from e
     except Exception as e:  # noqa: BLE001 - one bad recording must not raise out of a sense
-        raise HearingError(f"whisper.cpp could not transcribe the recording: {e}") from e
+        raise HearingError(f"{engine} could not transcribe the recording: {e}") from e
     text = (text or "").strip()
     if not text:
-        raise HearingError("whisper.cpp transcribed the recording to nothing")
+        raise HearingError(f"{engine} transcribed the recording to nothing")
     return text
 
 
 def _transcript_percept(
     text: str,
-    stt: WhisperSTT,
+    engine_stt: STT,
     max_seconds: float,
     silence_seconds: float,
 ) -> Percept:
@@ -311,8 +330,8 @@ def _transcript_percept(
         source=SOURCE,
         sensitivity=SENSITIVITY_PRIVATE,
         metadata={
-            "model": stt.model,
-            "language": stt.language,
+            "model": engine_stt.model,
+            "language": engine_stt.language,
             "max_seconds": max_seconds,
             "silence_seconds": silence_seconds,
             "chars_dropped": dropped,
@@ -348,8 +367,8 @@ def run(arguments: dict) -> "str | Percept":
                 "(Arch/Debian: 'pipewire-audio' for pw-record, or 'alsa-utils' for arecord)"
             )
 
-        stt = build_stt(config)
-        problem = stt_problem(stt)
+        engine_stt = build_stt(config)
+        problem = stt_problem(engine_stt)
         if problem:
             return _refusal(problem)
 
@@ -365,7 +384,7 @@ def run(arguments: dict) -> "str | Percept":
             return _refusal("no speech was detected during the capture")
 
         try:
-            text = transcribe(stt, audio_path)
+            text = transcribe(engine_stt, audio_path)
         except HearingError as e:
             return _refusal(str(e))
         finally:
@@ -377,7 +396,7 @@ def run(arguments: dict) -> "str | Percept":
             except OSError as e:
                 logger.warning("Could not remove the captured recording %s: %s", audio_path, e)
 
-        return _transcript_percept(text, stt, max_seconds, silence_seconds)
+        return _transcript_percept(text, engine_stt, max_seconds, silence_seconds)
     finally:
         _CAPTURE_LOCK.release()
 

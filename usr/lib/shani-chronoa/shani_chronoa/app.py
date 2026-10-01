@@ -28,8 +28,8 @@ from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
 from shani_chronoa import markdown_lite, pipewire, planmode, sessions, ask_bridge
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
-from shani_chronoa.stt import WhisperSTT
-from shani_chronoa import stt_provision
+from shani_chronoa import stt, stt_provision
+from shani_chronoa.stt import STT
 from shani_chronoa.llm import OllamaLLM
 from shani_chronoa.cloud_llm import CloudLLMChain, DEFAULT_PROVIDER_ORDER, BYOK_PROVIDER_ORDER
 from shani_chronoa.secrets_manager import secrets_manager
@@ -56,7 +56,7 @@ class ChronoaApplication(Gtk.Application):
         self.config = ChronoaConfig()
         self.hardware = HardwareProfile()
         self.privacy = PrivacyManager(self.config)
-        self.stt: Optional[WhisperSTT] = None
+        self.stt: Optional[STT] = None
         self.llm: Optional[Union[OllamaLLM, CloudLLMChain]] = None
         self.tts: Optional[PiperTTS] = None
         self.assistant: Optional[Assistant] = None
@@ -221,6 +221,37 @@ class ChronoaApplication(Gtk.Application):
         self.activate()
         return 0
 
+    def _stt_backend(self) -> str:
+        """The configured STT backend, tolerating a config without the key.
+
+        `stubbed_app`-style configs and any older caller that predates the
+        `stt-backend` gsetting have no such attribute. `getattr` rather than
+        `self.config.stt_backend` because a missing key must mean "the
+        behaviour that predates it", never an AttributeError at startup.
+        """
+        return getattr(self.config, "stt_backend", "whisper") or "whisper"
+
+    def _stt_backend_label(self) -> str:
+        """A human name for the backend, for status text and log lines."""
+        return "Parakeet" if self._stt_backend() == stt.BACKEND_PARAKEET \
+            else "Whisper.cpp"
+
+    def _build_stt(self):
+        """Construct the STT for the configured backend.
+
+        The single place a backend is chosen, shared by startup and by the
+        post-download rebuild - so the model a download installs is the model
+        the next utterance reads, whichever engine was selected.
+        """
+        model = self.config.whisper_model or self.hardware.get_whisper_model()
+        if self._stt_backend() == stt.BACKEND_PARAKEET:
+            model = stt_provision.PARAKEET_DEFAULT_MODEL
+        return stt.build_stt(
+            model=model,
+            language=self.config.language,
+            backend=self._stt_backend(),
+        )
+
     def _init_components(self) -> None:
         """Initialize all components based on hardware profile."""
         # Precedence: --model= CLI flag (session-only) > persisted gsetting
@@ -237,12 +268,13 @@ class ChronoaApplication(Gtk.Application):
             self.hardware.profile = persisted_profile
 
         model = self._model_override or self.config.model or self.hardware.get_model()
-        whisper_model = self.config.whisper_model or self.hardware.get_whisper_model()
 
         # Initialize STT
-        self.stt = WhisperSTT(model=whisper_model, language=self.config.language)
+        self.stt = self._build_stt()
         if not self.stt.is_available():
-            logger.warning("Whisper.cpp not available - STT disabled")
+            logger.warning(
+                "%s not available - STT disabled", self._stt_backend_label()
+            )
 
         # Initialize LLM - Ollama first, always (local-first by design).
         self.llm = OllamaLLM(
@@ -304,7 +336,13 @@ class ChronoaApplication(Gtk.Application):
 
         self._sync_autostart()
 
-        logger.info(f"Initialized: model={model}, whisper={whisper_model}, profile={self.hardware.profile}")
+        # Read the STT off the live object: the model is resolved inside
+        # `_build_stt`, and interpolating a local here instead raised
+        # UnboundLocalError, which took all of `do_startup` down with it.
+        logger.info(f"Initialized: model={model}, "
+                    f"stt={self._stt_backend_label()} "
+                    f"({getattr(self.stt, 'model', '?')}), "
+                    f"profile={self.hardware.profile}")
 
     def _create_actions(self) -> None:
         """Create application-wide actions."""
@@ -624,12 +662,19 @@ class ChronoaApplication(Gtk.Application):
                 self._set_status("A speech model is already downloading...")
                 return
 
-        model = self.config.whisper_model or self.hardware.get_whisper_model()
-        key = stt_provision.resolve_key(model)
-        if key not in stt_provision.MODELS:
+        parakeet = self._stt_backend() == stt.BACKEND_PARAKEET
+        if parakeet:
+            model = stt_provision.PARAKEET_DEFAULT_MODEL
+            key = model
+            available = stt_provision.PARAKEET_MODELS
+        else:
+            model = self.config.whisper_model or self.hardware.get_whisper_model()
+            key = stt_provision.resolve_key(model)
+            available = stt_provision.MODELS
+        if key not in available:
             self._set_status(
                 f"No downloadable build for the '{model}' model. Available: "
-                f"{', '.join(sorted(stt_provision.MODELS))}"
+                f"{', '.join(sorted(available))}"
             )
             return
         if not self.config.model_download_enabled:
@@ -651,7 +696,12 @@ class ChronoaApplication(Gtk.Application):
 
     def _fetch_speech_model_worker(self, key: str) -> None:
         try:
-            path = stt_provision.provision(key, config=self.config)
+            provision = (
+                stt_provision.provision_parakeet
+                if self._stt_backend() == stt.BACKEND_PARAKEET
+                else stt_provision.provision
+            )
+            path = provision(key, config=self.config)
         except Exception as exc:  # noqa: BLE001 - the reason is user-facing
             GLib.idle_add(self._on_model_download_failed, str(exc))
             return
@@ -662,10 +712,7 @@ class ChronoaApplication(Gtk.Application):
         # Rebuild the STT handle so the next utterance uses the new model rather
         # than keeping the one that failed is_available() at construction.
         try:
-            self.stt = WhisperSTT(
-                model=self.config.whisper_model or self.hardware.get_whisper_model(),
-                language=self.config.language,
-            )
+            self.stt = self._build_stt()
         except Exception as exc:  # noqa: BLE001
             self._set_status(f"Downloaded, but the model could not be loaded: {exc}")
             return False

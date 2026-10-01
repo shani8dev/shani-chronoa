@@ -1,6 +1,9 @@
 """Speech-to-text module using whisper.cpp.
 
-Provides local speech recognition using whisper.cpp models.
+Provides local speech recognition using whisper.cpp models. A second backend,
+NVIDIA Parakeet through the same `whisper-cpp` package, lives in
+`stt_parakeet.py`; `build_stt` below is the one place that chooses between
+them.
 """
 
 import logging
@@ -8,11 +11,47 @@ import subprocess
 import os
 import shutil
 import tempfile
-from typing import Optional
+from typing import Optional, Union
 
 from shani_chronoa import files
 
 logger = logging.getLogger(__name__)
+
+#: The STT backends a user may select, in the spelling the `stt-backend`
+#: gsetting uses. Anything else falls back to whisper.
+BACKEND_WHISPER = "whisper"
+BACKEND_PARAKEET = "parakeet"
+BACKENDS = (BACKEND_WHISPER, BACKEND_PARAKEET)
+
+STT = Union["WhisperSTT", "ParakeetSTT"]
+
+
+def build_stt(model: str, language: str = "en", backend: str = "") -> STT:
+    """Construct the STT for `backend`, defaulting to whisper.cpp.
+
+    `WhisperSTT` is the default and stays the fallback: this backend is opt-in
+    and a missing, blank or misspelled `stt-backend` must not change what
+    Chronoa does today. Nothing here raises - the caller gets a real object
+    either way and asks `is_available()`, which is the honest question.
+
+    The two classes are interchangeable by construction (identical public
+    surface), which is what makes this a selection rather than a branch every
+    caller has to write.
+    """
+    if (backend or "").strip().lower() == BACKEND_PARAKEET:
+        from shani_chronoa.stt_parakeet import ParakeetSTT
+        # The imported lazily and inside the branch so that importing `stt`
+        # does not drag in the Parakeet module for the default backend, and so
+        # that a broken optional dependency cannot break speech input
+        # wholesale. `stt_parakeet` imports nothing from this module, so the
+        # cycle cannot form.
+        return ParakeetSTT(model=model, language=language)
+    if backend and (backend or "").strip().lower() not in BACKENDS:
+        logger.warning(
+            "Unknown STT backend %r; using %s. Valid values: %s",
+            backend, BACKEND_WHISPER, ", ".join(BACKENDS),
+        )
+    return WhisperSTT(model=model, language=language)
 
 
 class WhisperSTT:
