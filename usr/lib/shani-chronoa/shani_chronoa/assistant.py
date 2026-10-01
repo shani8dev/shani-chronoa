@@ -34,6 +34,7 @@ from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector
 from shani_chronoa import compression, history_repair, sessions
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
+from shani_chronoa.tool_select import select_tools
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps the runtime import out
     from shani_chronoa.senses import Percept
@@ -458,13 +459,18 @@ class Assistant:
         """The tool loop itself. `handle()` owns the budget, the detectors and
         the repair-on-exit; this is the part that would otherwise be a 90-line
         `try` block wrapped around everything."""
+        # Only the schemas this request could use are sent - all 80 were
+        # ~11,800 tokens against an 8192-token window (see tool_select). Tools
+        # already called this turn stay, so a follow-up round keeps them.
+        in_use: set = set()
         for _ in range(MAX_TOOL_ROUNDS):
             over = self._over_budget(deadline)
             if over:
                 self.close_interrupted_turn("budget")
                 return over
             started = time.monotonic()
-            message = await self.llm.chat_message(self.build_messages(), tools=TOOLS)
+            sent = select_tools(text, TOOLS, in_use=in_use)
+            message = await self.llm.chat_message(self.build_messages(), tools=sent)
             self._note_model_call(time.monotonic() - started)
             self._record(message)
 
@@ -473,6 +479,7 @@ class Assistant:
                 return message.get("content", "")
 
             attempts.clear()
+            in_use.update((c.get("function") or {}).get("name", "") for c in tool_calls)
             for call in tool_calls:
                 # Checked here as well as between model calls, because a single
                 # tool call can outlast the whole budget. `ask_user` blocks for up
