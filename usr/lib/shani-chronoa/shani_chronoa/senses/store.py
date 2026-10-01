@@ -50,6 +50,7 @@ from collections import deque
 from pathlib import Path
 from typing import Iterable, Optional
 
+from shani_chronoa import files
 from shani_chronoa.senses import CONFIDENCE_UNSTATED, Percept
 
 logger = logging.getLogger(__name__)
@@ -275,10 +276,15 @@ class PerceptStore:
                     "transient": [_as_dict(p) for p in self._transient],
                     "durable_count": len(self._durable),
                 }
-                self._live_path.parent.mkdir(parents=True, exist_ok=True)
+                files.ensure_private_dir(self._live_path.parent)
                 unique = f"{os.getpid()}.{threading.get_ident()}"
                 tmp = self._live_path.with_name(f"{self._live_path.name}.{unique}.tmp")
                 tmp.write_text(json.dumps(snapshot), encoding="utf-8")
+                # On the temp only: `os.replace` carries the temp's mode across,
+                # so restricting it here is what makes the destination private.
+                # Restricting the destination before the replace would fail on a
+                # first publish, where it does not exist yet.
+                files.restrict_file(tmp)
                 os.replace(tmp, self._live_path)
         except OSError as e:
             logger.debug("Could not publish the live percept view to %s: %s",
@@ -303,9 +309,12 @@ class PerceptStore:
                 self._evict_to_capacity()
                 return
             try:
-                self._durable_path.parent.mkdir(parents=True, exist_ok=True)
+                files.ensure_private_dir(self._durable_path.parent)
+                existed = self._durable_path.exists()
                 with self._durable_path.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps(_as_dict(percept)) + "\n")
+                if not existed:
+                    files.restrict_file(self._durable_path)
             except OSError as e:
                 logger.error("Failed to persist durable percept to %s: %s", self._durable_path, e)
 
@@ -354,10 +363,11 @@ class PerceptStore:
         piggyback that keeps them from needing a write path of their own.
         """
         try:
-            self._durable_path.parent.mkdir(parents=True, exist_ok=True)
+            files.ensure_private_dir(self._durable_path.parent)
             with self._durable_path.open("w", encoding="utf-8") as handle:
                 for percept in self._durable:
                     handle.write(json.dumps(_as_dict(percept)) + "\n")
+            files.restrict_file(self._durable_path)
         except OSError as e:
             logger.error("Failed to rewrite durable percepts to %s: %s", self._durable_path, e)
 
