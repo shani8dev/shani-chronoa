@@ -536,7 +536,7 @@ MUTATING_TOOLS = frozenset({
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
-    "generate_password", "do_not_disturb", "convert_media", "power_action", "edit_image",
+    "generate_password", "do_not_disturb", "convert_media", "edit_image",
 })
 
 #: Tools that reach outside this machine.

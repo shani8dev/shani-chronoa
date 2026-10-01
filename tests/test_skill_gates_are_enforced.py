@@ -68,6 +68,7 @@ _IMPL = {
     "delete_file": "shani_chronoa.skills.delete_file",
     "kill_process": "shani_chronoa.skills.kill_process",
     "close_window": "shani_chronoa.skills.close_window",
+    "power_action": "shani_chronoa.skills.power_action",
     "connect_wifi": "shani_chronoa.skills.connect_wifi",
     # Scanning is passive but is still a radio operation, so it reuses the
     # `network` sense consent rather than minting a scanning key.

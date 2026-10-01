@@ -30,15 +30,26 @@ _SCHEMA = {
 }
 
 
+def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
+    """Whether power actions are allowed, and the refusal naming the switch if not."""
+    if not config.get_bool(_CONSENT_KEY, False):
+        return False, (f"Not done: power actions are switched off ('{_CONSENT_KEY}'). Turn on "
+                       "'Let Chronoa suspend, restart or shut down' in Settings to allow it.")
+    return True, ""
+
+
 def _run(arguments: dict) -> str:
     action = (arguments.get("action") or "").strip()
     if action not in ("suspend", "hibernate", "restart", "shutdown", "cancel"):
         return "Suspend, hibernate, restart, shutdown or cancel?"
-    if action != "cancel" and not ChronoaConfig().get_bool(_CONSENT_KEY, False):
-        return (f"Not done: power actions are switched off ('{_CONSENT_KEY}'). Turn on "
-                "'Let Chronoa suspend, restart or shut down' in Settings to allow it.")
+    if action != "cancel":
+        allowed, reason = _consent(ChronoaConfig())
+        if not allowed:
+            return reason
     try:
         if action in ("suspend", "hibernate"):
+            if not shutil.which("systemctl"):
+                return "systemctl is not available, so I cannot suspend."
             r = subprocess.run(["systemctl", action], capture_output=True, text=True, timeout=20)
             return f"{action.capitalize()}ing now." if r.returncode == 0 else \
                 f"Could not {action}: {r.stderr.strip()[:160]}"
