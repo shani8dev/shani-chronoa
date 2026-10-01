@@ -936,7 +936,10 @@ class ChronoaApplication(Gtk.Application):
             except Exception as e:  # a question that cannot be said is still on screen
                 logger.error(f"Could not speak the question: {e}")
             if self._voice_turn:
+                logger.info("Question said aloud; listening for the spoken answer")
                 GLib.idle_add(self._listen_for_answer)
+            else:
+                logger.info("Question said aloud; the turn was typed, so not opening the microphone")
 
         def wrapped(question: str, options: list):
             done = present(question, options)
@@ -946,8 +949,11 @@ class ChronoaApplication(Gtk.Application):
         return wrapped
 
     def _listen_for_answer(self) -> bool:
-        if self.window and self.window.has_pending_question() and not self._listening:
+        pending = bool(self.window and self.window.has_pending_question())
+        if pending and not self._listening:
             self._begin_listening()
+        else:
+            logger.info(f"Not listening for an answer (question open: {pending}, already listening: {self._listening})")
         return GLib.SOURCE_REMOVE
 
     def _submit(self, text: str) -> None:
