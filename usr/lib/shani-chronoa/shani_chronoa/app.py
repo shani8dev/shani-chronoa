@@ -905,10 +905,13 @@ class ChronoaApplication(Gtk.Application):
             self.window.set_state(AssistantState.THINKING)
             return GLib.SOURCE_REMOVE
         self._voice_turn = True
+        files_block = ""
         if self.window:
+            # a spoken message takes the attached files too, as a typed one does
+            names, files_block = self.window.take_attachments()
             self.window.set_state(AssistantState.THINKING)
-            self.window.add_user_turn(text)
-        self._submit(text)
+            self.window.add_user_turn(text + (("\n📎 " + ", ".join(names)) if names else ""))
+        self._submit(text + files_block)
         return GLib.SOURCE_REMOVE
 
     def _on_user_input(self, window: CajitaWindow, text: str) -> None:

@@ -53,6 +53,7 @@ class TestTheTranscriptAnswersAnOpenQuestion:
     def test_without_a_question_it_is_a_new_turn(self, stubbed_app):
         stubbed_app.window = MagicMock()
         stubbed_app.window.answer_pending_question.return_value = False
+        stubbed_app.window.take_attachments.return_value = ([], "")
         stubbed_app._submit = MagicMock()
         stubbed_app._on_transcribed("what is two plus two")
         stubbed_app._submit.assert_called_once_with("what is two plus two")

@@ -1078,9 +1078,29 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._stop_button.set_action_name("app.stop-speaking")
         self._stop_button.set_visible(False)
 
+        # Attachments: files dropped on the window or added with the paperclip
+        # go with the next message as paths (see attachments.py), shown as
+        # chips until it is sent; a chip's click removes it.
+        self._attachments: list = []
+        self._attach_bar = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                                       max_children_per_line=4, column_spacing=6, row_spacing=6)
+        self._attach_bar.set_visible(False)
+        self._attach_button = Gtk.Button()
+        self._attach_button.set_icon_name("mail-attachment-symbolic")
+        self._attach_button.add_css_class("flat")
+        self._attach_button.set_valign(Gtk.Align.CENTER)
+        self._attach_button.set_tooltip_text("Attach files (or drop them on this window)")
+        self._attach_button.update_property([Gtk.AccessibleProperty.LABEL], ["Attach files"])
+        self._attach_button.connect("clicked", lambda _b: self._pick_files())
+        drop = Gtk.DropTarget.new(Gdk.FileList, Gdk.DragAction.COPY)
+        drop.connect("drop", self._on_files_dropped)
+        self.add_controller(drop)
+
+        input_row.append(self._attach_button)
         input_row.append(self._input_entry)
         input_row.append(self._stop_button)
         input_row.append(self._send_button)
+        main_box.append(self._attach_bar)
         main_box.append(input_row)
 
     # ------------------------------------------------------------------
@@ -1215,11 +1235,69 @@ class CajitaWindow(Gtk.ApplicationWindow):
             # inside the tool waiting for exactly this.
             self._resolve_question(text)
             return
-        self.add_user_turn(text)
+        names, files_block = self.take_attachments()
+        self.add_user_turn(text + (("\n📎 " + ", ".join(names)) if names else ""))
         # The stripped text, not the raw entry contents: the turn the user can
         # see is the stripped one, and emitting the raw string meant the
-        # assistant received something the transcript never showed.
-        self.emit("user-input", text)
+        # assistant received something the transcript never showed. The one
+        # addition is the attachment block, shown above as the files' names.
+        self.emit("user-input", text + files_block)
+
+    # ------------------------------------------------------------------
+    # Attachments
+    # ------------------------------------------------------------------
+
+    def add_attachments(self, paths) -> None:
+        from shani_chronoa import attachments
+        self._attachments = attachments.accept(paths, self._attachments)
+        self._refresh_attach_bar()
+
+    def take_attachments(self):
+        """(names, block) for the message being sent, and clear the chips."""
+        from shani_chronoa import attachments
+        names, block = attachments.take(self._attachments)
+        self._attachments = []
+        self._refresh_attach_bar()
+        return names, block
+
+    def _refresh_attach_bar(self) -> None:
+        child = self._attach_bar.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self._attach_bar.remove(child)
+            child = nxt
+        for path in self._attachments:
+            chip = Gtk.Button(label=f"{path.name}  ✕")
+            chip.add_css_class("pill")
+            chip.set_tooltip_text(str(path))
+            chip.update_property([Gtk.AccessibleProperty.LABEL], [f"Remove attachment {path.name}"])
+            chip.connect("clicked", lambda _b, p=path: self._remove_attachment(p))
+            self._attach_bar.append(chip)
+        self._attach_bar.set_visible(bool(self._attachments))
+
+    def _remove_attachment(self, path) -> None:
+        self._attachments = [p for p in self._attachments if p != path]
+        self._refresh_attach_bar()
+
+    def _on_files_dropped(self, _target, value, _x, _y) -> bool:
+        try:
+            self.add_attachments(f.get_path() for f in value.get_files() if f.get_path())
+        except Exception as e:  # noqa: BLE001 - a bad drop must not break the window
+            logger.warning(f"Could not take the dropped files: {e}")
+            return False
+        return True
+
+    def _pick_files(self) -> None:
+        dialog = Gtk.FileDialog(title="Attach files", modal=True)
+
+        def done(dlg, result):
+            try:
+                chosen = dlg.open_multiple_finish(result)
+            except GLib.Error:
+                return  # cancelled
+            self.add_attachments(chosen.get_item(i).get_path() for i in range(chosen.get_n_items())
+                                 if chosen.get_item(i).get_path())
+        dialog.open_multiple(self, None, done)
 
     def show_question(self, question: str, options: list, resolve) -> None:
         """Put a question with its options on screen, resolved by `resolve`.

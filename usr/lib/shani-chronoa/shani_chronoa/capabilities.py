@@ -162,6 +162,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "do_not_disturb": ("Power and screen", "Do Not Disturb"),
     "read_document": ("Files", "Read a PDF or picture"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
+    "edit_image": ("Files", "Resize, compress or edit a picture"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
@@ -535,7 +536,7 @@ MUTATING_TOOLS = frozenset({
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
-    "generate_password", "do_not_disturb", "convert_media", "power_action",
+    "generate_password", "do_not_disturb", "convert_media", "power_action", "edit_image",
 })
 
 #: Tools that reach outside this machine.
