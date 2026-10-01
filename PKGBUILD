@@ -37,6 +37,14 @@ depends=(
     'power-profiles-daemon'
 )
 optdepends=(
+# The speech engines are optional on purpose, and the distinction is load-bearing.
+    # espeak-ng is a HARD depend below because it is the one TTS every Shanios image
+    # ships, so speech output always works. These two only improve the voice and add
+    # speech input, so neither may become a hard depend: a user without them must get a
+    # working assistant that says so, not a half-configured one whose mic cannot work.
+    'whisper-cpp: voice input (speech recognition)'
+    'rhvoice-language-english: a more natural voice than espeak-ng (needs a rhvoice-voice-* too)'
+    'rhvoice-voice-slt: an English RHVoice voice'
     'python-openwakeword: hands-free "hey chronoa" wake-word activation (AUR, not in official repos)'
     'python-numpy: required by python-openwakeword for wake-word activation'
     'python-mcp: shani-chronoa-mcp, exposes Chronoa skills as an MCP server for Claude Desktop/Claude Code/Cursor (AUR, not in official repos)'
