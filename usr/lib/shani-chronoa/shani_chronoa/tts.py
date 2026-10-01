@@ -15,6 +15,10 @@ from shani_chronoa import files
 logger = logging.getLogger(__name__)
 
 
+#: espeak-ng voice variant: female (its default for a language is male).
+ESPEAK_VARIANT = "+f3"
+
+
 class PiperTTS:
     """Text-to-speech using Piper."""
 
@@ -50,6 +54,11 @@ class PiperTTS:
         return None
 
     @staticmethod
+    def _rhvoice_voice_installed(name: str) -> bool:
+        return any(os.path.isdir(os.path.join(d, name))
+                   for d in ("/usr/share/RHVoice/voices", "/usr/local/share/RHVoice/voices"))
+
+    @staticmethod
     def _rhvoice_has_voice() -> bool:
         return any(os.path.isdir(d) and os.listdir(d)
                    for d in ("/usr/share/RHVoice/voices", "/usr/local/share/RHVoice/voices"))
@@ -65,8 +74,16 @@ class PiperTTS:
             cmd = [self.piper_path, "--model", self.voice_path, "--output_file", output_file]
         elif eng == "rhvoice":
             cmd = ["RHVoice-test", "-o", output_file]
+            # Chronoa's voice is a woman's in every engine: Piper's default
+            # (lessac) is, and SLT is the RHVoice voice the package suggests
+            # - but without -p RHVoice speaks its default English voice.
+            if self._rhvoice_voice_installed("slt"):
+                cmd += ["-p", "slt"]
         elif eng == "espeak-ng":
-            cmd = ["espeak-ng", "--stdin", "-v", self._lang(), "-w", output_file]
+            # espeak-ng's default for a language is a male voice, and it is
+            # the one engine every Shanios image ships: '+f3' is its own
+            # female variant.
+            cmd = ["espeak-ng", "--stdin", "-v", self._lang() + ESPEAK_VARIANT, "-w", output_file]
         else:
             logger.error("No speech engine: install rhvoice (+ a voice) or espeak-ng")
             return False
