@@ -48,6 +48,7 @@ CONTROLLED = {
     "file-delete-enabled",
     "process-kill-enabled",
     "window-close-enabled",
+    "power-control-enabled",
     "wifi-connect-enabled",
     "service-control-enabled",
     "bulk-edit-enabled",

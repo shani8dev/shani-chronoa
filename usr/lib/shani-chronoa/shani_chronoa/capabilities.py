@@ -57,6 +57,7 @@ GATED: dict[str, str] = {
     "delete_file": "file-delete-enabled",
     "kill_process": "process-kill-enabled",
     "close_window": "window-close-enabled",
+    "power_action": "power-control-enabled",
     "connect_wifi": "wifi-connect-enabled",
     "control_service": "service-control-enabled",
     "find_and_replace": "bulk-edit-enabled",
@@ -154,6 +155,14 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "check_internet": ("System", "Is the internet working?"),
     "data_usage": ("System", "Data used"),
     "accessibility": ("Appearance", "Accessibility features"),
+    "date_math": ("Time and reminders", "Date arithmetic"),
+    "random_pick": ("Everyday tools", "Coin, dice and random picks"),
+    "generate_password": ("Everyday tools", "Make a password"),
+    "my_ip_address": ("System", "IP address"),
+    "do_not_disturb": ("Power and screen", "Do Not Disturb"),
+    "read_document": ("Files", "Read a PDF or picture"),
+    "convert_media": ("Files", "Convert audio, video and pictures"),
+    "power_action": ("Power and screen", "Suspend, restart or shut down"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
@@ -231,6 +240,7 @@ GATE_NAMES: dict[str, str] = {
     "file-delete-enabled": "Let Chronoa delete files",
     "process-kill-enabled": "Let Chronoa stop processes",
     "window-close-enabled": "Let Chronoa close windows",
+    "power-control-enabled": "Let Chronoa suspend, restart or shut down",
     "wifi-connect-enabled": "Let Chronoa change WiFi",
     "service-control-enabled": "Let Chronoa change system services",
     "bulk-edit-enabled": "Let Chronoa edit many files at once",
@@ -356,6 +366,9 @@ _EXAMPLES: dict[str, str] = {
     "spell_word": "How do you spell necessary?",
     "check_internet": "Is my internet working?",
     "accessibility": "Turn on the screen reader",
+    "date_math": "How many days until 25 December?",
+    "random_pick": "Flip a coin",
+    "do_not_disturb": "Turn on Do Not Disturb",
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
@@ -461,6 +474,7 @@ def capability_for(capabilities: list[Capability], tool: str) -> Capability | No
 #: dismiss the ones that matter.
 DESTRUCTIVE_CONSENT_KEYS = frozenset({
     "file-delete-enabled",
+    "power-control-enabled",
     "process-kill-enabled",
     "window-close-enabled",
     "service-control-enabled",
@@ -487,6 +501,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
+    "date_math", "random_pick", "my_ip_address", "read_document",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -520,6 +535,7 @@ MUTATING_TOOLS = frozenset({
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
+    "generate_password", "do_not_disturb", "convert_media", "power_action",
 })
 
 #: Tools that reach outside this machine.

@@ -984,6 +984,10 @@ class SettingsWindow(Gtk.Window):
              "Off: Chronoa can list running processes but cannot stop one. A "
              "wrong process id can take down unsaved work.",
              "kill_process refuses while this is off"),
+            ("Let Chronoa suspend, restart or shut down", "power-control-enabled",
+             "Off: Chronoa cannot suspend, restart or shut down. On, restart and "
+             "shut down wait one minute and can be cancelled.",
+             "power_action refuses while this is off"),
             ("Let Chronoa close windows", "window-close-enabled",
              "Off: Chronoa can list and focus windows but cannot ask one to "
              "close, which can discard unsaved work.",

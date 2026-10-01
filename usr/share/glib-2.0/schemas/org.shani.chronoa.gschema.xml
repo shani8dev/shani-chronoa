@@ -491,6 +491,11 @@
       <summary>Let Chronoa stop processes</summary>
       <description>When true, Chronoa may send a stop or kill signal to a running process. Off by default. A wrong process id can take down unsaved work, and Chronoa cannot tell an unsaved document from a saved one.</description>
     </key>
+    <key name="power-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa suspend, restart or shut down</summary>
+      <description>When true, Chronoa may suspend, hibernate, restart or shut down this computer when asked. Off by default. Restart and shut down are scheduled one minute ahead and can be cancelled ("cancel the shutdown"), because a misheard request must be undoable; suspend and hibernate lose nothing and happen at once.</description>
+    </key>
     <key name="window-close-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa close windows</summary>
