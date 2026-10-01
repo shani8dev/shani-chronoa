@@ -3,6 +3,7 @@
 Provides local LLM inference through the Ollama API.
 """
 
+import asyncio
 import logging
 import httpx
 import json
@@ -26,14 +27,24 @@ class OllamaLLM:
         self.model = model
         self.context_window = context_window
         self.client: Optional[httpx.AsyncClient] = None
+        self._client_loop = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the HTTP client."""
-        if self.client is None or self.client.is_closed:
+        """Get or create the HTTP client - one per event loop.
+
+        An AsyncClient is bound to the loop it was first used on. Reusing
+        one from a loop that has since closed fails every request with
+        "Event loop is closed": is_available() used to leave exactly such a
+        client behind, and every voice turn then died at the model call
+        (found by shani-testbed's chronoa-voice run).
+        """
+        loop = asyncio.get_running_loop()
+        if self.client is None or self.client.is_closed or self._client_loop is not loop:
             self.client = httpx.AsyncClient(
                 base_url=self.host,
                 timeout=httpx.Timeout(120.0, connect=10.0),
             )
+            self._client_loop = loop
         return self.client
 
     async def chat_message(
@@ -171,12 +182,14 @@ class OllamaLLM:
             return False
 
     def is_available(self) -> bool:
-        """Check if Ollama is available (synchronous check)."""
-        import asyncio
+        """Check if Ollama is available (synchronous check).
+
+        A plain synchronous request: running check_health() on a throwaway
+        event loop cached an AsyncClient bound to that loop, which then
+        broke the next real chat on the app's own loop.
+        """
         try:
-            loop = asyncio.new_event_loop()
-            healthy = loop.run_until_complete(self.check_health())
-            loop.close()
-            return healthy
+            with httpx.Client(base_url=self.host, timeout=httpx.Timeout(10.0)) as c:
+                return c.get("/api/version").status_code == 200
         except Exception:
             return False

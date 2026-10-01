@@ -187,7 +187,10 @@ class OpenAICompatibleLLM:
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        # one client per event loop: see llm.OllamaLLM._get_client
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or getattr(self, "_client_loop", None) is not loop:
+            self._client_loop = loop
             self._client = httpx.AsyncClient(
                 base_url=self.provider.base_url,
                 timeout=httpx.Timeout(60.0, connect=10.0),
@@ -292,7 +295,10 @@ class AnthropicLLM:
         self._client: Optional[httpx.AsyncClient] = None
 
     async def _get_client(self) -> httpx.AsyncClient:
-        if self._client is None or self._client.is_closed:
+        # one client per event loop: see llm.OllamaLLM._get_client
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._client.is_closed or getattr(self, "_client_loop", None) is not loop:
+            self._client_loop = loop
             self._client = httpx.AsyncClient(
                 base_url=self.provider.base_url,
                 timeout=httpx.Timeout(60.0, connect=10.0),
