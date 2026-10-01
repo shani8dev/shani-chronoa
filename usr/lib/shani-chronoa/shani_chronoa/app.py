@@ -327,6 +327,10 @@ class ChronoaApplication(Gtk.Application):
         barge_in_vad_action.connect("activate", self._toggle_barge_in_vad)
         self.add_action(barge_in_vad_action)
 
+        model_download_action = Gio.SimpleAction.new("toggle-model-download", None)
+        model_download_action.connect("activate", self._toggle_model_download)
+        self.add_action(model_download_action)
+
         # Debug-logging toggle - the settings row goes through this action so
         # the live log-level change and the persisted setting stay in one path.
         debug_action = Gio.SimpleAction.new("toggle-debug", None)
@@ -563,6 +567,24 @@ class ChronoaApplication(Gtk.Application):
                 self.assistant.llm = None
         if self.window:
             self.window.set_status(f"Cloud fallback: {'ON' if new_value else 'OFF'}")
+
+    def _toggle_model_download(
+        self, _action: Gio.SimpleAction, _param: object
+    ) -> None:
+        """Toggle fetching a speech model over the network.
+
+        This is the only setting that makes Chronoa download anything, so the
+        refusal is stated where the choice is made rather than at the point of
+        failure: the user should not discover it by talking and being ignored.
+        """
+        new_value = not self.config.model_download_enabled
+        self.config.set("model-download-enabled", "true" if new_value else "false")
+        if self.window:
+            self.window.set_status(
+                "Model download: ON - the next voice input fetches a ~57 MB "
+                "speech model and checks it against a pinned SHA-256"
+                if new_value else "Model download: OFF"
+            )
 
     def _toggle_barge_in_vad(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle continuous-VAD barge-in. `_speak()` reads this fresh each call, no extra sync needed."""

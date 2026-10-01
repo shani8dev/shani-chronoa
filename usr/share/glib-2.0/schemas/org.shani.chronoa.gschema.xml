@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
   <schema id="org.shani.chronoa" path="/org/shani/chronoa/">
+    <key name="model-download-enabled" type="b">
+      <default>false</default>
+      <summary>Allow downloading a speech recognition model on first use</summary>
+      <description>When true, Chronoa may fetch a whisper.cpp model from HuggingFace the first time speech input is needed, verify it against a pinned SHA-256, and refuse to install it if the digest does not match. This is the only setting that causes Chronoa to download anything on the user's behalf. Off by default.</description>
+    </key>
     <key name="model" type="s">
       <default>''</default>
       <summary>LLM model override</summary>

@@ -727,6 +727,13 @@ class SettingsWindow(Gtk.Window):
             group, "Interrupt while replying (barge-in)",
             "No echo cancellation, so speaker output can self-interrupt; best with headphones",
             config.barge_in_vad_enabled, lambda a: self._app_toggle("toggle-barge-in-vad", a))
+        self._switch(
+            group, "Download speech model on first use",
+            "Fetches a whisper.cpp model from HuggingFace once, verifies it "
+            "against a pinned SHA-256, and refuses it if it does not match; "
+            "off by default",
+            config.model_download_enabled,
+            lambda a: self._app_toggle("toggle-model-download", a))
         self._entry(group, "Speech language (whisper.cpp)", "e.g. en, or auto",
                     config.language, lambda t: config.set("language", t.strip()))
         self._device_picker(group, "input", "Microphone",
@@ -1044,6 +1051,7 @@ class SettingsWindow(Gtk.Window):
             "toggle-cloud-fallback": self.app.config.cloud_fallback_enabled,
             "toggle-wake-word": self.app._wake_word_active,
             "toggle-barge-in-vad": self.app.config.barge_in_vad_enabled,
+            "toggle-model-download": self.app.config.model_download_enabled,
             "toggle-auto-start": self.app.config.auto_start,
             "toggle-debug": self.app.config.debug_mode,
         }.get(action)

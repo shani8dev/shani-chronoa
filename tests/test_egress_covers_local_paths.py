@@ -26,6 +26,7 @@ import pytest
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
 CARRIERS = {
+    "stt_provision.py": "bytes_out is the model file, so a real download is auditable",
     # file: what the request carries
     "llm.py": "the whole conversation",
     "senses/vision.py": "a base64 screenshot of the user's screen",

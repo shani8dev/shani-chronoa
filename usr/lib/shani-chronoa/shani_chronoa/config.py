@@ -483,6 +483,16 @@ class ChronoaConfig:
         """Get privacy mode status."""
         return self.get_bool("privacy-mode", True)
 
+    @property
+    def model_download_enabled(self) -> bool:
+        """Whether fetching a speech model over the network is permitted.
+
+        Off by default: it is the only setting in this file that causes bytes to
+        be fetched from the internet on the user's behalf, so it must never be
+        implied by any other one.
+        """
+        return self.get_bool("model-download-enabled", False)
+
     def sense_allowed(self, sense: str) -> bool:
         """Whether `sense` is permitted to perceive right now.
 

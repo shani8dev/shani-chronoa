@@ -39,6 +39,7 @@ from shani_chronoa import egress  # noqa: E402
 # Every file that records egress, mapped to the call site inside it. Used by the
 # static "no call site may drop the flag again" test at the bottom of this file.
 INSTRUMENTED = {
+    "stt_provision.py": "stt:provision",
     "llm.py": "llm:ollama",
     "cloud_llm.py": "cloud_llm:",
     "webtext.py": "web:retrieve",

@@ -32,6 +32,7 @@ SCHEMA = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
 # sense switch. Kept as a declared list because the binding is indirect: a
 # source scan would miss every one of these.
 CONTROLLED = {
+    "model-download-enabled",   # toggle-model-download
     # switches, reached through a GAction - the action name is what the window
     # calls, so the GSettings key never appears in the file next to it
     "privacy-mode",            # toggle-privacy

@@ -9,6 +9,26 @@ import subprocess
 import pytest
 
 
+class TestModelDownloadConsent:
+    """`model-download-enabled` is the only setting that causes a download."""
+
+    def test_it_defaults_to_false(self, chronoa_config):
+        # Given: a fresh config with the schema's default
+        # When: the consent gate is read
+        # Then: off, because Chronoa must never fetch bytes without being asked
+        assert chronoa_config.model_download_enabled is False
+
+    def test_it_is_a_value_and_not_a_method(self, chronoa_config):
+        # A method missing @property is truthy forever, so the settings switch
+        # would read as permanently on and the gate would never refuse. This
+        # caught exactly that: the property was written without the decorator
+        # and the settings-surface suite stayed green throughout.
+        value = chronoa_config.model_download_enabled
+        assert isinstance(value, bool), (
+            f"model_download_enabled is {type(value).__name__}, not bool"
+        )
+
+
 class TestStringQuoting:
     """`gsettings get` returns GVariant-quoted strings; ChronoaConfig stores them verbatim."""
 
