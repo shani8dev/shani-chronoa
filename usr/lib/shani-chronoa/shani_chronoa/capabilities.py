@@ -204,10 +204,14 @@ OTHER = "Other"
 # someone who has never opened a terminal.
 GATE_NAMES: dict[str, str] = {
     "input-control-enabled": "Let Chronoa act",
-    "notification-enabled": "Allow notifications",
-    "vision-sense-enabled": "Allow the screen sense",
-    "web-sense-enabled": "Allow web lookups",
-    "microphone-sense-enabled": "Allow the microphone sense",
+    # A gate whose switch lives in the settings window is named here with the
+    # label that row actually carries, not a second wording: the Help window
+    # tells the user to switch on this exact string, so a label Settings does
+    # not also show sends them looking for a switch that is not there.
+    "notification-enabled": "Speak answers aloud",
+    "vision-sense-enabled": "Take and describe photos",
+    "web-sense-enabled": "Web search",
+    "microphone-sense-enabled": "Transcribe speech",
     "file-delete-enabled": "Let Chronoa delete files",
     "process-kill-enabled": "Let Chronoa stop processes",
     "window-close-enabled": "Let Chronoa close windows",
@@ -224,7 +228,7 @@ GATE_NAMES: dict[str, str] = {
     "idle-timeout-enabled": "Let Chronoa change when the screen blanks",
     "sleep-inhibit-enabled": "Let Chronoa hold the machine awake",
     "file-edit-enabled": "Let Chronoa edit your files",
-    "git-sense-enabled": "Let Chronoa read your git working tree",
+    "git-sense-enabled": "Git working trees",
     "todo-list-enabled": "Let Chronoa keep a task list",
     "trigger-control-enabled": "Let Chronoa arm automatic rules",
     # The five trigger event types. Phrased as the thing the user is agreeing
@@ -237,6 +241,12 @@ GATE_NAMES: dict[str, str] = {
     "expiry-sense-enabled": "Let Chronoa watch stored deadlines",
     "containerrun-sense-enabled": "Let Chronoa act on container runs",
     "unithealth-sense-enabled": "Let Chronoa watch system units",
+    # A sense gate is named here with the label its settings row actually
+    # carries, not a second wording. The Help window tells the user to switch on
+    # this exact string, so any label the settings window does not also show
+    # sends them looking for a switch that is not there under that name.
+    "filesystem-sense-enabled": "Files and folders",
+    "sandbox-seccomp-enabled": "Restrict tools to a seccomp sandbox",
 }
 
 

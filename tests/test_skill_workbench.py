@@ -36,6 +36,7 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
+from shani_chronoa import capabilities  # noqa: E402
 from shani_chronoa.config import ChronoaConfig  # noqa: E402
 from shani_chronoa.skills import (  # noqa: E402
     compare_files,
@@ -1094,7 +1095,10 @@ class TestListCapabilitiesReadsLiveState:
         """
         out = list_capabilities._run({})
         assert "What changed in a git repository" in out
-        assert "Let Chronoa read your git working tree" in out
+        # Read the label from the gate table instead of hardcoding it: the
+        # intent is that the gate names the switch the user would have to
+        # enable, not the particular words that label currently uses.
+        assert capabilities.GATE_NAMES["git-sense-enabled"] in out
         assert "switched on" in out
 
     def test_it_reports_a_real_gate_as_allowed_when_allowed(self, home, granted):

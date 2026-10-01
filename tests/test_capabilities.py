@@ -16,6 +16,7 @@ import pytest
 
 from shani_chronoa import capabilities
 from shani_chronoa.capabilities import (
+    GATE_NAMES,
     Capability,
     find_capabilities,
     gated_by,
@@ -145,8 +146,12 @@ class TestGating:
         assert closed.startswith("Off."), closed
         # Both states name the switch, and must not stutter ("allow Allow
         # notifications"), which is how the first draft read.
-        assert "Allow notifications" in opened
-        assert "Allow notifications" in closed
+        # The label comes from GATE_NAMES rather than being spelled out here:
+        # what this pins is that BOTH states name the switch, not which words
+        # the switch happens to be called this week.
+        label = GATE_NAMES[notify.consent_key]
+        assert label in opened
+        assert label in closed
         assert "Settings" in closed
 
     def test_an_ungated_capability_has_no_gate_prose(self):
