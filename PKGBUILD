@@ -37,6 +37,8 @@ depends=(
     'power-profiles-daemon'
 )
 optdepends=(
+    'geoclue: where this computer is, for get_location and local weather (GNOME’s location service)'
+    'gpsd: a GPS receiver’s fix for get_location, when one is attached'
 # The speech engines are optional on purpose, and the distinction is load-bearing.
     # espeak-ng is a HARD depend below because it is the one TTS every Shanios image
     # ships, so speech output always works. These two only improve the voice and add

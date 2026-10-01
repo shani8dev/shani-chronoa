@@ -18,14 +18,11 @@ import urllib.parse
 
 import httpx
 
-from shani_chronoa import egress
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 GEOCODE = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST = "https://api.open-meteo.com/v1/forecast"
-TIMEOUT = httpx.Timeout(8.0, connect=5.0)
-MAX_BYTES = 64 * 1024
 
 #: WMO weather interpretation codes, as Open-Meteo documents them.
 _WMO = {
@@ -60,19 +57,8 @@ _SCHEMA = {
 
 
 def _get(url: str, params: dict) -> dict:
-    full = url + "?" + urllib.parse.urlencode(params)
-    status = None
-    try:
-        with httpx.Client(timeout=TIMEOUT, headers={"User-Agent": "ShaniChronoa/1.0"}) as c:
-            r = c.get(full)
-            status = r.status_code
-            r.raise_for_status()
-            if len(r.content) > MAX_BYTES:
-                raise ValueError("response too large")
-            return r.json()
-    finally:
-        egress.record("skill:get_weather", full, status=status,
-                      privacy_mode=egress.privacy_mode_enabled())
+    from shani_chronoa.netjson import get_json
+    return get_json("skill:get_weather", url, params)
 
 
 def _place(name: str) -> "tuple[float, float, str] | str":
@@ -110,7 +96,7 @@ def _run(arguments: dict) -> str:
         data = _get(FORECAST, {
             "latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}", "timezone": "auto", "forecast_days": 1,
             "current": "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m",
-            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code",
+            "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset",
         })
     except (httpx.HTTPError, ValueError, KeyError, json.JSONDecodeError) as e:
         return f"Could not get the weather: {e.__class__.__name__}: {e}"
@@ -128,6 +114,8 @@ def _run(arguments: dict) -> str:
         parts.append(f"Today: {_WMO.get(first('weather_code'), 'mixed')}, "
                      f"{first('temperature_2m_min')} to {first('temperature_2m_max')}°C, "
                      f"{first('precipitation_probability_max')}% chance of rain.")
+    if first("sunrise") and first("sunset"):
+        parts.append(f"Sunrise {str(first('sunrise'))[-5:]}, sunset {str(first('sunset'))[-5:]}.")
     parts.append("Source: Open-Meteo.")
     return " ".join(parts)
 

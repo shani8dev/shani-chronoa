@@ -105,3 +105,77 @@ def test_neither_source_is_said_not_guessed(monkeypatch):
 def test_the_sense_refuses_without_consent(monkeypatch):
     monkeypatch.setattr(loc, "ChronoaConfig", lambda: _Cfg(set()))
     assert loc._run({}).startswith("Location is not permitted")
+
+
+# --- the everyday skills added beside them ----------------------------------
+
+from shani_chronoa.skills import convert_currency as cc  # noqa: E402
+from shani_chronoa.skills import convert_units as cu  # noqa: E402
+from shani_chronoa.skills import lookup as lk  # noqa: E402
+from shani_chronoa.skills import media_control as mc  # noqa: E402
+from shani_chronoa.skills import world_clock as wc  # noqa: E402
+
+
+@pytest.mark.parametrize("place, zone", [("Tokyo", "Asia/Tokyo"), ("mumbai", "Asia/Kolkata"),
+                                         ("New York", "America/New_York"), ("Europe/Paris", "Europe/Paris")])
+def test_world_time_is_answered_offline(place, zone):
+    assert wc.local_zone(place) == zone
+
+
+def test_an_unknown_place_needs_web_consent(monkeypatch):
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Cfg(set()))
+    assert "needs the web" in wc._run({"place": "Nagpur"})
+
+
+@pytest.mark.parametrize("v, a, b, want", [(100, "km", "miles", 62.1371), (98.6, "fahrenheit", "celsius", 37.0),
+                                           (1, "gib", "mb", 1073.74), (2, "hours", "minutes", 120)])
+def test_units_convert(v, a, b, want):
+    out, err = cu.convert(v, a, b)
+    assert err is None and abs(out - want) < 0.01
+
+
+def test_units_of_different_kinds_do_not(monkeypatch):
+    assert "don't convert" in cu._run({"value": 5, "from_unit": "kg", "to_unit": "litres"})
+
+
+def test_currency_uses_iso_codes_and_names_the_rate(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cc, "ChronoaConfig", lambda: _Cfg({"web"}))
+    monkeypatch.setattr("shani_chronoa.netjson.get_json",
+                        lambda comp, url, params=None: seen.update(params=params) or {"rates": {"INR": 9633.0}, "date": "2026-10-01"})
+    out = cc._run({"amount": 100, "from_currency": "dollars", "to_currency": "rupees"})
+    assert seen["params"] == {"amount": 100.0, "from": "USD", "to": "INR"}
+    assert "9,633.00 INR" in out and "2026-10-01" in out
+
+
+def test_currency_without_web_consent(monkeypatch):
+    monkeypatch.setattr(cc, "ChronoaConfig", lambda: _Cfg(set()))
+    assert "not available" in cc._run({"amount": 1, "from_currency": "USD", "to_currency": "INR"})
+
+
+def test_lookups_without_web_consent(monkeypatch):
+    monkeypatch.setattr(lk, "ChronoaConfig", lambda: _Cfg(set()))
+    assert "not available" in lk._wiki({"topic": "Pune"}) and "not available" in lk._define({"word": "x"})
+
+
+def test_media_with_no_player(monkeypatch):
+    monkeypatch.setattr(mc.shutil, "which", lambda b: "/usr/bin/gdbus")
+    monkeypatch.setattr(mc, "players", lambda: [])
+    assert mc._run({"action": "pause"}) == "No media player is running."
+
+
+def test_media_pauses_the_playing_one_by_its_own_name(monkeypatch):
+    calls = []
+
+    def gdbus(*args):
+        calls.append(args)
+        if "PlaybackStatus" in args:
+            return subprocess.CompletedProcess([], 0, "(<'Playing'>,)" if "org.mpris.MediaPlayer2.spotify" in args else "(<'Paused'>,)", "")
+        if "Identity" in args:
+            return subprocess.CompletedProcess([], 0, "(<'Spotify'>,)", "")
+        return subprocess.CompletedProcess([], 0, "()", "")
+    monkeypatch.setattr(mc.shutil, "which", lambda b: "/usr/bin/gdbus")
+    monkeypatch.setattr(mc, "players", lambda: ["org.mpris.MediaPlayer2.firefox", "org.mpris.MediaPlayer2.spotify"])
+    monkeypatch.setattr(mc, "_gdbus", gdbus)
+    assert mc._run({"action": "pause"}) == "Done: pause in Spotify."
+    assert any("org.mpris.MediaPlayer2.Player.Pause" in a for a in calls[-1])

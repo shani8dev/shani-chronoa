@@ -119,9 +119,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_brightness": ("Power and screen", "Screen brightness"),
     "get_volume": ("Sound", "Output volume"),
     "set_volume": ("Sound", "Output volume"),
+    "media_control": ("Sound", "Play, pause and skip media"),
     "set_mute": ("Sound", "Mute and unmute"),
     "speak": ("Sound", "Speak a reply aloud"),
     "get_datetime": ("Time and reminders", "Date and time"),
+    "get_world_time": ("Time and reminders", "Time somewhere else"),
     "set_timer": ("Time and reminders", "Timer"),
     # With timers, not alone: a notification is how a reminder surfaces, and a
     # heading with one row under it is a worse help screen.
@@ -131,6 +133,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "screenshot": ("Screen", "Screenshot"),
     "open_application": ("Apps", "Open an app"),
     "web_search": ("Web", "Look something up"),
+    "get_weather": ("Web", "Weather"),
+    "get_location": ("Web", "Where this computer is"),
+    "convert_currency": ("Web", "Currency"),
+    "lookup_wikipedia": ("Web", "Who or what something is"),
+    "define_word": ("Web", "What a word means"),
     "move_pointer": ("Pointer and keyboard", "Move the pointer"),
     "click_pointer": ("Pointer and keyboard", "Click"),
     "type_text": ("Pointer and keyboard", "Type text"),
@@ -139,6 +146,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_privacy": ("Privacy controls", "Mute the microphone, disable a camera, or blank the screen"),
     "set_power_profile": ("Power and screen", "Power profile"),
     "calculate": ("Everyday tools", "Calculation"),
+    "convert_units": ("Everyday tools", "Convert units"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
@@ -334,6 +342,10 @@ _EXAMPLES: dict[str, str] = {
     "get_clipboard": "What is on my clipboard?",
     "screenshot": "Take a screenshot",
     "web_search": "Search the web for the Arch wiki",
+    "get_weather": "What's the weather today?",
+    "get_world_time": "What time is it in Tokyo?",
+    "convert_units": "How many miles is 100 km?",
+    "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
     "get_volume": "How loud is the volume?",
@@ -493,12 +505,16 @@ MUTATING_TOOLS = frozenset({
     "create_archive", "extract_archive", "set_clipboard", "set_volume",
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
+    "get_weather", "get_location", "get_world_time", "convert_units",
+    "convert_currency", "lookup_wikipedia", "define_word",
 })
 
 #: Tools that reach outside this machine.
 OPEN_WORLD_TOOLS = frozenset({
     "web_search", "scan_network", "connect_wifi", "install_model",
     "translate_text", "print_file",
+    "get_weather", "get_location", "convert_currency", "lookup_wikipedia",
+    "define_word", "get_world_time",
 })
 
 
