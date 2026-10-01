@@ -182,6 +182,10 @@ class ChronoaApplication(Gtk.Application):
         self.sense_scheduler.start()
         if not self.window:
             self.window = CajitaWindow(self)
+            # the wake phrase only listens between turns
+            self.window.state_observers = [
+                lambda s: self.wakeword.resume() if s is AssistantState.IDLE else self.wakeword.pause()
+            ]
             self.window.connect("user-input", self._on_user_input)
             # A rejected device outranks the ordinary status: it explains why
             # the microphone the user picked is not the one in use.

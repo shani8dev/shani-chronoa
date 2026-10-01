@@ -1090,6 +1090,11 @@ class CajitaWindow(Gtk.ApplicationWindow):
         """Set the assistant state. The single entry point for it."""
         self._state = state
         self._sync_from_state()
+        for observer in getattr(self, "state_observers", ()):
+            try:
+                observer(state)
+            except Exception as e:  # an observer must never break the UI
+                logger.error(f"State observer failed: {e}")
 
     def get_state(self) -> AssistantState:
         return self._state

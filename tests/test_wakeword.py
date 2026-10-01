@@ -190,3 +190,17 @@ class TestSpeechInputUsesAnInstalledModel:
         assert stt.installed_model("medium") == "base-q5_1", "the better of the two installed"
         (d / "ggml-medium.bin").write_bytes(b"x")
         assert stt.installed_model("medium") == "medium", "an installed choice is kept"
+
+
+class TestPausedBetweenTurns:
+    def test_a_paused_listener_transcribes_nothing(self, monkeypatch):
+        li, calls = _listener(monkeypatch)
+        li.pause()
+        assert _run(li, _stream(loud=8)) == [] and calls == [], \
+            "a paused listener sent the user's question to whisper a second time"
+
+    def test_resuming_listens_again(self, monkeypatch):
+        li, calls = _listener(monkeypatch)
+        li.pause()
+        li.resume()
+        assert _run(li, _stream(loud=8)) == [1]

@@ -135,6 +135,21 @@ class WakeWordListener:
         self._stop = threading.Event()
         self._generation = 0
         self._stop_epoch = 0
+        self._paused = threading.Event()
+
+    def pause(self) -> None:
+        """Stop judging speech without releasing the microphone.
+
+        While a turn is listening, thinking or speaking, the wake phrase can
+        do nothing (a detection mid-turn is ignored), yet the listener used
+        to transcribe the user's question - and Chronoa's own reply - a
+        second time in parallel. Frames are still read, so the capture keeps
+        flowing and nothing has to be recalibrated on resume.
+        """
+        self._paused.set()
+
+    def resume(self) -> None:
+        self._paused.clear()
 
     def _detect_backend(self) -> Optional[str]:
         if shutil.which("pw-record"):
@@ -288,6 +303,9 @@ class WakeWordListener:
                     return
                 if not chunk or len(chunk) < _FRAME_BYTES:
                     break
+                if self._paused.is_set():
+                    utterance, recent, loud, quiet = [], [], 0, 0
+                    continue
                 if threshold is None:
                     calib.append(chunk)
                     if len(calib) >= _CALIBRATION_FRAMES:
