@@ -473,6 +473,8 @@ READ_ONLY_TOOLS = frozenset({
     "list_processes", "list_windows", "focus_window", "list_wifi_networks",
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
+    "get_weather", "get_location", "get_world_time", "convert_units",
+    "convert_currency", "lookup_wikipedia", "define_word",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -505,8 +507,7 @@ MUTATING_TOOLS = frozenset({
     "create_archive", "extract_archive", "set_clipboard", "set_volume",
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
-    "get_weather", "get_location", "get_world_time", "convert_units",
-    "convert_currency", "lookup_wikipedia", "define_word",
+    "media_control",
 })
 
 #: Tools that reach outside this machine.

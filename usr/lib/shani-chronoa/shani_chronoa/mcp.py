@@ -51,11 +51,19 @@ from shani_chronoa.tools import TOOLS, execute_tool
 
 logger = logging.getLogger(__name__)
 
+# The SDK renamed its server class for 2.x: mcp.server.mcpserver.MCPServer is
+# 1.x's mcp.server.fastmcp.FastMCP, with the same constructor and add_tool().
+# Arch's own python-mcp (extra) is 1.29 - importing only the 2.x name made
+# the server report "mcp package is not installed" on every Shanios install
+# that had it installed (found by driving it with a real MCP client).
 try:
     from mcp.server.mcpserver import MCPServer
-except Exception as e:  # pragma: no cover - exercised only when the optional dep is missing
-    MCPServer = None  # type: ignore
-    logger.debug(f"mcp package not available: {e}")
+except Exception:  # pragma: no cover - which branch runs depends on the installed SDK
+    try:
+        from mcp.server.fastmcp import FastMCP as MCPServer
+    except Exception as e:  # pragma: no cover - exercised only when the optional dep is missing
+        MCPServer = None  # type: ignore
+        logger.debug(f"mcp package not available: {e}")
 
 _JSON_TYPE_MAP = {
     "string": str,

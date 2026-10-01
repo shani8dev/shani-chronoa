@@ -47,7 +47,7 @@ optdepends=(
     'whisper-cpp: voice input (speech recognition) and the hands-free wake phrase'
     'rhvoice-language-english: a more natural voice than espeak-ng (needs a rhvoice-voice-* too)'
     'rhvoice-voice-slt: an English RHVoice voice'
-    'python-mcp: shani-chronoa-mcp, exposes Chronoa skills as an MCP server for Claude Desktop/Claude Code/Cursor (AUR, not in official repos)'
+    'python-mcp: shani-chronoa-mcp, exposes Chronoa skills as an MCP server for Claude Desktop/Claude Code/Cursor (extra; 1.x and 2.x both work)'
 )
 install="$pkgname.install"
 

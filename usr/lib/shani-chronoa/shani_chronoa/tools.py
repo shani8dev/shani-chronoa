@@ -419,7 +419,16 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
         )
         if checked.verdict is verification.Verdict.FAILED:
             logger.error(f"Tool '{name}' reported success but verification failed: {checked.evidence}")
-        return DispatchResult(output + checked.suffix, checked.verdict, True,
+        # Verification is about ACTIONS: a claim that something changed. A
+        # read-only tool changed nothing and its output is the observation
+        # itself, so "reports success but nothing observed it" was false on
+        # every one of them - appended to calculate's "4" and to the time,
+        # inviting a model to doubt a correct answer. The verdict is still
+        # recorded above; only the misleading text is not appended.
+        from shani_chronoa.capabilities import READ_ONLY_TOOLS
+        suffix = "" if (name in READ_ONLY_TOOLS and checked.verdict is verification.Verdict.UNVERIFIED) \
+            else checked.suffix
+        return DispatchResult(output + suffix, checked.verdict, True,
                              checked.evidence)
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
