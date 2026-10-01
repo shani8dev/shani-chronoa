@@ -243,7 +243,9 @@ class ChronoaApplication(Gtk.Application):
         post-download rebuild - so the model a download installs is the model
         the next utterance reads, whichever engine was selected.
         """
-        model = self.config.whisper_model or self.hardware.get_whisper_model()
+        # An explicit `whisper-model` is honoured as chosen. Only the
+        # auto-selected one falls back to a model that is actually installed.
+        model = self.config.whisper_model or stt.installed_model(self.hardware.get_whisper_model())
         if self._stt_backend() == stt.BACKEND_PARAKEET:
             model = stt_provision.PARAKEET_DEFAULT_MODEL
         return stt.build_stt(

@@ -54,6 +54,31 @@ def build_stt(model: str, language: str = "en", backend: str = "") -> STT:
     return WhisperSTT(model=model, language=language)
 
 
+#: Installed-model fallback order, best first: what an auto-selected model
+#: falls back to when its own file is not on this machine.
+FALLBACK_MODELS = ("large-v3-turbo", "medium", "small-q5_1", "small", "base-q5_1", "base",
+                   "tiny-q5_1", "tiny")
+
+
+def installed_model(preferred: str) -> str:
+    """`preferred` if its file is installed, else the best installed model,
+    else `preferred` (so is_available() still answers honestly).
+
+    The hardware tier picked `medium` on a machine with a GPU while only
+    tiny and base were installed, and speech input then reported itself
+    unavailable - with two working models on disk (found by shani-testbed's
+    chronoa-voice run).
+    """
+    probe = WhisperSTT.__new__(WhisperSTT)
+    if os.path.exists(WhisperSTT._get_model_path(probe, preferred)):
+        return preferred
+    for m in FALLBACK_MODELS:
+        if os.path.exists(WhisperSTT._get_model_path(probe, m)):
+            logger.info(f"Whisper model {preferred!r} is not installed; using the installed {m!r}")
+            return m
+    return preferred
+
+
 class WhisperSTT:
     """Speech-to-text using whisper.cpp."""
 

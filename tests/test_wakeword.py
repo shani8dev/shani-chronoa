@@ -174,3 +174,19 @@ class TestTranscribeArgv:
         li = ww.WakeWordListener(whisper_path=str(fake))
         li._model_path = "/m/x.bin"
         assert li._transcribe(_pcm(0)) == ""
+
+
+class TestSpeechInputUsesAnInstalledModel:
+    """The auto-selected STT model falls back to one that is on disk."""
+
+    def test_a_missing_auto_model_falls_back_to_the_best_installed(self, monkeypatch, tmp_path):
+        from shani_chronoa import stt
+        d = tmp_path / "whisper" / "models"
+        d.mkdir(parents=True)
+        monkeypatch.setattr("shani_chronoa.files.data_home", lambda: tmp_path)
+        assert stt.installed_model("medium") == "medium", "nothing installed: the honest answer stays"
+        (d / "ggml-tiny-q5_1.bin").write_bytes(b"x")
+        (d / "ggml-base-q5_1.bin").write_bytes(b"x")
+        assert stt.installed_model("medium") == "base-q5_1", "the better of the two installed"
+        (d / "ggml-medium.bin").write_bytes(b"x")
+        assert stt.installed_model("medium") == "medium", "an installed choice is kept"
