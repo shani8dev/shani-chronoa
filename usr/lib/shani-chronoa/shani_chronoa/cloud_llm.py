@@ -194,10 +194,13 @@ class OpenAICompatibleLLM:
             self._client = httpx.AsyncClient(
                 base_url=self.provider.base_url,
                 timeout=httpx.Timeout(60.0, connect=10.0),
-                # Some of these gateways 401 on a totally absent Authorization
-                # header even when the key value itself is never checked -
-                # matches ai-ci-fixer.yml's "OPENAI_API_KEY: unused" note.
-                headers={"Authorization": f"Bearer {self.api_key or 'unused'}"},
+                # Only a real key is sent. A placeholder ("Bearer unused") used
+                # to be sent to the keyless gateways, and by 2026-10-01 it was
+                # what broke them: Kilo answered 401 "Your authentication token
+                # is invalid" and OVHcloud 403, while both served the same
+                # request - tool call included - with no Authorization header
+                # at all. LLM7 accepts either.
+                headers=({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
             )
         return self._client
 
