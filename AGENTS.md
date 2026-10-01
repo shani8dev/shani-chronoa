@@ -361,6 +361,35 @@ glib-compile-schemas /tmp/schema-test/   # must produce gschemas.compiled with n
 # (see asyncbridge.py's own module docstring for why this matters).
 ```
 
+### Measured on a real Shanios slot (2026-10-01), not inferred
+
+`shani-testbed/slot-tests/chronoa-speech.sh`, on `@blue` (`shanios-20260925-gnome`),
+with the checkout overlaid via `--local-src-chronoa`: **11 pass, 0 fail.**
+The same slot with the overlay removed: **3 pass, 8 fail**, including
+`ModuleNotFoundError: No module named 'shani_chronoa'`. Both runs are the
+evidence; either alone proves nothing.
+
+**Speech output works on Shanios today, and `espeak-ng` is load-bearing.**
+`PiperTTS().engine()` resolves to `espeak-ng` and `synthesize()` wrote a real
+81,698-byte RIFF/WAVE of 1.85s (confirmed with `ffprobe`). That is why
+`espeak-ng` is a hard `depends` and the other two tiers are `optdepends` —
+drop it and every image loses speech output entirely, because piper is not
+installable on Arch (no `onnxruntime`) and RHVoice is packaged separately.
+
+**Speech input is absent by design, not by breakage.** `is_available()` is
+`False` and `app.py`'s `"Whisper.cpp not available - STT disabled"` is the
+branch actually taken. `whisper-cpp` is an `optdepend` that no image profile
+installs, and no `ggml-*.bin` exists on any install. Do not "fix" this by
+hard-depending `whisper-cpp`: a user without it must get a working assistant
+that says so, not a half-configured one whose microphone silently cannot work.
+`test_the_piper_voice_dir_moves_with_the_data_home` guards exactly that, and
+also that no hard `depends` entry ever starts with `piper` — on Arch `piper`
+is a gaming-mouse configurator, not Piper TTS.
+
+An absent dependency must never be a confident wrong answer. The distinction the
+slot-test enforces: STT reporting `False` is a PASS, and STT claiming ready with
+no binary and no model would be a FAIL.
+
 `whisper.cpp`, `piper`, and `ollama` are unlikely to be installed on a
 generic dev machine — STT/LLM/TTS will report unavailable and the app
 should degrade gracefully (it's designed to: check `is_available()` on each
