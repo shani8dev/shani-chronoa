@@ -9,6 +9,7 @@ exercises exactly the same verification code as a real 57 MB download.
 import hashlib
 import os
 import stat
+from pathlib import Path
 
 import httpx
 import pytest
@@ -236,3 +237,190 @@ def test_no_model_is_shipped_without_a_digest_to_check_it_against():
 
 def test_the_default_model_is_one_we_can_actually_provision():
     assert stt_provision.DEFAULT_MODEL in stt_provision.MODELS
+
+# --- the integration that actually matters -------------------------------
+# Provisioning can be perfect and still useless: if the file it writes is not a
+# name `stt.py` looks for, the download "succeeds" and speech input stays dead
+# with nothing reporting why. The two halves shipped in different commits and
+# disagreed on the filename (`ggml-base.bin` vs `ggml-base-q5_1.bin`), so this
+# is pinned deliberately.
+
+
+def test_a_provisioned_file_is_one_the_stt_lookup_actually_finds(pinned):
+    """The end-to-end contract: provision, then resolve, and they must meet."""
+    from shani_chronoa.stt import WhisperSTT
+
+    transport, _ = _transport()
+    written = provision("tiny-q5_1", config=_Config(True), transport=transport)
+
+    resolved = Path(WhisperSTT(model="tiny").model_path)
+    assert resolved == written, (
+        f"provisioned {written.name} but WhisperSTT resolves to {resolved.name}; "
+        "the download would report success and never be read"
+    )
+    assert resolved.is_file()
+
+
+def test_a_hardware_tier_name_resolves_to_a_provisionable_key():
+    """`HardwareProfile.get_whisper_model()` returns 'tiny'/'base', not 'base-q5_1'."""
+    from shani_chronoa import stt_provision as sp
+    for tier in ("tiny", "base", "small"):
+        assert sp.resolve_key(tier) in sp.MODELS
+        assert sp.MODELS[sp.resolve_key(tier)].filename.startswith("ggml-")
+
+
+def test_an_explicit_model_key_is_left_alone():
+    from shani_chronoa import stt_provision as sp
+    assert sp.resolve_key("base-q5_1") == "base-q5_1"
+
+
+def test_the_quantized_name_is_found_after_the_exact_one():
+    """Ordering is a contract: `ggml-<model>.bin` stays first.
+
+    A test elsewhere pins the first name, and the full-precision file is what a
+    distro would package, so the quantized spellings must only ever be a
+    fallback.
+    """
+    from shani_chronoa.stt import WhisperSTT
+
+    exact = WhisperSTT(model="base")._get_model_path
+    assert exact("base").endswith("ggml-base.bin")
+
+
+# --- the action the settings button fires -------------------------------
+
+
+def test_the_download_action_starts_a_worker_and_installs_a_verified_model(monkeypatch):
+    """End to end from the action: click -> thread -> verified file on disk.
+
+    `provision` is driven through a stubbed transport, so this proves the
+    wiring and the download together without touching the network.
+    """
+    import threading
+
+    from shani_chronoa import app as app_mod
+
+    class _Cfg:
+        whisper_model = "base"
+        language = "en"
+        model_download_enabled = True
+
+        def get_bool(self, key, default):
+            return key == "model-download-enabled"
+
+    monkeypatch.setattr(app_mod.stt_provision, "MODELS", {
+        "base-q5_1": ModelSpec("base-q5_1", "ggml-base-q5_1.bin", len(PAYLOAD), PINNED),
+    })
+
+    real_provision = app_mod.stt_provision.provision
+    called = {}
+
+    def fake_provision(key, **kwargs):
+        called["key"] = key
+        kwargs.pop("transport", None)
+        return real_provision(key, transport=_transport()[0], **kwargs)
+
+    monkeypatch.setattr(app_mod.stt_provision, "provision", fake_provision)
+
+    application = app_mod.ChronoaApplication.__new__(app_mod.ChronoaApplication)
+    application.config = _Cfg()
+    application.window = None
+    application._model_download_thread = None
+    application.hardware = type("H", (), {"get_whisper_model": staticmethod(lambda: "base")})()
+    application._set_status = lambda m: None
+
+    application._download_speech_model()
+    thread = application._model_download_thread
+    assert isinstance(thread, threading.Thread), "the download must not run on this thread"
+    thread.join(timeout=10)
+
+    written = stt_provision.model_dir() / "ggml-base-q5_1.bin"
+    assert written.is_file(), "the worker did not install a verified model"
+    assert written.read_bytes() == PAYLOAD
+    assert called["key"] == "base-q5_1", "the tier name must resolve to the small build"
+
+
+def test_the_download_action_refuses_when_consent_is_off(monkeypatch):
+    """No network request may happen before the user has granted it."""
+    from shani_chronoa import app as app_mod
+
+    class _Cfg:
+        whisper_model = "base"
+        language = "en"
+        model_download_enabled = False
+
+        def get_bool(self, key, default):
+            return False
+
+    application = app_mod.ChronoaApplication.__new__(app_mod.ChronoaApplication)
+    application.config = _Cfg()
+    application.window = None
+    application._model_download_thread = None
+    application.hardware = type("H", (), {"get_whisper_model": staticmethod(lambda: "base")})()
+    seen = []
+    application._set_status = seen.append
+
+    def explode():
+        raise AssertionError("a download started with consent off")
+
+    monkeypatch.setattr(app_mod.stt_provision, "provision", explode)
+    application._download_speech_model()
+    assert application._model_download_thread is None, "it must not have started a thread"
+    assert any("off" in m.lower() for m in seen), f"the refusal must say why: {seen}"
+
+
+def test_an_untiered_model_name_is_reported_not_attempted(monkeypatch):
+    """An unknown tier gets a message, never a request."""
+    from shani_chronoa import app as app_mod
+
+    class _Cfg:
+        whisper_model = "enormous"
+        language = "en"
+        model_download_enabled = True
+
+        def get_bool(self, key, default):
+            return True
+
+    application = app_mod.ChronoaApplication.__new__(app_mod.ChronoaApplication)
+    application.config = _Cfg()
+    application.window = None
+    application._model_download_thread = None
+    application.hardware = type("H", (), {"get_whisper_model": staticmethod(lambda: "enormous")})()
+    seen = []
+    application._set_status = seen.append
+    monkeypatch.setattr(
+        app_mod.stt_provision, "provision",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not attempt")),
+    )
+    application._download_speech_model()
+    assert application._model_download_thread is None
+    assert any("enormous" in m for m in seen), f"the message must name the model: {seen}"
+
+
+def test_the_action_is_actually_registered_not_just_defined():
+    """A button wired to an unregistered action name does nothing, silently.
+
+    The tests above call the handler directly, so none of them notice if
+    `_create_actions` stops registering it - the settings row would still be
+    there, still look right, and clicking it would do nothing at all.
+
+    `list_actions()` is no help: it reports the action map only for a registered
+    GApplication, and there is no session bus here. So this records what
+    `_create_actions` actually adds.
+    """
+    from shani_chronoa.app import ChronoaApplication
+
+    # The real constructor, not __new__: an uninitialised GObject raises from
+    # add_action, which would fail this test for the wrong reason.
+    application = ChronoaApplication()
+    added = []
+    application.add_action = lambda action, *a, **k: added.append(action.get_name())
+    application._create_actions()
+
+    assert "download-speech-model" in added, (
+        "the settings button fires 'download-speech-model' but _create_actions "
+        f"never adds it; added: {sorted(added)}"
+    )
+    assert "toggle-model-download" in added, (
+        "the consent switch beside it fires a name that is never added"
+    )

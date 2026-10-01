@@ -103,6 +103,20 @@ MODELS: Dict[str, ModelSpec] = {
 
 DEFAULT_MODEL = "base-q5_1"
 
+# `HardwareProfile.get_whisper_model()` returns bare tier names ("tiny",
+# "base", "medium"); `stt.py` looks for `ggml-<tier>.bin` and then the
+# quantized spellings. This maps a tier onto the small file we would actually
+# download, so the two agree instead of the provisioner writing a filename
+# nothing reads.
+_TIER_TO_KEY = {"tiny": "tiny-q5_1", "base": "base-q5_1", "small": "small-q5_1"}
+
+
+def resolve_key(name: str) -> str:
+    """Map a hardware tier name onto a provisionable model key."""
+    if name in MODELS:
+        return name
+    return _TIER_TO_KEY.get(name, name)
+
 # Mirrors `stt.py`'s search order exactly: the user's own copy first, then a
 # distro-packaged one. This module must not invent a third location, or a model
 # written here would be invisible to the code that reads it.
@@ -149,7 +163,7 @@ def is_provisioned(key: str = DEFAULT_MODEL) -> bool:
 
 
 def _spec(key: str) -> ModelSpec:
-    spec = MODELS.get(key)
+    spec = MODELS.get(resolve_key(key))
     if spec is None:
         raise ProvisionError(
             f"there is no provisionable STT model called {key!r}; "
@@ -192,6 +206,7 @@ def provision(
 
     `transport` exists for tests; production callers leave it None.
     """
+    key = resolve_key(key)
     spec = _spec(key)
 
     # Read from wherever `stt.py` would, but always WRITE to the user's own

@@ -330,6 +330,18 @@ _EXAMPLE_TARGETS = {
 }
 
 
+def _stt_model_is_ready(config) -> str:
+    """The installed STT model filename, or "" when there is none."""
+    from shani_chronoa import stt_provision
+    try:
+        path = stt_provision.model_path(
+            stt_provision.resolve_key(config.whisper_model or "base")
+        )
+    except Exception:  # noqa: BLE001 - an unusable row is better than a crash
+        return ""
+    return path.name if path.is_file() else ""
+
+
 class SettingsWindow(Gtk.Window):
     """Every setting Chronoa has, in one searchable window."""
 
@@ -385,6 +397,28 @@ class SettingsWindow(Gtk.Window):
         self._searchable.append((group, f"{title} {description}".lower()))
         group._needle_extra = []  # rows to reveal if only they match
         return group
+
+    def _action_button(self, group, title, subtitle, action_name,
+                       sensitive=True, tooltip=""):
+        """A row that fires one of the app's own GActions.
+
+        Same shape as `_switch`, so the button reaches the action through the
+        identical path a keyboard shortcut or the D-Bus name would - not by
+        writing the setting directly, which is how a control and its shortcut
+        drift apart.
+        """
+        row = Adw.ActionRow(title=title, subtitle=subtitle or None)
+        button = Gtk.Button(label="Download", valign=Gtk.Align.CENTER)
+        button.set_sensitive(bool(sensitive))
+        if tooltip:
+            button.set_tooltip_text(tooltip)
+            row.set_tooltip_text(tooltip)
+        row.add_suffix(button)
+        row.set_activatable_widget(button)
+        button.connect("clicked", lambda _b: self._app_toggle(action_name, True))
+        group.add(row)
+        group._needle_extra.append((row, f"{title} {subtitle}".lower()))
+        return row
 
     def _switch(self, group, title, subtitle, active, on_toggle, enabled=True, tooltip=""):
         row = Adw.SwitchRow(title=title, subtitle=subtitle or None, active=bool(active))
@@ -727,6 +761,15 @@ class SettingsWindow(Gtk.Window):
             group, "Interrupt while replying (barge-in)",
             "No echo cancellation, so speaker output can self-interrupt; best with headphones",
             config.barge_in_vad_enabled, lambda a: self._app_toggle("toggle-barge-in-vad", a))
+        model_ready = _stt_model_is_ready(config)
+        self._action_button(
+            group, "Download speech model now",
+            "Fetch the speech model and verify it against a pinned SHA-256"
+            if not model_ready else
+            f"A speech model is already installed ({model_ready})",
+            "download-speech-model",
+            sensitive=not model_ready,
+        )
         self._switch(
             group, "Download speech model on first use",
             "Fetches a whisper.cpp model from HuggingFace once, verifies it "

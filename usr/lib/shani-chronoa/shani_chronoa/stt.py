@@ -30,9 +30,21 @@ class WhisperSTT:
     def _get_model_path(self, model: str) -> str:
         """Get the path to the whisper.cpp model file."""
         # whisper.cpp publishes its models as ggml-<model>.bin; <model>.bin
-        # kept for files named by hand
+        # kept for files named by hand.
+        #
+        # The quantized names come after the exact ones, deliberately: the
+        # full-precision ggml-base.bin is ~148 MB and the q5_1 build of the same
+        # model is ~57 MB, so a first-use download installs the small one. Without
+        # these, `stt_provision` would report success and write a file this
+        # function never looks for, leaving speech input silently dead.
         dirs = (files.data_home() / "whisper" / "models", "/usr/share/whisper/models")
-        names = (f"ggml-{model}.bin", f"{model}.bin")
+        names = (
+            f"ggml-{model}.bin",
+            f"{model}.bin",
+            f"ggml-{model}-q5_1.bin",
+            f"ggml-{model}-q8_0.bin",
+            f"ggml-{model}-q5_k.bin",
+        )
         for d in dirs:
             for n in names:
                 if os.path.exists(os.path.join(d, n)):

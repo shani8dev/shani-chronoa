@@ -8,6 +8,7 @@ import logging
 import sys
 import os
 import signal
+import threading
 from typing import Optional, Union
 
 import gi
@@ -28,11 +29,14 @@ from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
 from shani_chronoa import markdown_lite, pipewire, planmode, sessions, ask_bridge
 from shani_chronoa.config import ChronoaConfig, HardwareProfile, PrivacyManager
 from shani_chronoa.stt import WhisperSTT
+from shani_chronoa import stt_provision
 from shani_chronoa.llm import OllamaLLM
 from shani_chronoa.cloud_llm import CloudLLMChain, DEFAULT_PROVIDER_ORDER, BYOK_PROVIDER_ORDER
 from shani_chronoa.secrets_manager import secrets_manager
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.senses.store import PerceptStore
+from shani_chronoa.senses.scheduler import AmbientScheduler
+from shani_chronoa.triggers import EventEngine
 from shani_chronoa.tts import PiperTTS
 from shani_chronoa.wakeword import WakeWordListener
 from shani_chronoa.gui import (AssistantState, CajitaWindow, ChronoaOrbWidget,
@@ -85,6 +89,12 @@ class ChronoaApplication(Gtk.Application):
             if problem:
                 logger.warning("Audio device: %s", problem)
                 self._device_warnings.append(problem)
+        # Replaced by the real thing in _init_components. Declared here so a
+        # partially-constructed app still has the attribute: do_shutdown runs
+        # on paths that never reached _init_components, and a shutdown path
+        # that raises is worse than one that skips a step.
+        self.sense_scheduler = None
+        self._model_download_thread = None
         self.recorder = AudioRecorder(target=in_target or None)
         self.player = AudioPlayer(target=out_target or None)
         self.barge_in_monitor = BargeInMonitor(target=in_target or None)
@@ -141,6 +151,16 @@ class ChronoaApplication(Gtk.Application):
         self.player.stop()
         self.barge_in_monitor.stop()
         self.recorder.cancel_auto_stop()
+        # Bounded join, so a sense that is mid-poll when the user quits cannot
+        # hold the shutdown open.
+        # getattr, not an attribute access: conftest's `stubbed_app` builds the
+        # app with __new__ and hand-assigns only what a test needs, so the
+        # attribute genuinely may not exist. A shutdown that raises is worse
+        # than one that skips a step, and every other release below this line
+        # has the same exposure.
+        scheduler = getattr(self, "sense_scheduler", None)
+        if scheduler is not None:
+            scheduler.stop()
         # Stop the AsyncBridge last: it may still be running an in-flight
         # transcription/TTS/assistant coroutine scheduled by the components
         # above. shutdown() cancels pending coroutines and joins the thread
@@ -155,6 +175,11 @@ class ChronoaApplication(Gtk.Application):
     def do_activate(self) -> None:
         """Handle application activation."""
         logger.info("Activating Shani Chronoa")
+        # Every consent-gated sense in Settings was inert until this line: the
+        # scheduler was constructed but never started, so a user could enable all
+        # 44 switches and the assistant would perceive nothing at all. Start() is
+        # idempotent, so raising the window again does not spawn a second thread.
+        self.sense_scheduler.start()
         if not self.window:
             self.window = CajitaWindow(self)
             self.window.connect("user-input", self._on_user_input)
@@ -243,6 +268,18 @@ class ChronoaApplication(Gtk.Application):
         # that is not a licence to do so here.
         self.percept_context = ContextBuilder(
             consent=lambda sense: self.config.sense_allowed(sense))
+        # Built here, started in do_activate. Constructing the scheduler is
+        # inert; start() spawns the polling thread, and several tests call
+        # _init_components directly, so starting it in this method would put a
+        # live poller in the middle of the suite. It shares the app's own
+        # PerceptStore, so what a sense sees reaches the conversation through the
+        # same context builder the assistant already reads - a separate store
+        # would be a second, invisible one.
+        self.event_engine = EventEngine()
+        self.sense_scheduler = AmbientScheduler(
+            store=self.percept_store,
+            event_engine=self.event_engine,
+        )
         self.assistant = Assistant(
             self.llm,
             percept_store=self.percept_store,
@@ -330,6 +367,10 @@ class ChronoaApplication(Gtk.Application):
         model_download_action = Gio.SimpleAction.new("toggle-model-download", None)
         model_download_action.connect("activate", self._toggle_model_download)
         self.add_action(model_download_action)
+
+        fetch_model_action = Gio.SimpleAction.new("download-speech-model", None)
+        fetch_model_action.connect("activate", self._download_speech_model)
+        self.add_action(fetch_model_action)
 
         # Debug-logging toggle - the settings row goes through this action so
         # the live log-level change and the persisted setting stay in one path.
@@ -567,6 +608,84 @@ class ChronoaApplication(Gtk.Application):
                 self.assistant.llm = None
         if self.window:
             self.window.set_status(f"Cloud fallback: {'ON' if new_value else 'OFF'}")
+
+    def _download_speech_model(
+        self, _action: Gio.SimpleAction = None, _param: object = None
+    ) -> None:
+        """Fetch and verify the speech model, on its own thread.
+
+        A ~57 MB download cannot run on the GTK thread (the window freezes) nor
+        on the AsyncBridge's loop, which also carries transcription and the LLM
+        turn, so a download there would stall the assistant itself. Same shape
+        as AudioRecorder's watchdog thread.
+        """
+        if getattr(self, "_model_download_thread", None) is not None:
+            if self._model_download_thread.is_alive():
+                self._set_status("A speech model is already downloading...")
+                return
+
+        model = self.config.whisper_model or self.hardware.get_whisper_model()
+        key = stt_provision.resolve_key(model)
+        if key not in stt_provision.MODELS:
+            self._set_status(
+                f"No downloadable build for the '{model}' model. Available: "
+                f"{', '.join(sorted(stt_provision.MODELS))}"
+            )
+            return
+        if not self.config.model_download_enabled:
+            self._set_status(
+                "Downloading a speech model is off. Turn on "
+                "'Download speech model on first use' in Settings first."
+            )
+            return
+
+        self._set_status(f"Downloading the {model} speech model...")
+        thread = threading.Thread(
+            target=self._fetch_speech_model_worker,
+            args=(key,),
+            name="chronoa-model-download",
+            daemon=True,
+        )
+        self._model_download_thread = thread
+        thread.start()
+
+    def _fetch_speech_model_worker(self, key: str) -> None:
+        try:
+            path = stt_provision.provision(key, config=self.config)
+        except Exception as exc:  # noqa: BLE001 - the reason is user-facing
+            GLib.idle_add(self._on_model_download_failed, str(exc))
+            return
+        GLib.idle_add(self._on_model_download_done, str(path))
+
+    def _on_model_download_done(self, path: str) -> bool:
+        self._model_download_thread = None
+        # Rebuild the STT handle so the next utterance uses the new model rather
+        # than keeping the one that failed is_available() at construction.
+        try:
+            self.stt = WhisperSTT(
+                model=self.config.whisper_model or self.hardware.get_whisper_model(),
+                language=self.config.language,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Downloaded, but the model could not be loaded: {exc}")
+            return False
+        if self.stt.is_available():
+            self._set_status("Speech model ready - voice input is now available.")
+        else:
+            self._set_status(
+                f"Model installed to {path}, but whisper-cpp itself is not "
+                "installed. Run: sudo pacman -S whisper-cpp"
+            )
+        return False
+
+    def _on_model_download_failed(self, reason: str) -> bool:
+        self._model_download_thread = None
+        self._set_status(f"Could not get the speech model: {reason}")
+        return False
+
+    def _set_status(self, message: str) -> None:
+        if self.window is not None:
+            self.window.set_status(message)
 
     def _toggle_model_download(
         self, _action: Gio.SimpleAction, _param: object
