@@ -735,7 +735,7 @@ def test_percepts_never_reach_assistant_history():
 # --- the real launcher, as a real subprocess --------------------------------
 
 
-def _run_cli(*arguments, timeout=60):
+def _run_cli(*arguments, timeout=60, config_home=None):
     # USER_SITE_PACKAGES is re-exported here for the same reason
     # `sense_manifest_support` re-exports it: the per-test `HOME` override drops
     # `~/.local/lib/python3.*/site-packages` from a fresh interpreter's
@@ -748,6 +748,22 @@ def _run_cli(*arguments, timeout=60):
     environment["PYTHONPATH"] = os.pathsep.join(
         [str(PKG_DIR), USER_SITE_PACKAGES, environment.get("PYTHONPATH", "")]
     ).rstrip(os.pathsep)
+    # A user drop-in lives in the *config* home, and the conftest fixture
+    # relocates that per test, so a test that writes a drop-in under a fake `$HOME`
+    # has to say so here or the child looks in the relocated directory, finds
+    # nothing, and reports EXIT_NOTHING_POLLABLE (6) where the test expected its
+    # own exit code. Same file, same reason.
+    if config_home is not None:
+        environment["XDG_CONFIG_HOME"] = str(config_home)
+    else:
+        # Default to the config home the hermetic fixture already implies, which
+        # is `$HOME/.config`. The child would otherwise read the fixture's own
+        # relocated directory, miss the drop-in and the keyfile consent store
+        # that `_write_ambient_dropin` and `chronoa_config.set` wrote beside it,
+        # and report EXIT_NOTHING_POLLABLE where the test asserted its own code.
+        home = environment.get("HOME")
+        if home:
+            environment["XDG_CONFIG_HOME"] = str(Path(home) / ".config")
     return subprocess.run(
         [sys.executable, str(SENSE_CLI), *arguments],
         capture_output=True,

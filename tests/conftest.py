@@ -55,12 +55,18 @@ sys.path.insert(0, str(PKG_DIR))
 def _hermetic_env(tmp_path, monkeypatch):
     """Isolate every test from the real user environment."""
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
-    xdg = tmp_path / "xdg_config"
-    xdg.mkdir()
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # `$HOME/.config`, not a sibling directory. A user drop-in - a sense or a
+    # skill - is looked up under `$XDG_CONFIG_HOME`, and so is the keyfile
+    # store the consent gates are written to. Pointing the two at different
+    # directories makes a test write its drop-in where the code will not look
+    # and its consent grant where nothing reads it, and the failure looks like
+    # the sense being broken rather than the fixture disagreeing with itself.
+    xdg = home / ".config"
+    xdg.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg))
 
 
 @pytest.fixture(scope="session")

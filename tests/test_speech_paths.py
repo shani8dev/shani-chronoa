@@ -14,9 +14,14 @@ def test_stt_uses_whisper_cli_and_ggml_model(tmp_path, monkeypatch):
     bindir = tmp_path / "bin"; bindir.mkdir()
     cli = _exe(bindir, "whisper-cli")
     monkeypatch.setenv("PATH", str(bindir))
-    models = tmp_path / "home" / ".local/share/whisper/models"
+    # `XDG_DATA_HOME`, not `$HOME`: the model search consults the data home, so
+    # setting only the fake home left it searching the real one. Deriving the
+    # fixture from the variable the code reads is what makes this test a
+    # statement about the search rather than about the developer's machine.
+    models = tmp_path / "share" / "whisper" / "models"
     models.mkdir(parents=True)
     (models / "ggml-base.bin").write_bytes(b"x")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     from shani_chronoa.stt import WhisperSTT
     s = WhisperSTT(model="base")

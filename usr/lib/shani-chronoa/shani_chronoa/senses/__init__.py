@@ -48,6 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional, Union
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 # Sensitivity tiers, ordered least to most private. `ContextBuilder` uses
@@ -227,7 +229,7 @@ class Sense(NamedTuple):
         )
 
 
-_USER_SENSES_DIR = Path(os.path.expanduser("~/.config/shani-chronoa/senses"))
+_USER_SENSES_DIR = files.config_home() / "shani-chronoa" / "senses"
 
 
 def is_valid_schema(schema: object) -> bool:

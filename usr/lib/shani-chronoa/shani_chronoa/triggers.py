@@ -53,26 +53,22 @@ from shani_chronoa.tool_tracking import ORIGIN_UNATTENDED
 logger = logging.getLogger(__name__)
 
 def _data_home() -> Path:
-    """`$XDG_DATA_HOME`, or `~/.local/share` when unset, empty or relative.
+    """Delegates to `files.data_home`; kept as a name because it is called at import.
 
-    Resolved the way `egress.py` resolves its own data directory, and for the
-    same reason it had to: armed rules are unattended capability, and the
-    percept store in this repo has already contaminated a real user's data
-    directory once because a test set `$HOME` too late to matter.
+    Armed rules are unattended capability, and this module reads the answer at
+    *import* time as a module-level constant. `tests/conftest.py` documents the
+    consequence: a per-test `monkeypatch.setenv("HOME", tmp_path)` "lands too
+    late", and the suite works around it by rebinding `RULES_FILE`. A variable
+    read *before* import by every caller that isolates is the one that actually
+    reaches here, so it is honoured - and a relative value counts as unset, per
+    the XDG spec, so `XDG_DATA_HOME=relative/path` cannot resolve outside the
+    data directory.
 
-    `$XDG_DATA_HOME` rather than `$HOME` specifically because this module reads
-    the answer at *import* time, as a module-level constant. `tests/conftest.py`
-    documents the consequence in as many words - a per-test
-    `monkeypatch.setenv("HOME", tmp_path)` "lands too late" - and works around
-    it by rebinding `RULES_FILE`. A variable that is read *before* import by
-    every caller that isolates is the one that actually reaches here, so honour
-    it. A relative value counts as unset, per the XDG spec, so
-    `XDG_DATA_HOME=relative/path` cannot resolve outside the data directory.
+    This was the third copy of that rule in the package, alongside
+    `egress.py`'s and `files.py`'s. One implementation means a change to the
+    fallback cannot leave two of them disagreeing.
     """
-    configured = os.environ.get("XDG_DATA_HOME", "")
-    if configured and os.path.isabs(configured):
-        return Path(configured)
-    return Path(os.path.expanduser("~/.local/share"))
+    return files.data_home()
 
 
 # Where armed rules live. User-owned, under the same per-user data dir the rest

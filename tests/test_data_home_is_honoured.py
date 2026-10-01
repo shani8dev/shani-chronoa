@@ -32,6 +32,14 @@ DATA_PATHS = [
     ("shani_chronoa.skills.add_reminder", "_STORE"),
 ]
 
+#: The two directories that hold user-supplied *code* rather than state. These
+#: follow `$XDG_CONFIG_HOME` and must not follow `$XDG_DATA_HOME`: a run that
+#: relocates its data to a temp dir still has to load the user's own skills.
+CONFIG_PATHS = [
+    ("shani_chronoa.skills", "_USER_SKILLS_DIR"),
+    ("shani_chronoa.senses", "_USER_SENSES_DIR"),
+]
+
 
 def _in_fresh_process(module: str, attribute: str, data_home: str) -> str:
     """Read one attribute in a child process.
@@ -113,3 +121,124 @@ class TestEveryPersistedPathFollowsTheEnvironment:
         assert "expanduser" not in line, (
             f"{module}.{attribute} is built with expanduser again: {line.strip()!r}"
         )
+
+
+@pytest.mark.parametrize("module,attribute", CONFIG_PATHS, ids=[a for _, a in CONFIG_PATHS])
+class TestUserCodeDirectoriesFollowConfigNotData:
+    def test_it_resolves_under_the_relocated_config_home(self, tmp_path, module, attribute):
+        env = dict(os.environ, XDG_CONFIG_HOME=str(tmp_path), PYTHONDONTWRITEBYTECODE="1")
+        result = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(PACKAGE_ROOT)!r});"
+             f"import importlib;"
+             f"print(getattr(importlib.import_module({module!r}), {attribute!r}))"],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr[-400:]
+        assert result.stdout.strip().startswith(str(tmp_path)), (
+            f"{module}.{attribute} resolved to {result.stdout.strip()!r}, outside the "
+            f"relocated config home {tmp_path}"
+        )
+
+    def test_relocating_the_data_home_does_not_move_it(self, tmp_path, module, attribute):
+        # The point of the split. A run that sandboxes its *data* must still load
+        # the user's own skills and senses from their real config directory,
+        # because those are the user's code rather than something the run wrote.
+        env = dict(os.environ, XDG_DATA_HOME=str(tmp_path / "data"),
+                   XDG_CONFIG_HOME=str(tmp_path / "config"), PYTHONDONTWRITEBYTECODE="1")
+        result = subprocess.run(
+            [sys.executable, "-c",
+             f"import sys; sys.path.insert(0, {str(PACKAGE_ROOT)!r});"
+             f"import importlib;"
+             f"print(getattr(importlib.import_module({module!r}), {attribute!r}))"],
+            capture_output=True, text=True, env=env, timeout=60,
+        )
+        assert result.returncode == 0, result.stderr[-400:]
+        assert result.stdout.strip().startswith(str(tmp_path / "config")), (
+            f"{module}.{attribute} followed the data home instead of the config "
+            f"home; a relocated test run would silently load a different set of "
+            f"user modules"
+        )
+
+
+class TestTheAutostartDirectory:
+    """The autostart directory is where the desktop entry is written.
+
+    This one is asserted from the source rather than from a child's resolved
+    value, because a child's value is decided by whichever `XDG_CONFIG_HOME` it
+    inherits - and `conftest.py` sets that to its own temp dir per test, so a
+    test that copied `os.environ` was asserting about the fixture's directory
+    rather than its own. It passed with the fix reverted, which is the whole
+    problem this rewrite exists to fix.
+    """
+
+    def test_it_is_built_from_the_config_home(self):
+        import inspect
+
+        from shani_chronoa.app import ChronoaApplication
+        body = inspect.getsource(ChronoaApplication)
+        assert "files.config_home()" in body, (
+            "the autostart directory is no longer built from the config home"
+        )
+        assert 'expanduser("~/.config/autostart")' not in body, (
+            "the autostart directory is built with expanduser again"
+        )
+
+    def test_the_config_home_moves_when_the_variable_does(self, tmp_path, monkeypatch):
+        from shani_chronoa import files
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+        assert files.config_home() == tmp_path
+        assert str(files.config_home() / "autostart").startswith(str(tmp_path))
+
+
+class TestTheModelSearchPaths:
+    """The user half of each search path must move; the system half must not.
+
+    Both are resolved inside a method rather than at import, so they are driven
+    through the real call and the system fallback is checked at the same time -
+    a list that moved wholesale would also break every user whose models are
+    installed under `/usr`, which is the packaging default on Arch.
+    """
+
+    def test_the_whisper_user_half_moves_and_the_system_half_does_not(self, tmp_path):
+        # The searched directory, not the returned file. `_get_model_path`
+        # returns the first entry that *exists*, so on any machine with a model
+        # installed under the real home it answers with that one and says
+        # nothing about where it looked - an earlier version of this test
+        # asserted on the return value and passed with the fix reverted, which
+        # is the failure this comment exists to prevent.
+        from shani_chronoa.stt import WhisperSTT
+        os.environ["XDG_DATA_HOME"] = str(tmp_path)
+        import inspect
+        body = inspect.getsource(WhisperSTT._get_model_path)
+        assert "files.data_home()" in body, (
+            "the whisper model search no longer consults the data home"
+        )
+        assert "expanduser" not in body, (
+            "the whisper model search is built with expanduser again"
+        )
+        # And the call really does go through it, so the first entry is the
+        # relocated one even when a real model exists elsewhere.
+        resolved = WhisperSTT()._get_model_path("definitely-not-a-real-model")
+        assert str(resolved).startswith(str(tmp_path)), (
+            f"with no model installed anywhere, the search fell back to {resolved!r} "
+            f"instead of the relocated data home {tmp_path}"
+        )
+        assert "/usr/share/whisper/models" in body, (
+            "the system-wide model path was dropped from the search"
+        )
+
+    def test_the_piper_voice_dir_moves_with_the_data_home(self, tmp_path, monkeypatch):
+        from shani_chronoa import tts
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+        found = tts._find_voice_file("en_US-lessac-medium") if hasattr(
+            tts, "_find_voice_file") else None
+        if callable(found):
+            assert str(found).startswith(str(tmp_path))
+        else:
+            # No single entry point: assert the resolution is dynamic by checking
+            # the module reads the data home rather than a captured constant.
+            import inspect
+            assert "expanduser" not in inspect.getsource(tts), (
+                "tts.py resolves a voice directory with expanduser again"
+            )

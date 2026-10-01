@@ -21,6 +21,8 @@ from gi.repository import Gtk, Gio, GLib, Adw  # type: ignore
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shani_chronoa.assistant import Assistant
+
+from shani_chronoa import files
 from shani_chronoa.asyncbridge import AsyncBridge
 from shani_chronoa.audio import AudioPlayer, AudioRecorder, BargeInMonitor
 from shani_chronoa import markdown_lite, pipewire, planmode, sessions, ask_bridge
@@ -505,7 +507,7 @@ class ChronoaApplication(Gtk.Application):
             self.window.set_response("")
             self.window.set_status("New conversation")
 
-    _AUTOSTART_DIR = os.path.expanduser("~/.config/autostart")
+    _AUTOSTART_DIR = str(files.config_home() / "autostart")
     _AUTOSTART_DESKTOP_FILE = os.path.join(_AUTOSTART_DIR, "shani-chronoa.desktop")
     _INSTALLED_DESKTOP_FILE = "/usr/share/applications/shani-chronoa.desktop"
 

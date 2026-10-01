@@ -10,6 +10,8 @@ import shutil
 import tempfile
 from typing import Optional
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +28,7 @@ class PiperTTS:
 
     def _get_voice_path(self, voice: str) -> str:
         """Get the path to the Piper voice model file."""
-        voice_dir = os.path.expanduser("~/.local/share/piper/voices")
+        voice_dir = files.data_home() / "piper" / "voices"
         voice_file = f"{voice}.onnx"
         path = os.path.join(voice_dir, voice_file)
         if not os.path.exists(path):

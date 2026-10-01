@@ -65,6 +65,8 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
+
+from shani_chronoa import files
 from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
@@ -80,29 +82,20 @@ EGRESS_LOG = EGRESS_DIR / _LOG_NAME
 
 
 def _data_home() -> Path:
-    """`$XDG_DATA_HOME`, or `~/.local/share` when it is unset, empty or relative.
+    """Delegates to `files.data_home`.
 
-    Resolved per call, never at import, and that is the whole point of this
-    function existing. The log path used to be a module-level constant built from
-    a hardcoded `~/.local/share`, which meant a caller or test that relocated its
-    data - the documented way to sandbox a run, and the only way to stop a test
-    suite writing into a real user's home - had no way to be obeyed: a test run
-    with only `XDG_STATE_HOME` redirected still appended every fixture record to
-    the developer's actual audit log. It is also the same trap in a subtler form
-    if it is merely moved to a module constant, because a module is imported once
-    per process while the environment it read is not: the value would then depend
-    on collection order, and the test below would pass or fail depending on
-    whether something had already imported this module.
+    The log path used to be a module-level constant built from a hardcoded
+    `~/.local/share`, so a caller or test that relocated its data - the
+    documented way to sandbox a run, and the only way to stop a suite writing
+    into a real user's home - had no way to be obeyed. A suite run with only
+    `XDG_STATE_HOME` redirected still appended every fixture record to the real
+    audit log, which is how 4,320 lines once landed there.
 
-    A relative value is treated as unset, per the XDG spec: `XDG_DATA_HOME=""` is
-    a common way to end up with a path that resolves against the process's
-    working directory, and an audit log written relative to the CWD is both
-    untraceable and missed by any test looking for it.
+    Resolved per call, never at import: a module is imported once per process
+    while the environment it read is not, so a constant would make the answer
+    depend on collection order.
     """
-    configured = os.environ.get("XDG_DATA_HOME", "")
-    if configured and os.path.isabs(configured):
-        return Path(configured)
-    return Path.home() / ".local" / "share"
+    return files.data_home()
 
 
 def _egress_dir() -> Path:

@@ -10,6 +10,8 @@ import shutil
 import tempfile
 from typing import Optional
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 
@@ -29,7 +31,7 @@ class WhisperSTT:
         """Get the path to the whisper.cpp model file."""
         # whisper.cpp publishes its models as ggml-<model>.bin; <model>.bin
         # kept for files named by hand
-        dirs = (os.path.expanduser("~/.local/share/whisper/models"), "/usr/share/whisper/models")
+        dirs = (files.data_home() / "whisper" / "models", "/usr/share/whisper/models")
         names = (f"ggml-{model}.bin", f"{model}.bin")
         for d in dirs:
             for n in names:

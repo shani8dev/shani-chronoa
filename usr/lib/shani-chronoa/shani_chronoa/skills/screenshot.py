@@ -22,6 +22,8 @@ import shutil
 import time
 
 from shani_chronoa.config import ChronoaConfig
+
+from shani_chronoa import files
 from shani_chronoa.skills import Skill
 from shani_chronoa.screengrab import ScreenCaptureError, capture_screen
 
@@ -35,7 +37,7 @@ def _data_home() -> str:
     configured = os.environ.get("XDG_DATA_HOME", "")
     if configured and os.path.isabs(configured):
         return configured
-    return os.path.expanduser("~/.local/share")
+    return str(files.data_home())
 
 
 _OUTPUT_DIR = os.path.join(_data_home(), "shani-chronoa", "screenshots")

@@ -32,6 +32,8 @@ import os
 from pathlib import Path
 from typing import Callable, NamedTuple
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 #: Module-level marker meaning "this file lives in the skills package but is
@@ -55,7 +57,7 @@ class Skill(NamedTuple):
     run: Callable[[dict], str]
 
 
-_USER_SKILLS_DIR = Path(os.path.expanduser("~/.config/shani-chronoa/skills"))
+_USER_SKILLS_DIR = files.config_home() / "shani-chronoa" / "skills"
 
 
 def is_valid_schema(schema: object) -> bool:

@@ -158,6 +158,21 @@ def state_home() -> Path:
     return Path.home() / ".local" / "state"
 
 
+def config_home() -> Path:
+    """`$XDG_CONFIG_HOME`, or `~/.config`; same reasoning as `data_home`.
+
+    Distinct from `data_home` on purpose. Configuration is where a user drops
+    their own code - the skill and sense directories are module search paths -
+    so it must not move when a *test* relocates its data, and a run that
+    redirected `XDG_DATA_HOME` while reading skills from a relocated config
+    directory would silently load a different set of them.
+    """
+    configured = os.environ.get("XDG_CONFIG_HOME", "")
+    if configured and os.path.isabs(configured):
+        return Path(configured)
+    return Path.home() / ".config"
+
+
 def ensure_private_dir(path: Path) -> None:
     """Create `path` (and its parents) and make it owner-only.
 
