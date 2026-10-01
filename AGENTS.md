@@ -86,6 +86,50 @@ correct." It is verified by observing the actual behavior of the real
 thing in the real environment — built, served, deployed, signed, running.
 If you haven't seen it work (or fail) for real, it isn't verified.
 
+## Test harness: shani-testbed (use it - and improve it, never invent around it)
+
+The ecosystem's real test harness is the sibling repo **`../shani-testbed`**
+(read its `README.md` and `AGENTS.md`). It installs a real ShaniOS image with
+the real installer, boots its slots (`systemd-nspawn`, and UEFI + TPM VMs),
+runs real deploys and rollbacks, drives GUI apps through their accessibility
+tree, and checks web pages in a real headless browser. Every command runs from
+`../shani-install-media`, which provides the builder container:
+
+```bash
+cd ../shani-install-media
+./run_in_container.sh build.sh test <command> ...   # `... test help` lists them all
+```
+
+**If the check you need does not exist, add it to shani-testbed - do not invent
+around it.** A one-off script in this repo, a scratchpad, or a heredoc piped
+into a container is lost when the session ends, and the next agent re-derives
+it. Extend the harness instead (see "Extend the harness" in its AGENTS.md):
+
+- an in-slot check -> `shani-testbed/slot-tests/<name>.sh` (`# slot-test-mode: boot`,
+  prints `RESULT <name> PASS|FAIL|SKIP` lines), run by `slot-test <slot> <name>`;
+- a GUI interaction or assertion -> an `app` action in `lib/app.sh`, or a walk
+  through a real app as `app-scripts/<app>.actions`;
+- a web check -> `lib/web_client.py`;
+- a new way to boot, drive or observe -> a command or option in `lib/`;
+
+each with a negative control (a check that cannot fail is not a check), its
+self-test (`tests/run-app-actions.sh`, `tests/run-web-client.sh`, ...), and the
+`usage` + README updated. One harness run at a time: disk-touching commands
+take `disk/.testbed.lock` and a second run is refused. Plain nspawn boots see
+the image's whole `/var`; real boots have an empty tmpfs `/var`
+(`systemd.volatile=state`) - use `slot-test --volatile`, or a real UEFI boot
+with `iso-install --boot-only --console-exec=CMD`, for anything touching `/var`.
+
+### What to run for this repo
+
+- `slot-test <slot> chronoa-senses chronoa-machine-state --local-src-chronoa=/opt/shani-chronoa`
+  checks the senses against the real Arch image (run_in_container.sh mounts
+  this checkout at `/opt/shani-chronoa`).
+- `slot-test <slot> repo-pytest` runs this repo's suite on the image's
+  Python/GTK; Landlock and seccomp tests need the real kernel:
+  `iso-install --boot-only --console-exec=...`.
+- `app <slot> --run=shani-chronoa --strict ...` drives the real window.
+
 ## Rule: verify by actually running it, not by reading it
 
 This repo has shipped multiple bugs that read as completely correct and
