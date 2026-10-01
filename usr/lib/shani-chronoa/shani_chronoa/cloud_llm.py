@@ -143,10 +143,13 @@ PROVIDERS: dict[str, CloudProvider] = {
     "opencode-zen": CloudProvider("opencode-zen", "OpenCode Zen", "https://opencode.ai/zen/v1",
                                   "gpt-5.4-mini", requires_key=True),
     # Keyed (401 "No cookie auth credentials found" without one, 2026-10-01),
-    # but its ':free' models cost nothing with a free account key: 15 of them
-    # take tool calls. The default is one of those; the free list changes.
+    # but free with a free account key: `openrouter/free` is OpenRouter's own
+    # router over whichever ':free' models are up (price 0, tool calls
+    # supported), so it outlives any one free model. `openrouter/auto` picks
+    # the best model per prompt but bills at that model's price - not a
+    # default to choose for someone.
     "openrouter": CloudProvider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1",
-                                "qwen/qwen3.8-27b:free", requires_key=True),
+                                "openrouter/free", requires_key=True),
     "google": CloudProvider(
         "google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
         "gemini-2.0-flash", requires_key=True,
