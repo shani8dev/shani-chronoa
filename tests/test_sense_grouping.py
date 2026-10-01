@@ -23,7 +23,7 @@ from shani_chronoa.settings_window import (  # noqa: E402
 # they watch, not because they are unusual.
 WATCHES_THE_WORLD = {
     "camera", "vision", "contention", "privilege", "rfsense",
-    "thermal", "thermalgrid", "hwmon",
+    "thermal", "thermalgrid", "hwmon", "location",
     # `power` reads the machine's own hardware, like hwmon does, but it is NOT
     # in this set: it ships enabled by default. Battery charge and wear are the
     # same class of fact as a disk-free reading and never leave the machine,

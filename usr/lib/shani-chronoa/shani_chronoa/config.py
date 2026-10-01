@@ -58,7 +58,9 @@ def _is_secret(key: str) -> bool:
 # the vision sense where the model is actually chosen - gating it here would
 # deny local vision under privacy mode, which is the one case privacy mode
 # is supposed to permit.
-_NETWORKED_SENSES = frozenset({"web"})
+# `location` is here because GeoClue's Wi-Fi source sends nearby network IDs
+# to a location service: privacy mode means no.
+_NETWORKED_SENSES = frozenset({"web", "location"})
 
 # The authoritative sense -> consent-key table. Written out rather than
 # composed as f"{sense}-sense-enabled" so that adding a sense is one visible
@@ -72,6 +74,8 @@ _SENSE_CONSENT_KEYS = {
     "ocr": "ocr-sense-enabled",
     "filesystem": "filesystem-sense-enabled",
     "web": "web-sense-enabled",
+    # Off by default: where someone is is private on any reading.
+    "location": "location-sense-enabled",
     "memory": "memory-sense-enabled",
     "hearing": "hearing-sense-enabled",
     "capture": "capture-sense-enabled",

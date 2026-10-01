@@ -38,8 +38,10 @@ hey hi hello ok okay chronoa tell show give get let make want need like know""".
 
 #: Everyday words for what a tool does, where its own text uses others.
 _SYNONYMS: Dict[str, str] = {
-    "weather": "web search", "forecast": "web search", "temperature": "web search",
-    "rain": "web search", "news": "web search", "travel": "web search",
+    "weather": "weather", "forecast": "weather", "temperature": "weather",
+    "rain": "weather", "umbrella": "weather", "hot": "weather", "cold": "weather",
+    "where am i": "location", "where is this": "location", "gps": "location",
+    "news": "web search", "travel": "web search",
     "route": "web search", "train": "web search", "flight": "web search",
     "look": "search", "google": "web search", "internet": "web search",
     "louder": "volume", "quieter": "volume", "sound": "volume", "loud": "volume",

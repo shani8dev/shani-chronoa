@@ -276,6 +276,11 @@
       <summary>Let Chronoa sample the WiFi link and notice movement</summary>
       <description>When true, Chronoa may sample each wireless interface's link quality from /proc/net/wireless and track how much the signal is varying, which is a real and long-established indication that something in the room is moving. Off by default. This is RSSI-only, which is the coarser half of radio sensing: it notices movement, not who or what, it gives no position, and it cannot distinguish a person from a pet, a curtain or a rotating fan. It reports the machine's sensing ceiling honestly rather than implying a capability it does not have. No frames, no image, no camera.</description>
     </key>
+    <key name="location-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa find where this computer is</summary>
+      <description>When true, Chronoa may ask the system's location services where this computer is: a GPS receiver through gpsd if one is attached, otherwise GNOME's location service (GeoClue), whose Wi-Fi source sends the IDs of nearby networks to a location service to look them up. Off by default, and blocked in privacy mode for that reason. It reports latitude, longitude and accuracy, used for things like the local weather; it never guesses from an IP address. The position is kept for five minutes and is never written to disk.</description>
+    </key>
     <key name="thermalgrid-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa read a thermal camera array if one is attached</summary>

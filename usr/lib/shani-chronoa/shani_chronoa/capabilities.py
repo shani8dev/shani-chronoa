@@ -211,6 +211,7 @@ GATE_NAMES: dict[str, str] = {
     "notification-enabled": "Speak answers aloud",
     "vision-sense-enabled": "Take and describe photos",
     "web-sense-enabled": "Web search",
+    "location-sense-enabled": "Location",
     "microphone-sense-enabled": "Transcribe speech",
     "file-delete-enabled": "Let Chronoa delete files",
     "process-kill-enabled": "Let Chronoa stop processes",

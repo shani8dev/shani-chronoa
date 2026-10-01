@@ -124,6 +124,10 @@ SENSE_LABELS = {
         "Movement",
         "Sense motion from Wi-Fi signal strength, not what moved",
     ),
+    "location": (
+        "Location",
+        "Where this computer is, from a GPS receiver or GNOME's location service",
+    ),
     "thermalgrid": (
         "Infrared array",
         "Thermal grid sensors on the I2C bus, if one is wired up",
@@ -279,9 +283,9 @@ SENSE_CATEGORIES = [
      "Reading text out of pictures, and describing what a camera sees",
      ["vision", "ocr"]),
     ("Getting work done",
-     "Files, folders, git and the web - what makes it able to act rather than "
-     "only answer",
-     ["filesystem", "git", "web"]),
+     "Files, folders, git, the web and where you are - what makes it able to "
+     "act rather than only answer",
+     ["filesystem", "git", "web", "location"]),
     ("Is anything broken",
      "Failed services, errors the system has logged, updates that are waiting, "
      "and the running code and containers that have died - the ways a machine "
