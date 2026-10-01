@@ -755,6 +755,7 @@ class ChronoaConfig:
             "google": self.get("google-api-key", ""),
             "groq": self.get("groq-api-key", ""),
             "opencode-zen": self.get("opencode-zen-api-key", ""),
+            "openrouter": self.get("openrouter-api-key", ""),
         }
 
 

@@ -1121,6 +1121,7 @@ class SettingsWindow(Gtk.Window):
             ("OpenAI API key", "openai-api-key"),
             ("Google Gemini API key", "google-api-key"),
             ("Groq API key", "groq-api-key"),
+            ("OpenRouter API key (free models work with a free key)", "openrouter-api-key"),
             ("OpenCode Zen API key", "opencode-zen-api-key"),
         ):
             self._entry(byok, label, "", config.get(key, ""),

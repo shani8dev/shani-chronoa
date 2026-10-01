@@ -131,6 +131,11 @@
       <summary>Groq API key</summary>
       <description>Required to use Groq as a cloud LLM fallback - Groq has no anonymous access. Empty means this provider is skipped.</description>
     </key>
+    <key name="openrouter-api-key" type="s">
+      <default>''</default>
+      <summary>OpenRouter API key</summary>
+      <description>Required to use OpenRouter as a cloud LLM fallback - OpenRouter has no anonymous access. A free account key is enough for its ':free' models, which is what Chronoa uses by default. Empty means this provider is skipped.</description>
+    </key>
     <key name="opencode-zen-api-key" type="s">
       <default>''</default>
       <summary>OpenCode Zen API key</summary>

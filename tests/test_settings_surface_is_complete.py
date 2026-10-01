@@ -78,7 +78,7 @@ CONTROLLED = {
     # the audio device choosers
     "audio-input-device", "audio-output-device",
     # BYOK provider keys
-    "anthropic-api-key", "openai-api-key", "google-api-key", "groq-api-key", "opencode-zen-api-key",
+    "anthropic-api-key", "openai-api-key", "google-api-key", "groq-api-key", "opencode-zen-api-key", "openrouter-api-key",
     "llm7-api-key", "kilo-api-key", "blockrun-api-key",
 }
 
