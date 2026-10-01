@@ -923,6 +923,18 @@ BACKOFF_MAX_CONSECUTIVE_FAILURES = 5
 BACKOFF_RESTART_LIMIT = 5
 BACKOFF_RESTART_WINDOW_SECONDS = 300.0
 
+# Why a firing failed, as data rather than as an English prefix in `reason` -
+# the same prose-matching problem `DispatchResult.ran` exists to stop. These are
+# the three doors `_dispatch_now` and `TriggerEngine.evaluate` already had;
+# `reason` remains the human-readable text.
+FAILURE_NONE = ""
+FAILURE_ACTUATOR_RAISED = "actuator_raised"
+FAILURE_ACTUATOR_DID_NOT_RUN = "actuator_did_not_run"
+FAILURE_VERIFICATION_FAILED = "verification_failed"
+FAILURE_KINDS = frozenset((
+    FAILURE_ACTUATOR_RAISED, FAILURE_ACTUATOR_DID_NOT_RUN, FAILURE_VERIFICATION_FAILED,
+))
+
 # A ceiling on `attempt` for its arithmetic, not for its policy. `delay_for`
 # returns `min(base * 2 ** (attempt - 1), cap)`, so the delay stops growing at
 # attempt 7 either way - but Python still *computes* `2 ** (attempt - 1)`
@@ -930,6 +942,15 @@ BACKOFF_RESTART_WINDOW_SECONDS = 300.0
 # be discarded. The policy cap is `BACKOFF_MAX_CONSECUTIVE_FAILURES`; this only
 # keeps the expression finite.
 BACKOFF_MAX_ATTEMPT = 64
+
+# The ceiling on a *persisted* per-rule budget. `BACKOFF_MAX_CONSECUTIVE_FAILURES`
+# is the default a rule gets, not a limit a rule may not exceed, and 20 is chosen
+# so that a rule allowed twelve failures is reachable in wall-clock terms: the
+# delay ramp saturates at `BACKOFF_CAP_SECONDS` (60s) by attempt 7, so twenty
+# consecutive failures is roughly 16 minutes of a broken actuator being retried
+# before the rule parks and says so. Beyond that the budget stops describing
+# patience and starts describing a backoff that will never fire again.
+BACKOFF_MAX_RULE_CONSECUTIVE_FAILURES = 20
 
 # Two firings, then park. "A week out" is the reminder with time left to act;
 # "tomorrow" is the one where losing access is imminent. A third threshold adds
@@ -2219,7 +2240,7 @@ class EventRule:
         "cooldown_seconds", "retry_policy", "allow_destructive", "enabled",
         "created_at", "last_fired_at", "retry_at", "attempt", "parked",
         "parked_reason", "consecutive_failures", "restart_times",
-        "fired_thresholds",
+        "fired_thresholds", "max_consecutive_failures",
     )
 
     def __init__(
@@ -2248,6 +2269,7 @@ class EventRule:
         consecutive_failures: int = 0,
         restart_times: Optional[list[float]] = None,
         fired_thresholds: Optional[list[str]] = None,
+        max_consecutive_failures: int = BACKOFF_MAX_CONSECUTIVE_FAILURES,
     ) -> None:
         self.name = name
         self.event_type = event_type
@@ -2273,6 +2295,7 @@ class EventRule:
         self.consecutive_failures = int(consecutive_failures)
         self.restart_times = list(restart_times or [])
         self.fired_thresholds = list(fired_thresholds or [])
+        self.max_consecutive_failures = int(max_consecutive_failures)
 
     @property
     def sense(self) -> str:
@@ -2334,7 +2357,16 @@ class EventRule:
         return self._policy().delay_for(self.attempt)
 
     def _policy(self) -> BackoffPolicy:
-        policy = BackoffPolicy()
+        # `restart_limit` tracks the budget rather than staying at the module
+        # default: `should_park()` is an OR of the two caps, so a rule allowed
+        # twelve failures still parks after five inside the rolling window if the
+        # restart cap is left alone, and the budget is then a fiction.
+        policy = BackoffPolicy(
+            max_consecutive_failures=self.max_consecutive_failures,
+            restart_limit=max(
+                BACKOFF_RESTART_LIMIT, self.max_consecutive_failures
+            ),
+        )
         policy.consecutive = self.consecutive_failures
         policy.restarts = list(self.restart_times)
         return policy
@@ -2375,6 +2407,7 @@ class EventRule:
             "consecutive_failures": self.consecutive_failures,
             "restart_times": list(self.restart_times),
             "fired_thresholds": list(self.fired_thresholds),
+            "max_consecutive_failures": self.max_consecutive_failures,
         }
 
     @classmethod
@@ -2462,16 +2495,27 @@ class EventRule:
         # `BACKOFF_MAX_CONSECUTIVE_FAILURES`, so `should_park()` is False and a
         # rule that is failing every time never reaches the cap.
         attempt = _clamped_seconds(raw.get("attempt", 0), 0, BACKOFF_MAX_ATTEMPT, 0)
-        consecutive = _clamped_seconds(
-            raw.get("consecutive_failures", 0), 0, BACKOFF_MAX_CONSECUTIVE_FAILURES, 0
+        budget = _clamped_seconds(
+            raw.get("max_consecutive_failures", BACKOFF_MAX_CONSECUTIVE_FAILURES),
+            1, BACKOFF_MAX_RULE_CONSECUTIVE_FAILURES, BACKOFF_MAX_CONSECUTIVE_FAILURES,
         )
-        if attempt is None or consecutive is None:
+        # Clamped to *this rule's* budget, not the module default. Clamping to the
+        # default meant a rule configured for twelve reloads claiming five, and
+        # `should_park()` - which compares the counter against the budget - then
+        # flips to False: a parked rule silently un-parks on restart and starts
+        # driving a broken actuator again with nothing reporting the change.
+        if attempt is None or budget is None:
+            return None
+        consecutive = _clamped_seconds(
+            raw.get("consecutive_failures", 0), 0, budget, 0
+        )
+        if consecutive is None:
             return None
         restart_times = raw.get("restart_times", []) or []
         fired_thresholds = raw.get("fired_thresholds", []) or []
         if not isinstance(restart_times, list) or not isinstance(fired_thresholds, list):
             return None
-        if len(restart_times) > BACKOFF_RESTART_LIMIT:
+        if len(restart_times) > max(BACKOFF_RESTART_LIMIT, int(budget)):
             return None
         if len(fired_thresholds) > len(EXPIRY_THRESHOLDS):
             return None
@@ -2494,6 +2538,7 @@ class EventRule:
                 consecutive_failures=int(consecutive),
                 restart_times=restart_times,
                 fired_thresholds=fired_thresholds,
+                max_consecutive_failures=int(budget),
             )
         except (TypeError, ValueError):
             return None
@@ -2629,12 +2674,14 @@ class EventEvaluation(NamedTuple):
     event: "Optional[Event]" = None
     signal_status: str = SIGNAL_OK
     scheduled_for: "Optional[float]" = None
+    failure_kind: str = FAILURE_NONE
 
     def __repr__(self) -> str:
         return (
             f"EventEvaluation(rule={self.rule.name!r}, fired={self.fired}, "
             f"suppressed={self.suppressed}, censored={self.censored}, "
-            f"layer={self.layer!r}, reason={self.reason!r})"
+            f"layer={self.layer!r}, failure_kind={self.failure_kind!r}, "
+            f"reason={self.reason!r})"
         )
 
 
@@ -2928,7 +2975,7 @@ class EventEngine:
         except Exception as exc:  # noqa: BLE001 - one bad rule must not stop the rest
             reason = f"{type(exc).__name__}: {exc}"
             return self._failed(rule, event, moment, reason, None, fingerprint_key,
-                                previous_fingerprint)
+                                previous_fingerprint, FAILURE_ACTUATOR_RAISED)
 
         text = getattr(outcome, "text", outcome)
         verdict = getattr(outcome, "verdict", verification.verdict_from_text(text or ""))
@@ -2938,6 +2985,7 @@ class EventEngine:
                 rule, event, moment,
                 f"the actuator did not run: {getattr(outcome, 'text', '') or 'no detail'}",
                 verdict, fingerprint_key, previous_fingerprint,
+                FAILURE_ACTUATOR_DID_NOT_RUN,
             )
         if verdict is verification.Verdict.FAILED:
             return self._failed(
@@ -2945,6 +2993,7 @@ class EventEngine:
                 f"actuator ran but verification failed: "
                 f"{getattr(outcome, 'evidence', '') or 'no evidence'}",
                 verdict, fingerprint_key, previous_fingerprint,
+                FAILURE_VERIFICATION_FAILED,
             )
 
         rule.last_fired_at = moment
@@ -2958,12 +3007,18 @@ class EventEngine:
         self, rule: EventRule, event: Event, moment: float, reason: str,
         verdict: "Optional[verification.Verdict]",
         fingerprint_key: str = "", previous_fingerprint: "Optional[str]" = None,
+        failure_kind: str = FAILURE_NONE,
     ) -> EventEvaluation:
         """One non-success outcome, from any of the three ways it can arrive.
 
         Shared so the raising actuator, the one that never ran and the one whose
         post-condition did not hold cannot each grow their own idea of what a
         failure does to the fingerprint, the backoff counters and the park flag.
+
+        `verdict` was already threaded through here and is *not* total: the
+        exception door passes `None`, and a bare-string seam leaves it
+        UNVERIFIED-or-recovered-by-prose. `failure_kind` is that idea completed -
+        it says which door, so a caller never has to infer it from the wording.
         """
         rule.note_failure(moment)
         # The recorded state is rolled back so the *same* observation is
@@ -2983,6 +3038,7 @@ class EventEngine:
             suppressed=not exhausted,
             censored=exhausted,
             layer=LAYER_COOLDOWN if exhausted else None,
+            failure_kind=failure_kind,
         )
 
     def poll(self, now: Optional[float] = None) -> "list[EventEvaluation]":
@@ -3087,7 +3143,7 @@ class FireResult:
     are values so the caller keeps going and can see what did not run.
     """
 
-    __slots__ = ("rule", "fired", "denied", "reason", "verdict")
+    __slots__ = ("rule", "fired", "denied", "reason", "verdict", "failure_kind")
 
     def __init__(
         self,
@@ -3096,6 +3152,7 @@ class FireResult:
         denied: bool = False,
         reason: str = "",
         verdict: Optional[verification.Verdict] = None,
+        failure_kind: str = FAILURE_NONE,
     ) -> None:
         self.rule = rule
         self.fired = fired
@@ -3103,12 +3160,15 @@ class FireResult:
         self.reason = reason
         # None when no verdict applies: the rule was denied, or only dry-run.
         self.verdict = verdict
+        # Same values as `EventEvaluation.failure_kind`. Denials and dry runs
+        # stay `FAILURE_NONE`: neither is a failure of the actuator.
+        self.failure_kind = failure_kind
 
     def __repr__(self) -> str:
         return (
             f"FireResult(rule={self.rule.name!r}, fired={self.fired}, "
-            f"denied={self.denied}, reason={self.reason!r}, "
-            f"verdict={self.verdict})"
+            f"denied={self.denied}, failure_kind={self.failure_kind!r}, "
+            f"reason={self.reason!r}, verdict={self.verdict})"
         )
 
 
@@ -3218,9 +3278,10 @@ class TriggerEngine:
                 # distinguish from a user action is not auditable.
                 outcome = self._dispatch(rule.actuator, dict(rule.arguments), origin=_ORIGIN)
             except Exception as exc:  # noqa: BLE001 - one bad rule must not stop the rest
-                results.append(
-                    FireResult(rule, fired=False, reason=f"{type(exc).__name__}: {exc}")
-                )
+                results.append(FireResult(
+                    rule, fired=False, reason=f"{type(exc).__name__}: {exc}",
+                    failure_kind=FAILURE_ACTUATOR_RAISED,
+                ))
                 continue
             # An injected dispatch may still be the plain string-returning
             # seam, so accept either shape rather than assuming.
@@ -3240,6 +3301,7 @@ class TriggerEngine:
                     rule, fired=False,
                     reason=f"the actuator did not run: {text or 'no detail'}",
                     verdict=verdict,
+                    failure_kind=FAILURE_ACTUATOR_DID_NOT_RUN,
                 ))
                 continue
             if verdict is verification.Verdict.FAILED:
@@ -3252,6 +3314,7 @@ class TriggerEngine:
                     reason=f"actuator ran but verification failed: "
                            f"{getattr(outcome, 'evidence', '') or 'no evidence'}",
                     verdict=verdict,
+                    failure_kind=FAILURE_VERIFICATION_FAILED,
                 ))
                 continue
             rule.last_fired_at = moment
