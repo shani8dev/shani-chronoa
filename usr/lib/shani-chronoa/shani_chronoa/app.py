@@ -102,6 +102,7 @@ class ChronoaApplication(Gtk.Application):
             phrase=self.config.wake_phrase, target=in_target or None
         )
         self._listening = False
+        self._voice_turn = False
         self._wake_word_active = False
         self._ollama_available = False
         self._async = AsyncBridge()
@@ -128,7 +129,7 @@ class ChronoaApplication(Gtk.Application):
         # launch, before any tool can be dispatched. The window itself does not
         # exist yet (`do_activate` builds it), which is why the presenter takes a
         # getter rather than a window.
-        ask_bridge.set_presenter(make_question_presenter(lambda: self.window))
+        ask_bridge.set_presenter(self._spoken_presenter(make_question_presenter(lambda: self.window)))
 
         # Initialize components based on hardware and config
         self._init_components()
@@ -897,6 +898,13 @@ class ChronoaApplication(Gtk.Application):
             return GLib.SOURCE_REMOVE
 
         text = str(result).strip()
+        # A question is waiting (ask_user, a permission prompt): what was said
+        # answers it. Starting a new turn instead left the tool blocked for
+        # its full timeout while the answer went nowhere.
+        if self.window and self.window.answer_pending_question(text):
+            self.window.set_state(AssistantState.THINKING)
+            return GLib.SOURCE_REMOVE
+        self._voice_turn = True
         if self.window:
             self.window.set_state(AssistantState.THINKING)
             self.window.add_user_turn(text)
@@ -905,7 +913,42 @@ class ChronoaApplication(Gtk.Application):
 
     def _on_user_input(self, window: CajitaWindow, text: str) -> None:
         """Handle typed user input."""
+        self._voice_turn = False
         self._submit(text)
+
+    def _spoken_presenter(self, present):
+        """Wrap the window's question presenter so a question is also SAID.
+
+        Someone talking to Chronoa hands-free cannot see a question in the
+        window: it is read aloud with its options, and when the turn was
+        spoken, Chronoa listens for the answer afterwards. The tool loop that
+        asks is blocked waiting for the answer, so the speaking happens on a
+        thread of its own, not on that loop.
+        """
+        def speak_then_listen(question: str, options: list) -> None:
+            first = question.strip().split("\n\n", 1)[0]
+            said = first + (" You can say: " + ", ".join(options[:-1]) + ", or " + options[-1] + "."
+                            if len(options) > 1 else "")
+            try:
+                audio = self.tts.synthesize_to_bytes(markdown_lite.to_speech(said))
+                if audio and self.player.is_available():
+                    self.player.play_bytes(audio)
+            except Exception as e:  # a question that cannot be said is still on screen
+                logger.error(f"Could not speak the question: {e}")
+            if self._voice_turn:
+                GLib.idle_add(self._listen_for_answer)
+
+        def wrapped(question: str, options: list):
+            done = present(question, options)
+            if self.tts and self.tts.is_available() and self.config.notification_enabled:
+                threading.Thread(target=speak_then_listen, args=(question, list(options)), daemon=True).start()
+            return done
+        return wrapped
+
+    def _listen_for_answer(self) -> bool:
+        if self.window and self.window.has_pending_question() and not self._listening:
+            self._begin_listening()
+        return GLib.SOURCE_REMOVE
 
     def _submit(self, text: str) -> None:
         """Send text through the assistant's tool-calling pipeline."""

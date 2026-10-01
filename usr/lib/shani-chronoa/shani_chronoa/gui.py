@@ -34,6 +34,7 @@ hue alone.
 
 import enum
 import logging
+import re
 import threading
 
 import gi
@@ -1257,6 +1258,24 @@ class CajitaWindow(Gtk.ApplicationWindow):
         self._question_row.set_visible(True)
         self._input_entry.set_placeholder_text("Say or type your answer…")
         self._pending_question = resolve
+        self._pending_options = list(options)
+
+    def has_pending_question(self) -> bool:
+        return self._pending_question is not None
+
+    def answer_pending_question(self, spoken: str) -> bool:
+        """Answer the question on screen with what was SAID; False if none is open.
+
+        The hint promises "just say your answer", but a voice transcript used to
+        open a new turn while the tool sat blocked waiting for this one. And it
+        must be mapped to an option: permissions compares the answer exactly,
+        and whisper writes "Allow this once." - full stop - which would have
+        been read as a refusal.
+        """
+        if self._pending_question is None:
+            return False
+        self._resolve_question(match_spoken_option(spoken, getattr(self, "_pending_options", [])))
+        return True
 
     def abandon_pending_question(self) -> None:
         """Resolve a prompt on screen as unanswered, and touch nothing else.
@@ -1307,6 +1326,32 @@ class CajitaWindow(Gtk.ApplicationWindow):
     __gsignals__ = {
         "user-input": (GObject.SignalFlags.RUN_FIRST, str, (str,)),
     }
+
+
+def _norm_words(text: str) -> list:
+    return re.findall(r"[a-z0-9']+", text.lower().replace("\u2019", "'"))
+
+
+def match_spoken_option(spoken: str, options: list) -> str:
+    """The option a spoken answer names, else the words as said.
+
+    Strict on purpose, because some options grant permissions: the answer
+    must equal an option or begin with ALL of it ("allow this once, please"),
+    after case and punctuation are dropped, and exactly one option may match.
+    Anything else is passed through as said, which a permission prompt reads
+    as no - the same as an unrecognised typed answer.
+    """
+    said = _norm_words(spoken)
+    hits = []
+    for option in options:
+        want = _norm_words(option)
+        if want and said[: len(want)] == want:
+            hits.append(option)
+    # "allow this once" must not also count as a shorter option it begins with
+    if len(hits) > 1:
+        longest = max(len(_norm_words(h)) for h in hits)
+        hits = [h for h in hits if len(_norm_words(h)) == longest]
+    return hits[0] if len(hits) == 1 else spoken.strip()
 
 
 def make_question_presenter(window_getter):
