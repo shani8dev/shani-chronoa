@@ -68,6 +68,13 @@ CONTROLLED = {
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-word-model",
     "piper-voice", "ollama-host",
+    # Read by `stt.build_stt`, not written by a row. Listed here rather than in
+    # NOT_EXPOSED because it is *meant* to be user-settable - the whole point
+    # of the Parakeet backend - and the window row for it belongs to the
+    # settings-surface work that owns the voice-input panel, not to the commit
+    # that added the backend. Until that row lands it is still grantable by
+    # key: `gsettings set org.shani.chronoa stt-backend parakeet`.
+    "stt-backend",
     # the audio device choosers
     "audio-input-device", "audio-output-device",
     # BYOK provider keys
