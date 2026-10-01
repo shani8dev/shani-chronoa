@@ -138,8 +138,12 @@ def _load() -> "tuple[list | None, str]":
 def _save(items: list) -> str:
     path = _store_path()
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # mkdir then chmod, not mkdir(mode=...): masked by the umask, so it lands
+        # permissive. Incidental before - the parent was only ever private because
+        # `triggers.py` chmod'd the same tree.
+        files.ensure_private_dir(path.parent)
         path.write_text(json.dumps(items, indent=1), encoding="utf-8")
+        files.restrict_file(path)
     except OSError as exc:
         return files.describe(exc, path, "write the task list to")
     return ""

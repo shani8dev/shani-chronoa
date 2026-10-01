@@ -19,6 +19,7 @@ import tempfile
 import time
 from typing import Tuple
 
+from shani_chronoa import files
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.sandbox.profiles import AgentProfile, ResourceCeiling, profile_for_origin
 from shani_chronoa.sandbox.seccomp import SeccompError
@@ -773,7 +774,11 @@ class SandboxExecutor:
 
     def __init__(self, sandboxes_root: str | None = None) -> None:
         self.sandboxes_root = sandboxes_root or os.path.expanduser("~/.local/share/shani-chronoa/sandboxes")
-        os.makedirs(self.sandboxes_root, exist_ok=True)
+        # mkdir then chmod, not mkdir(mode=...): the mode argument is masked by
+        # the process umask and lands permissive without error. Measured at umask
+        # 002 this was 0775, putting the exec'd Landlock wrapper within reach of
+        # another local account. Reasoning in `files.ensure_private_dir`.
+        files.ensure_private_dir(self.sandboxes_root)
         self.bwrap_available = bool(shutil.which("bwrap"))
 
     def execute(
@@ -1092,7 +1097,7 @@ class SandboxExecutor:
         applying it here would permanently strip the app of filesystem access.
         """
         workspace = config.isolated_dir or os.path.join(self.sandboxes_root, agent_id)
-        os.makedirs(workspace, exist_ok=True)
+        files.ensure_private_dir(workspace)
 
         from shani_chronoa.sandbox import landlock as _landlock
 
@@ -1100,6 +1105,19 @@ class SandboxExecutor:
         wrapper = os.path.join(workspace, ".chronoa-landlock-wrapper.py")
         with open(wrapper, "w", encoding="utf-8") as handle:
             handle.write(_landlock.get_landlock_wrapper())
+        # This is the sandbox enforcer, not a cache: it applies the filesystem
+        # allowlist and then execs the command. At the umask it was created 0664,
+        # so another local account could rewrite the confinement between this
+        # write and the exec below - an integrity hole, not a disclosure one.
+        # chmod after the write completes, never before: the handle is still open
+        # here. 0700 rather than 0600 keeps the file executable as well as
+        # private, so it survives being run directly if that ever happens - which
+        # today it cannot be, since `inner_argv` puts `sys.executable` in argv[0]
+        # and 0600 measured fine (see tests/test_state_file_permissions.py).
+        try:
+            os.chmod(wrapper, 0o700)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", wrapper, exc)
 
         # The wrapper ends in `os.execvp(sys.argv[1], sys.argv[1:])`, so the
         # command's own argv reaches the kernel untouched. This used to build a
@@ -1312,7 +1330,7 @@ class SandboxExecutor:
         start_time: float,
     ) -> Tuple[int, str, float]:
         workspace = config.isolated_dir or os.path.join(self.sandboxes_root, agent_id)
-        os.makedirs(workspace, exist_ok=True)
+        files.ensure_private_dir(workspace)
 
         bwrap_args = [
             "bwrap",

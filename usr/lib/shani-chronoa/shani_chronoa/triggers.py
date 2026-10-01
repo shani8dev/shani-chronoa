@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, NamedTuple, Optional
 
-from shani_chronoa import verification
+from shani_chronoa import files, verification
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import Percept
 from shani_chronoa.skills import discover_skills
@@ -593,19 +593,17 @@ def _ensure_state_dir(path: Path) -> None:
     a shared machine should not be able to read. `mkdir` then `chmod` rather
     than a single mode argument, because `mkdir(parents=True, mode=...)` is
     masked by the process umask and silently lands permissive.
+
+    The body now delegates to `files.ensure_private_dir`. This was the first
+    copy of it in the tree; `egress.py` and then four other state-writing
+    surfaces each grew their own, and the reason is easier to state than to
+    remember: umask masking is invisible until you measure it at 002.
     """
-    path.mkdir(parents=True, exist_ok=True)
-    try:
-        path.chmod(0o700)
-    except OSError as e:
-        logger.warning("Could not restrict permissions on %s: %s", path, e)
+    files.ensure_private_dir(path)
 
 
 def _restrict_file(path: Path) -> None:
-    try:
-        path.chmod(0o600)
-    except OSError as e:
-        logger.warning("Could not restrict permissions on %s: %s", path, e)
+    files.restrict_file(path)
 
 
 class RuleStore:

@@ -36,6 +36,7 @@ import uuid
 from pathlib import Path
 from typing import List
 
+from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
 logger = logging.getLogger(__name__)
@@ -73,8 +74,13 @@ def _load() -> List[dict]:
 
 
 def _save(timers: List[dict]) -> None:
-    _DATA.parent.mkdir(parents=True, exist_ok=True)
+    # mkdir then chmod, not mkdir(mode=...): the mode argument is masked by the
+    # process umask and lands permissive without error. This directory was only
+    # ever incidentally private, because `triggers.py` happened to chmod the same
+    # parent - which stops being true the moment that runs first, or not at all.
+    files.ensure_private_dir(_DATA.parent)
     _DATA.write_text(json.dumps(timers, indent=1))
+    files.restrict_file(_DATA)
 
 
 def _systemd_available() -> bool:

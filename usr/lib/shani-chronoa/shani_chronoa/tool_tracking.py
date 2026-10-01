@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 # Chronoa runs as a normal desktop user, never root - /var/log is not
@@ -119,8 +121,15 @@ class ToolTracker:
         self._ensure_log_dir()
 
     def _ensure_log_dir(self) -> None:
-        """Ensure the log directory exists."""
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        """Ensure the log directory exists, and is not readable by anyone else.
+
+        The highest-traffic state surface in the package: every tool name,
+        argument and result lands here, and the file grows unbounded (13.5 MB on
+        the machine this was measured on). A `mkdir` with no mode landed the
+        directory at 0775 under umask 002, which leaves the log's own 0600 as the
+        only thing standing between another local account and the transcript.
+        """
+        files.ensure_private_dir(self.log_dir)
 
     def record_call(
         self,
@@ -182,6 +191,14 @@ class ToolTracker:
         logger.info("Exported %d calls to %s", len(self._calls), output_path)
 
     def _write_to_log(self, record: ToolCallRecord) -> None:
-        """Append a call record to the log file."""
-        with open(self.log_file, "a") as f:
+        """Append a call record to the log file.
+
+        Created with its mode rather than chmod'd after the write, so there is no
+        window in which the log is group- and world-readable - `egress.py` fixed
+        the same shape for the same reason. The trailing chmod is kept anyway: it
+        is what tightens a file that already existed at a looser mode.
+        """
+        fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(json.dumps(record.to_log_dict(), default=repr) + "\n")
+        files.restrict_file(self.log_file)

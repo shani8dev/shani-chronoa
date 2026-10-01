@@ -19,10 +19,13 @@ failure mode a person cannot detect and therefore cannot recover from.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 #: Never act on these, whatever the caller says. A typo that resolves to `/`
 #: must not delete a home directory, and a skill reachable by an LLM needs this
@@ -117,6 +120,51 @@ def human_size(num_bytes: float) -> str:
             return f"{value:.1f} {unit}"
         value /= step
     return f"{value:.1f} TiB"  # pragma: no cover - loop always returns above
+
+
+def ensure_private_dir(path: Path) -> None:
+    """Create `path` (and its parents) and make it owner-only.
+
+    `mkdir` then `chmod`, never `mkdir(mode=...)`: the mode argument is masked by
+    the process umask, so `mkdir(parents=True, mode=0o700)` under umask `0002`
+    lands at `0775` with no error at all. The correction therefore has to happen
+    after the directory exists.
+
+    This is `triggers._ensure_state_dir` moved here. It was written there first,
+    `egress.py` copied it, and then every other state-writing surface in the
+    package went without it - measured at umask `002`, `tool_calls.log` and
+    `spill` files landed at `0664` and `logs/` at `0775`. Six inline copies of the
+    same three lines is six chances to invent a seventh, wrong one.
+
+    The failure is **logged, never swallowed**: a state file that could not be
+    restricted is a confidentiality problem the user has to know about, and a
+    silent `except OSError: pass` would report success on a file that is still
+    world-readable. Note the `mkdir` itself is *not* caught - if the directory
+    cannot be created the caller has to find out, because every write under it is
+    about to fail too.
+    """
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError as exc:
+        logger.warning("Could not restrict permissions on %s: %s", path, exc)
+
+
+def restrict_file(path: Path) -> None:
+    """Make `path` owner-read/write only.
+
+    Same reasoning as `ensure_private_dir`, for a file. Used on both ends of an
+    atomic publish - the temp file **before** `os.replace`, then the destination
+    after - because `os.replace` preserves the temp's mode, so chmodding only the
+    destination leaves the window open: the file is already at its final path, and
+    readable by group and other, before the tightening runs.
+    """
+    path = Path(path)
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        logger.warning("Could not restrict permissions on %s: %s", path, exc)
 
 
 def describe(exc: BaseException, path: Path, action: str) -> str:

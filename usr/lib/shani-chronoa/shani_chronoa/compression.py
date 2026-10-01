@@ -81,6 +81,8 @@ from pathlib import Path
 
 import logging
 
+from shani_chronoa import files
+
 logger = logging.getLogger(__name__)
 
 #: A tool result longer than this is worth compressing. Chosen to sit below the
@@ -229,13 +231,15 @@ def _spill(content: str) -> "str | None":
         return None
     try:
         directory = _spill_dir()
-        directory.mkdir(parents=True, exist_ok=True)
+        files.ensure_private_dir(directory)
         digest = hashlib.sha256(content.encode("utf-8", "replace")).hexdigest()[:16]
         target = directory / f"{digest}-{len(content)}.txt"
         if not target.exists():
             tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
             tmp.write_text(content, encoding="utf-8")
+            files.restrict_file(tmp)
             os.replace(tmp, target)
+            files.restrict_file(target)
         return str(target)
     except OSError as e:
         logger.warning("Could not spill a %d-character result to disk: %s",
