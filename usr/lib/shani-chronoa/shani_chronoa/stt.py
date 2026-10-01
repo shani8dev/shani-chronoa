@@ -137,6 +137,14 @@ class WhisperSTT:
                 "-f", audio_file,
                 "-l", self.language,  # config.py's "language" gsetting was never wired anywhere before this
                 "-otxt",
+                # whisper-cli names the file <input>.txt - "q.wav.txt" - so
+                # without -of it never landed where it is read below, and the
+                # stdout fallback carried timestamps: every spoken question
+                # reached the model as "[00:00:00.000 --> 00:00:02.000]  what
+                # is 2+2" (found by shani-testbed's chronoa-voice run). -of
+                # puts it there; -nt keeps even the fallback clean.
+                "-of", audio_file.rsplit(".", 1)[0],
+                "-nt",
                 "-np",  # No progress
             ]
             result = subprocess.run(
