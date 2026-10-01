@@ -131,6 +131,11 @@
       <summary>Groq API key</summary>
       <description>Required to use Groq as a cloud LLM fallback - Groq has no anonymous access. Empty means this provider is skipped.</description>
     </key>
+    <key name="opencode-zen-api-key" type="s">
+      <default>''</default>
+      <summary>OpenCode Zen API key</summary>
+      <description>Required to use OpenCode Zen as a cloud LLM fallback. Zen's free tier can only be used from within OpenCode itself, so Chronoa uses Zen only with a key of your own. Empty means this provider is skipped.</description>
+    </key>
     <key name="vision-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa see the screen</summary>

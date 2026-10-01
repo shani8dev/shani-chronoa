@@ -754,6 +754,7 @@ class ChronoaConfig:
             "anthropic": self.get("anthropic-api-key", ""),
             "google": self.get("google-api-key", ""),
             "groq": self.get("groq-api-key", ""),
+            "opencode-zen": self.get("opencode-zen-api-key", ""),
         }
 
 

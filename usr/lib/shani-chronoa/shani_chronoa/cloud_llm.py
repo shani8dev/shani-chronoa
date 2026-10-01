@@ -45,11 +45,27 @@ skill's actual schema), not just read about:
   end-to-end on a real multi-step agent task, but its free quota is
   shared/global and can be (and was, when tested here) already exhausted
   for everyone.
-- **OpenCode Zen** (`opencode.ai/zen/v1`) - returned a real 401 "Invalid API
-  key" on an unauthenticated request, contradicting shani-docs' claim of
-  "no key of your own required." Excluded from the default provider chain
-  until that's resolved - either the docs are stale or Zen's free tier
-  needs a registered (if free) key now, not truly anonymous access.
+- **OpenCode Zen** (`opencode.ai/zen/v1`) - the 401 "Invalid API key" seen
+  here on 2026-09-16 came from Chronoa's own placeholder bearer (see below):
+  without an Authorization header Zen answers - and refuses, with
+  `FreeTierError: "OpenCode's free tier can only be used from within
+  OpenCode"` (2026-10-01; restricted since 2026-09-23). That is Zen's rule,
+  so Zen is only a **keyed** provider here (`opencode-zen-api-key`); its
+  free tier is not used, and not reached by imitating OpenCode.
+
+**Re-tested 2026-10-01**, chat plus a tool call with `get_datetime`'s real
+schema: LLM7 works (codestral-latest, tool call made; 1 s rate limits when
+requests come back-to-back). Kilo works - nvidia/nemotron-3-ultra via
+kilo-auto/free, tool call made - but only WITHOUT an Authorization header:
+the "Bearer unused" this module used to send got 401 "Your authentication
+token is invalid", so Kilo had been dead in the chain. BlockRun: still 429
+"Free model capacity exhausted". Considered and left out: Pollinations
+(gen.pollinations.ai now needs a key; the legacy text endpoint answers
+chat but 402s a tool call), OVHcloud AI Endpoints' anonymous tier
+(2 requests/minute per IP and model; only 429s from here, so its tool calls
+are unverified), ch.at (keyless chat, no tool calling), Hack Club AI and
+APIFreeLLM (need an account key), and aggregators that only bundle the
+user's own keys.
 
 Because free-tier availability is this volatile - two of four providers
 were already rate-limited/exhausted at first test, one contradicted its own
@@ -120,6 +136,12 @@ PROVIDERS: dict[str, CloudProvider] = {
     "blockrun": CloudProvider("blockrun", "BlockRun", "https://blockrun.ai/api/v1", "cohere/north-mini-code"),
     "openai": CloudProvider("openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", requires_key=True),
     "groq": CloudProvider("groq", "Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", requires_key=True),
+    # Keyed only: Zen's free tier answers anonymous requests with FreeTierError
+    # "OpenCode's free tier can only be used from within OpenCode" (2026-10-01),
+    # and that is the provider's rule to make. A paid Zen key is the sanctioned
+    # way in, and goes through the same OpenAI-compatible endpoint.
+    "opencode-zen": CloudProvider("opencode-zen", "OpenCode Zen", "https://opencode.ai/zen/v1",
+                                  "gpt-5.4-mini", requires_key=True),
     "google": CloudProvider(
         "google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
         "gemini-2.0-flash", requires_key=True,
@@ -131,7 +153,7 @@ DEFAULT_PROVIDER_ORDER = ("llm7", "kilo", "blockrun")
 # BYOK-required providers, tried ahead of the free chain when a key is
 # configured for them (see app.py's cloud-fallback wiring). Anthropic is
 # handled separately (see AnthropicLLM) since it isn't OpenAI-compatible.
-BYOK_PROVIDER_ORDER = ("anthropic", "openai", "google", "groq")
+BYOK_PROVIDER_ORDER = ("anthropic", "openai", "google", "groq", "opencode-zen")
 
 _ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 _ANTHROPIC_MAX_TOKENS = 1024
