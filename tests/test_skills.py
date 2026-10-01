@@ -346,7 +346,15 @@ class TestToolExecutionGuards:
             return (0, "ok", 1.0)
 
         monkeypatch.setattr(tools_mod._SANDBOX, "execute", fake_execute)
-        handler_name = next(iter(tools_mod._HANDLER_FNS))
+        # A handler with no required arguments, so the required-argument check
+        # does not answer first, and one that acts (not read-only), since only an
+        # action's result is marked unverified. Not "the first one registered":
+        # that depends on which skill sorts first.
+        from shani_chronoa.capabilities import READ_ONLY_TOOLS
+        schemas = {t["function"]["name"]: t["function"] for t in tools_mod.TOOLS}
+        handler_name = next(n for n in tools_mod._HANDLER_FNS
+                            if n not in READ_ONLY_TOOLS
+                            and not schemas.get(n, {}).get("parameters", {}).get("required"))
         # When: it is called with a non-dict arguments value
         result = tools_mod.execute_tool(handler_name, "not-a-dict")
         # Then: the arguments are treated as empty (`{}`) in the program built

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 from shani_chronoa import files
@@ -64,6 +66,43 @@ SCHEMA = {
 }
 
 
+_PLOCATE_DB = Path("/var/lib/plocate/plocate.db")
+
+
+def _from_index(root: Path, pattern: str, include_hidden: bool, limit: int) -> list:
+    """plocate's index (in every Shanios image) answers a whole-home search
+    instantly where os.walk takes seconds. Same scope, hidden-file rule and
+    limit as the walk; entries that no longer exist are dropped, since the
+    index is only as fresh as its last update. Empty - and so the caller
+    walks - when plocate or its database is missing (on Shanios /var starts
+    empty at boot until plocate-updatedb has run) or when it finds nothing,
+    so a stale index can never hide a file that exists."""
+    if not shutil.which("plocate") or not _PLOCATE_DB.exists():
+        return []
+    try:
+        r = subprocess.run(["plocate", "--ignore-case", "--basename", "--limit", str(limit * 20), "--", pattern],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    out = []
+    for line in r.stdout.splitlines():
+        p = Path(line)
+        try:
+            rel = p.relative_to(root)
+        except ValueError:
+            continue
+        if len(rel.parts) > _MAX_DEPTH + 1:
+            continue
+        if not include_hidden and any(part.startswith(".") for part in rel.parts):
+            continue
+        if not files_here_matches(p.name, pattern) or not p.exists():
+            continue
+        out.append(p)
+        if len(out) > limit:
+            break
+    return out
+
+
 def _run(arguments: dict) -> str:
     pattern = (arguments.get("pattern") or "").strip()
     if not pattern:
@@ -92,7 +131,10 @@ def _run(arguments: dict) -> str:
     matches: list[Path] = []
     skipped: list[str] = []
     truncated = False
-    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: skipped.append(str(e))):
+    indexed = _from_index(root, pattern, include_hidden, limit)
+    if indexed:
+        matches, truncated = indexed[:limit], len(indexed) > limit
+    for dirpath, dirnames, filenames in ([] if indexed else os.walk(root, onerror=lambda e: skipped.append(str(e)))):
         here = Path(dirpath)
         if len(here.parts) - len(root.parts) >= _MAX_DEPTH:
             dirnames[:] = []

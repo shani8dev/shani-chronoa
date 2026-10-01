@@ -15,6 +15,8 @@ when nothing changed.
 
 import logging
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -74,11 +76,43 @@ def _read_int(path: Path) -> Optional[int]:
         return None
 
 
+def _logind_set(panel: str, raw: int) -> bool:
+    """systemd-logind's Session.SetBrightness: lets the seat's own user set the
+    backlight with no root and no udev rule - the path brightnessctl and the
+    desktops use. True when logind accepted it."""
+    try:
+        r = subprocess.run(["busctl", "call", "org.freedesktop.login1",
+                            "/org/freedesktop/login1/session/auto", "org.freedesktop.login1.Session",
+                            "SetBrightness", "ssu", "backlight", panel, str(raw)],
+                           capture_output=True, text=True, timeout=5)
+        return r.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _ddc(level: Optional[int]) -> str:
+    """External monitors over DDC/CI with ddcutil (VCP feature 0x10, brightness).
+    A desktop has no backlight node at all, so this is its only brightness."""
+    if not shutil.which("ddcutil"):
+        return ""
+    try:
+        if level is None:
+            r = subprocess.run(["ddcutil", "getvcp", "10", "--brief"], capture_output=True, text=True, timeout=20)
+            vals = re.findall(r"VCP 10 C (\d+) (\d+)", r.stdout)
+            return "; ".join(f"monitor {i + 1}: {round(100 * int(c) / int(m))}%" for i, (c, m) in enumerate(vals) if int(m))
+        r = subprocess.run(["ddcutil", "setvcp", "10", str(level)], capture_output=True, text=True, timeout=20)
+        return f"external monitor brightness set to {level}%" if r.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
 def _set(panel: str, raw: int) -> Union[str, str]:
     target = _BACKLIGHT / panel / "brightness"
     try:
         target.write_text(str(raw))
     except PermissionError:
+        if _logind_set(panel, raw):
+            return ""
         return (
             f"Could not set brightness on {panel}: permission denied. The "
             "backlight node is root-owned, so this needs to run as root or "
@@ -93,6 +127,14 @@ def _set(panel: str, raw: int) -> Union[str, str]:
 def run(arguments: dict) -> str:
     panels = _panels()
     if not panels:
+        raw = arguments.get("level")
+        try:
+            want = None if raw is None or str(raw).strip() == "" else max(0, min(100, int(raw)))
+        except (TypeError, ValueError):
+            want = None
+        ddc = _ddc(want)
+        if ddc:
+            return ddc[:1].upper() + ddc[1:] + "."
         return (
             "This machine exposes no backlight node, so its screen brightness "
             "cannot be read or set. That is expected on a desktop with no "

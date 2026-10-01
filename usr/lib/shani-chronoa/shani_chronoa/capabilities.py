@@ -148,6 +148,12 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "calculate": ("Everyday tools", "Calculation"),
     "convert_units": ("Everyday tools", "Convert units"),
     "solve_math": ("Everyday tools", "Algebra and calculus"),
+    "spell_word": ("Everyday tools", "Spell a word"),
+    "explain_command": ("Everyday tools", "Explain a command"),
+    "scan_document": ("Everyday tools", "Scan and read a page"),
+    "check_internet": ("System", "Is the internet working?"),
+    "data_usage": ("System", "Data used"),
+    "accessibility": ("Appearance", "Accessibility features"),
     "ask_user": ("Everyday tools", "Ask a clarifying question"),
     "list_apps": ("Apps", "List installed applications"),
     "check_updates": ("System", "Check for waiting package updates"),
@@ -347,6 +353,9 @@ _EXAMPLES: dict[str, str] = {
     "get_world_time": "What time is it in Tokyo?",
     "convert_units": "How many miles is 100 km?",
     "solve_math": "What is the integral of x squared?",
+    "spell_word": "How do you spell necessary?",
+    "check_internet": "Is my internet working?",
+    "accessibility": "Turn on the screen reader",
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
@@ -477,6 +486,7 @@ READ_ONLY_TOOLS = frozenset({
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
+    "spell_word", "explain_command", "check_internet", "data_usage",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
     # permission to do any of it.
@@ -509,7 +519,7 @@ MUTATING_TOOLS = frozenset({
     "create_archive", "extract_archive", "set_clipboard", "set_volume",
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "add_reminder", "open_application", "speak", "ask_user",
-    "media_control",
+    "media_control", "scan_document", "accessibility",
 })
 
 #: Tools that reach outside this machine.

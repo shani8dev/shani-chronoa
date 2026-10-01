@@ -559,6 +559,10 @@ class TestBrightnessSkill:
 
         monkeypatch.setattr(type(panel / "brightness"), "write_text", _denied, raising=False)
         monkeypatch.setattr(brightness, "_BACKLIGHT", tmp_path)
+        # and logind refuses too: the fallback must not make a real failure look
+        # like success (and must never reach the real logind from a test - it
+        # once set this machine's screen to 40%)
+        monkeypatch.setattr(brightness, "_logind_set", lambda panel, raw: False)
 
         out = brightness.run({"level": 40})
         assert "permission denied" in out.lower()
