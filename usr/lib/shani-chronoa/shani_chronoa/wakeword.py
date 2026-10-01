@@ -15,14 +15,14 @@ openWakeWord's bundled pretrained "hey_jarvis" model as the default phrase
 a custom one exists - training one is a separate effort using openWakeWord's
 own training pipeline, not something improvised here.
 
-Caveat: this has NOT been verified against a real microphone/openWakeWord
-install in this dev environment (no audio hardware, package not installed
-here). The listen loop's framing (1280 samples = 80ms @ 16kHz mono s16le,
-openWakeWord's expected chunk size) and the pw-record/arecord invocations
-follow the same conventions already proven-by-execution in audio.py, but the
-loop itself - and the assumption that piped `pw-record` output starts with
-exactly one 44-byte WAV header before raw PCM - needs confirming on real
-hardware.
+Caveat: the openWakeWord half of this loop has NOT been verified in this dev
+environment - `numpy` and `openwakeword` are not installed here, so nothing
+below the argv has actually run. The capture side HAS: a real `pw-record`
+capture from this machine's microphone confirmed raw PCM from byte zero with no
+WAV header (see `_listen_loop`), so only the model path remains unproven. The
+framing (1280 samples = 80ms @ 16kHz mono s16le, openWakeWord's expected chunk
+size) is the shipped convention from `audio.py`; openWakeWord's own preference is
+not something that has been checked against a loaded model here.
 """
 
 import glob
@@ -33,11 +33,11 @@ import subprocess
 import threading
 from typing import Callable, Optional
 
-# Shared rather than redeclared: this listener and the turn recorder read the
-# same microphone, so they have to be invoked with the same capture ring. See
-# `_CAPTURE_LATENCY` there for the finding behind the value and for what was
-# not verified about it.
-from shani_chronoa.audio import _CAPTURE_LATENCY
+# The argv builder, not just its latency constant: this listener and the turn
+# recorder read the same microphone, and a second copy of the argv drifted from
+# this one silently (its rate was a literal). Asserted by
+# tests/test_capture_argv_agreement.py.
+from shani_chronoa.audio import _stream_capture_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -113,25 +113,7 @@ class WakeWordListener:
         self._target = target or None
 
     def _record_cmd(self) -> list:
-        # `--latency` is pinned for the same reason and with the same caveats as
-        # `audio.py`'s `_CAPTURE_LATENCY`: the capture ring should not depend on
-        # which PipeWire version is installed. Two code paths record from the
-        # same microphone (the recorder's turn, and this always-on listener), so
-        # they have to agree on the ring or the two disagree about what they
-        # heard. `arecord` takes no such option here, as in `audio.py`.
-        if self._backend == "pw-record":
-            cmd = [
-                "pw-record",
-                "--rate", "16000",
-                "--channels", "1",
-                "--format", "s16",
-                "--latency", _CAPTURE_LATENCY,
-            ]
-            if self._target:
-                cmd += ["--target", self._target]
-            cmd.append("-")
-            return cmd
-        return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", "16000", "-c", "1", "-"]
+        return _stream_capture_cmd(self._backend, self._target)
 
     def start(self, on_detected: Callable[[], None]) -> bool:
         """Start the continuous listen loop on a background thread.

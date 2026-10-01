@@ -126,16 +126,30 @@ def audio_status() -> list[HeartbeatStatus]:
 # written against - libpipewire 1.0.5, whose `--help` reads
 # "--latency Set node latency (default 100ms)".
 #
-# HONESTY, because this reads like a bug fix and is not one: **no sample loss
-# was demonstrated here, and none was measured.** There is no microphone, no
-# speaker and no PipeWire graph on the machine this was written on, so not one
-# frame of audio was captured to compare against anything. What is established
-# is only that (a) the flag is now in the argv with a value `pw-record`
-# accepts, (b) the capture ring is no longer at the mercy of a default that
-# has moved between PipeWire releases, and (c) 100 ms is at least as large as
-# the default it replaces, so this cannot make capture worse. Whether 100 ms
-# is *optimal* on any given machine, and whether Chronoa was in fact losing
-# samples before, both need a real capture to answer.
+# HONESTY, because this still does not read as the bug fix it is not. An earlier
+# version of this note said nothing here could be captured at all - "no microphone,
+# no speaker and no PipeWire graph" - and that was false. What is actually true,
+# each line measured on the dev box rather than reasoned about:
+#
+# - Two `Audio/Source` and four `Audio/Sink` nodes exist and a real `pw-record`
+#   capture returns audio. 20s at 100ms latency: 638918 bytes = 99.83% of
+#   realtime, 249 whole `_FRAME_BYTES` frames. At 20ms: 637894 = 99.67%, the
+#   same 249 frames. No sample loss is visible at this length, at either value.
+# - `pw-record --help` here still reads "(default 100ms)", so the pin currently
+#   restates the default it was written to protect against: the value is
+#   unproven, not wrong. And the direction of the risk, which an earlier version
+#   of this note had backwards - a *smaller* ring means smaller buffers and MORE
+#   xruns, not fewer.
+# - Playback does reach the microphone, weakly and variably. A 440Hz tone through
+#   `pw-play` raised the 440Hz component of a concurrent capture 3.5x on one run
+#   and 8.2x on the next, against 2.4x at 800Hz in the same window, with the
+#   component back at the ambient baseline once playback stopped. So the barge-in
+#   acoustic path is demonstrable here after all - which is the reason
+#   `barge-in-vad-enabled` is off by default, and a pure tone is not the speech
+#   that would decide whether that default is right.
+#
+# Still unestablished: whether 100ms is optimal under load, and BargeInMonitor's
+# real false-positive rate against actual TTS output.
 _CAPTURE_LATENCY = "100ms"
 
 
