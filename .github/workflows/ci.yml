@@ -56,7 +56,15 @@ jobs:
       # import, xwd)". Installing the tools keeps that test real; widening the
       # skipif to also cover a missing capture tool would delete exactly the
       # thing it exists to check.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb xdotool x11-apps imagemagick
+            # gir1.2-secret-1 and wireplumber are the two the tests above need and
+      # the runner did not have. secret_store.py has nothing to ask with
+      # without the libsecret typelib, so the keyring row read "not
+      # installed" where the test expects the bus to be consulted; and
+      # without wpctl every microphone path answers "wpctl is not
+      # installed on this machine" - which is the honest answer and not
+      # the state the tests are about. Both packages exist on Arch
+      # (libsecret, wireplumber) because the product has them there.
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the
