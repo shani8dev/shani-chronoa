@@ -2,3 +2,12 @@ __pycache__/
 tests/__pycache__/
 usr/**/__pycache__/
 usr/**/*.pyc
+
+# Packaging moved to shani-pkgbuilds (shani-chronoa/PKGBUILD there); a local
+# copy of pkg/ here is a stale duplicate of a tree this repo no longer owns.
+pkg/
+# makepkg output, from building that package in place.
+*.pkg.tar.zst
+# A stray WAV from a mistyped redirect (`cmd > -q`); it is a build artefact
+# with no name, and nothing references it.
+-q
