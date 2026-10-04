@@ -19,6 +19,14 @@ from shani_chronoa.sandbox.executor import (
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+#: The Arch manifest that actually ships this package lives in the sibling
+#: `shani-pkgbuilds` repo, which builds from this tree by pinned commit.
+#: This repo used to carry a second, drifting copy of it, which is how
+#: `llama-cpp` and `tesseract` went missing from a published image while
+#: everything here read green. Tests read the real one, so a divergence
+#: between the tree and what is packaged shows up here instead.
+_PKGBUILD = Path(__file__).resolve().parents[2] / "shani-pkgbuilds" / "shani-chronoa" / "PKGBUILD"
+
 EXIT_SECURITY_ERROR = 126
 
 
@@ -137,7 +145,7 @@ def test_the_packaging_manifests_actually_declare_the_sandbox():
     # The regression that made the above reachable in the field: bubblewrap
     # was absent from this repo's own PKGBUILD/DEBIAN control, so a package
     # built from source had no sandbox binary and every skill ran unconfined.
-    for path in (REPO_ROOT / "PKGBUILD", REPO_ROOT / "DEBIAN/control"):
+    for path in (_PKGBUILD, REPO_ROOT / "DEBIAN/control"):
         text = path.read_text().lower()
         assert "bubblewrap" in text, f"{path.name} does not declare bubblewrap"
         assert "libsecret" in text, f"{path.name} does not declare libsecret"

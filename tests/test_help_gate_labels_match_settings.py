@@ -143,10 +143,8 @@ def test_a_gate_with_no_row_is_not_merely_misnamed(row_titles):
                 if isinstance(key, ast.Constant):
                     gates[tool] = key.value
 
-    rows_source = (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "usr/lib/shani-chronoa/shani_chronoa/settings_window.py"
-    ).read_text()
+    from _source import package_source
+    rows_source = package_source("settings_window")
     haystack = " | ".join(row_titles).lower()
     # A gate is covered if its key is named in settings_window.py (the explicit
     # rows) or it is a sense (those rows are generated from SENSE_CATEGORIES and

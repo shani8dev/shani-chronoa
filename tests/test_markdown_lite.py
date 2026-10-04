@@ -8,6 +8,7 @@ introduced, which is the property these tests exist to hold in place.
 
 import re
 import sys
+import unicodedata
 
 import pytest
 
@@ -106,6 +107,178 @@ class TestRealisticReply:
         assert "<tt>/</tt>" in out
         assert "df -h /" in out
         assert tags(out) <= ALLOWED
+
+
+class TestPipeTables:
+    """Alpaca renders tables as real blocks; a `Gtk.Label` cannot, so this one
+    renders them as aligned monospace and says what it gives up."""
+
+    TABLE = ("| Mount | Size | Free |\n"
+             "|:---|---:|---:|\n"
+             "| / | 120G | 38G |\n"
+             "| /home | 480G | 92G |")
+
+    @staticmethod
+    def _cells_at(markup: str) -> "list[list[tuple]]":
+        """Each rendered row -> its cells as (start, end, text) offsets.
+
+        Offsets rather than `split()`, because `split()` throws away exactly the
+        padding this renderer exists to produce: every assertion below has to be
+        about *where* a cell sits, not what is in it.
+        """
+        block = markup.split("<tt>", 1)[1].split("</tt>", 1)[0]
+        return [[(m.start(), m.end(), m.group()) for m in re.finditer(r"\S+", line)]
+                for line in block.split("\n")]
+
+    def test_columns_line_up(self):
+        rows = self._cells_at(to_pango(self.TABLE))
+        # Every value in a column has to sit where its heading sits - on the
+        # same edge, whichever edge the model asked for. That is the whole
+        # reason this renderer exists.
+        for column in range(3):
+            starts = {row[column][0] for row in rows}
+            ends = {row[column][1] for row in rows}
+            assert len(starts) == 1 or len(ends) == 1, (column, rows)
+        assert rows[1][0][2].startswith("-"), "the rule row goes under the header"
+
+    def test_pipes_are_not_shown(self):
+        out = to_pango(self.TABLE)
+        block = out.split("<tt>", 1)[1].split("</tt>", 1)[0]
+        assert "|" not in block
+
+    def test_the_padding_is_a_no_break_space(self):
+        """Not `#x20`, and the reason is measured rather than remembered: in a
+        wrapping label a padded row breaks at any space it can find, which is
+        the middle of a column gap. `U+00A0` offers no break opportunity."""
+        block = to_pango(self.TABLE).split("<tt>", 1)[1].split("</tt>", 1)[0]
+        assert "\u00a0" in block and " " not in block
+
+    def test_pango_accepts_the_markup(self):
+        """A markup string Pango rejects is not an empty label - `get_text()`
+        returns the raw `<tt>...` text, so the user reads the markup as the
+        answer. This is how `xml:space="preserve"` nearly shipped."""
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        label = Gtk.Label()
+        label.set_markup(to_pango(self.TABLE))
+        text = label.get_text()
+        assert "<tt>" not in text and "<span" not in text
+        assert "120G" in text and "|" not in text
+
+    def test_the_columns_line_up_in_a_real_layout(self):
+        """Offsets measured by Pango, not by this module's own padding maths."""
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        label = Gtk.Label()
+        label.set_markup(to_pango(self.TABLE))
+        layout, text = label.get_layout(), label.get_text()
+        second_column = []
+        for line in text.split("\n"):
+            starts = [m.start() for m in re.finditer(r"\S+", line)]
+            second_column.append(layout.index_to_pos(starts[1]).x)
+        assert len(set(second_column)) == 1, second_column
+
+    def test_numbers_are_right_aligned_as_the_model_asked(self):
+        """`---:` in the rule row is the model asking for numbers to line up on
+        the right, which is the one alignment a table of figures needs."""
+        rows = self._cells_at(to_pango(self.TABLE))
+        for column in (1, 2):                       # Size and Free are `---:`
+            assert len({row[column][1] for row in rows}) == 1, rows
+        # The left-aligned `:` column moves instead, and moves by its own width.
+        assert len({row[0][0] for row in rows}) == 1
+
+    def test_a_cell_cannot_introduce_a_tag(self):
+        out = to_pango("| a | b |\n|---|---|\n| <b>x</b> | <i>y</i> |")
+        assert "<b>" not in out and "<i>" not in out
+        assert "&lt;b&gt;x&lt;/b&gt;" in out
+        assert tags(out) <= ALLOWED
+
+    def test_markers_in_a_cell_are_shown_not_applied(self):
+        """Bold inside one cell of a fixed-width column breaks the alignment it
+        exists to provide, so the cell keeps its asterisks."""
+        out = to_pango("| a | b |\n|---|---|\n| **bold** | x |")
+        assert "**bold**" in out and "<b>" not in out
+
+    def test_a_ragged_row_is_left_as_the_model_wrote_it(self):
+        """Half a row is not a table; guessing which column was meant invents
+        data."""
+        table = "| a | b |\n|---|---|\n| 1 |"
+        assert to_pango(table) == table
+
+    def test_a_horizontal_rule_is_not_a_table(self):
+        out = to_pango("intro\n\n---\n\nmore")
+        assert out.count("---") == 1 and "<tt>" not in out
+
+    def test_a_pipe_line_that_is_not_a_table_survives(self):
+        out = to_pango("a | b\nc | d")
+        assert out == "a | b\nc | d"
+
+    def test_a_wide_table_is_refused_rather_than_slabbed(self):
+        header = "| " + " | ".join(f"c{i}" for i in range(20)) + " |"
+        table = f"{header}\n|{'---|' * 20}\n| " + " | ".join("v" for _ in range(20)) + " |"
+        assert to_pango(table) == table
+
+    def test_padding_survives_a_wrapping_label(self):
+        """The transcript's label wraps, and this is the measurement the padding
+        character was chosen for: the same table breaks into fewer lines when
+        the gaps between columns cannot be broken. (Still not none - a table
+        wider than the window breaks somewhere.)"""
+        gi = pytest.importorskip("gi")
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        def line_boxes(markup: str) -> int:
+            label = Gtk.Label()
+            label.set_wrap(True)
+            label.set_size_request(240, -1)
+            label.set_markup(markup)
+            return label.get_layout().get_line_count()
+
+        ours = to_pango(self.TABLE)
+        assert line_boxes(ours) < line_boxes(ours.replace("\u00a0", " "))
+
+    def test_a_table_and_a_fence_both_survive_in_one_reply(self):
+        out = to_pango(self.TABLE + "\n\n```bash\ndf -h /\n```")
+        assert "120G" in out and "df -h /" in out and tags(out) <= ALLOWED
+
+    def test_full_width_characters_count_as_two_columns(self):
+        """A CJK cell is two columns wide but one Python character, so `len()`
+        would drift the table out of alignment on the first one. The test does
+        the counting itself rather than asking the module how wide a thing is."""
+        def columns(line: str) -> "list[int]":
+            return [sum(2 if unicodedata.east_asian_width(c) in "WF" else 1
+                        for c in line[:match.start()])
+                    for match in re.finditer(r"\S+", line)]
+
+        block = to_pango("| 名前 | size |\n|---|---|\n| ルート | 1G |")
+        block = block.split("<tt>", 1)[1].split("</tt>", 1)[0]
+        starts = [columns(line) for line in block.split("\n")]
+        assert starts[0][1] == starts[1][1] == starts[2][1], block
+
+
+class TestSpokenTables:
+    def test_a_table_is_read_as_rows_not_as_pipes(self):
+        spoken = to_speech(TestPipeTables.TABLE)
+        assert "|" not in spoken and "-" * 3 not in spoken
+        assert "Mount, Size, Free" in spoken
+        assert "/, 120G, 38G" in spoken
+
+    def test_the_columns_still_line_up_in_what_is_said(self):
+        spoken = to_speech(TestPipeTables.TABLE)
+        names = [line.split(", ")[0] for line in spoken.split("\n") if line]
+        assert names[:3] == ["Mount", "/", "/home"]
+
+    def test_a_ragged_row_is_dropped_rather_than_half_read(self):
+        spoken = to_speech("| a | b |\n|---|---|\n| 1 |\n| 1 | 2 |")
+        assert spoken == "a, b\n1, 2"
+
+    def test_a_table_inside_a_reply_does_not_eat_the_rule_after_it(self):
+        spoken = to_speech(TestPipeTables.TABLE + "\n\n---\n\nAnd that is all.")
+        assert spoken.endswith("And that is all.")
 
 
 class TestTheSpokenForm:

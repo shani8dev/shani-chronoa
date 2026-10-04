@@ -31,11 +31,12 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-_APP = _REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa" / "app.py"
+_APP = _REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa" / "app"
 
 
 def _source() -> str:
-    return _APP.read_text()
+    """Every module of the app package (it was one app.py)."""
+    return "".join(f.read_text() for f in sorted(_APP.glob("*.py")))
 
 
 def _speak_call_line() -> str:
@@ -48,28 +49,33 @@ def _speak_call_line() -> str:
 
 class TestTheVoicePathIsWiredToTheReducer:
     def test_speak_is_given_the_reduced_text(self):
-        line = _speak_call_line()
-        assert "to_speech" in line, (
-            f"the voice path hands the TTS engine the raw reply: {line!r}. The "
-            f"window renders the same text through to_pango, so every `**` and "
-            f"backtick is pronounced aloud."
-        )
+        """Replies are spoken sentence by sentence through speech.SpeechQueue,
+        which reduces each sentence with to_speech before synthesis - the
+        behaviour, checked by running it rather than by reading app.py."""
+        from shani_chronoa import speech
+        said = []
+        q = speech.SpeechQueue(lambda text: said.append(text) or b"RIFF", lambda wav: True)
+        q.speak(["You have **3** updates."])
+        q.close()
+        assert q.wait(5)
+        assert said == ["You have 3 updates."], said
+        assert "_new_speech_queue" in _source() and "speech.SpeechQueue(" in _source(), \
+            "app.py no longer speaks replies through the reducing queue"
 
     def test_the_reducer_is_not_applied_twice(self):
-        # to_speech is not idempotent in general - a second pass over already
-        # reduced text is harmless for markers, but a stray unmatched `_` could
-        # pair with a later one. Cheap to pin, and a double call is a real
-        # mistake that a test should catch.
-        line = _speak_call_line()
-        assert line.count("to_speech") == 1, (
-            f"to_speech is applied more than once on the path: {line!r}")
+        # to_speech is applied once, inside SpeechQueue.speak; the app hands it
+        # raw sentences. A second pass is a real mistake a test should catch.
+        from shani_chronoa import speech
+        import inspect
+        assert inspect.getsource(speech.SpeechQueue.speak).count("to_speech") == 1
+        assert "queue.speak(markdown_lite.to_speech" not in _source()
 
     def test_the_window_still_renders_through_to_pango(self):
         # The two paths must use the same module. If the window moved to another
         # renderer the spoken and displayed forms would start disagreeing about
         # what the reply said, which is the whole reason the reducer lives here.
-        gui = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-               / "gui.py").read_text()
+        from _source import package_source
+        gui = package_source("gui")
         assert "to_pango" in gui, "the window no longer renders through to_pango"
         assert "to_speech" not in gui, \
             "to_speech is a voice-path reducer; the window must not use it"

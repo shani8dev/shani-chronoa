@@ -27,7 +27,7 @@ import pytest
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa import sessions  # noqa: E402
+from shani_chronoa import conversation_store  # noqa: E402
 from shani_chronoa.assistant import Assistant  # noqa: E402
 
 
@@ -94,7 +94,7 @@ class TestPerceptsStayOffDisk:
         assert "percept" not in raw.lower()
         # And the only roles that may be written are the four known ones.
         for line in raw.splitlines():
-            assert sessions.json.loads(line)["role"] in sessions._KNOWN_ROLES
+            assert conversation_store.json.loads(line)["role"] in conversation_store._KNOWN_ROLES
 
     def test_a_system_message_is_not_written(self, transcript):
         a = _assistant(transcript)
@@ -102,8 +102,8 @@ class TestPerceptsStayOffDisk:
         assert not transcript.exists() or "should not be stored" not in transcript.read_text()
 
     def test_an_unknown_role_is_refused(self, transcript):
-        assert sessions.append({"role": "developer", "content": "x"}, transcript) is False
-        assert sessions.append("not a dict", transcript) is False
+        assert conversation_store.append({"role": "developer", "content": "x"}, transcript) is False
+        assert conversation_store.append("not a dict", transcript) is False
 
 
 class TestACrashLosesOneMessageNotTheConversation:
@@ -172,11 +172,11 @@ class TestPrivacyAndPermissions:
     def test_persistence_is_opt_in(self, tmp_path):
         """An Assistant with no path must not touch the real one.
 
-        The first version defaulted to `sessions.TRANSCRIPT`, so any test or
+        The first version defaulted to `conversation_store.TRANSCRIPT`, so any test or
         embedder that built an Assistant silently read and overwrote the real
         user's conversation.
         """
-        real = sessions.TRANSCRIPT
+        real = conversation_store.TRANSCRIPT
         assert not real.exists() or real.stat().st_size >= 0
         bare = Assistant(_FakeLLM())          # no session_path at all
         bare._record({"role": "user", "content": "should go nowhere"})
@@ -201,4 +201,4 @@ class TestReset:
         assert [m["role"] for m in later._history] == ["system"]
 
     def test_clearing_a_missing_file_is_not_an_error(self, transcript):
-        assert sessions.clear(transcript) is True
+        assert conversation_store.clear(transcript) is True

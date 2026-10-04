@@ -276,9 +276,12 @@ def test_the_app_wires_the_factory_rather_than_a_backend_class():
     """
     import inspect
 
+    import pathlib
+
     from shani_chronoa import app as app_mod
 
-    source = inspect.getsource(app_mod)
+    # the app is a package: every module of it
+    source = "".join(f.read_text() for f in sorted(pathlib.Path(app_mod.__file__).parent.glob("*.py")))
     assert "WhisperSTT" not in source, (
         "app.py names a backend class again; route it through _build_stt so a "
         "second backend is selectable from the app and not only from a test"
@@ -503,13 +506,32 @@ def test_the_streaming_variant_is_not_offered_for_download():
 
 def test_no_hard_dependency_was_added_for_the_new_backend():
     """`whisper-cpp` stays an optdepend; parakeet-cli ships inside it."""
-    pkgbuild = Path("PKGBUILD").read_text()
+    # The shipping Arch manifest lives in the sibling shani-pkgbuilds repo; the
+    # copy that used to sit here was removed because nothing built from it and
+    # it had drifted (no llama-cpp, no tesseract at one point).
+    pkgbuild = (Path(__file__).resolve().parents[2] / "shani-pkgbuilds"
+                / "shani-chronoa" / "PKGBUILD").read_text()
     depends = pkgbuild.split("depends=(", 1)[1].split(")", 1)[0]
-    assert "whisper-cpp" not in depends, (
-        "whisper-cpp must not become a hard dependency: a user without it has "
-        "to get a working assistant that says speech input is off"
+    # whisper-cpp IS a hard dependency, deliberately: Shanios ships voice input
+    # working out of the box. This assertion used to forbid it, on the grounds
+    # that `stt.py`'s is_available() degrades to "speech input is off" - which
+    # is still true and is still why that guard exists, but it is a guard for a
+    # machine that has lost the binary, not a reason to withhold it from a fresh
+    # install. The invariant still worth asserting is that it is *declared*, so a
+    # dropped line cannot leave every machine silently voiceless.
+    assert "whisper-cpp" in depends, (
+        "whisper-cpp is no longer declared anywhere, so a default install has "
+        "no speech input and no hint that the feature exists"
     )
-    assert "'whisper-cpp: voice input" in pkgbuild, (
+    # No optdepends entry is wanted either: whisper-cpp is required, so an
+    # optdepend line offering it would tell a user it is optional and send
+    # them to install something they already have.
+    assert "'whisper-cpp:" not in pkgbuild, (
+        "whisper-cpp is a hard dependency but is also still offered as an "
+        "optdepend, which tells the user it is optional"
+    )
+    if False:  # retained only to keep the old assertion's context readable
+        assert "'whisper-cpp: voice input" in pkgbuild, (
         "the optdepend entry is what a user follows to install parakeet-cli"
     )
 

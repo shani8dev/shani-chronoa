@@ -72,6 +72,16 @@ _IMPL = {
     "install_app": "shani_chronoa.skills.install_app",
     "vpn_control": "shani_chronoa.skills.vpn_control",
     "connect_wifi": "shani_chronoa.skills.connect_wifi",
+    # The lab-network builder. All four tools map to one module because they are
+    # one surface split into read (`lab_network_list`, `lab_network_status`) and
+    # write (`lab_network_create`, `lab_network_destroy`) halves sharing a single consent key - and the
+    # check this table feeds requires the enforcing code to be findable in the
+    # module it names.
+    "lab_network_list": "shani_chronoa.skills.lab_network",
+    "lab_network_create": "shani_chronoa.skills.lab_network",
+    "lab_network_destroy": "shani_chronoa.skills.lab_network",
+    "lab_network_status": "shani_chronoa.skills.lab_network",
+    "capture_packets": "shani_chronoa.skills.capture_packets",
     # Scanning is passive but is still a radio operation, so it reuses the
     # `network` sense consent rather than minting a scanning key.
     "list_wifi_networks": "shani_chronoa.skills.list_wifi_networks",
@@ -82,6 +92,11 @@ _IMPL = {
     "set_mic_mute": "shani_chronoa.skills.set_mic_mute",
     "lock_screen": "shani_chronoa.skills.lock_screen",
     "empty_trash": "shani_chronoa.skills.empty_trash",
+    "search_documents": "shani_chronoa.skills.search_documents",
+    "calendar_events": "shani_chronoa.skills.calendar_events",
+    "phone": "shani_chronoa.skills.phone",
+    "airplane_mode": "shani_chronoa.skills.airplane_mode",
+    "desktop_setting": "shani_chronoa.skills.desktop_setting",
     "set_theme": "shani_chronoa.skills.set_theme",
     "set_timezone": "shani_chronoa.skills.set_timezone",
     "set_screensaver": "shani_chronoa.skills.set_screensaver",
@@ -109,6 +124,10 @@ _IMPL = {
     "git_inspect": "shani_chronoa.skills.git_inspect",
     "todo_list": "shani_chronoa.skills.todo_list",
     "manage_triggers": "shani_chronoa.skills.manage_triggers",
+    "conversations": "shani_chronoa.skills.conversations",
+    "office_document": "shani_chronoa.skills.office_document",
+    "ui_elements": "shani_chronoa.skills.ui_elements",
+    "android_device": "shani_chronoa.skills.android_device",
 }
 
 

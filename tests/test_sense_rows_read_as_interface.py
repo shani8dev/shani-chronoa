@@ -20,7 +20,18 @@ sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.settings_window import SENSE_LABELS  # noqa: E402
 from shani_chronoa.senses import discover_senses  # noqa: E402
 
-GUI = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/settings_window.py")
+from _source import package_source  # noqa: E402
+
+
+class _Package:
+    """The settings window's source (a package since the 2026-10-02 split)."""
+
+    @staticmethod
+    def read_text():
+        return package_source("settings_window")
+
+
+GUI = _Package()
 
 # What a settings row may never show.
 RAW_IDENTIFIER = re.compile(r"^[a-z]+(_[a-z]+)*$")

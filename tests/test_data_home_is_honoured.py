@@ -28,7 +28,7 @@ DATA_PATHS = [
     ("shani_chronoa.senses.store", "PERCEPT_DIR"),
     ("shani_chronoa.tool_tracking", "LOG_DIR"),
     ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
-    ("shani_chronoa.sessions", "SESSION_DIR"),
+    ("shani_chronoa.conversation_store", "SESSION_DIR"),
     ("shani_chronoa.skills.add_reminder", "_STORE"),
 ]
 
@@ -175,8 +175,8 @@ class TestTheAutostartDirectory:
     def test_it_is_built_from_the_config_home(self):
         import inspect
 
-        from shani_chronoa.app import ChronoaApplication
-        body = inspect.getsource(ChronoaApplication)
+        from shani_chronoa.app.desktop_integration import DesktopIntegrationMixin
+        body = inspect.getsource(DesktopIntegrationMixin)  # autostart lives here
         assert "files.config_home()" in body, (
             "the autostart directory is no longer built from the config home"
         )

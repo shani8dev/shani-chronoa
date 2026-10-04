@@ -380,7 +380,8 @@ class TestBargeInAndWakeWordGenerations:
     def _monitor_stream() -> _Capture:
         # A quiet room, then genuinely loud audio. Four silent frames calibrate a floor of
         # 500 * _PLAYBACK_MARGIN, which the loud frame clears by a wide margin.
-        return _Capture([_pcm(_SILENT) for _ in range(_CALIBRATION_FRAMES)] + [_pcm(_LOUD)])
+        # three loud frames: one peak no longer interrupts (audio._BARGE_IN_FRAMES)
+        return _Capture([_pcm(_SILENT) for _ in range(_CALIBRATION_FRAMES)] + [_pcm(_LOUD)] * 3)
 
     @staticmethod
     def _wakeword(monkeypatch, heard: str = "Hey Chronoa."):
@@ -573,7 +574,8 @@ class TestAFrameFromAcrossTheStopBoundaryIsDropped:
     def test_a_frame_read_across_the_cancel_is_not_recorded(self, recorder, monkeypatch):
         spoken = _pcm(_SPEECH)
         shouted = _pcm(_SHOUT)
-        frames = [_pcm(_SILENT) for _ in range(_CALIBRATION_FRAMES)] + [spoken]
+        # two spoken frames: speech onset needs two in a row (vad.SilenceDetector.ONSET_FRAMES)
+        frames = [_pcm(_SILENT) for _ in range(_CALIBRATION_FRAMES)] + [spoken, spoken]
 
         def _cancel_during_shout(chunk):
             if chunk is shouted:

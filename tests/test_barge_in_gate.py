@@ -187,7 +187,8 @@ class TestTheLoopActuallyConsultsTheGate:
         thread.join(timeout=timeout)
         return stream.reads, fired
 
-    def _quiet_then_loud(self, quiet_frames=4, loud_frames=2):
+    # three loud frames: barge-in now needs ~240 ms of sustained sound, not one peak (audio._BARGE_IN_FRAMES)
+    def _quiet_then_loud(self, quiet_frames=4, loud_frames=3):
         from shani_chronoa.audio import _CALIBRATION_FRAMES, _FRAME_BYTES
         frames = [bytes(_FRAME_BYTES) for _ in range(quiet_frames)]
         frames += [_voice_frame() * (_FRAME_BYTES // len(_voice_frame()) + 1)

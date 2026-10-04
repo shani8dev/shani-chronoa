@@ -1026,10 +1026,13 @@ class TestTheGitSenseDoesNotExecuteTheRepository:
         # every read goes through run_git; no second subprocess call site exists
         # that a future edit could add a bare git invocation to
         src = Path(git_mod.__file__).read_text(encoding="utf-8")
-        assert src.count("subprocess.run") == 1, (
+        # exactly one way out to a process: the module's seam over the shared
+        # runner (subproc.run). A second subprocess call would bypass run_git.
+        assert src.count("subprocess.run") + src.count("subproc.run(") == 1, (
             "senses/git.py grew a second subprocess call site, so some read "
             "would bypass the hardening"
         )
+        assert src.count("_run_cmd(") == 2, "one definition and one call (inside run_git)"
         # and the read helpers call run_git, not the raw runner
         for helper in ("read_status", "read_branch", "read_commit_count",
                        "read_upstream"):

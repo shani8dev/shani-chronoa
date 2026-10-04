@@ -38,6 +38,8 @@ sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 # never the real session keyring (API keys otherwise go to Secret Service)
 os.environ["SHANI_CHRONOA_KEYRING"] = "0"
+# never start a real whisper-server from a test
+os.environ["SHANI_CHRONOA_STT_SERVER"] = "0"
 
 import pytest
 
@@ -58,6 +60,11 @@ def _hermetic_env(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # Data paths are resolved per call (triggers.triggers_dir, the screenshot
+    # folder, the conversation store), so pointing XDG_DATA_HOME at the test's
+    # own directory is what keeps every one of them out of the real home - a
+    # developer shell that exports XDG_DATA_HOME must not reach the suite.
+    monkeypatch.setenv("XDG_DATA_HOME", str(home / ".local" / "share"))
     # `$HOME/.config`, not a sibling directory. A user drop-in - a sense or a
     # skill - is looked up under `$XDG_CONFIG_HOME`, and so is the keyfile
     # store the consent gates are written to. Pointing the two at different
@@ -250,25 +257,23 @@ def stubbed_app(chronoa_config):
     return app
 
 @pytest.fixture(autouse=True)
-def _isolate_trigger_rule_store(tmp_path_factory, monkeypatch):
-    """Keep the armed-rule store out of the developer's real state dir.
+def _trigger_and_capture_paths_are_inside_the_test(tmp_path_factory):
+    """Guard, not a redirect: every data path the trigger engine and the
+    screenshot skill write to must resolve inside this test's own directory.
 
-    `triggers.RULES_FILE` is a module-level constant resolved from `$HOME` at
-    *import* time, so a per-test `monkeypatch.setenv("HOME", tmp_path)` lands
-    too late to move it - the path was captured when `triggers.py` was first
-    imported, pointing at the real home. The consequence was that running the
-    suite wrote armed actuator rules (`doorbell` -> notify, `click` ->
-    move_pointer) into `~/.local/share/shani-chronoa/triggers/rules.json`,
-    where they would later fire unattended.
-
-    This is the same class of bug `PerceptStore.DURABLE_FILE` already caused
-    in this repo, so the guard is autouse and repo-wide rather than patched
-    into the one test module that happened to trip it.
+    The redirect this replaced (`triggers.RULES_FILE` rebound to a tmp file)
+    covered one of six import-time paths; the others leaked into the real home
+    (armed rules, a corrupt rules file, 178 fake screenshots). Those paths are
+    now resolved per call, so the per-test HOME/XDG_DATA_HOME isolates them -
+    and this fails the test that would otherwise write outside it.
     """
     triggers = pytest.importorskip("shani_chronoa.triggers")
-    monkeypatch.setattr(
-        triggers, "RULES_FILE", tmp_path_factory.mktemp("rules") / "rules.json", raising=False
-    )
+    from shani_chronoa.skills import screenshot
+    for path in (triggers.rules_file(), triggers.event_rules_file(), triggers.fingerprints_file(),
+                 triggers.verdicts_dir(), triggers.deadlines_dir(), Path(screenshot.output_dir())):
+        assert str(path).startswith(str(tmp_path_factory.getbasetemp())), \
+            f"{path} is outside pytest's temporary directory - a test would write into a real home"
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -357,7 +362,7 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
         ("shani_chronoa.senses.store", "PERCEPT_DIR"),
         ("shani_chronoa.tool_tracking", "LOG_DIR"),
         ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
-        ("shani_chronoa.sessions", "SESSION_DIR"),
+        ("shani_chronoa.conversation_store", "SESSION_DIR"),
         ("shani_chronoa.skills.add_reminder", "_STORE"),
         ("shani_chronoa.skills.set_sleep_inhibit", "STATE_FILE"),
     ):
@@ -366,3 +371,54 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
             monkeypatch.setattr(
                 module, attribute, tmp_path_factory.mktemp("xdg") / "state", raising=False
             )
+
+
+@pytest.fixture(autouse=True)
+def _no_organ_may_stay_lit(request):
+    """No test may leave an organ lit behind it.
+
+    The body register is process-global, so a test that opens an activity and
+    never closes it does not fail *itself* - it fails some later test that
+    happened to look at the strip. That is how a microphone light left on for
+    30 seconds by the audio code was finally found, 40 files away and with no
+    hint about the cause.
+
+    Checking after every test names the culprit instead. It has to be an
+    autouse fixture rather than a `pytest_sessionfinish` hook: setting
+    `session.exitstatus` there is overwritten by pytest immediately afterwards,
+    and `pytest.exit(1)` from that hook is swallowed too - both were verified by
+    a control that leaked on purpose and still produced exit code 0.
+    """
+    body = pytest.importorskip("shani_chronoa.body")
+    # An explicit opt-out, for the tests whose subject *is* a lit organ. It has
+    # to be marked rather than inferred, so that "this test leaves an organ open
+    # on purpose" is written down where someone will read it.
+    if request.node.get_closest_marker("holds_organs"):
+        yield
+        return
+    before = set(body.body.busy_organs())
+    yield
+    # Pulses are exempt on purpose: they report something already finished and
+    # expire by themselves, so there is nothing to leave behind. Only an
+    # *activity* - something in progress - can be left hanging by mistake.
+    after = [activity for activity in body.body.snapshot()
+             if activity.organ not in before and not activity.pulse]
+    if after:
+        described = ", ".join(f"{a.organ} ({a.what!r})" for a in after)
+        # pytest reports a teardown failure as ERROR rather than FAILED. That is
+        # fine and is not worth working around: the node id in the message is the
+        # test that leaked, which is the whole point of doing this per-test
+        # instead of at the end of the session.
+        pytest.fail(
+            f"{request.node.nodeid} left {described} lit. An organ left lit means "
+            "the indicator stays on after the thing it describes has stopped, "
+            "which is worse than having no indicator at all. Open it with "
+            "`body.use(...)` and close it with `body.done(...)` - in a finally, "
+            "so a failure closes it too.")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "holds_organs: this test leaves a body activity open on purpose - it is "
+        "the subject of the test, not a leak")

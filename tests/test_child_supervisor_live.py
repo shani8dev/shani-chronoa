@@ -1,4 +1,4 @@
-"""The supervision half of `gateway_supervisor.py`, driven by real subprocesses.
+"""`child_supervisor.py` (once the supervision half of `gateway_supervisor.py`), driven by real subprocesses.
 
 `gateway_supervisor.py` was, for its whole life, a module that built a heartbeat
 mechanism and had nothing to supervise. The half that is now live watches the two
@@ -49,9 +49,9 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import audio as audio_mod  # noqa: E402
 from shani_chronoa.audio import AudioPlayer, AudioRecorder  # noqa: E402
-from shani_chronoa.gateway_supervisor import (  # noqa: E402
-    AgentState,
-    GatewaySupervisor,
+from shani_chronoa.child_supervisor import (  # noqa: E402
+    ChildState,
+    ChildSupervisor,
 )
 
 _PW_PLAY = shutil.which("pw-play")
@@ -144,7 +144,7 @@ def _state(probe, name: str):
     return None
 
 
-def _await_state(probe, expected: AgentState, limit: float = 20.0):
+def _await_state(probe, expected: ChildState, limit: float = 20.0):
     """Wait for a supervised child to reach `expected`; return whatever it reached.
 
     Returning the last status seen rather than a bool is deliberate: a timed-out wait
@@ -183,9 +183,9 @@ def _clean_registry():
 
 
 @pytest.fixture
-def supervisor() -> GatewaySupervisor:
+def supervisor() -> ChildSupervisor:
     """A private registry, for the cases that are about the supervisor itself."""
-    return GatewaySupervisor(heartbeat_interval=1)
+    return ChildSupervisor()
 
 
 @pytest.fixture
@@ -244,7 +244,7 @@ class TestTheThreeStatesAreDistinguishable:
         supervisor.track_child("killed", killed.poll, pid=killed.pid, stall_after=0.3)
 
         fresh = _state(supervisor.check_heartbeats, "leaving")
-        assert fresh.state is AgentState.STARTING, (
+        assert fresh.state is ChildState.STARTING, (
             f"a running child that has never reported is {fresh.state}, not STARTING: "
             "being new is not a fault and must not look like one"
         )
@@ -252,7 +252,7 @@ class TestTheThreeStatesAreDistinguishable:
         killed.wait(timeout=5)
 
         hung = _await_state(lambda: _state(supervisor.check_heartbeats, "leaving"),
-                            AgentState.DISCONNECTED)
+                            ChildState.DISCONNECTED)
         assert hung is not None and hung.name == "leaving", (
             "a child that is running and has said nothing for its whole budget was not "
             f"reported as hung (it stayed {fresh.state} -> {_state(supervisor.check_heartbeats, 'leaving')})"
@@ -265,14 +265,14 @@ class TestTheThreeStatesAreDistinguishable:
         dead = _state(supervisor.check_heartbeats, "killed")
         unstarted = _state(supervisor.check_heartbeats, "never-started")
 
-        assert dead.state is AgentState.EXITED and dead.exit_status is not None, (
+        assert dead.state is ChildState.EXITED and dead.exit_status is not None, (
             f"a child that was terminated is {dead.state}; an exit status is the only "
             "thing that distinguishes a crash from a kill, and it was dropped"
         )
         assert unstarted is None, "a name that was never tracked produced a status"
 
         states = {fresh.state, hung.state, dead.state}
-        collapsed = {s is AgentState.IDLE for s in (fresh, hung, dead)}
+        collapsed = {s is ChildState.IDLE for s in (fresh, hung, dead)}
         assert len(states) == 3, f"the three states are not distinct: {states}"
         assert len(collapsed) == 1, (
             "this test no longer demonstrates anything: if the states had collapsed to "
@@ -288,11 +288,11 @@ class TestTheThreeStatesAreDistinguishable:
         """
         child = _sleep()
         supervisor.track_child("capture", child.poll, pid=child.pid, stall_after=30)
-        assert _state(supervisor.check_heartbeats, "capture").state is AgentState.STARTING
+        assert _state(supervisor.check_heartbeats, "capture").state is ChildState.STARTING
 
         supervisor.update_heartbeat("capture")
         status = _state(supervisor.check_heartbeats, "capture")
-        assert status.state is AgentState.IDLE and status.age is not None
+        assert status.state is ChildState.IDLE and status.age is not None
         assert status.age < 30, f"a heartbeat just taken reads as {status.age}s old"
 
     def test_a_child_with_no_silence_budget_is_never_called_hung(self, supervisor):
@@ -306,12 +306,12 @@ class TestTheThreeStatesAreDistinguishable:
         supervisor.track_child("playback", child.poll, pid=child.pid, stall_after=None)
         time.sleep(0.6)
         status = _state(supervisor.check_heartbeats, "playback")
-        assert status.state is AgentState.STARTING, (
+        assert status.state is ChildState.STARTING, (
             f"a child with no silence budget reported {status.state}"
         )
         child.terminate()
         child.wait(timeout=5)
-        assert _state(supervisor.check_heartbeats, "playback").state is AgentState.EXITED
+        assert _state(supervisor.check_heartbeats, "playback").state is ChildState.EXITED
 
 
 # ======================================================================================
@@ -320,13 +320,19 @@ class TestTheThreeStatesAreDistinguishable:
 
 
 class TestACaptureChildIsSupervised:
+    # The capture is asked for 20 seconds and this test asserts on its first
+    # moments, so it is still live - and its ears light still on - when the test
+    # ends, except on a slow machine where the 20 seconds have already elapsed.
+    # That is why this is a marker and not a cleanup: either behaviour is
+    # correct, and the test is not about stopping a capture.
+    @pytest.mark.holds_organs
     def test_a_real_capture_child_goes_from_starting_to_healthy(self, streaming):
         recorder, queue = streaming
         queue.append(_child(amplitudes=_SILENT_30, interval=0.1, first_delay=1.5))
         assert recorder.start_auto_stop(lambda _p: None, max_seconds=20.0, silence_seconds=0.16)
 
         started = recorder.capture_status()
-        assert started is not None and started.state is AgentState.STARTING, (
+        assert started is not None and started.state is ChildState.STARTING, (
             f"a capture that has not delivered a frame yet is {started}, so a caller "
             "cannot tell it apart from one that is already broken"
         )
@@ -335,8 +341,8 @@ class TestACaptureChildIsSupervised:
             "describes a process nobody is watching"
         )
 
-        healthy = _await_state(recorder.capture_status, AgentState.IDLE, limit=20.0)
-        assert healthy is not None and healthy.state is AgentState.IDLE, (
+        healthy = _await_state(recorder.capture_status, ChildState.IDLE, limit=20.0)
+        assert healthy is not None and healthy.state is ChildState.IDLE, (
             f"a capture streaming real frames never reported healthy: {healthy}"
         )
         assert healthy.age is not None and healthy.age < audio_mod._CAPTURE_STALL_SECONDS
@@ -353,7 +359,7 @@ class TestACaptureChildIsSupervised:
             "a capture whose child died was forgotten, so the exit status is gone - the "
             "one moment it is the only evidence there is"
         )
-        assert status.state is AgentState.EXITED, f"a dead child is {status}"
+        assert status.state is ChildState.EXITED, f"a dead child is {status}"
         assert status.exit_status == 7, f"the real exit status was lost: {status}"
         assert "7" in status.detail, "the report does not name the status it is reporting"
         assert delivered == [None], (
@@ -404,8 +410,8 @@ class TestAgainstTheRealRecorderBinary:
         )
         proc = recorder._proc
 
-        healthy = _await_state(recorder.capture_status, AgentState.IDLE, limit=15.0)
-        assert healthy is not None and healthy.state is AgentState.IDLE, (
+        healthy = _await_state(recorder.capture_status, ChildState.IDLE, limit=15.0)
+        assert healthy is not None and healthy.state is ChildState.IDLE, (
             f"the real capture child was never seen as healthy: {healthy}"
         )
         assert healthy.pid == proc.pid, (
@@ -437,8 +443,8 @@ class TestTheWatchdogSeesARealWedge:
     def test_a_capture_that_stops_writing_is_reported_as_hung(self, streaming, caplog):
         recorder, delivered = self._wedge(streaming, caplog)
 
-        wedged = _await_state(recorder.capture_status, AgentState.DISCONNECTED)
-        assert wedged is not None and wedged.state is AgentState.DISCONNECTED, (
+        wedged = _await_state(recorder.capture_status, ChildState.DISCONNECTED)
+        assert wedged is not None and wedged.state is ChildState.DISCONNECTED, (
             f"a wedged capture was never reported: {wedged}"
         )
 
@@ -448,9 +454,13 @@ class TestTheWatchdogSeesARealWedge:
             "the fault was not retained; it is discovered at a moment when nothing else "
             "is looking, and the watchdog is the only thing that will ever look again"
         )
-        assert recorder.capture_failure().state is AgentState.DISCONNECTED
+        assert recorder.capture_failure().state is ChildState.DISCONNECTED
         assert delivered == [], "the wedge produced a finalised turn"
 
+    # The wedged capture is still running at the end, which is the point: the
+    # test is about what the watchdog does while it runs. Its ears activity
+    # stays lit, so it opts out of the session's no-organ-left-lit check.
+    @pytest.mark.holds_organs
     def test_a_wedge_is_reported_once_per_transition_not_once_per_tick(self, streaming, caplog):
         """A fault that logs twice a second for as long as the app is open gets ignored."""
         recorder, _delivered = self._wedge(streaming, caplog)
@@ -463,14 +473,19 @@ class TestTheWatchdogSeesARealWedge:
             "difference between a fault that gets read and one that gets scrolled past"
         )
 
+    @pytest.mark.holds_organs
     def test_a_healthy_capture_is_never_reported(self, streaming, caplog):
-        """The control: the watchdog is not simply reporting whatever it finds."""
+        """The control: the watchdog is not simply reporting whatever it finds.
+
+        Marked because this capture is still live when the test ends - its ears
+        activity is still lit, which is correct while it is recording.
+        """
         recorder, queue = streaming
         caplog.set_level(logging.ERROR, logger="shani_chronoa.audio")
         queue.append(_child(amplitudes=_SILENT_30, interval=0.1))
         assert recorder.start_auto_stop(lambda _p: None, max_seconds=30.0, silence_seconds=0.16)
-        healthy = _await_state(recorder.capture_status, AgentState.IDLE)
-        assert healthy is not None and healthy.state is AgentState.IDLE, healthy
+        healthy = _await_state(recorder.capture_status, ChildState.IDLE)
+        assert healthy is not None and healthy.state is ChildState.IDLE, healthy
         time.sleep(audio_mod._WATCHDOG_INTERVAL_SECONDS * 4)
 
         assert recorder.capture_failure() is None, (
@@ -496,8 +511,8 @@ class TestRecoveryIsSafeAtTurnBoundaries:
         delivered: list = []
         queue.append(_child(amplitudes="0,0,0,0,0,0", interval=0.01, ending="hang"))
         assert recorder.start_auto_stop(delivered.append, max_seconds=30.0, silence_seconds=0.16)
-        wedged = _await_state(recorder.capture_status, AgentState.DISCONNECTED)
-        assert wedged is not None and wedged.state is AgentState.DISCONNECTED, wedged
+        wedged = _await_state(recorder.capture_status, ChildState.DISCONNECTED)
+        assert wedged is not None and wedged.state is ChildState.DISCONNECTED, wedged
 
         second: list = []
         queue.append(_child())
@@ -506,13 +521,17 @@ class TestRecoveryIsSafeAtTurnBoundaries:
             "the microphone is dead and the app cannot say so"
         )
         reason = recorder.capture_failure()
-        assert reason is not None and reason.state is AgentState.DISCONNECTED, (
+        assert reason is not None and reason.state is ChildState.DISCONNECTED, (
             f"the turn was released without a reportable reason: {reason}"
         )
         assert _await(lambda: second), "the released recorder did not then work"
         if second[0]:
             os.unlink(second[0])
 
+    # The capture is deliberately still running when this ends - that is what
+    # the test asserts - so its ears activity is still lit. Marked, because the
+    # body register is process-global and an unclosed light outlives the test.
+    @pytest.mark.holds_organs
     def test_a_live_capture_is_never_released(self, streaming):
         """The control. Recovery that fires on a healthy capture truncates an utterance.
 
@@ -523,8 +542,8 @@ class TestRecoveryIsSafeAtTurnBoundaries:
         first: list = []
         queue.append(_child(amplitudes=_SILENT_40, interval=0.1))
         assert recorder.start_auto_stop(first.append, max_seconds=30.0, silence_seconds=0.16)
-        healthy = _await_state(recorder.capture_status, AgentState.IDLE)
-        assert healthy is not None and healthy.state is AgentState.IDLE, healthy
+        healthy = _await_state(recorder.capture_status, ChildState.IDLE)
+        assert healthy is not None and healthy.state is ChildState.IDLE, healthy
 
         queue.append(_child())
         assert not recorder.start_auto_stop(lambda _p: None, max_seconds=20.0,
@@ -547,8 +566,8 @@ class TestRecoveryIsSafeAtTurnBoundaries:
         queue.append(_child(amplitudes="0,0,0,0,0,0", interval=0.01, ending="hang"))
         assert recorder.start_auto_stop(abandoned.append, max_seconds=30.0,
                                         silence_seconds=0.16)
-        wedged = _await_state(recorder.capture_status, AgentState.DISCONNECTED)
-        assert wedged is not None and wedged.state is AgentState.DISCONNECTED, wedged
+        wedged = _await_state(recorder.capture_status, ChildState.DISCONNECTED)
+        assert wedged is not None and wedged.state is ChildState.DISCONNECTED, wedged
 
         queue.append(_child())
         assert recorder.start_auto_stop(lambda _p: None, max_seconds=20.0,
@@ -587,7 +606,7 @@ class TestPlaybackFailuresAreSurfaced:
             "a playback that failed on its own was forgotten, so the only evidence - "
             "its exit status - is discarded"
         )
-        assert status.state is AgentState.EXITED, f"a failed playback is {status}"
+        assert status.state is ChildState.EXITED, f"a failed playback is {status}"
         assert status.exit_status == 1, f"expected the real pw-play status, got {status}"
 
     def test_a_playback_interrupted_by_this_class_is_not_reported_as_a_fault(
@@ -641,13 +660,13 @@ class TestTheSupervisorBookkeeping:
         watched one - the same shape as `_run_host` reporting success over a process
         nobody was tracking.
         """
-        caplog.set_level(logging.WARNING, logger="shani_chronoa.gateway_supervisor")
+        caplog.set_level(logging.WARNING, logger="shani_chronoa.child_supervisor")
         assert supervisor.update_heartbeat("nobody") is False
         assert caplog.records, "a heartbeat for an unknown name failed silently"
 
     def test_retracking_a_name_warns_about_the_child_it_displaced(self, supervisor, caplog):
         """Starting a second child under a forgotten name is how one becomes unreachable."""
-        caplog.set_level(logging.WARNING, logger="shani_chronoa.gateway_supervisor")
+        caplog.set_level(logging.WARNING, logger="shani_chronoa.child_supervisor")
         first = _sleep()
         second = _sleep()
         supervisor.track_child("capture", first.poll, pid=first.pid, stall_after=30)

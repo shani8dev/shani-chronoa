@@ -1,6 +1,6 @@
 """Attaching files: the paperclip and drag-and-drop, shown as chips, sent as paths.
 
-The window part drives a real constructed CajitaWindow in a child process,
+The window part drives a real constructed ChronoaWindow in a child process,
 as test_window_input_and_copy does: a control created but not connected
 cannot be told apart by reading the source.
 """
@@ -43,11 +43,11 @@ _HARNESS = textwrap.dedent('''
     import json, gi, pathlib
     gi.require_version("Gtk", "4.0")
     from gi.repository import Gtk, GLib
-    from shani_chronoa.gui import CajitaWindow
+    from shani_chronoa.gui import ChronoaWindow
     app = Gtk.Application(application_id="test.attach.harness")
     out = {}
     def on_activate(a):
-        w = CajitaWindow(a)
+        w = ChronoaWindow(a)
         img = pathlib.Path("photo.png"); img.write_bytes(b"\\x89PNG" + b"0" * 100)
         doc = pathlib.Path("notes.pdf"); doc.write_bytes(b"%PDF" + b"0" * 50)
         out["button_label"] = w._attach_button.get_tooltip_text()

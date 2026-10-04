@@ -75,17 +75,17 @@ class RecordingLLM:
 def secrets():
     """The real secrets manager, with its process-global cache restored after.
 
-    `register_runtime_secret()` mutates a module-level singleton; without this
+    `register()` mutates a module-level singleton; without this
     a fake key registered by one test would still be redacted by the next.
     """
-    from shani_chronoa.secrets_manager import secrets_manager
+    from shani_chronoa.redaction import redactor
 
-    snapshot = dict(secrets_manager._cache)
+    snapshot = dict(redactor._values)
     try:
-        yield secrets_manager
+        yield redactor
     finally:
-        secrets_manager._cache.clear()
-        secrets_manager._cache.update(snapshot)
+        redactor._values.clear()
+        redactor._values.update(snapshot)
 
 
 def make_percept(content=FACT, ttl=300.0, created_at=None, **overrides):
@@ -277,14 +277,14 @@ class TestPerceptContentIsSanitized:
         from shani_chronoa.senses.store import PerceptStore
 
         secret = "sk-live-0123456789abcdef-do-not-leak"
-        secrets.register_runtime_secret("CLOUD_LLM_ANTHROPIC", secret)
+        secrets.register("CLOUD_LLM_ANTHROPIC", secret)
 
         # The real write path the memory sense uses: redact, then store.
         store = PerceptStore(durable_path=tmp_path / "redacted.jsonl")
         store.extend(
             sanitize_percepts(
                 [make_percept(content=f"the api key is {secret}")],
-                secrets.sanitize_text_for_llm,
+                secrets.sanitize,
             )
         )
         llm = RecordingLLM()

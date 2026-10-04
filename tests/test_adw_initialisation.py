@@ -37,7 +37,7 @@ _HARNESS = textwrap.dedent(
     gi.require_version("Adw", "1")
     from gi.repository import Gtk, Adw, GLib
 
-    import shani_chronoa.app as app_mod
+    import shani_chronoa.app.application as app_mod  # do_startup lives here
 
     calls = []
     real_init = Adw.init

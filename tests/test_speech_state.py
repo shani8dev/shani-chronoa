@@ -31,7 +31,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import GLib  # noqa: E402
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
-from shani_chronoa.gui import AssistantState, CajitaWindow  # noqa: E402
+from shani_chronoa.gui import AssistantState, ChronoaWindow  # noqa: E402
 
 REAL_AUDIO = pytest.mark.skipif(
     not os.environ.get("CHRONOA_ALLOW_AUDIO_TESTS"),
@@ -49,7 +49,7 @@ def real_app(tmp_path, monkeypatch):
 
     app = ChronoaApplication()
     app._init_components()
-    app.window = CajitaWindow(app)
+    app.window = ChronoaWindow(app)
     return app
 
 

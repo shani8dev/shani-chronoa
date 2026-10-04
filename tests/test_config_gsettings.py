@@ -112,7 +112,7 @@ class TestEmptyDefaultsReachConsumers:
         # When: components are initialized
         from unittest.mock import patch
 
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             model = mock_llm_cls.call_args.kwargs["model"]
@@ -127,12 +127,12 @@ class TestHardwareProfileOverride:
         # Given: a persisted hardware-profile override of "high" over a detected "low" profile
         stubbed_app.config.set("hardware-profile", "high")
         from unittest.mock import patch
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
         hw = HardwareProfile.__new__(HardwareProfile)
         hw.profile = "low"
         stubbed_app.hardware = hw
         # When: components are initialized
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls, \
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls, \
              patch("shani_chronoa.stt.build_stt") as mock_stt_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
@@ -148,12 +148,12 @@ class TestHardwareProfileOverride:
         # Given: a persisted hardware-profile override of "low" over a detected "gpu" profile
         stubbed_app.config.set("hardware-profile", "low")
         from unittest.mock import patch
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
         hw = HardwareProfile.__new__(HardwareProfile)
         hw.profile = "gpu"
         stubbed_app.hardware = hw
         # When: components are initialized
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             model = mock_llm_cls.call_args.kwargs["model"]
@@ -166,12 +166,12 @@ class TestHardwareProfileOverride:
         # Given: a persisted hardware-profile value that is not a known tier
         stubbed_app.config.set("hardware-profile", "quantum")
         from unittest.mock import patch
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
         hw = HardwareProfile.__new__(HardwareProfile)
         hw.profile = "medium"
         stubbed_app.hardware = hw
         # When: components are initialized
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             model = mock_llm_cls.call_args.kwargs["model"]
@@ -184,12 +184,12 @@ class TestHardwareProfileOverride:
         # Given: the default "auto" hardware profile (schema default)
         assert stubbed_app.config.hardware_profile == "auto"
         from unittest.mock import patch
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
         hw = HardwareProfile.__new__(HardwareProfile)
         hw.profile = "low"
         stubbed_app.hardware = hw
         # When: components are initialized
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             model = mock_llm_cls.call_args.kwargs["model"]
@@ -225,7 +225,7 @@ class TestApiKeyHandling:
             calls.append(cmd)
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
-        monkeypatch.setattr("shani_chronoa.config.subprocess.run", _fake_run)
+        monkeypatch.setattr("subprocess.run", _fake_run)  # any subprocess, from anywhere
         # When: the key is set through the config
         chronoa_config.set("openai-api-key", key_value)
         # Then: the key value must not appear in any subprocess argv

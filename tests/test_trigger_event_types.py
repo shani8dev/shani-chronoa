@@ -378,7 +378,7 @@ class TestGitEvent:
         import shani_chronoa.triggers as triggers
 
         monkeypatch.setattr(
-            triggers.shutil, "which",
+            triggers.sources.shutil, "which",
             lambda name: None if name == "git" else f"/usr/bin/{name}",
         )
         _armed(engine, event_type=EVENT_GIT, source="/tmp/whatever")
@@ -567,7 +567,7 @@ class TestFswatchEvent:
         watched.mkdir()
         watcher = PollingDirWatcher()
         watcher.poll(watched)
-        monkeypatch.setattr("shani_chronoa.triggers.MAX_WATCH_ENTRIES", 1)
+        monkeypatch.setattr("shani_chronoa.triggers.sources.MAX_WATCH_ENTRIES", 1)
         (watched / "a.txt").write_text("one")
         (watched / "b.txt").write_text("two")
 
@@ -793,8 +793,8 @@ def fake_runtime(monkeypatch):
     import shani_chronoa.triggers as triggers
 
     def install(responses):
-        monkeypatch.setattr(triggers, "_run_argv", _FakeRuntime(responses))
-        monkeypatch.setattr(triggers.shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(triggers.sources, "_run_argv", _FakeRuntime(responses))
+        monkeypatch.setattr(triggers.sources.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     return install
 
@@ -861,7 +861,7 @@ class TestContainerRunEvent:
     def test_no_runtime_is_unavailable_not_an_exit(self, engine, recorder, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(triggers.shutil, "which", lambda name: None)
+        monkeypatch.setattr(triggers.sources.shutil, "which", lambda name: None)
         _armed(engine, event_type=EVENT_CONTAINERRUN, source="build")
 
         (result,) = engine.poll(now=1000.0)
@@ -872,9 +872,8 @@ class TestContainerRunEvent:
     def test_a_container_that_does_not_exist_is_unavailable(self, engine, recorder, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(triggers.shutil, "which", lambda name: "/usr/bin/docker")
-        monkeypatch.setattr(
-            triggers, "_run_argv",
+        monkeypatch.setattr(triggers.sources.shutil, "which", lambda name: "/usr/bin/docker")
+        monkeypatch.setattr(triggers.sources, "_run_argv",
             lambda argv, **kw: subprocess.CompletedProcess(
                 argv, 1, stdout="", stderr=f"Error: No such container: {argv[-1]}"
             ),
@@ -974,8 +973,8 @@ def fake_systemd(monkeypatch):
     import shani_chronoa.triggers as triggers
 
     def install(states):
-        monkeypatch.setattr(triggers, "_run_argv", _FakeSystemd(states))
-        monkeypatch.setattr(triggers.shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(triggers.sources, "_run_argv", _FakeSystemd(states))
+        monkeypatch.setattr(triggers.sources.shutil, "which", lambda name: f"/usr/bin/{name}")
 
     return install
 
@@ -1037,7 +1036,7 @@ class TestUnitHealthEvent:
     def test_no_systemd_is_unavailable_not_healthy(self, engine, recorder, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(triggers.shutil, "which", lambda name: None)
+        monkeypatch.setattr(triggers.sources.shutil, "which", lambda name: None)
         _armed(engine, event_type=EVENT_UNITHEALTH, source="nginx.service")
 
         (result,) = engine.poll(now=1000.0)
@@ -1485,7 +1484,7 @@ class TestTheStorePathSeam:
     def test_rebinding_the_percept_store_path_redirects_a_new_store(self, tmp_path, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(triggers, "RULES_FILE", tmp_path / "elsewhere" / "rules.json")
+        monkeypatch.setattr(triggers.rules, "rules_file", lambda: tmp_path / "elsewhere" / "rules.json")
 
         store = RuleStore()
 
@@ -1499,18 +1498,14 @@ class TestTheStorePathSeam:
     def test_rebinding_the_event_store_path_redirects_a_new_store(self, tmp_path, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(
-            triggers, "EVENT_RULES_FILE", tmp_path / "elsewhere" / "event_rules.json"
-        )
+        monkeypatch.setattr(triggers.event_rules, "event_rules_file", lambda: tmp_path / "elsewhere" / "event_rules.json")
 
         assert EventRuleStore().path == tmp_path / "elsewhere" / "event_rules.json"
 
     def test_the_fingerprint_path_is_redirectable_too(self, tmp_path, monkeypatch):
         import shani_chronoa.triggers as triggers
 
-        monkeypatch.setattr(
-            triggers, "FINGERPRINTS_FILE", tmp_path / "elsewhere" / "prints.json"
-        )
+        monkeypatch.setattr(triggers.events, "fingerprints_file", lambda: tmp_path / "elsewhere" / "prints.json")
 
         prints = DurableFingerprints()
         prints.record("k", "v")
@@ -1692,11 +1687,11 @@ class TestSignalDispatch:
         arm(engine)
         _commit(repo, "move")
 
-        triggers.read_git_state = explode
+        triggers.events.read_git_state = explode
         try:
             results = engine.poll(now=1000.0)
         finally:
-            triggers.read_git_state = original
+            triggers.events.read_git_state = original
 
         assert len(results) == 2
         assert any("git index lock" in r.reason for r in results)

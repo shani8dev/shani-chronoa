@@ -424,3 +424,97 @@ def test_the_action_is_actually_registered_not_just_defined():
     assert "toggle-model-download" in added, (
         "the consent switch beside it fires a name that is never added"
     )
+
+
+# --- a dropped connection -------------------------------------------------
+# The Plasma slot run on 2026-10-02 hit "Connection reset by peer" halfway
+# through the Piper download: the raw httpx error escaped the setup step (a
+# traceback, not a message) and one blip failed the whole step.
+
+def _flaky(failures, exc=httpx.ConnectError("[Errno 104] Connection reset by peer")):
+    """A transport that drops the connection `failures` times, then serves the file."""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if len(calls) <= failures:
+            raise exc
+        return httpx.Response(200, headers={"content-length": str(len(PAYLOAD))}, content=PAYLOAD)
+
+    return httpx.MockTransport(handler), calls
+
+
+def test_a_dropped_connection_is_retried_and_the_file_still_verified(pinned, monkeypatch):
+    monkeypatch.setattr(stt_provision, "_RETRY_PAUSE", 0)
+    transport, calls = _flaky(2)
+    path = provision("tiny-q5_1", config=_Config(True), transport=transport)
+    assert path.read_bytes() == PAYLOAD and len(calls) == 3
+    assert not list(path.parent.glob("*.part")), "a failed attempt left its partial file behind"
+
+
+def test_a_connection_that_keeps_dropping_is_a_provision_error_not_a_traceback(pinned, monkeypatch):
+    monkeypatch.setattr(stt_provision, "_RETRY_PAUSE", 0)
+    transport, calls = _flaky(99)
+    with pytest.raises(ProvisionError, match="tries"):
+        provision("tiny-q5_1", config=_Config(True), transport=transport)
+    assert len(calls) == stt_provision._ATTEMPTS
+    assert not (stt_provision.model_dir() / pinned.filename).exists()
+
+
+def _breaks_after(n_bytes, honour_range):
+    """A server whose first answer drops after `n_bytes`; later ones resume (206) or start over (200)."""
+    calls = []
+
+    class _Breaks(httpx.SyncByteStream):
+        def __iter__(self):
+            yield PAYLOAD[:n_bytes]
+            raise httpx.ReadError("connection reset mid-body")
+
+    def handler(request):
+        calls.append(request.headers.get("range"))
+        if len(calls) == 1:
+            return httpx.Response(200, headers={"content-length": str(len(PAYLOAD))}, stream=_Breaks())
+        wanted = request.headers.get("range")
+        if wanted and honour_range:
+            start = int(wanted.split("=")[1].rstrip("-"))
+            return httpx.Response(206, content=PAYLOAD[start:])
+        return httpx.Response(200, headers={"content-length": str(len(PAYLOAD))}, content=PAYLOAD)
+
+    return httpx.MockTransport(handler), calls
+
+
+def test_a_dropped_download_resumes_where_it_stopped(pinned, monkeypatch):
+    """The second request asks only for the rest, and the whole file still has to match its digest."""
+    monkeypatch.setattr(stt_provision, "_RETRY_PAUSE", 0)
+    transport, calls = _breaks_after(10, honour_range=True)
+    path = provision("tiny-q5_1", config=_Config(True), transport=transport)
+    assert path.read_bytes() == PAYLOAD
+    assert calls == [None, "bytes=10-"], "the retry asked for the whole file again"
+
+
+def test_a_server_that_ignores_range_starts_the_file_over(pinned, monkeypatch):
+    """Bytes from a broken attempt must not be prepended to a full second copy."""
+    monkeypatch.setattr(stt_provision, "_RETRY_PAUSE", 0)
+    transport, calls = _breaks_after(10, honour_range=False)
+    path = provision("tiny-q5_1", config=_Config(True), transport=transport)
+    assert path.read_bytes() == PAYLOAD
+    assert calls == [None, "bytes=10-", None]
+
+
+def test_a_resumed_download_with_wrong_bytes_is_still_refused(pinned, monkeypatch):
+    """Resuming must not weaken the digest: a server that sends the wrong rest is caught."""
+    monkeypatch.setattr(stt_provision, "_RETRY_PAUSE", 0)
+    calls = []
+
+    class _Breaks(httpx.SyncByteStream):
+        def __iter__(self):
+            yield PAYLOAD[:10]
+            raise httpx.ReadError("reset")
+
+    def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(200, headers={"content-length": str(len(PAYLOAD))}, stream=_Breaks())
+        return httpx.Response(206, content=b"X" * (len(PAYLOAD) - 10))
+    with pytest.raises(DigestMismatch):
+        provision("tiny-q5_1", config=_Config(True), transport=httpx.MockTransport(handler))

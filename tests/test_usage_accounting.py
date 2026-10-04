@@ -132,8 +132,8 @@ class TestItNeverReachesTheModel:
         re-sent to the model on every subsequent turn - teaching it about a
         number it has no use for. Hence `last_usage` beside the message.
         """
-        from shani_chronoa.llm import OllamaLLM
-        from shani_chronoa import llm as llm_mod
+        from shani_chronoa.ollama_llm import OllamaLLM
+        from shani_chronoa import ollama_llm as llm_mod
 
         llm = OllamaLLM.__new__(OllamaLLM)
         llm.last_usage = None

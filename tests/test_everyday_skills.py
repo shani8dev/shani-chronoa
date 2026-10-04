@@ -504,8 +504,8 @@ class TestEveryGatedSkillHasAKeyAndALabel:
             assert key in capabilities.GATE_NAMES, f"{key} has no human label"
 
     def test_each_gate_is_reachable_from_the_settings_window(self):
-        source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-                  / "settings_window.py").read_text()
+        from _source import package_source
+        source = package_source("settings_window")
         for key in ("file-delete-enabled", "process-kill-enabled",
                     "window-close-enabled", "wifi-connect-enabled"):
             assert f'"{key}"' in source, (

@@ -840,60 +840,60 @@ class TestTaskModelResolution:
     """
 
     def test_the_three_real_jobs_resolve(self):
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
-        assert models.tasks() == ["text", "transcribe", "vision"]
-        for task in models.tasks():
-            assert models.resolve(task), f"{task} resolved to nothing"
-            assert models.describe(task), f"{task} has no stated purpose"
+        assert model_choice.tasks() == ["text", "transcribe", "vision"]
+        for task in model_choice.tasks():
+            assert model_choice.resolve(task), f"{task} resolved to nothing"
+            assert model_choice.describe(task), f"{task} has no stated purpose"
 
     def test_an_unknown_task_is_none_not_the_chat_model(self, monkeypatch):
         """A typo must say so, not quietly answer with the text model."""
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
-        assert models.resolve("textt") is None
-        out = models.explain("textt")
+        assert model_choice.resolve("textt") is None
+        out = model_choice.explain("textt")
         assert "not a task Chronoa resolves" in out
         assert "text" in out  # it lists what is known
 
     def test_a_user_pin_beats_the_hardware_tier(self, monkeypatch, chronoa_config):
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
         chronoa_config.set("model", "qwen3:30b-a3b")
-        assert models.resolve("text", config=chronoa_config) == "qwen3:30b-a3b"
-        explain = models.explain("text", config=chronoa_config)
+        assert model_choice.resolve("text", config=chronoa_config) == "qwen3:30b-a3b"
+        explain = model_choice.explain("text", config=chronoa_config)
         assert "which wins" in explain, "the source of the answer must be named"
 
     def test_an_empty_pin_falls_through_to_the_tier(self, chronoa_config):
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
         chronoa_config.set("model", "")
-        resolved = models.resolve("text", config=chronoa_config)
+        resolved = model_choice.resolve("text", config=chronoa_config)
         assert resolved == "qwen3:4b" or resolved == "qwen3:1.7b"
-        assert "hardware tier decides" in models.explain("text", config=chronoa_config)
+        assert "hardware tier decides" in model_choice.explain("text", config=chronoa_config)
 
     def test_whitespace_only_a_pin_is_not_a_pin(self, chronoa_config):
         """A settings field left as spaces is not a user preference."""
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
         chronoa_config.set("model", "   ")
-        resolved = models.resolve("text", config=chronoa_config)
+        resolved = model_choice.resolve("text", config=chronoa_config)
         assert resolved in ("qwen3:4b", "qwen3:1.7b")
 
     def test_transcribe_is_flagged_as_not_an_ollama_model(self, chronoa_config):
         """Whisper is not pulled with `ollama pull`, and saying so prevents a
         user chasing a model that was never going to be there."""
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
-        assert "transcribe" in models.NON_OLLAMA_TASKS
-        assert "not an Ollama model" in models.explain("transcribe", config=chronoa_config)
+        assert "transcribe" in model_choice.NON_OLLAMA_TASKS
+        assert "not an Ollama model" in model_choice.explain("transcribe", config=chronoa_config)
 
     def test_the_vision_pin_is_separate_from_the_text_pin(self, monkeypatch, chronoa_config):
         """They are different jobs with different requirements, and conflating
         them is the mistake the two separate settings exist to prevent."""
-        from shani_chronoa import models
+        from shani_chronoa import model_choice
 
         chronoa_config.set("model", "qwen3:4b")
         chronoa_config.set("vision-model", "qwen3-vl:2b")
-        assert models.resolve("text", config=chronoa_config) == "qwen3:4b"
-        assert models.resolve("vision", config=chronoa_config) == "qwen3-vl:2b"
+        assert model_choice.resolve("text", config=chronoa_config) == "qwen3:4b"
+        assert model_choice.resolve("vision", config=chronoa_config) == "qwen3-vl:2b"

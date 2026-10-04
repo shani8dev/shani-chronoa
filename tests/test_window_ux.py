@@ -24,7 +24,7 @@ from gi.repository import Gtk, GLib  # noqa: E402
 sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.gui import (  # noqa: E402
     AssistantState,
-    CajitaWindow,
+    ChronoaWindow,
     ChronoaOrbWidget,
     TranscriptView,
 )
@@ -68,7 +68,7 @@ def gtk_app():
 
 @pytest.fixture
 def window(gtk_app):
-    win = CajitaWindow(gtk_app)
+    win = ChronoaWindow(gtk_app)
     yield win
     win.destroy()
 
@@ -88,14 +88,14 @@ def test_every_state_is_fully_derived_and_never_disagrees(window):
         assert f"state-{state.value}" in list(window._orb.get_css_classes())
 
 
-def test_stop_control_appears_only_while_speaking(window):
-    """Spoken audio must be stoppable exactly when it is playing."""
-    window.set_state(AssistantState.SPEAKING)
-    assert window._stop_button.get_visible()
+def test_stop_control_appears_only_while_speaking_or_thinking(window):
+    """Stop is shown exactly when there is something to stop: audio playing, or a turn still thinking."""
+    for state in (AssistantState.SPEAKING, AssistantState.THINKING):
+        window.set_state(state)
+        assert window._stop_button.get_visible(), f"no stop while {state.value}"
     for state in (
         AssistantState.IDLE,
         AssistantState.LISTENING,
-        AssistantState.THINKING,
         AssistantState.INTERRUPTING,
         AssistantState.ERROR,
     ):
@@ -199,6 +199,8 @@ def test_state_is_not_colour_only(window):
     # `listening`/`idle` share an icon by design (both involve the mic), so
     # icons need not be unique - but no colour may be reused, or two states
     # would be indistinguishable by colour alone.
+    assert icons, "no state has an icon at all"
+    assert len(set(colours)) == len(AssistantState)
     assert len(set(colours)) == len(AssistantState)
 
 
@@ -225,7 +227,7 @@ def test_orb_reports_its_own_state_independently():
 
 def test_stop_button_is_reachable_by_keyboard(gtk_app):
     """Accessibility: a mouse-only stop control would be unusable by keyboard."""
-    win = CajitaWindow(gtk_app)
+    win = ChronoaWindow(gtk_app)
     assert win._stop_button.get_focusable()
     assert win._stop_button.get_action_name() == "app.stop-speaking"
     win.destroy()
@@ -237,11 +239,11 @@ def test_reduce_motion_class_is_applied_when_animations_are_off(gtk_app, monkeyp
     original = settings.get_property("gtk-enable-animations")
     try:
         settings.set_property("gtk-enable-animations", False)
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         assert "reduce-motion" in list(win.get_css_classes())
         win.destroy()
         settings.set_property("gtk-enable-animations", True)
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         assert "reduce-motion" not in list(win.get_css_classes())
         win.destroy()
     finally:
@@ -264,16 +266,25 @@ def test_transcript_view_scrolls_to_the_newest_turn(gtk_app):
 
 
 def _label_of(row):
-    """The turn's text, whether the row is the label or wraps it.
+    """The turn's text, whatever shape the row is.
 
-    An assistant turn is now a row holding the label plus a copy button, so
-    the label is not always the row itself. Unwrapping one level keeps these
-    tests pointed at the behaviour they are about - turns accumulating, a
-    second response updating rather than appending - instead of at the
-    widget tree shape, which is not the contract.
+    A user turn is one label. An assistant turn is a row of blocks - a copy
+    button beside a stack of text, code, table and tool-call widgets - so there
+    is no single label to read.
+
+    The text is read from the row's own `_turn_text` rather than by digging
+    through the blocks for the first `Gtk.Label` in sight, because that would
+    find the *language tag* of a code block ("Bash") instead of the reply.
+    Reading the accessible label back instead is not an option: on this GTK
+    build `update_property([LABEL], [None])` on a Box segfaults. These tests are
+    about turns accumulating and a second response replacing the first, not
+    about the widget tree, which is not the contract.
     """
     if isinstance(row, Gtk.Label):
         return row.get_label()
+    text = getattr(row, "_turn_text", None)
+    if text is not None:
+        return text
     child = row.get_first_child()
     while child is not None:
         if isinstance(child, Gtk.Label):
@@ -325,7 +336,7 @@ class TestLevelHalo:
         """The check that would have caught the dead draw callback."""
         from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX
 
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         orb = win._orb
         orb.set_level(0.0)
         _pump(1.0)
@@ -342,7 +353,7 @@ class TestLevelHalo:
     def test_level_eases_rather_than_jumping(self, gtk_app):
         from shani_chronoa.gui import _HALO_MAX_PX, _HALO_MIN_PX, _TICK_MS
 
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         orb = win._orb
         orb.set_level(1.0)
         # Mid-flight the value must be strictly between the endpoints, which is
@@ -362,7 +373,7 @@ class TestLevelHalo:
 
     def test_input_level_is_ignored_unless_listening(self, gtk_app):
         """A level arriving after the turn ended must not pulse at nothing."""
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         win.set_state(AssistantState.IDLE)
         win.set_input_level(1.0)
         _pump(0.5)
@@ -375,7 +386,7 @@ class TestLevelHalo:
         win.destroy()
 
     def test_halo_colour_tracks_the_state(self, gtk_app):
-        win = CajitaWindow(gtk_app)
+        win = ChronoaWindow(gtk_app)
         for state in AssistantState:
             win.set_state(state)
             assert f"halo-{state.value}" in list(win._orb._halo.get_css_classes())

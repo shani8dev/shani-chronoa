@@ -61,8 +61,12 @@ def _allow_web(chronoa_config):
 def canned_page(monkeypatch):
     """Serve CANNED_HTML for any request, recording what was asked for."""
     requested: list = []
+    from shani_chronoa import webtext
+    monkeypatch.setattr(webtext, "_ROBOTS", {})
 
     def _handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)  # no robots.txt: everything allowed, and not part of what was asked
         requested.append(str(request.url))
         return httpx.Response(
             200,
@@ -370,3 +374,66 @@ class TestSenseShape:
         # Then: it declares no poll interval - egress is never scheduled
         assert sense.poll_interval is None
         assert not sense.is_ambient()
+
+
+class TestLongPagesAreReadInSlices:
+    """servers/fetch `start_index` and browser-use `search_page`, on the web sense."""
+
+    def _serve(self, monkeypatch, chronoa_config):
+        _allow_web(chronoa_config)
+        words = " ".join(f"w{i}" for i in range(3000)) + " refund policy is thirty days " + "tail " * 50
+        _install_transport(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "text/html"},
+                                                                 text=f"<p>{words}</p>"))
+
+    def test_start_index_continues_where_the_last_slice_stopped(self, monkeypatch, chronoa_config):
+        self._serve(monkeypatch, chronoa_config)
+        from shani_chronoa.senses import web
+        first = web._run({"url": "https://example.org/long"}).content
+        import re as _re
+        nxt = int(_re.search(r"start_index=(\d+)\]", first).group(1))
+        assert nxt == MAX_TEXT_CHARS
+        second = web._run({"url": "https://example.org/long", "start_index": nxt}).content
+        assert f"Showing from character {nxt}" in second
+        tail_of_first = first.split("\n\n", 1)[1][:MAX_TEXT_CHARS][-20:]
+        assert tail_of_first not in second.split("\n\n", 1)[1][:40], "slices must not repeat"
+
+    def test_find_lists_every_mention_across_the_whole_page(self, monkeypatch, chronoa_config):
+        self._serve(monkeypatch, chronoa_config)
+        from shani_chronoa.senses import web
+        out = web._run({"url": "https://example.org/long", "find": "Refund Policy"}).content
+        assert "1 place(s) mention 'Refund Policy'" in out and "thirty days" in out
+        assert "does not contain" in web._run({"url": "https://example.org/long", "find": "warranty"}).content
+
+
+class TestRobotsTxt:
+    """A page a model asked for is fetched only if the site's robots.txt allows it (adopted from Alpaca)."""
+
+    def _serve(self, monkeypatch, robots_status, robots_body=""):
+        from shani_chronoa import webtext
+        monkeypatch.setattr(webtext, "_ROBOTS", {})
+        seen = []
+
+        def handler(request):
+            seen.append(request.url.path)
+            if request.url.path == "/robots.txt":
+                return httpx.Response(robots_status, text=robots_body)
+            return httpx.Response(200, headers={"content-type": "text/html"}, text=CANNED_HTML)
+        _install_transport(monkeypatch, handler)
+        return seen
+
+    def test_a_disallowed_page_is_not_fetched(self, chronoa_config, monkeypatch):
+        _allow_web(chronoa_config)
+        seen = self._serve(monkeypatch, 200, "User-agent: *\nDisallow: /private\n")
+        from shani_chronoa.skills.web_search import _run
+        result = _run({"query": "x", "url": "https://example.org/private/page"})
+        assert "robots.txt" in result and seen == ["/robots.txt"], "the page itself must not be requested"
+        assert "blue-green" in _run({"query": "x", "url": "https://example.org/notes"}), "the rest of the site is fine"
+        assert seen.count("/robots.txt") == 1, "robots.txt is read once per site"
+
+    def test_forbidden_robots_means_nothing_and_missing_means_everything(self, chronoa_config, monkeypatch):
+        _allow_web(chronoa_config)
+        from shani_chronoa.skills.web_search import _run
+        self._serve(monkeypatch, 403)
+        assert "robots.txt" in _run({"query": "x", "url": "https://example.org/notes"})
+        self._serve(monkeypatch, 404)
+        assert "blue-green" in _run({"query": "x", "url": "https://example.org/notes"})

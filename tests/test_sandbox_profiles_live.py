@@ -35,6 +35,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.sandbox import executor as executor_mod  # noqa: E402
+from shani_chronoa.sandbox import limits as limits_mod  # noqa: E402
 from shani_chronoa.sandbox.executor import SandboxExecutor  # noqa: E402
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel  # noqa: E402
 from shani_chronoa.sandbox.profiles import (  # noqa: E402
@@ -567,5 +568,5 @@ class TestTheProfileFieldsAreValidatedAtConstruction:
         `RLIMIT_AS` rather than `RLIMIT_DATA`, and a CPU budget that is a
         multiple of the wall timeout rather than the share count itself.
         """
-        assert executor_mod.resource.RLIMIT_AS == resource.RLIMIT_AS
+        assert limits_mod.resource.RLIMIT_AS == resource.RLIMIT_AS
         assert PROFILE_DEFAULT.memory_bytes() == 512 * 1024 * 1024

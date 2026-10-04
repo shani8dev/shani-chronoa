@@ -8,7 +8,7 @@ really has the shape Ollama's vision API requires.
 
 **What is mocked, and why.** `describe_image()` takes a `transport`, so the
 `/api/chat` request is captured with `httpx.MockTransport` - the technique
-`AGENTS.md` endorses for `assistant.py`/`llm.py`, and the only way to prove the
+`AGENTS.md` endorses for `assistant.py`/`ollama_llm.py`, and the only way to prove the
 `images` array is on the *user message* (where Ollama reads it) rather than
 somewhere plausible-looking. The capture itself is stubbed for the
 consent/argument tests by a `screengrab.capture` spy that records whether it
@@ -92,9 +92,10 @@ def _stub_description(monkeypatch, text: str = "A small solid dark rectangle."):
     """Answer the describe step in-process, recording the arguments it got."""
     seen: dict = {}
 
-    def _fake_describe(image, model, host, prompt, timeout):
+    def _fake_describe(image, model, host, prompt, timeout, backend="ollama"):
         seen.update(
-            {"image": image, "model": model, "host": host, "prompt": prompt, "timeout": timeout}
+            {"image": image, "model": model, "host": host, "prompt": prompt, "timeout": timeout,
+             "backend": backend}
         )
         return text
 
@@ -222,7 +223,7 @@ class TestLocalityIsEnforcedBeforeAnyCapture:
 
 class TestTheVisionModelIsIndependentOfTheTextModel:
     def test_the_vision_pin_differs_from_the_text_pin_on_every_tier(self):
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
 
         for profile in ("gpu", "high", "medium", "low"):
             hardware = HardwareProfile()
@@ -236,7 +237,7 @@ class TestTheVisionModelIsIndependentOfTheTextModel:
             assert ":" in seen, seen
 
     def test_a_text_model_override_does_not_change_the_vision_model(self, chronoa_config):
-        from shani_chronoa.config import HardwareProfile
+        from shani_chronoa.hardware_profile import HardwareProfile
 
         # The setting a user reaches for when chat misbehaves.
         chronoa_config.set("model", "some-text-model:70b")

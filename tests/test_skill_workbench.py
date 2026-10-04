@@ -303,8 +303,6 @@ class TestGitInspectNeverClaimsACleanTreeItDidNotRead:
         `_git`, which is what makes this a test of the *shared* failure path
         rather than of one branch of it.
         """
-        import shani_chronoa.senses.git as git_sense
-
         # `_run_cmd` swallows the timeout and returns None, so the timeout is
         # raised *inside* what it calls, where the real handling lives.
         def slow(argv, **kwargs):
@@ -312,7 +310,8 @@ class TestGitInspectNeverClaimsACleanTreeItDidNotRead:
 
         repo = _repo(home)
         _commit(repo, "a.txt", "one\n", "first")
-        monkeypatch.setattr(git_sense.subprocess, "run", slow)
+        from shani_chronoa import subproc
+        monkeypatch.setattr(subproc.subprocess, "run", slow)  # where git_sense._run_cmd ends up
         out = git_inspect._run({"path": str(repo), "subcommand": "status"})
         assert "UNKNOWN" in out
         assert "is clean" not in out
@@ -980,8 +979,8 @@ class TestTreeRendersShapeAndSaysWhatItSkipped:
 class TestManageTriggersMakesTheEngineReachable:
     def test_a_rule_can_be_armed_listed_and_removed(self, home, granted, tmp_path):
         import shani_chronoa.triggers as triggers
-        monkey = triggers.RULES_FILE
-        triggers.RULES_FILE = tmp_path / "rules.json"
+        monkey = triggers.rules.rules_file
+        triggers.rules.rules_file = lambda: tmp_path / "rules.json"
         try:
             armed = manage_triggers._run({
                 "action": "add", "name": "lowbatt", "sense": "power",
@@ -997,7 +996,7 @@ class TestManageTriggersMakesTheEngineReachable:
             assert "Removed" in manage_triggers._run({"action": "remove", "name": "lowbatt"})
             assert "No trigger rules are armed" in manage_triggers._run({"action": "list"})
         finally:
-            triggers.RULES_FILE = monkey
+            triggers.rules.rules_file = monkey
 
     def test_listing_needs_no_permission_because_that_is_the_point(self, home, shut):
         out = manage_triggers._run({"action": "list"})
@@ -1009,42 +1008,42 @@ class TestManageTriggersMakesTheEngineReachable:
 
     def test_arming_is_refused_when_shut(self, home, shut, tmp_path):
         import shani_chronoa.triggers as triggers
-        monkey = triggers.RULES_FILE
-        triggers.RULES_FILE = tmp_path / "rules.json"
+        monkey = triggers.rules.rules_file
+        triggers.rules.rules_file = lambda: tmp_path / "rules.json"
         try:
             out = manage_triggers._run({
                 "action": "add", "name": "x", "sense": "power",
                 "match_mode": "keywords", "keywords": ["battery low"],
                 "actuator": "notify", "arguments": {"summary": "s"}})
             assert "Refusing" in out and TRIGGER_KEY in out
-            assert not triggers.RULES_FILE.exists(), (
+            assert not triggers.rules.rules_file().exists(), (
                 "a refused arm still wrote a rule that will fire unattended"
             )
         finally:
-            triggers.RULES_FILE = monkey
+            triggers.rules.rules_file = monkey
 
 
 class TestManageTriggersCannotBecomeAShellEscape:
     def test_an_unwhitelisted_actuator_is_refused(self, home, granted, tmp_path):
         import shani_chronoa.triggers as triggers
-        monkey = triggers.RULES_FILE
-        triggers.RULES_FILE = tmp_path / "rules.json"
+        monkey = triggers.rules.rules_file
+        triggers.rules.rules_file = lambda: tmp_path / "rules.json"
         try:
             out = manage_triggers._run({
                 "action": "add", "name": "evil", "sense": "power",
                 "match_mode": "keywords", "keywords": ["x"],
                 "actuator": "rm_rf_slash", "arguments": {}})
             assert "not installed" in out or "whitelisted skill" in out
-            assert not triggers.RULES_FILE.exists()
+            assert not triggers.rules.rules_file().exists()
         finally:
-            triggers.RULES_FILE = monkey
+            triggers.rules.rules_file = monkey
 
     def test_arguments_are_checked_against_the_actuators_own_schema(self, home, granted,
                                                                      tmp_path):
         """`build_rule`'s docstring claims this; running it shows it does not."""
         import shani_chronoa.triggers as triggers
-        monkey = triggers.RULES_FILE
-        triggers.RULES_FILE = tmp_path / "rules.json"
+        monkey = triggers.rules.rules_file
+        triggers.rules.rules_file = lambda: tmp_path / "rules.json"
         try:
             out = manage_triggers._run({
                 "action": "add", "name": "sneaky", "sense": "power",
@@ -1052,19 +1051,21 @@ class TestManageTriggersCannotBecomeAShellEscape:
                 "actuator": "notify",
                 "arguments": {"summary": "s", "totally_bogus_arg": 1}})
             assert "not declared by the notify skill" in out
-            assert not triggers.RULES_FILE.exists(), (
+            assert not triggers.rules.rules_file().exists(), (
                 "an argument the actuator does not declare was armed anyway; "
                 "the engine's guardrail only type-checks declared keys, so the "
                 "extra reaches the skill as a real value"
             )
         finally:
-            triggers.RULES_FILE = monkey
+            triggers.rules.rules_file = monkey
 
     def test_an_armed_rule_says_it_would_not_fire_rather_than_lying(self, home, granted):
         """A promise of an action the engine will silently not take."""
         import shani_chronoa.triggers as triggers
         from shani_chronoa.config import ChronoaConfig as C
-        saved, triggers.RULES_FILE = triggers.RULES_FILE, Path(os.environ["XDG_STATE_HOME"]) / "r.json"
+        saved = triggers.rules.rules_file
+        _p = Path(os.environ["XDG_STATE_HOME"]) / "r.json"
+        triggers.rules.rules_file = lambda: _p
         try:
             import shani_chronoa.triggers as t
             original = t.TriggerEngine._consent
@@ -1079,7 +1080,7 @@ class TestManageTriggersCannotBecomeAShellEscape:
             finally:
                 t.TriggerEngine._consent = original
         finally:
-            triggers.RULES_FILE = saved
+            triggers.rules.rules_file = saved
 
 
 # --- 8. list_capabilities ---------------------------------------------------

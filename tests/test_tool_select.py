@@ -37,6 +37,11 @@ def test_all_of_them_did_not_fit_any_tier():
     ("delete the file notes.txt", "delete_file"),
     ("what is the weather in mumbai today", "web_search"),
     ("what time is it", "get_datetime"),
+    # each word had two entries in the synonym table and the second silently won
+    ("fix up my photo", "edit_image"),
+    ("set this photo as my background", "set_wallpaper"),
+    ("is the internet down", "check_internet"),
+    ("search the internet for flights", "web_search"),
 ])
 def test_the_tool_a_request_needs_is_sent(request_, tool):
     assert tool in _names(select_tools(request_, TOOLS))

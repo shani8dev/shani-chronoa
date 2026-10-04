@@ -1,6 +1,6 @@
 """The egress log must cover the local call sites too, not only the cloud ones.
 
-The log existed for the cloud providers only. It did not cover `llm.py`, the
+The log existed for the cloud providers only. It did not cover `ollama_llm.py`, the
 vision sense, or page retrieval - which is backwards for a local-first app,
 because those are the paths where the user's own words, their own screen and
 whatever URL they were told to fetch go, and `egress.is_local` is exactly what
@@ -28,7 +28,7 @@ sys.path.insert(0, "usr/lib/shani-chronoa")
 CARRIERS = {
     "stt_provision.py": "bytes_out is the model file, so a real download is auditable",
     # file: what the request carries
-    "llm.py": "the whole conversation",
+    "ollama_llm.py": "the whole conversation",
     "senses/vision.py": "a base64 screenshot of the user's screen",
     "webtext.py": "whatever URL the assistant was told to fetch",
     "cloud_llm.py": "the conversation, to a third party",
@@ -68,7 +68,7 @@ def test_every_carrier_calls_the_egress_log(name):
 def test_the_local_chat_path_records_the_host_it_used():
     """A local default and a remote override have to be distinguishable, which
     is the entire reason to log a request that is 'probably local'."""
-    source = (pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/llm.py")).read_text()
+    source = (pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/ollama_llm.py")).read_text()
     assert "llm:ollama" in source
     assert "/api/chat" in source, (
         "the record must name the endpoint, so a log line is actionable rather "

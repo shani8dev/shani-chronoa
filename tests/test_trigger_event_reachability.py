@@ -131,9 +131,9 @@ def consent(tmp_path, monkeypatch, gsettings_env):
     `GSETTINGS_BACKEND=keyfile` the CLI writes a *different* store than
     `ChronoaConfig` reads - a control that silently does nothing.
     """
-    monkeypatch.setattr(triggers, "RULES_FILE", tmp_path / "rules.json")
-    monkeypatch.setattr(triggers, "EVENT_RULES_FILE", tmp_path / "event_rules.json")
-    monkeypatch.setattr(triggers, "FINGERPRINTS_FILE", tmp_path / "fingerprints.json")
+    monkeypatch.setattr(triggers.rules, "rules_file", lambda: tmp_path / "rules.json")
+    monkeypatch.setattr(triggers.event_rules, "event_rules_file", lambda: tmp_path / "event_rules.json")
+    monkeypatch.setattr(triggers.events, "fingerprints_file", lambda: tmp_path / "fingerprints.json")
 
     config = ChronoaConfig()
     config.set("privacy-mode", "false")
@@ -281,7 +281,7 @@ class TestAnEventRuleCanBeArmedFromATurn:
     def test_the_armed_rule_survives_as_json_on_disk(self, consent, tmp_path):
         repo = _git_repo()
         _arm(repo)
-        stored = json.loads(Path(triggers.EVENT_RULES_FILE).read_text())
+        stored = json.loads(triggers.event_rules.event_rules_file().read_text())
         assert stored[0]["event_type"] == "git"
         assert stored[0]["source"] == str(repo)
 
@@ -398,11 +398,20 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
     files and a test of only one of them proves half the claim.
     """
 
-    #: The five that shipped inert. Spelled out rather than derived so that a
-    #: sixth type added to `triggers.EVENT_TYPES` fails
-    #: `test_the_six_event_types_are_exactly_the_six` below instead of
-    #: quietly escaping every gate assertion in this class.
-    WAS_INERT = ("fswatch", "failure", "expiry", "containerrun", "unithealth")
+    #: Every event type with its own key: the five that shipped inert, then the
+    #: desktop/device types added 2026-10-01, then `calendar` and `phone`, then
+    #: `git` and `sound`. Spelled out rather than derived so that a new type
+    #: added to `triggers.EVENT_TYPES` fails
+    #: `test_the_event_types_are_exactly_these` below instead of quietly
+    #: escaping every gate assertion in this class.
+    #:
+    #: `git` and `sound` were added here on 2026-10-03 for exactly that reason:
+    #: both arrived fully wired - own consent key in `capabilities.py`, own
+    #: `-sense-enabled` key in the gschema - and this list still said 17 while
+    #: `EVENT_TYPES` said 19, so the guard did its job.
+    WAS_INERT = ("fswatch", "failure", "expiry", "containerrun", "unithealth",
+                 "screenlock", "powerstate", "netstate", "usbplug", "btconnect", "schedule",
+                 "sleepwake", "audiodevice", "journalmatch", "dbusprop", "calendar", "phone")
 
     #: The cooldown every `_arm` call below passes explicitly.
     #:
@@ -424,6 +433,18 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
         "expiry": "probe",
         "containerrun": "probe",
         "unithealth": "probe.service",
+        "screenlock": "locked",
+        "powerstate": "on-battery",
+        "netstate": "offline",
+        "usbplug": "plugged:probe",
+        "btconnect": "connected:probe",
+        "schedule": "daily 08:00",
+        "sleepwake": "resumed",
+        "audiodevice": "added:probe",
+        "journalmatch": "probe pattern",
+        "dbusprop": "system org.freedesktop.UPower / org.freedesktop.UPower OnBattery",
+        "calendar": "starts-in:10",
+        "phone": "connected",
     }
 
     @pytest.mark.parametrize("event_type", WAS_INERT)
@@ -443,14 +464,14 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
             f"its default and no grant can ever open it"
         )
 
-    def test_the_six_event_types_are_exactly_the_six(self):
+    def test_the_event_types_are_exactly_these(self):
         """Anti-vacuity for every `parametrize` above.
 
         `triggers.EVENT_TYPES` is the real set. If it grows, this fails, and
         the five type-specific tests are known not to cover the new one.
         """
         assert sorted(triggers.EVENT_TYPES) == sorted(
-            ("git",) + self.WAS_INERT
+            ("git", "sound") + self.WAS_INERT
         ), (
             "triggers.EVENT_TYPES changed; WAS_INERT and the params below are "
             "written out by hand and this is where that gets caught"
@@ -834,7 +855,7 @@ class TestTheRealLoopEvaluatesIt:
     def test_a_corrupt_rules_file_is_refused_rather_than_silently_emptied(
             self, consent, tmp_path):
         """Fail-closed at construction, which is the only point the store can see it."""
-        Path(triggers.EVENT_RULES_FILE).write_text("{not json", encoding="utf-8")
+        triggers.event_rules.event_rules_file().write_text("{not json", encoding="utf-8")
         with pytest.raises(triggers.RuleStoreError):
             triggers.EventRuleStore()
 
@@ -863,3 +884,35 @@ class TestTheRealLoopEvaluatesIt:
         assert events["rules"] == ["repo-changed"]
         assert events["polls"] == 1
         assert events["fired"] == 0
+
+
+@pytest.mark.parametrize("event_type, bad, hint", [
+    ("screenlock", "sleepy", "locked, unlocked, idle, active"),
+    ("schedule", "sometime soon", "daily 08:00"),
+    ("dbusprop", "system notabus / x.y Prop", "malformed"),
+])
+def test_a_source_the_type_cannot_read_is_refused_at_arm_time(consent, tmp_path, event_type, bad, hint):
+    """The schema no longer spells out every type's grammar; the refusal does."""
+    _grant(f"{event_type}-sense-enabled")
+    out = _arm(tmp_path, name=f"bad-{event_type}", event_type=event_type, source=bad)
+    assert "Nothing was armed" in out and hint in out, out
+    assert all(r.name != f"bad-{event_type}" for r in EventRuleStore().all())
+    good = {"screenlock": "locked", "schedule": "daily 08:00",
+            "dbusprop": "system org.freedesktop.UPower / org.freedesktop.UPower OnBattery"}[event_type]
+    assert "Nothing was armed" not in _arm(tmp_path, name=f"ok-{event_type}", event_type=event_type, source=good)
+
+
+def test_arming_an_event_rule_with_no_cooldown_works_end_to_end():
+    """Behaviour, not names: the name-only tests above stayed green while this
+    path raised NameError (DEFAULT_COOLDOWN_SECONDS was never imported) - found
+    by pyflakes in the 2026-10-02 structure review."""
+    from shani_chronoa.config import ChronoaConfig
+    from shani_chronoa.skills import manage_triggers as mt
+    ChronoaConfig().set("trigger-control-enabled", "true")
+    out = mt._run({"action": "add", "name": "lock-note", "event_type": "screenlock",
+                   "source": "locked", "actuator": "notify",
+                   "arguments": {"summary": "Locked", "body": "Screen locked"}})
+    assert "nothing was armed" not in out.lower() and "lock-note" in out, out
+    from shani_chronoa.triggers import DEFAULT_COOLDOWN_SECONDS
+    listed = mt._run({"action": "list"})
+    assert "lock-note" in listed, listed

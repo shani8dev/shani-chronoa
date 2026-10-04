@@ -316,7 +316,7 @@ class TestThePolarityIsInverted:
     def test_the_guard_is_only_wired_into_the_model_supplied_url_path(self):
         """A scope decision, pinned so it is a decision and not an oversight.
 
-        `llm.py` and `senses/vision.py` post to an operator-configured
+        `ollama_llm.py` and `senses/vision.py` post to an operator-configured
         `ollama-host`, which `config.ollama_host` already forces to loopback
         under privacy mode and which `senses/vision.local_endpoint()` refuses
         outright if it is not loopback. `webtext` is the one path where the URL
@@ -325,7 +325,7 @@ class TestThePolarityIsInverted:
         """
         path = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa")
         assert "check_destination" in (path / "webtext.py").read_text()
-        for name in ("llm.py", "cloud_llm.py", "senses/vision.py"):
+        for name in ("ollama_llm.py", "cloud_llm.py", "senses/vision.py"):
             assert "check_destination" not in (path / name).read_text(), (
                 f"{name} was given the web destination guard; its host is not "
                 f"model-supplied and the guard does not belong there"

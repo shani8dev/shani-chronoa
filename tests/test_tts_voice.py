@@ -14,7 +14,12 @@ from shani_chronoa import tts as tts_mod
 def _argv(monkeypatch, engine, slt=False):
     seen = {}
     t = tts_mod.PiperTTS()
-    monkeypatch.setattr(t, "engine", lambda: engine)
+    # `*args, **kw` rather than a zero-argument lambda: `_synthesize` calls
+    # `engine(text)` (it has to, since Kokoro is skipped per-text for a script
+    # it has no voice for), and a stub with a narrower signature would turn that
+    # into a TypeError in every test here instead of the assertion this helper
+    # exists to make.
+    monkeypatch.setattr(t, "engine", lambda *args, **kw: engine)
     monkeypatch.setattr(tts_mod.PiperTTS, "_rhvoice_voice_installed", staticmethod(lambda name: slt and name == "slt"))
 
     def run(cmd, **kw):

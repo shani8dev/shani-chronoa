@@ -22,7 +22,8 @@ import re
 
 import pytest
 
-GUI = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui.py")
+# The stylesheet lives in the window's style mixin since gui became a package (2026-10-02).
+GUI = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui/style.py")
 
 # The orb's states. Listed explicitly so that ADDING one is a deliberate act
 # that has to update this list, rather than a colour quietly slipping through.

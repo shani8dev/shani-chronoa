@@ -9,7 +9,7 @@ directory, and nothing else supplies it.
 This was broken for the entire life of the project and looked fine throughout,
 for two compounding reasons. The launcher scripts fix their own `sys.path` with
 `sys.path.insert`, which is never exported to anything they spawn; and
-`secrets_manager.inject_environment()` copies the parent environment, so any
+`redaction.child_env()` copies the parent environment, so any
 developer who happened to have `PYTHONPATH` set in their shell saw every call
 succeed. From a real `.desktop` launch, where it is not set, every single skill
 call died with `ModuleNotFoundError: No module named 'shani_chronoa'`.

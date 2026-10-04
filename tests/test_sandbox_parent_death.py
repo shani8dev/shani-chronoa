@@ -51,6 +51,7 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 _PKG_DIR_REPR = repr(str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.sandbox import executor as executor_mod  # noqa: E402
+from shani_chronoa.sandbox import child as child_mod  # noqa: E402
 from shani_chronoa.sandbox.executor import SandboxExecutor  # noqa: E402
 
 #: Long enough that a surviving orphan is unambiguous, short enough to run in a suite.
@@ -132,7 +133,7 @@ class TestOrdinaryCommandsAreUnaffected:
         code = f"""
 import os, sys
 sys.path.insert(0, {_PKG_DIR_REPR})
-from shani_chronoa.sandbox import executor as E
+from shani_chronoa.sandbox import child as E
 E._EXPECTED_PARENT["pid"] = os.getppid()
 E._die_with_parent()
 print("clean")
@@ -145,15 +146,15 @@ print("clean")
     def test_a_failing_prctl_does_not_fail_the_command(self):
         # An unsupported kernel, or a seccomp policy that blocks prctl, must leave the
         # command runnable rather than erroring out of preexec_fn.
-        original = executor_mod._PR_SET_PDEATHSIG
+        original = child_mod._PR_SET_PDEATHSIG
         try:
-            executor_mod._PR_SET_PDEATHSIG = -1  # EINVAL
+            child_mod._PR_SET_PDEATHSIG = -1  # EINVAL
             exit_code, out, _ = SandboxExecutor()._run_host(
                 ["echo", "still-works"], 10, time.monotonic())
             assert exit_code == 0, f"exit {exit_code}: {out!r}"
             assert "still-works" in out
         finally:
-            executor_mod._PR_SET_PDEATHSIG = original
+            child_mod._PR_SET_PDEATHSIG = original
 
 
 class TestTheExpectedParentIsRecordedAndCleared:
@@ -161,13 +162,13 @@ class TestTheExpectedParentIsRecordedAndCleared:
         # A stale entry would make a later, unrelated child compare against the wrong
         # pid and exit for no reason.
         SandboxExecutor()._run_host(["echo", "x"], 10, time.monotonic())
-        assert not executor_mod._EXPECTED_PARENT, (
+        assert not child_mod._EXPECTED_PARENT, (
             f"the expected-parent record survived the spawn: "
-            f"{executor_mod._EXPECTED_PARENT}")
+            f"{child_mod._EXPECTED_PARENT}")
 
     def test_the_record_is_consulted_rather_than_assumed(self):
         # The race guard. With no record, the helper cannot tell "parent alive" from
         # "parent already gone", so it arms the signal and carries on - which is the
         # right default, and is why the record is cleared rather than left set.
         assert "_EXPECTED_PARENT.get" in (
-            Path(executor_mod.__file__).read_text())
+            Path(child_mod.__file__).read_text())

@@ -1,7 +1,7 @@
 """Core dumps are a way to write a process's secrets to disk without meaning to.
 
 Every child this module spawns inherits a full copy of what Chronoa was holding:
-`secrets_manager.inject_environment()` puts cloud provider API keys into the
+`redaction.child_env()` keeps API keys out of the child, but a crash can still dump the
 environment it hands over, and a captured screenshot or a transcript is in the
 address space. A core dump writes that out in cleartext when the process dies -
 which is precisely the moment nobody is watching - into a directory the user
@@ -35,6 +35,7 @@ import time
 import pytest
 
 from shani_chronoa.sandbox import executor as executor_mod
+from shani_chronoa.sandbox import child as child_mod
 from shani_chronoa.sandbox.executor import SandboxExecutor
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 
@@ -199,14 +200,14 @@ print('after', l.prctl(3, 0, 0, 0, 0), resource.getrlimit(resource.RLIMIT_CORE))
         "Exception occurred in preexec_fn". A seccomp policy or an old kernel
         refusing prctl must not do the same to the core-dump hardening.
         """
-        original = executor_mod._PR_SET_DUMPABLE
-        executor_mod._PR_SET_DUMPABLE = -1  # EINVAL
+        original = child_mod._PR_SET_DUMPABLE
+        child_mod._PR_SET_DUMPABLE = -1  # EINVAL
         try:
             rc, out, _ = SandboxExecutor()._run_host(
                 ["echo", "still-works"], 10, time.monotonic()
             )
         finally:
-            executor_mod._PR_SET_DUMPABLE = original
+            child_mod._PR_SET_DUMPABLE = original
 
         assert rc == 0, f"exit {rc}: {out!r}"
         assert "still-works" in out

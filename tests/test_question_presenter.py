@@ -9,7 +9,7 @@ delete_file, connect_wifi, kill_process, ...) silently refused instead of
 offering to ask. `skills/ask_user.py` is gated on the same predicate and was
 dead for the same reason.
 
-`gui.py` had the GTK half too, and equally unreachable: `CajitaWindow.
+`gui.py` had the GTK half too, and equally unreachable: `ChronoaWindow.
 show_question(question, options, resolve)` built a prompt row and had no callers.
 What was missing was the presenter that calls it.
 
@@ -290,7 +290,7 @@ class TestTheApplicationInstallsAPresenter:
             "not exist yet"
         )
         assert started_app["window_in_stage2"] is True
-        assert started_app["window_type"] == "CajitaWindow", (
+        assert started_app["window_type"] == "ChronoaWindow", (
             "the prompt was put on something other than the application's own "
             f"window (got {started_app['window_type']})"
         )

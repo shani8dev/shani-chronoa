@@ -25,7 +25,7 @@ _HARNESS = textwrap.dedent(
     gi.require_version("Gtk", "4.0")
     from gi.repository import Gtk, Gdk, GLib
 
-    from shani_chronoa.gui import CajitaWindow
+    from shani_chronoa.gui import ChronoaWindow
     import shani_chronoa.gui as gui_mod
 
     app = Gtk.Application(application_id="test.ux.harness")
@@ -38,7 +38,7 @@ _HARNESS = textwrap.dedent(
         return acc
 
     def on_activate(a):
-        w = CajitaWindow(a)
+        w = ChronoaWindow(a)
         w.set_default_size(560, 720)
 
         out["send_icon"] = w._send_button.get_icon_name()
@@ -75,9 +75,13 @@ _HARNESS = textwrap.dedent(
             1 for n in nodes
             if isinstance(n, Gtk.Button) and n.get_icon_name() == "edit-copy-symbolic"
         )
+        # A turn is a container, not one label: a reply with a command, a table
+        # or an equation in it is several widgets now, so the role class lives
+        # on the container. Counting labels would report zero assistant turns
+        # and pass a window that had rendered none at all.
         out["assistant_turns"] = sum(
             1 for n in nodes
-            if isinstance(n, Gtk.Label) and "transcript-assistant" in n.get_css_classes()
+            if type(n).__name__ == "Box" and "transcript-assistant" in n.get_css_classes()
         )
 
         # Press the first copy button and read the clipboard back.

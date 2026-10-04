@@ -19,7 +19,7 @@ class TestRemoteOllamaPolicy:
         stubbed_app.privacy = PrivacyManager(stubbed_app.config)
         assert stubbed_app.privacy.is_local_only
         # When: components are initialized (the host is chosen for the LLM)
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             host = mock_llm_cls.call_args.kwargs["host"]
@@ -33,7 +33,7 @@ class TestRemoteOllamaPolicy:
         from shani_chronoa.config import PrivacyManager
         stubbed_app.privacy = PrivacyManager(stubbed_app.config)
         assert not stubbed_app.privacy.is_local_only
-        with patch("shani_chronoa.app.OllamaLLM") as mock_llm_cls:
+        with patch("shani_chronoa.app.application.OllamaLLM") as mock_llm_cls:
             mock_llm_cls.return_value.is_available.return_value = False
             stubbed_app._init_components()
             host = mock_llm_cls.call_args.kwargs["host"]

@@ -32,6 +32,19 @@ SCHEMA = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
 # sense switch. Kept as a declared list because the binding is indirect: a
 # source scan would miss every one of these.
 CONTROLLED = {
+    "speech-rate", "end-of-speech-pause",  # spin rows in the Voice group
+    "follow-up-enabled", "sound-cues-enabled",  # switches in the Voice group
+    "voice-style",             # a ComboRow in the Voice group ("Voice"): the named
+                              # character, applied by SoX in the same pass as
+                              # tts-pitch/tempo/rate, which stay as their own rows
+    "organ-audible-enabled",   # "Say what it is doing", same group; the tone the
+                              # organ strip plays, which is why it sits with the
+                              # other sound cues rather than in Privacy
+    "sound-sense-enabled",    # a switch in the Privacy group (privacy.py): the
+                              # sound sense, which has to be there and not here
+    # the Voice output group: the neural voice's opt-in switch and SoX's three
+    # timbre controls, all built by `_build_voice_output`
+    "kokoro-tts-enabled", "tts-pitch", "tts-tempo", "tts-rate",
     "model-download-enabled",   # toggle-model-download
     # switches, reached through a GAction - the action name is what the window
     # calls, so the GSettings key never appears in the file next to it
@@ -44,6 +57,14 @@ CONTROLLED = {
     "notification-enabled",    # written directly; gates the notify skill
     # the actuator consent gate, written directly
     "input-control-enabled",
+    "document-search-enabled", "calendar-read-enabled", "calendar-sense-enabled",
+    "phone-control-enabled", "phone-sense-enabled", "global-shortcut-enabled", "radio-control-enabled",
+    "background-mode-enabled",
+    "global-shortcut",  # the trigger string; changed in the desktop's own keyboard settings
+    # the six desktop/device trigger gates, each a row in the automatic-rules group
+    "screenlock-sense-enabled", "powerstate-sense-enabled", "netstate-sense-enabled",
+    "usbplug-sense-enabled", "btconnect-sense-enabled", "schedule-sense-enabled",
+    "sleepwake-sense-enabled", "audiodevice-sense-enabled", "journalmatch-sense-enabled", "dbusprop-sense-enabled",
     # the destructive-action gates, each with its own row in the actions group
     "file-delete-enabled",
     "process-kill-enabled",
@@ -51,6 +72,13 @@ CONTROLLED = {
     "power-control-enabled",
     "app-install-enabled",
     "wifi-connect-enabled",
+    "network-provision-enabled",
+    "packet-capture-enabled",  # row in the actions group, worded so it does
+                            # not read as more of the network sense
+    # `interface_counters` is NOT listed here: it is ungated by design -, beside WiFi: reads
+                                  # like WiFi, but it builds new interfaces and
+                                  # needs the machine password, so it is its own
+                                  # agreement rather than a wider WiFi switch
     "service-control-enabled",
     "bulk-edit-enabled",
     "mount-control-enabled",
@@ -87,6 +115,15 @@ CONTROLLED = {
 # Keys deliberately not in the window, each with the reason. A new entry here
 # is a decision someone has to write down.
 NOT_EXPOSED = {
+    "kokoro-voice": "chosen on the setup window's Voice page, in the same list as the Piper voices, "
+                    "where choosing one also downloads Kokoro; Settings has the Kokoro on/off switch",
+    "extra-languages": "chosen on the setup window's More page, which installs each language's "
+                       "reading data and voice at the same time; a text row could name a "
+                       "language with nothing installed for it",
+    "setup-dismissed": "set when the setup window is closed unfinished; Settings has \"Open setup\" instead",
+    "setup-complete": "set by the setup window's own finish button; Settings offers "
+                      "\"Open setup\" instead of a switch, because ticking it by hand "
+                      "would only hide a setup that has not been done",
     "hardware-profile": "shown read-only in 'In effect right now'; it is "
                         "auto-detected, and overriding it by hand is how a "
                         "user ends up with a model too large for the machine",

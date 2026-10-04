@@ -234,9 +234,8 @@ class TestNoHardcodedTheme:
         light theme got a dark dialog that fought Adwaita."""
         import pathlib
 
-        source = pathlib.Path(
-            "usr/lib/shani-chronoa/shani_chronoa/settings_window.py"
-        ).read_text()
+        from _source import package_source
+        source = package_source("settings_window")
         # The literal survives in the docstring, describing the bug. What must
         # not survive is an executable stylesheet.
         assert "CssProvider" not in source

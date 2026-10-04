@@ -10,6 +10,14 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+#: The Arch manifest that actually ships this package lives in the sibling
+#: `shani-pkgbuilds` repo, which builds from this tree by pinned commit.
+#: This repo used to carry a second, drifting copy of it, which is how
+#: `llama-cpp` and `tesseract` went missing from a published image while
+#: everything here read green. Tests read the real one, so a divergence
+#: between the tree and what is packaged shows up here instead.
+_PKGBUILD = Path(__file__).resolve().parents[2] / "shani-pkgbuilds" / "shani-chronoa" / "PKGBUILD"
+
 PKG_DIR = REPO_ROOT / "usr/lib/shani-chronoa"
 SCHEMA_SRC = REPO_ROOT / "usr/share/glib-2.0/schemas"
 
@@ -29,11 +37,15 @@ def _pkgbuild_array(name: str) -> list[str]:
     a `#` comment is not a declared entry (both arrays carry comments that
     name real packages), and a check about `optdepends` must not be
     satisfiable by the same string appearing somewhere else in the file.
-    The closing paren is anchored to column 0 because optdepends descriptions
-    legitimately contain `(` and `)` of their own.
+    The closing paren is matched with optional leading whitespace, because the
+    canonical manifest indents its `optdepends` closer by two spaces while the
+    one this file was written against put it at column 0 - and a column-anchored
+    pattern reported "no optdepends array" for a manifest that plainly has one.
+    That is the same failure as the drifted copy: an assertion that encodes one
+    file's formatting rather than the property it means to check.
     """
-    pkgbuild = (REPO_ROOT / "PKGBUILD").read_text()
-    match = re.search(rf"^{name}=\s*\((.*?)^\)", pkgbuild, re.M | re.S)
+    pkgbuild = _PKGBUILD.read_text()
+    match = re.search(rf"^{name}=\s*\((.*?)^[ \t]*\)", pkgbuild, re.M | re.S)
     assert match, f"no {name}=( ... ) array in PKGBUILD"
     return [token.split(":", 1)[0] for token in shlex.split(match.group(1), comments=True)]
 
@@ -139,10 +151,20 @@ class TestPackagingMetadata:
     def test_desktop_file_has_no_inert_mime_type(self):
         # Given: the desktop entry
         desktop = (REPO_ROOT / "usr/share/applications/shani-chronoa.desktop").read_text()
-        # Then: the inert x-scheme-handler MIME declaration must be gone (no URI
-        # handler is implemented, so declaring one would be a lie to the desktop)
-        assert "MimeType=" not in desktop
+        # Then: no x-scheme-handler (no URI scheme handler is implemented, so
+        # declaring one would be a lie to the desktop)...
         assert "x-scheme-handler" not in desktop
+        # ...and every file type it declares is one it really opens: Exec passes
+        # the files (%U), `app.launch_paths` turns them into attachments
+        # ("Open with Chronoa", 2026-10-01), and each type is one `attachments`
+        # accepts as a file. A MimeType with no handler behind it is the inert
+        # declaration this test was written to forbid.
+        if "MimeType=" in desktop:
+            assert re.search(r"^Exec=shani-chronoa %[UF]$", desktop, re.M), "MimeType without %U/%F in Exec"
+            from shani_chronoa import app
+            assert callable(app.launch_paths)
+            types = re.search(r"^MimeType=(.*)$", desktop, re.M).group(1).split(";")
+            assert all(t.split("/")[0] in ("image", "audio", "video", "text", "application") for t in types if t)
 
     def test_arch_install_refreshes_icon_cache_on_remove(self):
         # Given: the Arch .install script
@@ -153,38 +175,93 @@ class TestPackagingMetadata:
         # Then: it must refresh the icon cache, matching install/upgrade
         assert "gtk-update-icon-cache" in post_remove.group(1)
 
+    def test_pkgbuild_installs_every_binary_not_a_hand_kept_list(self):
+        """`shani-chronoa-daemon` and `shani-chronoa-search` were built,
+        unit-tested, and named by a gschema description and a search-provider
+        install - and left out of the PKGBUILD's install list, so neither existed
+        on a real install while every test in this suite passed. A test that
+        reads the list still cannot catch a *new* binary being forgotten, so this
+        asserts the rule instead: the package installs whatever is in usr/bin.
+        """
+        # The real rule is not "install a glob" - it is **every launcher in
+        # usr/bin is installed**. That holds whichever way the manifest spells
+        # it, so this asserts the outcome instead of one implementation of it.
+        # (The drifted in-repo copy used a glob; the canonical one lists them,
+        # and when the two disagreed the glob-based assertion passed against a
+        # file nobody built from.)
+        pkgbuild = _PKGBUILD.read_text()
+        every = sorted(p.name for p in (REPO_ROOT / "usr" / "bin").iterdir()
+                       if p.is_file())
+        assert len(every) >= 5, every
+        missing = [name for name in every
+                   if f"usr/bin/{name}" not in pkgbuild]
+        assert not missing, (
+            f"these launchers are in usr/bin but the manifest never installs "
+            f"them: {missing}. A skill that shells out to one reports 'not "
+            f"installed' on every machine."
+        )
+
+    def test_pkgbuild_installs_the_units_and_dbus_services_too(self):
+        """Same class of omission, same fix. Without these the package has no
+        `shani-chronoa-daemon.service` (so background mode cannot be started,
+        and the Settings switch that enables it does nothing) and no
+        SearchProvider service (so the desktop search entry points at a file
+        that is not installed). shani-pkgbuilds installed both; this did not."""
+        # Same outcome-first approach: every unit and every dbus service present
+        # in the tree is installed by the manifest.
+        pkgbuild = _PKGBUILD.read_text()
+        units = sorted(p.name for p in
+                       (REPO_ROOT / "usr/lib/systemd/user").glob("*.service"))
+        assert len(units) >= 3, units
+        missing_units = [u for u in units if u not in pkgbuild]
+        assert not missing_units, f"units not installed: {missing_units}"
+        services = sorted(p.name for p in
+                          (REPO_ROOT / "usr/share/dbus-1/services").glob("*.service"))
+        missing_services = [s for s in services if s not in pkgbuild]
+        assert not missing_services, f"dbus services not installed: {missing_services}"
+
     def test_pkgbuild_installs_hicolor_icon(self):
         # Given: the Arch PKGBUILD
-        pkgbuild = (REPO_ROOT / "PKGBUILD").read_text()
+        pkgbuild = _PKGBUILD.read_text()
         # Then: it must install the icon into the hicolor scalable apps path
         assert "icons/hicolor/scalable/apps/shani-chronoa.svg" in pkgbuild
 
     def test_pkgbuild_never_ships_bytecode(self):
         # Given: the Arch PKGBUILD
-        pkgbuild = (REPO_ROOT / "PKGBUILD").read_text()
+        pkgbuild = _PKGBUILD.read_text()
         # Then: it must exclude __pycache__/pyc from the packaged payload
         assert "__pycache__" in pkgbuild
         assert "*.pyc" in pkgbuild
 
-    def test_pkgbuild_offers_whisper_cpp_as_optdepend(self):
+    def test_pkgbuild_ships_voice_input(self):
+        """whisper-cpp is a HARD dependency, deliberately.
+
+        This test used to assert the opposite - that STT must never be a hard
+        dependency, on the grounds that `stt.py`'s `is_available()` returning
+        False only logs a warning so the app stays usable as a text assistant.
+        That reasoning is still true, and it is why `is_available()` is guarded
+        the way it is, but the conclusion was wrong for a product whose whole
+        point is voice. Shanios ships voice input working out of the box; an
+        install that needs a second pacman command before the microphone does
+        anything is a broken first run, not a minimal one.
+
+        So the invariant now is the opposite one, and it is still an invariant:
+        the binary must be declared **somewhere**. Silently dropping it would
+        leave `shani-chronoa-sense` reporting "not installed" on every machine
+        with no hint that voice input exists.
+        """
         # Given: the Arch PKGBUILD's depends and optdepends arrays
         depends = _pkgbuild_array("depends")
         optdepends = _pkgbuild_array("optdepends")
         # When: whisper-cpp is looked up in each of them
         problems = []
-        if "whisper-cpp" not in optdepends:
+        if "whisper-cpp" not in depends and "whisper-cpp" not in optdepends:
             problems.append(
-                "'whisper-cpp' is offered nowhere (absent from optdepends), so a "
-                "user installing from this PKGBUILD gets no hint that voice input "
-                f"exists at all; optdepends today is {optdepends}"
+                "'whisper-cpp' is declared nowhere, so a user installing from "
+                "this PKGBUILD gets no voice input and no hint that the feature "
+                f"exists; depends is {depends} and optdepends is {optdepends}"
             )
-        if "whisper-cpp" in depends:
-            problems.append(
-                "'whisper-cpp' is a hard dependency, but STT is optional: "
-                "stt.py's is_available() returning False only logs a warning, "
-                "app.py continues, and the app is fully usable as a text assistant"
-            )
-        # Then: it must be offered, not required
+        # Then: voice input is present in a default install
         assert problems == []
 
     def test_pkgbuild_offers_rhvoice_for_tts_quality(self):
@@ -216,18 +293,101 @@ class TestPackagingMetadata:
         depends = _pkgbuild_array("depends")
         # When: entries whose declared package name starts with "piper" are selected
         piper_deps = [dep for dep in depends if dep.startswith("piper")]
-        # Then: none may. tts.py's engine() is a three-way fallback, best
-        # first - piper, then rhvoice, then espeak-ng - and only espeak-ng
+        # Then: none may. tts.py's engine() is now a four-way fallback, best
+        # first - piper, rhvoice, espeak-ng, and kokoro when asked for - and only espeak-ng
         # ships in every Shanios image, so piper is never load-bearing. It is
-        # also the wrong binary on Arch, twice over: the piper TTS package is
-        # not installable from the Arch repos at all (it needs onnxruntime,
-        # which is not in them), and Arch's extra/piper is the GTK
-        # gaming-mouse configurator - a completely different program. A hard
-        # dep on that name installs the wrong binary, which tts.py would then
-        # launch with TTS arguments. Both facts are recorded in tts.py's own
-        # comments; this test exists so the fix for the over-declared
-        # dependencies above cannot resolve into that mistake.
+        # also the wrong binary on Arch: extra/piper is the GTK gaming-mouse
+        # configurator, a completely different program, so a hard dep on that
+        # name installs the wrong binary which tts.py would then launch with
+        # TTS arguments.
+        #
+        # The reasoning this comment used to carry is corrected (2026-10-02):
+        # it said the piper TTS package "is not installable from the Arch repos
+        # at all (it needs onnxruntime, which is not in them)". The runtime
+        # arrived - `onnxruntime-cpu` has been in extra since 2026-09-04 - which
+        # is exactly what made the Kokoro backend possible. The conclusion is
+        # unchanged and now rests on the ordering rather than on a missing
+        # package: espeak-ng is the only hard depend, so the other three are
+        # never required for speech to work.
         assert piper_deps == []
+
+    def test_kokoro_needs_no_package_and_espeak_stays_the_floor(self):
+        # Kokoro runs through sherpa-onnx's release build, which carries its own
+        # onnxruntime and is a pinned download into the user's home (voices.py),
+        # exactly like Piper's. So *speech* may never name an onnxruntime package:
+        # declaring one would point a user at a runtime the voice path never
+        # reads, and would put it in front of every install.
+        #
+        # Corrected (2026-10-02, with u2net): the hard rule still holds in
+        # `depends` - nothing about speech or about any other feature may make a
+        # machine without onnxruntime uninstallable. What is no longer true is
+        # that no package may be *offered*: `segmentation_u2net.py` genuinely
+        # imports onnxruntime to cut a background out of any object (PP-HumanSeg
+        # only knows about people), so `python-onnxruntime-cpu` belongs in
+        # optdepends - a feature that needs a runtime is a feature a user may
+        # decline, and `remove_background` then says what is missing instead of
+        # quietly doing the people-only thing.
+        depends = _pkgbuild_array("depends")
+        optdepends = _pkgbuild_array("optdepends")
+        problems = [f"{name!r} is a hard dependency, so a machine without it "
+                    f"cannot install the assistant at all"
+                    for name in depends if "onnxruntime" in name]
+        u2net_source = (REPO_ROOT / "usr/lib/shani-chronoa/shani_chronoa/segmentation_u2net.py")
+        if u2net_source.exists():
+            assert "import onnxruntime" in u2net_source.read_text(), (
+                "the object background remover is offered a runtime it never reads")
+        if "espeak-ng" not in depends:
+            problems.append(
+                "'espeak-ng' is not a hard dependency although it is the one "
+                "engine guaranteed to be present on Shanios, and it is the "
+                "floor the whole fallback chain rests on"
+            )
+        assert problems == []
+
+    def test_pkgbuild_offers_sox_without_requiring_it(self):
+        # Given: the Arch PKGBUILD's depends and optdepends arrays
+        depends = _pkgbuild_array("depends")
+        optdepends = _pkgbuild_array("optdepends")
+        # sox is what `tts.py:apply_timbre` shells out to for the pitch, tempo
+        # and rate settings. It must be offered, because a user who does not
+        # know it exists has no way to turn those three rows on; and it must not
+        # be required, because speech works without it and a missing optional
+        # engine has to degrade to a working assistant that says the transform
+        # was skipped - not to an install that refuses to complete.
+        problems = []
+        if "sox" not in optdepends:
+            problems.append(
+                f"'sox' is offered nowhere (absent from optdepends), so the "
+                f"pitch, tempo and rate rows in Settings cannot do anything and "
+                f"nothing says the package is the reason; optdepends today is "
+                f"{optdepends}"
+            )
+        if "sox" in depends:
+            problems.append(
+                "'sox' is a hard dependency, but speech does not need it: "
+                "tts.py applies the timbre chain only when it is installed and "
+                "speaks the reply unchanged otherwise, so requiring it would "
+                "make an optional preference into an install-time requirement"
+            )
+        assert problems == []
+
+    def test_debian_control_offers_sox_as_a_suggestion(self):
+        # The Debian sibling of the check above, and the convention trap AGENTS.md
+        # warns about: the field here is Suggests, not optdepends, and a `sox`
+        # that only appeared in the Arch PKGBUILD would leave the Debian package
+        # silently without the capability.
+        #
+        # `_debian_field` splits the field on commas and keeps each entry's
+        # description attached, so the package name is the part before the
+        # first " (". An entry whose *description* contains a comma arrives as
+        # two pieces - `python3-onnxruntime (Kokoro TTS` and `a neural voice
+        # instead of...` do, and go unnoticed because nothing tests for them -
+        # so this one's description stays comma-free for the check to mean what
+        # it says.
+        names = [entry.split(" (", 1)[0].strip() for entry in _debian_field("Suggests")]
+        assert "sox" in names, (
+            f"DEBIAN/control does not offer sox as a Suggests entry: {names}"
+        )
 
     def test_debian_control_does_not_hard_depend_piper_tts(self):
         # Given: the Debian control file's Depends field only (its Description

@@ -8,7 +8,7 @@ existed. That test is real, and it is also insufficient: it calls
 works and says nothing about whether any *caller* ever supplies the flag.
 
 Which is what was wrong. All five instrumented call sites -
-`llm.py`, `cloud_llm.py` twice, `senses/vision.py`, `webtext.py` - omitted
+`ollama_llm.py`, `cloud_llm.py` twice, `senses/vision.py`, `webtext.py` - omitted
 `privacy_mode`, so the parameter kept its `False` default, `violation` was
 structurally always `False`, and the `logger.error` alarm at the end of
 `record()` was unreachable. For an application whose entire product claim is
@@ -39,8 +39,8 @@ from shani_chronoa import egress  # noqa: E402
 # Every file that records egress, mapped to the call site inside it. Used by the
 # static "no call site may drop the flag again" test at the bottom of this file.
 INSTRUMENTED = {
-    "stt_provision.py": "stt:provision",
-    "llm.py": "llm:ollama",
+    "stt_provision.py": ":provision",  # f"{label}:provision" - stt, llm and voice files
+    "ollama_llm.py": "llm:ollama",
     "cloud_llm.py": "cloud_llm:",
     "webtext.py": "web:retrieve",
     "senses/vision.py": "senses:vision",
@@ -156,9 +156,9 @@ class TestCloudProvidersAlarm:
 class TestOllamaPathAlarms:
     def test_a_remote_ollama_host_alarms(self, privacy_on, monkeypatch):
         """`config.ollama_host` forces loopback while privacy mode is on, so
-        reaching this means either that gate was bypassed or `llm.py` was
+        reaching this means either that gate was bypassed or `ollama_llm.py` was
         pointed somewhere else by hand. Both are worth a log line."""
-        import shani_chronoa.llm as llm_mod
+        import shani_chronoa.ollama_llm as llm_mod
 
         _mocked_async(monkeypatch, llm_mod, _ok_ollama)
         remote = llm_mod.OllamaLLM(host="http://ollama.example.com:11434")
@@ -169,7 +169,7 @@ class TestOllamaPathAlarms:
         assert event["violation"] is True
 
     def test_the_default_loopback_host_does_not_alarm(self, privacy_on, monkeypatch):
-        import shani_chronoa.llm as llm_mod
+        import shani_chronoa.ollama_llm as llm_mod
 
         _mocked_async(monkeypatch, llm_mod, _ok_ollama)
         asyncio.run(llm_mod.OllamaLLM().chat_message([{"role": "user", "content": "hi"}]))

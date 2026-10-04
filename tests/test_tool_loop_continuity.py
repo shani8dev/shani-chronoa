@@ -47,7 +47,7 @@ from shani_chronoa.assistant import (  # noqa: E402
     MAX_TOOL_ROUNDS,
     Assistant,
 )
-from shani_chronoa.llm import OllamaLLM  # noqa: E402
+from shani_chronoa.ollama_llm import OllamaLLM  # noqa: E402
 from shani_chronoa.loops import LOOP_THRESHOLD  # noqa: E402
 
 

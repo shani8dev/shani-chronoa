@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from shani_chronoa.llm import OllamaLLM
+from shani_chronoa.ollama_llm import OllamaLLM
 
 
 class _Ollama(BaseHTTPRequestHandler):

@@ -9,7 +9,7 @@ Both are reachable here, and neither is hypothetical:
   after every result, so it is paired, but a `CancelledError` from
   `AsyncBridge.cancel_pending()` and a `ConnectionError` from a backend that
   died mid-turn both land in the same place.
-- **Orphaned results** arrive with the transcript. `sessions.load()` reads a
+- **Orphaned results** arrive with the transcript. `conversation_store.load()` reads a
   file on disk and skips only lines that will not parse, so a hand-edited or
   truncated conversation is loaded and replayed as-is.
 
@@ -96,7 +96,7 @@ class TestOrphanedResultsAreDropped:
     def test_a_history_that_makes_no_call_is_left_alone(self):
         """The evidence rule, which is also why the fixture above needs a call.
 
-        `sessions.load()` replays whatever is on disk and skips only lines that
+        `conversation_store.load()` replays whatever is on disk and skips only lines that
         will not parse, so a restored transcript whose call line was lost really
         does arrive as results with nothing that asked for them. "I could not
         find its call" is then not evidence of anything, and
@@ -487,7 +487,7 @@ class TestDeterminismAndPurity:
 
 class TestMalformedInputIsTolerated:
     """A backend that returns something unexpected must not make the assistant
-    unable to answer at all - the same tolerance `llm.py` applies to a bad body."""
+    unable to answer at all - the same tolerance `ollama_llm.py` applies to a bad body."""
 
     @pytest.mark.parametrize("messages", [
         [],
