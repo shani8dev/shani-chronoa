@@ -47,6 +47,42 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 PKG_DIR = REPO_ROOT / "usr/lib/shani-chronoa"
 SCHEMA_SRC = REPO_ROOT / "usr/share/glib-2.0/schemas"
 
+
+def _compile_repo_schema() -> str:
+    """Compile the repo gschema into a directory of its own.
+
+    Import-time, deliberately, and not a fixture: `Gio.SettingsSchemaSource
+    .get_default()` memoises its answer for the life of the process —
+    *including the answer "no schemas found"* — and pytest imports test
+    modules during collection, before any fixture runs. One of those imports
+    (`test_skill_workbench`, which builds its own extended schema) resolves a
+    schema, and if that happens while GSETTINGS_SCHEMA_DIR is unset the empty
+    answer is cached for the whole run: every consent key then reads back as
+    the caller's own default, so `get_bool("vision-sense-enabled", True)`
+    answers True, 300 tests fail on a runner that has a perfectly good schema,
+    and nothing in the log says "schema". Set here instead, at the earliest
+    point pytest gives us, so there is no window in which the variable is
+    unset.
+    """
+    import tempfile
+
+    directory = Path(tempfile.mkdtemp(prefix="chronoa-schema-"))
+    for xml in SCHEMA_SRC.glob("*.xml"):
+        shutil.copy2(xml, directory)
+    result = subprocess.run(["glib-compile-schemas", str(directory)],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode != 0 or not (directory / "gschemas.compiled").is_file():
+        raise RuntimeError(
+            f"glib-compile-schemas failed for the repo schema: {result.stderr}")
+    return str(directory)
+
+
+#: The compiled schema, built once and shared: the session fixture points at
+#: the same directory, so nothing changes GSETTINGS_SCHEMA_DIR mid-run.
+COMPILED_SCHEMA_DIR = _compile_repo_schema()
+os.environ["GSETTINGS_SCHEMA_DIR"] = COMPILED_SCHEMA_DIR
+os.environ.setdefault("GSETTINGS_BACKEND", "keyfile")
+
 # Make the repo package importable. No `import shani_chronoa` at module level:
 # imports happen inside fixtures/tests so PYTHONDONTWRITEBYTECODE=1 is already
 # in effect and no bytecode is ever written into the repo tree.
@@ -77,18 +113,14 @@ def _hermetic_env(tmp_path, monkeypatch):
 
 
 @pytest.fixture(scope="session")
-def compiled_schema_dir(tmp_path_factory):
-    """Compile a copy of the repo gschema into a temp dir (no system schema store)."""
-    schema_dir = tmp_path_factory.mktemp("schemas")
-    for xml in SCHEMA_SRC.glob("*.xml"):
-        shutil.copy2(xml, schema_dir)
-    result = subprocess.run(
-        ["glib-compile-schemas", str(schema_dir)],
-        capture_output=True, text=True, timeout=30,
-    )
-    assert result.returncode == 0, f"glib-compile-schemas failed: {result.stderr}"
-    assert (schema_dir / "gschemas.compiled").is_file(), "gschemas.compiled not produced"
-    return schema_dir
+def compiled_schema_dir():
+    """The repo gschema, compiled once at conftest import (see COMPILED_SCHEMA_DIR).
+
+    A fixture that compiled its own copy would be strictly worse than the
+    import-time build: it would not exist until after collection, which is the
+    window this whole mechanism exists to close.
+    """
+    return Path(COMPILED_SCHEMA_DIR)
 
 
 @pytest.fixture(scope="session", autouse=True)
