@@ -16,7 +16,7 @@ _SCHEMA = {
     "type": "function",
     "function": {
         "name": "explain_command",
-        "description": "Explain a Linux command from the local manuals (tldr, man), e.g. "
+        "description": "Explain a Linux shell command (not a general topic) from the local manuals (tldr, man), e.g. "
                        "'what does tar do', 'how do I use rsync'; or find which command does "
                        "something, e.g. 'which command shows disk usage'.",
         "parameters": {"type": "object", "properties": {

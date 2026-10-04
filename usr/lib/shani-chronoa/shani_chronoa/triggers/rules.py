@@ -1,0 +1,743 @@
+"""Percept rules: a sense's percept matched against a rule fires one whitelisted actuator (TriggerRule, RuleStore, TriggerEngine)."""
+
+from __future__ import annotations
+
+
+import json
+import os
+import threading
+import time
+from pathlib import Path
+from typing import Any, Mapping, Optional
+
+from shani_chronoa import verification
+from shani_chronoa.config import ChronoaConfig
+from shani_chronoa.senses import Percept
+from shani_chronoa.skills import discover_skills
+
+from .common import (  # noqa: F401
+    DEFAULT_COOLDOWN_SECONDS,
+    FAILURE_ACTUATOR_DID_NOT_RUN,
+    FAILURE_ACTUATOR_RAISED,
+    FAILURE_NONE,
+    FAILURE_VERIFICATION_FAILED,
+    MATCH_ANY,
+    MATCH_SUBSTRING,
+    MAX_ARGUMENTS,
+    MAX_ARGUMENT_VALUE_CHARS,
+    MAX_CONTENT_CHARS,
+    MAX_COOLDOWN_SECONDS,
+    MAX_KEYWORDS,
+    MAX_KEYWORD_CHARS,
+    MAX_RULES_PER_USER,
+    MAX_RULE_NAME_CHARS,
+    MIN_COOLDOWN_SECONDS,
+    triggers_dir,
+    TRIGGER_CONTROL_KEY,
+    _ORIGIN,
+    _VALID_MATCH_MODES,
+    _actuator_problem,
+    _clamped_seconds,
+    _ensure_state_dir,
+    _restrict_file,
+    _stored_arguments_problem,
+)
+def rules_file() -> Path:
+    """The percept-rule store, resolved per call (see common.triggers_dir)."""
+    return triggers_dir() / "rules.json"
+
+
+class TriggerRule:
+    """One armed rule: a sense, a match condition, a whitelisted actuator.
+
+    The fields are deliberately narrow. There is no `prompt`, no `command`,
+    and no `skill` resolved at fire time - `actuator` is validated against
+    the *shipped* skill registry at arm time and stored as the exact name the
+    registry uses, so a rule that names a skill that does not exist cannot be
+    armed, and a rule that names one cannot be silently redirected later.
+
+    `arguments` are the fixed, user-supplied values the actuator is called
+    with. They are validated against the actuator's own schema at arm time,
+    so a rule cannot carry an argument the skill does not declare.
+
+    `allow_destructive` mirrors `EventRule`'s field of the same name, for the
+    same reason. It is a Python argument only: `skills/manage_triggers.py`
+    never passes it and its schema does not declare it, so a model cannot arm a
+    destructive unattended action by adding one argument. It is also re-checked
+    in `TriggerEngine._consent`, so a rules file that sets it without the arming
+    path having agreed is refused at fire time rather than obeyed.
+    """
+
+    __slots__ = (
+        "name",
+        "sense",
+        "match_mode",
+        "substring",
+        "keywords",
+        "actuator",
+        "arguments",
+        "cooldown_seconds",
+        "enabled",
+        "allow_destructive",
+        "created_at",
+        "last_fired_at",
+    )
+
+    def __init__(
+        self,
+        name: str,
+        sense: str,
+        match_mode: str,
+        actuator: str,
+        arguments: dict,
+        substring: str = "",
+        keywords: Optional[list[str]] = None,
+        cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+        enabled: bool = True,
+        allow_destructive: bool = False,
+        created_at: Optional[float] = None,
+        last_fired_at: Optional[float] = None,
+    ) -> None:
+        self.name = name
+        self.sense = sense
+        self.match_mode = match_mode
+        self.substring = substring
+        self.keywords = list(keywords) if keywords else []
+        self.actuator = actuator
+        self.arguments = dict(arguments)
+        self.cooldown_seconds = cooldown_seconds
+        self.enabled = enabled
+        self.allow_destructive = bool(allow_destructive)
+        self.created_at = created_at if created_at is not None else time.time()
+        self.last_fired_at = last_fired_at
+
+    def matches(self, percept: Percept) -> bool:
+        """Whether this rule's condition is met by `percept`'s content.
+
+        Case-insensitive. A rule whose sense does not equal the percept's is
+        not consulted at all - `fire()` pre-filters on sense, so this is the
+        content test only.
+        """
+        if not self.enabled:
+            return False
+        content = percept.content.lower()
+        if self.match_mode == MATCH_SUBSTRING:
+            return self.substring.lower() in content
+        return any(keyword.lower() in content for keyword in self.keywords)
+
+    def due(self, now: Optional[float] = None) -> bool:
+        """True if enough time has elapsed since the last firing.
+
+        `last_fired_at is None` is "never fired", which is always due. The
+        clock is monotonic so an NTP jump or a suspended laptop cannot make a
+        rule look freshly due.
+        """
+        if self.last_fired_at is None:
+            return True
+        current = time.monotonic() if now is None else now
+        return (current - self.last_fired_at) >= self.cooldown_seconds
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "sense": self.sense,
+            "match_mode": self.match_mode,
+            "substring": self.substring,
+            "keywords": list(self.keywords),
+            "actuator": self.actuator,
+            "arguments": dict(self.arguments),
+            "cooldown_seconds": self.cooldown_seconds,
+            "enabled": self.enabled,
+            "allow_destructive": self.allow_destructive,
+            "created_at": self.created_at,
+            "last_fired_at": self.last_fired_at,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: Any) -> "Optional[TriggerRule]":
+        """Rebuild a rule from a decoded record, or None if it is unusable.
+
+        A corrupt line is refused rather than silently downgraded to a
+        harmless rule: an armed rule that quietly becomes a no-op is worse
+        than one that is absent, because `list` would still show it.
+
+        The numeric fields are *clamped* rather than refused, and always in the
+        restrictive direction - see `_load_bounds` for why those two answers
+        differ and where the boundary is.
+        """
+        if not isinstance(raw, dict):
+            return None
+        try:
+            name = raw["name"]
+            sense = raw["sense"]
+            match_mode = raw["match_mode"]
+            actuator = raw["actuator"]
+            arguments = raw["arguments"]
+        except (KeyError, TypeError):
+            return None
+        if not isinstance(name, str) or not name.strip():
+            return None
+        if not isinstance(sense, str) or not sense.strip():
+            return None
+        if match_mode not in _VALID_MATCH_MODES:
+            return None
+        if not isinstance(actuator, str) or not actuator.strip():
+            return None
+        problem = _stored_arguments_problem(arguments)
+        if problem is not None:
+            return None
+        substring = raw.get("substring", "")
+        keywords = raw.get("keywords", [])
+        enabled = raw.get("enabled", True)
+        allow_destructive = raw.get("allow_destructive", False)
+        created_at = raw.get("created_at")
+        last_fired_at = raw.get("last_fired_at")
+        if not isinstance(substring, str):
+            return None
+        if len(substring) > MAX_CONTENT_CHARS:
+            return None
+        if not isinstance(keywords, list) or not all(isinstance(k, str) for k in keywords):
+            return None
+        if len(keywords) > MAX_KEYWORDS:
+            return None
+        cooldown = _clamped_seconds(
+            raw.get("cooldown_seconds", DEFAULT_COOLDOWN_SECONDS),
+            MIN_COOLDOWN_SECONDS, MAX_COOLDOWN_SECONDS, DEFAULT_COOLDOWN_SECONDS,
+        )
+        if cooldown is None:
+            return None
+        try:
+            created_at = float(created_at) if created_at is not None else time.time()
+            last_fired_at = float(last_fired_at) if last_fired_at is not None else None
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(enabled, bool) or not isinstance(allow_destructive, bool):
+            return None
+        return cls(
+            name=name,
+            sense=sense,
+            match_mode=match_mode,
+            substring=substring,
+            keywords=keywords,
+            actuator=actuator,
+            arguments=arguments,
+            cooldown_seconds=cooldown,
+            enabled=enabled,
+            allow_destructive=allow_destructive,
+            created_at=created_at,
+            last_fired_at=last_fired_at,
+        )
+
+
+# --- validation -------------------------------------------------------------
+
+def _validate_rule_fields(
+    name: str,
+    sense: str,
+    match_mode: str,
+    substring: str,
+    keywords: list[str],
+    actuator: str,
+    arguments: dict,
+    cooldown_seconds: float,
+) -> "Optional[str]":
+    """Return why a candidate rule is unacceptable, or None if it is fine.
+
+    Every rejection here carries an explicit reason. The shape is enforced
+    before the rule is persisted, so an LLM- or typo-shaped object cannot
+    become an armed rule; `build_rule` is the only entry point and it calls
+    this first.
+    """
+    if not isinstance(name, str) or not name.strip():
+        return "rule name must be a non-empty string"
+    if len(name) > MAX_RULE_NAME_CHARS:
+        return f"rule name must be at most {MAX_RULE_NAME_CHARS} characters"
+    if not isinstance(sense, str) or not sense.strip():
+        return "sense must be a non-empty string"
+    if match_mode not in _VALID_MATCH_MODES and match_mode != MATCH_ANY:
+        return f"match_mode must be one of {sorted(_VALID_MATCH_MODES)}"
+    if match_mode == MATCH_ANY:
+        # `pass`, not `return None`, and that is the whole of the fix. Every
+        # bound below this branch - the cooldown, the argument count, the
+        # argument value length - is about *cadence and size*, not about what
+        # the rule matches, so returning early skipped all of them for exactly
+        # the mode `manage_triggers` hands out by default for an event rule.
+        # Measured before the fix, all of these were accepted with
+        # `match_mode=any`: `cooldown_seconds` of 0.0, -9999.0 and 1000000000;
+        # 100 arguments against a limit of 8; and a 100k-character argument
+        # value against a limit of 4096. The same cooldown was refused with a
+        # clear message in `substring` mode, so the bound was live and simply
+        # unreachable from the default arming path.
+        #
+        # Note this branch is reachable from `build_rule` too, not only from
+        # `build_event_rule` as an earlier comment here claimed: this function
+        # accepts `MATCH_ANY` itself, and `build_rule` does not narrow it. Such
+        # a rule carries no substring and no keywords, so `TriggerRule.matches`
+        # finds nothing to match and it can never fire - inert rather than
+        # exploitable - which is why narrowing `build_rule` was left alone and
+        # the bounds fixed instead.
+        pass
+    elif match_mode == MATCH_SUBSTRING:
+        if not isinstance(substring, str) or not substring.strip():
+            return "a substring rule needs a non-empty 'substring'"
+        if len(substring) > MAX_CONTENT_CHARS:
+            return f"substring must be at most {MAX_CONTENT_CHARS} characters"
+    else:
+        if not isinstance(keywords, list) or not keywords:
+            return "a keywords rule needs a non-empty list of 'keywords'"
+        if len(keywords) > MAX_KEYWORDS:
+            return f"at most {MAX_KEYWORDS} keywords are allowed"
+        for keyword in keywords:
+            if not isinstance(keyword, str) or not keyword.strip():
+                return "every keyword must be a non-empty string"
+            if len(keyword) > MAX_KEYWORD_CHARS:
+                return f"each keyword must be at most {MAX_KEYWORD_CHARS} characters"
+    if not isinstance(actuator, str) or not actuator.strip():
+        return "actuator must be a non-empty string"
+    if not isinstance(arguments, dict):
+        return "arguments must be a dict"
+    if len(arguments) > MAX_ARGUMENTS:
+        return f"at most {MAX_ARGUMENTS} arguments are allowed"
+    for key, value in arguments.items():
+        if not isinstance(key, str) or not key.strip():
+            return "every argument key must be a non-empty string"
+        if isinstance(value, str) and len(value) > MAX_ARGUMENT_VALUE_CHARS:
+            return f"argument {key!r} must be at most {MAX_ARGUMENT_VALUE_CHARS} characters"
+    if not isinstance(cooldown_seconds, (int, float)) or isinstance(cooldown_seconds, bool):
+        return "cooldown_seconds must be a number"
+    cooldown_seconds = float(cooldown_seconds)
+    if cooldown_seconds < MIN_COOLDOWN_SECONDS:
+        return f"cooldown_seconds must be at least {MIN_COOLDOWN_SECONDS:g}s"
+    if cooldown_seconds > MAX_COOLDOWN_SECONDS:
+        return f"cooldown_seconds must be at most {MAX_COOLDOWN_SECONDS:g}s"
+    return None
+
+
+def build_rule(
+    *,
+    name: str,
+    sense: str,
+    match_mode: str,
+    actuator: str,
+    arguments: dict,
+    substring: str = "",
+    keywords: Optional[list[str]] = None,
+    cooldown_seconds: float = DEFAULT_COOLDOWN_SECONDS,
+    enabled: bool = True,
+    allow_destructive: bool = False,
+    skills: Optional[Mapping[str, object]] = None,
+) -> "tuple[Optional[TriggerRule], Optional[str]]":
+    """Validate and build a rule. Returns (rule, None) or (None, reason).
+
+    `skills` is the shipped skill registry (`tools._HANDLER_FNS`); passing
+    one explicitly is how tests substitute a fixed whitelist. Without it the
+    real registry is loaded, which is what the CLI does - but the validation
+    is identical either way, and the whitelist is always the *shipped* set,
+    never something a rule can extend.
+
+    The actuator is checked against the registry here, at arm time, so a rule
+    naming a skill that is not installed cannot be armed and cannot be
+    silently redirected to a different one later.
+
+    A destructive actuator is refused here too, which it was not until
+    2026-09-30: `build_event_rule` had refused all eight of them and this
+    accepted all eight, so the percept path - the half
+    `skills/manage_triggers.py` makes reachable from a spoken instruction -
+    was the permissive one. `allow_destructive` is the event path's opt-in,
+    reused verbatim; see `_actuator_problem` for why `write_text_file` has no
+    opt-in at all.
+    """
+    if skills is None:
+        # `discover_skills()` returns `(TOOLS, handlers)`; the name-keyed
+        # mapping is the second element. Assigning the tuple here and testing
+        # `actuator not in skills` compares against the two container objects,
+        # never a skill name, so every default-path call rejected every
+        # actuator. The unit suite passed because it substitutes `skills=`
+        # explicitly - so the broken default was invisible until something
+        # outside the tests called it.
+        _tools, skills = discover_skills()
+    if actuator not in skills:
+        return None, f"actuator {actuator!r} is not a whitelisted skill"
+    problem = _actuator_problem(actuator, allow_destructive)
+    if problem is not None:
+        return None, problem
+    problem = _validate_rule_fields(
+        name, sense, match_mode, substring, list(keywords or []), actuator, arguments, cooldown_seconds
+    )
+    if problem is not None:
+        return None, problem
+    rule = TriggerRule(
+        name=name,
+        sense=sense,
+        match_mode=match_mode,
+        substring=substring,
+        keywords=list(keywords or []),
+        actuator=actuator,
+        arguments=arguments,
+        cooldown_seconds=cooldown_seconds,
+        enabled=enabled,
+        allow_destructive=allow_destructive,
+    )
+    return rule, None
+
+
+class RuleStore:
+    """The armed-rule store: a JSON file under the per-user state dir.
+
+    Corrupt or truncated input is refused loudly rather than silently
+    discarded: an armed rule that quietly becomes a no-op is worse than an
+    absent one, because `list` would still show it. A partial write (the
+    process died mid-rewrite) is detected because the file is only ever
+    replaced as a whole, via an atomic rename from a temp sibling.
+
+    `RULE_CLASS` and `default_path()` let the event-rule store below be this
+    exact store over a different rule type, and a second implementation of
+    "validate, persist, replace atomically, refuse corrupt input" is a second
+    set of bugs.
+
+    `default_path()` is a method rather than a class attribute on purpose: the
+    path is resolved on every call (`rules_file()` -> `common.triggers_dir()`),
+    so a sandboxed HOME/XDG_DATA_HOME is honoured. A class attribute - or the
+    module-level constant this used to be - captures the path at import time,
+    and test runs then wrote armed rules and corrupt rule files into a real
+    `~/.local/share` with nothing reporting an error.
+    """
+
+    RULE_CLASS = TriggerRule
+
+    @classmethod
+    def default_path(cls) -> Path:
+        return rules_file()
+
+    def __init__(self, path: Optional[Path] = None) -> None:
+        self._path = Path(path) if path else self.default_path()
+        self._lock = threading.RLock()
+        self._rules: "dict[str, Any]" = {}
+        self._load()
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def _load(self) -> None:
+        with self._lock:
+            if not self._path.is_file():
+                return
+            try:
+                raw = json.loads(self._path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise RuleStoreError(
+                    f"the rules file {self._path} is corrupt or truncated: {e}; "
+                    "refusing to load armed rules rather than silently discarding them"
+                ) from e
+            if not isinstance(raw, list):
+                raise RuleStoreError(
+                    f"the rules file {self._path} does not contain a JSON list; "
+                    "refusing to load armed rules"
+                )
+            loaded: "dict[str, Any]" = {}
+            for entry in raw:
+                rule = self.RULE_CLASS.from_dict(entry)
+                if rule is None:
+                    raise RuleStoreError(
+                        f"the rules file {self._path} contains an unreadable rule; "
+                        "refusing to load armed rules"
+                    )
+                loaded[rule.name] = rule
+            self._rules = loaded
+
+    def _write(self) -> None:
+        """Atomically replace the rules file.
+
+        Write to a temp sibling in the same directory and rename: a crash
+        mid-write leaves the previous file intact, and `rename` is atomic on
+        every filesystem this project targets.
+        """
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        _ensure_state_dir(self._path.parent)
+        tmp = self._path.with_name(self._path.name + ".tmp")
+        payload = json.dumps(
+            [rule.to_dict() for rule in self._rules.values()],
+            indent=2,
+            sort_keys=True,
+        )
+        try:
+            tmp.write_text(payload, encoding="utf-8")
+            _restrict_file(tmp)
+            os.replace(tmp, self._path)
+            _restrict_file(self._path)
+        except OSError as e:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise RuleStoreError(f"could not write the rules file {self._path}: {e}") from e
+
+    def add(self, rule: TriggerRule) -> None:
+        with self._lock:
+            if len(self._rules) >= MAX_RULES_PER_USER and rule.name not in self._rules:
+                raise RuleStoreError(
+                    f"refusing to arm more than {MAX_RULES_PER_USER} rules; "
+                    "remove one first"
+                )
+            self._rules[rule.name] = rule
+            self._write()
+
+    def remove(self, name: str) -> bool:
+        with self._lock:
+            if name not in self._rules:
+                return False
+            del self._rules[name]
+            self._write()
+            return True
+
+    def clear(self) -> int:
+        with self._lock:
+            count = len(self._rules)
+            self._rules = {}
+            self._write()
+            return count
+
+    def get(self, name: str) -> "Optional[TriggerRule]":
+        with self._lock:
+            return self._rules.get(name)
+
+    def names(self) -> "list[str]":
+        with self._lock:
+            return sorted(self._rules)
+
+    def all(self) -> "list[TriggerRule]":
+        with self._lock:
+            return [self._rules[name] for name in sorted(self._rules)]
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._rules)
+
+
+class RuleStoreError(Exception):
+    """A rule-store failure that must be reported, not swallowed."""
+
+
+
+
+
+
+
+# --- the firing engine ------------------------------------------------------
+#
+# `RuleStore` knows how to validate, persist and match rules. Nothing above this
+# line ever *acted* on one, which made the module inert: a rule could be armed,
+# listed, and matched, and no percept would ever move because there was no path
+# from a percept to an actuator. That is the shape of dead code this repo has
+# shipped four times, so the consumer is part of the feature rather than a
+# follow-up.
+
+# Skills that move the machine and so carry their own consent requirement,
+# separate from the vision sense's. Seeing a screen and controlling it are
+# different risks; a rule must never become a way around a consent key.
+_INPUT_ACTUATORS = frozenset({"move_pointer", "click_pointer", "type_text"})
+
+
+class FireResult:
+    """What happened to one rule for one percept. Reported, never raised.
+
+    An unattended loop that stops on the first failure is not a loop, it is a
+    one-shot: one broken rule would silently disable every other rule. Failures
+    are values so the caller keeps going and can see what did not run.
+    """
+
+    __slots__ = ("rule", "fired", "denied", "reason", "verdict", "failure_kind")
+
+    def __init__(
+        self,
+        rule,
+        fired: bool,
+        denied: bool = False,
+        reason: str = "",
+        verdict: Optional[verification.Verdict] = None,
+        failure_kind: str = FAILURE_NONE,
+    ) -> None:
+        self.rule = rule
+        self.fired = fired
+        self.denied = denied
+        self.reason = reason
+        # None when no verdict applies: the rule was denied, or only dry-run.
+        self.verdict = verdict
+        # Same values as `EventEvaluation.failure_kind`. Denials and dry runs
+        # stay `FAILURE_NONE`: neither is a failure of the actuator.
+        self.failure_kind = failure_kind
+
+    def __repr__(self) -> str:
+        return (
+            f"FireResult(rule={self.rule.name!r}, fired={self.fired}, "
+            f"denied={self.denied}, failure_kind={self.failure_kind!r}, "
+            f"reason={self.reason!r}, verdict={self.verdict})"
+        )
+
+
+class TriggerEngine:
+    """Turns percepts into whitelisted actuator calls, under consent.
+
+    Every rule is checked twice before anything happens: the *sensing* side must
+    pass `sense_allowed(sense)`, so a sense the user has since switched off stops
+    driving actions, and the *acting* side must pass its own gate. Both are
+    consulted per percept rather than cached at arm time, because the whole
+    point of a consent key is that turning it off takes effect immediately.
+    """
+
+    def __init__(self, store=None, config_factory=None, dispatch=None) -> None:
+        from shani_chronoa.tools import execute_tool_outcome
+
+        self._store = store if store is not None else RuleStore()
+        self._config_factory = config_factory or ChronoaConfig
+        self._dispatch = dispatch or execute_tool_outcome
+
+    def store(self) -> "RuleStore":
+        return self._store
+
+    def _consent(self, config, rule) -> str:
+        """Empty when the rule may act, otherwise why it may not.
+
+        Three refusals, all read per percept rather than cached at arm time,
+        because the whole point of a consent key is that turning it off takes
+        effect immediately.
+
+        The first was **missing** until 2026-09-30 and it is the load-bearing
+        one. `EventEngine._consent` gained it on that date; this function, the
+        one the *percept* half of the module runs through, did not, and still
+        had no `trigger-control-enabled` check when the omission was fixed
+        there. So the switch that gates arming a rule gated nothing at all on
+        the percept firing path: a user who armed a rule and then turned the key
+        off had revoked permission to *change* the rules and nothing else. The
+        key reads `false` by default in the schema, so the fail-closed
+        direction is also the default one - a schema predating the key yields
+        the supplied `False` and denies every rule rather than permitting all.
+
+        The severity is honestly **latent**, not a live unattended escalation:
+        `fire_all` and `evaluate_many` have exactly one caller -
+        `shani-chronoa-sense trigger run` - and `AmbientScheduler` drives the
+        *event* engine only, so no percept rule fires on its own today. It
+        becomes critical the moment the scheduler is wired to percept rules,
+        and `skills/manage_triggers.py` is what makes that arming path
+        reachable from a spoken instruction in the meantime.
+
+        The third is the arm-time destructive default-deny re-checked here, so
+        a rules file edited by hand is not a way around it - the same argument
+        the event path already made for its own copy.
+        """
+        if not config.get_bool(TRIGGER_CONTROL_KEY, False):
+            return (
+                f"arming or disarming automatic rules is turned off (enable "
+                f"'{TRIGGER_CONTROL_KEY}' in Settings), so no rule may act "
+                "unattended - including one armed before the key was turned off"
+            )
+        if not config.sense_allowed(rule.sense):
+            return f"the {rule.sense} sense is not permitted: {config.sense_allowed_reason(rule.sense)}"
+        if rule.actuator in _INPUT_ACTUATORS and not config.input_control_enabled:
+            return (
+                f"the {rule.actuator} actuator needs the 'input-control-enabled' "
+                "consent key, which is off"
+            )
+        return _actuator_problem(rule.actuator, rule.allow_destructive)
+
+    def evaluate(
+        self, percept, now: Optional[float] = None, dry_run: bool = False
+    ) -> "list[FireResult]":
+        """Fire every armed rule this percept matches. Never raises.
+
+        `dry_run` reports what *would* fire without dispatching anything. It
+        exists because the alternative is unacceptable: without it there is no
+        way to ask "is this rule armed, does it match, and is it consented?"
+        except by letting it act. A user cannot review an unattended action
+        before it happens, and a denied rule cannot be distinguished from an
+        absent one without firing something.
+        """
+        import time
+
+        moment = time.time() if now is None else now
+        config = self._config_factory()
+        results: list[FireResult] = []
+
+        for rule in self._store.all():
+            if not rule.enabled or not rule.matches(percept):
+                continue
+            # Consent is checked BEFORE the cooldown, deliberately. Ordering it
+            # after means a rule that already fired sits in its cooldown window
+            # and is skipped silently, so switching a sense off looks exactly
+            # like "nothing matched" - and an unauditable refusal is the one
+            # outcome a consent gate must never produce.
+            denial = self._consent(config, rule)
+            if denial:
+                results.append(FireResult(rule, fired=False, denied=True, reason=denial))
+                continue
+            if not rule.due(moment):
+                continue
+            if dry_run:
+                results.append(FireResult(rule, fired=False, reason="would fire (dry run)"))
+                continue
+            try:
+                # origin= is what makes this distinguishable in the audit log
+                # from a person asking. An unattended action nobody can
+                # distinguish from a user action is not auditable.
+                outcome = self._dispatch(rule.actuator, dict(rule.arguments), origin=_ORIGIN)
+            except Exception as exc:  # noqa: BLE001 - one bad rule must not stop the rest
+                results.append(FireResult(
+                    rule, fired=False, reason=f"{type(exc).__name__}: {exc}",
+                    failure_kind=FAILURE_ACTUATOR_RAISED,
+                ))
+                continue
+            # An injected dispatch may still be the plain string-returning
+            # seam, so accept either shape rather than assuming.
+            text = getattr(outcome, "text", outcome)
+            verdict = getattr(
+                outcome, "verdict", verification.verdict_from_text(text or "")
+            )
+            if getattr(outcome, "ran", None) is False:
+                # The one UNVERIFIED that is not "it ran and cannot be checked
+                # against": the tool never executed. Reported as not-fired, and
+                # with no cooldown started, on the same reasoning as FAILED
+                # below - a rule must not sit out its window having done
+                # nothing. This engine has no backoff counters to park on, so
+                # the next matching percept is the retry, which is the whole of
+                # the retry story on this path.
+                results.append(FireResult(
+                    rule, fired=False,
+                    reason=f"the actuator did not run: {text or 'no detail'}",
+                    verdict=verdict,
+                    failure_kind=FAILURE_ACTUATOR_DID_NOT_RUN,
+                ))
+                continue
+            if verdict is verification.Verdict.FAILED:
+                # The actuator ran and its post-condition says the effect is
+                # not there. Cooldown is deliberately NOT started: the rule
+                # stays due so the next matching percept retries, and the
+                # failure is reported rather than being spent silently.
+                results.append(FireResult(
+                    rule, fired=False,
+                    reason=f"actuator ran but verification failed: "
+                           f"{getattr(outcome, 'evidence', '') or 'no evidence'}",
+                    verdict=verdict,
+                    failure_kind=FAILURE_VERIFICATION_FAILED,
+                ))
+                continue
+            rule.last_fired_at = moment
+            results.append(FireResult(rule, fired=True, verdict=verdict))
+
+        return results
+
+    def evaluate_many(
+        self, percepts, now: Optional[float] = None, dry_run: bool = False
+    ) -> "list[FireResult]":
+        """Evaluate a batch without dispatching. Preserves order."""
+        out: list[FireResult] = []
+        for percept in percepts:
+            out.extend(self.evaluate(percept, now=now, dry_run=dry_run))
+        return out
+
+    def fire_all(self, percepts, now: Optional[float] = None) -> "list[FireResult]":
+        """Evaluate a batch, preserving order. Used by the polling loop."""
+        out: list[FireResult] = []
+        for percept in percepts:
+            out.extend(self.evaluate(percept, now=now))
+        return out

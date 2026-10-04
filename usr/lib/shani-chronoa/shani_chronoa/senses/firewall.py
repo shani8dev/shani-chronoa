@@ -31,11 +31,11 @@ from __future__ import annotations
 
 import logging
 import shutil
-import subprocess
 from typing import List, Optional, Union
 
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import subproc
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,11 @@ SENSITIVITY = SENSITIVITY_PUBLIC
 _TTL_SECONDS = 300.0
 _POLL_INTERVAL = 300.0
 _TIMEOUT = 20
+
+
+def _run_cmd(argv, env=None):
+    """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
+    return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
 _SCHEMA = {
     "type": "function",
@@ -57,14 +62,6 @@ _SCHEMA = {
         "parameters": {"type": "object", "properties": {}},
     },
 }
-
-
-def _run_cmd(argv: List[str]):
-    try:
-        return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
 
 
 def ufw_state() -> Optional[dict]:

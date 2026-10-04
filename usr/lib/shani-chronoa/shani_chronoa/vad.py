@@ -22,6 +22,7 @@ threshold and opt-in-by-default-off, not a full AEC implementation).
 
 import array
 import math
+from typing import Optional
 
 _SAMPLE_WIDTH = 2  # bytes per sample, s16le
 
@@ -66,17 +67,28 @@ class SilenceDetector:
     sample of the current room/mic, not a hardcoded literal.
     """
 
-    def __init__(self, threshold: float, silence_seconds: float = 1.2, frame_seconds: float = 0.08) -> None:
+    #: Consecutive loud frames before it counts as speech: one 80 ms frame over
+    #: the threshold is a click, a keypress or a cough as often as a voice
+    #: (assistd confirms onset over 60 ms, sayri requires 100 ms of speech).
+    ONSET_FRAMES = 2
+
+    def __init__(self, threshold: float, silence_seconds: float = 1.2, frame_seconds: float = 0.08,
+                 onset_frames: Optional[int] = None) -> None:
         self.threshold = threshold
         self._silence_frames_needed = max(1, round(silence_seconds / frame_seconds))
+        self._onset_needed = max(1, self.ONSET_FRAMES if onset_frames is None else onset_frames)
         self._consecutive_silence = 0
+        self._consecutive_loud = 0
         self._heard_speech = False
 
     def feed(self, chunk: bytes) -> None:
         if rms(chunk) >= self.threshold:
             self._consecutive_silence = 0
-            self._heard_speech = True
+            self._consecutive_loud += 1
+            if self._consecutive_loud >= self._onset_needed:
+                self._heard_speech = True
         else:
+            self._consecutive_loud = 0
             self._consecutive_silence += 1
 
     @property

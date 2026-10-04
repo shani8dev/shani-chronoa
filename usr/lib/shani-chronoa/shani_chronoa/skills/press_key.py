@@ -17,6 +17,7 @@ wrong server.
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 from shani_chronoa.config import ChronoaConfig
@@ -75,13 +76,13 @@ def _run(arguments: dict) -> str:
     config = ChronoaConfig()
     if not config.input_control_enabled:
         return (
-            f"Refusing to press the key: input control is turned off (enable "
-            f"'input-control-enabled' in Settings). A key combination can do "
-            f"anything a "
-            f"person at this machine could, including confirming a dialog the "
-            f"user cannot see."
+            "Refusing to press the key: input control is turned off (enable "
+            "'input-control-enabled' in Settings). A key combination can do "
+            "anything a person at this machine could, including confirming a "
+            "dialog the user cannot see."
         )
-    problem = session_problem()
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
+    problem = "" if wayland else session_problem()
     if problem:
         return f"Could not press the key: {problem}"
 
@@ -106,6 +107,18 @@ def _run(arguments: dict) -> str:
         count = max(1, min(int(arguments.get("repeat") or 1), 50))
     except (TypeError, ValueError):
         count = 1
+
+    if wayland:
+        # xdotool cannot drive a Wayland session; the desktop portal can (GNOME and Plasma).
+        from shani_chronoa import portal
+        try:
+            syms = [portal.keysym_for(p.strip()) for p in raw.split("+") if p.strip()]
+            with portal.RemoteInput(portal.KEYBOARD) as ri:
+                for _ in range(count):
+                    ri.chord(syms)
+        except (portal.PortalError, ValueError) as exc:
+            return f"Could not press {raw} through the desktop portal: {exc}."
+        return f"Pressed {raw}" + (f" {count} times" if count > 1 else "") + " (through the desktop portal)."
 
     for _ in range(count):
         try:

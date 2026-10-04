@@ -27,15 +27,18 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import desktop_session
 
 _CONSENT_KEY = "appearance-control-enabled"
 _TIMEOUT = 20
+
+
+def _gsettings(*args: str):
+    return desktop_session.gsettings(*args, timeout=_TIMEOUT)
 
 _SCHEME = "org.gnome.desktop.interface"
 _KEY = "text-scaling-factor"
@@ -81,28 +84,8 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     return True, ""
 
 
-def _desktop() -> str:
-    for var in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_DESKTOP"):
-        value = (os.environ.get(var) or "").lower()
-        if "kde" in value or "plasma" in value:
-            return "kde"
-        if "gnome" in value or "unity" in value or "cinnamon" in value:
-            return "gnome"
-    return "unknown"
-
-
-def _gs(*args: str):
-    if shutil.which("gsettings") is None:
-        return None
-    try:
-        return subprocess.run(["gsettings", *args], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
 def _current():
-    proc = _gs("get", _SCHEME, _KEY)
+    proc = _gsettings("get", _SCHEME, _KEY)
     if proc is None or proc.returncode != 0:
         return None
     try:
@@ -116,7 +99,7 @@ def _run(arguments: dict) -> str:
     if action not in ("status", "set"):
         return f"Action must be status or set, not {action!r}."
 
-    desktop = _desktop()
+    desktop = desktop_session.kind()
     if desktop == "unknown":
         return ("The desktop session could not be identified, so this does not "
                 "know which mechanism to use.")
@@ -162,8 +145,7 @@ def _run(arguments: dict) -> str:
                 f"{_MAX}, and the desktop clamps anything outside it, so the "
                 f"result would be a different number than the one asked for.")
 
-    before = _current()
-    proc = _gs("set", _SCHEME, _KEY, repr(factor))
+    proc = _gsettings("set", _SCHEME, _KEY, repr(factor))
     if proc is None or proc.returncode != 0:
         detail = (proc.stderr or "").strip() if proc else "gsettings is not installed"
         return f"Could not set the text scaling factor: {detail or 'no detail'}."

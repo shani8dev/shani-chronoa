@@ -21,9 +21,12 @@ umask and silently lands permissive.
 records a pre-image immediately before it rewrites a file, and so does this
 skill before it restores one - so a restore is itself undoable, which is the
 difference between "undo" and "revert to some earlier state I happened to
-keep". `write_text_file` and `find_and_replace` do not record, and this skill
-does not pretend otherwise: a path with no ring entry reports that plainly
-rather than guessing at a content it does not have.
+keep". `write_text_file` (when it replaces or appends to a file),
+`find_and_replace` (each file it rewrites) and `office_document` record too;
+binary pre-images (.docx, .xlsx) are kept as base64. A path with no ring entry
+reports that plainly rather than guessing at a content it does not have.
+`list=true` shows the undo points held - the checkpoint list cline and
+gemini-cli offer, scoped to Chronoa's own writes.
 
 Consent is checked *before* the path is looked at, so a refusal does not
 reveal whether a file exists.
@@ -31,6 +34,7 @@ reveal whether a file exists.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -93,13 +97,12 @@ def record_preimage(path: Path, content: bytes) -> str:
             f"cover this change."
         )
     try:
-        text = content.decode("utf-8")
+        entry = {"path": str(path), "at": time.time(), "content": content.decode("utf-8")}
     except UnicodeDecodeError:
-        return (
-            "Not recording a pre-image: the file is not UTF-8 text, so this "
-            "change cannot be undone."
-        )
-    entry = {"path": str(path), "at": time.time(), "content": text}
+        # A binary file (a .docx, .xlsx, an image) is kept as base64, so the
+        # office and image skills' edits are as undoable as a text edit.
+        entry = {"path": str(path), "at": time.time(),
+                 "content_b64": base64.b64encode(content).decode("ascii")}
     entries = _load()
     entries.append(entry)
     del entries[:-RING_SIZE]
@@ -173,6 +176,10 @@ SCHEMA = {
                     "type": "string",
                     "description": "The file to restore.",
                 },
+                "list": {
+                    "type": "boolean",
+                    "description": "List the recorded undo points (for path, or every file) instead of restoring.",
+                },
                 "steps": {
                     "type": "integer",
                     "description": (
@@ -181,16 +188,40 @@ SCHEMA = {
                     ),
                 },
             },
-            "required": ["path"],
+            "required": [],
         },
     },
 }
+
+
+def _list(arguments: dict) -> str:
+    """The undo points held, newest first - the checkpoint list cline/gemini show, for Chronoa's own writes."""
+    entries = [e for e in _load() if isinstance(e, dict)]
+    raw = (arguments.get("path") or "").strip()
+    if raw:
+        try:
+            target = files.resolve_in_home(raw)
+        except files.PathProblem as exc:
+            return str(exc)
+        entries = [e for e in entries if e.get("path") == str(target)]
+    if not entries:
+        return "No undo points are held" + (f" for {raw}." if raw else ".")
+    lines = [f"{len(entries)} undo point(s), newest first (steps=1 is the newest for each file):"]
+    seen: dict = {}
+    for e in reversed(entries):
+        seen[e["path"]] = seen.get(e["path"], 0) + 1
+        size = len(e.get("content") or "") or len(e.get("content_b64") or "") * 3 // 4
+        when = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.get("at") or 0))
+        lines.append(f"- {when}  {e['path']}  (steps={seen[e['path']]}, {files.human_size(size)} before)")
+    return "\n".join(lines)
 
 
 def _run(arguments: dict) -> str:
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
         return f"Refusing to restore: {reason}"
+    if arguments.get("list"):
+        return _list(arguments)
 
     try:
         target = files.resolve_in_home(arguments.get("path") or "")
@@ -238,12 +269,19 @@ def _run(arguments: dict) -> str:
 
     chosen = entries[-steps]
     content = chosen.get("content")
-    if not isinstance(content, str):
+    if isinstance(chosen.get("content_b64"), str):
+        try:
+            raw = base64.b64decode(chosen["content_b64"], validate=True)
+        except ValueError:
+            raw = None
+    else:
+        raw = content.encode("utf-8") if isinstance(content, str) else None
+    if raw is None:
         return (
             f"The recorded pre-image for {target} is unreadable, so nothing "
             f"was restored."
         )
-    if current == content.encode("utf-8"):
+    if current == raw:
         return (
             f"{target} already holds that content, so nothing was written."
         )
@@ -251,7 +289,7 @@ def _run(arguments: dict) -> str:
     # The entry is dropped only after the write succeeds, so a failure leaves
     # the ring as it was and the restore can be tried again.
     try:
-        target.write_bytes(content.encode("utf-8"))
+        target.write_bytes(raw)
     except OSError as exc:
         return files.describe(exc, target, "restore")
     if _consume(chosen):
@@ -259,12 +297,12 @@ def _run(arguments: dict) -> str:
     else:
         note = ""
 
-    if target.read_bytes() != content.encode("utf-8"):
+    if target.read_bytes() != raw:
         return f"Reported restoring {target} but its contents do not match."
     when = time.strftime("%Y-%m-%d %H:%M", time.localtime(chosen.get("at") or 0))
     return (
         f"Restored {target} to the content recorded at {when} "
-        f"({steps} step(s) back, {files.human_size(len(content))}).{note}"
+        f"({steps} step(s) back, {files.human_size(len(raw))}).{note}"
     )
 
 

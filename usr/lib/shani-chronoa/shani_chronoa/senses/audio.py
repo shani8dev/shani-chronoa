@@ -24,7 +24,9 @@ machine, the integrated camera, which appears as `Integrated Camera (V4L2)`.
 A sink is something that plays. Reporting "2 audio devices" when the two are a
 microphone and a speaker answers a question nobody asked.
 
-`wpctl` comes from the pipewire group, which `shani-multimedia` ships on every
+`wpctl` comes from the `wireplumber` package (it left the `pipewire` package
+when wireplumber split off the PipeWire project), which `shani-multimedia` ships
+on every
 desktop profile, so this is the default path — and its absence is reported as
 its own fact rather than folded into "no audio hardware".
 """
@@ -164,7 +166,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
     if shutil.which("wpctl") is None:
         return _SENSE.to_percept(
             "Audio devices were not determined: wpctl is not installed. It "
-            "comes with the pipewire package group, which shani-multimedia "
+            "comes with the wireplumber package, which shani-multimedia "
             "ships on every desktop profile - so on a desktop ShaniOS this "
             "means the audio server is not running rather than that there is "
             "no sound hardware.",

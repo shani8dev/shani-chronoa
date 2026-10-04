@@ -136,4 +136,24 @@ def _run(arguments: dict) -> str:
     return f"{unit} is now {after} (was {before})."
 
 
+
+def _post_condition(arguments: dict):
+    """start/restart should leave the unit active; stop should leave it not active."""
+    action = (arguments.get("action") or "restart").strip().lower()
+    unit = (arguments.get("unit") or "").strip()
+    if not unit or action not in ("start", "restart", "stop"):
+        return None
+    if "." not in unit and not unit.endswith(_SUFFIXES):
+        unit += ".service"
+    state = _state_of(unit)
+    if state.startswith("unknown"):
+        return None
+    ok = state == "active" if action in ("start", "restart") else state != "active"
+    return ok, f"{unit} is {state}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="control_service", schema=SCHEMA, run=_run)]

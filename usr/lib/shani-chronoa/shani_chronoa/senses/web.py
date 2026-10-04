@@ -63,6 +63,14 @@ _SCHEMA = {
                     "type": "string",
                     "description": "The absolute http:// or https:// URL to fetch.",
                 },
+                "start_index": {
+                    "type": "integer",
+                    "description": "Read a long page on from this character (the reply says where to continue).",
+                },
+                "find": {
+                    "type": "string",
+                    "description": "Instead of the text, list every place the page mentions this phrase.",
+                },
             },
             "required": ["url"],
         },
@@ -90,7 +98,11 @@ def _run(arguments: dict):
         return "No URL given to fetch."
 
     try:
-        page = retrieve(url)
+        try:
+            start = int(arguments.get("start_index") or 0)
+        except (TypeError, ValueError):
+            start = 0
+        page = retrieve(url, start=start, find=str(arguments.get("find") or ""))
     except RetrievalError as e:
         return f"Could not fetch {url}: {e}"
 

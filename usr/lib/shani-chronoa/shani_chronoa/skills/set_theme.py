@@ -6,9 +6,15 @@ room, and the projector you just plugged into. An assistant that can read the
 screen but cannot follow it into a dark room is only half an assistant.
 
 Handles GNOME and KDE separately, because they do not share a mechanism at all.
-GNOME keeps the preference in GSettings and it is a one-line write. KDE keeps the
-*look* in a `.krc` file and the colour scheme in `kdeglobals`, and the supported
-way to change either is `plasma-lookandfeeltool`. Writing KDE's config files
+GNOME keeps the preference in GSettings and it is a one-line write. Plasma 6
+keeps light/dark in the *colour scheme* (`[General] ColorScheme` in kdeglobals),
+and the supported way to change it is `plasma-apply-colorscheme`, whose
+`--list-schemes` marks the current one - that mark is the read-back. Plasma 5's
+`plasma-lookandfeeltool` (renamed `plasma-apply-lookandfeel` in Plasma 6, whose
+`--list` no longer marks the current look) is only a fallback. Measured on the
+Plasma image, 2026-10-01: neither `plasma-lookandfeeltool` nor `kreadconfig5`
+exists, and the old code read `[KDE] colorScheme`, a key Plasma 6 does not
+write - status and both changes were broken there. Writing KDE's config files
 directly is what breaks a Plasma session, so that is not attempted.
 
 Gated, and separately from anything that reads. Restyling someone's desktop
@@ -31,15 +37,20 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
+import re
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import desktop_session
+from shani_chronoa import subproc
 
 _CONSENT_KEY = "appearance-control-enabled"
 _TIMEOUT = 25
+
+
+def _run_cmd(argv, env=None):
+    """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
+    return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
 _GNOME_SCHEME = "org.gnome.desktop.interface"
 _GNOME_KEY = "color-scheme"
@@ -84,27 +95,6 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     return True, ""
 
 
-def _run_cmd(argv: list):
-    if shutil.which(argv[0]) is None:
-        return None
-    try:
-        return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
-def _desktop() -> str:
-    """'gnome', 'kde' or 'unknown' from the session itself, not from a guess."""
-    for var in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_DESKTOP"):
-        value = (os.environ.get(var) or "").lower()
-        if "kde" in value or "plasma" in value:
-            return "kde"
-        if "gnome" in value or "unity" in value or "cinnamon" in value:
-            return "gnome"
-    return "unknown"
-
-
 def _gnome_state() -> "tuple[str | None, str]":
     """(state, raw) where state is 'dark'/'light', or None if unreadable."""
     proc = _run_cmd(["gsettings", "get", _GNOME_SCHEME, _GNOME_KEY])
@@ -118,32 +108,55 @@ def _gnome_state() -> "tuple[str | None, str]":
     return (None, raw)
 
 
+def _kde_schemes() -> "tuple[list[str], str]":
+    """(available colour schemes, the current one) from plasma-apply-colorscheme, or ([], '')."""
+    proc = _run_cmd(["plasma-apply-colorscheme", "--list-schemes"])
+    if proc is None or proc.returncode != 0:
+        return [], ""
+    names, current = [], ""
+    for line in proc.stdout.splitlines():
+        m = re.match(r"^\s*\*\s+(.+?)(\s+\(current color scheme\))?\s*$", line)
+        if m:
+            names.append(m.group(1))
+            if m.group(2):
+                current = m.group(1)
+    return names, current
+
+
 def _kde_state() -> "tuple[str | None, str]":
-    """(state, look) from kdeglobals' colour scheme, or (None, '') if unreadable."""
-    proc = _run_cmd(["kreadconfig6", "--file", "kdeglobals", "--group", "KDE",
-                     "--key", "colorScheme"])
-    if proc is not None and proc.returncode == 0 and proc.stdout.strip():
-        scheme = proc.stdout.strip()
-        return (("dark" if "dark" in scheme.lower() else "light"), scheme)
-    proc = _run_cmd(["kreadconfig5", "--file", "kdeglobals", "--group", "KDE",
-                     "--key", "colorScheme"])
-    if proc is not None and proc.returncode == 0 and proc.stdout.strip():
-        scheme = proc.stdout.strip()
-        return (("dark" if "dark" in scheme.lower() else "light"), scheme)
+    """(state, scheme): Plasma 6's colour scheme, else Plasma 5's kdeglobals key."""
+    _, current = _kde_schemes()
+    if current:
+        return (("dark" if "dark" in current.lower() else "light"), current)
+    for tool, group, key in (("kreadconfig6", "General", "ColorScheme"), ("kreadconfig5", "KDE", "colorScheme")):
+        proc = _run_cmd([tool, "--file", "kdeglobals", "--group", group, "--key", key])
+        if proc is not None and proc.returncode == 0 and proc.stdout.strip():
+            scheme = proc.stdout.strip()
+            return (("dark" if "dark" in scheme.lower() else "light"), scheme)
     return (None, "")
 
 
 def _kde_look() -> str:
-    proc = _run_cmd(["plasma-lookandfeeltool", "--list"])
+    """The global theme (look-and-feel package) in use, for status only."""
+    proc = _run_cmd(["kreadconfig6", "--file", "kdeglobals", "--group", "KDE", "--key", "LookAndFeelPackage"])
+    if proc is not None and proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip()
+    proc = _run_cmd(["plasma-lookandfeeltool", "--list"])  # Plasma 5 marks the current one with '*'
     if proc is None or proc.returncode != 0:
         return ""
-    current = ""
     for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("*"):
-            current = line.lstrip("* ").strip()
-            break
-    return current
+        if line.strip().startswith("*"):
+            return line.strip().lstrip("* ").strip()
+    return ""
+
+
+def _pick_scheme(available: "list[str]", want_dark: bool) -> str:
+    preferred = ("BreezeDark",) if want_dark else ("BreezeLight", "BreezeClassic")
+    for name in preferred:
+        if name in available:
+            return name
+    matching = [n for n in available if ("dark" in n.lower()) == want_dark]
+    return matching[0] if matching else ""
 
 
 def _run(arguments: dict) -> str:
@@ -151,7 +164,7 @@ def _run(arguments: dict) -> str:
     if action not in ("status", "dark", "light"):
         return f"Action must be status, dark or light, not {action!r}."
 
-    desktop = _desktop()
+    desktop = desktop_session.kind()
     if desktop == "unknown":
         return ("This desktop's session could not be identified from "
                 "XDG_CURRENT_DESKTOP, DESKTOP_SESSION or XDG_SESSION_DESKTOP, so "
@@ -168,7 +181,7 @@ def _run(arguments: dict) -> str:
     if action == "status":
         lines = [f"Desktop session: {desktop}"]
         if state is None:
-            lines.append(f"Appearance: UNKNOWN - the preference could not be read"
+            lines.append("Appearance: UNKNOWN - the preference could not be read"
                          + (f" (raw value {raw!r})" if raw else ""))
         else:
             lines.append(f"Appearance preference: {state}"
@@ -202,30 +215,43 @@ def _run(arguments: dict) -> str:
         return (f"gsettings accepted the change but it reads back as {raw_after!r}, "
                 f"so this is not verified.")
 
-    # KDE: prefer the supported tool. Editing kdeglobals and the .krc by hand is
-    # how a Plasma session ends up with a half-applied theme.
+    # KDE: the supported tool, never a hand edit of kdeglobals.
+    available, before = _kde_schemes()
+    if available:
+        target = _pick_scheme(available, want_dark)
+        if not target:
+            return (f"No {'dark' if want_dark else 'light'} colour scheme was found among "
+                    f"{len(available)}: {', '.join(available[:8])}. Nothing was changed.")
+        proc = _run_cmd(["plasma-apply-colorscheme", target])
+        if proc is None or proc.returncode != 0:
+            return (f"plasma-apply-colorscheme could not apply {target!r}: "
+                    f"{(proc.stderr or proc.stdout or '').strip() if proc else 'not installed'}. "
+                    f"Nothing was changed.")
+        _, after = _kde_schemes()
+        if after == target:
+            return f"Plasma colour scheme is now {after!r} (verified by reading it back; was {before or 'unknown'!r})."
+        return (f"plasma-apply-colorscheme reported success but the current scheme reads back as "
+                f"{after!r}, so this is not verified.")
+    # Plasma 5: the global theme tool
     looks = _run_cmd(["plasma-lookandfeeltool", "--list"])
-    available = []
-    if looks is not None and looks.returncode == 0:
-        available = [l.strip().lstrip("* ").strip()
-                     for l in looks.stdout.splitlines() if l.strip()]
+    if looks is None or looks.returncode != 0:
+        return ("Neither plasma-apply-colorscheme (Plasma 6) nor plasma-lookandfeeltool (Plasma 5) "
+                "answered, so the Plasma appearance cannot be changed from here. Nothing was changed.")
+    available = [l.strip().lstrip("* ").strip() for l in looks.stdout.splitlines() if l.strip()]
     wanted = [n for n in available
-              if (any(d in n.lower() for d in _DARK_LOOKS) if want_dark
-                  else ("dark" not in n.lower()))]
+              if (any(d in n.lower() for d in _DARK_LOOKS) if want_dark else ("dark" not in n.lower()))]
     if not wanted:
-        return (f"No suitable {'dark' if want_dark else 'light'} Plasma look was "
-                f"found among {len(available)} available: "
-                f"{', '.join(available[:8]) or 'none listed'}. Nothing was changed.")
+        return (f"No suitable {'dark' if want_dark else 'light'} Plasma look was found among "
+                f"{len(available)} available: {', '.join(available[:8]) or 'none listed'}. Nothing was changed.")
     proc = _run_cmd(["plasma-lookandfeeltool", "--apply", wanted[0]])
     if proc is None or proc.returncode != 0:
         return (f"plasma-lookandfeeltool could not apply {wanted[0]!r}: "
-                f"{(proc.stderr or '').strip() if proc else 'not installed'}. "
-                f"Nothing was changed.")
+                f"{(proc.stderr or '').strip() if proc else 'not installed'}. Nothing was changed.")
     applied = _kde_look()
     if applied == wanted[0]:
-        return (f"Applied Plasma look {applied!r} (verified by reading it back).")
-    return (f"plasma-lookandfeeltool reported success but the applied look reads "
-            f"back as {applied!r}, so this is not verified.")
+        return f"Applied Plasma look {applied!r} (verified by reading it back)."
+    return (f"plasma-lookandfeeltool reported success but the applied look reads back as {applied!r}, "
+            f"so this is not verified.")
 
 
 SKILLS = [Skill(name="set_theme", schema=SCHEMA, run=_run)]

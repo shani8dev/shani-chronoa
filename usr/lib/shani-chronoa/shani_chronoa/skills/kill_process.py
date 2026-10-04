@@ -24,7 +24,6 @@ import signal
 import time
 from pathlib import Path
 
-from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -150,6 +149,26 @@ def _run(arguments: dict) -> str:
             f"but use signal_name KILL to force it if it will not go."
         )
     return f"Sent SIG{name} to {what} and it has exited."
+
+
+
+def _post_condition(arguments: dict):
+    """The process is gone. Only TERM/INT/QUIT/KILL are meant to end it."""
+    name = (arguments.get("signal_name") or "TERM").strip().upper()
+    if name not in ("TERM", "INT", "QUIT", "KILL"):
+        return None
+    try:
+        pid = str(int(arguments.get("pid")))
+    except (TypeError, ValueError):
+        return None
+    deadline = time.time() + 2.0
+    while time.time() < deadline and _is_running(pid):
+        time.sleep(0.05)
+    return (not _is_running(pid)), f"pid {pid} is {'still running' if _is_running(pid) else 'gone'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
 
 
 SKILLS = [Skill(name="kill_process", schema=SCHEMA, run=_run)]

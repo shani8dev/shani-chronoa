@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Shani Chronoa's desktop search provider: GNOME Shell's overview and Plasma's KRunner.
+
+D-Bus activated (usr/share/dbus-1/services/dev.shani.chronoa.SearchProvider.service);
+exits after two idle minutes. See shani_chronoa/search_provider.py.
+"""
+
+import sys
+import os
+
+# See usr/bin/shani-chronoa for why this is usr/lib/shani-chronoa, not just
+# dirname(dirname(__file__)) - the package lives one directory deeper.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa.search_provider import main
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import shutil
 import subprocess
-import time
 from typing import List, Optional, Union
 
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense

@@ -129,4 +129,21 @@ def _run(arguments: dict) -> str:
     return f"Deleted {what}: {target}. This is permanent."
 
 
+
+def _post_condition(arguments: dict):
+    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    try:
+        # expand, not resolve: resolving follows a symlink to its target, and a
+        # dangling link left behind would then read as removed.
+        target = files.expand(arguments.get("path") or "")
+    except files.PathProblem:
+        return None
+    gone = not os.path.lexists(target)
+    return gone, f"{target} {'is gone' if gone else 'still exists'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="delete_file", schema=SCHEMA, run=_run)]

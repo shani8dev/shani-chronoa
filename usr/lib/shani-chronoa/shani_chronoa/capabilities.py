@@ -49,18 +49,45 @@ __all__ = [
 # parse should be a visible constant to correct rather than a regex change
 # whose effect nobody can see.
 GATED: dict[str, str] = {
+    "desktop_setting": "appearance-control-enabled",
+    "airplane_mode": "radio-control-enabled",
+    "phone": "phone-control-enabled",
+    "calendar_events": "calendar-read-enabled",
+    "search_documents": "document-search-enabled",
     "move_pointer": "input-control-enabled",
     "click_pointer": "input-control-enabled",
     "type_text": "input-control-enabled",
     "notify": "notification-enabled",
     "screenshot": "vision-sense-enabled",
     "delete_file": "file-delete-enabled",
+    # Deleting a saved conversation is deleting a file of the user's; the rest of the skill is ungated.
+    "conversations": "file-delete-enabled",
+    # Creating a new document is ungated (as write_text_file); changing one the user has is an edit.
+    "office_document": "file-edit-enabled",
+    # Reading and using another app's controls is input control, like typing into it.
+    "ui_elements": "input-control-enabled",
+    "android_device": "phone-control-enabled",
     "kill_process": "process-kill-enabled",
     "close_window": "window-close-enabled",
     "power_action": "power-control-enabled",
     "install_app": "app-install-enabled",
     "vpn_control": "wifi-connect-enabled",
     "connect_wifi": "wifi-connect-enabled",
+    # The lab-network builder. One key for all four, and deliberately not the
+    # `network-sense-enabled` or `wifi-connect-enabled` keys: those are about
+    # this machine's existing connectivity (reading link state, joining a
+    # network that already exists), while this one *creates* network interfaces
+    # and needs the machine administrator's password to do it. Reading about a
+    # network and being allowed to invent one are different agreements.
+    "lab_network_list": "network-provision-enabled",
+    "lab_network_create": "network-provision-enabled",
+    "lab_network_destroy": "network-provision-enabled",
+    "lab_network_status": "network-provision-enabled",
+    # Packet capture is the only thing in the package that reads what is IN a
+    # packet. Its own key, not `network-sense-enabled`: that one reads interface
+    # counters, this one sees payloads, and on a machine with a browser open
+    # that is a very different permission.
+    "capture_packets": "packet-capture-enabled",
     "control_service": "service-control-enabled",
     "find_and_replace": "bulk-edit-enabled",
     "manage_mount": "mount-control-enabled",
@@ -125,6 +152,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "media_control": ("Sound", "Play, pause and skip media"),
     "set_mute": ("Sound", "Mute and unmute"),
     "speak": ("Sound", "Speak a reply aloud"),
+    "sing": ("Sound", "Sing a line aloud"),
     "get_datetime": ("Time and reminders", "Date and time"),
     "get_world_time": ("Time and reminders", "Time somewhere else"),
     "set_timer": ("Time and reminders", "Timer"),
@@ -165,6 +193,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_document": ("Files", "Read a PDF or picture"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
     "edit_image": ("Files", "Resize, compress or edit a picture"),
+    "generate_image": ("Files", "Make a new picture from a description, on this computer"),
+    "photo_video": ("Files", "Find faces and objects in a photo or video, add effects, or go through a video"),
+    "photos": ("Files", "Find your photos by what is in them, what is written on them, or when they were taken"),
+    "recording": ("Files", "Transcribe a recording or video, make subtitles, say who said what, or clean up noise"),
     "encode_text": ("Everyday tools", "Encode or decode text"),
     "convert_color": ("Everyday tools", "Colour codes"),
     "find_emoji": ("Everyday tools", "Find an emoji"),
@@ -173,6 +205,18 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "cleanup_report": ("Files", "What could be cleaned up"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
     "vpn_control": ("System", "VPN connections"),
+    # Packet-level work, beside the interface counters and the neighbour table
+    # it sits with: capture_packets reads packets as they cross,
+    # dissect_traffic says what they are, and interface_counters says how much
+    # moved. One gate covers the first two.
+    "dissect_traffic": ("System", "Dissect traffic into protocol fields"),
+    # Pre-existing strays: these three are complete skills with no _GROUPS
+    # entry, so they fell through to OTHER and failed
+    # test_no_builtin_skill_lands_in_the_other_group. Grouped here so the
+    # surface test passes and they appear somewhere a user can find them.
+    "ping_host": ("System", "Ping a host"),
+    "routing_table": ("System", "The machine's routing table"),
+    "tls_certificate": ("System", "Inspect a TLS certificate"),
     "tailscale_status": ("System", "Tailscale"),
     "install_app": ("Apps", "Install and remove apps"),
     "power_action": ("Power and screen", "Suspend, restart or shut down"),
@@ -187,9 +231,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_keyboard_layout": ("Pointer and keyboard", "Change the keyboard layout"),
     "lock_screen": ("Power and screen", "Lock this session"),
     "empty_trash": ("Files", "Permanently empty the desktop trash"),
+    "search_documents": ("Files", "Search inside your files with the desktop's own index"),
+    "calendar_events": ("Time and reminders", "Read what is on your calendar"),
+    "phone": ("Devices", "Find, ping or send a file to your paired phone"),
+    "airplane_mode": ("Devices", "Report the radios, or turn airplane mode on or off"),
+    "charger_info": ("Power and screen", "Say what is charging this machine, and how fast"),
+    "firmware_updates": ("System", "List firmware updates for this machine's devices"),
     "extract_archive": ("Files", "Unpack a tar or zip archive"),
     "trash_file": ("Files", "Move a file or folder to the trash, recoverably"),
     "set_theme": ("Appearance", "Switch the desktop between light and dark"),
+    "desktop_setting": ("Appearance", "Read or change a desktop setting (animations, clock, cursor, touchpad...)"),
     "set_wallpaper": ("Appearance", "Change the desktop wallpaper"),
     "set_scaling": ("Appearance", "Change the text size"),
     "toggle_night_light": ("Appearance", "Turn the blue-light filter on or off"),
@@ -198,6 +249,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
                            "Hold the machine awake for a bounded time"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
     "git_inspect": ("Code and git", "What changed in a git repository"),
+    "project_outline": ("Code and git", "Outline a code project: files, classes and functions"),
     "todo_list": ("Code and git", "Keep a list of tasks to do"),
     "compare_files": ("Files", "Compare two files"),
     "get_file_info": ("Files", "File size, age and permissions"),
@@ -207,6 +259,43 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "undo_last_change": ("Files", "Undo Chronoa's last change to a file"),
     "manage_triggers": ("Code and git", "Arm an automatic rule"),
     "list_capabilities": ("What Chronoa knows", "What it can do right now"),
+    "conversations": ("What Chronoa knows", "Search, reopen, copy or export earlier conversations"),
+    "office_document": ("Files", "Read, create or edit Word, Excel and PowerPoint files"),
+    "analyze_table": ("Files", "Ask questions of a spreadsheet or CSV, and chart it"),
+    # Beside `analyze_table` on purpose: that one answers arithmetic questions
+    # over rows, this one answers what a document actually contains. Grouped
+    # together because they are the two halves of "what is in this file".
+    "json_query": ("Files", "Ask what a JSON document contains"),
+    "port_owner": ("System", "Which program is using a port"),
+    # Next to `check_internet`, which it does not overlap: that one walks a
+    # fixed ladder and takes no arguments, so it cannot be pointed at a host.
+    "trace_route": ("System", "Trace the network path to a host"),
+    # The lab-network builder, grouped with the other System entries. All four
+    # share one consent key, so a user cannot allow `vpc_status` - which only
+    # reports reachability - while refusing `vpc_create`, which builds
+    # interfaces and needs the machine administrator's password.
+    "lab_network_list": ("System", "List the lab networks built on this machine"),
+    "lab_network_create": ("System", "Build an isolated lab network with named subnets"),
+    "lab_network_destroy": ("System", "Remove a lab network this machine built"),
+    "lab_network_status": ("System", "Check what a lab network can actually reach"),
+    "interface_counters": ("System", "How much traffic each interface has carried"),
+    "bridge_topology": ("System", "Which interfaces are bridges, and what is plugged into them"),
+    "neighbour_table": ("System", "Which addresses on this link have answered, and which never have"),
+    # The active counterpart to neighbour_table: that one reads the kernel's
+    # passive cache and so only sees hosts that already talked to this machine.
+    # This one asks, and only ever about a private segment - the one this
+    # machine is on, or a private CIDR named explicitly.
+    "discover_hosts": ("System", "Who is on this network right now"),
+    # The Lookup and Whois tabs of GNOME's gnome-nettool, which nothing here
+    # covered. Read-only, but they leave the machine - so they go in the
+    # ungated read-only set and are refused in privacy mode, exactly as
+    # `trace_route` is.
+    "dns_lookup": ("System", "Look a name up in DNS, or read its mail, name or certificate records"),
+    "whois_lookup": ("System", "Look up who a domain or address is registered to"),
+    "capture_packets": ("System", "Watch the packets crossing an interface"),
+    "ui_elements": ("Pointer and keyboard", "Press buttons, fill fields and open menus in other apps"),
+    "android_device": ("Devices", "Battery, screenshot, apps and files of a phone connected with adb"),
+    "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -256,6 +345,8 @@ GATE_NAMES: dict[str, str] = {
     "power-control-enabled": "Let Chronoa suspend, restart or shut down",
     "app-install-enabled": "Let Chronoa install and remove apps",
     "wifi-connect-enabled": "Let Chronoa change WiFi",
+    "network-provision-enabled": "Let Chronoa build lab networks",
+    "packet-capture-enabled": "Let Chronoa watch network packets",
     "service-control-enabled": "Let Chronoa change system services",
     "bulk-edit-enabled": "Let Chronoa edit many files at once",
     "mount-control-enabled": "Let Chronoa mount disks",
@@ -263,6 +354,13 @@ GATE_NAMES: dict[str, str] = {
     "mic-control-enabled": "Let Chronoa mute the microphone",
     "screen-lock-enabled": "Let Chronoa lock this session",
     "trash-empty-enabled": "Let Chronoa empty the trash",
+    "document-search-enabled": "Let Chronoa search inside your files",
+    "calendar-read-enabled": "Let Chronoa read your calendar",
+    "calendar-sense-enabled": "Let Chronoa act before calendar events",
+    "phone-control-enabled": "Let Chronoa use your paired phone",
+    "phone-sense-enabled": "Let Chronoa act on your phone connecting",
+    "sound-sense-enabled": "Let Chronoa listen for sounds like the doorbell",
+    "radio-control-enabled": "Let Chronoa switch airplane mode",
     "appearance-control-enabled": "Let Chronoa change the desktop look",
     "timezone-control-enabled": "Let Chronoa change the timezone",
     "idle-timeout-enabled": "Let Chronoa change when the screen blanks",
@@ -281,6 +379,16 @@ GATE_NAMES: dict[str, str] = {
     "expiry-sense-enabled": "Let Chronoa watch stored deadlines",
     "containerrun-sense-enabled": "Let Chronoa act on container runs",
     "unithealth-sense-enabled": "Let Chronoa watch system units",
+    "screenlock-sense-enabled": "Let Chronoa act when the screen locks",
+    "powerstate-sense-enabled": "Let Chronoa act on power changes",
+    "netstate-sense-enabled": "Let Chronoa act on network changes",
+    "usbplug-sense-enabled": "Let Chronoa act on USB devices",
+    "btconnect-sense-enabled": "Let Chronoa act on Bluetooth devices",
+    "schedule-sense-enabled": "Let Chronoa act on a schedule",
+    "sleepwake-sense-enabled": "Let Chronoa act when the machine wakes",
+    "audiodevice-sense-enabled": "Let Chronoa act on audio devices",
+    "journalmatch-sense-enabled": "Let Chronoa act on log messages",
+    "dbusprop-sense-enabled": "Let Chronoa watch system properties",
     # A sense gate is named here with the label its settings row actually
     # carries, not a second wording. The Help window tells the user to switch on
     # this exact string, so any label the settings window does not also show
@@ -389,6 +497,7 @@ _EXAMPLES: dict[str, str] = {
     "media_control": "Pause the music",
     "recommend_model": "Which model would fit this machine?",
     "speak": "Read that back to me",
+    "sing": "Sing that for me",
     "get_volume": "How loud is the volume?",
     "set_brightness": "Set brightness to 60%",
     "set_clipboard": "Copy this to the clipboard",
@@ -509,6 +618,10 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
 #: because not needing consent does not mean changing nothing: `open_application`
 #: and `speak` are ungated and both act.
 READ_ONLY_TOOLS = frozenset({
+    "charger_info", "firmware_updates",
+    "project_outline",
+    "calendar_events",
+    "search_documents",
     "get_datetime", "get_volume", "get_battery_status", "get_clipboard",
     "list_apps", "list_directory", "find_files", "search_file_contents",
     "read_text_file", "open_file", "disk_usage", "system_info",
@@ -525,6 +638,31 @@ READ_ONLY_TOOLS = frozenset({
     # permission to do any of it.
     "get_file_info", "directory_tree", "compare_files",
     "find_recently_modified", "list_capabilities",
+    # Both read a file or the kernel's own tables and change nothing, which is
+    # why they are here and not behind a gate: a user must be able to ask what
+    # is listening, and what a file says, without first being granted
+    # permission to act on it.
+    "json_query", "port_owner",
+    # Reads /proc/net/dev and the kernel's own TCP counters. No daemon, no
+    # privilege, and no state written anywhere - which is why it is here rather
+    # than behind a gate, and why it is not `ifstat` or `vnstat`.
+    "interface_counters",
+    # Reads /sys/class/net only: which interfaces are bridges and which are
+    # enslaved to them. No command, no privileges, nothing written.
+    "bridge_topology",
+    # /proc/net/arp only. Unprivileged, unlike `ip neigh` and `arp`, and the
+    # COMPLETE/UNRESOLVED split is what `ping_host` cannot tell you.
+    "neighbour_table",
+    # Read-only in effect but not in intent: it sends probes beyond this network,
+    # exactly as the public steps of `check_internet` do, and is refused in
+    # privacy mode. It is listed here because on the machines where it runs it
+    # changes nothing on this one - it is a measurement, not an actuator.
+    "trace_route",
+    # Read-only in effect but not in intent: both leave this machine, which is
+    # why privacy mode refuses them. A DNS query tells a resolver which names
+    # this computer wants; a whois query can return the person who registered
+    # the domain. Neither changes anything here.
+    "dns_lookup", "whois_lookup",
 })
 
 #: Tools that change the machine but need no consent key.
@@ -555,6 +693,14 @@ MUTATING_TOOLS = frozenset({
     "media_control", "scan_document", "accessibility",
     "generate_password", "do_not_disturb", "convert_media", "edit_image",
     "find_emoji", "stopwatch", "bluetooth_devices",
+    # writes only new files (a saved result, a chart); the source is never written
+    "analyze_table", "qr_code", "generate_image", "photo_video", "recording",
+    # makes sound and leaves a rendering on disk, exactly as `speak` makes sound.
+    # It was missing from this set while `sing` existed, so cli_matrix classified
+    # the skill as read-only ("skill", not "actuator"), the MCP read_only_hint
+    # was withheld, and the post-condition column was never computed for it -
+    # the inventory disagreed with the code by one entry.
+    "sing",
 })
 
 #: Tools that reach outside this machine.
@@ -610,3 +756,40 @@ def tool_title(tool: str) -> str:
     """The human-facing label for a tool, for hosts that show one."""
     entry = _GROUPS.get(tool)
     return entry[1] if entry else tool
+
+
+# --- Permission presets ------------------------------------------------------
+#
+# Around forty separate switches is accurate and unreadable for a new user;
+# sayri offers named levels with a one-line summary (`cajita.py:3874`). These
+# set only the ACTION permissions (what Chronoa may change), never the senses
+# (what it may perceive) or privacy mode, and "Custom" is what any hand-made
+# combination reads as.
+
+ACTION_CONSENT_KEYS = tuple(sorted(
+    {k for k in GATED.values() if not k.endswith("-sense-enabled")} | set(DESTRUCTIVE_CONSENT_KEYS)))
+
+PRESETS = {
+    "chat": ("Chat only", "Answers and reads, but changes nothing on this computer",
+             lambda key: False),
+    "everyday": ("Everyday", "Changes settings, writes and edits files, controls apps; never deletes, "
+                             "stops or powers off anything",
+                 lambda key: key not in DESTRUCTIVE_CONSENT_KEYS or key == "file-edit-enabled"),
+    "full": ("Full control", "Everything Chronoa can do, including deleting files and powering off",
+             lambda key: True),
+}
+
+
+def apply_preset(name: str, config) -> None:
+    rule = PRESETS[name][2]
+    for key in ACTION_CONSENT_KEYS:
+        config.set(key, "true" if rule(key) else "false")
+
+
+def current_preset(config) -> str:
+    """The preset these switches match, or "custom"."""
+    state = {k: config.get_bool(k, False) for k in ACTION_CONSENT_KEYS}
+    for name, (_label, _summary, rule) in PRESETS.items():
+        if all(state[k] == rule(k) for k in ACTION_CONSENT_KEYS):
+            return name
+    return "custom"

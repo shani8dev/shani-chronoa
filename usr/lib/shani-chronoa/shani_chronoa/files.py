@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -309,17 +308,95 @@ def tool_missing(binary: str, purpose: str) -> str:
     anyway is the bug shape this repo has shipped before.
     """
     hint = _PACKAGE_HINTS.get(binary, "the package that provides it")
+    # The sentence has to name a *package*, not just the name of one. The
+    # fallback says "the package that provides it" and reads correctly, but with
+    # a real hint substituted it became "On Arch it comes from coreutils" -
+    # which tells the reader what to install without telling them that what
+    # they need is a package, and `test_disk_usage_missing_df.py` asserts the
+    # word is present precisely so a user searching for it knows to search for
+    # a package.
     return (
         f"Could not {purpose}: {binary} is not installed on this machine, so "
-        f"nothing was done. On Arch it comes from {hint}."
+        f"nothing was done. On Arch it comes from the '{hint}' package."
     )
 
 
+#: Which Arch package ships a binary, so `tool_missing()` can name it.
+#:
+#: **Every entry here was read out of `tools/cli_matrix.py`'s output** — the
+#: command-to-package map it builds from pacman's own file database on a real
+#: Shanios image (2026-10-03), not written from memory. That matters more than
+#: it looks: auditing the names this project already states in prose found three
+#: of them wrong, and every one is a name a user would have typed into
+#: `pacman -S` and been told "no such package" or, worse, been handed a package
+#: that installs without providing the tool.
+#:
+#: The three it caught, all now corrected in the skills themselves:
+#:
+#: - `wpctl` is in **`wireplumber`**, not the `pipewire` package. It left
+#:   `pipewire` when wireplumber split off the PipeWire project, which makes the
+#:   old claim a stale truth rather than a guess - the kind that survives review
+#:   indefinitely because it was once right.
+#: - `bluetoothctl` is in **`bluez-utils`**. `bluez` is the daemon and does not
+#:   ship the client.
+#: - `udisksctl` is in **`udisks2`**. `udisks` is the older name.
+#:
+#: An earlier version of this audit matched package names as substrings and
+#: reported `bluez` and `udisks` correct, because `bluez` is a prefix of
+#: `bluez-utils` and `udisks` of `udisks2`. A substring test is not a check.
+#:
+#: `xdotool` is here although the matrix cannot confirm it (not installed on the
+#: image audited, so there was no pacman file to read); it is a single-word
+#: package, so there is nothing for it to be confused with.
 _PACKAGE_HINTS = {
     "nmcli": "networkmanager",
     "lp": "cups",
     "lpr": "cups",
+    "lpstat": "cups",
     "xdotool": "xdotool",
+    "systemctl": "systemd",
+    "journalctl": "systemd",
+    "localectl": "systemd",
+    "wpctl": "wireplumber",
+    "pactl": "libpulse",
+    "df": "coreutils",
+    "findmnt": "util-linux",
+    "lsblk": "util-linux",
+    "rfkill": "util-linux",
+    "gsettings": "glib2",
+    "gdbus": "glib2",
+    "notify-send": "libnotify",
+    "upower": "upower",
+    "fwupdmgr": "fwupd",
+    "bluetoothctl": "bluez-utils",
+    "udisksctl": "udisks2",
+    "pdftotext": "poppler",
+    "scanimage": "sane",
+    "smartctl": "smartmontools",
+    "vnstat": "vnstat",
+    "fuser": "psmisc",
+    "ss": "iproute2",
+    "ping": "iputils",
+    "dig": "bind",
+    "host": "bind",
+    "git": "git",
+    "flatpak": "flatpak",
+    "pacman": "pacman",
+    "gnome-extensions": "gnome-shell",
+    "powerprofilesctl": "power-profiles-daemon",
+    "xdg-open": "xdg-utils",
+    "xdg-mime": "xdg-utils",
+    "sox": "sox",
+    "soundstretch": "soundtouch",
+    "rubberband": "rubberband",
+    "espeak-ng": "espeak-ng",
+    "zbarimg": "zbar",
+    "pw-top": "pipewire",
+    "pw-dump": "pipewire",
+    "pw-play": "pipewire-audio",
+    "pw-record": "pipewire-audio",
+    "pw-cat": "pipewire-audio",
+    "xrandr": "xorg-xrandr",
 }
 
 

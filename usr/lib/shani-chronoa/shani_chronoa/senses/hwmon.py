@@ -31,7 +31,6 @@ bad reading rather than passed through.
 """
 
 import glob as _glob
-import json
 import logging
 import shutil
 import subprocess
@@ -43,6 +42,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -99,20 +99,6 @@ _SCHEMA = {
 }
 
 
-def _read_int(path: Path) -> Optional[int]:
-    try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
-
-
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def _chips() -> List[Path]:
     """Every hwmon chip, following the symlinked hwmonX directories.
 
@@ -151,8 +137,8 @@ def _channels(chip: Path) -> Dict[str, List[dict]]:
         if item == "label":
             continue
 
-        label = _read_text(chip / f"{kind}{index}_label")
-        raw = _read_text(chip / name)
+        label = sysfs.read_text(chip / f"{kind}{index}_label")
+        raw = sysfs.read_text(chip / name)
         if raw is None:
             continue
         try:
@@ -190,7 +176,7 @@ def read_chips() -> List[dict]:
     """Every chip, with its readings and any unpopulated channels."""
     out = []
     for chip in _chips():
-        name = _read_text(chip / "name") or chip.name
+        name = sysfs.read_text(chip / "name") or chip.name
         channels = _channels(chip)
         if not channels:
             continue
@@ -259,7 +245,7 @@ def read_pwm(chips: List[dict]) -> List[dict]:
             if not entry.startswith("pwm") or not entry[3:].isdigit():
                 continue
             index = entry[3:]
-            value = _read_int(directory / entry)
+            value = sysfs.read_int(directory / entry)
             if value is None:
                 continue
             record: Dict[str, object] = {
@@ -267,7 +253,7 @@ def read_pwm(chips: List[dict]) -> List[dict]:
                 "channel": f"pwm{index}",
                 "value": value,
             }
-            enable = _read_int(directory / f"pwm{index}_enable")
+            enable = sysfs.read_int(directory / f"pwm{index}_enable")
             record["enable"] = enable
             record["mode"] = _PWM_ENABLE_MEANING.get(enable, "unknown")
             record["duty_pct"] = round(100.0 * value / 255.0, 1)

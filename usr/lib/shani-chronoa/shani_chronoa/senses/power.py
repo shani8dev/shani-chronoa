@@ -32,13 +32,13 @@ each gotten wrong once.
 """
 
 import logging
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -57,33 +57,6 @@ _BATTERY = "Battery"
 _OVERFULL_REPORT = 1.02
 
 
-def _read_int(path: Path) -> Optional[int]:
-    """Read a sysfs integer, or None if absent, unreadable or not an integer.
-
-    The empty-string case is the one that matters: a `charge_now` on a laptop
-    with no coulomb counter exists as a file and reads as ``''``, which is
-    neither an error nor a number. Treating it as zero would report a battery
-    that is flat rather than one that cannot be measured.
-    """
-    try:
-        raw = path.read_text().strip()
-    except OSError:
-        return None
-    if not raw:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def _pack(entry: Path) -> Optional[dict]:
     """One battery's readings, or None if this is not one.
 
@@ -92,19 +65,19 @@ def _pack(entry: Path) -> Optional[dict]:
     counting those as batteries is the obvious way to report a laptop as having
     three batteries.
     """
-    if _read_text(entry / "type") != _BATTERY:
+    if sysfs.read_text(entry / "type") != _BATTERY:
         return None
 
-    now = _read_int(entry / "energy_now")
-    full = _read_int(entry / "energy_full")
-    design = _read_int(entry / "energy_full_design")
+    now = sysfs.read_int(entry / "energy_now")
+    full = sysfs.read_int(entry / "energy_full")
+    design = sysfs.read_int(entry / "energy_full_design")
     unit = "Wh"
 
     if now is None or full is None:
         # Fall back to the charge family, which is in different units but the
         # same idea. Only consulted when the energy family is unusable.
-        now = _read_int(entry / "charge_now")
-        full = _read_int(entry / "charge_full")
+        now = sysfs.read_int(entry / "charge_now")
+        full = sysfs.read_int(entry / "charge_full")
         if now is not None and full is not None:
             unit = "Ah"
         else:
@@ -113,9 +86,9 @@ def _pack(entry: Path) -> Optional[dict]:
             # a fabricated 0.
             return {
                 "name": entry.name,
-                "model": _read_text(entry / "model_name"),
-                "status": _read_text(entry / "status") or "unknown",
-                "technology": _read_text(entry / "technology"),
+                "model": sysfs.read_text(entry / "model_name"),
+                "status": sysfs.read_text(entry / "status") or "unknown",
+                "technology": sysfs.read_text(entry / "technology"),
                 "percent": None,
                 "reason": "this pack reports neither energy nor charge readings",
             }
@@ -123,9 +96,9 @@ def _pack(entry: Path) -> Optional[dict]:
     if not now or not full:
         pack = {
             "name": entry.name,
-            "model": _read_text(entry / "model_name"),
-            "status": _read_text(entry / "status") or "unknown",
-            "technology": _read_text(entry / "technology"),
+            "model": sysfs.read_text(entry / "model_name"),
+            "status": sysfs.read_text(entry / "status") or "unknown",
+            "technology": sysfs.read_text(entry / "technology"),
             "percent": None,
             "reason": (
                 "the pack reported a zero reading, which is a gauge that has "
@@ -142,9 +115,9 @@ def _pack(entry: Path) -> Optional[dict]:
     ratio = now / full
     pack = {
         "name": entry.name,
-        "model": _read_text(entry / "model_name"),
-        "status": _read_text(entry / "status") or "unknown",
-        "technology": _read_text(entry / "technology"),
+        "model": sysfs.read_text(entry / "model_name"),
+        "status": sysfs.read_text(entry / "status") or "unknown",
+        "technology": sysfs.read_text(entry / "technology"),
         "unit": unit,
         "now": now,
         "full": full,
@@ -159,7 +132,7 @@ def _pack(entry: Path) -> Optional[dict]:
     elif ratio > 1.0:
         pack["note"] = "slightly above its last-full stamp; clamped to 100%"
 
-    cycle_count = _read_int(entry / "cycle_count")
+    cycle_count = sysfs.read_int(entry / "cycle_count")
     if cycle_count is not None:
         pack["cycles"] = cycle_count
 
@@ -203,11 +176,11 @@ def read_ac() -> List[dict]:
             entry = raw.resolve()
         except OSError:
             continue
-        if _read_text(entry / "type") != _AC:
+        if sysfs.read_text(entry / "type") != _AC:
             continue
         adapters.append({
             "name": entry.name,
-            "online": _read_text(entry / "online") or "unknown",
+            "online": sysfs.read_text(entry / "online") or "unknown",
         })
     return adapters
 

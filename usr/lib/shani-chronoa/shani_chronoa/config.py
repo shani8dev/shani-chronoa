@@ -6,7 +6,6 @@ and privacy controls.
 
 import logging
 import os
-import subprocess
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -82,6 +81,22 @@ _SENSE_CONSENT_KEYS = {
     "privilege": "privilege-sense-enabled",
     "display": "display-sense-enabled",
     "network": "network-sense-enabled",
+    # The lab networks this machine happens to have. Its own key, NOT
+    # `network-sense-enabled` and deliberately not the builder's
+    # `network-provision-enabled`: this sense only reads a JSON record and lists
+    # namespace directories, and noticing which isolated networks exist says
+    # nothing about the user - no addresses, no contents, no traffic. The
+    # builder's key is for *changing* networks and is far stricter.
+    "labnetworks": "labnetworks-sense-enabled",
+    # The link this machine already joined: signal, negotiated rate, retries and
+    # the regulatory domain. Its own key, and NOT `list_wifi_networks`' - that
+    # one *scans for nearby networks*, which says where the machine is. This
+    # one reads the association the machine is already in and scans nothing.
+    "wirelesslink": "wirelesslink-sense-enabled",
+    # The resolvers this machine uses, and whether DNS is encrypted or validated.
+    # Reads no query log and enables none - which names were looked up is a
+    # separate question with its own permission, and this does not need it.
+    "dnsresolvers": "dnsresolvers-sense-enabled",
     "bluetooth": "bluetooth-sense-enabled",
     # Off by default: window titles and application names say what the
     # user is working on, which is personal on any reading.
@@ -156,6 +171,19 @@ _EVENT_CONSENT_KEYS = {
     "expiry": "expiry-sense-enabled",
     "containerrun": "containerrun-sense-enabled",
     "unithealth": "unithealth-sense-enabled",
+    "screenlock": "screenlock-sense-enabled",
+    "powerstate": "powerstate-sense-enabled",
+    "netstate": "netstate-sense-enabled",
+    "usbplug": "usbplug-sense-enabled",
+    "btconnect": "btconnect-sense-enabled",
+    "schedule": "schedule-sense-enabled",
+    "sleepwake": "sleepwake-sense-enabled",
+    "audiodevice": "audiodevice-sense-enabled",
+    "journalmatch": "journalmatch-sense-enabled",
+    "dbusprop": "dbusprop-sense-enabled",
+    "calendar": "calendar-sense-enabled",
+    "phone": "phone-sense-enabled",
+    "sound": "sound-sense-enabled",
 }
 
 # Deliberately empty, and written out rather than omitted.
@@ -430,6 +458,13 @@ class ChronoaConfig:
             return value.get_boolean()
         return default
 
+    def get_double(self, key: str, default: float = 0.0) -> float:
+        """Get a number configuration value (schema type "d")."""
+        if self._settings is None or key not in self._valid_keys:
+            return default
+        value = self._settings.get_value(key)
+        return value.get_double() if value.get_type_string() == "d" else default
+
     def set(self, key: str, value: str) -> None:
         """Set a configuration value. Boolean keys accept "true"/"false" strings.
 
@@ -446,6 +481,14 @@ class ChronoaConfig:
         current = self._settings.get_value(key)
         if current.get_type_string() == "b":
             self._settings.set_boolean(key, value == "true")
+        elif current.get_type_string() == "d":
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                logger.error("Setting %s needs a number", key)
+                return
+            low, high = {"speech-rate": (0.5, 2.0), "end-of-speech-pause": (0.5, 3.0)}.get(key, (-1e9, 1e9))
+            self._settings.set_double(key, min(high, max(low, number)))
         else:
             self._settings.set_string(key, value)
         logger.debug("Set %s", key)
@@ -739,181 +782,46 @@ class ChronoaConfig:
         runs anonymously. Not a property since it returns a dict, matching
         `cloud_llm.PROVIDERS`' ids exactly.
 
-        Threat model: keys are stored in GSettings (dconf on a real
-        install), which any process running as the same user can read -
-        this is same-user protection, not a secure vault. GSettings is
-        chosen for consistency with the rest of Chronoa's settings, not as
-        a secret store. Keys are never logged and never passed through
-        subprocess argv.
+        Threat model: keys live in the desktop keyring (secret_store.py:
+        gnome-keyring / KWallet, encrypted at rest under the login password)
+        when there is one, and in GSettings otherwise - dconf, plain text,
+        readable by any same-user process. Either way this is same-user
+        protection, not a vault against the user's own programs. Keys are
+        never logged and never passed through subprocess argv.
         """
-        return {
-            "llm7": self.get("llm7-api-key", ""),
-            "kilo": self.get("kilo-api-key", ""),
-            "blockrun": self.get("blockrun-api-key", ""),
-            "openai": self.get("openai-api-key", ""),
-            "anthropic": self.get("anthropic-api-key", ""),
-            "google": self.get("google-api-key", ""),
-            "groq": self.get("groq-api-key", ""),
-            "opencode-zen": self.get("opencode-zen-api-key", ""),
-            "openrouter": self.get("openrouter-api-key", ""),
-        }
+        from shani_chronoa import secret_store
+
+        out = {}
+        for provider, key in API_KEY_SETTINGS.items():
+            stored = secret_store.get(provider)
+            out[provider] = stored if stored else self.get(key, "")
+        return out
+
+    def api_key_value(self, key: str) -> str:
+        """What Settings shows for an API-key row: the keyring's copy first, then GSettings."""
+        from shani_chronoa import secret_store
+
+        provider = next((p for p, k in API_KEY_SETTINGS.items() if k == key), None)
+        stored = secret_store.get(provider) if provider else None
+        return stored if stored else self.get(key, "")
+
+    def set_api_key(self, key: str, value: str) -> None:
+        """Save a key from Settings: into the keyring when there is one, else GSettings."""
+        from shani_chronoa import secret_store
+
+        provider = next((p for p, k in API_KEY_SETTINGS.items() if k == key), None)
+        if provider and secret_store.put(provider, value):
+            self.set(key, "")  # the keyring has it (read back); keep no plain-text copy
+            return
+        self.set(key, value)
 
 
-class HardwareProfile:
-    """Hardware detection and model selection."""
-
-    def __init__(self) -> None:
-        self.gpu_available: bool = False
-        self.gpu_type: str = "none"
-        self.ram_mb: int = 0
-        self.cpu_cores: int = 0
-        self.profile: str = "auto"
-        self._detect()
-
-    def _detect(self) -> None:
-        """Detect hardware capabilities."""
-        self._detect_ram()
-        self._detect_cpu()
-        self._detect_gpu()
-        self._select_profile()
-
-    def _detect_ram(self) -> None:
-        """Detect total system RAM."""
-        try:
-            with open("/proc/meminfo") as f:
-                for line in f:
-                    if line.startswith("MemTotal:"):
-                        self.ram_mb = int(line.split()[1]) // 1024
-                        break
-        except Exception:
-            self.ram_mb = 4096  # Default fallback
-
-    def _detect_cpu(self) -> None:
-        """Detect CPU core count."""
-        try:
-            self.cpu_cores = os.cpu_count() or 4
-        except Exception:
-            self.cpu_cores = 4
-
-    def _detect_gpu(self) -> None:
-        """Detect GPU availability."""
-        try:
-            # Check for NVIDIA
-            result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                self.gpu_available = True
-                self.gpu_type = "nvidia"
-                return
-        except Exception:
-            pass
-
-        # Check for Vulkan
-        try:
-            result = subprocess.run(
-                ["vulkaninfo", "--summary"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                self.gpu_available = True
-                self.gpu_type = "vulkan"
-                return
-        except Exception:
-            pass
-
-        # Check for AMD
-        try:
-            result = subprocess.run(
-                ["rocm-smi", "--showproductname"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                self.gpu_available = True
-                self.gpu_type = "amd"
-                return
-        except Exception:
-            pass
-
-    def _select_profile(self) -> None:
-        """Select hardware profile based on detected capabilities."""
-        if self.gpu_available:
-            self.profile = "gpu"
-        elif self.ram_mb >= 16384 and self.cpu_cores >= 8:
-            self.profile = "high"
-        elif self.ram_mb >= 8192:
-            self.profile = "medium"
-        else:
-            self.profile = "low"
-
-    def get_model(self) -> str:
-        """Get the smallest Ollama model that still does reliable tool-calling.
-
-        Qwen3 is tool-call-trained at every dense size (unlike most small
-        model families, which only call functions reliably at 7B+); 4B keeps
-        argument formatting reliable while staying ~2.5GB on disk. 1.7B is
-        used only on the lowest tier and may need bumping back to 4B via
-        `--model=qwen3:4b` if tool calls come out malformed on real hardware.
-        """
-        if self.profile in ("gpu", "high", "medium"):
-            return "qwen3:4b"
-        else:
-            return "qwen3:1.7b"
-
-    def get_vision_model(self) -> str:
-        """Get the vision model `senses/vision.py` describes images with.
-
-        **Independent of `get_model()` on purpose.** The text pin is Qwen3,
-        chosen for reliable tool-call argument formatting; a text model has no
-        vision tower at all, so pointing the vision sense at it cannot work,
-        and pointing the text LLM at a VLM makes every tool call worse. A user
-        who sets `--model=` on the command line, or the `model` gsetting, has
-        expressed a preference about *chat* and must not silently change what
-        looks at their screen. The `vision-model` gsetting overrides this
-        (see `ChronoaConfig.vision_model`), and only that.
-
-        Qwen3-VL is the vision sibling of the text pin, so the family is at
-        least familiar, and 2B is the smallest size that still reads a
-        screenshot's small text rather than describing wallpaper. Tiers mirror
-        `get_model()` exactly so the two are comparable at a glance.
-
-        **Not verified live.** No Ollama server was reachable on the machine
-        this was written on, so these tags have never been pulled or run -
-        treat them as the intended default, not a tested one. If a tag is
-        missing, `ollama pull qwen3-vl:2b` (or a `vision-model` override)
-        resolves it, and a wrong tag surfaces as an Ollama error the sense
-        reports verbatim rather than as a silently blank description.
-        """
-        if self.profile in ("gpu", "high"):
-            return "qwen3-vl:8b"
-        elif self.profile == "medium":
-            return "qwen3-vl:4b"
-        else:
-            return "qwen3-vl:2b"
-
-    def get_whisper_model(self) -> str:
-        """Get the appropriate whisper model for hardware."""
-        if self.profile in ("high", "gpu"):
-            return "medium"
-        elif self.profile == "medium":
-            return "base"
-        else:
-            return "tiny"
-
-    def get_context_window(self) -> int:
-        """Get an Ollama context window (num_ctx) size for the hardware tier.
-
-        Was a single hardcoded 2048 in llm.py regardless of hardware - too
-        tight once the system prompt, all ~8 tool schemas, and a multi-turn
-        tool-calling conversation are all in context at once.
-        """
-        if self.profile in ("gpu", "high"):
-            return 8192
-        elif self.profile == "medium":
-            return 4096
-        else:
-            return 2048
+#: provider id -> the GSettings key that held its API key before (and without) a keyring
+API_KEY_SETTINGS = {
+    "llm7": "llm7-api-key", "kilo": "kilo-api-key", "blockrun": "blockrun-api-key", "openai": "openai-api-key",
+    "anthropic": "anthropic-api-key", "google": "google-api-key", "groq": "groq-api-key",
+    "opencode-zen": "opencode-zen-api-key", "openrouter": "openrouter-api-key",
+}
 
 
 class PrivacyManager:

@@ -78,13 +78,8 @@ from shani_chronoa.senses import Percept, Sense, discover_senses  # noqa: E402
 from shani_chronoa.senses.context import ContextBuilder  # noqa: E402
 from shani_chronoa.senses.scheduler import AmbientScheduler, PollResult  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
-from shani_chronoa import egress, models  # noqa: E402
-from shani_chronoa.triggers import (  # noqa: E402
-    EventEngine,
-    TriggerEngine,
-    TriggerRule,
-    build_rule,
-)
+from shani_chronoa import egress, model_choice  # noqa: E402
+from shani_chronoa.triggers import EventEngine, TriggerEngine, build_rule
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -396,7 +391,6 @@ def cmd_run(args: argparse.Namespace) -> tuple:
     name = args.sense
     sense = registered.get(name)
     if sense is None:
-        known = known_sense_names(registered)
         hint = (
             "; it has a consent key but no sense module is registered"
             if name in consent_sense_names()
@@ -470,7 +464,7 @@ def cmd_run(args: argparse.Namespace) -> tuple:
         lines.append("  stored:      no (--no-store)")
     else:
         lines.append(
-            f"  stored:      yes (durable, on disk)"
+            "  stored:      yes (durable, on disk)"
             if stored
             else "  stored:      transient only - in memory, lost when this process exits"
         )
@@ -511,22 +505,22 @@ def cmd_model(args: argparse.Namespace) -> tuple:
     attributable.
     """
     if args.task:
-        detail = models.explain(args.task)
-        if args.task not in models.tasks():
+        detail = model_choice.explain(args.task)
+        if args.task not in model_choice.tasks():
             return EXIT_USAGE, [detail], {"task": args.task, "known": False}
         return EXIT_OK, detail.splitlines(), {
             "task": args.task,
             "known": True,
-            "model": models.resolve(args.task),
-            "purpose": models.describe(args.task),
+            "model": model_choice.resolve(args.task),
+            "purpose": model_choice.describe(args.task),
         }
 
-    lines = [f"known tasks: {', '.join(models.tasks())}"]
+    lines = [f"known tasks: {', '.join(model_choice.tasks())}"]
     payload = {}
-    for task in models.tasks():
+    for task in model_choice.tasks():
         lines.append("")
-        lines.extend(models.explain(task).splitlines())
-        payload[task] = models.resolve(task)
+        lines.extend(model_choice.explain(task).splitlines())
+        payload[task] = model_choice.resolve(task)
     lines.append("")
     lines.append(
         "Pin one with `gsettings set org.shani.chronoa "

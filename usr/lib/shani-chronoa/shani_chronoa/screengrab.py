@@ -675,7 +675,49 @@ def capture(
     max_capture_bytes: int = MAX_CAPTURE_BYTES,
     max_image_bytes: int = MAX_IMAGE_BYTES,
 ) -> Capture:
-    """Capture from `source`, which must be one of `SOURCES`."""
+    """Capture from `source`, which must be one of `SOURCES`.
+
+    The eyes light for the duration of the capture. A camera being opened is the
+    single event on this list that a person in the room could not otherwise
+    know about, which is why it is announced from the one function every capture
+    path - screen, camera, portal - goes through rather than from each.
+    """
+    activity = _light_eyes(source, device)
+    try:
+        return _capture(source, device, timeout, max_pixels, max_capture_bytes,
+                        max_image_bytes)
+    finally:
+        _put_eyes(activity)
+
+
+def _light_eyes(source: str, device: Optional[str]):
+    try:
+        from shani_chronoa import body
+
+        what = "reading the screen" if source == SOURCE_SCREEN else "using the camera"
+        return body.body.use("eyes", what, (device or "default")[:80],
+                             deadline=max(30.0, DEFAULT_TIMEOUT_SECONDS * 2))
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _put_eyes(activity) -> None:
+    try:
+        from shani_chronoa import body
+
+        body.body.done(activity)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _capture(
+    source: str,
+    device: Optional[str],
+    timeout: float,
+    max_pixels: int,
+    max_capture_bytes: int,
+    max_image_bytes: int,
+) -> Capture:
     if source == SOURCE_SCREEN:
         return capture_screen(
             timeout=timeout,

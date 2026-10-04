@@ -18,7 +18,6 @@ happen is a traceback where a sentence would do.
 """
 
 import os
-import shutil
 import time
 
 from shani_chronoa.config import ChronoaConfig
@@ -33,21 +32,20 @@ from shani_chronoa.screengrab import ScreenCaptureError, capture_screen
 # asked for: a test that redirected `XDG_DATA_HOME` to a fixture directory
 # still got its screenshot written into the real `~/.local/share`, which made
 # the suite non-hermetic and left the developer's home as the only record of it.
-def _data_home() -> str:
-    configured = os.environ.get("XDG_DATA_HOME", "")
-    if configured and os.path.isabs(configured):
-        return configured
-    return str(files.data_home())
-
-
-_OUTPUT_DIR = os.path.join(_data_home(), "shani-chronoa", "screenshots")
+# Resolved on every call: a constant computed at import ignored the per-test
+# data directory, and 178 fake test captures landed in a real user's
+# ~/.local/share/shani-chronoa/screenshots (CHRONOA-HARVEST.md Part 8).
 _PREFIX = "chronoa-screenshot-"
+
+
+def output_dir() -> str:
+    return os.path.join(str(files.data_home()), "shani-chronoa", "screenshots")
 
 
 def _ensure_output_dir() -> str:
     try:
-        os.makedirs(_OUTPUT_DIR, exist_ok=True)
-        return _OUTPUT_DIR
+        os.makedirs(output_dir(), exist_ok=True)
+        return output_dir()
     except OSError:
         # A read-only HOME must not make the skill fail; fall back to the
         # process temp dir, which mkdtemp makes private by default.

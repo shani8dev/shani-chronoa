@@ -237,7 +237,7 @@ def sanitize_percepts(
 ) -> list[Percept]:
     """Redact registered secrets from percept content before it is persisted.
 
-    `sanitizer` is `secrets_manager.sanitize_text_for_llm`. It is passed in
+    `sanitizer` is `redactor.sanitize`. It is passed in
     rather than imported so this module stays importable without the secrets
     machinery, and so tests can substitute a recorder.
 

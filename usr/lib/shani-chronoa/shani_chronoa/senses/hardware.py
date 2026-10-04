@@ -48,6 +48,7 @@ from typing import Dict, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -98,14 +99,6 @@ _PLACEHOLDERS = frozenset({
 })
 
 
-def _read_text(path: Path) -> Optional[str]:
-    """File contents, or None when it could not be read at all."""
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return None
-
-
 def _clean(raw: Optional[str]) -> Optional[str]:
     """Trim a firmware string, or None if it is empty or a placeholder.
 
@@ -132,7 +125,7 @@ def read_dmi() -> Dict[str, str]:
     """
     found: Dict[str, str] = {}
     for attribute in _DMI_ATTRS:
-        value = _clean(_read_text(_DMI / attribute))
+        value = _clean(sysfs.read_raw(_DMI / attribute))
         if value is not None:
             found[attribute] = value
     return found
@@ -140,7 +133,7 @@ def read_dmi() -> Dict[str, str]:
 
 def read_devicetree_model() -> Optional[str]:
     """The device-tree model string, NUL-padding stripped, or None."""
-    return _clean(_read_text(_DEVTREE_MODEL))
+    return _clean(sysfs.read_raw(_DEVTREE_MODEL))
 
 
 def read_identity() -> Optional[dict]:

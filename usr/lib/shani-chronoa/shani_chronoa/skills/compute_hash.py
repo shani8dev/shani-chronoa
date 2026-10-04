@@ -16,7 +16,6 @@ a file is worse than none - it looks authoritative and is not.
 from __future__ import annotations
 
 import hashlib
-from pathlib import Path
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill

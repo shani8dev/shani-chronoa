@@ -47,6 +47,7 @@ from typing import Dict, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -67,13 +68,6 @@ _V1_UNLIMITED_THRESHOLD = 1 << 60
 _V1_NO_QUOTA = -1
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def read_memory_max() -> Optional[dict]:
     """`memory.max` (v2) or `memory.limit_in_bytes` (v1), or None.
 
@@ -81,7 +75,7 @@ def read_memory_max() -> Optional[dict]:
     None when the file is not there - a machine on the other hierarchy, or a
     container without the memory controller delegated to it.
     """
-    raw = _read_text(_CGROUP_ROOT / "memory.max")
+    raw = sysfs.read_text(_CGROUP_ROOT / "memory.max")
     if raw is not None:
         if raw == "max":
             return {"limit": None, "unlimited": True, "file": "memory.max (v2)"}
@@ -90,7 +84,7 @@ def read_memory_max() -> Optional[dict]:
             return None
         return {"limit": value, "unlimited": False, "file": "memory.max (v2)"}
 
-    raw = _read_text(_CGROUP_ROOT / "memory" / "memory.limit_in_bytes")
+    raw = sysfs.read_text(_CGROUP_ROOT / "memory" / "memory.limit_in_bytes")
     if raw is not None:
         value = _as_int(raw)
         if value is None:
@@ -111,7 +105,7 @@ def read_cpu_max() -> Optional[dict]:
     is the literal `max` for unlimited. v1 is two *files*, and a -1 quota means
     no quota at all.
     """
-    raw = _read_text(_CGROUP_ROOT / "cpu.max")
+    raw = sysfs.read_text(_CGROUP_ROOT / "cpu.max")
     if raw is not None:
         parts = raw.split()
         if not parts:
@@ -127,8 +121,8 @@ def read_cpu_max() -> Optional[dict]:
         return {"cores": value / period, "unlimited": False,
                 "file": "cpu.max (v2)", "raw": raw}
 
-    quota = _as_int(_read_text(_CGROUP_ROOT / "cpu" / "cpu.cfs_quota_us"))
-    period = _as_int(_read_text(_CGROUP_ROOT / "cpu" / "cpu.cfs_period_us"))
+    quota = _as_int(sysfs.read_text(_CGROUP_ROOT / "cpu" / "cpu.cfs_quota_us"))
+    period = _as_int(sysfs.read_text(_CGROUP_ROOT / "cpu" / "cpu.cfs_period_us"))
     if quota is None or period is None:
         return None
     if quota == _V1_NO_QUOTA or quota <= 0 or not period:
@@ -140,9 +134,9 @@ def read_cpu_max() -> Optional[dict]:
 
 def read_pids_max() -> Optional[dict]:
     """`pids.max` (v2) or the v1 equivalent, or None."""
-    raw = _read_text(_CGROUP_ROOT / "pids.max")
+    raw = sysfs.read_text(_CGROUP_ROOT / "pids.max")
     if raw is None:
-        raw = _read_text(_CGROUP_ROOT / "pids" / "pids.max")
+        raw = sysfs.read_text(_CGROUP_ROOT / "pids" / "pids.max")
         source = "pids/pids.max (v1)"
     else:
         source = "pids.max (v2)"
@@ -164,7 +158,7 @@ def read_own_cgroup() -> Optional[str]:
     process's, and saying "unlimited" from there is a true statement about the
     wrong thing.
     """
-    raw = _read_text(_PROC_SELF_CGROUP)
+    raw = sysfs.read_text(_PROC_SELF_CGROUP)
     if not raw:
         return None
     for line in raw.splitlines():

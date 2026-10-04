@@ -22,15 +22,18 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import desktop_session
 
 _CONSENT_KEY = "appearance-control-enabled"
 _TIMEOUT = 20
+
+
+def _gsettings(*args: str):
+    return desktop_session.gsettings(*args, timeout=_TIMEOUT)
 
 _SCHEME = "org.gnome.settings-daemon.plugins.color"
 _KEY = "night-light-enabled"
@@ -71,28 +74,8 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     return True, ""
 
 
-def _desktop() -> str:
-    for var in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_DESKTOP"):
-        value = (os.environ.get(var) or "").lower()
-        if "kde" in value or "plasma" in value:
-            return "kde"
-        if "gnome" in value or "unity" in value or "cinnamon" in value:
-            return "gnome"
-    return "unknown"
-
-
-def _gs(*args: str):
-    if shutil.which("gsettings") is None:
-        return None
-    try:
-        return subprocess.run(["gsettings", *args], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
 def _read(key: str):
-    proc = _gs("get", _SCHEME, key)
+    proc = _gsettings("get", _SCHEME, key)
     if proc is None or proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -103,7 +86,7 @@ def _run(arguments: dict) -> str:
     if action not in ("status", "on", "off"):
         return f"Action must be status, on or off, not {action!r}."
 
-    desktop = _desktop()
+    desktop = desktop_session.kind()
     if desktop == "kde":
         return ("This is a KDE session. Plasma's night light is configured "
                 "through KWin's colour-management settings and has no supported "
@@ -141,7 +124,7 @@ def _run(arguments: dict) -> str:
         return f"Refusing to change the blue-light filter: {reason}"
 
     want = "true" if action == "on" else "false"
-    proc = _gs("set", _SCHEME, _KEY, want)
+    proc = _gsettings("set", _SCHEME, _KEY, want)
     if proc is None or proc.returncode != 0:
         detail = (proc.stderr or "").strip() if proc else "gsettings is not installed"
         return f"Could not change the blue-light filter: {detail or 'no detail'}."

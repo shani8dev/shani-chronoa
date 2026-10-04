@@ -79,7 +79,8 @@ import time
 from typing import Optional
 
 from shani_chronoa.audio import AudioRecorder
-from shani_chronoa.config import ChronoaConfig, HardwareProfile
+from shani_chronoa.config import ChronoaConfig
+from shani_chronoa.hardware_profile import HardwareProfile
 from shani_chronoa.senses import SENSITIVITY_PRIVATE, Percept, Sense
 from shani_chronoa import stt, stt_provision
 from shani_chronoa.stt import STT

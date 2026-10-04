@@ -24,6 +24,8 @@ edit through `write_text_file` is not.
 
 from __future__ import annotations
 
+import difflib
+
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
@@ -59,6 +61,13 @@ SCHEMA = {
                 "new_string": {
                     "type": "string",
                     "description": "What to put in its place. An empty string deletes it.",
+                },
+                "preview": {
+                    "type": "boolean",
+                    "description": (
+                        "Show the change as a unified diff and write nothing - "
+                        "for 'show me first'. Defaults to false."
+                    ),
                 },
                 "replace_all": {
                     "type": "boolean",
@@ -176,6 +185,14 @@ def _run(arguments: dict) -> str:
         )
 
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    if arguments.get("preview"):
+        # servers/filesystem `edit_file dryRun`: the diff, and nothing written.
+        diff = "".join(difflib.unified_diff(
+            text.splitlines(keepends=True), updated.splitlines(keepends=True),
+            fromfile=f"{target} (now)", tofile=f"{target} (after)", n=2))
+        if len(diff) > 6000:
+            diff = diff[:6000] + "\n... (diff cut)"
+        return f"Preview only - nothing was written. Call again without preview to apply.\n{diff}"
     note = record_preimage(target, raw)
     try:
         target.write_text(updated, encoding="utf-8")

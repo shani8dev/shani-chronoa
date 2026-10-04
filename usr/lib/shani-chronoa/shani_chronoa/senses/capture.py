@@ -45,10 +45,10 @@ import os
 import re
 import shutil
 import subprocess
-import time
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+from shani_chronoa import subproc
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PERSONAL, Sense
 from shani_chronoa.senses.context import Percept
@@ -170,20 +170,6 @@ def _holders(node: Path, timeout: float = 2.0) -> List[int]:
     return pids
 
 
-def _cmdline(pid: int) -> str:
-    """The command line for a PID, or "" if it is gone or unreadable.
-
-    Kernel threads have an empty cmdline by design, so "" legitimately means
-    "no command line", not "lookup failed".
-    """
-    try:
-        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
-    except (OSError, ValueError):
-        return ""
-    text = raw.replace(b"\0", b" ").strip()
-    return text.decode("utf-8", "replace")
-
-
 def describe(node: Path) -> Dict[str, object]:
     """One device node and everything currently holding it open.
 
@@ -191,7 +177,7 @@ def describe(node: Path) -> Dict[str, object]:
     so a missing `fuser` can never be reported as an unused microphone.
     """
     pids = _holders(node)
-    holders = [{"pid": pid, "cmdline": _cmdline(pid)} for pid in (pids or [])]
+    holders = [{"pid": pid, "cmdline": subproc.cmdline(pid) or ""} for pid in (pids or [])]
     return {
         "device": str(node),
         "in_use": None if pids is None else bool(pids),

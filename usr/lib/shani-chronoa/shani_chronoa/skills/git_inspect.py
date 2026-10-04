@@ -58,6 +58,7 @@ the same module for the same reason, so the diff path cannot drift either.
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 
@@ -116,6 +117,13 @@ SCHEMA = {
                         "Optional commit, branch, or range such as 'HEAD~3' or "
                         "'main...HEAD'. diff compares it against the working "
                         "tree; log starts from it."
+                    ),
+                },
+                "since": {
+                    "type": "string",
+                    "description": (
+                        "log only: commits after a time - 'yesterday', 'today', "
+                        "'3 days ago', '2 weeks ago' or a date like 2026-09-30."
                     ),
                 },
                 "context_lines": {
@@ -345,6 +353,15 @@ def _run(arguments: dict) -> str:
 
     args = ["log", f"--max-count={_MAX_LOG}", "--format=%h %ad %an %s",
             "--date=short"]
+    since = str(arguments.get("since") or "").strip().lower()
+    if since:
+        # servers/git `start_timestamp`, kept to shapes git reads unambiguously
+        if since == "today":
+            since = "midnight"
+        if not re.fullmatch(r"yesterday|midnight|\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?|\d{1,3} (minute|hour|day|week|month|year)s? ago", since):
+            return ("since must be 'yesterday', 'today', 'N days ago' (or hours/weeks/months) "
+                    "or a date like 2026-09-30.")
+        args.append(f"--since={since}")
     if revision:
         args.append(revision)
     proc = _git(target, *args)
@@ -360,6 +377,8 @@ def _run(arguments: dict) -> str:
         )
     body = [ln for ln in proc.stdout.splitlines() if ln.strip()]
     if not body:
+        if since:
+            return f"No commits in {target} since {arguments.get('since')}."
         return f"{target} has no commits reachable from HEAD yet."
     head = f"Most recent commits in {target}" + (f" from {revision}" if revision else "") + ":"
     return "\n".join([head, *body])

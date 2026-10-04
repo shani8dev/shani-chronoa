@@ -37,4 +37,21 @@ def _run(arguments: dict) -> str:
     return f"Do Not Disturb is now {'on' if want else 'off'}."
 
 
+
+def _post_condition(arguments: dict):
+    """show-banners read back; GNOME's own switch reads the same key."""
+    want = arguments.get("enabled")
+    if not isinstance(want, bool):
+        return None
+    cur = subprocess.run(["gsettings", "get", SCHEMA_ID, KEY], capture_output=True, text=True, timeout=5)
+    if cur.returncode != 0:
+        return None
+    on = cur.stdout.strip() == "false"
+    return on == want, f"Do Not Disturb reads back {'on' if on else 'off'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="do_not_disturb", schema=_SCHEMA, run=_run)]

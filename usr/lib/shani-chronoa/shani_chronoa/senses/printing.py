@@ -35,7 +35,7 @@ import shutil
 import subprocess
 from typing import Optional
 
-from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense, Percept
+from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 
 logger = logging.getLogger(__name__)
 

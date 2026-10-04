@@ -17,10 +17,10 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
+from shani_chronoa.skills.undo_last_change import record_preimage
 
 _MAX_BYTES = 5 * 1024 * 1024
 
@@ -97,6 +97,13 @@ def _run(arguments: dict) -> str:
                 f"lost. Pass overwrite to replace it, or append to add to the end."
             )
 
+    note = ""
+    if existed:
+        # A replace or append of a file that already exists is undoable, as edit_file's changes are.
+        try:
+            note = record_preimage(target, target.read_bytes())
+        except OSError:
+            note = " (no undo point: the old contents could not be read)"
     mode = "a" if append else "w"
     try:
         with open(target, mode, encoding="utf-8") as handle:
@@ -109,7 +116,26 @@ def _run(arguments: dict) -> str:
     except OSError as exc:
         return f"Wrote to {target} but could not check the result: {exc}"
     verb = "Appended to" if append else ("Replaced" if existed else "Created")
-    return f"{verb} {target}: {files.human_size(size)}."
+    return f"{verb} {target}: {files.human_size(size)}.{note if existed else ''}"
+
+
+
+def _post_condition(arguments: dict):
+    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    content = arguments.get("content")
+    if not isinstance(content, str):
+        return None
+    try:
+        target = files.resolve(arguments.get("path") or "")
+        text = target.read_text(encoding="utf-8")
+    except (files.PathProblem, OSError, UnicodeDecodeError) as exc:
+        return False, f"could not read the file back: {exc}"
+    ok = text.endswith(content) if arguments.get("append") else text == content
+    return ok, f"{target} holds {len(text)} characters" + ("" if ok else ", not what was written")
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
 
 
 SKILLS = [Skill(name="write_text_file", schema=SCHEMA, run=_run)]

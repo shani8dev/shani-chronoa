@@ -26,14 +26,18 @@ Honesty rules:
 from __future__ import annotations
 
 import shutil
-import subprocess
 
-from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import subproc
 
 _CONSENT_KEY = "screen-lock-enabled"
 _TIMEOUT = 20
+
+
+def _run_cmd(argv, env=None):
+    """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
+    return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
 SCHEMA = {
     "type": "function",
@@ -61,16 +65,6 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
             f"machine."
         )
     return True, ""
-
-
-def _run_cmd(argv: list) -> "subprocess.CompletedProcess | None":
-    if shutil.which(argv[0]) is None:
-        return None
-    try:
-        return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
 
 
 def _session_is_locked() -> "bool | None":

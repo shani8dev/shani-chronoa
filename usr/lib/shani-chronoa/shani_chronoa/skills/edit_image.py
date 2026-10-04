@@ -21,24 +21,41 @@ READ = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp", ".gif":
         ".bmp": "bmp", ".tif": "tiff", ".tiff": "tiff", ".heic": "heic", ".avif": "avif"}
 WRITE = ("png", "jpg", "webp", "gif", "bmp", "tiff", "avif")
 
+#: ImageMagick's own operators for each look - no model, nothing to download
+LOOKS = {
+    "sepia": ["-sepia-tone", "80%"],
+    "vignette": ["-background", "black", "-vignette", "0x40"],
+    "sketch": ["-colorspace", "Gray", "-sketch", "0x20+120"],
+    "paint": ["-paint", "4"],
+    "enhance": ["-auto-level", "-enhance", "-modulate", "100,110"],
+}
+
+
 _SCHEMA = {
     "type": "function",
     "function": {
         "name": "edit_image",
         "description": "Edit a picture and save the result as a new file next to it: resize (width "
                        "and/or height, or percent), compress (quality, or to under a size in KB), crop, "
-                       "rotate, flip, grayscale, strip metadata (location/camera), or convert format. "
-                       "Several edits can be combined in one call.",
+                       "upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip "
+                       "metadata (location/camera), or convert format. Several edits can be combined in one "
+                       "call. For effects that depend on what is in the picture (blur faces, blur the "
+                       "background) use photo_video.",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "The picture, e.g. an attached file's path."},
             "width": {"type": "integer"}, "height": {"type": "integer"},
             "percent": {"type": "integer", "description": "Scale to this percent of the size."},
+            "upscale": {"type": "integer", "enum": [2, 3, 4],
+                        "description": "Enlarge 2-4x with a sharp (Lanczos) resample and light sharpening."},
             "quality": {"type": "integer", "description": "1-100 for jpg/webp/avif (lower = smaller)."},
             "max_kb": {"type": "integer", "description": "Compress until the file is under this many KB (jpg)."},
             "crop": {"type": "string", "description": "WIDTHxHEIGHT+X+Y, e.g. '800x600+100+50'."},
             "rotate": {"type": "integer", "description": "Degrees clockwise."},
             "flip": {"type": "string", "enum": ["horizontal", "vertical"]},
             "grayscale": {"type": "boolean"},
+            "look": {"type": "string", "enum": list(LOOKS),
+                     "description": "sepia, vignette (darker edges), sketch (pencil), paint (oil-paint), "
+                                    "enhance (fix dull light and contrast)."},
             "strip_metadata": {"type": "boolean", "description": "Remove EXIF (camera, GPS location)."},
             "format": {"type": "string", "enum": list(WRITE)},
         }, "required": ["path"]},
@@ -67,7 +84,17 @@ def build(src, arguments: dict) -> "tuple[list, str]":
     elif arguments.get("flip") == "vertical":
         ops += ["-flip"]
         done.append("flipped upside down")
-    if pct:
+    up = arguments.get("upscale")
+    if up:
+        factor = int(up)
+        if factor not in (2, 3, 4):
+            raise ValueError("upscale is 2, 3 or 4")
+        # Lanczos keeps edges crisp; the unsharp mask restores some of the
+        # bite an enlargement loses. It cannot invent detail that was never
+        # captured - that takes a generative upscaler, and the answer says so.
+        ops += ["-filter", "Lanczos", "-resize", f"{factor * 100}%", "-unsharp", "0x0.75+0.75+0.008"]
+        done.append(f"enlarged {factor}x (sharp resample; no detail is invented)")
+    elif pct:
         p = max(1, min(int(pct), 1000))
         ops += ["-resize", f"{p}%"]
         done.append(f"scaled to {p}%")
@@ -78,6 +105,12 @@ def build(src, arguments: dict) -> "tuple[list, str]":
     if arguments.get("grayscale"):
         ops += ["-colorspace", "Gray"]
         done.append("made grayscale")
+    look = (arguments.get("look") or "").strip().lower()
+    if look:
+        if look not in LOOKS:
+            raise ValueError(f"look must be one of {', '.join(LOOKS)}")
+        ops += LOOKS[look]
+        done.append(f"gave it a {look} look" if look != "enhance" else "enhanced the light and contrast")
     if arguments.get("strip_metadata") or arguments.get("max_kb") or arguments.get("quality"):
         ops += ["-strip"]
         if arguments.get("strip_metadata"):

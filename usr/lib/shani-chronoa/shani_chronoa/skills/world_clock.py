@@ -7,7 +7,6 @@ with Open-Meteo's geocoding, which returns the place's time zone - a web
 request, so only with the web sense on and privacy mode off.
 """
 
-import urllib.parse
 import zoneinfo
 from datetime import datetime
 

@@ -45,6 +45,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -66,13 +67,6 @@ _LOCKDOWN = "LockdownMode-8be4df61-93ca-11d2-aa0d-00e098032b8c"
 def _read_bytes(path: Path) -> Optional[bytes]:
     try:
         return path.read_bytes()
-    except OSError:
-        return None
-
-
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
     except OSError:
         return None
 
@@ -135,11 +129,11 @@ def read_lsms() -> dict:
             active_path = candidate
             break
     record: Dict[str, object] = {}
-    raw = _read_text(configured_path)
+    raw = sysfs.read_text(configured_path)
     if raw is not None:
         record["configured"] = [x for x in raw.split(",") if x]
     if active_path is not None:
-        raw_active = _read_text(active_path) or ""
+        raw_active = sysfs.read_text(active_path) or ""
         record["active"] = [x for x in raw_active.split(",") if x]
     return record
 
@@ -152,10 +146,10 @@ def read_tpm() -> Optional[dict]:
     what is it — with no subprocess and no parsing.
     """
     record: Dict[str, object] = {}
-    version = _read_text(_SECURITY / "tpm0/tpm_version_major")
+    version = sysfs.read_text(_SECURITY / "tpm0/tpm_version_major")
     if version is None:
         for candidate in sorted(_SECURITY.glob("tpm*/tpm_version_major")):
-            version = _read_text(candidate)
+            version = sysfs.read_text(candidate)
             if version:
                 record["device"] = candidate.parent.name
                 break
@@ -163,7 +157,7 @@ def read_tpm() -> Optional[dict]:
         return None
     record["version"] = version
     if "device" in record:
-        description = _read_text(_SECURITY / record["device"] / "device/description")
+        description = sysfs.read_text(_SECURITY / record["device"] / "device/description")
         if description:
             record["description"] = description
     return record

@@ -179,4 +179,21 @@ def _run(arguments: dict) -> str:
             f"so this is not verified.")
 
 
+
+def _post_condition(arguments: dict):
+    """The zone timedatectl reports now, compared with the one asked for."""
+    if (arguments.get("action") or "status").strip().lower() != "set":
+        return None
+    zone = (arguments.get("timezone") or "").strip()
+    if not zone:
+        return None
+    proc = _timedatectl("show", "--property=Timezone", "--value")
+    now = (proc.stdout or "").strip() if proc is not None and proc.returncode == 0 else ""
+    return now == zone, f"read back: {now or 'nothing'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="set_timezone", schema=SCHEMA, run=_run)]

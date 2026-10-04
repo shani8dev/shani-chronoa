@@ -6,11 +6,8 @@ Adapted from sayri/adapters/sandbox/executor.py with shani-chronoa paths.
 from __future__ import annotations
 
 import json
-import ctypes
 import logging
 import os
-import re
-import resource
 import shutil
 import signal
 import subprocess
@@ -21,11 +18,29 @@ from typing import Tuple
 
 from shani_chronoa import files
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
-from shani_chronoa.sandbox.profiles import AgentProfile, ResourceCeiling, profile_for_origin
-from shani_chronoa.sandbox.seccomp import SeccompError
+from shani_chronoa.sandbox.profiles import AgentProfile, profile_for_origin
 from shani_chronoa.sandbox import seccomp as _seccomp
 from shani_chronoa.tool_tracking import ORIGIN_USER
-from shani_chronoa.secrets_manager import secrets_manager
+from shani_chronoa.redaction import redactor
+from .commands import (
+    _program,
+    _name_matches,
+    _blocked_binary,
+    _shell_script,
+    _unresolvable_script,
+)
+from .child import (
+    _EXPECTED_PARENT,
+    _harden_child,
+)
+from .limits import (
+    _PENDING_SECCOMP,
+    _seccomp_requested,
+    _seccomp_refusal,
+    _seccomp_child_failure,
+    _PENDING_CEILING,
+    _resolve_ceiling,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +58,7 @@ def _child_pythonpath() -> str:
     This was invisible for the life of the project for two compounding reasons.
     The launcher scripts fix `sys.path` with `sys.path.insert`, which affects
     only the server process and is never exported; and
-    `secrets_manager.inject_environment()` copies the parent environment, so a
+    `redactor.child_env()` copies the parent environment, so a
     developer who happened to have `PYTHONPATH` set saw every call succeed
     while a real `.desktop` launch saw every call fail. The whole MCP surface
     was affected - `tools/list` answered with all 27 tools and every single
@@ -105,54 +120,6 @@ def _landlock_abi() -> int:
 
 DANGEROUS_BINARIES = ("mkfs", "dd", "shutdown", "reboot", "mount", "umount")
 
-
-#: A leading `VAR=value` word, as in `FOO=bar python3 ...`.
-_ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-
-#: Programs whose meaning depends on a script string this module cannot resolve.
-_SHELL_PROGRAMS = ("sh", "bash", "dash", "zsh", "ksh")
-
-#: `env` options that take no value. From `env --help` on this machine (GNU
-#: coreutils 9.4), including `-` - which env documents as "a mere - implies -i",
-#: i.e. an option and emphatically not a terminator.
-_ENV_FLAGS = frozenset({
-    "-i", "--ignore-environment",
-    "-0", "--null",
-    "-v", "--debug",
-    "--help", "--version",
-    "--list-signal-handling",
-    "-",
-})
-
-#: `env` short options that take no value, derived from `_ENV_FLAGS` rather than
-#: written out again: the two lists were once separate and the short one had
-#: drifted, which made `-iu` unreadable and turned a refusal into a wrong answer.
-_ENV_SHORT_FLAGS = frozenset(
-    name[1] for name in _ENV_FLAGS
-    if len(name) == 2 and name.startswith("-") and not name.startswith("--")
-)
-
-#: `env` short options that take a value, each paired with the long form it
-#: stands for: `-u`/`--unset`, `-C`/`--chdir`, `-S`/`--split-string`. They take
-#: the rest of the token as the value: `-uPATH` unsets PATH and `-u PATH` unsets
-#: PATH, while `-u=PATH` unsets `=PATH` (measured) - so the value is the remainder
-#: of the token and never anything after an `=`.
-_ENV_SHORT_VALUED = frozenset("uCS")
-
-#: `env` long options that require a value, accepting both `--unset PATH` and
-#: `--unset=PATH`. `--split-string` takes its value and splits it into several
-#: arguments, but for naming the program it is one consumed token either way.
-_ENV_VALUED = frozenset({"--unset", "--chdir", "--split-string"})
-
-#: `env` long options whose value is optional, and therefore only ever accepted
-#: after an `=` - GNU getopt cannot take a detached one, which is why the token
-#: after a bare `--block-signal` is the command.
-_ENV_OPTIONAL_VALUED = frozenset({"--block-signal", "--default-signal",
-                                  "--ignore-signal"})
-
-#: Constructs that hide the real program from any static reading of a script.
-_EXPANSION = ("$(", "`", "${")
-
 #: Launchers that return immediately instead of waiting for the program.
 _BACKGROUND_PROGRAMS = ("gtk-launch", "xdg-open")
 
@@ -164,353 +131,13 @@ _INTERNAL_BINARIES = ("shani-skills", "shani-plugins", "shani-settings",
                       "shani", "pkill", "killall")
 
 
-def _env_splits_its_argument(word: str) -> bool:
-    """True for `env -S`, which hides the program inside a string.
-
-    `env -S "dd of=/tmp/x"` word-splits its own argument and execs whatever
-    falls out, so the program is not a token in this argv and no walk over
-    tokens can reach it. Treating `-S` as an ordinary value-taking option made
-    `_program(['env','-S','dd'])` consume `dd` as the option's argument and
-    return `''` - a name no blocklist holds, so all four guards passed and the
-    real dd ran and wrote. Measured at LEVEL_3_HOST_USER before this check.
-
-    Refused rather than parsed, for the reason the rest of this module is built
-    on: guessing where a program sits inside an arbitrary string is the failure
-    mode, not the fix. `env -S` exists for shebang lines, which no skill here
-    emits, so nothing legitimate is lost.
-    """
-    if word in ("-S", "--split-string"):
-        return True
-    if word.startswith("--split-string="):
-        return True
-    return word.startswith("-S") and len(word) > 2
-
-
-def _env_option_width(word: str) -> "int | None":
-    """How many argv entries `word` swallows as an `env` option, or None.
-
-    None means "this is not an `env` option at all", which is the ordinary case:
-    the caller has found the command. A short option is one word, so its width is
-    1 or 2; a long option's width depends on whether it was given a detached
-    value, because `--unset PATH` and `--unset=PATH` both appear in real argv.
-
-    Short options cluster, and the first letter that wants a value takes the rest
-    of the token - `-iu PATH` unsets PATH, `-ui PATH` unsets `i`. Both measured
-    against the real `env`. That walk only ever runs on a token that begins with
-    `-`: without that guard it reads the *command* as a cluster, so `env -i sudo`
-    consumed `su` plus the token after it and named neither.
-
-    An option this table does not know is reported as *not an option*, so the
-    caller's next step is to refuse the whole call rather than guess. That
-    asymmetry is the point: an option skipped when it should have been obeyed
-    lands the walk on an argument, and an argument is a name no blocklist holds;
-    the reverse mistake cannot happen. The cost is that GNU's long-option
-    abbreviation (`env --ignore-e dd`, which really does run dd) is refused
-    instead of understood. A spelling nobody types, refused loudly, beats a
-    spelling a blocklist cannot see.
-    """
-    if word == "--":
-        return 1
-    if word.startswith("--"):
-        name, sep, _ = word.partition("=")
-        if name in _ENV_VALUED:
-            return 1 if sep else 2
-        if name in _ENV_OPTIONAL_VALUED:
-            return 1
-        if name in _ENV_FLAGS:
-            # `env --ignore-environment=true` is an error, not a flag with a
-            # value, so a flag carrying one is malformed rather than accepted.
-            return None if sep else 1
-        return None
-    if word in _ENV_FLAGS:
-        return 1
-    if not word.startswith("-"):
-        return None
-    for position, letter in enumerate(word[1:], start=1):
-        if letter in _ENV_SHORT_VALUED:
-            return 1 if position < len(word) - 1 else 2
-        if letter not in _ENV_SHORT_FLAGS:
-            return None
-    return 1
-
-
-def _program(argv: "list[str]") -> "str | None":
-    """The program this argv will actually exec, or None if it cannot be read.
-
-    `env FOO=bar python3 ...` and `FOO=bar python3 ...` both run python3, so a
-    guard that read only argv[0] would see `env`, match nothing, and wave the
-    real program straight through. Leading assignments and a leading `env` are
-    therefore skipped to find the program the kernel will exec.
-
-    Getting past `env` means getting past its *options*, which are not
-    assignments. The previous version skipped assignments and one `env` and then
-    stopped at the next token, so it named the option: `_program(["env","-i",
-    "dd"])` was `-i`, which matches no blocklist, and all four guards read it.
-    Measured against the real executor at LEVEL_3_HOST_USER before the fix, `env
-    -i dd`, `env -- dd`, `env -u PATH dd` and `env env dd` each ran the real dd
-    and wrote the file it was pointed at, and `env -i sudo` and `env -i pkexec`
-    each ran the real privilege escalator. So this walks `env`'s whole option
-    grammar to the first token that is not one.
-
-    Three `env` behaviours make a hand-rolled walk wrong if they are missed, all
-    measured against GNU coreutils 9.4 on this machine rather than assumed:
-
-    - An assignment ends option parsing. `env FOO=bar -i echo` execs `-i`, not
-      `echo` - so options after an assignment must not be skipped, or the
-      resolver names a program that never runs.
-    - Short options cluster and the first value-taking letter consumes the rest
-      of the token, so `-iu PATH` and `-ui PATH` mean different things.
-    - A repeated `env` is a launcher too. `env env dd` really does exec dd, one
-      `env` deeper, and a resolver that stopped at the outer `env` named a
-      program that merely forwards to the dangerous one.
-
-    Returns None - never a guess - when the argv's program cannot be read, which
-    `execute()` treats as a refusal. That happens for a malformed option (`env
-    -u` with no NAME to unset, a flag handed a value it does not take) and for an
-    option this table does not know. Both are cases where the two-ended-token
-    problem bites: `-u` and `-C` take an argument, so a bare `-u` is not a
-    program, it is half an option; and there is no safe way to skip an option of
-    unknown shape, because skipping too much walks straight past the program
-    while skipping too little merely misses a blocklist that was never going to
-    match anyway.
-
-    An argv that names no program at all - `env -i`, which prints its empty
-    environment and exits 0 - returns "". That is not the same answer as None and
-    must not be: refusing it would be refusing working code, and the fail-closed
-    rule has to stop at malformed rather than at empty.
-
-    HONEST SCOPE. This closes the resolver, which is what commit 7af8265's four
-    guards are built on; it does not describe a hole that was live. Both
-    production call sites set argv[0] to a literal (`tools.py` builds
-    `["python3","-c",...]`, `argfile.py` likewise), and the LLM controls the
-    program *string*, not argv[0]. Before this change `env -i dd` reached the real
-    dd through `execute()` in isolation, and could not have reached it from either
-    production caller. It becomes live the moment some caller builds an argv an
-    LLM can influence - which is why it is fixed as a structural property of the
-    resolver rather than as a patch at one call site.
-    """
-    index = 0
-    inside_env = False
-    options_parse = False
-    while index < len(argv):
-        word = argv[index]
-        if os.path.basename(word) == "env":
-            # Transparent whenever it is the command of the env before it, even
-            # behind a `--`: the inner env then runs its own program, so the
-            # walk continues into *its* options rather than stopping here.
-            inside_env = True
-            options_parse = True
-            index += 1
-            continue
-        if _ENV_ASSIGNMENT.match(word):
-            if inside_env:
-                options_parse = False
-            index += 1
-            continue
-        if inside_env and options_parse:
-            if _env_splits_its_argument(word):
-                return None  # the program is inside a string, not in this argv
-            width = _env_option_width(word)
-            if width is not None:
-                if word == "--":
-                    # The terminator ends option parsing for good, so the next
-                    # token is the program even when it is shaped like an option.
-                    options_parse = False
-                elif index + width > len(argv):
-                    return None  # a value-taking option with nothing left to take
-                index += width
-                continue
-            if word.startswith("-") and word != "-":
-                return None  # an option of unknown or malformed shape
-        return word
-    return ""
-
-
-def _name_matches(name: str, blocked_names) -> bool:
-    """Whether `name` is one of `blocked_names`.
-
-    Basename first, so `/sbin/dd` is `dd`. Still no substring matching, so `add`
-    and `ddrescue` are not `dd`; and a dotted variant (`mkfs.ext4`,
-    `mount.fuse`) counts as the binary it is named after, which is the form
-    anyone actually types.
-    """
-    base = os.path.basename(name)
-    return any(base == blocked or base.startswith(blocked + ".") for blocked in blocked_names)
-
-
-def _blocked_binary(argv: "list[str]", blocked_names) -> "str | None":
-    r"""The blocklisted program this argv would run, if any.
-
-    argv[0] and nothing else. The previous version split a *shell string* on
-    whitespace and compared tokens, which meant the check was defeated by
-        # writing the name in any form a shell would expand: measured against the
-        # real executor, `dd status=...` was refused with 126 while `$(echo dd)
-        # status=...` and `d\d status=...` both reached the real system `dd`, which
-        # then complained about its own arguments.
-
-    Every spelling of `dd` is now either the name `_program()` reports, or an
-    argv that was refused before anything ran. The `env` option spellings were
-    the missing middle case: a resolver that stopped at the token after `env`
-    named `-i`, `--`, `-u` and `env` for them, and none of those is in any
-    blocklist, so `env -i dd` and `env -u PATH dd` reached the real dd. The two
-    ways a spelling still escapes naming are both deliberate and both tested: the
-    argv was refused as unreadable (`env -h dd`, `env --un PATH dd`), or real
-    `env` is not running `dd` either because an assignment ended its option
-    parsing (`env FOO=bar -i dd` execs `-i`). The earlier version of this
-    sentence claimed there was no such spelling at all, which was false.
-    """
-    program = _program(argv)
-    if program and _name_matches(program, blocked_names):
-        return os.path.basename(program)
-    return None
-
-
-def _shell_script(argv: "list[str]") -> "str | None":
-    """The script of an explicit `sh -c ...` argv, or None if this is not one.
-
-    The shell stays reachable on purpose, because a blocklist never could police
-    a shell string - so the honest move is to make the shell *visible* in the argv
-    rather than keep a filter that appears to work. Everything below exists to
-    stop that visibility from being a hole.
-    """
-    program = _program(argv)
-    if not program or os.path.basename(program) not in _SHELL_PROGRAMS:
-        return None
-    try:
-        return argv[argv.index("-c") + 1]
-    except (ValueError, IndexError):
-        return None
-
-
-def _unresolvable_script(script: str) -> "str | None":
-    """Why a literal shell script cannot be policed, or None if it can be.
-
-    An expansion construct makes the program unknowable by reading the text: that
-    is precisely how the previous string filter was walked past, since
-    `$(echo dd) ...` names no blocked binary anywhere in the string. Rather than
-    guess, the script is refused. The cost is real and deliberate - `sh -c "echo
-    $(date)"` is refused too - and the alternative is a check that silently fails
-    on the input it exists to catch.
-    """
-    for construct in _EXPANSION:
-        if construct in script:
-            return (
-                f"an explicit shell script contains {construct!r}, so the program it "
-                "would run is not knowable from the argv; pass the program directly "
-                "instead of a shell string"
-            )
-    return None
-
-
 class SandboxExecutionError(Exception):
     pass
-
-
-#: `prctl(2)` option, and the signal it takes. `PR_SET_PDEATHSIG` makes the kernel
-#: deliver a signal to this process when its parent dies. Linux-only, and not in POSIX.
-_PR_SET_PDEATHSIG = 1
-
-#: `PR_SET_DUMPABLE`. 0 makes the kernel refuse to let another process read this
-#: process's memory through /proc/<pid>/mem or ptrace.
-_PR_SET_DUMPABLE = 4
-
-#: `RLIMIT_CORE`. Setting both the soft and the hard limit to 0 means the kernel
-#: writes no core file however the child dies.
-_RLIMIT_CORE = 4
-
-_SIGTERM = 15
 
 #: The kernel's signal for a soft `RLIMIT_CPU` breach. Its default action is to
 #: terminate, so a child that outruns a profile's CPU budget dies here rather
 #: than being reported as an ordinary non-zero exit.
 _SIGXCPU = 24
-
-#: The parent pid a freshly forked child should still see. `preexec_fn` is handed no
-#: arguments, so the executor records the parent immediately before spawning and the
-#: child compares against it. Cleared as soon as `Popen` returns, because after that
-#: the value is meaningless and a recycled dict would only invite confusion.
-_EXPECTED_PARENT: "dict" = {}
-
-
-def _die_with_parent() -> None:
-    """Ask the kernel to signal this child if its parent dies.
-
-    `start_new_session=True` is what makes the timeout fix work - it gives the child its
-    own process group, so `os.killpg` reaches a whole `sh -c` tree rather than hitting
-    Chronoa's own group. It also detaches the child from that group, so killing Chronoa
-    does not reach it, and a backgrounded command is the reachable case: the executor
-    returns at once, reports "continues running in the background", and keeps no record
-    beyond that string. Measured on this machine - a backgrounded `sleep 4; touch MARKER`
-    still wrote its marker long after the executor returned.
-
-    The race is the part that is easy to get wrong. If the parent dies between `fork` and
-    this call, the signal is never armed and nothing else would ever notice, so the check
-    below compares `getppid()` against the pid recorded before the spawn and exits at
-    once if they differ. Without it the fix covers the common case and silently misses
-    the one where it matters most.
-    """
-    try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl.restype = ctypes.c_int
-        libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong,
-                               ctypes.c_ulong, ctypes.c_ulong]
-    except OSError:
-        return  # no libc to ask; the child is no worse off than it was before
-    try:
-        if libc.prctl(_PR_SET_PDEATHSIG, _SIGTERM, 0, 0, 0) != 0:
-            return  # unsupported or not permitted; not worth failing the command over
-        expected = _EXPECTED_PARENT.get("pid")
-        if expected is not None and os.getppid() != expected:
-            os._exit(0)  # the parent died before the arm took effect
-    except OSError:
-        return
-
-
-class _Rlimit(ctypes.Structure):
-    """`struct rlimit`, both members `rlim_t` (an unsigned long)."""
-
-    _fields_ = [("rlim_cur", ctypes.c_ulong), ("rlim_max", ctypes.c_ulong)]
-
-
-def _disable_core_dumps(libc) -> None:
-    """Stop the kernel writing this process out to disk, whatever kills it.
-
-    The secrets a child here holds are real: `secrets_manager.inject_environment()`
-    puts cloud provider API keys into its environment, and a screenshot or a
-    transcript is in its address space. A core dump writes all of that to a file
-    on disk in cleartext, in a directory the user does not think of as holding
-    credentials, and it does so at the worst possible moment - the command
-    crashing, which is exactly when nobody is looking.
-
-    Both halves matter and they do different jobs, which is worth being precise
-    about because only one of them is load-bearing:
-
-    - `RLIMIT_CORE = 0` is what survives `execve`. Rlimits are per-process and
-      inherited across exec, so the limit the confined child starts under is the
-      one the wrapped command runs with. Measured here: set to (0, 0) in a
-      parent, read back as (0, 0) after an `execve`.
-    - `PR_SET_DUMPABLE = 0` does NOT survive `execve`. `setup_new_exec()` resets
-      it to `SUID_DUMP_USER` for any binary that is not setuid, so it covers
-      only the fork-to-exec window - which is nonetheless where the Python
-      interpreter that `secrets_manager` injected keys into actually lives.
-      Measured here: `PR_GET_DUMPABLE` reads 0 immediately before `execve` and 1
-      in the exec'd program.
-
-    Best-effort by design: an old kernel, a hardened container refusing prctl, or
-    a resource limit the caller cannot lower must leave the command runnable
-    rather than raise inside `preexec_fn`, which would take every call down with
-    an opaque "Exception occurred in preexec_fn".
-    """
-    libc.prctl(_PR_SET_DUMPABLE, 0, 0, 0, 0)
-    no_core = _Rlimit(0, 0)
-    libc.setrlimit(_RLIMIT_CORE, ctypes.byref(no_core))
-
-
-#: Whether the next spawned child must install a seccomp filter. `preexec_fn`
-#: is handed no arguments, so the decision the parent made reaches the forked
-#: child the same way the profile ceiling does: written here immediately before
-#: the spawn, cleared in `execute()`'s `finally`.
-_PENDING_SECCOMP: "dict" = {}
 
 #: `LEVEL_4_HOST_ROOT` is not a level a filter can be applied to, and saying so
 #: loudly matters more than applying it would. `PR_SET_NO_NEW_PRIVS` - which
@@ -521,244 +148,6 @@ _PENDING_SECCOMP: "dict" = {}
 #: appears. So the filter is skipped there and the skip is named, once, rather
 #: than being applied or ignored.
 _SECCOMP_SKIPPED_LEVELS: "set" = set()
-
-
-def _harden_child() -> None:
-    """The single `preexec_fn` for every child this module spawns.
-
-    Both spawn paths need it - `_run_host` through `Popen` and `_run_landlock`
-    through `subprocess.run` - and a `preexec_fn` has to run in the forked child
-    between `fork` and `exec`, which is the only place a process can change its
-    own dumpable flag or lower its own rlimits at all. Anything done in the
-    parent instead would harden Chronoa itself, which is the opposite of the
-    intent.
-
-    The seccomp filter goes last, and only if `_PENDING_SECCOMP` says this call
-    asked for it. Last because a filter installed earlier would be in force
-    while the calls above it run, and the rule is that a control must not be
-    able to break the setup that installs it. It is also irreversible for the
-    life of the process, which is why it cannot be a decision the parent
-    reverses.
-    """
-    _die_with_parent()
-    _apply_profile_ceiling()
-    try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    except OSError:
-        return
-    libc.prctl.restype = ctypes.c_int
-    libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong,
-                           ctypes.c_ulong, ctypes.c_ulong]
-    libc.setrlimit.restype = ctypes.c_int
-    libc.setrlimit.argtypes = [ctypes.c_int, ctypes.POINTER(_Rlimit)]
-    _disable_core_dumps(libc)
-    # Raises SeccompError on failure, which the spawn paths turn into a 126.
-    # Deliberately not wrapped in a bare `except`: a filter that was asked for
-    # and could not be installed must not degrade into running the command
-    # unfiltered, and the only way to guarantee that is to have no path that
-    # swallows this.
-    if _PENDING_SECCOMP.get("enabled"):
-        try:
-            count = _seccomp.apply()
-        except _seccomp.SeccompError as exc:
-            # CPython does not re-raise a `preexec_fn` exception: it collects it
-            # in the child, writes "Exception occurred in preexec_fn." to the
-            # error pipe and raises a bare `SubprocessError` in the parent. The
-            # type and the message are both gone, so the reason is written to a
-            # file the parent reads back. Measured, not assumed - the first
-            # draft caught this as `except SeccompError` in the spawn path,
-            # which can never fire for exactly this reason.
-            report = _PENDING_SECCOMP.get("report")
-            if report:
-                try:
-                    with open(report, "w", encoding="utf-8") as handle:
-                        handle.write(str(exc))
-                except OSError:
-                    pass
-            raise
-        logger.debug("sandbox: installed a %d-instruction seccomp filter in the child",
-                     count)
-
-
-def _seccomp_requested() -> bool:
-    """Whether the `sandbox-seccomp-enabled` gsetting asks for the filter.
-
-    Read per call rather than cached at import, so a user who flips the switch
-    does not have to restart the assistant - the same reason the sense
-    consent gates are read per call.
-
-    An unreadable setting is `False`, and that is the correct direction rather
-    than a convenient one: the schema default is `false`, so failing to read it
-    can only mean the user never turned the filter on. The opposite fallback
-    would be a machine that filters every skill call because GSettings was
-    unavailable, which is a much worse answer to the same error.
-    """
-    try:
-        from shani_chronoa.config import ChronoaConfig
-        return bool(ChronoaConfig().get_bool(_seccomp.SECCOMP_SETTING, False))
-    except Exception as exc:  # noqa: BLE001 - a gate must never raise into a command
-        logger.warning("Cannot read the %s setting; treating it as off (%s)",
-                       _seccomp.SECCOMP_SETTING, exc)
-        return False
-
-
-def _seccomp_refusal(exc: SeccompError) -> Tuple[int, str, float]:
-    """Turn an uninstallable filter into a 126 rather than an opaque exit 1.
-
-    126 because this is the same shape as every other refusal in this executor:
-    the caller asked for a sandbox, the sandbox could not exist, and the
-    command did not run. A generic "Execution error on the host" would report
-    the same fact in a form that reads like the command itself had failed.
-    """
-    return (
-        126,
-        f"Security error: the '{_seccomp.SECCOMP_SETTING}' setting is on, so this "
-        f"command must run under a seccomp filter, and no filter was installed: "
-        f"{exc}",
-        0.0,
-    )
-
-
-def _seccomp_child_failure() -> "SeccompError | None":
-    """The reason the child could not install a filter, if it wrote one.
-
-    Paired with the handler in `_harden_child`. Returns None when no filter was
-    requested, so the spawn paths can call it unconditionally on any spawn
-    failure and only change their answer when this is what went wrong.
-    """
-    report = _PENDING_SECCOMP.pop("report", None)
-    if not report:
-        return None
-    text = ""
-    try:
-        with open(report, encoding="utf-8") as handle:
-            text = handle.read().strip()
-    except OSError:
-        return None
-    finally:
-        try:
-            os.unlink(report)
-        except OSError:
-            pass
-    return SeccompError(text) if text else None
-
-
-class ProfileLimitError(RuntimeError):
-    """A profile ceiling the child could not impose on itself.
-
-    Distinct from `SandboxExecutionError` because it is not a policy refusal -
-    the policy said yes and the mechanism could not deliver, which is a
-    different thing for a caller to be told about and the reason it is not
-    folded into the 126 the guards return.
-    """
-
-
-#: The ceilings the next spawned child must impose on itself, plus the CPU budget
-#: to name if the kernel kills it. Set in the parent immediately before a spawn
-#: and cleared in a `finally` after it, for the same reason `_EXPECTED_PARENT`
-#: is: `preexec_fn` is handed no arguments, so a per-call ceiling can only reach
-#: the forked child through a channel the parent writes first. The `cpu_seconds`
-#: entry is read back inside `_run_host` to explain a `SIGXCPU`, which is why the
-#: clearing `finally` sits in `execute()` rather than in the spawn helpers.
-_PENDING_CEILING: "dict" = {}
-
-
-def _apply_profile_ceiling() -> None:
-    """Apply the resolved profile's resource ceilings to this child.
-
-    Runs between `fork` and `execve`, which is the only window in which a
-    process can lower its own limits. Rlimits are inherited across `execve`, so
-    what is set here is what the exec'd program actually runs under - measured
-    rather than assumed, and the measurement is the only reason to believe it: a
-    child that reports `resource.getrlimit(RLIMIT_AS)` from inside the exec'd
-    `python3` reads back the number the parent chose.
-
-    Raises rather than warns, which is a deliberate break from
-    `_disable_core_dumps` next to it. That one is best-effort and correct: a
-    core dump is a hazard the child might survive, so an old kernel that refuses
-    `prctl` should leave the command runnable. A memory or CPU ceiling is a
-    promise the caller was told would be kept, and a silently unapplied one is
-    exactly the "configured but not enforced" shape this layer exists to
-    remove. An exception out of `preexec_fn` is caught by the spawn paths and
-    returned as `Execution error on the host: ...` naming the profile; the
-    command does not run, which is the correct answer to a ceiling that cannot
-    be applied.
-    """
-    limits = _PENDING_CEILING.get("limits")
-    if not limits:
-        return
-    for what, soft, hard in limits:
-        try:
-            resource.setrlimit(what, (soft, hard))
-        except (ValueError, OSError) as exc:
-            name = _PENDING_CEILING.get("profile", "the active")
-            raise ProfileLimitError(
-                f"the '{name}' sandbox profile requires a limit of "
-                f"{soft} (hard {hard}) on {_limit_name(what)} that this child "
-                f"could not be given: {exc}. The command was not run, because a "
-                f"profile whose ceiling cannot be applied is not a profile."
-            ) from exc
-
-
-def _limit_name(what: int) -> str:
-    for name, value in (("address space", resource.RLIMIT_AS),
-                        ("CPU time", resource.RLIMIT_CPU)):
-        if what == value:
-            return name
-    return f"resource limit {what}"
-
-
-def _clamp(what: int, soft: int, hard: int) -> "tuple[int, int] | None":
-    """`(soft, hard)` as this process is actually able to impose, else None.
-
-    An unprivileged process may lower a hard limit but never raise one, so a
-    profile asking for more than this process already has gets `EPERM` rather
-    than the policy it was promised. Deciding that here, in the parent, is what
-    lets the refusal name the profile, the ceiling it asked for and the ceiling
-    this process really has - instead of surfacing as a bare `setrlimit` error
-    from inside `preexec_fn`, naming none of them.
-    """
-    _, current_hard = resource.getrlimit(what)
-    if current_hard == resource.RLIM_INFINITY:
-        return (soft, hard)
-    if soft > current_hard:
-        return None
-    return (soft, min(hard, current_hard))
-
-
-def _resolve_ceiling(
-    profile: AgentProfile, caller_timeout_seconds: int
-) -> "tuple[ResourceCeiling, list[tuple[int, int, int]], str | None]":
-    """`(ceiling, [(what, soft, hard)], refusal)` for this profile on this call.
-
-    The ceiling comes back rather than being recomputed by the caller, so the
-    numbers the child is given and the numbers the log line and the timeout use
-    cannot drift apart.
-
-    Returns a refusal string rather than raising, because a profile that cannot
-    be honoured is a policy answer the caller can read - the same 126 shape the
-    argv guards use - and not an exception from a sandbox helper.
-    """
-    ceiling = profile.ceiling(caller_timeout_seconds)
-    wanted = (
-        ("address space", resource.RLIMIT_AS,
-         ceiling.memory_bytes, ceiling.memory_bytes),
-        ("CPU time", resource.RLIMIT_CPU,
-         ceiling.cpu_seconds, ceiling.cpu_hard_seconds),
-    )
-    limits: "list[tuple[int, int, int]]" = []
-    for label, what, soft, hard in wanted:
-        pair = _clamp(what, soft, hard)
-        if pair is None:
-            allowed = resource.getrlimit(what)[1]
-            return ceiling, [], (
-                f"the '{profile.name}' sandbox profile allows {soft} of {label} "
-                f"but this process is already limited to {allowed}, and a hard "
-                f"limit cannot be raised without privilege. Refusing rather than "
-                f"running the command without the ceiling it was promised."
-            )
-        limits.append((what, pair[0], pair[1]))
-    return ceiling, limits, None
 
 
 #: `network_access=False` is declared by every restricted profile and enforced by
@@ -1138,7 +527,7 @@ class SandboxExecutor:
                 *inner_argv,
             ]
 
-        env = secrets_manager.inject_environment()
+        env = redactor.child_env()
         env.update(
             {
                 "LANLOCK_ALLOWED_PATHS": json.dumps([list(p) for p in paths]),
@@ -1182,7 +571,7 @@ class SandboxExecutor:
     def _run_host(
         self, argv: "list[str]", timeout: int, start_time: float, elevated: bool = False
     ) -> Tuple[int, str, float]:
-        env = secrets_manager.inject_environment()
+        env = redactor.child_env()
         # Set outright, not added to the passthrough loop below. That loop only
         # copies a key when it is absent, and `inject_environment` has already
         # put the parent's PYTHONPATH there - so a passthrough entry for it
@@ -1280,7 +669,7 @@ class SandboxExecutor:
                         if not combined:
                             combined = f"(Process exited with error code {retcode})"
                     elif not combined:
-                        combined = f"(Command completed with exit code 0)"
+                        combined = "(Command completed with exit code 0)"
 
                     return (retcode, combined, duration)
 
@@ -1359,7 +748,7 @@ class SandboxExecutor:
             res = subprocess.run(
                 bwrap_args, capture_output=True, text=True,
                 timeout=timeout,
-                env=secrets_manager.inject_environment(allowed_keys=[]),
+                env=redactor.child_env(),
             )
             out = (res.stdout + "\n" + res.stderr).strip()
             retcode = res.returncode
@@ -1383,7 +772,7 @@ class SandboxExecutor:
 
             duration = (time.monotonic() - start_time) * 1000.0
             return (retcode, out, duration)
-        except subprocess.TimeoutExpired as exc:
+        except subprocess.TimeoutExpired:
             duration = (time.monotonic() - start_time) * 1000.0
             return (124, f"Error: Sandbox time limit ({timeout}s) exceeded.", duration)
         except Exception as exc:

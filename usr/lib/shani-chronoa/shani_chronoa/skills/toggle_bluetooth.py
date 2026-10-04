@@ -103,7 +103,8 @@ def _run(arguments: dict) -> str:
 
     if _bt is None or shutil.which("bluetoothctl") is None:
         return ("bluetoothctl is not installed, so the adapter cannot be "
-                "queried or changed. On Arch it comes from bluez. No fallback "
+                "queried or changed. On Arch it comes from bluez-utils (the bluez "
+                "package is the daemon and does not ship this client). No fallback "
                 "to sysfs or rfkill is attempted: those are the paths that need "
                 "privilege, and using them would bypass the desktop's own "
                 "authorisation rules.")

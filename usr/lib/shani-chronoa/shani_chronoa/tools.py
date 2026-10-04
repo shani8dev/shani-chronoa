@@ -26,13 +26,12 @@ against real subprocesses, not assumed).
 """
 
 import importlib
-import json
 import logging
-import sys
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
-                              guardrail, permissions, planmode,
-                              verification)
+                       guardrail, permissions, planmode, verification)
+from shani_chronoa import outcome_model
+from shani_chronoa.reaction import ReactionLayer, destructive_tools
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
@@ -64,6 +63,12 @@ _TRACKER = ToolTracker()
 logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FNS)) or '(none)'}")
 
 
+#: Tools whose real work takes longer than the usual 30 s, named here rather
+#: than guessed. The per-origin profile still caps each (300 s when a person
+#: asked, 15 s for an unattended rule), so this can only lengthen up to that.
+_SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300}
+
+
 def _get_sandbox_config(tool_name: str) -> SandboxConfig:
     """Determines the sandbox level for a given tool.
 
@@ -81,7 +86,7 @@ def _get_sandbox_config(tool_name: str) -> SandboxConfig:
         return SandboxConfig(level=SandboxLevel.LEVEL_0_NO_EXEC, timeout_seconds=5)
     if tool_name in elevated_tools:
         return SandboxConfig(level=SandboxLevel.LEVEL_4_HOST_ROOT, timeout_seconds=60)
-    return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=30)
+    return SandboxConfig(level=SandboxLevel.LEVEL_3_HOST_USER, timeout_seconds=_SLOW_TOOLS.get(tool_name, 30))
 
 
 def _json_safe(value):
@@ -205,6 +210,115 @@ def _consent_key_for(name: str) -> "str | None":
 
 
 def _dispatch(name: str, arguments: dict, by_reference: bool = False,
+              origin: str = ORIGIN_USER) -> DispatchResult:
+    """Every actuator, with the hands light on for the duration.
+
+    The light is opened before the handler lookup and closed in a `finally`, so
+    a skill that raises, a sandbox refusal and a normal return all leave it off.
+    Closing it in each return instead would be one forgotten return away from a
+    permanently-lit "acting", which is the failure the body's deadlines exist to
+    cover but which should not be *relied* on.
+    """
+    # The reaction layer sees the call BEFORE it acts, and can only turn an
+    # allowed call into one that needs a person - never the reverse. It is here
+    # rather than inside `_dispatch_inner` so a pattern that has grown needs a
+    # second sighting before it proceeds, and it is inside `_dispatch` so every
+    # path through `execute_tool` and `execute_tool_outcome` gets it.
+    blocked = _reaction_refuses(name, arguments, origin)
+    if blocked:
+        return blocked
+
+    # Record what the outcome model expects *before* the call, so a prediction
+    # and its outcome can later be paired. Without this the loop never closes:
+    # the dispatch log has the verdicts but nothing records what was expected,
+    # so no prediction can be scored and no model can improve.
+    #
+    # Best-effort by design. A model that is absent, untrained or broken must
+    # not stop a tool from running - this records when it can and says nothing
+    # when it cannot.
+    _record_prediction(name, arguments)
+
+    activity = _light_hands(name, arguments if isinstance(arguments, dict) else {}, origin)
+    try:
+        return _dispatch_inner(name, arguments, by_reference, origin)
+    finally:
+        _unlight_hands(activity)
+
+
+def _record_prediction(name: str, arguments) -> None:
+    """Ask the outcome model what it expects, and log the answer. Never raises."""
+    try:
+        model = _outcome_model()
+        if model is None:
+            return
+        record = {"tool_name": name, "args": arguments if isinstance(arguments, dict) else {}}
+        outcome_model.record_prediction(name, model.predict_proba(record),
+                                        model.recommend(record))
+    except Exception:  # noqa: BLE001 - telemetry must never block a tool
+        return
+
+
+#: Loaded once, lazily, and only if a trained model has been saved. Absent is
+#: the normal state: nothing trains a model until someone runs the dream pass
+#: and the labels are good enough to be worth training on.
+_OUTCOME_MODEL = None
+_OUTCOME_TRIED = False
+
+
+def _outcome_model():
+    global _OUTCOME_MODEL, _OUTCOME_TRIED
+    if _OUTCOME_TRIED:
+        return _OUTCOME_MODEL
+    _OUTCOME_TRIED = True
+    try:
+        from shani_chronoa.outcome_model import OutcomeModel, predictions_path
+        candidate = predictions_path().parent / "outcome-model.json"
+        if candidate.exists():
+            _OUTCOME_MODEL = OutcomeModel.load(candidate)
+    except Exception:  # noqa: BLE001
+        _OUTCOME_MODEL = None
+    return _OUTCOME_MODEL
+
+
+#: One reaction layer per process. It is a short window of prior calls, so
+#: sharing it across turns is the point: a pattern is a pattern across the
+#: conversation, not within one tool call.
+_REACTIONS = ReactionLayer()
+
+
+def _reaction_refuses(name: str, arguments, origin: str):
+    """Ask the reaction layer about this call. Returns a DispatchResult to
+    return instead, or None to proceed.
+
+    Never raises. A layer that cannot answer must not be the reason a tool
+    fails - it is an advisory layer over a permission layer that is already
+    enforcing the real rule, so the safe degradation is to let the call through
+    to the gate that can actually refuse it.
+    """
+    try:
+        decision = _REACTIONS.check(
+            name,
+            arguments if isinstance(arguments, dict) else {},
+            origin=origin,
+            destructive=name in destructive_tools(),
+        )
+    except Exception:  # noqa: BLE001
+        return None
+    if not decision.confirm:
+        return None
+    # `ran=False` is the load-bearing field: it is what tells a caller the
+    # tool never executed, rather than leaving that to be inferred from wording.
+    # The verdict is UNVERIFIED rather than FAILED because nothing was checked -
+    # nothing ran to be checked.
+    return DispatchResult(
+        text=("Not run. " + decision.confirm),
+        verdict=verification.Verdict.UNVERIFIED,
+        ran=False,
+        evidence=decision.confirm,
+    )
+
+
+def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
              origin: str = ORIGIN_USER) -> DispatchResult:
     """Execute a named tool with the given arguments, returning a short result string.
 
@@ -404,7 +518,7 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
         # says so rather than letting the caller infer success. See
         # verification.py for why this is not optional politeness.
         try:
-            checked = verification.verify(handler_module, arguments)
+            checked = verification.verify(handler_module, arguments, tool=name)
         except Exception as e:  # noqa: BLE001 - verification must never kill the action
             logger.warning(f"Post-condition for '{name}' raised: {e}")
             checked = verification.Result(verification.Verdict.UNVERIFIED, str(e))
@@ -461,6 +575,34 @@ class ToolOutcome(NamedTuple):
     def is_error(self) -> bool:
         """goose's spelling: did this fail to produce an answer."""
         return not self.ran
+
+
+def _light_hands(name: str, arguments: dict, origin: str):
+    """Tell the body an actuator is running. Never raises.
+
+    The summary is the tool's own name plus its arguments, because "acting" with
+    no detail is the one thing an indicator must not say: the question behind
+    every permission prompt in the world is *what exactly are you doing*.
+    """
+    try:
+        from shani_chronoa import body
+
+        summary = ", ".join(f"{key}={value}" for key, value in list(arguments.items())[:3])
+        return body.body.use("hands", name.replace("_", " "),
+                             summary[:80],
+                             deadline=body.DEFAULT_DEADLINE["hands"],
+                             origin=origin)
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _unlight_hands(activity) -> None:
+    try:
+        from shani_chronoa import body
+
+        body.body.done(activity)
+    except Exception:                                   # noqa: BLE001
+        pass
 
 
 def execute_tool(name: str, arguments: dict, by_reference: bool = False,

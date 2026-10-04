@@ -52,10 +52,16 @@ def _run(arguments: dict) -> str:
         return f"I can convert to: {', '.join(sorted(FORMATS))}."
     dst = src.with_suffix("." + to)
     n = 1
-    while dst.exists():
-        dst = src.with_name(f"{src.stem}-{n}.{to}")
-        n += 1
-    argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n", "-i", str(src), *FORMATS[to]]
+    while True:
+        try:
+            # claimed, not just checked: ffmpeg's -n exits 0 without writing
+            # when the file exists, so its exit code cannot prove it made this
+            with open(dst, "x"):
+                break
+        except FileExistsError:
+            dst = src.with_name(f"{src.stem}-{n}.{to}")
+            n += 1
+    argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(src), *FORMATS[to]]
     width = arguments.get("width")
     if width:
         w = max(16, min(int(width), 7680))
@@ -69,7 +75,7 @@ def _run(arguments: dict) -> str:
     except subprocess.TimeoutExpired:
         dst.unlink(missing_ok=True)
         return "The conversion took longer than ten minutes, so I stopped it."
-    if r.returncode != 0 or not dst.exists():
+    if r.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
         dst.unlink(missing_ok=True)
         return f"ffmpeg could not convert {src.name}: {(r.stderr.strip().splitlines() or ['no message'])[-1][:200]}"
     return f"Made {dst} ({dst.stat().st_size / 1e6:.1f} MB) from {src.name}; the original is unchanged."

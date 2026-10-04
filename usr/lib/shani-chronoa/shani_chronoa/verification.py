@@ -37,7 +37,7 @@ import logging
 import os
 import subprocess
 from enum import Enum
-from typing import List, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -120,12 +120,34 @@ def post_condition_for(handler_module: str) -> Optional[object]:
     return argv or None
 
 
-def verify(handler_module: str, arguments: Optional[dict] = None) -> Result:
+def _call(check, arguments: dict, tool: Optional[str]):
+    """Call a post-condition with the tool name when it takes one.
+
+    One module can hold several tools - `volume` has set_volume and set_mute,
+    `clipboard` a getter beside its setter - and a check that cannot tell which
+    one ran has to guess. The guess was wrong in the one module that had a
+    post-condition: reading the clipboard was verified as a write of the empty
+    string, and any non-empty clipboard reported the *read* as FAILED.
+    """
+    import inspect
+
+    try:
+        takes_tool = len(inspect.signature(check).parameters) >= 2
+    except (TypeError, ValueError):
+        takes_tool = False
+    return check(arguments, tool) if takes_tool else check(arguments)
+
+
+def verify(handler_module: str, arguments: Optional[dict] = None, tool: Optional[str] = None) -> Result:
     """Run the module's post-condition and report what it observed.
 
     Never raises. A verification step that can crash the action path is worse
     than no verification, so every failure mode collapses to UNVERIFIED rather
     than propagating.
+
+    A callable post-condition may return None: "this call changed nothing I can
+    check" (a status query, a dry run). That is UNVERIFIED, never FAILED -
+    reporting a read as a failed write is a confident wrong answer.
     """
     declared = post_condition_for(handler_module)
     if declared is None:
@@ -133,9 +155,11 @@ def verify(handler_module: str, arguments: Optional[dict] = None) -> Result:
 
     if callable(declared):
         try:
-            outcome = declared(dict(arguments or {}))
+            outcome = _call(declared, dict(arguments or {}), tool)
         except Exception as exc:  # noqa: BLE001 - a broken check is not a failure
             return Result(Verdict.UNVERIFIED, f"post-condition raised: {type(exc).__name__}: {exc}")
+        if outcome is None:
+            return Result(Verdict.UNVERIFIED, "nothing this call changed can be checked")
         if isinstance(outcome, tuple) and len(outcome) == 2:
             ok, evidence = bool(outcome[0]), str(outcome[1])
         else:

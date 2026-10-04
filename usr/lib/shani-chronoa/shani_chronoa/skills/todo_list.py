@@ -235,7 +235,7 @@ def _run(arguments: dict) -> str:
 
     raw_id = arguments.get("id")
     if raw_id is None:
-        return f"Which task? Pass id, as shown by the list action. Nothing was changed."
+        return "Which task? Pass id, as shown by the list action. Nothing was changed."
     try:
         wanted = int(raw_id)
     except (TypeError, ValueError):

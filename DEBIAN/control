@@ -4,7 +4,13 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3, python3-gi, gir1.2-gtk-4.0, gir1.2-adw-1, python3-httpx, espeak-ng, pipewire, wireplumber, libnotify-bin, upower, tesseract-ocr, tesseract-ocr-eng, bubblewrap, libsecret, psmisc, i2c-tools, policykit-1, bluez, pciutils, usbutils, smartmontools, power-profiles-daemon, udisks2, cups-client, sane-utils, nmap, network-manager
-Suggests: whisper.cpp (voice input (speech recognition) and the wake phrase), piper-tts (a better TTS voice; espeak-ng is used when absent), python3-mcp, translate-shell
+# The TTS chain is piper, rhvoice, espeak-ng, and kokoro only when the user asks for it
+# (kokoro-tts-enabled, default false - real-time factor 1.2). Kokoro, like Piper, is a
+# pinned download into the user's home from setup (sherpa-onnx bundles onnxruntime).
+# sox is the timbre pass tts.py applies to whichever engine produced the WAV: pitch,
+# tempo and rate. Optional like every other optional engine - without it the reply is
+# spoken unchanged and the reason is said rather than guessed at.
+Suggests: soundtouch, rubberband (higher-quality pitch transposition for singing.py; without them a pitch shift falls back to sox), whisper.cpp (voice input (speech recognition) and the wake phrase), piper-tts (a better TTS voice; espeak-ng is used when absent), sox (voice pitch plus the tempo and rate controls in Settings), python3-mcp, translate-shell, gir1.2-webkit-6.0 (the in-app browser and attaching a page to the conversation), python3-onnxruntime (remove_background for any object, not only people)
 Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
 Description: Local AI assistant with privacy-first design, integrated into Shanios
  Shani Chronoa is a local-first AI assistant for the Shanios ecosystem.

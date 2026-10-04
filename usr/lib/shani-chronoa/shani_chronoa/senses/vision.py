@@ -66,7 +66,8 @@ import httpx
 
 from shani_chronoa import argfile, screengrab
 from shani_chronoa import egress
-from shani_chronoa.config import ChronoaConfig, HardwareProfile
+from shani_chronoa.config import ChronoaConfig
+from shani_chronoa.hardware_profile import HardwareProfile
 from shani_chronoa.senses import SENSITIVITY_PRIVATE, Percept, Sense
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,7 @@ TTL_SECONDS = 90.0
 # timeout is the same number, and the parent adds a small grace on top for
 # interpreter start-up.
 DEFAULT_TIMEOUT_SECONDS = 90.0
+BACKEND_OLLAMA, BACKEND_LLAMACPP = "ollama", "llamacpp"
 CHILD_GRACE_SECONDS = 15.0
 
 # The instruction sent with the image. Short, because a long one eats the
@@ -206,7 +208,7 @@ def describe_image(
 
     `transport` exists so the request shape can be proven with
     `httpx.MockTransport` - the same technique this repo's `assistant.py` and
-    `llm.py` tests use - without a running Ollama. Production passes nothing.
+    `ollama_llm.py` tests use - without a running Ollama. Production passes nothing.
 
     Raises `VisionError` with a message fit to show a user; nothing here returns
     an empty description, because "the model said nothing" and "the model said
@@ -282,6 +284,13 @@ def describe_captured(arguments: dict) -> str:
             image = payload.read()
     _require(isinstance(image, (bytes, bytearray)), "no image was passed to describe_captured")
     timeout = arguments.get("timeout_seconds")
+    if arguments.get("backend") == BACKEND_LLAMACPP:
+        from shani_chronoa import local_vision
+        try:
+            return local_vision.describe(bytes(image), str(arguments.get("prompt") or DEFAULT_PROMPT),
+                                         float(DEFAULT_TIMEOUT_SECONDS if timeout is None else timeout))
+        except local_vision.VisionError as exc:
+            raise VisionError(str(exc)) from exc
     return describe_image(
         bytes(image),
         str(arguments.get("model") or ""),
@@ -312,7 +321,7 @@ def _child_env() -> dict:
 
 
 def _describe_via_child(
-    image: bytes, model: str, host: str, prompt: str, timeout: float
+    image: bytes, model: str, host: str, prompt: str, timeout: float, backend: str = "ollama"
 ) -> str:
     """Hand the image to a child interpreter by reference and read its answer.
 
@@ -332,6 +341,7 @@ def _describe_via_child(
             "host": host,
             "prompt": prompt,
             "timeout_seconds": timeout,
+            "backend": backend,
         },
         by_reference=True,
     )
@@ -419,9 +429,17 @@ def run(arguments: dict) -> "str | Percept":
     if not config.sense_allowed(CONSENT_SENSE):
         return _refusal(config.sense_allowed_reason(CONSENT_SENSE))
 
+    # A vision model set up in Chronoa's own setup (llama.cpp, on 127.0.0.1)
+    # comes first; a local Ollama is the fallback. Asking for a model by name
+    # means Ollama, as it always has.
+    from shani_chronoa import local_vision, model_service
+    backend = BACKEND_LLAMACPP if not arguments.get("model") and local_vision.available() else BACKEND_OLLAMA
     try:
-        model = _model(arguments, config)
-        host = local_endpoint(config)
+        if backend == BACKEND_LLAMACPP:
+            model, host = local_vision.active(), model_service.base_url(local_vision.INSTANCE)
+        else:
+            model = _model(arguments, config)
+            host = local_endpoint(config)
         timeout = _timeout(arguments)
         source = str(arguments.get("source") or screengrab.SOURCE_SCREEN).strip()
         _require(source in screengrab.SOURCES, f"{source!r} is not a capture source; expected one of {', '.join(screengrab.SOURCES)}")
@@ -440,7 +458,7 @@ def run(arguments: dict) -> "str | Percept":
         return _refusal(str(e))
 
     try:
-        description = _describe_via_child(capture.data, model, host, prompt, timeout)
+        description = _describe_via_child(capture.data, model, host, prompt, timeout, backend)
     except VisionError as e:
         return _refusal(str(e))
 
@@ -455,6 +473,7 @@ def run(arguments: dict) -> "str | Percept":
         metadata={
             "model": model,
             "endpoint": host,
+            "backend": backend,
             "capture_source": capture.source,
             "capture_backend": capture.backend,
             "width": capture.width,

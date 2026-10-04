@@ -26,7 +26,7 @@ SCHEMA = {
     "function": {
         "name": "open_file",
         "description": (
-            "Open a file or folder using the desktop's default application for "
+            "Open one specific file or folder (by its path) using the desktop's default application for "
             "it - the same thing double-clicking it would do."
         ),
         "parameters": {

@@ -1,0 +1,15 @@
+[Unit]
+Description=Shani Chronoa background mode (automatic rules and senses)
+Documentation=file:///usr/lib/shani-chronoa/shani_chronoa/daemon.py
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/shani-chronoa-daemon
+Restart=on-failure
+RestartSec=10
+# Light hardening only, per the Shanios policy: it runs the user's own rules as the user.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

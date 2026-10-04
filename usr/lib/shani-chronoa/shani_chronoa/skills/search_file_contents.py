@@ -168,8 +168,8 @@ def _run(arguments: dict) -> str:
     lines.extend(found)
     if truncated:
         lines.append(
-            f"  ... stopped early (match or byte limit). Narrow the path, raise "
-            f"max_matches, or set file_pattern to search less."
+            "  ... stopped early (match or byte limit). Narrow the path, raise "
+            "max_matches, or set file_pattern to search less."
         )
     if skipped_binary or skipped_big or unreadable:
         lines.append(

@@ -75,7 +75,7 @@ def _collect(path: Path) -> "tuple[list, list]":
         for name in names:
             child = Path(root) / name
             try:
-                size = child.stat().st_size
+                child.stat()
                 child.resolve().relative_to(path.resolve())
             except (OSError, ValueError) as exc:
                 skipped.append(f"{child} ({exc})")

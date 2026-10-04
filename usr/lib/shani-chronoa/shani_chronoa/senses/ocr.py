@@ -112,6 +112,15 @@ class OcrRequest:
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
 
 
+def default_languages() -> "tuple[str, ...]":
+    """English, then every language the person turned on in setup whose data is installed."""
+    try:
+        from shani_chronoa import languages as _languages
+        return tuple(_languages.ocr_languages())
+    except Exception:  # noqa: BLE001 - a settings problem must not stop reading English
+        return DEFAULT_LANGUAGES
+
+
 def resolve_tesseract() -> Optional[str]:
     """Return the tesseract binary, or None if this machine has none."""
     found = shutil.which("tesseract")
@@ -154,6 +163,10 @@ def find_tessdata_dir() -> Optional[str]:
             if os.path.basename(prefix.rstrip(os.sep)) == "tessdata"
             else os.path.join(prefix, "tessdata")
         )
+    # the user's own directory, which setup fills with extra languages beside
+    # links to the system's English data; tesseract reads only one directory
+    from shani_chronoa import languages as _languages
+    candidates.append(str(_languages.tessdata_dir()))
     candidates.append(FALLBACK_TESSDATA_DIR)
     return next((c for c in candidates if _usable_tessdata(c)), None)
 
@@ -329,7 +342,7 @@ def _extract_text(arguments: dict) -> OcrRequest:
     """Read and validate the sense's arguments. Raises OcrError on bad input."""
     path = str(arguments.get("path") or "").strip()
     _require(path and os.path.isfile(path), f"{path or 'no path'} is not a readable file")
-    languages = arguments.get("languages") or DEFAULT_LANGUAGES
+    languages = arguments.get("languages") or default_languages()
     _require(
         isinstance(languages, (list, tuple)) and not isinstance(languages, str),
         "languages must be a list of tesseract language codes",

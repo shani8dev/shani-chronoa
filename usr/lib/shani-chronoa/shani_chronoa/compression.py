@@ -58,7 +58,7 @@ can be wrong in the direction that matters. So the default path through
 - **`chronoa_compression` parallel field.** From agno's
   `compression/manager.py:161`, which writes `tool_msg.compressed_content`
   while `content` stays intact - lossless, inspectable, reversible. Chronoa's
-  message dicts are forwarded to the provider verbatim (`llm.py:56` does
+  message dicts are forwarded to the provider verbatim (`ollama_llm.py:56` does
   `{**msg, ...}`), so a field the consumer chooses between is not available
   here; the equivalent that *is* available is a small record beside the reduced
   text carrying the original size, the original line count, a SHA-256 of the
@@ -307,7 +307,7 @@ def _describe(kind: str, original: str, *, spill: "str | None" = None,
 
     agno's `compressed_content` is lossless, inspectable and reversible
     because `content` is left intact beside it. Chronoa's dicts go to the
-    provider verbatim (`llm.py:56` is `{**msg, ...}`), so keeping the original
+    provider verbatim (`ollama_llm.py:56` is `{**msg, ...}`), so keeping the original
     on the wire would defeat the entire saving and shipping a *second* copy of
     the summary would waste what was just won. So the parallel record holds the
     provenance instead: what the original was, how big, and where the full text

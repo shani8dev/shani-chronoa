@@ -46,6 +46,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PERSONAL, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -75,19 +76,6 @@ _MAX_LISTED = 40
 OWNER_NAMED = "named"
 OWNER_UNKNOWN = "unknown"
 OWNER_GONE = "no-live-process"
-
-
-def _read_text(path: Path) -> Optional[str]:
-    """File contents, or None when it could not be read.
-
-    Deliberately does not distinguish "absent" from "unreadable" to its callers:
-    the one caller that needs to (`read_socket_table`) checks the file's own
-    existence first, and every other caller has only one right answer for both.
-    """
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return None
 
 
 def _decode_ipv4(hex_address: str) -> str:
@@ -133,7 +121,7 @@ def read_socket_table(path: Path, ipv6: bool = False) -> Optional[List[dict]]:
     """
     if not path.is_file():
         return None
-    text = _read_text(path)
+    text = sysfs.read_raw(path)
     if text is None:
         return None
 
@@ -166,7 +154,7 @@ def read_socket_table(path: Path, ipv6: bool = False) -> Optional[List[dict]]:
 
 
 def _process_name(pid: str) -> str:
-    return (_read_text(_PROC / pid / "comm") or "?").strip() or "?"
+    return (sysfs.read_raw(_PROC / pid / "comm") or "?").strip() or "?"
 
 
 def map_socket_inodes(wanted: set) -> tuple:

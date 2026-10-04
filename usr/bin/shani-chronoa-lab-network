@@ -1,0 +1,288 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - the privileged half of the lab network builder.
+
+This is the only program in the package that acts as root, and it exists
+because creating a network namespace requires `CAP_NET_ADMIN`. It is written
+to be boring in the specific way that matters for a root process:
+
+- **It takes no arguments that describe what to build.** Only a *path* to a
+  plan file. Everything else - the network's name, its CIDRs, every command - comes
+  out of that plan, and `netprovision.revalidate()` re-derives the whole plan
+  from the request embedded in it and refuses the file if a single step differs.
+  So this helper cannot be talked into running a command that
+  `netprovision.build_plan()` would not have produced.
+- **It never uses a shell.** Every step is an argv array run with
+  `shell=False`, and there is no code path here that builds a command string.
+- **It is a fixed program with fixed subcommands**, which is what makes a polkit
+  action meaningful: the action names *this* program, so the authorisation is
+  "run the network builder", not "run anything as root".
+
+Subcommands:
+
+    list                     what this tool has built, and what is on the host
+    plan   <file>            print what the plan would do, changing nothing
+    apply  <file>            run the plan
+    destroy <name>           tear one network down
+    destroy-all              tear every network this tool recorded down
+
+`apply` is deliberately the only one that acts on a file, and it writes its
+record before reporting success: if the process is killed half-way the record
+still exists, so `destroy` can clean up rather than leaving namespaces behind.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+# dirname(dirname(__file__)) - the package lives one directory deeper, and
+# deriving it that way is the fix for a launcher path bug that shipped once.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa import netprovision as np  # noqa: E402
+
+#: Creating a network is many commands; the ceiling is generous but finite, so a
+#: plan cannot hold the helper indefinitely.
+STEP_TIMEOUT = 30
+PLAN_TIMEOUT = 180
+
+
+def _require_root() -> None:
+    if os.geteuid() != 0:
+        print(
+            "This needs to run as root: creating a network namespace requires "
+            "CAP_NET_ADMIN. Run it through pkexec, or as root directly.",
+            file=sys.stderr)
+        raise SystemExit(77)
+
+
+def _run_step(argv, optional: bool, timeout: int = STEP_TIMEOUT):
+    """Run one argv array. Returns (ok, output). Never raises on a failed command."""
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout, check=False)
+    except FileNotFoundError as exc:
+        return False, f"{argv[0]}: not installed ({exc.strerror or exc})"
+    except subprocess.TimeoutExpired:
+        return False, f"{argv[0]}: did not finish within {timeout}s"
+    except OSError as exc:
+        return False, f"{argv[0]}: could not be run ({exc})"
+    if proc.returncode == 0:
+        return True, ""
+    detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    return False, f"{' '.join(argv)}: exit {proc.returncode}" + (
+        f" - {detail[-1]}" if detail else "")
+
+
+def _namespaces_on_host() -> list:
+    try:
+        proc = subprocess.run(["ip", "netns", "list"], capture_output=True,
+                              text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [line.split()[0] for line in proc.stdout.splitlines() if line.strip()]
+
+
+def cmd_list(args) -> int:
+    record = np.load_record()
+    print("Built by this tool:")
+    if not record:
+        print("  (none)")
+    for name in sorted(record):
+        entry = record[name]
+        subnets = entry.get("subnets") or []
+        print(f"  network {name}  {entry.get('cidr', '?')}  "
+              f"{len(subnets)} subnet(s), masquerade "
+              f"{'on' if entry.get('nat') else 'off'}  "
+              f"recorded {entry.get('created', 'at an unrecorded time')}")
+        for subnet in subnets:
+            print(f"      {subnet.get('name')} {subnet.get('cidr')} "
+                  f"({'public' if subnet.get('public') else 'private'})")
+
+    present = set(_namespaces_on_host())
+    recorded = set(record)
+    orphaned = sorted(present - recorded)
+    print("\nNetwork namespaces on the host:")
+    if not present:
+        print("  (none)")
+    for name in sorted(present):
+        mark = "managed" if name in recorded else "not built by this tool"
+        print(f"  {name}  ({mark})")
+    if orphaned:
+        print("  Namespaces marked 'not built by this tool' are not this tool's "
+              "to delete. destroy-all only touches the ones it recorded.")
+    return 0
+
+
+def cmd_plan(args) -> int:
+    plan = np.read_envelope(args.file)
+    action, network, steps = np.revalidate(plan)
+    print(np.render_plan(network, steps, f"Plan ({action}) - nothing was changed:"))
+    return 0
+
+
+def cmd_apply(args) -> int:
+    plan = np.read_envelope(args.file)
+    action, network, steps = np.revalidate(plan)
+    print(np.render_plan(network, steps, f"Applying ({action}):"))
+
+    failures = []
+    for number, step in enumerate(steps, start=1):
+        ok, detail = _run_step(step.argv, step.optional)
+        status = "ok" if ok else ("skipped" if step.optional else "FAILED")
+        print(f"  {number:>3}/{len(steps)} {status:<8} {step.note}")
+        if not ok:
+            if step.optional:
+                print(f"        {detail}")
+            else:
+                failures.append((number, detail, step.note))
+                print(f"        {detail}")
+
+    if failures:
+        print(f"\n{len(failures)} step(s) failed, so this network is NOT built.")
+        for number, detail, note in failures[:3]:
+            print(f"    step {number}: {detail}")
+        if action == "create":
+            _rollback(network)
+        return 1
+
+    if action == "create":
+        from datetime import datetime, timezone
+        record = np.load_record()
+        record[network.name] = {
+            "cidr": network.cidr,
+            "nat": network.nat,
+            "uplink": network.uplink,
+            "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "subnets": [{"name": s.name, "cidr": s.cidr, "public": s.public,
+                         "gateway": s.gateway, "instance": s.instance}
+                        for s in network.subnets],
+        }
+        np.save_record(record)
+        print("\nBuilt and recorded:")
+        print(np.describe(network))
+        leftovers = sorted(set(_namespaces_on_host()) - set(record) - {
+            f"{network.name}--{s.name}" for s in network.subnets} - {network.name})
+        if leftovers:
+            print(f"\nNote: unrelated namespaces are also present ({', '.join(leftovers)}). "
+                  f"They are not this tool's and were left alone.")
+    else:
+        record = np.load_record()
+        record.pop(network.name, None)
+        np.save_record(record)
+        print(f"\n{network.name} removed and forgotten.")
+    return 0
+
+
+def _recorded_network(name: str):
+    """The network for `name`, rebuilt from its record through the same validator.
+
+    Rebuilding rather than trusting the record's fields is the point: a
+    hand-edited record cannot make this delete anything the builder would not
+    have created in the first place.
+    """
+    entry = np.load_record().get(name)
+    if entry is None:
+        return None
+    return np.parse_request({
+        "name": name,
+        "cidr": entry.get("cidr"),
+        "nat": bool(entry.get("nat", True)),
+        "uplink": entry.get("uplink") or "",
+        "subnets": entry.get("subnets") or [],
+    })
+
+
+def cmd_destroy(args) -> int:
+    network = _recorded_network(args.name)
+    if network is None:
+        known = ", ".join(sorted(np.load_record())) or "none"
+        return _refuse(f"No network called {args.name!r} is recorded, so nothing "
+                       f"was removed. Recorded networks: {known}. Namespaces this "
+                       f"tool did not build are never removed by it.")
+    steps = np.build_teardown(network)
+    print(np.render_plan(network, steps, f"Destroying {args.name}:"))
+    failures = 0
+    for number, step in enumerate(steps, start=1):
+        ok, detail = _run_step(step.argv, step.optional)
+        if not ok and not step.optional:
+            failures += 1
+        print(f"  {number:>3}/{len(steps)} {'ok' if ok else 'FAILED':<8} {step.note}")
+        if not ok:
+            print(f"        {detail}")
+    record = np.load_record()
+    record.pop(args.name, None)
+    np.save_record(record)
+    if failures:
+        print(f"\n{failures} step(s) failed. The record was cleared anyway so this "
+              f"can be retried, but check `list` before assuming it is gone.")
+        return 1
+    print(f"\n{args.name} removed and forgotten.")
+    return 0
+
+
+def cmd_destroy_all(args) -> int:
+    names = sorted(np.load_record())
+    if not names:
+        print("No networks are recorded, so nothing was removed. Namespaces this tool "
+              "did not build are never removed by it.")
+        return 0
+    print(f"Destroying {len(names)} recorded network(s): {', '.join(names)}")
+    failed = []
+    for name in names:
+        network = _recorded_network(name)
+        for step in np.build_teardown(network):
+            ok, detail = _run_step(step.argv, step.optional)
+            if not ok and not step.optional:
+                failed.append(f"{name}: {detail}")
+    np.save_record({})
+    if failed:
+        print(f"\n{len(failed)} step(s) failed:")
+        for line in failed:
+            print(f"  {line}")
+        return 1
+    print("\nAll recorded lab networks removed.")
+    return 0
+
+
+def _refuse(message: str) -> int:
+    print(message)
+    return 2
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="shani-chronoa-lab-network",
+        description="Build and tear down isolated lab networks out of Linux "
+                    "network namespaces, veth pairs and nftables. Intended to be "
+                    "reached through pkexec from Chronoa's network skills, and to "
+                    "be usable by hand as root.")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("list", help="what this tool built, and what is on the host")
+    for name, help_text in (("plan", "print a plan file without running it"),
+                            ("apply", "run a plan file")):
+        entry = sub.add_parser(name, help=help_text)
+        entry.add_argument("file", help="path to a plan written by Chronoa")
+    entry = sub.add_parser("destroy", help="tear down one recorded network")
+    entry.add_argument("name", help="the network's name")
+    sub.add_parser("destroy-all", help="tear down every recorded network")
+
+    args = parser.parse_args(argv)
+    handlers = {"list": cmd_list, "plan": cmd_plan, "apply": cmd_apply,
+                "destroy": cmd_destroy, "destroy-all": cmd_destroy_all}
+    try:
+        if args.command in ("plan", "apply"):
+            return handlers[args.command](args)
+        return handlers[args.command](args)
+    except np.Rejected as exc:
+        print(f"Refused: {exc}")
+        return 2
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    _require_root()
+    raise SystemExit(main())

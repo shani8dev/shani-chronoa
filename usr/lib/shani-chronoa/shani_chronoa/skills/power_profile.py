@@ -144,4 +144,18 @@ def _run(arguments: dict) -> str:
     return f"Power profile set to {active or wanted}."
 
 
+
+def _post_condition(arguments: dict):
+    """`powerprofilesctl get`, a separate process from the one that set it."""
+    wanted = (arguments.get("profile") or "").strip()
+    if not wanted:
+        return None
+    now = current()
+    return now == wanted, f"read back: {now or 'nothing'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="set_power_profile", schema=SCHEMA, run=_run)]

@@ -1,0 +1,19 @@
+[Unit]
+Description=Shani Chronoa local language model (llama.cpp)
+Documentation=man:llama-server(1)
+# Started by Chronoa's setup once a model is downloaded; never by default.
+ConditionPathExists=%h/.local/share/shani-chronoa/llm/current.gguf
+
+[Service]
+# Arguments are written by Chronoa (local_llm.write_env): GPU offload when
+# llama-server lists a Vulkan device, CPU threads otherwise.
+EnvironmentFile=%h/.config/shani-chronoa/llm.env
+ExecStart=/usr/bin/llama-server $LLAMA_ARGS
+Restart=on-failure
+RestartSec=5
+# Minimal hardening only (see AGENTS.md): it is the user's own process.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

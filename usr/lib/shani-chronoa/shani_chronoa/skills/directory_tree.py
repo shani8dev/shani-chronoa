@@ -32,7 +32,6 @@ Honesty rules, each a place a naive tree renderer is quietly wrong:
 from __future__ import annotations
 
 import os
-import stat as stat_mod
 from pathlib import Path
 
 from shani_chronoa import files

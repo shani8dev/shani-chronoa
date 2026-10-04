@@ -42,7 +42,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa import pipewire
@@ -172,7 +172,7 @@ def _mute_mic(muted: bool) -> dict:
     if shutil.which("wpctl") is None:
         return {"text": (
             "Cannot mute the microphone: wpctl is not installed. It comes with "
-            "the pipewire package group, which shani-multimedia ships. Until "
+            "the wireplumber package, which shani-multimedia ships. Until "
             "then the hardware switch on the keyboard is the only route, and "
             "that is a manual action this skill cannot take."
         ), "changed": [], "failed": []}

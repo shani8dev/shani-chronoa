@@ -52,6 +52,7 @@ from typing import List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,6 @@ _START_TIME_INDEX = 19
 _MAX_RECORDS = 10
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return None
-
-
 def _clock_ticks() -> Optional[int]:
     """`SC_CLK_TCK`, which is what `/proc/<pid>/stat`'s start-time counts in."""
     try:
@@ -98,7 +92,7 @@ def read_boot_id() -> Optional[str]:
     subtracting uptime from the current time and calling the result the boot
     time - those are different claims with different error bars.
     """
-    raw = _read_text(_BOOT_ID)
+    raw = sysfs.read_raw(_BOOT_ID)
     if not raw:
         return None
     value = raw.strip()
@@ -107,7 +101,7 @@ def read_boot_id() -> Optional[str]:
 
 def read_btime() -> Optional[int]:
     """The boot instant as a Unix timestamp, from the `btime` line of /proc/stat."""
-    text = _read_text(_STAT)
+    text = sysfs.read_raw(_STAT)
     if not text:
         return None
     for line in text.splitlines():
@@ -126,7 +120,7 @@ def read_process_started(pid: str, btime: Optional[int],
     """
     if btime is None or ticks is None:
         return None
-    text = _read_text(_PROC / pid / "stat")
+    text = sysfs.read_raw(_PROC / pid / "stat")
     if not text:
         return None
     tail = text.rsplit(")", 1)

@@ -100,6 +100,11 @@ class Page(NamedTuple):
     text: str
     chars_dropped: int
     bytes_truncated: bool
+    #: Where `text` starts in the page's full readable text (servers/fetch `start_index`).
+    start: int = 0
+    #: For a `find`: (offset, snippet) for each place the phrase occurs, from the whole page.
+    matches: tuple = ()
+    find: str = ""
 
 
 class _TextExtractor(HTMLParser):
@@ -223,7 +228,49 @@ def _check_content_type(content_type: str) -> None:
     )
 
 
-def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
+#: robots.txt answers, per site, for this process (a site's rules rarely change mid-conversation)
+_ROBOTS: "dict[str, object]" = {}
+ROBOTS_AGENT = "ShaniChronoa"
+
+
+def _robots_allows(client: httpx.Client, url: str) -> bool:
+    """Whether the site's robots.txt lets Chronoa fetch `url` (Alpaca checks the same before a page).
+
+    A page fetched because a model asked for it is the kind of automated
+    request robots.txt exists for. Python's own rules apply: no robots.txt, or
+    any other 4xx, means everything is allowed; 401/403 means nothing is; a
+    network error fails open, because a site that cannot serve its robots.txt
+    has not asked for anything.
+    """
+    from urllib.parse import urlsplit
+    from urllib.robotparser import RobotFileParser
+    parts = urlsplit(url)
+    site = f"{parts.scheme}://{parts.netloc}"
+    parser = _ROBOTS.get(site)
+    if parser is None:
+        parser = RobotFileParser()
+        status = None
+        try:
+            response = client.get(site + "/robots.txt", timeout=CONNECT_TIMEOUT_SECONDS + 3)
+            status = response.status_code
+            if status in (401, 403):
+                parser.disallow_all = True
+            elif status == 200:
+                parser.parse(response.text[:200_000].splitlines())
+            else:
+                parser.allow_all = True
+        except httpx.HTTPError:
+            parser.allow_all = True
+        finally:
+            from shani_chronoa import egress
+            egress.record("webtext:robots", site + "/robots.txt", method="GET", status=status, bytes_out=0,
+                          privacy_mode=egress.privacy_mode_enabled())
+        _ROBOTS[site] = parser
+    return parser.can_fetch(ROBOTS_AGENT, url)
+
+
+def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None,
+             start: int = 0, find: str = "") -> Page:
     """Fetch `url` and return its readable text.
 
     `transport` exists so a test can substitute `httpx.MockTransport`; the
@@ -267,6 +314,8 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
             hops = 0
             while True:
                 _check_url(hop_url)
+                if not _robots_allows(client, hop_url):
+                    raise RetrievalError("the site's robots.txt asks automated readers not to fetch that page")
                 fetched_url = hop_url
                 with client.stream("GET", hop_url) as response:
                     status_code = response.status_code
@@ -329,13 +378,26 @@ def retrieve(url: str, transport: Optional[httpx.BaseTransport] = None) -> Page:
             f"{fetched_url} returned {len(body)} bytes of "
             f"{content_type or 'unknown type'} with no readable text in it"
         )
-    clipped = full_text[:MAX_TEXT_CHARS]
+    start = max(0, min(int(start or 0), len(full_text)))
+    clipped = full_text[start:start + MAX_TEXT_CHARS]
+    matches = ()
+    if find and find.strip():
+        # browser-use `search_page`: grep the page, at no model cost, over all of it - not one slice.
+        needle, low, found = find.strip().lower(), full_text.lower(), []
+        at = low.find(needle)
+        while at != -1 and len(found) < 25:
+            found.append((at, " ".join(full_text[max(0, at - 150): at + len(needle) + 150].split())))
+            at = low.find(needle, at + len(needle))
+        matches = tuple(found)
     return Page(
         url=fetched_url,
         title=extractor.title(),
         text=clipped,
-        chars_dropped=len(full_text) - len(clipped),
+        chars_dropped=len(full_text) - start - len(clipped),
         bytes_truncated=bytes_truncated,
+        start=start,
+        matches=matches,
+        find=find.strip() if find else "",
     )
 
 
@@ -358,9 +420,21 @@ def render(page: Page) -> str:
         notes.append(
             f"The response was larger than {MAX_RESPONSE_BYTES} bytes and was cut off."
         )
+    if page.find:
+        if not page.matches:
+            return header + "\n" + "\n".join(notes) + f"\n\nThe page does not contain {page.find!r}."
+        lines = [f"{len(page.matches)} place(s) mention {page.find!r}"
+                 + (" (first 25 shown)" if len(page.matches) == 25 else "") + ":"]
+        lines += [f"- at {off}: ...{snip}..." for off, snip in page.matches]
+        lines.append("Read around one with start_index set to its offset.")
+        return header + "\n" + "\n".join(notes) + "\n\n" + "\n".join(lines)
+    if page.start:
+        notes.append(f"Showing from character {page.start}.")
     if page.chars_dropped:
-        notes.append(f"{page.chars_dropped} further characters were dropped.")
+        notes.append(f"{page.chars_dropped} further characters were dropped from this reply; read on "
+                     f"with start_index={page.start + len(page.text)}.")
     body = page.text
     if page.chars_dropped:
-        body += f"\n[truncated after {MAX_TEXT_CHARS} characters]"
+        body += (f"\n[truncated after {MAX_TEXT_CHARS} characters - continue with "
+                 f"start_index={page.start + len(page.text)}]")
     return header + "\n" + "\n".join(notes) + "\n\n" + body

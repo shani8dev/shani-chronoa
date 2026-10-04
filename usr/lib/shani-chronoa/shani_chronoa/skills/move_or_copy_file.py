@@ -11,6 +11,7 @@ crossed a filesystem boundary. A refused overwrite says what is in the way.
 
 from __future__ import annotations
 
+import os
 import shutil
 
 from shani_chronoa import files
@@ -84,6 +85,28 @@ def _run(arguments: dict) -> str:
         return f"Reported success but {destination} is not there."
     verb = "Copied" if mode == "copy" else "Moved"
     return f"{verb} {source} to {destination}."
+
+
+
+def _post_condition(arguments: dict):
+    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    mode = (arguments.get("mode") or "move").strip().lower()
+    try:
+        source = files.resolve(arguments.get("source") or "")
+        destination = files.resolve(arguments.get("destination") or "")
+    except files.PathProblem:
+        return None
+    if destination.is_dir() and source.name and (destination / source.name).exists() and not source.is_dir():
+        destination = destination / source.name
+    there = destination.exists()
+    left = os.path.lexists(source)
+    ok = there and (not left if mode == "move" else True)
+    return ok, f"destination {'exists' if there else 'missing'}" + (f", source {'still there' if left else 'gone'}"
+                                                                     if mode == "move" else "")
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
 
 
 SKILLS = [Skill(name="move_or_copy_file", schema=SCHEMA, run=_run)]

@@ -49,7 +49,8 @@ import urllib.request
 from pathlib import Path
 from typing import List, Optional, Union
 
-from shani_chronoa.config import ChronoaConfig, HardwareProfile
+from shani_chronoa.config import ChronoaConfig
+from shani_chronoa.hardware_profile import HardwareProfile
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
 

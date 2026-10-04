@@ -17,11 +17,9 @@ than guessed at.
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill

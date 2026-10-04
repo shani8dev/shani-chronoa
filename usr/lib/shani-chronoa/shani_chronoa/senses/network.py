@@ -17,15 +17,14 @@ is the cheapest possible read of whether a failure is local or remote.
 import logging
 import shutil
 import re
-import re
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-from typing import Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +55,8 @@ _SCHEMA = {
 }
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def read_resolvers() -> list:
-    text = _read_text(Path(_RESOLV))
+    text = sysfs.read_text(Path(_RESOLV))
     if not text:
         return []
     return re.findall(r"^\s*nameserver\s+(\S+)", text, re.MULTILINE)
@@ -73,30 +65,23 @@ def read_resolvers() -> list:
 _UNKNOWN_VALUES = {"unknown!", "unknown (255)", "unknown!", "n/a"}
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def _sysfs_link(interface: str) -> dict:
     entry = _NET / interface
     record = {
-        "operstate": _read_text(entry / "operstate") or "unknown",
-        "carrier": _read_text(entry / "carrier"),
-        "mtu": _read_text(entry / "mtu"),
-        "address": _read_text(entry / "address"),
+        "operstate": sysfs.read_text(entry / "operstate") or "unknown",
+        "carrier": sysfs.read_text(entry / "carrier"),
+        "mtu": sysfs.read_text(entry / "mtu"),
+        "address": sysfs.read_text(entry / "address"),
         "wireless": (entry / "wireless").is_dir(),
     }
-    speed = _read_text(entry / "speed")
+    speed = sysfs.read_text(entry / "speed")
     # `-1` is the kernel's "not applicable or not known" for a down link, and
     # the file is empty for a wireless interface. Neither is a number.
     if speed is not None and speed.lstrip("-").isdigit() and int(speed) > 0:
         record["speed_mbps"] = int(speed)
     else:
         record["speed"] = None
-    duplex = _read_text(entry / "duplex")
+    duplex = sysfs.read_text(entry / "duplex")
     if duplex and duplex not in ("unknown", ""):
         record["duplex"] = duplex
     return record

@@ -20,7 +20,7 @@ closes. The integer counters need no overflow guard: Python ints are
 arbitrary precision, so the 64-bit wrap Codex has to defend against cannot
 occur here.
 
-Those two children are supervised through `gateway_supervisor.py`
+Those two children are supervised through `child_supervisor.py`
 (`_SUPERVISOR` below), because a subprocess nobody watches is the one failure
 this module cannot report on its own. Scoped honestly: the recorder's capture
 and the player's playback are tracked; `BargeInMonitor` spawns the same
@@ -39,7 +39,7 @@ import time
 import wave
 from typing import Callable, Optional
 
-from shani_chronoa.gateway_supervisor import AgentState, GatewaySupervisor, HeartbeatStatus
+from shani_chronoa.child_supervisor import ChildState, ChildSupervisor, HeartbeatStatus
 from shani_chronoa.vad import SilenceDetector, calibrate_noise_floor, normalize_level, rms
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ _CAPTURE_STALL_SECONDS = 2.0
 _WATCHDOG_INTERVAL_SECONDS = 0.5
 
 # One registry for the whole process, for the reason the names above are names.
-_SUPERVISOR = GatewaySupervisor()
+_SUPERVISOR = ChildSupervisor()
 
 
 def audio_status() -> list[HeartbeatStatus]:
@@ -182,6 +182,29 @@ def _stream_capture_cmd(backend: str, target: Optional[str] = None) -> list:
     return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(_SAMPLE_RATE), "-c", str(_CHANNELS), "-"]
 
 
+def _light_organ(organ: str, what: str, detail: str = ""):
+    """Tell the body an organ started. Never raises into the caller.
+
+    Audio paths run inside signal-driven reads and barge-in handlers; an
+    indicator that can take the microphone down is the opposite of the point.
+    """
+    try:
+        from shani_chronoa import body
+
+        return body.body.use(organ, what, detail)
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _put_organ(activity) -> None:
+    try:
+        from shani_chronoa import body
+
+        body.body.done(activity)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 class AudioRecorder:
     """Microphone recorder producing 16kHz mono WAV files.
 
@@ -197,6 +220,10 @@ class AudioRecorder:
 
     def __init__(self, target: Optional[str] = None) -> None:
         self._proc: Optional[subprocess.Popen] = None
+        # The body activity for the capture in progress, so the ears light can
+        # be turned off at the stop rather than at a deadline. Initialised here
+        # because a stop that arrives before the first capture must not raise.
+        self._organ = None
         self._backend = self._detect_backend()
         self._auto_stop_thread: Optional[threading.Thread] = None
         self._auto_stop_cancel = threading.Event()
@@ -270,6 +297,12 @@ class AudioRecorder:
         self._proc = proc
         self._generation += 1
         self._auto_stop_cancel.clear()
+        # The ears light here, at the spawn, because that is the moment the
+        # machine's microphone starts being read by *something* - which is the
+        # only moment that matters to the person in the room. Cleared by the
+        # body's deadline rather than only on a tidy stop, so a `pw-record` that
+        # dies on its own does not leave the light on.
+        self._organ = _light_organ("ears", "listening", f"{self._backend} capture")
         self._watch_capture(proc)
         self._capture_failure = released
         self._auto_stop_thread = threading.Thread(
@@ -321,7 +354,7 @@ class AudioRecorder:
             # `Popen.pid` is always set, so this getattr only ever yields None for a
             # stand-in child. It is spelled out because the pid is reporting detail
             # only: nothing below branches on one being present, and
-            # `test_gateway_supervisor_live.py` pins that a pid-less child is still
+            # `test_child_supervisor_live.py` pins that a pid-less child is still
             # supervised correctly, so this can never become load-bearing by accident.
             pid=getattr(proc, "pid", None),
             stall_after=_CAPTURE_STALL_SECONDS,
@@ -346,7 +379,7 @@ class AudioRecorder:
         goes through `_watch_capture`, which stops the previous watchdog on its way
         past.
         """
-        reported: Optional[AgentState] = None
+        reported: Optional[ChildState] = None
         while not stop.wait(_WATCHDOG_INTERVAL_SECONDS):
             status = self.capture_status()
             if status is None:
@@ -354,7 +387,7 @@ class AudioRecorder:
             if status.state is reported:
                 continue
             reported = status.state
-            if status.state in (AgentState.DISCONNECTED, AgentState.EXITED):
+            if status.state in (ChildState.DISCONNECTED, ChildState.EXITED):
                 logger.error("Microphone capture is not delivering audio: %s", status.detail)
                 self._capture_failure = status
 
@@ -382,7 +415,7 @@ class AudioRecorder:
         if proc is None:
             return None
         status = self.capture_status()
-        if status is None or status.state not in (AgentState.DISCONNECTED, AgentState.EXITED):
+        if status is None or status.state not in (ChildState.DISCONNECTED, ChildState.EXITED):
             return None
 
         logger.error("Releasing an unresponsive microphone capture: %s", status.detail)
@@ -399,6 +432,13 @@ class AudioRecorder:
         if thread is not None:
             thread.join(timeout=2)
         self._proc = None
+        # The microphone has stopped, so the ears light goes off *now*. Relying
+        # on the 30-second deadline instead would say "listening" for half a
+        # minute after the room went quiet, which is the one thing an indicator
+        # in this position must never do - it would train a person to distrust
+        # the light that exists precisely so they can trust it.
+        _put_organ(self._organ)
+        self._organ = None
         return status
 
     def cancel_auto_stop(self) -> None:
@@ -487,6 +527,8 @@ class AudioRecorder:
                 proc.kill()
             self._proc = None
             self._auto_stop_thread = None
+            _put_organ(self._organ)
+            self._organ = None
 
         if self._generation != generation:
             logger.info("Dropping a superseded capture's result; a newer turn has started")
@@ -546,6 +588,11 @@ class AudioPlayer:
         self._lock = threading.Lock()
         self._target = target or None
         self._generation = 0
+        # The mouth activity for the reply being spoken. Held for the whole
+        # playback rather than flashed at synthesis: "the voice was prepared" and
+        # "the room heard it" are different claims, and only the second one is
+        # what somebody in the room is entitled to.
+        self._organ = None
 
     def set_target(self, target: Optional[str]) -> None:
         """Point playback at a specific device, or back to the default."""
@@ -572,7 +619,7 @@ class AudioPlayer:
             return ["pw-play", "--target", self._target, path]
         return [self._backend, path]
 
-    def play_file(self, path: str) -> bool:
+    def play_file(self, path: str) -> bool:  # noqa: D401
         """Play a WAV file, blocking until playback finishes or is stopped.
 
         Returns False when this playback did not get to finish on its own -
@@ -590,9 +637,11 @@ class AudioPlayer:
         if not self._backend:
             return False
         superseded: Optional[subprocess.Popen] = None
+        superseded_organ = None
         try:
             with self._lock:
                 superseded = self._proc
+                superseded_organ = self._organ
                 proc = subprocess.Popen(
                     self._playback_cmd(path),
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -603,6 +652,9 @@ class AudioPlayer:
         except Exception as e:
             logger.error(f"Playback failed ({self._backend}): {e}")
             return False
+        # Opened here, at the spawn, because that is when the speaker starts making
+        # noise. Cleared in the `finally` below, on every exit including barge-in.
+        self._organ = _light_organ("mouth", "speaking", os.path.basename(path)[:60])
 
         # Tracked for its exit status only. There is no byte stream to starve here -
         # this class waits on the child with one bounded `wait()` - so `stall_after` is
@@ -614,6 +666,12 @@ class AudioPlayer:
         _SUPERVISOR.update_heartbeat(_PLAYBACK_CHILD)
 
         if superseded is not None:
+            # The reply being replaced was talking a moment ago and is not any
+            # more, so its mouth light closes here. Without this the new playback
+            # overwrites `self._organ` and the old activity is unreachable: no
+            # later `done()` can ever find it, and the indicator would sit on
+            # "speaking" for the rest of the session.
+            _put_organ(superseded_organ)
             self._terminate(superseded)
 
         finished_on_its_own = False
@@ -626,6 +684,11 @@ class AudioPlayer:
         finally:
             with self._lock:
                 if self._proc is proc:
+                    # The speaker has stopped either way - it finished on its own
+                    # or it was cut short - so the mouth light goes off here, in
+                    # the one place every exit from a playback passes through.
+                    _put_organ(self._organ)
+                    self._organ = None
                     self._proc = None
                 finished_on_its_own = finished_on_its_own and self._generation == generation
             # Whether a positive exit status means "the child failed on its own" cannot
@@ -677,6 +740,13 @@ class AudioPlayer:
         with self._lock:
             proc = self._proc
             self._proc = None
+            # Barge-in: the reply was cut off, so the mouth closes now. Without
+            # this the light would stay on until the playback thread's own
+            # `finally` ran, which for an interrupted turn can be seconds of
+            # silence with the indicator still claiming Chronoa is speaking.
+            if proc is not None:
+                _put_organ(self._organ)
+                self._organ = None
             # Bumped even when there is nothing to stop, so a `play_file` that
             # is between Popen and wait() still learns that it was superseded.
             self._generation += 1
@@ -695,6 +765,9 @@ class AudioPlayer:
             return self.play_file(path)
         finally:
             os.unlink(path)
+
+
+_BARGE_IN_FRAMES = 3
 
 
 class BargeInMonitor:
@@ -825,6 +898,7 @@ class BargeInMonitor:
             # this whole class is off by default to avoid.
             self._playing.wait(timeout=self._PRE_PLAYBACK_GUARD_SECONDS)
 
+            loud_run = 0
             while not self._stop.is_set():
                 # A frame already in flight when `stop()` arrived was captured
                 # before the monitor was stopped, so it is dropped instead of
@@ -847,7 +921,12 @@ class BargeInMonitor:
                 if self._generation != generation:
                     logger.info("Barge-in: dropping a monitor superseded by a newer playback")
                     return
-                if rms(chunk) >= threshold:
+                # three loud frames in a row (~240 ms), not one: a single peak
+                # is a cough, a click or the reply's own loudest syllable
+                # leaking back, and it cut the reply off (assistd confirms onset
+                # over consecutive frames for the same reason)
+                loud_run = loud_run + 1 if rms(chunk) >= threshold else 0
+                if loud_run >= _BARGE_IN_FRAMES:
                     logger.info("Barge-in: speech detected during playback")
                     on_interrupt()
                     return

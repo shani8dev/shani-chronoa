@@ -29,7 +29,8 @@ fallback chain stays visible rather than being re-derived per call site.
 import logging
 from typing import Callable, Dict, List, Optional, Tuple
 
-from shani_chronoa.config import ChronoaConfig, HardwareProfile
+from shani_chronoa.config import ChronoaConfig
+from shani_chronoa.hardware_profile import HardwareProfile
 
 logger = logging.getLogger(__name__)
 

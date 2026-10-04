@@ -140,7 +140,7 @@ _LOCAL_SUFFIXES = (".local", ".localhost", ".internal", ".localdomain")
 # RFC1918 as "private" and refuses them, which is right for a coding CLI -
 # there, the only loopback address anyone means is a developer's own dev
 # server, and refusing it is a feature. Chronoa's own Ollama endpoint is
-# `http://127.0.0.1:11434`; the product *is* that address, and `llm.py` and
+# `http://127.0.0.1:11434`; the product *is* that address, and `ollama_llm.py` and
 # `senses/vision.py` post to it on every turn. Copied verbatim, gemini-cli's
 # list would stop Chronoa working.
 #
@@ -208,7 +208,7 @@ def privacy_mode_enabled() -> bool:
     read the property's docstring says it exists to avoid.
 
     The import is inside the function because `config` pulls in `gi`/`Gio`.
-    `egress` is imported by `llm.py`, `cloud_llm.py`, `webtext.py` and
+    `egress` is imported by `ollama_llm.py`, `cloud_llm.py`, `webtext.py` and
     `senses/vision.py`, and a module-level import would make the audit log
     unimportable on a system without GObject - turning "the alarm cannot be
     evaluated" into "the request cannot be made".
@@ -433,6 +433,29 @@ def payload_size(obj: object) -> int:
         return 0
 
 
+def _light_skin(event: "Event") -> None:
+    """Tell the body this request reached the skin.
+
+    Placed here rather than at each call site because this function *is* the
+    single point every off-machine request passes through: the web searcher, the
+    page fetcher, the cloud fallback, the updater. Wiring it anywhere else would
+    leave a path that reaches the network without lighting anything, which is the
+    exact blind spot the strip exists to remove.
+    """
+    try:
+        from shani_chronoa import body
+
+        where = event.host or event.url
+        # A request is over in milliseconds; the light is a heartbeat rather
+        # than a duration, kept just long enough to be seen at all. A flash that
+        # never appears is the same as no indicator.
+        body.body.pulse("skin", f"{event.method} {where}"[:80],
+                        origin="user" if event.local else "network")
+    except Exception:                                   # noqa: BLE001
+        # Never let an indicator break the request it is describing.
+        pass
+
+
 def record(
     component: str,
     url: str,
@@ -461,6 +484,7 @@ def record(
         # Chronoa's documented invariant: privacy mode means nothing leaves.
         violation=bool(privacy_mode and not local),
     )
+    _light_skin(event)
     try:
         directory = _egress_dir()
         log = _egress_log()

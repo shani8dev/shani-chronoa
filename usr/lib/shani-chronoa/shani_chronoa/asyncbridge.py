@@ -35,8 +35,8 @@ class AsyncBridge:
         self,
         coro: Coroutine[Any, Any, Any],
         callback: Optional[Callable[[Any], None]] = None,
-    ) -> None:
-        """Schedule `coro` on the background loop.
+    ) -> "Any":
+        """Schedule `coro` on the background loop; returns its concurrent Future (so a caller can cancel it).
 
         If `callback` is given, it is invoked on the GTK main thread with the
         coroutine's result, or with the raised exception if it failed.
@@ -44,7 +44,7 @@ class AsyncBridge:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
 
         if callback is None:
-            return
+            return future
 
         def _on_done(fut: "asyncio.Future[Any]") -> None:
             try:
@@ -57,6 +57,7 @@ class AsyncBridge:
             GLib.idle_add(callback, result)
 
         future.add_done_callback(_on_done)
+        return future
 
     def shutdown(self) -> None:
         """Stop the background loop and join its thread.

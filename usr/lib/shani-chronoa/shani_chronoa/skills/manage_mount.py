@@ -116,7 +116,7 @@ def _run(arguments: dict) -> str:
             "udisksctl is not installed, so this will not fall back to a bare "
             "mount command. That fallback would bypass the polkit authorisation "
             "which is what makes mounting safe to offer. On Arch it comes from "
-            "udisks."
+            "udisks2 (the package is named udisks2, not udisks)."
         )
 
     device = (arguments.get("device") or "").strip()

@@ -15,7 +15,6 @@ import contextlib
 import ctypes
 import ctypes.util
 import errno
-import json
 import os
 import stat
 import sys

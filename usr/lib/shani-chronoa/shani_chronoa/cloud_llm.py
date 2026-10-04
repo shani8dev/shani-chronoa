@@ -113,7 +113,7 @@ from typing import NamedTuple, Optional
 import httpx
 
 from shani_chronoa import egress, usage as usage_mod
-from shani_chronoa.secrets_manager import secrets_manager
+from shani_chronoa.redaction import redactor
 from shani_chronoa.skills import is_valid_schema
 
 logger = logging.getLogger(__name__)
@@ -209,6 +209,20 @@ class OpenAICompatibleLLM:
     #: one. See `usage.py` for why this is not part of the returned message.
     last_usage: "usage_mod.Usage | None" = None
 
+    #: Hooks a subclass fills in (local_llm.LocalLLM does): extra request
+    #: fields, a rewrite of the messages before sending, a rewrite of the reply,
+    #: and the read timeout - a CPU model can take minutes where a cloud
+    #: gateway takes seconds.
+    extra_payload: dict = {}
+    #: set by the assistant for one request when the person named the tool ('/timer ...')
+    required_tool: str = ""
+    read_timeout: float = 60.0
+
+    def prepare_messages(self, messages: list[dict]) -> list[dict]:
+        return messages
+
+    def postprocess(self, message: dict, tools: Optional[list[dict]]) -> dict:
+        return message
 
     def __init__(self, provider: CloudProvider, model: Optional[str] = None, api_key: str = "") -> None:
         self.provider = provider
@@ -223,7 +237,7 @@ class OpenAICompatibleLLM:
             self._client_loop = loop
             self._client = httpx.AsyncClient(
                 base_url=self.provider.base_url,
-                timeout=httpx.Timeout(60.0, connect=10.0),
+                timeout=httpx.Timeout(self.read_timeout, connect=10.0),
                 # Only a real key is sent. A placeholder ("Bearer unused") used
                 # to be sent to the keyless gateways, and by 2026-10-01 it was
                 # what broke them: Kilo answered 401 "Your authentication token
@@ -240,19 +254,21 @@ class OpenAICompatibleLLM:
         both Kilo and BlockRun - see module docstring)."""
         client = await self._get_client()
         sanitized_messages = [
-            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
-            for msg in messages
+            {**msg, "content": redactor.sanitize(msg.get("content", ""))}
+            for msg in self.prepare_messages(messages)
         ]
-        payload: dict = {"model": self.model, "messages": sanitized_messages}
+        payload: dict = {"model": self.model, "messages": sanitized_messages, **self.extra_payload}
         if tools:
             payload["tools"] = _valid_tools(tools)
+            if self.required_tool:
+                payload["tool_choice"] = {"type": "function", "function": {"name": self.required_tool}}
 
         status = None
         try:
             response = await client.post("/chat/completions", json=payload)
             status = response.status_code
         except httpx.RequestError as e:
-            raise CloudLLMError(f"{self.provider.name}: request failed: {e}") from e
+            raise CloudLLMError(f"{self.provider.name}: request failed: {type(e).__name__}: {e}") from e
         finally:
             # Metadata only - never the payload. This is one of only two paths
             # that deliberately send a conversation off the machine, so it is
@@ -296,7 +312,89 @@ class OpenAICompatibleLLM:
         # Recorded beside the message, not inside it: a message is appended to
         # history and re-sent as context on later turns.
         self.last_usage = usage_mod.from_openai(data)
-        return choices[0].get("message", {})
+        return self.postprocess(choices[0].get("message", {}), tools)
+
+    #: Whether `chat_message_stream` may be used (the local llama-server: yes;
+    #: the free gateways were only ever verified non-streaming).
+    stream_supported: bool = False
+
+    async def chat_message_stream(self, messages: list[dict], tools: Optional[list[dict]] = None,
+                                  on_text=None) -> dict:
+        """Like `chat_message`, but streamed: `on_text(delta)` gets the reply's words as they arrive.
+
+        Tool-call fragments are assembled as they stream (OpenAI's indexed
+        `delta.tool_calls`). Text stops being passed on once a tool call
+        appears - it is preamble, not the answer - and a leading `<think>`
+        block is held back. Bounded per chunk, not per request: the first
+        token may take long on a CPU, but a stalled stream fails (assistd's
+        inactivity timeout).
+        """
+        import json as _json
+        client = await self._get_client()
+        payload: dict = {"model": self.model, "stream": True, **self.extra_payload, "messages": [
+            {**msg, "content": redactor.sanitize(msg.get("content", ""))}
+            for msg in self.prepare_messages(messages)]}
+        if tools:
+            payload["tools"] = _valid_tools(tools)
+        content, calls, status = [], {}, None
+        held, released = "", False
+        try:
+            async with client.stream("POST", "/chat/completions", json=payload) as response:
+                status = response.status_code
+                if status >= 400:
+                    body = (await response.aread()).decode(errors="replace")[:300]
+                    raise CloudLLMError(f"{self.provider.name}: HTTP {status}: {body}")
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = _json.loads(data)
+                    except ValueError:
+                        continue
+                    if chunk.get("usage"):
+                        self.last_usage = usage_mod.from_openai(chunk)
+                    for choice in chunk.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        for tc in delta.get("tool_calls") or []:
+                            slot = calls.setdefault(tc.get("index", 0), {"id": "", "type": "function",
+                                                                          "function": {"name": "", "arguments": ""}})
+                            slot["id"] = tc.get("id") or slot["id"]
+                            fn = tc.get("function") or {}
+                            slot["function"]["name"] += fn.get("name") or ""
+                            slot["function"]["arguments"] += fn.get("arguments") or ""
+                        text = delta.get("content") or ""
+                        if not text:
+                            continue
+                        content.append(text)
+                        if calls or on_text is None:
+                            continue
+                        if not released:
+                            held += text
+                            stripped = held.lstrip()
+                            if stripped.startswith("<think>") or "<think>".startswith(stripped):
+                                if "</think>" not in held:
+                                    continue
+                                held = held.split("</think>", 1)[1]
+                            released = True
+                            text, held = held.lstrip(), ""
+                            if not text:
+                                continue
+                        on_text(text)
+        except httpx.RequestError as e:
+            raise CloudLLMError(f"{self.provider.name}: request failed: {type(e).__name__}: {e}") from e
+        finally:
+            egress.record(
+                f"cloud_llm:{self.provider.name}", f"{self.provider.base_url}/chat/completions",
+                method="POST", status=status, bytes_out=egress.payload_size(payload),
+                privacy_mode=egress.privacy_mode_enabled(),
+            )
+        message: dict = {"role": "assistant", "content": "".join(content)}
+        if calls:
+            message["tool_calls"] = [calls[i] for i in sorted(calls)]
+        return self.postprocess(message, tools)
 
     async def check_health(self) -> bool:
         """Best-effort reachability check - lists models, doesn't spend a real request."""
@@ -411,9 +509,9 @@ class AnthropicLLM:
         client = await self._get_client()
         system_prompt, anthropic_messages = self._history_to_anthropic(messages)
         if system_prompt:
-            system_prompt = secrets_manager.sanitize_text_for_llm(system_prompt)
+            system_prompt = redactor.sanitize(system_prompt)
         sanitized_messages = [
-            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            {**msg, "content": redactor.sanitize(msg.get("content", ""))}
             for msg in anthropic_messages
         ]
         payload: dict = {
@@ -431,7 +529,7 @@ class AnthropicLLM:
             response = await client.post("/messages", json=payload)
             status = response.status_code
         except httpx.RequestError as e:
-            raise CloudLLMError(f"Anthropic: request failed: {e}") from e
+            raise CloudLLMError(f"Anthropic: request failed: {type(e).__name__}: {e}") from e
         finally:
             egress.record(
                 f"cloud_llm:{self.provider.name}",
@@ -516,7 +614,7 @@ class CloudLLMChain:
 
     async def chat_message(self, messages: list[dict], tools: Optional[list[dict]] = None, stream: bool = False) -> dict:
         sanitized_messages = [
-            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            {**msg, "content": redactor.sanitize(msg.get("content", ""))}
             for msg in messages
         ]
         last_error: Optional[Exception] = None

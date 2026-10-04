@@ -15,6 +15,10 @@ done.
 - `Boundaries`
 - `Commit discipline`
 - `Cross-repo impact`
+- `Package layout and renames` - older sections use pre-2026-10-02 file names
+- `ARCHITECTURE-TARGET.md` - the architecture Chronoa is aiming for, every box
+  mapped to today's code, and the ordered gap list. Update its row when you
+  fill a box; read its Part 4 before building anything it marks 🚫
 
 **Read when your change touches them:**
 - `Rendering the UI to a PNG` — GTK4/Adw init ordering and the capture path
@@ -79,6 +83,56 @@ Code, Cursor - can call them too; this replaced an earlier `mcp.py` that
 only looked like MCP support (see the bug list below). Packaged via both an
 Arch `PKGBUILD` and a `DEBIAN/control` (two different package managers, keep
 dependency names in the right convention for each — see below).
+
+## Package layout and renames (2026-10-02) - read before grepping
+
+The package was restructured for long-term maintenance on 2026-10-02. **Older
+sections of this file keep the names that existed when they were written**;
+use this map to translate them. Moving code changed no behaviour; the bugs
+that linting turned up were fixed separately and are listed below.
+
+| Older sections say | Now |
+|---|---|
+| `app.py` | `app/` - `application.py` (`ChronoaApplication`), with `voice`, `brain`, `conversation` and `desktop_integration` mixins, plus `common` |
+| `gui.py` | `gui/` - `window.py` (`ChronoaWindow`), `style`, `asking`, `attaching`, `conversations_menu`, `widgets`, `questions` |
+| `settings_window.py` | `settings_window/` - `window`, `senses`, `privacy`, `voice`, `activity` |
+| `triggers.py` | `triggers/` - `common`, `sources`, `desktop_sources`, `rules`, `event_rules`, `events` |
+| `office.py` | `office/` - `common`, `read`, `write`, `edit` |
+| `sandbox/executor.py` (the whole thing) | `executor.py` keeps `SandboxExecutor` and the bwrap/Landlock probes; `child.py` does the in-child hardening (`_harden_child`, `_die_with_parent`, core dumps); `commands.py` works out which program an argv really runs (`_blocked_binary`); `limits.py` holds the profile ceilings and the seccomp request (`ProfileLimitError`) |
+| `llm.py` | `ollama_llm.py`. The default local brain is now llama.cpp (`local_llm.py`, user unit `shani-chronoa-llm.service`); Ollama stays as an option |
+| `models.py` | `model_choice.py` |
+| `sessions.py` | `conversation_store.py` (many conversations, plus FTS5 search) |
+| `calendar.py` | `eds_calendar.py` (it shadowed the stdlib module) |
+| `desktop.py` | `desktop_session.py` |
+| `secrets_manager.py`, `vault.json` | **removed** - the vault was XOR plus base64, not encryption. Keys live in GSettings; `redaction.py` (`Redactor`) is what keeps them out of logs, tool output and memory |
+| `gateway_supervisor.py` | **removed** (it was dead code). `child_supervisor.py` is the part that was live |
+
+Rules the split follows, so the next change keeps them:
+
+- **A package's `__init__` re-exports its old public names**, so
+  `from shani_chronoa.triggers import RuleStore` still works. Code inside the
+  package imports from the submodule that defines a name, never from
+  `__init__`, which keeps the import graph acyclic.
+- **Patch a name where it is read, not where it is re-exported.** After a
+  move, `monkeypatch.setattr(executor_mod, "_PR_SET_PDEATHSIG", -1)` sets a
+  copy nobody reads, and the test still passes. Two tests did exactly that
+  and were repointed to `sandbox.child`. Test the patch: make it break the
+  code and confirm the test fails.
+- **Data paths are resolved per call, never at import.** `triggers_dir()`,
+  `rules_file()` and `screenshot.output_dir()` are functions because, as
+  import-time constants, they pointed the test suite at the real
+  `~/.local/share/shani-chronoa` (178 fake screenshots and a `triggers/` tree
+  ended up there). `tests/conftest.py`'s
+  `_trigger_and_capture_paths_are_inside_the_test` guard fails any test that
+  writes there.
+- **Tests that read source as text** use `tests/_source.py`'s
+  `package_source("shani_chronoa.app")`, which concatenates a package's
+  modules, so a split does not break them.
+- **Lint with pyflakes.** It found a real crash (`DEFAULT_COOLDOWN_SECONDS`
+  never imported in `skills/manage_triggers.py`) and a synonym table in
+  `tool_select.py` whose duplicated keys silently dropped `edit_image` for
+  "fix up my photo". The only expected warnings are the re-exports in
+  package `__init__.py` files.
 
 ## Empirical verification (mandatory)
 
@@ -374,9 +428,15 @@ evidence; either alone proves nothing.
 **Speech output works on Shanios today, and `espeak-ng` is load-bearing.**
 `PiperTTS().engine()` resolves to `espeak-ng` and `synthesize()` wrote a real
 81,698-byte RIFF/WAVE of 1.85s (confirmed with `ffprobe`). That is why
-`espeak-ng` is a hard `depends` and the other two tiers are `optdepends` —
-drop it and every image loses speech output entirely, because piper is not
-installable on Arch (no `onnxruntime`) and RHVoice is packaged separately.
+`espeak-ng` is a hard `depends` and the other tiers are `optdepends` — drop it
+and every image loses speech output entirely, because RHVoice is packaged
+separately and the neural engines (Kokoro, Piper) are opt-in downloads that
+are not there on a fresh install.
+**Correction (2026-10-02):** this said "piper is not installable on Arch (no
+`onnxruntime`)". The runtime is in `extra` now, and Kokoro is the neural voice
+that unblocked; `engine()` is a four-way chain, not a three-way one, and the
+measured cost of its first entry is in `Kokoro TTS` above. The conclusion — that
+`espeak-ng` must stay the only hard `depends` — is unchanged.
 
 **Speech input is absent by design, not by breakage.** `is_available()` is
 `False` and `app.py`'s `"Whisper.cpp not available - STT disabled"` is the
@@ -797,8 +857,363 @@ a *reason* for the UNKNOWN that turned out to be false, and the version before
 it failed senses whose legitimate readings are all one or two digits. A green
 line with an invented explanation is worth less than an admitted SKIP.
 
+## Surfaces added 2026-10-01: six event types, post-conditions, "Open with"
+
+Found by `tools/cli_matrix.py` (see below), which reads Chronoa's own registries
+beside the OS's commands and interfaces and showed three gaps.
+
+- **Trigger event types 6 -> 12**: `screenlock` (logind LockedHint/IdleHint),
+  `powerstate` (`/sys/class/power_supply`), `netstate` (nmcli), `usbplug`
+  (`/sys/bus/usb/devices`), `btconnect` (`bluetoothctl devices Connected`),
+  `schedule` (local clock). The `source` names the state to be told about and an
+  event exists only while it holds, so the engine's baseline-then-transition
+  logic fires on the transition *into* it (arming "locked" on a locked screen
+  fires nothing). Each has its own default-off `<type>-sense-enabled` key - the
+  names deliberately differ from the `power`/`network`/`bluetooth`/`sessions`
+  senses so no switch is shared. A peripheral's battery (`scope=Device`) is not
+  the machine's; a schedule missed while asleep (beyond `grace_minutes`, 15) is
+  skipped, not replayed. In an unbooted nspawn slot screenlock/netstate/btconnect
+  read UNAVAILABLE (no session, no NetworkManager, no bluetoothd) - correct, and
+  the real-desktop readings were checked on a laptop.
+- **Post-conditions 1 -> 14 of 60 actuators** (volume, set_mic_mute,
+  power_profile, set_timezone, control_service, kill_process, create_directory,
+  delete_file, trash_file, write_text_file, move_or_copy_file, do_not_disturb,
+  clipboard). `verify()` now passes the tool name to a two-argument check, and a
+  check returning None is UNVERIFIED. That fixed a live bug: `clipboard`'s check
+  could not tell get from set, so **reading** a non-empty clipboard reported
+  FAILED. delete/trash checks use `files.expand`, not `resolve` - resolving
+  follows a dangling symlink and reads it as removed.
+- **"Open with Chronoa"**: the desktop entry passes `%U` with a MimeType list;
+  `do_command_line` attaches file arguments/`file://` URIs (relative to the
+  *invoking* cwd - a second launch is forwarded to the running instance) and
+  `--ask=TEXT` sends a question through the window's own send path. Verified in
+  the `@blue` slot: the transcript showed `user said: <text>\n📎 os-release`.
+
+`tools/cli_matrix.py` (not packaged) writes a JSON/Markdown/HTML map of every
+command (owner, man NAME line, JSON output, intent, safety, which Chronoa
+surface it could feed, which skill/sense/trigger already calls it) plus D-Bus,
+typelibs, GSettings, Polkit, sysfs, portals and entry points. Run it in a slot:
+`SHANIOS_TEST_EXTRA_BINDS=/opt/shani-chronoa:/mnt/chronoa,<out>:/mnt/out
+build.sh test enter blue --local-src-chronoa=/opt/shani-chronoa python3
+/mnt/chronoa/tools/cli_matrix.py --out=/mnt/out/shanios-matrix`. Its
+classifications are heuristics from man summaries - a starting list, not a verdict,
+and the output says how far to trust them: `calibration` scores safety and the
+sense fit against Chronoa's own modules (2026-10-01: safety 89%, sense recall
+83% with 22% of commands classed as senses, up from 61%/19% after the fixes the
+disagreements pointed at - a syscall page chosen over the command's, "Format"
+read as a verb, `\bpack` matching "packet", no `mixed` class for managers like
+systemctl).
+
+**The matrix is also the only authority in the tree on Arch package names, and
+three package names this project states to users were wrong (fixed 2026-10-03;
+guarded by `tests/test_package_names_match_arch.py`).** `commands[].package` in
+`chronoa-matrix.json` is read out of pacman's own file database on a real image,
+so it settles arguments about what ships a binary. Auditing every package name
+this tree claims against it found three that name a package which **does not
+contain the binary the user needs** — each of which sends someone to
+`pacman -S <name>` and gets nothing:
+
+- **`wpctl` is in `wireplumber`, not the `pipewire` package.** It left
+  `pipewire` when wireplumber split off the PipeWire project, so this was a
+  *stale truth* rather than a guess — the kind that survives review forever
+  because it was once true. In `skills/privacy.py` and twice in `senses/audio.py`.
+- **`bluetoothctl` is in `bluez-utils`.** `bluez` is the daemon and does not
+  ship the client. In `skills/toggle_bluetooth.py`.
+- **`udisksctl` is in `udisks2`.** `udisks` is the pre-rename name. In
+  `skills/manage_mount.py`.
+
+`files._PACKAGE_HINTS` was four entries, so seven of the eleven skills calling
+`tool_missing()` fell back to "the package that provides it" — a sentence that
+helps nobody install anything. It now carries 45 entries, all read out of the
+matrix.
+
+**Two method traps, both hit during this audit and both worth remembering:**
+
+1. **A substring test is not a check.** The first pass matched package names as
+   substrings and reported `bluez` and `udisks` *correct*, because `bluez` is a
+   prefix of `bluez-utils` and `udisks` of `udisks2` — it found two of the
+   three real bugs as clean. Exact equality only.
+2. **The matrix's `gsettings` entries carry 5 *example* keys per schema, not all
+   of them**, so it cannot confirm an individual key name. To check
+   `desktop_setting.py`'s allowlist, use `gsettings list-keys` against the
+   installed schemas instead — which is what was done, and all 8 keys it
+   references (`enable-animations`, `cursor-size`, `clock-format`,
+   `clock-show-seconds`, `show-battery-percentage`, `enable-hot-corners`,
+   `natural-scroll`, `tap-to-click`) exist and are correct. A clean result, worth
+   recording so nobody re-audits it blind.
+
+**`open_surfaces` is a lead list, not a gap list - read this before building a
+skill out of it (measured 2026-10-03).** The matrix flags a command as a skill
+candidate when no Chronoa code *calls that binary*, and this repo deliberately
+answers questions without the binary. Checking the top candidates against the
+127 skills that exist: `fastfetch`, `lscpu`, `lsblk`, `lsmod`, `ps` and `uptime`
+are all flagged, and all six are already answered by `system_info` /
+`list_processes`, which read `/proc` on purpose because those binaries can be
+absent on a minimal image. `rg`, `fd`, `tree` and `locate` are flagged and are
+`search_file_contents`, `find_files` and `directory_tree`. So does `pactl` -
+which turns out to be covered too, by `volume.py`'s numeric device-node
+handling. **`open_surfaces` measures calls, not answers.** Also note `ideas[].score`
+is a category-size number, not a value one: every entry in a big category ties
+at 25, so ranking by it surfaces `lur-command` and `gendict`.
+
+Two skills were built from a matrix pass on 2026-10-03 after that check, both on
+`/proc`/stdlib rather than the flagged binary, both verified against the real
+thing: `json_query` (`jq` was the flagged command; `analyze_table` already reads
+JSON but flattens it, so it cannot address a nested field) and `port_owner`
+(`ss`/`lsof` were flagged; verified to report the same 10 listening sockets as
+`ss -tuln` on this machine, and it attributes sockets that `ss -p` cannot
+without privileges).
+podman, git, nmcli, flatpak, pactl...), from COMMANDS sections and from
+`<cmd>-<sub>` pages; classification is by whole-word name, then the full
+description, and defaults to "changes" - `checkout` is not `check`, and
+`log-level [LEVEL]` is a setter. `--scaffold` of a mixed tool exposes only
+its reading subcommands as an allowlisted enum (systemctl: 20 of 74).
+
+Distro-level modes, all run on the host from the JSONs a slot run wrote (one per
+image; the GNOME and Plasma images are separate harness data dirs):
+`--audit-packaging A.json B.json [--strict]` checks the matrices against
+shani-pkgbuilds and image_profiles (listed-but-not-installed, meta deps, drift
+between the profiles' lists and between the images, Chronoa's undeclared runtime
+deps, image lag against `pkgver-pkgrel`, setuid and password-less Polkit
+surface); `--strict` exits 1 on the hard ones and does not blame a stale image on
+its lists (an image older than its profile's last list commit is reported as
+stale). `--suggest A.json B.json [--suggest-json F]` ranks fix / rebuild / add /
+review / consider: "add" is measured (an installed package's unmet optional
+dependency, wanted by two or more; a command or Python module Chronoa uses),
+"consider" is a labelled catalog (opinion), X11 tools are notes, not Wayland gaps. The JSON also carries
+each package's size, build date, depends and optional deps, enabled-unit links,
+broken launchers/units and Chronoa's unresolved imports, so the audit reports
+each explicit package's *exclusive* footprint (what removing it alone frees),
+services enabled on one image only, and stale builds. `--resolve-files` asks
+pacman's files database (run `pacman -Fy` first - the builder can) instead of
+the hand-kept command->package map. `--enrich M.json --security-json all.json --tldr-zip tldr.zip
+--pkgstats-cache F` adds web data (run in the builder - it has the network and
+`vercmp`): Arch security tracker AVGs (only a recorded fixed version newer than
+the installed one is a "fix"; an open AVG with no fix is "review", because the
+tracker leaves old ones open - 2026-10-01: 25 open, 0 fixable on either image),
+tldr coverage, and pkgstats popularity from ONE paged list down to 0.5% (24 s
+for 11,873 packages; a request per package took minutes). pkgstats candidates
+are filtered to things a person picks: leaves in the sync db, not explained by
+a popular dependent (libodfgen <- libreoffice), not the base-devel closure, not
+the other desktop's image, not Arch-maintenance tools, and not apps the profile
+ships as a Flatpak. Rare-on-Arch packages on the image come with the chain that
+pulled them in (arpwatch 0.52% <- shani-tools-network).
+
+## Kokoro TTS (2026-10-02): run by sherpa-onnx, the way Piper is run by its own program
+
+Kokoro (82M, Apache-2.0) is a voice, and like Piper it needs a program to speak
+it. It first shipped as `kokoro.py`, which phonemised with espeak-ng and ran the
+ONNX graph through `python-onnxruntime-cpu`. **That module is gone (2026-10-02).**
+`tts.py` now runs sherpa-onnx's `sherpa-onnx-offline-tts` (`sherpa.py`: one
+27 MB release in the user's home, onnxruntime bundled, found through the
+binaries' `$ORIGIN/../lib` rpath) with sherpa-onnx's packaging of the model
+(`kokoro-int8-en-v0_19`, 98 MB, eleven speakers). Nothing system-wide, no
+numpy or onnxruntime for Python, and no PKGBUILD/DEBIAN dependency on either.
+
+- **Voices are speaker ids.** `voices.KOKORO_VOICES` maps six female voices to
+  their `--sid`; each id was checked byte for byte - row 30 of the speaker's
+  slice of `voices.bin` equals row 30 of that voice's own style bank in
+  onnx-community/Kokoro-82M-ONNX (the first 21 rows of every bank are
+  identical, so row 0 would prove nothing).
+- **Opt-in, by measurement.** RTF about 1.2 on a CPU (7.7 s to make 6.4 s of
+  speech in a slot; 2 and 4 threads the same; the old Python path measured
+  1.18-1.32 too), so as a default it put seconds of silence before each reply.
+  `kokoro-tts-enabled` defaults false; setup's Voice page turns it on when a
+  Kokoro voice is chosen.
+- **One list of voices.** Setup shows Piper and Kokoro voices together; picking
+  one installs the engine it needs (`setup_wizard.setup_voice`), and picking a
+  Piper voice turns Kokoro off, so the voice chosen is the voice heard. The
+  "Listen" button tries a voice without saving it (`PiperTTS.kokoro_trial_voice`
+  / `piper_trial`, never a monkeypatch on a live instance).
+- **English only.** A reply in another script (`languages.script_of`) goes to
+  that language's Piper voice instead.
+- Intelligibility was checked earlier by transcribing each engine's output back
+  with whisper: espeak-ng 0.920 and Kokoro 0.926 mean similarity - both clear;
+  the gain is naturalness, not intelligibility.
+
+## The goal (2026-10-02): a harness that makes the smallest model beat bigger ones - measured
+
+The user's stated goal: Chronoa's harness should be good enough that the
+smallest local model (Qwen3 0.6B/1.7B on a CPU) outperforms much bigger models
+on what people actually ask. Judge changes by that, and **measure it**:
+
+- `tools/task_eval.py` + `tools/eval_cases.json` (not packaged): ~60 requests
+  with the call a correct assistant makes, scored on tool and arguments,
+  **never executed**. Configs: `bare` (every schema - 131 tools are ~19,700
+  tokens, past the 8k local context, so it cannot even be sent), `select`
+  (tool_select), `select+recover` (the default: calls written as text
+  recovered), `+compact`; and `--cloud=kilo|blockrun|llm7` (the free keyless
+  providers, user's choice of baseline - "some free are good") as `cloud`
+  (every schema, no harness) and `cloud+select`.
+- A provider that is busy, rate-limited or over quota is retried and then
+  counted as **not measured**, never as the model being wrong (LLM7 was over
+  its daily quota during the first run).
+- shani-testbed `slot-tests/chronoa-eval.sh` runs it against the real model on
+  a slot. `tests/test_task_eval.py` checks the scorer from both sides and that
+  every case names a real tool and real arguments.
+
+## Optional extras (setup's More page, 2026-10-02)
+
+Each is opt-in, pinned by size and sha256, installed into the user's home, and
+runs on this machine. What needs no model uses the system's own tools.
+
+| Extra | What | Runs as | Download |
+|---|---|---|---|
+| Eyes | describe a screen or photo | llama.cpp `--mmproj`, `shani-chronoa-model@vision` (port 8767, `--sleep-idle-seconds`) | 0.5 / 1.6 / 3.0 GB by RAM and GPU |
+| Imagine | pictures from a description, and changing a photo by description (img2img) | stable-diffusion.cpp release, `sd-server` `@imagine` (8769) | 2.0 GB + 26/35 MB engine |
+| Memory | conversation search by meaning (hybrid with FTS5, reciprocal rank) | llama.cpp `--embedding`, `@embed` (8768) | 146 MB |
+| Languages | OCR data, a Piper voice, whisper listening | user tessdata + Piper | 1-12 MB each + ~64 MB voice |
+| Photos and videos | identify faces/objects, blur faces, blur/remove background, page scans | OpenCV wheel + numpy + 3 OpenCV Zoo models | ~88 MB |
+| Sounds | what a sound is (AudioSet 527 classes) | sherpa-onnx + CED-tiny | 28.5 MB |
+| Who said what | speaker turns in a recording | sherpa-onnx + pyannote seg 3.0 + CAM++ | 37 MB |
+
+No model needed: video keyframes and "describe this video" (`video_frames.py`,
+ffmpeg scene detection), plain photo looks and 2-4x upscale (`edit_image`,
+ImageMagick), subtitles and transcripts (`recordings.py`, ffmpeg + whisper),
+recording clean-up (ffmpeg `anlmdn,afftdn`: measured 11.8 -> 13.4 dB on real
+speech - modest; `loudnorm` made it worse by lifting the noise in the gaps and
+resampling to 192 kHz).
+
+Lessons from building these, each found by running:
+
+- **OpenCV 5 orders NanoDet's outputs differently from the Zoo's 4.x
+  reference** (all scores, then all boxes; three levels, not four). The
+  reference's `outs[::2]` pairing would pair scores with scores; `detect._levels`
+  pairs by shape. The Zoo's 0.35 threshold found two people in a one-person
+  portrait; 0.5 is right on both sample photos.
+- **A page finder must not find the picture's own border** - random noise came
+  back as "a page" until candidates spanning ~the whole frame were refused.
+- **Downloads resume** (HTTP Range) and are retried; a server that ignores
+  Range restarts the file cleanly; the digest still covers the whole file
+  (`tests/test_stt_provision.py`, with a wrong-bytes control). A 2 GB model on a
+  slow link timed out three times in a slot before this.
+- **A truncated download can still list its archive** - a partial `.tar.bz2`
+  lists its first members. Pin a file only after its size matches the
+  publisher's.
+- **Address-space limits shape the design**: a skill child runs under the
+  profile's 512 MB RLIMIT_AS, so every model runs as a loopback service and
+  skills are HTTP clients; slow skills get a named longer timeout
+  (`tools._SLOW_TOOLS`), still capped by the profile.
+
+## Approve from a notification, and four more event types (2026-10-01)
+
+An event rule armed with `ask_first` (manage_triggers' `ask_first`) does not act:
+`approvals.py` shows `notify-send --action` Allow once / Deny on its own thread
+(both GNOME Shell and Plasma implement org.freedesktop.Notifications; Gio's
+GNOME path would need a `dev.shani.chronoa.desktop` that does not exist), and
+only Allow runs it, after consent is read again, with the audit origin
+`approved`. That is what lets such a rule reach a destructive actuator;
+expiry stays notify-only. Event types 12 -> 16: `sleepwake` (BOOTTIME minus
+MONOTONIC only grows while suspended), `audiodevice` (pw-dump), `journalmatch`
+(cursor of the newest `journalctl --grep` match, pattern as one argv element),
+`dbusprop` (`busctl get-property`, every token validated; read-only by D-Bus's
+rules). `set_theme` on Plasma 6 uses `plasma-apply-colorscheme` and its
+"(current color scheme)" mark as the read-back - the Plasma 5 tool it called does
+not exist on the Plasma image. Also: `--scaffold CMD --from-json M.json` writes a
+user drop-in skill (flags from the man page's OPTIONS, a `which` guard,
+operands that may not start with '-'; anything not read-only is opt-in and
+generated disabled), `--diff OLD NEW` compares two runs, and `--check` is what
+shani-testbed's `slot-tests/chronoa-matrix.sh` asserts. The dependency audit
+follows guards into imported helpers - its first version reported
+close_window/focus_window/press_key as unguarded when all three check via
+`list_windows.session_problem()`.
+
+## Desktop surfaces added 2026-10-02 (GNOME and Plasma backends, each run on both images)
+
+| Surface | GNOME | Plasma | Gate (default off) | Verified on the images |
+|---|---|---|---|---|
+| Search provider (`search_provider.py`, `shani-chronoa-search`) | Shell SearchProvider2 | KRunner `org.kde.krunner1` | - (no network, no model, nothing logged) | both: GetInitialResultSet / Match over D-Bus |
+| `search_documents` | LocalSearch (`tracker3` fallback) | `baloosearch6` + `balooctl6 status` | `document-search-enabled` | GNOME: honest "index not available"; Plasma: empty output with no index is NOT "nothing found" |
+| `calendar_events`, trigger `calendar` | EDS via ECal/ICalGLib 4.0 | none on the image - says so | `calendar-read-enabled`, `calendar-sense-enabled` | GNOME: event created in EDS, read back, trigger fired |
+| `phone`, trigger `phone` | GSConnect (ObjectManager + daemon.js CLI) | `kdeconnect-cli` + battery over D-Bus | `phone-control-enabled`, `phone-sense-enabled` | both: link-not-running reported as itself. No SMS, no notification reading, no remote input |
+| Wayland input (`portal.py` RemoteDesktop) | gnome portal | kde portal | `input-control-enabled` (existing) | fake portal on a private bus only - the first real use shows the desktop's dialog, which needs a person |
+| Global shortcut (GlobalShortcuts) | gnome portal | kde portal | `global-shortcut-enabled` | fake portal; the app thread is stoppable (a thread parked in MainLoop.run deadlocked interpreter exit) |
+| `airplane_mode`, `charger_info`, `firmware_updates` | /sys/class/rfkill, power_supply, typec; fwupdmgr --json | same | `radio-control-enabled` (switching only) | real laptop hardware (read paths); rtc wake left out - needs CAP_WAKE_ALARM |
+| `desktop_setting` (allowlist) | gsettings | kreadconfig6/kwriteconfig6 --notify | `appearance-control-enabled` (existing) | both: change + read-back verified; the other desktop's setting is refused |
+| Background mode (`daemon.py`, user unit) | systemd --user | same | `background-mode-enabled` | both: unit verifies, daemon starts/stops; `runner_lock` = one engine at a time; never the microphone |
+| Keyring (`secret_store.py`) | gnome-keyring | KWallet secret service | - (automatic, additive) | GNOME: migrate + read back + clear; Plasma with no keyring: nothing moved, key kept |
+
+**Test hygiene learned the hard way here:** Gio caches ONE session-bus connection per
+process. A test that only sets `DBUS_SESSION_BUS_ADDRESS` can still reach the user's
+real bus if an earlier test in the run opened it - the global-shortcut test did, once,
+sending BindShortcuts to the real desktop portal. Anything that talks D-Bus in a test
+takes an explicit private connection (`Gio.DBusConnection.new_for_address_sync`) or
+runs in a subprocess. `dbus-launch` is not installed on the dev box; use
+`dbus-daemon --session --print-address`.
+
 ## Audit-verified known issues (confirmed present)
 
+
+- **`midi.py` is the clearest illustration of this whole section — and it could
+  not even be imported.** Added 2026-10-03 as a third member of this class
+  (alongside `singing.py`/`prosody.py`): it reads a Standard MIDI File and fits
+  its melody to a line of syllables, it is 357 lines of careful code, and
+  `grep -rn "\bmidi\b" --include=*.py usr/` finds **no importer at all** — the
+  one hit is `senses/capture.py`'s regex for ALSA `pcm` nodes. There is no
+  `tests/test_midi.py` either.
+
+  **It was also broken in the most basic way available, and 4603 passing tests
+  said nothing.** A module-level line `_ = (os, struct)` referenced a name
+  `os` that was never imported, so `from shani_chronoa import midi` raised
+  `NameError: name 'os' is not defined` on line 357 of the file — a module
+  that is 100% unreachable and 100% unimportable. Fixed by deleting the line
+  (pyflakes 4.0.1 flags it; the suite does not, because nothing imports the
+  module).
+
+  **Then `tests/test_midi.py` was added (same day) and two more real bugs
+  surfaced within minutes, both of which the empty test suite had been
+  concealing.** Writing the first MIDI bytes by hand is what found them:
+
+  - **Every note was half its real length.** `seconds_per_tick` was
+    `(60.0 / bpm) / ticks_per_second`, but `ticks_per_second` was itself
+    derived from `TICKS_PER_BEAT`, so the length of a beat was applied twice.
+    A quarter note at 120bpm in a 480-division file parsed as **0.25s instead
+    of 0.5s** — a melody sung from a parsed file ran at double speed. Any file
+    whose division was not 480 was wrong by a different factor again (division 96
+    is common), because the only correct denominator is the file's own
+    `division`. Now `(60.0 / bpm) / division`, with the SMPTE branch kept
+    separate since its clock is the recording equipment's, not the tempo's.
+    Verified by running: 0.5s / 0.5s / 0.5s at 120bpm for divisions 480 and 96,
+    1.0s at 60bpm, onsets 0.0 / 0.5 / 1.0.
+  - **`from_url()` could never have worked.** It passed `_Bytes` to
+    `read_notes`, which called `Path(path).read_bytes()`; `Path()` rejects an
+    object that is not `os.PathLike`, so every call raised
+    `TypeError: argument should be a str or an os.PathLike ... not '_Bytes'`.
+    `read_notes` now takes either a path or anything with `read_bytes()`.
+
+  Recorded here because the lesson is sharper than any of the three bugs: **the
+  absence of an importer is what hid a syntax-level defect, a factor-of-two
+  timing error and an unusable public function from the entire suite.** Adding
+  the test file is done; **wiring the module to something real is still open**,
+  and this entry is the reason to distrust any future "green, so it works"
+  claim about a module with no callers.
+
+- **`singing.py` + `prosody.py` are fully built, unit-tested (`tests/test_singing.py`,
+  `tests/test_prosody.py`), verified on a real image — and nothing in the
+  product imports either module. OPEN as of 2026-10-03.** `grep -rn "singing\|prosody"
+  --include=*.py usr/` outside those two files returns **nothing**: no skill, no
+  trigger, no `tts.py` path, no CLI. Their only consumer is
+  `../shani-testbed/slot-tests/chronoa-singing.sh`. This is exactly the dead-code
+  class at the end of this section (a module that is green in isolation and
+  unreachable at runtime), so it is recorded rather than assumed shipped.
+
+  What *is* real, measured on a booted `@blue` (`shanios-20260925-gnome`,
+  Chronoa overlaid, kokoro + soundstretch + sox present): per-note pitch is
+  exact — a four-note rising plan of +0/+2/+4/+6 semitones read back
+  +0.0/+2.0/+4.2/+6.1 by zero-crossing count — and the `soothing` voice style
+  measurably moves the audio (1.28x at 180 Hz, 0.87x at 3500 Hz, with a `bright`
+  control moving 3500 Hz to 1.40x the other way). So the capability works on real
+  hardware; what is missing is a **surface**: which entry point should reach it
+  (a `sing` skill? a reply mode? a trigger?), and that is a design decision
+  rather than a mechanical wire-up — the same reason `ipc.py` was deleted rather
+  than wired.
+
+  Two dependencies to know before that surface exists, both measured on the same
+  run: `soundstretch` (or `rubberband`) is what shifts a note — `sox` alone
+  cannot — and `singing.singing_support()` reports `can_track_pitch: False`,
+  which is the honest ceiling and is stated in the module itself: nothing in the
+  codebase measures the pitch of the audio it is shifting, so the contour cannot
+  be closed against what is actually sung.
 
 - **`SandboxExecutor`: the four policy guards scanned a shell *string*, so shell
   expansion defeated every one of them — FIXED (2026-09-30) by taking `argv`

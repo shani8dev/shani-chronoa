@@ -159,7 +159,7 @@ def _call_ids(message: dict) -> "list[str]":
 
     A malformed `tool_calls` - not a list, or entries that are not dicts - is
     treated as making no calls rather than raising. The same tolerance
-    `llm.py` applies to a malformed response body: a backend that returns
+    `ollama_llm.py` applies to a malformed response body: a backend that returns
     something unexpected must not make the assistant unable to answer at all.
     """
     calls = message.get("tool_calls")
@@ -198,7 +198,6 @@ def synthesized_tool_result(call: dict, reason: str = "orphaned") -> dict:
     Carries no timestamp and no id of its own beyond the call's, so calling
     this twice on the same call produces the same dict.
     """
-    content = _reason_phrase(reason)
     return {
         "role": "tool",
         "tool_call_id": call.get("id", "") if isinstance(call, dict) else "",
@@ -293,7 +292,7 @@ def drop_orphaned_tool_results(messages: "list[dict]") -> "list[dict]":
 
     Same rule again, one level out: with no call anywhere there is nothing to
     compare a result against, so "I could not find its call" carries no
-    information at all. `sessions.load()` replays whatever is on disk and skips
+    information at all. `conversation_store.load()` replays whatever is on disk and skips
     only lines that will not parse, so a restored transcript whose call line was
     lost really does reach here with results and no calls - and
     `Assistant.build_messages()` must not delete them. That is the contract

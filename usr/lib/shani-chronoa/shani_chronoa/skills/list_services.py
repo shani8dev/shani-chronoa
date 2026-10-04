@@ -14,7 +14,6 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
 _TIMEOUT = 20

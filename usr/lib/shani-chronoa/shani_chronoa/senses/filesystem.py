@@ -55,7 +55,6 @@ from __future__ import annotations
 import os
 import stat as _stat
 import threading
-import time
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Union

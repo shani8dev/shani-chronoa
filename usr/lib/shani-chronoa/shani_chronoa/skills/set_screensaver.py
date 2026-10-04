@@ -31,16 +31,19 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 import re
 import shutil
-import subprocess
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa import desktop_session
 
 _CONSENT_KEY = "idle-timeout-enabled"
 _TIMEOUT = 20
+
+
+def _gsettings(*args: str):
+    return desktop_session.gsettings(*args, timeout=_TIMEOUT)
 
 _IDLE_SCHEME = "org.gnome.desktop.session"
 _IDLE_KEY = "idle-delay"
@@ -98,26 +101,6 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     return True, ""
 
 
-def _desktop() -> str:
-    for var in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_DESKTOP"):
-        value = (os.environ.get(var) or "").lower()
-        if "kde" in value or "plasma" in value:
-            return "kde"
-        if "gnome" in value or "unity" in value or "cinnamon" in value:
-            return "gnome"
-    return "unknown"
-
-
-def _gs(*args: str):
-    if shutil.which("gsettings") is None:
-        return None
-    try:
-        return subprocess.run(["gsettings", *args], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
 #: `gsettings get` prefixes numeric types with their GVariant type name:
 #: `org.gnome.desktop.session idle-delay` comes back as `uint32 300`, not `300`.
 #: Booleans, doubles and strings come back bare (`true`, `1.0`, `'default'`), so
@@ -129,7 +112,7 @@ _TYPED_PREFIX = re.compile(r"^(?:u?int(?:8|16|32|64)|byte|int)\s+")
 
 def _read(scheme: str, key: str):
     """The key's value in GVariant form, or None if it could not be read."""
-    proc = _gs("get", scheme, key)
+    proc = _gsettings("get", scheme, key)
     if proc is None or proc.returncode != 0:
         return None
     return proc.stdout.strip()
@@ -161,7 +144,7 @@ def _run(arguments: dict) -> str:
     if action not in ("status", "set"):
         return f"Action must be status or set, not {action!r}."
 
-    desktop = _desktop()
+    desktop = desktop_session.kind()
     if desktop == "kde":
         return ("This is a KDE session. The screensaver's settings live in "
                 "kscreensaver's own configuration with no documented command-line "
@@ -204,7 +187,7 @@ def _run(arguments: dict) -> str:
             return f"Refusing {minutes} minutes: the timeout cannot be negative. " \
                    f"Use 0 for never."
         seconds = minutes * 60
-        proc = _gs("set", _IDLE_SCHEME, _IDLE_KEY, str(seconds))
+        proc = _gsettings("set", _IDLE_SCHEME, _IDLE_KEY, str(seconds))
         if proc is None or proc.returncode != 0:
             detail = (proc.stderr or "").strip() if proc else "gsettings is not installed"
             return f"Could not set the blank timeout: {detail or 'no detail'}"
@@ -220,7 +203,7 @@ def _run(arguments: dict) -> str:
 
     if "lock" in arguments and arguments.get("lock") is not None:
         want = "true" if arguments.get("lock") else "false"
-        proc = _gs("set", _LOCK_SCHEME, _LOCK_KEY, want)
+        proc = _gsettings("set", _LOCK_SCHEME, _LOCK_KEY, want)
         if proc is None or proc.returncode != 0:
             detail = (proc.stderr or "").strip() if proc else "gsettings is not installed"
             return f"Could not change whether it locks: {detail or 'no detail'}"

@@ -37,6 +37,7 @@ from typing import Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -70,23 +71,15 @@ VIRT_NO_MARKER = "no-container-marker"
 VIRT_UNKNOWN = "could-not-determine"
 
 
-def _read_text(path: Path) -> Optional[str]:
-    """File contents, or None when it could not be read at all."""
-    try:
-        return path.read_text(errors="replace")
-    except OSError:
-        return None
-
-
 def read_osrelease() -> Optional[str]:
     """The kernel release string, e.g. `6.11.4-arch1-1`."""
-    value = _read_text(_OSRELEASE)
+    value = sysfs.read_raw(_OSRELEASE)
     return value.strip() if value else None
 
 
 def read_version() -> Optional[str]:
     """The full `/proc/version` line, including the build compiler."""
-    value = _read_text(_VERSION)
+    value = sysfs.read_raw(_VERSION)
     return value.strip() if value else None
 
 
@@ -98,7 +91,7 @@ def read_pretty_name() -> Optional[str]:
     than reporting a distribution with no version, which would be wrong in the
     other direction.
     """
-    text = _read_text(_STAT)
+    text = sysfs.read_raw(_STAT)
     if not text:
         return None
     fields: dict = {}
@@ -174,7 +167,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
 
     release = read_osrelease()
     version = read_version()
-    cmdline = scrub_cmdline(_read_text(_CMDLINE))
+    cmdline = scrub_cmdline(sysfs.read_raw(_CMDLINE))
     distribution = read_pretty_name()
 
     if release is None and version is None and cmdline is None:

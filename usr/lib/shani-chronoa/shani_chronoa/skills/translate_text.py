@@ -31,7 +31,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 

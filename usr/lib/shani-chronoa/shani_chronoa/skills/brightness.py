@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from shani_chronoa.skills import Skill
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +59,15 @@ def _panels() -> List[dict]:
         logger.debug("cannot list %s: %s", _BACKLIGHT, exc)
         return out
     for entry in entries:
-        current = _read_int(entry / "brightness")
+        current = sysfs.read_int(entry / "brightness")
         if current is None:
             continue
         out.append({
             "name": entry.name,
             "brightness": current,
-            "max_brightness": _read_int(entry / "max_brightness"),
+            "max_brightness": sysfs.read_int(entry / "max_brightness"),
         })
     return out
-
-
-def _read_int(path: Path) -> Optional[int]:
-    try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
 
 
 def _logind_set(panel: str, raw: int) -> bool:

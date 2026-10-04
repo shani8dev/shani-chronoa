@@ -17,6 +17,7 @@ absent, replaced by PulseAudio, or not running at all, and none of that is a
 reason to stop an assistant from starting.
 """
 
+from typing import Optional
 import json
 import logging
 import shutil

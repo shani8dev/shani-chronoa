@@ -28,7 +28,6 @@ import ast
 import logging
 import math
 import re
-from decimal import Decimal, InvalidOperation
 
 from shani_chronoa.skills import Skill
 

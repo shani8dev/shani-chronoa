@@ -75,7 +75,7 @@ def _detect_backend() -> Optional[tuple[str, list[str]]]:
     rather than emit a command that cannot possibly work.
     """
     session = os.environ.get("XDG_SESSION_TYPE", "").lower()
-    wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+    wayland = bool(os.environ.get("WAYLAND_DISPLAY")) or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland"
     display = os.environ.get("DISPLAY", "")
 
     if session == "wayland" or wayland:
@@ -84,6 +84,9 @@ def _detect_backend() -> Optional[tuple[str, list[str]]]:
             return ("wtype", ["wtype"])
         if shutil.which("dotool"):
             return ("dotool", ["dotool"])
+        # Neither ships on the Shanios images; the desktop portal does, on GNOME and Plasma
+        # alike (see shani_chronoa/portal.py) - it asks the person once in a system dialog.
+        return ("portal", [])
         return None
 
     # X11 (or unknown session with a DISPLAY): xdotool via XTEST.
@@ -156,6 +159,9 @@ def _run_action(action: str, params: dict, *, description: str) -> str:
             "Wayland). Install one and ensure your session exposes it."
         )
 
+    if backend[0] == "portal":
+        return _run_portal(action, params, description)
+
     cmd = _build_command(backend, action, params)
     if cmd is None:
         return f"Input control: backend '{backend[0]}' cannot perform '{description}'."
@@ -163,13 +169,37 @@ def _run_action(action: str, params: dict, *, description: str) -> str:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
     except FileNotFoundError:
-        return f"Input control: backend binary disappeared before execution."
+        return "Input control: backend binary disappeared before execution."
     except Exception as e:  # noqa: BLE001 - surface any failure as a message
         return f"Input control failed: {e}"
 
     if result.returncode != 0:
         return f"Input control failed: {result.stderr.strip() or result.stdout.strip()}"
     return f"{description.capitalize()} done."
+
+
+def _run_portal(action: str, params: dict, description: str) -> str:
+    """Input through xdg-desktop-portal's RemoteDesktop (Wayland, GNOME and Plasma)."""
+    from shani_chronoa import portal
+
+    if action == "move":
+        return ("Moving the pointer to an absolute position is not possible through the desktop portal "
+                "without also sharing the screen with Chronoa, so it was not done. Typing and clicking work.")
+    names = {"1": "left", "2": "middle", "3": "right"}
+    try:
+        with portal.RemoteInput(portal.KEYBOARD if action == "type" else portal.POINTER) as ri:
+            if action == "type":
+                ri.type_text(params["text"])
+            elif action == "click":
+                button = names.get(str(params["button"]))
+                if button is None:
+                    return "The portal can click the left, middle or right button only."
+                ri.click(button, int(params.get("count", 1)))
+            else:
+                return f"Input control: the portal cannot perform '{description}'."
+    except (portal.PortalError, ValueError) as exc:
+        return f"Input control through the desktop portal failed: {exc}."
+    return f"{description.capitalize()} done (through the desktop portal)."
 
 
 def _run_move_pointer(arguments: dict) -> str:

@@ -2,7 +2,6 @@
 'emoji for heart', 'the rupee sign'. From Python's Unicode database on this
 machine; nothing leaves it."""
 
-import sys
 import unicodedata
 
 from shani_chronoa.skills import Skill

@@ -33,11 +33,12 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +84,6 @@ _USB_CLASSES = {
 }
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def read_pci() -> List[dict]:
     """Every PCI function the kernel knows about."""
     try:
@@ -100,7 +94,7 @@ def read_pci() -> List[dict]:
     devices = []
     for name in names:
         entry = _PCI / name
-        raw_class = _read_text(entry / "class")
+        raw_class = sysfs.read_text(entry / "class")
         # A PCI class is a 24-bit value written as `0x030000`: the first two
         # hex digits are the base class and the next two the subclass, so a
         # display controller is `03`/`00` = "0300". Slicing from index 2
@@ -111,8 +105,8 @@ def read_pci() -> List[dict]:
             label = _PCI_CLASSES.get(digits[0:4])
         driver_link = entry / "driver"
         record: Dict[str, object] = {"slot": name, "class": label or "unknown"}
-        vendor = _read_text(entry / "vendor")
-        device = _read_text(entry / "device")
+        vendor = sysfs.read_text(entry / "vendor")
+        device = sysfs.read_text(entry / "device")
         if vendor and device:
             record["id"] = f"{vendor.removeprefix('0x')}:{device.removeprefix('0x')}"
         try:
@@ -136,10 +130,10 @@ def read_usb() -> List[dict]:
     for name in names:
         entry = _USB / name
         record: Dict[str, object] = {"port": name}
-        product = _read_text(entry / "product")
+        product = sysfs.read_text(entry / "product")
         if product:
             record["product"] = product
-        manufacturer = _read_text(entry / "manufacturer")
+        manufacturer = sysfs.read_text(entry / "manufacturer")
         if manufacturer:
             record["manufacturer"] = manufacturer
         # `bDeviceClass` lives on the device; an interface entry like `1-0:1.0`
@@ -148,10 +142,10 @@ def read_usb() -> List[dict]:
         # comes out unclassified.
         # An interface also has `bInterfaceClass`, and a composite device may
         # only be classified there, so both are consulted.
-        class_code = _read_text(entry / "bDeviceClass")
+        class_code = sysfs.read_text(entry / "bDeviceClass")
         source = entry
         if not class_code:
-            class_code = _read_text(entry / "bInterfaceClass")
+            class_code = sysfs.read_text(entry / "bInterfaceClass")
         for _ in range(4):
             if class_code:
                 break
@@ -165,13 +159,13 @@ def read_usb() -> List[dict]:
                 class_code = None
                 break
             source = candidate
-            class_code = _read_text(source / "bDeviceClass")
+            class_code = sysfs.read_text(source / "bDeviceClass")
         if class_code:
             record["class"] = _USB_CLASSES.get(class_code.lower().zfill(2),
                                                 f"class {class_code}")
             if source != entry:
                 record["on"] = source.name
-        speed = _read_text(entry / "speed")
+        speed = sysfs.read_text(entry / "speed")
         if speed:
             record["speed_mbps"] = int(speed) if speed.isdigit() else speed
         devices.append(record)

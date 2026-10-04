@@ -33,6 +33,7 @@ from typing import List
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
+from shani_chronoa.skills.undo_last_change import record_preimage
 
 _CONSENT_KEY = "bulk-edit-enabled"
 _MAX_FILES = 500
@@ -164,9 +165,7 @@ def _run(arguments: dict) -> str:
         return files.describe(FileNotFoundError(2, "No such file or directory"),
                               root, "search")
     if root.is_file():
-        root, single = root.parent, True
-    else:
-        single = False
+        root = root.parent
 
     matches, already, skipped = _scan(
         root, find, (arguments.get("file_pattern") or "").strip(),
@@ -192,11 +191,11 @@ def _run(arguments: dict) -> str:
 
     if dry_run:
         lines.append(
-            f"  Nothing was written. To apply this, call again with dry_run false. "
-            f"This rewrites every listed file in place.")
+            "  Nothing was written. To apply this, call again with dry_run false. "
+            "This rewrites every listed file in place.")
         return "\n".join(lines)
 
-    changed, failed, total = 0, [], 0
+    changed, failed = 0, []
     for path, _count, _first in matches:
         try:
             text = path.read_text(encoding="utf-8")
@@ -211,6 +210,7 @@ def _run(arguments: dict) -> str:
         if updated == text:
             continue
         try:
+            record_preimage(path, text.encode("utf-8"))  # so undo_last_change can put each file back
             path.write_text(updated, encoding="utf-8")
             changed += 1
         except OSError as exc:

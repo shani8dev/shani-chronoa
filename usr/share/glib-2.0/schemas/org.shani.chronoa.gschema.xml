@@ -6,6 +6,69 @@
       <summary>Allow downloading a speech recognition model on first use</summary>
       <description>When true, Chronoa may fetch a whisper.cpp model from HuggingFace the first time speech input is needed, verify it against a pinned SHA-256, and refuse to install it if the digest does not match. This is the only setting that causes Chronoa to download anything on the user's behalf. Off by default.</description>
     </key>
+    <key name="speech-rate" type="d">
+      <range min="0.5" max="2.0"/>
+      <default>1.0</default>
+      <summary>How fast Chronoa speaks</summary>
+      <description>1.0 is normal; 0.8 slower, 1.3 faster. Applied to Piper (as its length scale) and espeak-ng (words per minute).</description>
+    </key>
+    <key name="tts-pitch" type="d">
+      <range min="-6.0" max="6.0"/>
+      <default>0.0</default>
+      <summary>Shift the voice's pitch, in semitones</summary>
+      <description>0 is the voice as the engine produced it; -6 is six semitones down, +6 up. Applied by SoX (its pitch effect, which takes cents - 100 per semitone) to whatever the engine wrote, so it works with every engine rather than only the ones that happen to have a pitch control. Needs the optional sox package; without it the audio is left exactly as synthesised and the reason is logged and shown in Settings.</description>
+    </key>
+    <key name="tts-tempo" type="d">
+      <range min="0.5" max="2.0"/>
+      <default>1.0</default>
+      <summary>Speed the voice up or slow it down, keeping its pitch</summary>
+      <description>1.0 is as synthesised, 1.3 is a third faster, 0.7 a third slower. Applied by SoX's tempo effect, which changes the duration and leaves the pitch alone - unlike tts-rate. This is not the same as speech-rate, which asks the engine to speak at a different rate and is applied by each engine in its own way (Piper's length scale, espeak-ng's words per minute); both can be used at once and multiply.</description>
+    </key>
+    <key name="voice-style" type="s">
+      <choices>
+        <choice value="natural"/>
+        <choice value="assistant"/>
+        <choice value="gentle"/>
+        <choice value="calm"/>
+        <choice value="clear"/>
+        <choice value="warm"/>
+      </choices>
+      <default>'natural'</default>
+      <summary>A named voice character</summary>
+      <description>A whole set of voice character settings chosen by name, rather than one slider at a time: warmth, brightness, resonance, breathiness, articulation, dynamics, room and colour. Applied by SoX in the same single pass as tts-pitch, tts-tempo and tts-rate, and on top of them, so the two compose instead of fighting. 'natural' is the identity and costs nothing - no effects are added at all. An unknown name is ignored and the reply speaks unstyled, because a bad preset must not cost a reply. The full list is in voice_style.py, which is also where the acoustic meaning of each name lives; the choices above are only the ones offered first in Settings.</description>
+    </key>
+    <key name="tts-rate" type="d">
+      <range min="0.5" max="2.0"/>
+      <default>1.0</default>
+      <summary>Resample: change speed and pitch together</summary>
+      <description>1.0 is as synthesised. Above 1.0 the reply is shorter and higher, below 1.0 longer and lower - the chipmunk effect, and the only one of the three timbre settings that moves both. Applied by SoX's speed effect (a plain resample). Note that SoX's own "rate" effect is not this: that one takes an absolute sample rate and leaves the duration unchanged, which would make this a second copy of tts-pitch.</description>
+    </key>
+    <key name="end-of-speech-pause" type="d">
+      <range min="0.5" max="3.0"/>
+      <default>1.2</default>
+      <summary>Pause that ends what you are saying, in seconds</summary>
+      <description>How long Chronoa waits in silence before treating a spoken request as finished. Raise it if you are cut off mid-sentence; lower it for quicker replies.</description>
+    </key>
+    <key name="sound-cues-enabled" type="b">
+      <default>false</default>
+      <summary>Play a short sound when Chronoa starts listening or did not understand</summary>
+      <description>Uses the desktop sound theme (freedesktop), so it can be heard without looking at the window.</description>
+    </key>
+    <key name="follow-up-enabled" type="b">
+      <default>false</default>
+      <summary>Listen for a follow-up after a spoken reply</summary>
+      <description>After answering a spoken request, keep the microphone open for six seconds so "and make it ten minutes" needs no wake phrase. A transcript that is only the reply heard back from the speakers is ignored.</description>
+    </key>
+    <key name="setup-dismissed" type="b">
+      <default>false</default>
+      <summary>The setup window was closed before it was finished</summary>
+      <description>Closing setup means "not now": it stops opening by itself when Chronoa starts. It can still be opened from Settings, the dock menu ("Set up Chronoa") or with shani-chronoa --setup.</description>
+    </key>
+    <key name="setup-complete" type="b">
+      <default>false</default>
+      <summary>First-run setup has been finished</summary>
+      <description>Set when the person presses "Start using Chronoa" in the setup window. While false, and while the language model, speech model or natural voice is missing, the setup window opens by itself when Chronoa starts. It can always be reopened from Settings.</description>
+    </key>
     <key name="model" type="s">
       <default>''</default>
       <summary>LLM model override</summary>
@@ -36,10 +99,25 @@
       <summary>Local speech-to-text engine</summary>
       <description>Which local engine transcribes: "whisper" (whisper.cpp, the default and the behaviour that predates this key) or "parakeet" (NVIDIA Parakeet TDT via the same whisper-cpp package). Any other value falls back to whisper with a log line rather than failing. Applies to offline transcription only - Parakeet's streaming variant is deliberately not offered, because its licence is unresolved. Read by `stt.build_stt`, which is the single place that chooses a backend.</description>
     </key>
+    <key name="extra-languages" type="s">
+      <default>''</default>
+      <summary>Languages besides English</summary>
+      <description>Comma-separated language codes (hi, mr, ta...) turned on in setup: text in them is read by OCR, spoken with that language's voice, and speech recognition listens for them.</description>
+    </key>
     <key name="piper-voice" type="s">
       <default>'en_US-lessac-medium'</default>
       <summary>Piper TTS voice to use</summary>
       <description>The voice model for text-to-speech synthesis.</description>
+    </key>
+    <key name="kokoro-voice" type="s">
+      <default>'af_sarah'</default>
+      <summary>Kokoro voice</summary>
+      <description>Which Kokoro voice speaks when the Kokoro voice is turned on: af_sarah, af_bella, af_nicole, af_sky, bf_emma or bf_isabella. Chosen on the setup window's Voice page.</description>
+    </key>
+    <key name="kokoro-tts-enabled" type="b">
+      <default>false</default>
+      <summary>Speak with the Kokoro neural voice</summary>
+      <description>Off by default, and the default is the measured one. Kokoro sounds like a person where espeak-ng sounds like a speech chip, but on a four-core laptop with onnxruntime's CPU provider it took 6.39 s of wall clock to produce 5.225 s of audio (real-time factor 1.22), so it cannot finish before playback would start - every reply would open with about 6 s of silence. With this off, the chain below it runs exactly as before: Piper, then RHVoice, then espeak-ng. Turn it on and Kokoro is preferred again wherever it can speak the reply's script. Changing this does not download anything: Kokoro also needs its model, from Settings or voices.install_kokoro.</description>
     </key>
     <key name="ollama-host" type="s">
       <default>'http://localhost:11434'</default>
@@ -261,6 +339,21 @@
       <summary>Let Chronoa read local network interface state</summary>
       <description>When true, Chronoa may read link state for each network interface - up or down, carrier present, negotiated speed - and the machine's configured DNS servers. Off by default. Interface state only: it does not read traffic contents, does not scan nearby networks, and does not perform any radiometric sensing.</description>
     </key>
+    <key name="dnsresolvers-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report how this machine resolves names</summary>
+      <description>When true, Chronoa may read systemd-resolved's configuration and report which resolvers this machine uses, whether DNS queries are encrypted over TLS, whether DNSSEC validation is on, and how much the resolver's cache is doing. Off by default. It reports the resolvers and never the names looked up: no DNS query log is read and none is enabled. A machine where queries and answers cross the network unencrypted, and unvalidated, is the case this exists to make visible.</description>
+    </key>
+    <key name="wirelesslink-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read this machine's own WiFi link</summary>
+      <description>When true, Chronoa may read the wireless link this machine is already joined to: its network name, signal strength in dBm, the negotiated transmit and receive rates, retry counters, the band and channel, and the regulatory domain the kernel is enforcing with its permitted transmit-power ceiling. Off by default. This scans for nothing and associates with nothing - it reports the one link already in use. It is deliberately separate from the switch that lets Chronoa look for nearby networks, because noticing which networks are in range says where the machine is. It also calls out an unset regulatory domain, the commonest reason a WiFi link is worse than the same router achieves elsewhere.</description>
+    </key>
+    <key name="labnetworks-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report which lab networks exist</summary>
+      <description>When true, Chronoa may report which isolated lab networks this machine has, and whether the network namespaces each one recorded are actually still present. Off by default. It reads only the builder's own record file and lists namespace names: no addresses, no packet contents, and nothing about what runs inside them. Separate from the switch that lets Chronoa build or remove lab networks - that one changes the machine's networking and asks for your password; this one only looks, and cannot reach or alter a network.</description>
+    </key>
     <key name="idle-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa read how long since this machine was last used</summary>
@@ -481,6 +574,116 @@
       <summary>Let Chronoa watch system units</summary>
       <description>When true, a rule may watch an init system unit and act when it becomes active, inactive or failed. Off by default: a unit's state is the machine's own, but a rule that fires on it runs while you are not there, and a wrong unit name is a wrong action. A unit the init system cannot be asked about is reported as unavailable, never as healthy.</description>
     </key>
+    <key name="screenlock-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act when the screen locks</summary>
+      <description>When true, a rule may act when your session locks, unlocks, goes idle or becomes active again, read from logind. Off by default: whether you are at the machine is the shape of your day, not the hardware's state, and a rule that fires on it acts while you are away.</description>
+    </key>
+    <key name="powerstate-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on power changes</summary>
+      <description>When true, a rule may act when the machine goes on battery or AC power, or its battery crosses a level you name. Off by default, because a rule acts with nobody asking. A machine with no readable battery reports the battery sources as unavailable, never as charged.</description>
+    </key>
+    <key name="netstate-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on network changes</summary>
+      <description>When true, a rule may act when the network goes online or offline, or a named connection comes up or drops, read from NetworkManager. Off by default: which network you are on says where you are.</description>
+    </key>
+    <key name="usbplug-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on USB devices</summary>
+      <description>When true, a rule may act when a USB device is plugged in or pulled out, read from the kernel's device list. Off by default, because a rule acts with nobody asking and a plugged-in device is the thing an attacker controls.</description>
+    </key>
+    <key name="btconnect-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on Bluetooth devices</summary>
+      <description>When true, a rule may act when a Bluetooth device you name connects or disconnects. Off by default: which devices are near says where you are and who is with you.</description>
+    </key>
+    <key name="schedule-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on a schedule</summary>
+      <description>When true, a rule may act at a time you set - daily 08:00, weekdays 18:30, every 30 minutes. Off by default, because a scheduled rule acts with nobody asking. A time missed while the machine slept is skipped, not replayed late.</description>
+    </key>
+    <key name="sleepwake-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act when the machine wakes</summary>
+      <description>When true, a rule may act right after the machine resumes from suspend. Off by default, because a rule acts with nobody asking - and the moment after waking is when a person is least likely to be watching.</description>
+    </key>
+    <key name="audiodevice-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on audio devices</summary>
+      <description>When true, a rule may act when an audio output or input - headphones, a USB microphone, a Bluetooth speaker - appears or disappears. Off by default: which devices are attached says what you are doing.</description>
+    </key>
+    <key name="journalmatch-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on log messages</summary>
+      <description>When true, a rule may act when a new system log entry matches a pattern you give. Off by default: the journal records what every program on the machine does, and a rule that reads it can see more than you might expect.</description>
+    </key>
+    <key name="dbusprop-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa watch system properties</summary>
+      <description>When true, a rule may read one D-Bus property you name - a battery percentage, a connection state - and act when it changes or reaches a value. Only reading is possible: a property is fetched, never set. Off by default.</description>
+    </key>
+    <key name="document-search-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa search inside your files</summary>
+      <description>When true, Chronoa may ask the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma) which of your files contain some words, and name them. Off by default: what is in your files is yours, and an answer quoting a document you forgot was indexed is the surprise this switch prevents. Chronoa reads no file itself for this and builds no index of its own. Searching file names needs no permission.</description>
+    </key>
+    <key name="calendar-read-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read your calendar</summary>
+      <description>When true, Chronoa may list the events on your calendars - the ones in GNOME Calendar and your online accounts - when you ask what is on today or this week. Off by default: who you meet, and where, is yours. A calendar that cannot be read is reported as unreadable, never as empty.</description>
+    </key>
+    <key name="calendar-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act before calendar events</summary>
+      <description>When true, a rule may act when one of your calendar events is about to start - "remind me ten minutes before a meeting". Off by default, because a rule acts with nobody asking, and it reads your calendar to do it.</description>
+    </key>
+    <key name="phone-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa use your paired phone</summary>
+      <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. Off by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
+    </key>
+    <key name="phone-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa act on your phone connecting</summary>
+      <description>When true, a rule may act when your paired phone connects, disconnects or its battery runs low. Off by default: whether your phone is near says where you are.</description>
+    </key>
+    <key name="sound-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa listen for sounds like the doorbell</summary>
+      <description>When true, a rule may listen to the microphone a few seconds at a time and act when it recognises a sound (doorbell, knock, dog, baby, alarm), and Chronoa may listen when asked what it hears. Only the recognised labels are kept; the recording is deleted at once. Off by default: it is the microphone.</description>
+    </key>
+    <!-- The organ strip's sound. Off by default, and the default is the point:
+         a machine that makes a noise every time it looks at a camera is a
+         machine people mute, and a muted indicator is no indicator. The strip's
+         lights are unconditional; this only adds a tone. -->
+    <key name="organ-audible-enabled" type="b">
+      <default>false</default>
+      <summary>Play a short tone when Chronoa starts using one of its senses</summary>
+      <description>When true, starting to listen, look at the screen or the camera, speak, reach the network or act on something plays a short quiet tone naming the organ class. Off by default: the lights in the window are always on, and a sound people have learned to mute is worse than no sound. The tone needs a player (pw-play, paplay or aplay) and says nothing about what is happening - the tooltip on the light does.</description>
+    </key>
+
+    <key name="background-mode-enabled" type="b">
+      <default>false</default>
+      <summary>Keep Chronoa's automatic rules running in the background</summary>
+      <description>When true, Chronoa's automatic rules and senses keep running after its window is closed, through the systemd user service shani-chronoa-daemon. It never listens to the microphone - the wake phrase stays a window feature - and it never runs the rules at the same time as the window. Applied the next time Chronoa starts.</description>
+    </key>
+    <key name="global-shortcut-enabled" type="b">
+      <default>false</default>
+      <summary>Talk to Chronoa with a keyboard shortcut</summary>
+      <description>When true, Chronoa asks the desktop (through its shortcut portal, on GNOME and Plasma) for a system-wide shortcut that starts and stops listening, even when another window has focus. The desktop shows its own dialog the first time, where the key can be changed. Takes effect the next time Chronoa starts.</description>
+    </key>
+    <key name="global-shortcut" type="s">
+      <default>'CTRL+ALT+space'</default>
+      <summary>The shortcut Chronoa asks for</summary>
+      <description>The preferred trigger offered to the desktop, in the portal's format (for example CTRL+ALT+space or LOGO+space). The desktop may assign another, and the person can change it in the desktop's own keyboard settings.</description>
+    </key>
+    <key name="radio-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa switch airplane mode</summary>
+      <description>When true, Chronoa may turn all radios (Wi-Fi, Bluetooth, mobile broadband) off or back on. Off by default: cutting the network mid-call is not something to do unasked. Reporting which radios are on needs no permission, and a radio blocked by a physical switch cannot be turned on from software.</description>
+    </key>
     <key name="file-delete-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa delete files</summary>
@@ -510,6 +713,16 @@
       <default>false</default>
       <summary>Let Chronoa change WiFi connections</summary>
       <description>When true, Chronoa may join, leave or change the machine's WiFi network. Off by default: this changes what the machine can reach, and a network change made on a spoken or misread instruction is not obvious to undo by looking at the screen.</description>
+    </key>
+    <key name="network-provision-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa build and remove local lab networks</summary>
+      <description>When true, Chronoa may build and tear down isolated lab networks on this machine: a network namespace holding a bridge, with named subnets in namespaces of their own, connected by veth pairs. Off by default, and separate from the network sense and from WiFi control on purpose. Those two are about the machine's existing connectivity - reading link state, or joining a network that already exists. This one creates new network interfaces and needs the machine administrator's password to do it, which is why it is a separate agreement rather than a wider version of the same switch. It reaches nothing beyond this machine: every address it hands out is private, and the single masquerade rule it adds is scoped to the lab's own address range and its own uplink. It only ever removes networks it built, and it shows the exact plan before changing anything.</description>
+    </key>
+    <key name="packet-capture-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa watch the packets crossing a network interface</summary>
+      <description>When true, Chronoa may watch packets crossing one network interface for a few seconds and report what it saw: who sent to whom, which protocol, how large, and the TCP flags. Off by default, and it has its own switch rather than joining the network sense's, because it is the only permission here that reads what is inside a packet rather than only the kernel's counters about it. On a machine with a browser open, most of what crosses is encrypted, but not all of it, and anything unencrypted on the wire is visible to this. Reports summaries only, never payload text, and is bounded by packet count, seconds and output length so a capture always ends. Reporting how many bytes each interface has carried needs no permission at all - that reads the kernel's own counters and changes nothing.</description>
     </key>
     <key name="input-control-enabled" type="b">
       <default>false</default>

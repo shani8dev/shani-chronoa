@@ -1,0 +1,319 @@
+"""Privacy and permissions: privacy mode, cloud fallback, API keys, permission presets and every action permission."""
+
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk
+
+from shani_chronoa import capabilities
+
+
+
+
+
+class PrivacyPage:
+    """Privacy and permissions: privacy mode, cloud fallback, API keys, permission presets and every action permission. - a part of SettingsWindow, which mixes it in."""
+
+
+    def _presets_row(self, group) -> None:
+        """One choice for every action permission at once (capabilities.PRESETS); the switches below show the result."""
+        names = list(capabilities.PRESETS)
+        labels = [capabilities.PRESETS[n][0] for n in names] + ["Custom"]
+        current = capabilities.current_preset(self.app.config)
+        row = Adw.ComboRow(title="What Chronoa may change")
+        row.set_model(Gtk.StringList.new(labels))
+        row.set_selected(names.index(current) if current in names else len(names))
+        row.set_subtitle(capabilities.PRESETS[current][1] if current in names else "Your own combination of the switches below")
+
+        def changed(r, _pspec):
+            index = r.get_selected()
+            if index >= len(names):
+                return
+            capabilities.apply_preset(names[index], self.app.config)
+            r.set_subtitle(capabilities.PRESETS[names[index]][1] + " - reopen Settings to see each switch")
+        row.connect("notify::selected", changed)
+        group.add(row)
+        group._needle_extra.append((row, "permission preset what chronoa may change chat everyday full control"))
+
+    # -- sections ------------------------------------------------------------
+
+    def _build_privacy(self, page) -> None:
+        config = self.app.config
+        group = self._group(
+            page, "Privacy and network",
+            "Privacy mode is the master switch: with it on, Chronoa keeps speech, "
+            "screen and sensed data on this machine and sends nothing to a cloud provider.",
+        )
+        self._presets_row(group)
+        self._switch(group, "Privacy mode (local only)", "Master switch for leaving this machine",
+                     config.privacy_mode, lambda a: self._app_toggle("toggle-privacy", a))
+        self._switch(
+            group, "Cloud fallback when Ollama is unavailable",
+            "Separate opt-in on purpose - this never turns on from one switch alone",
+            config.cloud_fallback_enabled,
+            lambda a: self._app_toggle("toggle-cloud-fallback", a))
+
+        # The gate every actuator passes through. `triggers.py` refuses any
+        # action without it and names it, so a user whose armed rules do
+        # nothing had no way to turn it on except `gsettings set` from a
+        # terminal - the same trap the seventeen sense switches were in.
+        self._switch(
+            group, "Let Chronoa act on this machine",
+            "Off: Chronoa can answer but cannot run actions. Every trigger "
+            "rule needs this, so an armed rule does nothing until it is on.",
+            self._read_bool("input-control-enabled"),
+            lambda a: self._set_bool("input-control-enabled", a),
+            tooltip="triggers.py refuses every actuator while this is off",
+        )
+
+        # Every new destructive action needs a row here, or the key exists in
+        # the schema and nowhere a person can reach it - which is the same trap
+        # as a refusal that names a setting with no switch.
+        for label, key, blurb, tip in (
+            ("Let Chronoa delete files", "file-delete-enabled",
+             "Off: Chronoa can read, search, create and move files but never "
+             "delete one. Deletion here is permanent and does not use the trash.",
+             "delete_file refuses while this is off"),
+            ("Let Chronoa stop processes", "process-kill-enabled",
+             "Off: Chronoa can list running processes but cannot stop one. A "
+             "wrong process id can take down unsaved work.",
+             "kill_process refuses while this is off"),
+            ("Let Chronoa install and remove apps", "app-install-enabled",
+             "Off: Chronoa can search Flathub and list your apps, but cannot install "
+             "or remove one. Installs are per user and need an exact app ID.",
+             "install_app refuses while this is off"),
+            ("Let Chronoa suspend, restart or shut down", "power-control-enabled",
+             "Off: Chronoa cannot suspend, restart or shut down. On, restart and "
+             "shut down wait one minute and can be cancelled.",
+             "power_action refuses while this is off"),
+            ("Let Chronoa close windows", "window-close-enabled",
+             "Off: Chronoa can list and focus windows but cannot ask one to "
+             "close, which can discard unsaved work.",
+             "close_window refuses while this is off"),
+            ("Let Chronoa mount disks", "mount-control-enabled",
+             "Off: Chronoa can list what is mounted but cannot mount or "
+             "unmount anything. Mounting runs code from a device that was not "
+             "there a moment ago.",
+             "manage_mount refuses while this is off"),
+            ("Let Chronoa change when the screen blanks", "idle-timeout-enabled",
+             "Off: Chronoa can report the current idle timeout and whether the "
+             "screen locks, but cannot change either. Its own key rather than "
+             "sharing the lock skill's, because whether the machine locks itself "
+             "is a standing policy decision, not a one-off action.",
+             "set_screensaver refuses while this is off"),
+            ("Let Chronoa hold the machine awake", "sleep-inhibit-enabled",
+             "Off: Chronoa can report what is holding the machine awake, but cannot "
+             "take a hold of its own. Every hold is bounded and lapses on its own, "
+             "so turning this on cannot leave the machine unable to sleep.",
+             "set_sleep_inhibit refuses while this is off"),
+            ("Let Chronoa change the desktop look", "appearance-control-enabled",
+             "Off: Chronoa can report whether the desktop is set to light or dark "
+             "but cannot change it. Restyling a desktop unasked, mid-document, is "
+             "disruptive in a way that reading it is not.",
+             "set_theme refuses to change it while this is off"),
+            ("Let Chronoa change the timezone", "timezone-control-enabled",
+             "Off: Chronoa can report the current timezone and list what is "
+             "available, but cannot change it. It is a system-wide change that "
+             "moves every timestamp at once, and it needs root.",
+             "set_timezone refuses while this is off"),
+            ("Let Chronoa switch Bluetooth", "bluetooth-control-enabled",
+             "Off: Chronoa can report which Bluetooth devices are paired and "
+             "whether the adapter is on, but cannot turn it off. Separate from "
+             "the bluetooth sense's own permission, because noticing a headset "
+             "and agreeing to have it disconnected mid-call are different "
+             "things.",
+             "toggle_bluetooth refuses to switch while this is off"),
+            ("Let Chronoa mute the microphone", "mic-control-enabled",
+             "Off: Chronoa can report whether the microphone is muted but "
+             "cannot change it. Output volume and mute need no such permission; "
+             "this covers the input side, which is the more privacy-relevant of "
+             "the two.",
+             "set_mic_mute refuses while this is off"),
+            ("Let Chronoa lock this session", "screen-lock-enabled",
+             "Off: Chronoa cannot lock the screen. Its own permission rather "
+             "than sharing input control, because it does not act on the "
+             "interface - it ends the session's access to the machine.",
+             "lock_screen refuses while this is off"),
+            ("Let Chronoa switch airplane mode", "radio-control-enabled",
+             "Off: Chronoa can say which radios are on but cannot switch them.",
+             "airplane_mode refuses to switch while this is off"),
+            ("Keep Chronoa's automatic rules running in the background", "background-mode-enabled",
+             "Off: rules and senses stop when the window closes. On, a background service keeps them "
+             "running (never the microphone).",
+             "the background service stays disabled while this is off"),
+            ("Talk to Chronoa with a keyboard shortcut", "global-shortcut-enabled",
+             "Off: start listening with the microphone button or the wake phrase only. On, Chronoa asks "
+             "the desktop for a system-wide shortcut (Ctrl+Alt+Space by default) the next time it starts.",
+             "no shortcut is requested while this is off"),
+            ("Let Chronoa use your paired phone", "phone-control-enabled",
+             "Off: Chronoa cannot see, ring or send anything to your phone.",
+             "phone refuses while this is off"),
+            ("Let Chronoa act on your phone connecting", "phone-sense-enabled",
+             "Off: an automatic rule cannot trigger on your phone connecting or running low.",
+             "a phone trigger is refused while this is off"),
+            ("Let Chronoa listen for sounds like the doorbell", "sound-sense-enabled",
+             "Off: an automatic rule cannot listen for a sound, and Chronoa will not listen when asked what it "
+             "hears. On, a rule records a few seconds at a time and keeps only what was recognised.",
+             "a sound trigger is refused while this is off"),
+            ("Let Chronoa read your calendar", "calendar-read-enabled",
+             "Off: Chronoa cannot tell you what is on your calendar.",
+             "calendar_events refuses while this is off"),
+            ("Let Chronoa act before calendar events", "calendar-sense-enabled",
+             "Off: an automatic rule cannot trigger before a calendar event starts.",
+             "a calendar trigger is refused while this is off"),
+            ("Let Chronoa search inside your files", "document-search-enabled",
+             "Off: Chronoa can find files by name but not by what is in them. On, it asks the "
+             "desktop's own search index - it reads nothing itself.",
+             "search_documents refuses while this is off"),
+            ("Let Chronoa empty the trash", "trash-empty-enabled",
+             "Off: Chronoa can list what is in the trash but cannot empty it. "
+             "Not the same permission as deleting files: the trash is already "
+             "recoverable, and emptying it is what makes it not.",
+             "empty_trash refuses while this is off"),
+            ("Let Chronoa change system services", "service-control-enabled",
+             "Off: Chronoa can list services and read their logs but cannot "
+             "start, stop or restart one. These are root-owned units, and the "
+             "wrong one can take down something another person is using.",
+             "control_service refuses while this is off"),
+            ("Let Chronoa edit many files at once", "bulk-edit-enabled",
+             "Off: find-and-replace runs as a dry run and only lists what it "
+             "would change. Writing one named file still works without this.",
+             "find_and_replace refuses to write while this is off"),
+            ("Let Chronoa change WiFi", "wifi-connect-enabled",
+             "Off: Chronoa can list nearby networks but cannot join or leave "
+             "one. Changing the connection changes what this machine can reach.",
+             "connect_wifi refuses while this is off"),
+            # Beside WiFi, and worded so the difference is the point: that one
+            # changes which network this machine joins, this one builds a new
+            # one. It also needs your machine administrator's password, which
+            # joining a WiFi network does not - so it is a separate agreement
+            # rather than a wider version of the switch above.
+            ("Let Chronoa build lab networks", "network-provision-enabled",
+             "Off: Chronoa cannot create or remove the isolated lab networks it "
+             "builds out of network namespaces. On: it still shows you the exact "
+             "plan before changing anything, still needs your password to apply "
+             "it, and can only ever remove networks it built itself. Nothing "
+             "reaches beyond this machine - every address is private.",
+             "lab_network_create and lab_network_destroy refuse while this is off"),
+            # Its own row, and the wording is the point: the network sense and
+            # interface_counters read the kernel's *counters*, this reads what is
+            # inside the packets. Putting it under the network row would read as
+            # "it already knows about the network", which is exactly the
+            # misunderstanding that matters here.
+            ("Let Chronoa watch network packets", "packet-capture-enabled",
+             "Off: Chronoa cannot watch packets crossing an interface. This is "
+             "the one permission that reads what is inside network traffic "
+             "rather than just counting it - most of what crosses an encrypted "
+             "browser session is unreadable, but anything sent in the clear is "
+             "visible. On: it still reports summaries only (who sent to whom, "
+             "which protocol, how large), never the contents, and every capture "
+             "stops on its own after a set number of packets or seconds.",
+             "capture_packets refuses while this is off"),
+            # The Help window names a switch for every gate it reports as off
+            # ("Off. Switch on “…” in Settings to use this"), so a gate with no
+            # row here is a promise the settings window does not keep - the user
+            # is sent to a switch that does not exist and the skill stays
+            # unreachable with no way to enable it. The gates skills and
+            # triggers.py read had no row at all; the senses sharing this table
+            # get theirs from the generated Senses group above, which is why a
+            # grep of this file alone cannot find the missing ones.
+            ("Let Chronoa edit your files", "file-edit-enabled",
+             "Off: Chronoa can read and search your files but cannot write to "
+             "them. Turning this on lets a tool call change your work.",
+             "edit_file and undo_last_change refuse while this is off"),
+            ("Let Chronoa keep a task list", "todo-list-enabled",
+             "Off: Chronoa cannot keep a to-do list between turns.",
+             "todo_list refuses while this is off"),
+            ("Let Chronoa arm automatic rules", "trigger-control-enabled",
+             "Off: Chronoa cannot create rules that act on their own, such as "
+             "running something when a file changes.",
+             "manage_triggers refuses while this is off"),
+            ("Let Chronoa watch files for changes", "fswatch-sense-enabled",
+             "Off: an automatic rule cannot trigger on a file being written.",
+             "a fswatch trigger is refused while this is off"),
+            ("Let Chronoa act on system failures", "failure-sense-enabled",
+             "Off: an automatic rule cannot trigger on a service failing.",
+             "a failure trigger is refused while this is off"),
+            ("Let Chronoa watch stored deadlines", "expiry-sense-enabled",
+             "Off: an automatic rule cannot trigger when a stored deadline "
+             "passes.",
+             "an expiry trigger is refused while this is off"),
+            ("Let Chronoa act on container runs", "containerrun-sense-enabled",
+             "Off: an automatic rule cannot trigger on a container starting or "
+             "stopping.",
+             "a container-run trigger is refused while this is off"),
+            ("Let Chronoa watch system units", "unithealth-sense-enabled",
+             "Off: an automatic rule cannot trigger on a systemd unit changing "
+             "state.",
+             "a unit-health trigger is refused while this is off"),
+            ("Let Chronoa act when the screen locks", "screenlock-sense-enabled",
+             "Off: an automatic rule cannot trigger on the screen locking or unlocking.",
+             "a screenlock trigger is refused while this is off"),
+            ("Let Chronoa act on power changes", "powerstate-sense-enabled",
+             "Off: an automatic rule cannot trigger on unplugging, plugging in or a battery level.",
+             "a powerstate trigger is refused while this is off"),
+            ("Let Chronoa act on network changes", "netstate-sense-enabled",
+             "Off: an automatic rule cannot trigger on the network going up or down.",
+             "a netstate trigger is refused while this is off"),
+            ("Let Chronoa act on USB devices", "usbplug-sense-enabled",
+             "Off: an automatic rule cannot trigger on a USB device being plugged in.",
+             "a usbplug trigger is refused while this is off"),
+            ("Let Chronoa act on Bluetooth devices", "btconnect-sense-enabled",
+             "Off: an automatic rule cannot trigger on a Bluetooth device connecting.",
+             "a btconnect trigger is refused while this is off"),
+            ("Let Chronoa act on a schedule", "schedule-sense-enabled",
+             "Off: an automatic rule cannot run at a set time.",
+             "a schedule trigger is refused while this is off"),
+            ("Let Chronoa act when the machine wakes", "sleepwake-sense-enabled",
+             "Off: an automatic rule cannot trigger on the machine waking from sleep.",
+             "a sleepwake trigger is refused while this is off"),
+            ("Let Chronoa act on audio devices", "audiodevice-sense-enabled",
+             "Off: an automatic rule cannot trigger on headphones or a microphone being connected.",
+             "a audiodevice trigger is refused while this is off"),
+            ("Let Chronoa act on log messages", "journalmatch-sense-enabled",
+             "Off: an automatic rule cannot trigger on a log message.",
+             "a journalmatch trigger is refused while this is off"),
+            ("Let Chronoa watch system properties", "dbusprop-sense-enabled",
+             "Off: an automatic rule cannot trigger on a system property changing.",
+             "a dbusprop trigger is refused while this is off"),
+            ("Restrict tools to a seccomp sandbox", "sandbox-seccomp-enabled",
+             "Off: tools run without a seccomp filter. Turning this on drops "
+             "the syscalls a tool may make, at the cost of some tools refusing "
+             "to run.",
+             "the sandbox executor adds the seccomp filter when this is on"),
+        ):
+            self._switch(group, label, blurb, self._read_bool(key),
+                         (lambda k: (lambda a: self._set_bool(k, a)))(key),
+                         tooltip=tip)
+
+        free = self._group(
+            page, "Free cloud providers",
+            "Optional. These work without a key at a lower rate limit; a key raises it. "
+            "Applies when the cloud fallback next activates, not to a running session.",
+        )
+        for label, key in (
+            ("LLM7 API key", "llm7-api-key"),
+            ("Kilo Gateway API key", "kilo-api-key"),
+            ("BlockRun API key", "blockrun-api-key"),
+        ):
+            self._entry(free, label, "", config.api_key_value(key),
+                        lambda text, k=key: config.set_api_key(k, text.strip()), secret=True)
+
+        byok = self._group(
+            page, "Cloud providers that require a key",
+            "Anthropic, OpenAI, Google and Groq all rejected an unauthenticated request "
+            "when tested live, so a key here is mandatory rather than optional. Tried ahead "
+            "of the free providers when set.",
+        )
+        for label, key in (
+            ("Anthropic (Claude) API key", "anthropic-api-key"),
+            ("OpenAI API key", "openai-api-key"),
+            ("Google Gemini API key", "google-api-key"),
+            ("Groq API key", "groq-api-key"),
+            ("OpenRouter API key (free models work with a free key)", "openrouter-api-key"),
+            ("OpenCode Zen API key", "opencode-zen-api-key"),
+        ):
+            self._entry(byok, label, "", config.api_key_value(key),
+                        lambda text, k=key: config.set_api_key(k, text.strip()), secret=True)

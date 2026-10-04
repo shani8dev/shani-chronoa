@@ -54,7 +54,7 @@ _CALIBRATION_FRAMES = 4  # ~320ms of ambient audio, as the recorder samples
 _PRE_ROLL_FRAMES = 2  # 160ms before the first loud frame: the "h" of "hey" is quiet
 _END_SILENCE_FRAMES = 5  # 400ms of quiet ends an utterance
 _MIN_SPEECH_FRAMES = 3  # under 240ms is a click or a cough, not a phrase
-_MAX_UTTERANCE_FRAMES = 38  # ~3s: a wake phrase is short; longer is conversation
+_MAX_UTTERANCE_FRAMES = 100  # ~8s: room for "hey chronoa, <the request>" in one breath
 _TRANSCRIBE_TIMEOUT = 20
 
 DEFAULT_PHRASE = "hey chronoa"
@@ -92,6 +92,32 @@ def matches_phrase(transcript: str, phrase: str = DEFAULT_PHRASE) -> bool:
             continue
         return False
     return True
+
+
+def _takes_argument(callback) -> bool:
+    import inspect
+    try:
+        params = inspect.signature(callback).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+
+
+def phrase_remainder(transcript: str, phrase: str = DEFAULT_PHRASE) -> Optional[str]:
+    """What was said after the wake phrase ('' for the phrase alone), or None when it did not wake.
+
+    The remainder is cut from the original transcript, so its words keep their
+    case and punctuation for the turn: "Hey Chronoa, what's the time?" -> "what's the time?".
+    """
+    if not matches_phrase(transcript, phrase):
+        return None
+    n = len(_words(phrase))
+    count = 0
+    for m in re.finditer(r"[A-Za-z0-9\u00C0-\u024F']+", transcript):
+        count += 1
+        if count == n:
+            return transcript[m.end():].lstrip(" ,.!?;:-").strip()
+    return ""
 
 
 def _find_model(preferred: Optional[str] = None) -> Optional[str]:
@@ -281,15 +307,19 @@ class WakeWordListener:
             if self._generation != generation:
                 logger.info("Wake phrase: dropping a detection from a superseded session")
                 return True
-            hit = bool(text) and matches_phrase(text, self._phrase)
+            remainder = phrase_remainder(text, self._phrase) if text else None
+            hit = remainder is not None
             # the length and the verdict, never the words: what was said is
             # discarded, and a log is the last place it may end up
             logger.debug(f"Wake phrase: judged {len(frames) * _FRAME_SAMPLES / _SAMPLE_RATE:.1f}s "
                          f"of speech: {'match' if hit else 'no match'}"
                          f"{'' if text else ' (whisper returned nothing)'}")
             if hit:
-                logger.info("Wake phrase detected")
-                on_detected()
+                logger.info("Wake phrase detected" + (" with a request" if remainder else ""))
+                if _takes_argument(on_detected):
+                    on_detected(remainder)
+                else:  # a callback from before the request was passed on
+                    on_detected()
             return False
 
         try:

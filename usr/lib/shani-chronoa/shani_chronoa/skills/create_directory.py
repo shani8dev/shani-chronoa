@@ -48,4 +48,18 @@ def _run(arguments: dict) -> str:
     return f"Created {target}."
 
 
+
+def _post_condition(arguments: dict):
+    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    try:
+        target = files.resolve(arguments.get("path") or "")
+    except files.PathProblem:
+        return None
+    return target.is_dir(), f"{target} {'is' if target.is_dir() else 'is not'} a directory"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="create_directory", schema=SCHEMA, run=_run)]

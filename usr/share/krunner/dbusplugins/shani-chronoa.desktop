@@ -1,0 +1,15 @@
+[Desktop Entry]
+Name=Shani Chronoa
+Comment=Ask Chronoa, and answer arithmetic and unit conversions locally
+X-KDE-ServiceTypes=Plasma/Runner
+Type=Service
+Icon=shani-chronoa
+X-KDE-PluginInfo-Name=shani-chronoa
+X-KDE-PluginInfo-Version=1.0
+X-KDE-PluginInfo-License=GPL
+X-KDE-PluginInfo-EnabledByDefault=true
+X-Plasma-API=DBus
+X-Plasma-DBusRunner-Service=dev.shani.chronoa.SearchProvider
+X-Plasma-DBusRunner-Path=/runner
+X-Plasma-Request-Actions-Once=true
+X-Plasma-Runner-Min-Letter-Count=3

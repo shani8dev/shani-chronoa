@@ -138,7 +138,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
     if not failed:
         running = counts.get("running", 0)
         return _SENSE.to_percept(
-            f"No service is in a failed state."
+            "No service is in a failed state."
             + (f" {running} service unit(s) are running." if running else ""),
             source="systemd",
             metadata={"failed": [], "counts": counts, "known": True},

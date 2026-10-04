@@ -14,7 +14,7 @@ from __future__ import annotations
 import subprocess
 
 from shani_chronoa.skills import Skill
-from shani_chronoa.skills.list_windows import _MAX_WINDOWS, session_problem
+from shani_chronoa.skills.list_windows import session_problem
 
 _TIMEOUT = 15
 

@@ -1,12 +1,26 @@
 [Desktop Entry]
 Name=Shani Chronoa
 Comment=Local AI Assistant with Privacy-First Design
-Exec=shani-chronoa
+Exec=shani-chronoa %U
 Icon=shani-chronoa
 Terminal=false
 Type=Application
 Categories=Utility;Accessibility;Office;GTK;
 StartupNotify=true
+MimeType=image/png;image/jpeg;image/webp;image/gif;image/heic;image/avif;image/tiff;image/bmp;application/pdf;text/plain;text/markdown;text/csv;application/json;audio/mpeg;audio/ogg;audio/flac;audio/x-wav;audio/wav;video/mp4;video/webm;video/x-matroska;
 Keywords=AI;assistant;speech;privacy;local;
 X-GNOME-Uses-Privacy-Indicator=true
 X-GNOME-Single-Instance=true
+Actions=talk;new-conversation;setup;
+
+[Desktop Action talk]
+Name=Talk to Chronoa
+Exec=shani-chronoa --listen
+
+[Desktop Action new-conversation]
+Name=New conversation
+Exec=shani-chronoa --new-conversation
+
+[Desktop Action setup]
+Name=Set up Chronoa
+Exec=shani-chronoa --setup

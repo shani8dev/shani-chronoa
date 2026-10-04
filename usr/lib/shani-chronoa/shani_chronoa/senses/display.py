@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,6 @@ _SCHEMA = {
 }
 
 
-def _read_int(path: Path) -> Optional[int]:
-    try:
-        return int(path.read_text().strip())
-    except (OSError, ValueError):
-        return None
-
-
 def read_backlights() -> list:
     out = []
     try:
@@ -69,13 +63,13 @@ def read_backlights() -> list:
     except OSError:
         return out
     for entry in entries:
-        now = _read_int(entry / "brightness")
+        now = sysfs.read_int(entry / "brightness")
         if now is None:
             continue
         out.append({
             "backlight": entry.name,
             "brightness": now,
-            "max_brightness": _read_int(entry / "max_brightness"),
+            "max_brightness": sysfs.read_int(entry / "max_brightness"),
         })
     return out
 
@@ -84,13 +78,6 @@ _HEADER = bytes((0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00))
 _DESCRIPTOR_OFFSETS = (54, 72, 90, 108)
 _TAG_MONITOR_NAME = 0xFC
 _TAG_MONITOR_SERIAL = 0xFF
-
-
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
 
 
 def manufacturer(value: int) -> str:
@@ -188,13 +175,13 @@ def read_connectors() -> List[dict]:
             continue
         entry = _DRM / name
         record: Dict[str, object] = {"connector": name}
-        status = _read_text(entry / "status")
+        status = sysfs.read_text(entry / "status")
         record["status"] = status or "unknown"
-        record["enabled"] = _read_text(entry / "enabled") or "unknown"
-        dpms = _read_text(entry / "dpms")
+        record["enabled"] = sysfs.read_text(entry / "enabled") or "unknown"
+        dpms = sysfs.read_text(entry / "dpms")
         if dpms:
             record["dpms"] = dpms
-        modes = _read_text(entry / "modes")
+        modes = sysfs.read_text(entry / "modes")
         if modes:
             listed = [m for m in modes.split() if m]
             record["modes"] = listed

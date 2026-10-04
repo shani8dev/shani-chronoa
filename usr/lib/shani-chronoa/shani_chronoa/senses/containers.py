@@ -33,12 +33,12 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import subprocess
 from typing import List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PERSONAL, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import subproc
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,11 @@ SENSITIVITY = SENSITIVITY_PERSONAL
 _TTL_SECONDS = 120.0
 _POLL_INTERVAL = 120.0
 _TIMEOUT = 20
+
+
+def _run_cmd(argv, env=None):
+    """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
+    return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
 #: Podman first: on ShaniOS it is the default rootless runtime, and it does not
 #: need a daemon, so it works where docker's socket is dead. `docker` is the
@@ -70,15 +75,6 @@ _SIGNAL_EXIT_CODES = {137: "SIGKILL (9) - most often the OOM killer, but a "
                       143: "SIGTERM (15) - an orderly stop, e.g. `docker stop`"}
 
 _MAX_LISTED = 25
-
-
-def _run_cmd(argv: List[str]):
-    try:
-        return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.debug("%s failed: %s", argv[0], exc)
-        return None
 
 
 def _parse_containers(stdout: str) -> Optional[List[dict]]:

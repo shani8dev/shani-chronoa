@@ -14,7 +14,6 @@ Consent: a weather lookup is a web request, so it needs the web sense
 """
 
 import json
-import urllib.parse
 
 import httpx
 

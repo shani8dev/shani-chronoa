@@ -173,6 +173,19 @@ def _from_dict(raw: object) -> Optional[Percept]:
     )
 
 
+def _light_memory(percept: "Percept") -> None:
+    """A short flash on the memory organ as a percept lands. Never raises."""
+    try:
+        from shani_chronoa import body
+
+        activity = body.body.use("memory", "noting",
+                                 f"{percept.sense}: {percept.text}"[:80],
+                                 deadline=body.DEFAULT_DEADLINE["memory"])
+        body.body.done(activity)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 class PerceptStore:
     """Holds transient percepts in memory and durable ones on disk."""
 
@@ -205,6 +218,11 @@ class PerceptStore:
             _DURABLE_CAPACITY if durable_capacity is None else max(1, int(durable_capacity))
         )
         self._loaded = False
+
+    @property
+    def durable_path(self) -> Path:
+        """Where the durable tier lives; a sibling file (memory history) goes next to it."""
+        return self._durable_path
 
     def _ensure_loaded(self) -> None:
         """Read the durable file once, lazily.
@@ -240,7 +258,14 @@ class PerceptStore:
             logger.error("Failed to read durable percepts from %s: %s", self._durable_path, e)
 
     def add(self, percept: Percept) -> None:
-        """Record a percept in the tier its lifetime dictates."""
+        """Record a percept in the tier its lifetime dictates.
+
+        The memory light goes on for the write. It is the only place a fact
+        enters the store, so it is the only place worth lighting - and a memory
+        indicator that came from somewhere else would be a guess about when
+        Chronoa is thinking of something, which it cannot know.
+        """
+        _light_memory(percept)
         if percept.ttl_seconds is None:
             self._append_durable(percept)
         else:

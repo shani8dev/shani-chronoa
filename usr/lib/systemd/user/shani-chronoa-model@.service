@@ -1,0 +1,20 @@
+[Unit]
+Description=Shani Chronoa local model server (%i)
+Documentation=man:llama-server(1)
+# Set up by Chronoa's setup (model_service.write_env); never started by default.
+# %i is vision, embed or imagine; each listens on 127.0.0.1 only.
+ConditionPathExists=%h/.config/shani-chronoa/model-%i.env
+
+[Service]
+EnvironmentFile=%h/.config/shani-chronoa/model-%i.env
+# /usr/bin/env so the binary can come from the env file too: llama-server is a
+# package, sd-server is the user-local release build in ~/.local/share
+ExecStart=/usr/bin/env ${MODEL_BIN} $MODEL_ARGS
+Restart=on-failure
+RestartSec=5
+# Minimal hardening only (see AGENTS.md): it is the user's own process.
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

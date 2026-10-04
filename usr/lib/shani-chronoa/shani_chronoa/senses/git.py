@@ -101,13 +101,13 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-import subprocess
 from pathlib import Path
 from typing import List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PERSONAL, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import subproc
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +116,11 @@ SENSITIVITY = SENSITIVITY_PERSONAL
 _TTL_SECONDS = 600.0
 _POLL_INTERVAL = 300.0
 _TIMEOUT = 15
+
+
+def _run_cmd(argv, env=None):
+    """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
+    return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
 #: Porcelain v1 status codes, split into what they mean. `??` is untracked - the
 #: reason `--untracked-files=all` is used rather than the default: the default
@@ -159,15 +164,6 @@ _GIT_CHILD_ENV: dict[str, str] = {
 #: and both were verified to run a hostile script. These two flags cover both,
 #: and unlike `diff.external=` they leave a real unified diff behind.
 DIFF_HARDENING: tuple[str, ...] = ("--no-ext-diff", "--no-textconv")
-
-
-def _run_cmd(argv: List[str], env: Optional[dict] = None):
-    try:
-        return subprocess.run(argv, capture_output=True, text=True,
-                              timeout=_TIMEOUT, check=False, env=env)
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logger.debug("%s failed: %s", argv[0], exc)
-        return None
 
 
 def _child_env() -> dict:

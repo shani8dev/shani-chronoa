@@ -38,7 +38,6 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 import tarfile
 import zipfile
 from pathlib import Path

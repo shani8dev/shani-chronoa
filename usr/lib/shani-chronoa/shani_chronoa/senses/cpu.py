@@ -40,13 +40,13 @@ differ.
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -61,23 +61,6 @@ _UPTIME = Path("/proc/uptime")
 _MEMINFO = Path("/proc/meminfo")
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
-def _read_int(path: Path) -> Optional[int]:
-    raw = _read_text(path)
-    if raw is None:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
 def read_counts() -> dict:
     """How many CPUs, and how many are online right now.
 
@@ -85,8 +68,8 @@ def read_counts() -> dict:
     actually running - a machine with cores hot-unplugged is a real state, and
     a load average measured against `possible` would be wrong.
     """
-    online = _read_text(_CPU / "online")
-    possible = _read_text(_CPU / "possible")
+    online = sysfs.read_text(_CPU / "online")
+    possible = sysfs.read_text(_CPU / "possible")
     if online is None:
         # `online` is absent on single-cpu-range kernels; count what is there.
         try:
@@ -121,7 +104,7 @@ def read_load() -> Optional[dict]:
     the load consists of: a load of 11 from 17 runnable tasks is a machine
     with too many threads, not a machine with a hot CPU.
     """
-    raw = _read_text(_LOADAVG)
+    raw = sysfs.read_text(_LOADAVG)
     if not raw:
         return None
     fields = raw.split()
@@ -141,7 +124,7 @@ def read_load() -> Optional[dict]:
 
 
 def read_uptime() -> Optional[float]:
-    raw = _read_text(_UPTIME)
+    raw = sysfs.read_text(_UPTIME)
     if not raw:
         return None
     try:
@@ -186,8 +169,8 @@ def _policies() -> List[dict]:
             ))
         except OSError:
             related = ""
-        governor = _read_text(policy / "scaling_governor")
-        preference = _read_text(policy / "energy_performance_preference")
+        governor = sysfs.read_text(policy / "scaling_governor")
+        preference = sysfs.read_text(policy / "energy_performance_preference")
         if governor is None and preference is None:
             continue
         key = f"{governor or '-'}/{preference or '-'}"
@@ -256,7 +239,7 @@ def _run(arguments: dict) -> Union[str, Percept]:
                 detail.append(f"energy preference {record['preference']}")
             cpus = ",".join(record["cpus"])
             lines.append("  " + ", ".join(detail) + (f" on cpu {cpus}" if cpus else ""))
-        available = _read_text(_CPU / "cpu0/cpufreq/energy_performance_available_preferences")
+        available = sysfs.read_text(_CPU / "cpu0/cpufreq/energy_performance_available_preferences")
         if available:
             lines.append(f"  available energy preferences: {available}")
         if len(policies) > 1:
@@ -264,8 +247,8 @@ def _run(arguments: dict) -> Union[str, Percept]:
                 f"  {len(policies)} distinct cpu policies, which is what a "
                 f"hybrid P-core/E-core machine looks like"
             )
-        current = _read_int(_CPU / "cpu0/cpufreq/scaling_cur_freq")
-        maximum = _read_int(_CPU / "cpu0/cpufreq/scaling_max_freq")
+        current = sysfs.read_int(_CPU / "cpu0/cpufreq/scaling_cur_freq")
+        maximum = sysfs.read_int(_CPU / "cpu0/cpufreq/scaling_max_freq")
         if current:
             scale = 1000000 if current > 100000 else 1000
             text = f"  cpu0 last reported frequency {current / scale:.2f} GHz"

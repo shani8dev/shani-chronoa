@@ -114,15 +114,18 @@ confirmation would sit on disk forever. All three declare
 and `forget` return explicitly short-lived Percepts so that cannot happen.
 """
 
+import json
 import logging
 import math
+import os
 import re
 import time
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
-from shani_chronoa.secrets_manager import secrets_manager
+from shani_chronoa.redaction import redactor
 from shani_chronoa.senses import (
     CONFIDENCE_UNSTATED,
     MEMORY_KIND_FACT,
@@ -157,7 +160,15 @@ CONFIDENCE_EXTRACTED = 0.6
 # model, not new facts about the user. See the module docstring.
 _TRANSIENT_TTL = 120.0
 
-_OPERATIONS = ("remember", "recall", "forget")
+_OPERATIONS = ("remember", "recall", "forget", "link", "about", "history")
+
+# A relation names how two things the user mentioned stand to each other -
+# "Priya works_at the bike co-op". Short, lowercase, underscores: it is a
+# label the model chooses and the user reads back, not free text.
+_RELATION_RE = re.compile(r"^[a-z][a-z0-9_ ]{0,39}$")
+
+#: Name of the audit file kept next to the durable store.
+HISTORY_FILE = "memory-history.jsonl"
 
 # Set once per process so an empty secrets vault is reported without
 # turning every `remember` into a repeated warning.
@@ -234,6 +245,9 @@ class Fact(NamedTuple):
     source: str
     confidence: float = CONFIDENCE_UNSTATED
     valid_until: Optional[float] = None
+    #: (subject, relation, object) when this fact is a link between two
+    #: things, so `about` can walk from one to the other. None for a plain fact.
+    relation: Optional[tuple] = None
 
 
 _STORE: Optional[PerceptStore] = None
@@ -457,7 +471,7 @@ def _warn_if_no_vault() -> None:
     this is information for the case where they believe they do.
     """
     global _warned_empty_vault
-    if _warned_empty_vault or secrets_manager.list_secrets():
+    if _warned_empty_vault or redactor.names():
         return
     _warned_empty_vault = True
     logger.warning(
@@ -486,7 +500,7 @@ def _redacted_text(text: str) -> str:
 
     def sanitizer(candidate: str) -> str:
         nonlocal ran
-        result = secrets_manager.sanitize_text_for_llm(candidate)
+        result = redactor.sanitize(candidate)
         ran = True
         return result
 
@@ -526,7 +540,8 @@ def _memory_percept(fact: Fact) -> Percept:
         ttl_seconds=None,
         source=fact.source,
         sensitivity=SENSITIVITY_PRIVATE,
-        metadata={"key": fact.key, "keywords": sorted(_tokens(fact.span))},
+        metadata={"key": fact.key, "keywords": sorted(_tokens(fact.span)),
+                  **({"relation": list(fact.relation)} if fact.relation else {})},
         valid_until=fact.valid_until,
         confidence=fact.confidence,
     )
@@ -612,19 +627,202 @@ def store_fact(fact: Fact, store: Optional[PerceptStore] = None) -> Optional[Per
         content = _redacted_text(fact.text).strip()
         span = _redacted_text(fact.span)
         key = _redacted_text(fact.key).strip().lower()
+        relation = (
+            tuple(_redacted_text(part).strip() for part in fact.relation)
+            if fact.relation else None
+        )
     except MemoryRedactionBlocked as e:
         logger.error("Refusing to remember %r: %s", fact.text, e)
         return None
     if not content:
         return None
     target = _target(store)
+    replaced: list[Percept] = []
     if key:
-        target.forget(lambda p: (p.metadata or {}).get("key") == key)
+        def same_key(p: Percept) -> bool:
+            if (p.metadata or {}).get("key") == key:
+                replaced.append(p)
+                return True
+            return False
+        target.forget(same_key)
     percept = _memory_percept(
-        Fact(content, span, key, fact.source, fact.confidence, fact.valid_until)
+        Fact(content, span, key, fact.source, fact.confidence, fact.valid_until, relation)
     )
     target.add(percept)
+    changed = [p for p in replaced if p.content != content]
+    if changed:
+        for old in changed:
+            _record(target, "UPDATE", key, old.content, content, fact.source)
+    elif not replaced:
+        _record(target, "ADD", key, "", content, fact.source)
     return percept
+
+
+# --- History --------------------------------------------------------------
+#
+# Every add, replacement and forget is logged to a 0600 JSONL file next to the
+# durable store, so "why do you think that?" and "what did I tell you before?"
+# have an answer. The text in it is the already-redacted text that reached the
+# durable store, so the history cannot hold a secret the store did not.
+#
+# A forget **scrubs the history too**. "Forget that" is documented as erasing
+# from disk, and an audit trail that kept the forgotten words would quietly
+# break the promise. What a forget leaves is one line saying how many facts
+# went, with no text from any of them.
+
+
+def _history_path(store: PerceptStore) -> Path:
+    return store.durable_path.with_name(HISTORY_FILE)
+
+
+def _read_history(store: PerceptStore) -> list[dict]:
+    path = _history_path(store)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def _write_history(store: PerceptStore, events: list[dict]) -> None:
+    path = _history_path(store)
+    try:
+        files.ensure_private_dir(path.parent)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("".join(json.dumps(e) + "\n" for e in events), encoding="utf-8")
+        files.restrict_file(tmp)
+        os.replace(tmp, path)
+    except OSError as e:
+        logger.error("Could not rewrite memory history %s: %s", path, e)
+
+
+def _record(store: PerceptStore, event: str, key: str, old: str, new: str, source: str) -> None:
+    path = _history_path(store)
+    entry = {"at": time.time(), "event": event, "key": key, "old": old, "new": new, "source": source}
+    try:
+        files.ensure_private_dir(path.parent)
+        existed = path.exists()
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+        if not existed:
+            files.restrict_file(path)
+    except OSError as e:
+        logger.error("Could not append memory history %s: %s", path, e)
+
+
+def _scrub_history(store: PerceptStore, removed: list[Percept]) -> None:
+    """Drop every history line that quotes a forgotten fact, then log the forget without text."""
+    texts = {p.content for p in removed}
+    keys = {(p.metadata or {}).get("key") for p in removed} - {None, ""}
+    kept = [
+        e for e in _read_history(store)
+        if e.get("old") not in texts and e.get("new") not in texts and e.get("key") not in keys
+    ]
+    kept.append({"at": time.time(), "event": "DELETE", "key": "", "old": "", "new": "",
+                 "source": f"forgot {len(removed)} fact(s); their text was erased from this history too"})
+    _write_history(store, kept)
+
+
+def memory_history(query: str = "", store: Optional[PerceptStore] = None, limit: int = 10) -> list[dict]:
+    """The newest history events, optionally only those sharing a word root with `query`."""
+    events = _read_history(_target(store))
+    wanted = _tokens(query)
+    if wanted:
+        events = [e for e in events
+                  if wanted & _tokens(f"{e.get('old', '')} {e.get('new', '')} {e.get('key', '')}")]
+    return events[-max(1, limit):][::-1]
+
+
+# --- Links between things -------------------------------------------------
+#
+# The flat facts above cannot say how two things relate, so "who does Priya
+# work with?" has nothing to walk. A link is stored as an ordinary durable
+# fact ("Priya works at bike co-op") - so recall finds it, forget erases it,
+# and the same consent and redaction apply - plus its (subject, relation,
+# object) triple in metadata, which is what `about` follows. The design is the
+# MCP reference memory server's entities/relations graph, kept in the store
+# Chronoa already has instead of a second database.
+
+
+def _norm(name: str) -> str:
+    return " ".join(name.split()).lower()
+
+
+def link_entities(
+    subject: str, relation: str, obj: str, replace: bool = False,
+    store: Optional[PerceptStore] = None, valid_until: Optional[float] = None,
+) -> "tuple[Optional[Percept], str]":
+    """Store "subject relation object"; with `replace`, drop other objects of the same relation first."""
+    subject, obj = " ".join(subject.split()), " ".join(obj.split())
+    relation = "_".join(relation.strip().lower().split())
+    if not subject or not obj:
+        return None, "link needs both a subject and an object"
+    if not _RELATION_RE.match(relation):
+        return None, "relation must be a short lowercase label such as works_at, sister_of or owns"
+    if _norm(subject) == _norm(obj):
+        return None, "a thing cannot be linked to itself"
+    target = _target(store)
+    if replace:
+        prefix = f"rel:{_norm(subject)}|{relation}|"
+        removed: list[Percept] = []
+
+        def other_object(p: Percept) -> bool:
+            k = (p.metadata or {}).get("key") or ""
+            if k.startswith(prefix) and k != prefix + _norm(obj):
+                removed.append(p)
+                return True
+            return False
+        if target.forget(other_object):
+            for old in removed:
+                _record(target, "UPDATE", prefix.rstrip("|"), old.content,
+                        f"{subject} {relation.replace('_', ' ')} {obj}", "user-stated")
+    text = f"{subject} {relation.replace('_', ' ')} {obj}"
+    stored = store_fact(
+        Fact(text, text, f"rel:{_norm(subject)}|{relation}|{_norm(obj)}", "user-stated",
+             CONFIDENCE_STATED, valid_until, (subject, relation, obj)),
+        target,
+    )
+    return stored, "" if stored else (_consent_error() or "the write was refused")
+
+
+def about(entity: str, store: Optional[PerceptStore] = None) -> "tuple[list[Percept], list[Percept], list[str]]":
+    """Everything held about `entity`: its links, other facts naming it, and the things one link away.
+
+    Returns (links, facts, neighbours). A fact "names" the entity when every
+    word of the name appears in it, so "Priya" finds "Priya's birthday is in
+    May" but not "Priyanka". Expired facts are left out here, as recall does.
+    """
+    name = _norm(entity)
+    words = {w[:-2] if w.endswith("'s") else w for w in _words(entity)}
+    if not name or not words:
+        return [], [], []
+    target = _target(store)
+    now = time.time()
+    links, facts, neighbours = [], [], []
+    for p in target.durable():
+        if p.is_expired(now):
+            continue
+        triple = (p.metadata or {}).get("relation")
+        if isinstance(triple, list) and len(triple) == 3:
+            s, _, o = (str(x) for x in triple)
+            if _norm(s) == name or _norm(o) == name:
+                links.append(p)
+                other = o if _norm(s) == name else s
+                if _norm(other) not in (_norm(n) for n in neighbours):
+                    neighbours.append(other)
+                continue
+        if words <= {w[:-2] if w.endswith("'s") else w for w in _words(p.content)}:
+            facts.append(p)
+    target.mark_accessed(links + facts, now=now)
+    return links, facts, neighbours
 
 
 def remember_fact(
@@ -803,13 +1001,20 @@ def forget_facts(query: str, store: Optional[PerceptStore] = None) -> int:
     if not phrase and not wanted:
         return 0
 
+    removed: list[Percept] = []
+
     def matches(percept: Percept) -> bool:
         content = percept.content.lower()
-        if phrase and phrase in content:
-            return True
-        return bool(wanted) and wanted <= _raw_keywords(percept)
+        hit = bool(phrase and phrase in content) or (bool(wanted) and wanted <= _raw_keywords(percept))
+        if hit:
+            removed.append(percept)
+        return hit
 
-    return _target(store).forget(matches)
+    target = _target(store)
+    count = target.forget(matches)
+    if count:
+        _scrub_history(target, removed)
+    return count
 
 
 
@@ -898,6 +1103,42 @@ def _run(arguments: dict) -> Percept:
                 else "No stored fact matched that."
             )
             return _note(said)
+        case "link":
+            valid_for = arguments.get("valid_for_minutes")
+            try:
+                minutes = float(valid_for) if valid_for else None
+            except (TypeError, ValueError):
+                minutes = None
+            stored, why = link_entities(
+                str(arguments.get("subject") or ""), str(arguments.get("relation") or ""),
+                str(arguments.get("object") or ""), replace=bool(arguments.get("replace")),
+                valid_until=None if minutes is None else time.time() + minutes * 60.0,
+            )
+            return stored if stored is not None else _note(f"Did not link that: {why}.")
+        case "about":
+            links, facts, neighbours = about(query)
+            if not links and not facts:
+                return _note(f"Nothing stored about {query!r}." if query else "Say what to look up with query.")
+            lines = [f"About {query}:"]
+            lines += [f"- {p.content}" for p in links + facts]
+            if neighbours:
+                lines.append("Linked to: " + ", ".join(neighbours) + " (ask about any of them for more).")
+            return _note("\n".join(lines))
+        case "history":
+            limit = arguments.get("limit")
+            events = memory_history(query, limit=int(limit) if limit else 10)
+            if not events:
+                return _note("No memory changes recorded" + (f" about {query!r}." if query else "."))
+            lines = ["Memory changes, newest first:"]
+            for e in events:
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(e.get("at") or 0)))
+                if e.get("event") == "UPDATE":
+                    lines.append(f"- {when} changed: {e.get('old')!r} -> {e.get('new')!r}")
+                elif e.get("event") == "ADD":
+                    lines.append(f"- {when} remembered: {e.get('new')!r} ({e.get('source')})")
+                else:
+                    lines.append(f"- {when} {e.get('source')}")
+            return _note("\n".join(lines))
         case _:
             return _note(
                 f"Unknown operation {operation!r}. Use one of: "
@@ -929,7 +1170,13 @@ SENSES = [
                     "query using words the fact actually contains. A fact "
                     "whose valid_for_minutes has run out is reported as "
                     "expired rather than quoted; operation='forget' erases "
-                    "matching facts from disk permanently."
+                    "matching facts from disk permanently. operation='link' "
+                    "stores how two things relate (subject, relation, object, "
+                    "e.g. Priya works_at Acme; replace=true when the old one "
+                    "stops being true); operation='about' (query=a name) "
+                    "returns every link and fact naming it and what it is "
+                    "linked to; operation='history' shows what was "
+                    "remembered or changed, and when."
                 ),
                 "parameters": {
                     "type": "object",
@@ -955,6 +1202,10 @@ SENSES = [
                             "type": "string",
                             "description": "Provenance for 'remember', e.g. 'user-stated'.",
                         },
+                        "subject": {"type": "string", "description": "operation='link': the first thing."},
+                        "relation": {"type": "string", "description": "operation='link': e.g. works_at, sister_of, owns."},
+                        "object": {"type": "string", "description": "operation='link': the second thing."},
+                        "replace": {"type": "boolean", "description": "operation='link': drop the subject's other objects for this relation."},
                         "valid_for_minutes": {
                             "type": "number",
                             "description": (

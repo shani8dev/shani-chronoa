@@ -60,6 +60,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -75,24 +76,6 @@ _SMARTCTL_TIMEOUT = 30
 # as being detected structurally: a mapper with no `slaves` directory at all is
 # not a drive, and a RAID member is only meaningful with its array.
 _SKIP_PREFIXES = ("loop", "ram", "zram", "sr", "fd", "dm-", "md")
-
-
-def _read_int(path: Path) -> Optional[int]:
-    try:
-        raw = path.read_text().strip()
-    except OSError:
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
 
 
 def _slaves(entry: Path) -> List[str]:
@@ -123,7 +106,7 @@ def _is_physical(entry: Path, name: str) -> bool:
 def _vendor_model(entry: Path) -> str:
     """The drive's model, which lives under `device/` for a real disk."""
     for candidate in ("device/model", "device/name"):
-        value = _read_text(entry / candidate)
+        value = sysfs.read_text(entry / candidate)
         if value:
             return value.strip()
     return ""
@@ -137,7 +120,7 @@ def _wear(entry: Path) -> Optional[dict]:
     these, which is why this returns None for them rather than guessing.
     """
     controller = entry / "device"
-    used = _read_text(controller / "percentage_used")
+    used = sysfs.read_text(controller / "percentage_used")
     if used is None:
         return None
     record: Dict[str, object] = {}
@@ -145,24 +128,24 @@ def _wear(entry: Path) -> Optional[dict]:
         record["percentage_used"] = int(used)
     except ValueError:
         return None
-    media_errors = _read_text(controller / "media_errors")
+    media_errors = sysfs.read_text(controller / "media_errors")
     if media_errors is not None and media_errors.isdigit():
         record["media_errors"] = int(media_errors)
     return record
 
 
 def _device(entry: Path, name: str) -> Optional[dict]:
-    sectors = _read_int(entry / "size")
+    sectors = sysfs.read_int(entry / "size")
     if sectors is None:
         return None
     record: Dict[str, object] = {
         "name": name,
         "bytes": sectors * _SECTOR_BYTES,
-        "rotational_claim": _read_text(entry / "queue/rotational"),
-        "scheduler": _read_text(entry / "queue/scheduler"),
+        "rotational_claim": sysfs.read_text(entry / "queue/rotational"),
+        "scheduler": sysfs.read_text(entry / "queue/scheduler"),
         "model": _vendor_model(entry),
     }
-    discard = _read_text(entry / "queue/discard_max_bytes")
+    discard = sysfs.read_text(entry / "queue/discard_max_bytes")
     if discard:
         record["discard_max_bytes"] = int(discard)
     wear = _wear(entry)

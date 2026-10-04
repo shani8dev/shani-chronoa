@@ -10,8 +10,10 @@ the same one: wire the consumer, don't rewrite the engine.
 
 Both rule kinds are armed here. A *percept* rule fires when a sense reports
 something matching it, via `triggers.build_rule`. An *event* rule fires on one
-of the six event signals (git, fswatch, failure, expiry, containerrun,
-unithealth) via `triggers.build_event_rule`. The two have deliberately
+of the nineteen event signals (git, fswatch, failure, expiry, containerrun,
+unithealth, screenlock, powerstate, netstate, usbplug, btconnect, schedule,
+sleepwake, audiodevice, journalmatch, dbusprop, calendar, phone, sound) via
+`triggers.build_event_rule`. The two have deliberately
 different validation - the event path default-denies a destructive actuator -
 so read both before changing either.
 
@@ -41,26 +43,11 @@ would not happen.
 from __future__ import annotations
 
 import json
+import re
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
-from shani_chronoa.triggers import (
-    EVENT_TYPES,
-    DEFAULT_DEBOUNCE_SECONDS,
-    MATCH_ANY,
-    MATCH_KEYWORDS,
-    MATCH_SUBSTRING,
-    RETRY_POLICIES,
-    RETRY_RETRYABLE,
-    TRIGGER_CONTROL_KEY,
-    EventEngine,
-    EventRuleStore,
-    RuleStore,
-    RuleStoreError,
-    TriggerEngine,
-    build_event_rule,
-    build_rule,
-)
+from shani_chronoa.triggers import EVENT_TYPES, DEFAULT_COOLDOWN_SECONDS, DEFAULT_DEBOUNCE_SECONDS, MATCH_ANY, MATCH_KEYWORDS, MATCH_SUBSTRING, RETRY_POLICIES, RETRY_RETRYABLE, TRIGGER_CONTROL_KEY, EventEngine, EventRuleStore, RuleStoreError, TriggerEngine, build_event_rule, build_rule
 
 _CONSENT_KEY = TRIGGER_CONTROL_KEY
 _ACTIONS = ("list", "add", "remove", "clear")
@@ -145,11 +132,10 @@ SCHEMA = {
                 "source": {
                     "type": "string",
                     "description": (
-                        "What the event rule watches: a repository path for 'git', a "
-                        "path to watch for 'fswatch', a verdict file for 'failure', a "
-                        "deadline file for 'expiry', a container name for "
-                        "'containerrun', a systemd unit for 'unithealth'. Required "
-                        "with event_type."
+                        "What the event rule watches: a path, unit or container, or "
+                        "the state to be told about ('locked', 'on-battery', "
+                        "'daily 08:00', or a sound such as 'doorbell'). A source that type cannot read is refused "
+                        "with the forms it accepts. Required with event_type."
                     ),
                 },
                 "params": {
@@ -158,9 +144,14 @@ SCHEMA = {
                         "Reader options for that event type, as plain JSON values "
                         "only (a live watcher handle is not accepted and is not "
                         "persisted). 'failure' takes signal='verdict-file' or one of "
-                        "the fixed command aliases; 'containerrun' takes "
+                        "the fixed command aliases; 'schedule' takes "
+                        "grace_minutes; 'containerrun' takes "
                         "stalled_after seconds."
                     ),
+                },
+                "ask_first": {
+                    "type": "boolean",
+                    "description": "Event rules: ask with an Allow/Deny notification before each run.",
                 },
                 "retry_policy": {
                     "type": "string",
@@ -539,9 +530,21 @@ def _add_event_rule(arguments: dict, event_type: str) -> str:
             DEFAULT_DEBOUNCE_SECONDS if debounce is None else debounce
         ),
         retry_policy=(arguments.get("retry_policy") or RETRY_RETRYABLE).strip().lower(),
+        ask_first=arguments.get("ask_first") is True,
     )
     if rule is None:
         return f"Refusing to arm {name!r}: {why or 'the rule was rejected'}. Nothing was armed."
+    # A source the type cannot parse would only ever read UNAVAILABLE - refuse it
+    # now, with the forms the reader accepts, so the caller can correct it.
+    from shani_chronoa.triggers import read_event_signal
+    try:
+        probe = read_event_signal(rule)
+    except Exception:  # noqa: BLE001 - a reader that cannot run now may work at fire time
+        probe = None
+    detail = getattr(probe, "detail", "") or ""
+    if re.match(r"(source must be|the pattern must be|use 'daily|every N minutes|hourly :MM|"
+                r"a bus name, path|\S+ is not a (day|unit name|time of day))", detail):
+        return f"Refusing to arm {name!r}: {detail}. Nothing was armed."
 
     try:
         store.add(rule)

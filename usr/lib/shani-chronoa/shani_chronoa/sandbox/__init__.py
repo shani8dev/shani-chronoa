@@ -22,11 +22,8 @@ it would put a seccomp module in the import path of every process that touches
 this package for a feature that ships switched off.
 """
 
-from shani_chronoa.sandbox.executor import (
-    ProfileLimitError,
-    SandboxExecutor,
-    SandboxExecutionError,
-)
+from shani_chronoa.sandbox.executor import SandboxExecutor, SandboxExecutionError
+from shani_chronoa.sandbox.limits import ProfileLimitError
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel
 from shani_chronoa.sandbox.profiles import (
     AgentProfile,

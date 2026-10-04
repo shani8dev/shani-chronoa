@@ -7,10 +7,10 @@ import asyncio
 import logging
 import httpx
 import json
-from typing import Optional, AsyncIterator
+from typing import Optional
 
 from shani_chronoa import egress, usage as usage_mod
-from shani_chronoa.secrets_manager import secrets_manager
+from shani_chronoa.redaction import redactor
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class OllamaLLM:
         """
         client = await self._get_client()
         sanitized_messages = [
-            {**msg, "content": secrets_manager.sanitize_text_for_llm(msg.get("content", ""))}
+            {**msg, "content": redactor.sanitize(msg.get("content", ""))}
             for msg in messages
         ]
         payload = {

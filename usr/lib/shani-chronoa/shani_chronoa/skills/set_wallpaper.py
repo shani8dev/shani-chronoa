@@ -30,18 +30,20 @@ Honesty rules:
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
-from pathlib import Path
 
 from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.files import PathProblem
 from shani_chronoa.skills import Skill
+from shani_chronoa import desktop_session
 
 _CONSENT_KEY = "appearance-control-enabled"
 _TIMEOUT = 20
+
+
+def _gsettings(*args: str):
+    return desktop_session.gsettings(*args, timeout=_TIMEOUT)
 
 _SCHEME = "org.gnome.desktop.background"
 _KEYS = ("picture-uri", "picture-uri-dark")
@@ -85,30 +87,10 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
     return True, ""
 
 
-def _desktop() -> str:
-    for var in ("XDG_CURRENT_DESKTOP", "DESKTOP_SESSION", "XDG_SESSION_DESKTOP"):
-        value = (os.environ.get(var) or "").lower()
-        if "kde" in value or "plasma" in value:
-            return "kde"
-        if "gnome" in value or "unity" in value or "cinnamon" in value:
-            return "gnome"
-    return "unknown"
-
-
-def _gs(*args: str):
-    if shutil.which("gsettings") is None:
-        return None
-    try:
-        return subprocess.run(["gsettings", *args], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
-
-
 def _current() -> "dict | None":
     out = {}
     for key in _KEYS:
-        proc = _gs("get", _SCHEME, key)
+        proc = _gsettings("get", _SCHEME, key)
         if proc is None or proc.returncode != 0:
             return None
         out[key] = proc.stdout.strip().strip("'\"")
@@ -120,7 +102,7 @@ def _run(arguments: dict) -> str:
     if action not in ("status", "set"):
         return f"Action must be status or set, not {action!r}."
 
-    desktop = _desktop()
+    desktop = desktop_session.kind()
     if desktop == "kde":
         return ("This is a KDE session, and the wallpaper is not supported there. "
                 "Plasma stores it inside the layout widget tree rather than in a "
@@ -174,7 +156,7 @@ def _run(arguments: dict) -> str:
     uri = image.as_uri()
     results = []
     for key in _KEYS:
-        proc = _gs("set", _SCHEME, key, uri)
+        proc = _gsettings("set", _SCHEME, key, uri)
         if proc is None or proc.returncode != 0:
             detail = (proc.stderr or "").strip() if proc else "gsettings is not installed"
             return (f"Could not set {key}: {detail or 'no detail'}. "

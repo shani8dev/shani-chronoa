@@ -22,6 +22,7 @@ TTL instead of surviving for the session.
 `build_messages()` returns a plain copy of `_history` and every prompt is
 byte-for-byte what it was before the senses layer existed.
 """
+from shani_chronoa import provenance
 
 import json
 import logging
@@ -29,9 +30,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
-from shani_chronoa.llm import OllamaLLM
+from shani_chronoa.ollama_llm import OllamaLLM
 from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector
-from shani_chronoa import compression, history_repair, sessions
+from shani_chronoa import compression, history_repair, conversation_store, user_prompts
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
 from shani_chronoa.tool_select import select_tools
@@ -157,11 +158,34 @@ class Assistant:
         # is the first version's actual behaviour and nobody would have chosen it.
         self._session_path = session_path
         self._saved = self._history[:1]
-        restored = ([m for m in sessions.load(session_path)
+        restored = ([m for m in conversation_store.load(session_path)
                      if m.get("role") != "system"] if session_path else [])
         if restored:
             self._history = self._saved + restored
             logger.info("Restored %d message(s) from the saved conversation", len(restored))
+
+    @property
+    def session_path(self) -> "Optional[Path]":
+        return self._session_path
+
+    def switch_session(self, path: "Optional[Path]") -> int:
+        """Continue a different saved conversation: history becomes that file's messages.
+
+        Returns how many messages were restored. The previous conversation is
+        left on disk untouched - switching is not resetting.
+        """
+        self._session_path = path
+        restored = ([m for m in conversation_store.load(path) if m.get("role") != "system"] if path else [])
+        self._history = self._saved + restored
+        return len(restored)
+
+    def visible_turns(self) -> "list[tuple[str, str]]":
+        """(role, text) for the user and assistant messages, to redraw a window after a switch."""
+        out = []
+        for m in self._history:
+            if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str) and m["content"].strip():
+                out.append((m["role"], m["content"]))
+        return out
 
     def reset(self) -> None:
         """Clear conversation history back to just the system prompt.
@@ -171,7 +195,74 @@ class Assistant:
         """
         self._history = self._saved[:]
         if self._session_path is not None:
-            sessions.clear(self._session_path)
+            conversation_store.clear(self._session_path)
+
+    def drop_last_reply(self) -> "tuple[str, str]":
+        """Take back the assistant's last answer, and say what to ask again.
+
+        Returns `(user_text, previous_answer)`, or `("", "")` when there is
+        nothing to take back. The user text is returned rather than looked up by
+        the caller because the caller is a button: the only question that makes
+        sense to re-ask is the one this answer was an answer to.
+
+        Everything from the last user message onwards goes, not just the last
+        assistant message. A turn that ran tools left tool results behind it,
+        and a tool result is not a conversation - keeping it would put a
+        transcript entry with no question above it into the next request.
+
+        The question goes with them, deliberately: the caller re-asks it through
+        the ordinary send path, and `handle()` records the question itself. Left
+        behind, a regenerate would record it twice and every later turn would
+        see the same question asked again with its own answer missing. The
+        window puts the question back on screen while the new answer is
+        computed, which is the part the user actually sees.
+
+        The saved transcript is rewritten, not appended to: a process restarted
+        after a regenerate must not restore the answer the user threw away.
+        `_history` is trimmed the same way `close_interrupted_turn` repairs it,
+        so what is on disk and what is in memory cannot disagree.
+        """
+        if len(self._history) < 2:
+            return "", ""
+        end = len(self._history)
+        while end > 1 and self._history[end - 1].get("role") != "user":
+            end -= 1
+        if end == 1:
+            return "", ""
+        question = self._history[end - 1].get("content")
+        previous = next((m.get("content") for m in reversed(self._history[end:])
+                         if m.get("role") == "assistant" and isinstance(m.get("content"), str)), "")
+        del self._history[end - 1:]
+        if self._session_path is not None:
+            conversation_store.rewrite(
+                [m for m in self._history if m.get("role") != "system"], self._session_path)
+        return (question if isinstance(question, str) else ""), (previous or "")
+
+    @staticmethod
+    def _tool_source(call: dict) -> str:
+        """Where a tool's output came from, for the provenance fence.
+
+        Derived from the tool's own name rather than trusted from the call, and
+        defaults to `tool` - so an unrecognised skill's output is still fenced as
+        untrusted. A new skill therefore cannot accidentally arrive unfenced by
+        forgetting to declare itself here.
+        """
+        function = call.get("function") or {}
+        name = str(function.get("name") or "")
+        if name.startswith(("web_", "browse", "search")):
+            return "web"
+        # A listing is file content too: filenames come from the filesystem, not
+        # from the user, and a file can be named `ignore previous
+        # instructions.txt`. So anything that reports what is *in* a directory
+        # is fenced as file content as well.
+        if name.startswith(("read_", "open_", "find_", "search_file",
+                            "search_", "directory_", "list_directory",
+                            "list_files", "compare_", "json_", "office_",
+                            "extract_", "analyze_", "disk_usage",
+                            "get_file_info", "find_recently_modified",
+                            "transcript", "recordings", "photo")):
+            return "file"
+        return "tool"
 
     def _record(self, message: dict) -> None:
         """Add a message to the conversation and to the saved transcript.
@@ -182,7 +273,7 @@ class Assistant:
         """
         self._history.append(message)
         if self._session_path is not None and message.get("role") != "system":
-            sessions.append(message, self._session_path)
+            conversation_store.append(message, self._session_path)
 
     def active_percepts(self) -> "list[Percept]":
         """Every percept still within its lifetime, or [] if sensing is off.
@@ -227,7 +318,7 @@ class Assistant:
         current would be elided on the strength of a position the repair
         invalidated.
 
-        Repair is placed here rather than in `llm.py` because it is a property
+        Repair is placed here rather than in `ollama_llm.py` because it is a property
         of the *conversation*, not of one backend: every backend gets it,
         including the cloud fallbacks, and `_history` is the only thing that
         knows the whole turn.
@@ -244,6 +335,11 @@ class Assistant:
         # later turn as though it were new. Without it the model opens the next
         # turn with results saying nothing ran and no frame for why, which is
         # how an interrupted turn turns into a confident wrong answer.
+        # The user's rules file, re-read each turn, never recorded (user_prompts.py).
+        rules = user_prompts.rules_message()
+        if rules:
+            messages = [messages[0], rules, *messages[1:]]
+
         notice = getattr(self, "_continue_notice", None)
         if notice:
             messages = [{**messages[0]},
@@ -379,12 +475,36 @@ class Assistant:
             "over_budget": bool(getattr(self, "_turn_overran", False)),
         }
 
-    async def handle(self, text: str, on_tool_call: Optional[Callable[[str, dict], None]] = None) -> str:
+    # Not done: keeping a conversation's tools in a stable, appending order for
+    # the prompt cache. Measured on both images (2026-10-02, Qwen3-0.6B, CPU):
+    # first word 16.7/9.3/11.0 s with it against 3.3/6.5/5.3 s without. Qwen's
+    # template puts tools inside the system message, ahead of the conversation,
+    # so an appended tool still invalidates everything after it, and the
+    # longer tool list costs more prefill on every miss.
+
+    #: A tool the person named for this turn ('/timer 5 minutes', user_prompts.forced_tool):
+    #: the first round offers only it and asks the model for it. Cleared after the turn.
+    forced_tool: str = ""
+
+    async def _ask(self, messages, tools, on_text):
+        """One model call: streamed when the backend can and a caller wants the words as they come."""
+        if on_text is not None and getattr(self.llm, "stream_supported", False):
+            return await self.llm.chat_message_stream(messages, tools=tools, on_text=on_text)
+        return await self.llm.chat_message(messages, tools=tools)
+
+    async def handle(self, text: str, on_tool_call: Optional[Callable[[str, dict], None]] = None,
+                     on_text: Optional[Callable[[str], None]] = None,
+                     on_tool_result: Optional[Callable[[str, dict, str, bool], None]] = None) -> str:
         """Process one user utterance, executing tool calls, return the reply text.
 
         `on_tool_call(name, arguments)`, if given, fires just before each
         tool executes - lets a caller surface "what is it doing right now"
         (e.g. "Open application...") instead of a generic "Processing...".
+        `on_tool_result(name, arguments, result, ok)` fires after, with what the
+        skill returned. It is a separate callback because the two answer
+        different questions: one is "what is about to happen", the other is "what
+        ran, with what arguments, and what came back" - the only record that
+        makes a surprising action explicable afterwards.
         Runs synchronously on whatever thread `handle()` itself runs on
         (the caller's async loop, not necessarily the GTK main thread).
 
@@ -425,7 +545,7 @@ class Assistant:
 
         try:
             return await self._run_turn(
-                text, on_tool_call, deadline, loop, attempts)
+                text, on_tool_call, deadline, loop, attempts, on_text, on_tool_result)
         except BaseException:
             # One guard for the whole turn, and it is here rather than at each
             # site because the sites are easy to forget: a model call that
@@ -455,6 +575,8 @@ class Assistant:
         deadline: float,
         loop: LoopDetector,
         attempts: "dict[str, int]",
+        on_text: "Optional[Callable[[str], None]]" = None,
+        on_tool_result: "Optional[Callable[[str, dict, str, bool], None]]" = None,
     ) -> str:
         """The tool loop itself. `handle()` owns the budget, the detectors and
         the repair-on-exit; this is the part that would otherwise be a 90-line
@@ -463,14 +585,21 @@ class Assistant:
         # ~11,800 tokens against an 8192-token window (see tool_select). Tools
         # already called this turn stay, so a follow-up round keeps them.
         in_use: set = set()
+        named, self.forced_tool = self.forced_tool, ""  # this turn only
         for _ in range(MAX_TOOL_ROUNDS):
             over = self._over_budget(deadline)
             if over:
                 self.close_interrupted_turn("budget")
                 return over
             started = time.monotonic()
-            sent = select_tools(text, TOOLS, in_use=in_use)
-            message = await self.llm.chat_message(self.build_messages(), tools=sent)
+            forced = named if not in_use else ""
+            sent = [t for t in TOOLS if t["function"]["name"] == forced] if forced else \
+                select_tools(text, TOOLS, in_use=in_use)
+            self.llm.required_tool = forced if sent else ""
+            try:
+                message = await self._ask(self.build_messages(), sent, on_text)
+            finally:
+                self.llm.required_tool = ""
             self._note_model_call(time.monotonic() - started)
             self._record(message)
 
@@ -499,9 +628,20 @@ class Assistant:
                 arguments = function.get("arguments", {})
                 if isinstance(arguments, str):
                     try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        arguments = {}
+                        arguments = json.loads(arguments) if arguments.strip() else {}
+                    except json.JSONDecodeError as exc:
+                        # Never run a tool with arguments the model did not
+                        # give: running it with {} did whatever the defaults
+                        # do (sayri hands a small model its own error back
+                        # instead). The model sees why, with the call's id.
+                        self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
+                                      f"ERROR: the arguments for {name} were not valid JSON ({exc.msg} at "
+                                      f"position {exc.pos}); nothing ran. Call it again with valid JSON."})
+                        continue
+                if not isinstance(arguments, dict):
+                    self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
+                                  f"ERROR: the arguments for {name} must be a JSON object; nothing ran."})
+                    continue
                 logger.info(f"Tool call: {name}({arguments})")
                 # Counted *after* the call is dispatched below, so the number in the
                 # message is the number that actually ran. Checking first would stop the
@@ -537,6 +677,17 @@ class Assistant:
 
                 attempts[name] = attempts.get(name, 0) + 1
                 result = execute_tool(name, arguments)
+                if on_tool_result:
+                    # `ok` is decided here rather than left to the callback to
+                    # guess: a card that says "done" over a failed skill is
+                    # exactly the confident wrong answer this repo keeps paying
+                    # for, and the executor already encodes the verdict in the
+                    # text it returns.
+                    ok = not str(result).lstrip().lower().startswith(("error", "refused"))
+                    try:
+                        on_tool_result(name, arguments, str(result), ok)
+                    except Exception as e:
+                        logger.error(f"on_tool_result callback failed: {e}")
                 # tool_call_id correlates this result back to the specific
                 # tool_calls entry that requested it - required by the
                 # actual OpenAI spec (tolerated without it by the free
@@ -544,7 +695,16 @@ class Assistant:
                 # cloud_llm.py, which can't build a valid tool_result block
                 # without it. Empty string for backends (e.g. Ollama) that
                 # don't emit an id on their tool_calls at all.
-                self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content": result})
+                # A tool's output is the one thing in this loop that the model
+                # reads but the user never typed, and a tool that reads a file
+                # or fetches a page returns whatever that file or page said -
+                # including text shaped like an instruction. So it is marked as
+                # data here, at the point it enters the conversation, rather
+                # than relying on the model to notice. See provenance.py for
+                # what this does and does not claim.
+                self._record({"role": "tool", "tool_call_id": call.get("id", ""),
+                              "content": provenance.fence(
+                                  result, Assistant._tool_source(call)).text})
                 if loop.stopped:
                     self._turn_deadline = None
                     return loop.explain()
@@ -555,7 +715,7 @@ class Assistant:
             self.close_interrupted_turn("budget")
             return over
         started = time.monotonic()
-        message = await self.llm.chat_message(self.build_messages(), tools=None)
+        message = await self._ask(self.build_messages(), None, on_text)
         self._note_model_call(time.monotonic() - started)
         self._record(message)
         self._turn_deadline = None

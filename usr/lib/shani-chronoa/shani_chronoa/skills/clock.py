@@ -8,7 +8,7 @@ _SCHEMA = {
     "type": "function",
     "function": {
         "name": "get_datetime",
-        "description": "Get the current local date and time.",
+        "description": "The current date and time here. For the time in another city or country, use get_world_time.",
         "parameters": {"type": "object", "properties": {}},
     },
 }

@@ -148,6 +148,38 @@ def _run_set_mute(arguments: dict) -> str:
     return "Muted." if mute else "Unmuted."
 
 
+
+def _post_condition(arguments: dict, tool: "str | None" = None):
+    """Read the level / mute state back with `wpctl get-volume`, a separate process."""
+    if tool not in ("set_volume", "set_mute"):
+        return None
+    device = _device(arguments)
+    if isinstance(device, _Refusal):
+        return None
+    shown = _run_wpctl("get-volume", device)
+    if shown.returncode != 0:
+        return False, f"could not read {device} back"
+    text = shown.stdout.strip()
+    if tool == "set_mute":
+        want = arguments.get("mute")
+        if not isinstance(want, bool):
+            return None
+        muted = "[MUTED]" in text
+        return muted == want, f"read back: {text}"
+    percent = arguments.get("percent")
+    if isinstance(percent, bool) or not isinstance(percent, int):
+        return None
+    m = re.search(r"Volume:\s*([0-9.]+)", text)
+    if not m:
+        return False, f"wpctl printed no level: {text!r}"
+    level = round(float(m.group(1)) * 100)
+    return abs(level - max(0, min(percent, 100))) <= 1, f"read back: {level}%"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
+
+
 SKILLS = [
     Skill(
         name="get_volume",
@@ -211,7 +243,8 @@ SKILLS = [
             "type": "function",
             "function": {
                 "name": "set_mute",
-                "description": "Mute or unmute the system output.",
+                "description": "Mute or unmute the sound from the speakers or headphones ('mute the sound', 'unmute'). "
+                               "The microphone is set_mic_mute.",
                 "parameters": {
                     "type": "object",
                     "properties": {

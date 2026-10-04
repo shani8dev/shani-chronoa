@@ -40,6 +40,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -66,6 +67,14 @@ _MAX_REDIRECTS = 5
 # but this is not a download manager.
 _TIMEOUT = 120.0
 
+#: Tries per file when the connection itself fails (reset, refused, timed out).
+#: A dropped connection is common on a long download and says nothing about
+#: the file; a wrong status, size or digest is never retried.
+_ATTEMPTS = 3
+
+#: Seconds before the second try; doubled before the third.
+_RETRY_PAUSE = 2.0
+
 
 @dataclass(frozen=True)
 class ModelSpec:
@@ -83,24 +92,26 @@ class ModelSpec:
 
 
 # Sizes are the HF LFS `size` for each blob; digests are the same field's
-# `sha256`. Both were read from the HuggingFace LFS API, not from a download
+# `sha256`. (The sizes were wrong until 2026-10-02 - rounded figures that made
+# every download fail the size check; found by shani-testbed's chronoa-setup,
+# which downloads for real. Re-read from the HF API that day.) Both were read from the HuggingFace LFS API, not from a download
 # script. Only quantized builds are offered: the full-precision ggml files run
 # to several gigabytes, which is not something to pull on a first utterance.
 MODELS: Dict[str, ModelSpec] = {
     spec.key: spec
     for spec in (
         ModelSpec(
-            "tiny-q5_1", "ggml-tiny-q5_1.bin", 32_212_224,
+            "tiny-q5_1", "ggml-tiny-q5_1.bin", 32_152_673,
             "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7",
             "fastest; for weak hardware or a proof the pipeline works",
         ),
         ModelSpec(
-            "base-q5_1", "ggml-base-q5_1.bin", 59_713_024,
+            "base-q5_1", "ggml-base-q5_1.bin", 59_707_625,
             "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
             "the default balance",
         ),
         ModelSpec(
-            "small-q5_1", "ggml-small-q5_1.bin", 190_142_720,
+            "small-q5_1", "ggml-small-q5_1.bin", 190_085_487,
             "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
             "noticeably better, 3x the download",
         ),
@@ -352,8 +363,12 @@ def _install(
     config=None,
     progress: Optional[Callable[[int, int], None]] = None,
     transport=None,
+    label: str = "stt",
 ) -> Path:
-    """The shared body of `provision` and `provision_parakeet`.
+    """The shared body of `provision` and `provision_parakeet` - and of `local_llm` and `voices`.
+
+    `label` names the kind of file in logs and the egress record ("stt",
+    "llm", "voice"); the verification is identical for all of them.
 
     Reads from wherever the reader would (`existing`, resolved by the caller
     against this backend's own `model_path`), but always WRITES to the user's
@@ -388,13 +403,41 @@ def _install(
     # record because it looks like a completed attempt.
     seen: Dict[str, object] = {}
 
+    import httpx
+
     try:
-        with os.fdopen(handle, "wb") as sink:
-            for chunk in _stream(spec, progress, transport, fetched_url, digest, seen):
-                sink.write(chunk)
-                written += len(chunk)
-            sink.flush()
-            os.fsync(sink.fileno())
+        os.close(handle)
+        attempt = 0
+        while True:
+            attempt += 1
+            # A retry continues where the last try stopped (HTTP Range) rather
+            # than from byte zero: on a slow link a 2 GB model that times out
+            # at 1.8 GB should not cost 1.8 GB again. The file and the hash
+            # always hold the same bytes - a chunk is hashed and written
+            # together - so the digest check at the end still covers the whole
+            # file, resumed or not.
+            try:
+                with open(tmp, "ab" if written else "wb") as sink:
+                    for chunk in _stream(spec, progress, transport, fetched_url, digest, seen, start=written):
+                        sink.write(chunk)
+                        written += len(chunk)
+                    sink.flush()
+                    os.fsync(sink.fileno())
+                break
+            except _RangeIgnored:
+                # the server sent the whole file again: start the file and the hash over
+                logger.info("%s cannot be resumed from that server; starting it again", spec.filename)
+                digest, written = hashlib.sha256(), 0
+                attempt -= 1
+                continue
+            except httpx.TransportError as exc:
+                if attempt == _ATTEMPTS:
+                    raise ProvisionError(
+                        f"could not download {spec.filename} after {_ATTEMPTS} tries: {exc}"
+                    ) from exc
+                logger.warning("Downloading %s failed (%s); trying again from %d MB", spec.filename, exc,
+                               written >> 20)
+                time.sleep(_RETRY_PAUSE * 2 ** (attempt - 1))
         files.restrict_file(tmp)
 
         if written != spec.size_bytes:
@@ -413,14 +456,14 @@ def _install(
 
         os.replace(tmp, destination)
         files.restrict_file(destination)
-        logger.info("Provisioned STT model %s to %s", spec.key, destination)
+        logger.info("Provisioned %s file %s to %s", label, spec.key, destination)
         return destination
     except OSError as exc:
-        raise ProvisionError(f"could not write the STT model: {exc}") from exc
+        raise ProvisionError(f"could not write the {label} file: {exc}") from exc
     finally:
         tmp.unlink(missing_ok=True)
         egress.record(
-            "stt:provision",
+            f"{label}:provision",
             seen.get("url") or fetched_url,
             method="GET",
             status=seen.get("status"),
@@ -429,12 +472,46 @@ def _install(
         )
 
 
+def file_matches(path: Path, spec: ModelSpec) -> bool:
+    """Whether `path` still has `spec`'s pinned size and sha256 (about a second per GB).
+
+    For a file already in place: being there is not the same as being right - a
+    copied-in, truncated or altered model must be fetched again, not loaded.
+    """
+    try:
+        if path.stat().st_size != spec.size_bytes:
+            return False
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return False
+    return digest.hexdigest() == spec.sha256
+
+
+def install_verified(spec: ModelSpec, directory: Path, *, config=None, progress=None, transport=None,
+                     label: str) -> Path:
+    """`spec` in `directory`: kept if it matches its pin, otherwise (re)downloaded and verified."""
+    present = directory / spec.filename
+    if present.is_file() and not file_matches(present, spec):
+        logger.warning("%s does not match its pinned digest; fetching it again", present)
+        present.unlink()
+    return _install(spec, user_dir=directory, system_dir=Path("/usr/share/shani-chronoa") / label,
+                    existing=present if present.is_file() else None, config=config,
+                    progress=progress, transport=transport, label=label)
+
+
 def spec_url(spec: ModelSpec) -> str:
     """The canonical download URL for `spec`."""
     return f"{spec.base_url or _BASE_URL}/{spec.filename}"
 
 
-def _stream(spec, progress, transport, url, digest, seen):
+class _RangeIgnored(Exception):
+    """A resumed request was answered with the whole file (200, not 206)."""
+
+
+def _stream(spec, progress, transport, url, digest, seen, start: int = 0):
     """Yield verified-stream chunks, re-checking every redirect hop.
 
     Redirects are followed by hand rather than by httpx so each hop passes
@@ -452,7 +529,8 @@ def _stream(spec, progress, transport, url, digest, seen):
     ) as client:
         while True:
             _guard(fetched_url)
-            with client.stream("GET", fetched_url) as response:
+            headers = {"Range": f"bytes={start}-"} if start else None
+            with client.stream("GET", fetched_url, headers=headers) as response:
                 status = response.status_code
                 seen["status"] = status
                 seen["url"] = str(response.url)
@@ -466,11 +544,14 @@ def _stream(spec, progress, transport, url, digest, seen):
                     location = response.headers["location"]
                     fetched_url = str(response.url.join(location))
                     continue
-                if status != 200:
+                if start and status == 200:
+                    raise _RangeIgnored()
+                if status != (206 if start else 200):
                     raise ProvisionError(
                         f"the server answered {status} for {spec.filename}"
                     )
-                _guard_size(response, spec)
+                if not start:
+                    _guard_size(response, spec)
                 for chunk in response.iter_bytes():
                     digest.update(chunk)
                     if progress is not None:
@@ -490,8 +571,12 @@ def _guard(url: str) -> None:
 def _guard_size(response, spec: ModelSpec) -> None:
     """Refuse an implausible length before spending the bandwidth."""
     declared = response.headers.get("content-length")
-    if declared and declared.isdigit() and int(declared) > _MAX_BYTES:
+    # the ceiling is the larger of the global one and this file's own pinned
+    # size (a 1.1 GB language model is legitimate; 1.1 GB claimed for a 60 MB
+    # speech model is not)
+    ceiling = max(_MAX_BYTES, spec.size_bytes)
+    if declared and declared.isdigit() and int(declared) > ceiling:
         raise ProvisionError(
             f"{spec.filename} claims to be {int(declared)} bytes, which is "
-            f"above the {_MAX_BYTES}-byte ceiling; refusing to download it"
+            f"above the {ceiling}-byte ceiling; refusing to download it"
         )

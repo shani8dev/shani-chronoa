@@ -89,6 +89,8 @@ import time
 from collections import deque
 from typing import Callable, Iterable, Mapping, NamedTuple, Optional
 
+from shani_chronoa import reflex
+from shani_chronoa.reflex import ReflexRunner
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import Percept, Sense, discover_senses
 from shani_chronoa.senses.latch import LatchRegistry
@@ -259,7 +261,19 @@ class AmbientScheduler:
         rearm_seconds: float = _DEFAULT_REARM_SECONDS,
         event_engine=None,
         event_poll_seconds: float = _EVENT_POLL_SECONDS,
+        reflex_layer=None,
     ) -> None:
+        # The reflex layer is a constructor argument so a test can substitute
+        # one and so an embedding application can switch it off - but the
+        # default is the real thing, because a reflex layer that exists and is
+        # never constructed is exactly the dead-code shape this repo keeps
+        # recording. `False` disables it explicitly.
+        if reflex_layer is False:
+            self._reflexes = None
+        elif reflex_layer is None:
+            self._reflexes = ReflexRunner()
+        else:
+            self._reflexes = reflex_layer
         self._senses: dict[str, Sense] = dict(senses if senses is not None else discover_senses())
         self._store = store if store is not None else PerceptStore()
         self._config_factory = config_factory
@@ -476,6 +490,20 @@ class AmbientScheduler:
     def _note_success(self, name: str) -> None:
         self._failures.pop(name, None)
 
+        # **The runner lock, added 2026-10-04.** `runner_lock.holds()` TAKES
+        # the lock when it is free and reports False only when another process
+        # already holds it, so `not holds()` means "the window or the daemon is
+        # already running the engine" and this process leaves the rules alone,
+        # retrying on its next poll. Without this, two processes poll one rules
+        # file and every rule fires twice.
+        #
+        # This guard was missing from the committed implementation, which is why
+        # `test_the_scheduler_leaves_the_rules_alone_without_the_lock` was
+        # failing before any of this session's work. I briefly "fixed" it in the
+        # other direction - `if runner_lock.holds()` - which was worse: it made
+        # the lock-HOLDER refuse to poll, so the engine never ran at all and
+        # `seconds_until_next_due()` stayed at 0.0. Six tests caught that. The
+        # question is about acquiring, not about possession.
     def _poll_event_rules(self, now: float) -> "list[object]":
         """Re-read every armed event rule's signal, and dispatch what fired.
 
@@ -498,6 +526,9 @@ class AmbientScheduler:
         senses from being polled.
         """
         if self._event_engine is None:
+            return []
+        from shani_chronoa import runner_lock
+        if not runner_lock.holds():
             return []
         if now - self._last_event_poll < self._event_seconds:
             return []
@@ -537,10 +568,17 @@ class AmbientScheduler:
         """
         current = time.monotonic() if now is None else now
         results: list[PollResult] = []
-        for name, sense in self.ambient_senses().items():
+        for position, (name, sense) in enumerate(self.ambient_senses().items()):
             if current - self._last_poll.get(name, current) < (sense.poll_interval or 0.0):
                 continue
-            if self._stop.is_set():
+            # A stop cancels the senses *after* the one in hand; it must not
+            # cancel the first. `break` on any stop meant a caller that started
+            # and immediately stopped lost the very poll it was promised -
+            # `test_start_is_idempotent` asserts one poll after a start/stop pair
+            # and saw none. The purpose of the check is "do not begin another
+            # slow sense once told to stop", which is about the ones still to
+            # come, not the one already due.
+            if position and self._stop.is_set():
                 break
             result = self.poll(name)
             # Stamped after the run, from the real clock. Stamping before it
@@ -632,8 +670,59 @@ class AmbientScheduler:
             self.stop()
         return self.results()
 
+    @property
+    def reflex_layer(self):
+        """The reflex runner in use, or None when disabled."""
+        return self._reflexes
+
+    def _reflex_tick(self) -> list:
+        """Run the reflex layer and say whatever it has to say.
+
+        Deliberately on the sense loop rather than inside `poll_due()`. Two
+        reasons, both about what a reflex is for: a reflex must answer when
+        there is no percept to deposit and no model to deposit it to, and it
+        must keep answering when every sense is refused or the store has
+        failed. Both are conditions `poll_due()` can return from having done
+        nothing at all, which is exactly when "battery is at 8%" must still
+        reach the person.
+
+        It cannot make the loop wait either. `due()` is pure reads of sysfs
+        and /proc - sub-millisecond, measured in `tests/test_reflex.py` - and
+        `notify` is contained, so a reflex cannot stall the sense tick.
+        """
+        if not self._reflexes:
+            return []
+        try:
+            urges = self._reflexes.due()
+        except Exception as exc:  # noqa: BLE001 - the tick must survive
+            logger.debug("reflex layer failed and said nothing: %s: %s",
+                         type(exc).__name__, exc)
+            return []
+        if urges:
+            try:
+                reflex.notify(urges)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("reflex notify failed: %s: %s", type(exc).__name__, exc)
+        return urges
+
     def _loop(self) -> None:
-        while not self._stop.is_set():
+        # **The first iteration runs even if `stop()` has already been called.**
+        # The loop otherwise begins `while not self._stop.is_set()`, so a caller
+        # that starts and immediately stops can set the flag before the new
+        # thread is ever scheduled - and the scheduler then reports a successful
+        # start having polled nothing, which `test_start_is_idempotent` catches.
+        #
+        # The obvious alternative - polling synchronously inside `start()` - is
+        # worse twice over: it polls a second time on top of the thread's own
+        # first poll (two back-to-back polls, which
+        # `test_a_slower_sense_is_not_polled_back_to_back` rejects), and placing
+        # it inside `with self._lock` deadlocks, because `poll_due()` takes the
+        # same non-reentrant lock. A deadlock is worse than a failure: the test
+        # hangs and reports nothing at all.
+        first = True
+        while first or not self._stop.is_set():
+            first = False
+            self._reflex_tick()
             self.poll_due()
             if self._stop.is_set():
                 break

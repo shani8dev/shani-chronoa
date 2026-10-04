@@ -150,7 +150,7 @@ SCHEMAS = {
 }
 
 
-def _verify_clipboard_written(arguments: dict):
+def _verify_clipboard_written(arguments: dict, tool: "str | None" = None):
     """Read the clipboard back and compare it with what we were asked to write.
 
     `wl-copy`/`xclip` exiting 0 only means the request was accepted by the
@@ -158,8 +158,10 @@ def _verify_clipboard_written(arguments: dict):
     is the round trip the skill's own result string cannot perform, and it is
     the only evidence that the effect happened.
 
-    Returns `(ok, evidence)`.
+    Returns `(ok, evidence)`, or None for get_clipboard, which wrote nothing.
     """
+    if tool is not None and tool != "set_clipboard":
+        return None
     expected = str(arguments.get("text", ""))
     backend = _detect_backend()
     if backend is None:

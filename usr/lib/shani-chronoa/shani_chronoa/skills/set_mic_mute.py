@@ -192,9 +192,28 @@ def _run(arguments: dict) -> str:
     if after == want:
         return f"Microphone is now {state} (verified by reading it back)."
     if after is None:
-        return (f"wpctl reported success but the mute state could not be read "
-                f"back, so this is not verified.")
+        return ("wpctl reported success but the mute state could not be read "
+                "back, so this is not verified.")
     return f"Asked wpctl to change the mute state, but it still reports {after}."
+
+
+
+def _post_condition(arguments: dict):
+    """The microphone's mute state, read back through get-volume."""
+    action = (arguments.get("action") or "status").strip().lower()
+    if action not in ("mute", "unmute"):
+        return None
+    source = _default_source()
+    if source is None:
+        return False, "no capture source to read back"
+    muted = _is_muted(source[0])
+    if muted is None:
+        return None
+    return muted == (action == "mute"), f"read back: {'muted' if muted else 'unmuted'}"
+
+
+# Declared for `verification.verify`; the LLM never supplies this.
+POST_CONDITION = _post_condition
 
 
 SKILLS = [Skill(name="set_mic_mute", schema=SCHEMA, run=_run)]

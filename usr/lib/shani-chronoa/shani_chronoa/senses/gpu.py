@@ -40,6 +40,7 @@ from typing import Dict, List, Optional, Union
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
+from shani_chronoa import sysfs
 
 logger = logging.getLogger(__name__)
 
@@ -56,16 +57,9 @@ _TIMEOUT = 15
 _CARD_PREFIX = "card"
 
 
-def _read_text(path: Path) -> Optional[str]:
-    try:
-        return path.read_text().strip()
-    except OSError:
-        return None
-
-
 def _uevent(device: Path) -> Dict[str, str]:
     """Parse a `uevent` file, which is `KEY=value` per line."""
-    raw = _read_text(device / "uevent")
+    raw = sysfs.read_text(device / "uevent")
     if not raw:
         return {}
     found = {}
@@ -95,7 +89,7 @@ def _cards() -> List[str]:
 
 def _vram_bytes(device: Path) -> Optional[int]:
     for name in ("mem_info_vram_total", "mem_info_gtt_total"):
-        value = _read_text(device / name)
+        value = sysfs.read_text(device / name)
         if value and value.isdigit():
             return int(value)
     return None

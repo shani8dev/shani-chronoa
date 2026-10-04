@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import time
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +28,9 @@ LOG_FILE = LOG_DIR / "tool_calls.log"
 # deliberately NOT a second log file (see AGENTS.md).
 ORIGIN_USER = "user"
 ORIGIN_UNATTENDED = "unattended"
+# A rule fired unattended, a person tapped "Allow once" on its notification, and
+# only then did it run: neither typed by a person nor done without one.
+ORIGIN_APPROVED = "approved"
 
 # One tool call can now legitimately carry a multi-megabyte argument: a binary
 # payload reaches a skill by reference (see argfile.py), and the reference is
