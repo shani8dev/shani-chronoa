@@ -57,6 +57,16 @@ jobs:
       # skipif to also cover a missing capture tool would delete exactly the
       # thing it exists to check.
       apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb xdotool x11-apps imagemagick
+      # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
+      # package's install list, its units, its icon, its optdepends and the
+      # bytecode rule are all asserted against the real file, because the
+      # package is what ships this tree. A runner has only this repo, so
+      # those tests raised FileNotFoundError on a path that is not a bug in
+      # either repo - they are the packaging contract, and the packaging
+      # lives in shani-pkgbuilds. Checked out beside it here rather than
+      # skipped, because a skipped install-list assertion is exactly the
+      # thing that lets a binary go missing from a package unnoticed.
+      extra-repositories: '[{"repo": "shani8dev/shani-pkgbuilds", "path": "../shani-pkgbuilds"}]'
       system-site-packages: true
     needs: lint
 
