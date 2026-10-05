@@ -17,7 +17,7 @@ from gi.repository import Gio, GLib  # type: ignore
 
 
 from shani_chronoa import markdown_lite, speech, cues
-from shani_chronoa import stt, stt_provision
+from shani_chronoa import speech_gate, stt, stt_provision
 from shani_chronoa.gui import AssistantState
 
 
@@ -29,6 +29,25 @@ def _is_echo(heard: str, reply: str) -> bool:
     words = _re.findall(r"[a-z0-9']+", heard.lower())
     said = set(_re.findall(r"[a-z0-9']+", reply.lower()))
     return bool(words) and sum(w in said for w in words) / len(words) >= 0.8
+
+
+#: How long an ordinary spoken turn may run before it is cut off, and how long
+#: of silence ends one.
+#:
+#: **Twenty seconds is right for a question and wrong for a sentence of dictation,
+#: and that difference is the whole of dictation.** A turn is meant to be "what
+#: time is it", so a cap that stops a rambling question is a feature. But talking
+#: *at* the machine - a paragraph of notes, a message to be turned into text, a
+#: meeting - needs minutes, and 20 seconds cuts it in the first sentence. So the
+#: two are separate ceilings rather than one compromise number, chosen when the
+#: turn starts.
+TURN_SECONDS = 20.0
+DICTATION_SECONDS = 300.0
+
+#: Silence that ends a turn. A question ends at a natural pause; a paragraph of
+#: speech has pauses inside it, and 1.2s would cut every one of them.
+TURN_SILENCE_SECONDS = 1.2
+DICTATION_SILENCE_SECONDS = 2.5
 
 
 class VoiceMixin:
@@ -108,6 +127,60 @@ class VoiceMixin:
             self.window.set_status("")
         cues.play("listening", self.config)
         self._start_listening()
+
+    def dictate(self, action=None, param=None) -> None:
+        """Talk *at* the machine: one long turn, no wake word, no button held.
+
+        Added because an ordinary turn is capped at twenty seconds, which is right
+        for "what time is it" and wrong for anything longer - a paragraph of
+        notes, a message to be written down, a meeting. A cap that stops a
+        rambling question becomes the thing that stops dictation in the middle of
+        its first sentence.
+
+        So this is a different ceiling and a different silence, not a longer
+        version of the same one:
+
+        - **five minutes**, because a paragraph is not twenty seconds;
+        - **2.5 seconds** of silence to finish, because 1.2 cuts at every pause
+          *inside* a paragraph rather than at its end;
+        - **no wake word**, because you are already talking and pressing nothing.
+
+        It still goes through the same capture, the same transcription and the
+        same turn, so there is no second audio path to keep honest - and it is
+        stopped the same ways: the stop button, Esc, or the silence.
+
+        A dictation longer than the cap is cut and transcribed as far as it got,
+        which is reported rather than hidden: the transcript arrives and the
+        status line says it was cut.
+        """
+        if self._listening:
+            # `_toggle_listening`, not a `_stop_listening` that does not exist -
+            # the first version of this called one and would have raised
+            # `AttributeError` the first time anybody pressed the key twice,
+            # which is exactly when dictation most needs to work. Going through
+            # the microphone button's own handler also means dictation is
+            # stopped by exactly the code that stops a question.
+            self._dictating = False
+            self._listen_max_seconds = TURN_SECONDS
+            self._listen_silence_seconds = None      # the setting, not a constant
+            self._toggle_listening(None, None)
+            return GLib.SOURCE_REMOVE
+        self._follow_up_of = ""
+        self._dictating = True
+        self._listen_max_seconds = DICTATION_SECONDS
+        self._listen_silence_seconds = DICTATION_SILENCE_SECONDS
+        if self.window:
+            self.window.set_status("Dictating - stop whenever you have finished")
+        try:
+            self._begin_listening()
+        finally:
+            # Back to `None`, which means "use `end-of-speech-pause`". Restoring
+            # the *constant* instead would silently override the person's own
+            # setting for every turn after the first dictation - and that is the
+            # kind of thing that only shows up as "the mic got twitchy one day".
+            self._listen_max_seconds = TURN_SECONDS
+            self._listen_silence_seconds = None
+        return GLib.SOURCE_REMOVE
 
     def _settle_into_listening(self) -> bool:
         """Finish the interrupt handover, unless something else took over."""
@@ -327,8 +400,10 @@ class VoiceMixin:
 
         started = self.recorder.start_auto_stop(
             self._on_recording_done,
-            max_seconds=getattr(self, "_listen_max_seconds", 20.0),
-            silence_seconds=self.config.get_double("end-of-speech-pause", 1.2) or 1.2,
+            max_seconds=getattr(self, "_listen_max_seconds", TURN_SECONDS),
+            silence_seconds=getattr(
+                self, "_listen_silence_seconds", None)
+            or self.config.get_double("end-of-speech-pause", 1.2) or 1.2,
             on_level=self._on_input_level,
         )
         if not started:
@@ -357,9 +432,27 @@ class VoiceMixin:
         """Recorder callback - runs on the recorder's own background thread."""
         GLib.idle_add(self._on_recording_done_main, audio_path)
 
+    def _dictation_note(self) -> str:
+        """What to say when a dictation ended, including when it was cut.
+
+        A dictation stopped by its five-minute cap arrives as a transcript, and a
+        transcript that silently stops mid-sentence reads as "that is everything
+        I said" - which is the one thing a transcript must never imply.
+        """
+        if not getattr(self, "_dictating", False):
+            return ""
+        self._dictating = False
+        if getattr(self, "_record_truncated", False):
+            self._record_truncated = False
+            return " (stopped at the dictation limit)"
+        return " (dictation ended)"
+
     def _on_recording_done_main(self, audio_path: Optional[str]) -> bool:
         """Handle a finished recording (auto-stopped or cancelled early) on the GTK main thread."""
         self._listening = False
+        # Why it ended, read now: the recorder's reason describes *this*
+        # recording, and a later turn would overwrite it.
+        self._record_truncated = (getattr(self.recorder, "auto_stop_reason", "") == "limit")
         if not audio_path:
             logger.info("No audio captured")
             if self.window:
@@ -375,10 +468,45 @@ class VoiceMixin:
         return GLib.SOURCE_REMOVE
 
     async def _transcribe(self, audio_path: str) -> str:
-        """Run (blocking) whisper.cpp transcription off the GTK thread."""
+        """Run (blocking) whisper.cpp transcription off the GTK thread.
+
+        **Waits for the model first, when there is one.** whisper.cpp and
+        llama.cpp share this machine, so a transcript that starts while a reply is
+        still being generated competes with it for the same accelerator - and the
+        transcript is the half whose lateness the person notices, having just
+        said the words. `assistd`'s `QueuedTranscriber` asks the same question
+        before every transcription and logs which way it went; this does the
+        bounded-wait half of it, with the reason on both the log and the status
+        line so "your speech was slow" has an explanation attached.
+
+        The wait happens on this coroutine's executor, not the GTK thread, so the
+        window stays responsive while it happens - which is the whole reason the
+        transcription is off-thread in the first place.
+        """
         loop = asyncio.get_event_loop()
+        gate = getattr(self, "_speech_gate", None)
+        if gate is None:
+            gate = self._speech_gate = speech_gate.Gate(
+                speech_gate.window_busy(getattr(self, "window", None)))
         try:
-            return await loop.run_in_executor(None, self.stt.transcribe, audio_path)
+            def _work() -> str:
+                waited = gate.run()
+                if waited and self.window:
+                    # A *state*, not a status line. `assistd` carries this as
+                    # `VoiceCaptureState::Queued`, and the difference is visible:
+                    # on the detail line it is a sentence that scrolls away, while
+                    # as a state it moves the orb and holds there for as long as
+                    # the wait lasts - which is the difference between "I heard
+                    # you and am holding on" and "the microphone has died".
+                    GLib.idle_add(self.window.set_state, AssistantState.QUEUED)
+                    GLib.idle_add(self.window.set_status, gate.last_reason)
+                try:
+                    return self.stt.transcribe(audio_path)
+                finally:
+                    if waited and self.window:
+                        GLib.idle_add(self.window.set_state, AssistantState.LISTENING)
+
+            return await loop.run_in_executor(None, _work)
         finally:
             os.remove(audio_path)
 
@@ -525,7 +653,7 @@ class VoiceMixin:
         try:
             self._begin_listening()
         finally:
-            self._listen_max_seconds = 20.0
+            self._listen_max_seconds = TURN_SECONDS
         return GLib.SOURCE_REMOVE
 
     def _last_reply_text(self) -> str:

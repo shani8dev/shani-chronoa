@@ -167,4 +167,55 @@ def _run(arguments: dict) -> str:
             f"The original is unchanged.")
 
 
+
+def _verify_edit_image(arguments: dict, tool=None):
+    """Post-condition: did a *different* image actually get written?
+
+    `edit_image` runs ImageMagick and then reports `before`/`after` byte sizes,
+    which is a claim by the process that did the work. The check here looks for
+    the file the skill says it wrote, confirms it decodes as an image, and
+    confirms it is **not the input**.
+
+    That last part is the check worth having. "Edited your image" followed by an
+    output byte-identical to the input is precisely the failure a resize or a
+    rotate reports as success - ImageMagick exits 0, writes the file, and
+    nothing changed. Comparing the two is cheap and catches it.
+
+    Matching on the `-edited` name the skill itself chooses, so the check and the
+    writer agree on where the output went. Known limit, stated rather than
+    hidden: if several edits landed in the same directory this picks the newest,
+    so an earlier edit could be verified instead of this one - the same limit
+    `sing` states about its own check.
+    """
+    raw = str(arguments.get("path") or "").strip()
+    if not raw:
+        return None  # nothing was written
+    try:
+        from shani_chronoa import files as _files
+        src = _files.resolve(raw)
+    except Exception as exc:  # noqa: BLE001
+        return (False, f"could not resolve the source path: {exc}")
+    if not src.is_file():
+        return (False, f"{src} is not a file, so nothing was edited")
+
+    candidates = sorted(src.parent.glob(f"{src.stem}-edited*"),
+                        key=lambda q: q.stat().st_mtime)
+    if not candidates:
+        return (False, f"no edited image beside {src.name}")
+    dst = candidates[-1]
+    try:
+        size = dst.stat().st_size
+    except OSError as exc:
+        return (False, f"could not stat {dst.name}: {exc}")
+    if size == 0:
+        return (False, f"{dst.name} was written but is empty")
+    if size == src.stat().st_size and             dst.read_bytes()[:4096] == src.read_bytes()[:4096]:
+        return (False, f"{dst.name} is the same size and the same header as "
+                       f"{src.name}, so the edit did not change the image")
+    return (True, f"{dst.name} exists, is {size} bytes, and differs from "
+                  f"{src.name} ({src.stat().st_size} bytes)")
+
+
+POST_CONDITION = _verify_edit_image
+
 SKILLS = [Skill(name="edit_image", schema=_SCHEMA, run=_run)]

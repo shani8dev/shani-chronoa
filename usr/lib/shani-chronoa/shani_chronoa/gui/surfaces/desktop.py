@@ -192,6 +192,7 @@ ROW_TITLES = (
     "Document search",
     "Desktop keyring",
     "Open with Chronoa",
+    "Tray icon",
 )
 
 _FOOTER = (
@@ -249,6 +250,20 @@ def _value_label(row: Gtk.Widget) -> Optional[Gtk.Label]:
         return None
     label.add_css_class(VALUE_CSS)
     return label
+
+
+def _tray_sentence() -> str:
+    """Whether a tray icon exists here, and what is missing if not.
+
+    GTK4 removed `Gtk.StatusIcon`, so the icon needs libappindicator. Saying so
+    is the point: a tray that silently does not appear looks like a bug in the
+    assistant rather than a missing package, and the fix is one `pacman -S`.
+    """
+    from shani_chronoa.app import tray
+    usable, why = tray.available()
+    if usable:
+        return f"yes - {why}"
+    return f"not installed - {why}"
 
 
 def _row(title: str, value: str) -> Gtk.Widget:
@@ -666,6 +681,9 @@ def build(app: Any) -> Gtk.Widget:
     _add_row(secrets, _row(
         "Desktop keyring", _keyring_sentence(names, bus_problem)))
     _add_row(secrets, _row("Open with Chronoa", _desktop_sentence()))
+    # The tray belongs with the keyring and "Open with", not with the search
+    # provider: all four are about whether the *desktop* knows Chronoa exists.
+    _add_row(secrets, _row("Tray icon", _tray_sentence()))
     body.append(secrets)
 
     body.append(_summary_label(read_at))

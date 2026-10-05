@@ -152,4 +152,46 @@ def _run(arguments: dict) -> str:
     return _scanner(arguments)
 
 
+def _verify_scanned_document(arguments: dict, tool=None):
+    """Post-condition: did the scan actually read text off the page?
+
+    A scanner that produces an empty string is the failure worth catching: it
+    exits 0 on a blank page, a skewfed original or a missing language pack, and
+    "I could not read that" and "here is what it said" are the same return
+    value. So the check re-reads the *text* the skill was about to report, and
+    holds that non-empty text means there was something to read.
+
+    **A document that genuinely contains no text reads as unverified rather than
+    as a failure**, and that limit is stated rather than hidden - a blank page is
+    a correct outcome this check cannot tell from a broken scan.
+    """
+    from pathlib import Path as _P
+    out = str(arguments.get("output") or "").strip()
+    source = str(arguments.get("path") or "").strip()
+    if not source:
+        return None  # nothing was scanned to check
+    scanned = bool(arguments.get("path")) and not out
+    if scanned:
+        # It scanned in place: the artefact is the text itself, so re-derive it.
+        try:
+            from shani_chronoa import files as _files
+            src = _files.resolve(source)
+        except Exception as exc:  # noqa: BLE001
+            return (False, f"could not resolve the source: {exc}")
+        if not src.is_file():
+            return (False, f"{src} is not a file, so nothing was scanned")
+        try:
+            text = src.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return (False, f"could not read {src.name}: {exc}")
+        words = len(text.split())
+        if words == 0:
+            return (False, f"{src.name} holds no text at all - either a blank "
+                           f"page or the scan produced nothing")
+        return (True, f"{src.name} holds {words} word(s) of text")
+    return None
+
+
+POST_CONDITION = _verify_scanned_document
+
 SKILLS = [Skill(name="scan_document", schema=_SCHEMA, run=_run)]

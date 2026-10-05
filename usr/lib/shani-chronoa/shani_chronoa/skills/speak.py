@@ -126,4 +126,56 @@ _SCHEMA = {
     },
 }
 
+def _verify_spoke(arguments: dict, tool=None):
+    """Post-condition: does the text actually become playable audio?
+
+    **`speak` plays rather than writes.** It synthesises to bytes, hands them to
+    PipeWire, and the file it used is deleted before this runs - so unlike
+    `sing`, which can look for a WAV it left behind, there is no artifact to
+    inspect. The evidence available is therefore a *re-synthesis*: if the engine
+    produces real audio for this text now, it produced real audio a moment ago,
+    and the failure mode worth catching is the one that is reproducible -
+    no voice model installed, espeak-ng missing, a stub that returns silence.
+
+    What this deliberately does **not** claim: that sound reached a speaker.
+    Whether a sink is muted, the volume is zero, or the machine is in a
+    container with no audio device is not observable from here, and `play_file`
+    reporting success only means the backend accepted the stream. So the
+    evidence says "audio was produced and offered to the backend", and the
+    check is honest about that rather than claiming a person heard something.
+
+    This is the same shape as `sing._verify_sung` - trust the artifact, not the
+    skill's own claim - adapted to the fact that `speak` leaves no artifact.
+    """
+    text = str(arguments.get("text") or "").strip()
+    if not text:
+        return None  # nothing was asked for, so nothing to check
+    try:
+        from shani_chronoa.tts import PiperTTS
+
+        tts = PiperTTS()
+        engine = tts.engine()
+        audio = tts.synthesize_to_bytes(text)
+    except Exception as exc:  # noqa: BLE001 - cannot check is not a pass
+        return (False, f"could not re-synthesise the text to check it: "
+                       f"{type(exc).__name__}: {str(exc)[:100]}")
+    if not audio:
+        return (False, f"the {engine} engine produced no audio for this text - "
+                       f"check that a voice model is installed")
+    # A WAV header with nothing behind it is exactly what a stub returns.
+    header = bytes(audio[:12])
+    if len(audio) <= 44 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+        return (False, f"the {engine} engine produced {len(audio)} bytes that "
+                       f"are not a WAV, so nothing could have been played")
+    samples = len(audio) - 44
+    if samples <= 0:
+        return (False, f"the {engine} engine produced a WAV header with no "
+                       f"audio behind it")
+    return (True, f"the {engine} engine re-synthesised {len(audio)} bytes "
+                  f"({samples} after the 44-byte header) as a valid WAV for "
+                  f"this text; playback itself is not observable from here")
+
+
+POST_CONDITION = _verify_spoke
+
 SKILLS = [Skill(name="speak", schema=_SCHEMA, run=_run)]

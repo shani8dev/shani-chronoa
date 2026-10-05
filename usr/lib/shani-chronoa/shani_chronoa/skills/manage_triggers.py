@@ -80,8 +80,11 @@ SCHEMA = {
                 "sense": {
                     "type": "string",
                     "description": (
-                        "Which sense's perceptions to match, e.g. 'power', "
-                        "'battery' is 'power'. Required for add."
+                        "Which sense's perceptions to match, e.g. 'power' "
+                        "(which reports battery and charging), or "
+                        "'heard-sound' for sounds in the room. Required "
+                        "for add. The settings window lists every sense and what "
+                        "it reports."
                     ),
                 },
                 "match_mode": {
@@ -286,6 +289,44 @@ def _check_arguments(actuator: str, arguments) -> "tuple[dict, str]":
         f"The {actuator} skill is not installed, so a rule naming it could not "
         f"be checked against its arguments."
     )
+
+
+#: The status a reader returns when it cannot read the source at all.
+_UNREADABLE_SOURCE = "unavailable"
+
+#: Phrasings that mean *the source string itself* is wrong, rather than the
+#: thing it names being absent. Both arrive as SIGNAL_UNAVAILABLE, and the
+#: difference matters: arming `git` on a repository you have not cloned yet is
+#: sensible and must be allowed, while `doorbell:1.5` is a typo that would
+#: otherwise sit armed and never fire.
+#:
+#: This is still prose-matching, and deliberately so - it is a much smaller
+#: surface than the regex it replaces (a fixed list of complete phrases, rather
+#: than the openings of whatever English a reader happened to write), and it
+#: sits *behind* the status check, so a reader that says none of them is
+#: allowed through rather than wrongly blocked. The mistake it can still make
+#: is admitting a malformed source, which is the behaviour that already existed;
+#: the mistake it can no longer make is refusing a legitimate one.
+_MALFORMED_SOURCE_PHRASES = (
+    "source is the name of",
+    "must be between",
+    "needs a percentage from",
+    "must be a percentage from",
+    "is not a unit name",
+    "is not a day",
+    "is not a time of day",
+    "source must be",
+    "the pattern must be",
+    "use 'daily",
+    "every N minutes",
+    "hourly :MM",
+    "a bus name, path",
+)
+
+
+def _names_the_source(detail: str) -> bool:
+    """Whether this refusal is about the source's form, not its target."""
+    return any(phrase in detail for phrase in _MALFORMED_SOURCE_PHRASES)
 
 
 def _open(kind: str):
@@ -536,14 +577,26 @@ def _add_event_rule(arguments: dict, event_type: str) -> str:
         return f"Refusing to arm {name!r}: {why or 'the rule was rejected'}. Nothing was armed."
     # A source the type cannot parse would only ever read UNAVAILABLE - refuse it
     # now, with the forms the reader accepts, so the caller can correct it.
+    #
+    # This asks the reader and reads its *status*, which is what it uses to mean
+    # "I cannot read this source". It used to string-match the reader's prose
+    # against a regex of the openings those messages happened to have, which
+    # silently accepted every reader that phrased its refusal differently - five
+    # verified cases armed fine and then reported SIGNAL_UNAVAILABLE on every
+    # poll forever, with `list` still showing them enabled. A status is a
+    # contract; English is not.
+    #
+    # Deliberately *not* refusing on every non-OK status: a source naming a
+    # repository or unit that does not exist yet is a legitimate thing to arm
+    # before it does, and the readers report that as unavailable too.
     from shani_chronoa.triggers import read_event_signal
     try:
         probe = read_event_signal(rule)
     except Exception:  # noqa: BLE001 - a reader that cannot run now may work at fire time
         probe = None
     detail = getattr(probe, "detail", "") or ""
-    if re.match(r"(source must be|the pattern must be|use 'daily|every N minutes|hourly :MM|"
-                r"a bus name, path|\S+ is not a (day|unit name|time of day))", detail):
+    status = getattr(probe, "status", None)
+    if status == _UNREADABLE_SOURCE and _names_the_source(detail):
         return f"Refusing to arm {name!r}: {detail}. Nothing was armed."
 
     try:

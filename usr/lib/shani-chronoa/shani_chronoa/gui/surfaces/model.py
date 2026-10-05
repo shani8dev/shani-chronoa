@@ -488,20 +488,42 @@ def _speakers(config: Any) -> Tuple[Optional[bool], str]:
 
 
 def _math(config: Any) -> Tuple[Optional[bool], str]:
-    """Algebra and calculus, which `skills/solve_math.py` gates on SymPy.
+    """Algebra and calculus, which `skills/solve_math.py` gates on **symengine
+    and `bc`** - not on one of them.
 
-    Not on the setup wizard's More page - SymPy is a distro package, not a
-    download - so the state that answers this is the skill module's own `sp`:
-    the exact flag `_run()` refuses on. Nothing else in the tree records it.
+    Two engines because one is not enough: symengine does the exact algebra
+    (derivative, series, expand, factor, primes, linear solve) and `bc` does
+    the exact rational arithmetic that symengine's own `solve` segfaults on. So
+    a row that reported only symengine would say "installed" on a machine where
+    every matrix question raises, and one that reported only `bc` would say it
+    on a machine where nothing symbolic can run at all.
+
+    **This read `solve_math.sp`.** There is no `sp` any more - the module binds
+    `se` for symengine - so the probe raised `AttributeError`, the row came back
+    *unknown*, and a real dependency change left the wizard describing a module
+    that had not existed for days. The state that answers this is the skill
+    module's own flags: the exact ones `_run()` and the bc engine refuse on.
     """
     try:
         from shani_chronoa.skills import solve_math
     except Exception as exc:  # noqa: BLE001 - an unimportable skill is unknown
         logger.debug("cannot import solve_math", exc_info=True)
         return None, f"could not be determined - {_clip(exc)}"
-    if solve_math.sp is None:
-        return False, "SymPy is not installed (python-sympy), so solve_math refuses"
-    return True, "SymPy is installed, so solve_math can run"
+    symbolic = getattr(solve_math, "se", None) is not None
+    arithmetic = bool(getattr(solve_math, "_bc_available", lambda: False)())
+    if symbolic and arithmetic:
+        return True, ("symengine and bc are both available, so solve_math can "
+                      "do the exact algebra and the exact arithmetic")
+    if symbolic:
+        return False, ("symengine is installed but bc is not, so every integral, "
+                       "limit, sum and numeric evaluation refuses (install bc); "
+                       "the exact algebra still works")
+    if arithmetic:
+        return False, ("bc is installed but symengine is not, so every symbolic "
+                       "question refuses (install python-symengine); numeric "
+                       "evaluation still works")
+    return False, ("neither python-symengine nor bc is installed, so solve_math "
+                   "refuses everything")
 
 
 #: key -> (label, what it is for, probe, the module the probe reads). The order
@@ -518,7 +540,7 @@ _EXTRAS: Tuple[Tuple[str, str, str, Probe, Any], ...] = (
      "straighten a photographed page", _photos, opencv_runtime),
     ("sounds", "Sounds", "tell what a sound is", _sounds, sounds),
     ("speakers", "Who said what", "split a recording's transcript by speaker", _speakers, speakers),
-    ("math", "Maths", "algebra and calculus, through SymPy", _math, None),
+    ("math", "Maths", "algebra and calculus, through symengine and bc", _math, None),
 )
 
 
@@ -534,7 +556,7 @@ class _Extra(NamedTuple):
 def _extra_source(module: Any) -> str:
     """Where the answer came from, so a row can be checked against its source."""
     if module is None:
-        return "skills/solve_math.py's SymPy import"
+        return "skills/solve_math.py's symengine and bc availability"
     name = getattr(module, "__name__", "the extras module")
     directory = _read_dir(module)
     return f"{name}" + (f" (reads {directory})" if directory else "")

@@ -440,11 +440,11 @@ def test_the_window_does_not_need_libadwaita():
     assert not hasattr(browser, "Adw"), "the module exposes an Adw name"
 
 
-def _pkgbuild_depends(pkgbuild: str) -> str:
-    """The Arch `depends=(...)` block, so `optdepends` is not read as one."""
-    match = re.search(r"^depends=\s*\((.*?)^\)", pkgbuild, re.M | re.S)
-    assert match, "no depends=(...) array in PKGBUILD"
-    return match.group(1)
+# The Arch manifest lives in the sibling shani-pkgbuilds repo; the copy that used
+# to sit in this one was removed because nothing built from it and it had drifted.
+# Reading `REPO_ROOT/PKGBUILD` therefore failed with FileNotFoundError, which is
+# a confusing way to learn that a dependency is absent.
+from _pkgbuild import arch_pkgbuild, depends as _pkgbuild_depends  # noqa: E402
 
 
 def test_the_module_is_not_a_hard_package_dependency():
@@ -457,9 +457,10 @@ def test_the_module_is_not_a_hard_package_dependency():
     unreachable, and a `depends` line for a browser engine would put one on every
     install for a surface most sessions never open.
     """
+    declared = {name.lower() for name in
+                _pkgbuild_depends(arch_pkgbuild().read_text(encoding="utf-8"))}
+    assert not any("webkit" in name for name in declared), declared
     repo_root = pathlib.Path(__file__).resolve().parent.parent
-    assert "webkit" not in _pkgbuild_depends(
-        (repo_root / "PKGBUILD").read_text(encoding="utf-8")).lower()
     control = (repo_root / "DEBIAN" / "control").read_text(encoding="utf-8")
     hard = re.search(r"^Depends:\s*(.+)$", control, re.M)
     assert hard, "no Depends: field in DEBIAN/control"

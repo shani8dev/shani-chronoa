@@ -94,16 +94,43 @@ class BrainMixin:
         self._setup_window = setup_wizard.build_window(self, self.config, on_finished=finished)
         self._setup_window.present()
 
-    def _use_local_server(self) -> bool:
+    def _use_local_server(self, wake: bool = True) -> bool:
         """Use llama.cpp's llama-server (local_llm.py) when Ollama is absent; still on this machine.
 
         Sets `_ollama_available` too, because every caller treats that flag as
         "a local model answers" - which is the promise that keeps the cloud
         fallback from engaging while a local model is running.
+
+        **`wake=True` starts the service when it is not already answering**, which
+        it did not before. That is what makes `presence.py` honest: releasing the
+        model is only a state if something brings it back, and with a bare
+        `is_up()` check a released model was simply gone - a question would have
+        gone to the cloud fallback or nowhere at all. With a cold start, "let go
+        of the memory" and "still here" stop being opposites.
+
+        `wake=False` is for the callers that must not start anything - checking
+        whether a model is present is not a reason to load one.
         """
         from shani_chronoa import local_llm
+        from shani_chronoa.presence import Presence
         if not local_llm.is_up():
-            return False
+            # Only Drowsy means "load it again". Sleeping means do not, and
+            # reading a *presence* rather than the `_can_answer` bool is the
+            # difference: a bool cannot tell "no model installed" from "asleep
+            # on purpose", and a first version compared the bool to an enum,
+            # which is never true and so quietly disabled the whole guard.
+            if not wake or getattr(self, "_presence", Presence.ACTIVE) is Presence.SLEEPING:
+                return False
+            logger.info("llama-server is not answering; starting it for this question")
+            problem = local_llm.start_service()
+            if problem:
+                logger.warning("could not start the local model server: %s", problem)
+                return False
+            if not local_llm.is_up():
+                # Started, and still not answering. Saying so beats a silent
+                # False: the difference is "it is loading" and "it will not".
+                logger.warning("the local model server was started but is not answering")
+                return False
         self.llm = local_llm.LocalLLM()
         self._ollama_available = True
         if getattr(self, "assistant", None):
@@ -122,9 +149,32 @@ class BrainMixin:
         if self._ollama_available or isinstance(self.llm, CloudLLMChain):
             return
         if self.privacy.is_local_only or not self.config.cloud_fallback_enabled:
+            # **Name every backend and its own reason.** This said only "no
+            # Ollama", on a machine where Ollama was never the default and
+            # llama.cpp is - so a person reading the log could not tell that the
+            # local backend it *does* use was the thing that was missing. The
+            # whole point of this line is that it is the answer to "why is
+            # nothing answering?", and it was answering a question about the
+            # wrong program.
+            try:
+                from shani_chronoa import local_llm
+                binary = local_llm.server_binary()
+                if not binary:
+                    local = "llama.cpp is not installed"
+                elif local_llm.active():
+                    local = f"llama.cpp has {local_llm.active()} but is not answering"
+                else:
+                    local = "llama.cpp is installed but has no model yet"
+            except Exception as exc:  # noqa: BLE001 - a report must not raise
+                local = f"llama.cpp could not be checked ({type(exc).__name__})"
+            gates = []
+            if self.privacy.is_local_only:
+                gates.append("privacy mode is on")
+            if not self.config.cloud_fallback_enabled:
+                gates.append("cloud fallback is off")
             logger.info(
-                "LLM unavailable (no Ollama, and cloud fallback needs privacy mode off "
-                "AND cloud-fallback-enabled)"
+                "LLM unavailable - %s; Ollama is not running; no cloud model (%s)",
+                local, " and ".join(gates),
             )
             return
         # BYOK providers (Anthropic/OpenAI/Google/Groq) go first when a key
@@ -168,10 +218,46 @@ class BrainMixin:
         if self.window:
             self.window.set_status(f"Cloud fallback: {'ON' if new_value else 'OFF'}")
 
+    def _router_fallback(self, text: str) -> bool:
+        """One turn from the distilled router, when no model answers at all.
+
+        **A prior, not a brain, and it is labelled as one.** The router names a
+        skill; it cannot fill in arguments, so it may only reach a skill that
+        declares none - running one with `{}` means running its defaults, which
+        is the rule `assistant.py` already refuses to break for a model. The
+        call goes through `execute_tool_outcome`, so the whitelist, the consent
+        key, the sandbox and the post-condition all apply as they always do.
+
+        Returns False when there is nothing to offer, which is the common case
+        and the honest one: a router that has not separated anything should not
+        be made to guess on a person's behalf.
+        """
+        from shani_chronoa import distill, tools
+        from shani_chronoa.tool_tracking import ORIGIN_USER
+        proposal = distill.fallback(text)
+        if not proposal:
+            return False
+        name = str(proposal["tool"])
+        outcome = tools.execute_tool_outcome(name, {}, origin=ORIGIN_USER)
+        if self.window:
+            # No `add_user_turn`: both the typed path and the spoken one have
+            # already put this request on screen before `_submit` is reached,
+            # and adding it again here showed the person their own words twice.
+            self.window.set_response(
+                f"{outcome.text}\n\n(No language model is installed, so a "
+                f"distilled router picked `{name}` - {proposal['reason']}. "
+                f"Runner-up was `{proposal['runner_up']}`.)")
+            self.window.set_status(f"Routed by the distilled student: {name}")
+            self.window.set_orb_state("idle")
+        logger.info("no model answering; distilled router picked %s", name)
+        return True
+
     def _explain_no_model(self, text: str) -> None:
-        """No model answers: start the installed local one, or point at setup - never just "not available"."""
+        """No model answers: the router if it can be sure, the installed model, or setup - never just "not available"."""
         from shani_chronoa import local_llm
         if not self.window:
+            return
+        if self._router_fallback(text):
             return
         self.window.set_orb_state("error")
         if local_llm.installed() and local_llm.server_binary():

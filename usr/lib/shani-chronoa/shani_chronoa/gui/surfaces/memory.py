@@ -61,7 +61,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk  # noqa: E402
 
 from shani_chronoa import egress, markdown_lite  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -371,7 +372,7 @@ def _by_sense(percepts: List[Any]) -> "Dict[str, List[Any]]":
 # ---------------------------------------------------------------------------
 
 
-class _MemorySurface(Gtk.Box):
+class _MemorySurface(Adw.NavigationPage):
     """The page: an optional privacy banner, then one group per sense.
 
     Rebuilt from the store on every `refresh()`, which is what a Forget does
@@ -381,12 +382,14 @@ class _MemorySurface(Gtk.Box):
     """
 
     def __init__(self, app: Any) -> None:
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._store = _store_of(app)
-        page, set_content = common.surface(TITLE, SUBTITLE)
-        self.append(page)
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        # Wrap content in a surface to get the header
+        page_content, set_content = common.surface(TITLE, SUBTITLE)
         set_content(self._content)
+
+        super().__init__(child=page_content, title=TITLE)
         self.refresh()
 
     # -- content ------------------------------------------------------------

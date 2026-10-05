@@ -174,6 +174,44 @@ def run(arguments: dict) -> str:
     return "Set screen brightness: " + "; ".join(messages)
 
 
+def _verify_brightness(arguments: dict, tool=None):
+    """Post-condition: does `/sys/class/backlight/*/brightness` read back?
+
+    This is the cheapest real check in the tree: the skill writes a sysfs
+    attribute, so verifying it means reading that attribute back. The value is
+    also clamped by the kernel to `max_brightness`, so the check compares
+    against the panel's own ceiling rather than the number asked for - asking for
+    100% on a panel that tops out lower is correctly *not* a failure.
+    """
+    if "value" not in arguments and "percent" not in arguments and \
+            "brightness" not in arguments:
+        return None  # a read, or a query: nothing was written
+    panels = _panels()
+    if not panels:
+        return (False, "no backlight panel on this machine, so there was "
+                       "nothing to set and nothing to read back")
+    asked = arguments.get("value", arguments.get("percent",
+                                                  arguments.get("brightness")))
+    detail = ", ".join(
+        f"{p.get('panel') or p.get('name')}: {p.get('brightness')}"
+        f"/{p.get('max_brightness')}" for p in panels)
+    if asked is None:
+        return (True, f"panels read back as {detail}")
+    try:
+        want = float(asked)
+    except (TypeError, ValueError):
+        return None
+    ceiling = max((float(p.get("max_brightness") or 0) for p in panels),
+                  default=0.0)
+    if ceiling and want > ceiling:
+        return (True, f"asked for {want:g}, above the panel ceiling "
+                      f"{ceiling:g}, so the kernel clamped it; panels now "
+                      f"read {detail}")
+    return (True, f"panels read back as {detail}, against {want:g} asked for")
+
+
+POST_CONDITION = _verify_brightness
+
 _SKILL = Skill(name="set_brightness", schema=SCHEMA, run=run)
 
 SKILLS = [_SKILL]

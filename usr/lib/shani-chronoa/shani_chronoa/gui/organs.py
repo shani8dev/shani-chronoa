@@ -46,15 +46,28 @@ logger = logging.getLogger(__name__)
 
 #: organ -> (icon, label). The icons are the GNOME ones this repo already uses
 #: for the same meanings elsewhere, so a person who learned one has learned both.
+#:
+#: The eye and the brain are here because the names that were here first did not
+#: resolve, and an icon that does not resolve is not a subtle wrong - it is an
+#: empty box in the organ strip, which is on screen in every conversation.
+#: `eye-open-negative-symbolic` reads as "not looking" in intent and is absent
+#: from the theme under that spelling or the plain one; the theme's eye is
+#: `preferences-desktop-screensaver-symbolic`, which is also what this repo
+#: already uses for the Senses panel, so the two now agree. For "thinking",
+#: there is no brain icon in Adwaita at any spelling - `brain-augemnted-symbolic`
+#: (which is also misspelled) and the corrected `brain-augmented-symbolic` were
+#: both measured absent, as was `brain-symbolic` - so "thinking" takes
+#: `dialog-question-symbolic`, the repo's existing glyph for Chronoa working
+#: something out.
 ORGAN_ICONS = {
     "ears": ("audio-input-microphone-symbolic", "listening"),
-    "eyes": ("eye-open-negative-symbolic", "looking"),
+    "eyes": ("preferences-desktop-screensaver-symbolic", "looking"),
     "mouth": ("audio-volume-high-symbolic", "speaking"),
     "skin": ("network-wireless-symbolic", "network"),
     "nose": ("weather-clear-symbolic", "sensing"),
     "memory": ("emblem-documents-symbolic", "remembering"),
     "hands": ("system-run-symbolic", "acting"),
-    "brain": ("brain-augemnted-symbolic", "thinking"),
+    "brain": ("dialog-question-symbolic", "thinking"),
 }
 
 #: Which sound an organ makes, and at what pitch. Groups rather than eight

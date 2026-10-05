@@ -550,7 +550,6 @@ class bandits:
         pool = [c for c in candidates if c]
         if not pool:
             return None
-        keyed = [f"{context}|{c}" for c in pool]
         return max(pool, key=lambda c: self._rates([f"{context}|{c}"])[f"{context}|{c}"][0])
 
     def posterior(self, arm: str) -> Tuple[float, float]:
@@ -1363,8 +1362,267 @@ core = sys.modules[__name__]
 # keeping two copies of a feature width is a way to have two different
 # feature spaces in one program.
 
+
+# ══════════════════════════════════════════════════════════════════════════
+# LEARNING FROM OUTCOMES: RELIABILITY, AND WHAT IT MAY CHANGE
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Restored into this package after a duplicate copy of it was found under
+# `pkg/`, which is where these six functions actually lived. The canonical tree
+# had lost them while `tool_select` still called them - and the calls were
+# wrapped in `try/except`, so nothing failed: `learned_weights()` returned `{}`
+# on every request and `reorder()` was never reached. The learned half of
+# selection was dead and silent, which is the one failure shape a suite only
+# reports as red if some test asserts the *effect* rather than the import.
+#
+# The safety argument is unchanged, and is the whole reason this is a
+# multiplier rather than a decision: nothing here can add a tool to a selection
+# or remove one permanently. It reorders names the matcher already returned,
+# and a demotion is a nudge - `MIN_WEIGHT` leaves even a total record of failure
+# reachable.
+
+#: Verdicts that mean "this worked". Anything else - including `None`, which is a
+#: call that never reached verification - is not evidence of success.
+SUCCESS = ("verified",)
+
+#: How much one outcome is worth, in pseudo-counts. Two is deliberate: with one,
+#: a single failure would swing a tool's score to zero, and one bad call is not
+#: evidence that a tool is bad.
+PRIOR_STRENGTH = 2.0
+#: The score of a tool with no history at all: neutral, so an unproven tool is
+#: neither promoted nor buried - it just stays where the matcher put it.
+NEUTRAL = 0.5
+#: Reliability is mapped onto a multiplier between these, so the worst history
+#: can demote a tool without ever putting it out of reach of the matcher.
+#: `MAX_WEIGHT` is the ceiling; `MIN_WEIGHT` is *derived* from the slope below so
+#: that a total record of failure lands exactly on it. The first version had a
+#: hand-picked 0.25 that the curve never reached, which made the constant a
+#: claim the code did not make.
+MAX_WEIGHT = 1.75
+
+
+def is_success(verdict: Optional[str]) -> bool:
+    """Whether a verdict counts as evidence that the action worked.
+
+    Case-insensitive on purpose: the log has been written by hand, by tests, and
+    by older code, and `"Verified"` must not read as a failure.
+    """
+    if not verdict:
+        return False
+    return str(verdict).strip().lower() in SUCCESS
+
+
+def reliability(records: Iterable) -> float:
+    """The share of calls that verified, shrunk towards `NEUTRAL`.
+
+    `records` is anything with `.verdict` on it - `ToolCallRecord`, or the dict
+    `to_log_dict` produces, which is what reading the log back gives you.
+    `PRIOR_STRENGTH` pseudo-observations of "probably fine" are added, so:
+    0 calls -> 0.5 (neutral), 1 verified -> ~0.62, 9 verified -> ~0.91, and
+    a flawless record reaches 1.0 only after enough calls to mean something.
+    """
+    total = 0
+    good = 0
+    for record in records:
+        verdict = (record.get("verdict") if isinstance(record, dict)
+                   else getattr(record, "verdict", None))
+        if verdict is None:
+            # The call never reached verification, so nothing was observed. It
+            # is counted as neither a success nor a failure - a skill that
+            # crashed before its post-condition ran is not evidence about
+            # whether the skill works.
+            continue
+        total += 1
+        if is_success(verdict):
+            good += 1
+    return ((good + PRIOR_STRENGTH * NEUTRAL) / (total + PRIOR_STRENGTH))
+
+
+#: How fast a reliability moves a weight. Chosen so a *perfect* history reaches
+#: exactly `MAX_WEIGHT`, which makes the scale's two ends facts rather than
+#: taste.
+_SLOPE = math.log(MAX_WEIGHT) / (1.0 - NEUTRAL)
+#: What a reliability of zero is worth, exactly.
+MIN_WEIGHT = math.exp(-_SLOPE * NEUTRAL)
+
+
+def weight(score: float) -> float:
+    """Turn a reliability into the multiplier `tool_select` multiplies by.
+
+    Exponential, and anchored so that `NEUTRAL` maps to exactly **1.0** - the
+    first version used `log2(score / NEUTRAL)`, which put the neutral point at
+    0.5 and therefore demoted even a tool with a flawless record. An indicator
+    that reads "0.9" and calls it below neutral is worse than no indicator.
+
+    Clamped, because a demotion is a nudge and never a veto: even a total record
+    of failure leaves the tool reachable.
+    """
+    bounded = min(1.0, max(0.0, float(score)))
+    return min(MAX_WEIGHT, max(MIN_WEIGHT,
+                               math.exp(_SLOPE * (bounded - NEUTRAL))))
+
+
+def weights_from_records(records: Iterable) -> Dict[str, float]:
+    """Per-tool multipliers, from a flat list of call records."""
+    grouped: Dict[str, list] = {}
+    for record in records:
+        name = (record.get("tool_name") if isinstance(record, dict)
+                else getattr(record, "tool_name", None))
+        if not name:
+            continue
+        grouped.setdefault(str(name), []).append(record)
+    return {name: weight(reliability(items)) for name, items in grouped.items()}
+
+
+def weights_from_tracker(tracker: Optional[object] = None) -> Dict[str, float]:
+    """The same, from the live `ToolTracker`.
+
+    Takes the tracker as an argument rather than importing the singleton, so the
+    caller decides whose history it is: a test with a temporary log, or the real
+    one. A module-level import of the singleton would make this untestable and
+    would read another process's history by accident.
+    """
+    if tracker is None:
+        return {}
+    try:
+        records = tracker.get_calls()
+    except Exception:
+        logger.debug("could not read the tool history", exc_info=True)
+        return {}
+    return weights_from_records(records)
+
+
+def reorder(ranked: Sequence[Tuple], learned: Optional[Dict[str, float]] = None,
+            limit: Optional[int] = None) -> List:
+    """Reorder `tool_select.ranked()` output by what has been learned.
+
+    `ranked` is a sequence of `(score, tool_name)` pairs. The learned multiplier
+    is applied to the matcher's own score, and the list is sorted again -
+    **stably**, so two tools the matcher considered equally good keep the
+    matcher's order when learning has no opinion about them.
+
+    Only names it was given can come back out. This is the whole safety argument
+    for learning in one line, and it is why there is no code path from a score to
+    a tool that the matcher did not already return.
+    """
+    if not learned:
+        return list(ranked)[:limit] if limit else list(ranked)
+    scored = []
+    for position, pair in enumerate(ranked):
+        try:
+            score, name = pair[0], pair[1]
+        except (TypeError, IndexError, KeyError):
+            scored.append((0.0, position, pair))
+            continue
+        multiplier = learned.get(name)
+        if multiplier is None:
+            multiplier = 1.0
+        scored.append((float(score) * float(multiplier), position, pair))
+    # -score for descending, position ascending so ties keep the matcher's order.
+    scored.sort(key=lambda triple: (-triple[0], triple[1]))
+    out = [triple[2] for triple in scored]
+    return out[:limit] if limit else out
+
+
+def organ_status(tracker: Optional[object] = None) -> Dict[str, object]:
+    """What the Inventory panel shows, from the history that exists."""
+    learned = weights_from_tracker(tracker)
+    if not learned:
+        return {"tools_with_history": 0, "trusted": 0, "doubted": 0}
+    return {
+        "tools_with_history": len(learned),
+        "trusted": sum(1 for w in learned.values() if w > 1.0),
+        "doubted": sum(1 for w in learned.values() if w < 1.0),
+    }
+
 VERDICTS = ("unverified", "verified", "failed")
 _N_FEATURES = 1 << 14
+
+#: **The feature space's identity, recorded in every model and checked on load.**
+#:
+#: `_index` hashes a name with a fixed width, so a model whose weights live at
+#: index 41 means "the tool whose name hashes to 41" - and that sentence stops
+#: being true the moment the width, the hash, or the naming convention changes.
+#: Nothing in the model recorded that, so a model written before a change would
+#: load, pass its digest, and predict confidently about a feature it no longer
+#: refers to. Silent nonsense is worse than a refusal, because nothing looks
+#: wrong.
+#:
+#: So the space identifies itself, and a model that was not trained in this
+#: space is **converted where it can be and refused where it cannot** - never
+#: loaded and believed. A human changing one feature name does not invalidate a
+#: model; a human changing the hasher does, and the difference is the point.
+def read_model_knowledge(model=None) -> List[Dict[str, object]]:
+    """What an existing model already knows, read out of its weights.
+
+    **The model is the one artefact that is already paid for.** While the log
+    has no scored labels, a model from an earlier run still encodes which
+    feature combinations leaned toward failure. Discarding it and waiting for
+    fresh evidence throws away the part of the system that cost the most to
+    produce, so the knowledge is extracted and reported directly rather than
+    re-derived.
+
+    Read from the weights directly, with no log involved, so it works even on a
+    machine whose log has nothing scored in it. This is *hypothesis* extraction,
+    not proof: a weight is evidence the fit was pulled that way, not a
+    measurement, and the entries say so.
+    """
+    if model is None:
+        try:
+            candidates = sorted(models_dir().glob(
+                f"outcome-{_feature_space_id()}.json"))
+            if not candidates:
+                return []
+            model = OutcomeModel.load(candidates[-1])
+        except Exception:  # noqa: BLE001 - absent or unreadable is not a failure
+            return []
+    weights = getattr(model, "w", None) or {}
+    bias = list(getattr(model, "b", []) or [])
+    if not weights or not bias:
+        return []
+
+    # A feature is weighted toward whichever verdict it was most often fitted
+    # for. Aggregating by target class turns the flat weight map back into the
+    # statements it was trained from.
+    pulled: Dict[int, float] = defaultdict(float)
+    for index, row in weights.items():
+        for cls, value in enumerate(row):
+            if cls < len(bias):
+                pulled[cls] += value
+    total = sum(abs(v) for v in pulled.values()) or 1.0
+
+    out: List[Dict[str, object]] = []
+    for cls, name in enumerate(VERDICTS):
+        if cls >= len(bias):
+            break
+        share = pulled.get(cls, 0.0) / total
+        if abs(share) < 0.15:
+            continue
+        direction = "toward" if share > 0 else "away from"
+        out.append({
+            "verdict": name,
+            "weight_share": round(abs(share), 4),
+            "bias": round(bias[cls], 4),
+            "lesson": (f"this model's weights are pulled {direction} {name} "
+                       f"({abs(share):.0%} of total weight)"),
+            "action": ("confirm on the next scored calls before acting on it"
+                       if name != "failed" else
+                       "check the failing call shape's post-condition first"),
+            "confidence": "low - a fitted weight, not a measurement",
+        })
+    return sorted(out, key=lambda e: -float(e["weight_share"]))
+
+
+def _feature_space_id() -> str:
+    """A digest of everything that decides what an index means."""
+    import hashlib as _h
+    material = "|".join([
+        f"width={_N_FEATURES}",
+        f"hash=blake2b:{_index('probe').__class__.__name__}",
+        f"sample={_index('tool=example')},{_index('argkey=tool.path')}",
+        "convention=v2",
+    ])
+    return _h.sha256(material.encode("utf-8")).hexdigest()[:16]
 _MIN_CLASS = 20
 _ZERO = (0.0, 0.0, 0.0)
 REWARD = {"verified": 1.0, "failed": 0.0}
@@ -1474,13 +1732,1071 @@ def vectorise(names: Sequence[str]) -> List[float]:
     norm = math.sqrt(sum(v * v for v in vector))
     return [v / norm for v in vector] if norm else vector
 
+def collapse(examples: Sequence["Example"]) -> List[Tuple["Example", int]]:
+    """Unique feature vectors with how many times each was seen.
+
+    **Measured on this machine's own log: 11,590 examples carry only 344
+    distinct vectors.** 97% are duplicates and the largest identical group is
+    4,172 records. That single number reframes the whole layer:
+
+    - A 16,384-wide hashed space holds 344 distinct patterns, so almost every
+      column and almost every stored row is repetition.
+    - kNN retrieved *exact duplicates* as its nearest neighbours, which is why
+      it scored so well and so slowly: it was memorising, not generalising.
+    - Every fit was paying for repetition it did not need to.
+
+    Collapsing duplicates with their counts is therefore not a micro-optimisation
+    but a 34x reduction in the work, and it is what a weighted fit means
+    anyway: a row repeated 4,172 times and a row seen once carry exactly the
+    same information as one row with a weight of 4,172 and one with a weight
+    of 1. Any of these estimators fits that identically.
+
+    Order is preserved, so a prefix/suffix split still splits by time.
+    """
+    counts: Dict[Tuple[Tuple[int, float], ...], int] = defaultdict(int)
+    first: Dict[Tuple[Tuple[int, float], ...], "Example"] = {}
+    for example in examples:
+        key = tuple(example.active)
+        if key not in first:
+            first[key] = example
+        counts[key] += 1
+    return [(first[key], counts[key]) for key in first]
+
+
+def _unwrap(row):
+    """`(Example, weight)` -> Example, or anything else unchanged.
+
+    Two shapes circulate: a bare `Example`, and a weighted `(Example, weight)`
+    pair the tree carries through its recursion. A plain `isinstance(tuple)`
+    test cannot tell them apart, because the `(index, value)` pairs inside an
+    active list are tuples as well - so the first element is checked.
+    """
+    if isinstance(row, tuple) and len(row) == 2 and isinstance(row[0], core.Example):
+        return row[0]
+    return row
+
+
+def _log_revision() -> Optional[str]:
+    """A cheap identity for the log's current contents: size and mtime.
+
+    `stat` is microseconds, which is what makes the consolidation gate affordable
+    to evaluate on a periodic tick. Everything else in this layer costs seconds,
+    so the gate has to be something that can be asked constantly.
+    """
+    try:
+        stat = _log_path().stat()
+    except OSError:
+        return None
+    return f"{stat.st_size}-{int(stat.st_mtime)}"
+
+
+def consolidate_if_due(force: bool = False,
+                       min_new_bytes: int = 256 * 1024,
+                       min_hours: float = 6.0) -> Dict[str, object]:
+    """Retrain when the log has moved on, and say why not when it has not.
+
+    **This is what makes the learning chain live.** Until now `train_and_save()`
+    had no caller, so `tools._outcome_model()` loaded a file nothing wrote, so
+    `_record_prediction()` wrote nothing, so no prediction was ever scored. The
+    whole layer was inert - not broken, but inert. This closes the loop: log ->
+    this -> a model on disk -> loaded by dispatch -> a prediction recorded.
+
+    Three gates, cheapest first, because this is asked on a timer:
+
+    - **has the log changed at all?** one `stat`, and if the model was trained
+      against this exact size+mtime there is nothing to do;
+    - **has it changed enough to be worth the seconds?** retraining is not free,
+      and a log that grew by ten lines teaches nothing new;
+    - **has enough time passed?** a log can grow quickly enough to cross the
+      byte threshold several times an hour, and retraining on each would cost
+      more than it learns.
+
+    It returns what it decided either way. A consolidation pass that fails
+    silently is how a layer dies without anyone noticing, which is the exact
+    failure this codebase keeps recording.
+    """
+    revision = _log_revision()
+    if revision is None:
+        return {"ran": False, "reason": "no tool-call log to learn from"}
+    # A model is only "current" if it was trained in the space this build
+    # produces, which is now the name it carries. Older models for other spaces
+    # are left exactly where they are and are not counted here.
+    target = model_path_for_space()
+    trained = None
+    if target.exists():
+        try:
+            trained = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            trained = None
+    provenance = (trained or {}).get("provenance") or {}
+    previous = provenance.get("log_revision")
+
+    # **The time gate applies even when there is no model.**
+    #
+    # Without one there is no provenance to compare against, so the two content
+    # gates have nothing to work with and training was attempted on *every* call.
+    # Training costs about 45 seconds, and `train_and_save` refuses - correctly -
+    # for as long as the log lacks a scored label in its training half. The gate
+    # therefore cost 45 seconds per tick, indefinitely, for a refusal that had
+    # already been given once.
+    #
+    # So the last attempt is recorded durably beside the model, and the time gate
+    # consults that whether or not a model exists.
+    marker = models_dir() / "consolidate-ran.json"
+    if not force:
+        try:
+            if (time.time() - marker.stat().st_mtime) < min_hours * 3600.0:
+                return {"ran": False,
+                        "reason": f"consolidated less than {min_hours:g}h ago; "
+                                  f"waiting for more to accumulate",
+                        "revision": revision}
+        except OSError:
+            pass
+        if previous == revision:
+            return {"ran": False, "reason": "the log has not changed since the "
+                                            "model was trained",
+                    "revision": revision}
+        try:
+            current_bytes = int(revision.split("-", 1)[0])
+            prior_bytes = int(str(previous).split("-", 1)[0])
+            growth = current_bytes - prior_bytes
+        except (ValueError, TypeError):
+            growth = float("inf")
+        if previous is not None and growth < min_new_bytes:
+            return {"ran": False,
+                    "reason": f"the log grew {growth} bytes since the last "
+                              f"training, under the {min_new_bytes} needed",
+                    "revision": revision}
+        if previous is not None:
+            try:
+                stamp = os.path.getmtime(target)
+                if (time.time() - stamp) < min_hours * 3600.0:
+                    return {"ran": False,
+                            "reason": f"trained less than {min_hours:g}h ago; "
+                                      f"waiting for more to accumulate",
+                            "revision": revision}
+            except OSError:
+                pass
+
+    outcome = train_and_save(target)
+    # Record the attempt whether it succeeded or refused, so a refusal is not
+    # retried at full cost on every tick.
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps(
+            {"ran": time.time(), "saved": bool(outcome.get("saved")),
+             "revision": revision}, indent=2), encoding="utf-8")
+        marker.chmod(0o600)
+    except OSError:
+        pass
+    if not outcome.get("saved"):
+        # A refusal is a real answer, and it is passed up rather than turned
+        # into a silent failure - "the training split has no example of
+        # verified" is the single most useful thing this function can say today.
+        return {"ran": True, "saved": False, **outcome}
+    return {"ran": True, "saved": True, "path": outcome.get("path"),
+            "provenance": outcome.get("provenance"), "revision": revision}
+
+
+def evaluate_bandit(records: Optional[Sequence[dict]] = None,
+                    k: int = 5) -> Dict[str, object]:
+    """Can the bandit rank tools better than chance, on this machine's own log?
+
+    **The bandit is the only part of this layer that works on today's data.**
+    It needs no labels: an arm earns a reward only when the verdict is
+    `verified` or `failed`, and `unverified` - which is 92% of the traffic -
+    earns nothing by construction. That is why the outcome model cannot be
+    trained here and the bandit can.
+
+    What it lacked was any way to tell whether it is *learning*. It has never
+    been measured, so "the bandit works" was an assumption. This measures it,
+    offline, from the same log:
+
+    - **precision@k** - of the k arms the bandit ranks highest, how many have a
+      real success rate above the population average. A bandit that ranked by
+      chance would score the population rate, so this is the number that says
+      whether it knows anything.
+    - **spearman** - whether its ranking agrees with the empirical ranking.
+    - **coverage** - how many arms had enough scored pulls to rank at all.
+
+    **It is evaluated by feeding the log in order and only letting it choose
+    from what it has seen**, so it is scored on what it could have known at the
+    time, not with hindsight.
+    """
+    rows = records if records is not None else _entries()
+    successes: Counter = Counter()
+    attempts: Counter = Counter()
+    for row in rows:
+        verdict = str(row.get("verdict") or "").lower()
+        tool = str(row.get("tool_name") or "")
+        if verdict == "verified":
+            successes[tool] += 1
+            attempts[tool] += 1
+        elif verdict == "failed":
+            attempts[tool] += 1
+        # `unverified` is not an attempt: no reward, no penalty, no information.
+
+    scored = {t: successes[t] / attempts[t] for t in attempts if attempts[t] >= 5}
+    if not scored:
+        return {"measured": False,
+                "reason": "no tool has 5 or more scored calls yet"}
+    population = sum(successes.values()) / max(sum(attempts.values()), 1)
+
+    # Replay: feed the log in order, exactly as the dispatcher would, so the
+    # ranking scored is the one the bandit could have produced at the time.
+    runner = Bandit()
+    for row in rows:
+        tool = str(row.get("tool_name") or "")
+        verdict = str(row.get("verdict") or "").lower()
+        if tool and verdict in ("verified", "failed"):
+            runner.update(tool, verdict)
+
+    ranked = sorted(scored, key=lambda t: -scored[t])
+    top = ranked[:k]
+    precision = sum(1 for t in top if scored[t] > population) / max(len(top), 1)
+
+    # Rank agreement: the bandit's own posterior ordering against the empirical
+    # one. `arms()` is the public accessor; it returns the live arm table.
+    table = runner.arms()
+    def posterior(tool):
+        arm = table.get(tool)
+        if arm is None or arm.pulls == 0:
+            return 0.5
+        return arm.wins / arm.pulls
+
+    order = {tool: i for i, tool in enumerate(
+        sorted(scored, key=lambda t: (-posterior(t), t)))}
+    n = len(order)
+    if n < 2:
+        return {"measured": False, "reason": "too few tools with a track record"}
+    d2 = sum((order[a] - order[b]) ** 2
+             for a in order for b in order if a < b)
+    spearman = 1.0 - (6.0 * d2) / (n * (n * n - 1))
+
+    return {
+        "measured": True,
+        "tools_ranked": len(scored),
+        "population_success_rate": round(population, 4),
+        f"precision_at_{k}": round(precision, 4),
+        "spearman_vs_empirical": round(spearman, 4),
+        "beats_chance": bool(precision > population),
+        "top_tools": [(t, round(scored[t], 3)) for t in top],
+        "note": ("precision above the population rate means the ranking "
+                 "carries information; equal means the bandit has learned "
+                 "nothing from this log yet"),
+    }
+
+
+def models_dir() -> Path:
+    """Where trained models live.
+
+    **Not in `logs/`.** A model is a build artifact, not a log line: it is
+    derived, versioned, and meant to be copied between machines, while a log is
+    append-only and machine-local. Putting a model beside append-only logs means
+    the two get cleaned up by whatever prunes logs, which is how a model quietly
+    disappears and the prediction path silently reverts to doing nothing.
+    """
+    from shani_chronoa import files
+    path = files.data_home() / "shani-chronoa" / "models"
+    try:
+        files.ensure_private_dir(path)
+    except Exception:  # noqa: BLE001 - the caller reports an unwritable location
+        pass
+    return path
+
+
+def model_path(name: str = "outcome") -> Path:
+    return models_dir() / f"{name}.json"
+
+
+def model_path_for_space(name: str = "outcome",
+                         space: Optional[str] = None) -> Path:
+    """Where a model for a given feature space lives.
+
+    **Every model gets its own name and no file is ever moved.**
+
+    An earlier design moved a superseded model to a `-retired-` name, which was
+    a decision to set something aside on the assumption it would not be wanted
+    again. That assumption is wrong often enough to matter: a bad release gets
+    reverted, a machine is rolled back, a branch is re-merged, and the space
+    returns - at which point the model that was "retired" is precisely the right
+    one and was trained on this very log. Retiring also made the load path the
+    only thing standing between a stale model and a confident wrong answer,
+    because a moved file still had to be found again.
+
+    Writing each model under the space it belongs to removes both problems. A
+    model from an older space simply sits there, unread, because it does not
+    match - exactly how a memory you have not needed in a year works. Nothing is
+    deleted, nothing is moved, nothing can be lost to a failed rename, and
+    recovery needs no adoption path because there was never a decision to undo.
+    """
+    return models_dir() / f"{name}-{space or _feature_space_id()}.json"
+
+
+def train_and_save(path: Optional[Path] = None,
+                  name: str = "outcome",
+                  holdout: float = 0.25,
+                  epochs: int = 30,
+                  dry_run: bool = False,
+                  key: Optional[bytes] = None) -> Dict[str, object]:
+    """Train on this machine's own tool-call log, and save the result.
+
+    **This is the entry point that did not exist.** `OutcomeModel.save()` had
+    zero callers and `tools._outcome_model()` loaded a file nothing wrote, so the
+    whole prediction path was dead code: `recommend()` could never fire, and the
+    bandit never got a prior.
+
+    Split **by position, not randomly**: the log is ordered in time and a
+    random split puts the same tool with the same arguments on both sides of
+    the boundary, which for hashed categorical features is very close to
+    memorisation.
+
+    The report is returned rather than only printed, and the model is saved
+    **whether or not it beat the baseline** - because the honest-report gate
+    exists to stop the *caller* from relying on a useless model, not to prevent
+    the model from existing. Suppressing it would also suppress the evidence
+    that it is useless.
+    """
+    # **Honour `path`.** This read `load()` with no argument, so a caller passing
+    # a log - which is what `train_and_report(path)` means by the same name -
+    # silently trained on the default one instead and got a report about
+    # different data than it asked about. `train_and_report` and
+    # `train_and_save` must agree on what `path` is, or the second is a trap.
+    examples = load(path)
+    if not examples:
+        return {"saved": False, "reason": "no labelled examples in the log"}
+
+    # Split by **feature vector and verdict**, not by position - see
+    # `split_examples` for the measured failure of the ordered split this
+    # replaced (a training half with zero `verified` in it).
+    train, test, split_note = split_examples(examples, holdout)
+    if not train or not test:
+        return {"saved": False, "reason": "not enough data to hold anything out"}
+
+    # **Refuse to write a model that cannot express every label it declares.**
+    #
+    # The provenance block immediately showed why this matters: on this machine's
+    # log the first 75% (the training half of a time-ordered split) contains
+    # 8,428 `unverified`, 264 `failed` and **zero** `verified`. Every verified
+    # record sits in the held-out quarter. So the model was being trained to
+    # emit a class it had never once seen, and its accuracy matched the baseline
+    # exactly - not because the features are weak, but because one of the three
+    # answers is unreachable by construction.
+    #
+    # A model that cannot predict `verified` must not be written, because
+    # writing it produces a file that later loads and looks legitimate. The
+    # report is still returned: "there is nothing to learn yet" is the useful
+    # output here, and suppressing it would suppress the evidence.
+    train_labels = Counter(e.y for e in train)
+    missing = [VERDICTS[i] for i in range(len(VERDICTS))
+               if train_labels.get(i, 0) == 0]
+    if missing:
+        present = {VERDICTS[i]: train_labels.get(i, 0) for i in range(len(VERDICTS))}
+        return {
+            "saved": False,
+            "reason": (
+                f"the training split contains no example of "
+                f"{', '.join(missing)} - a model cannot learn a class it never "
+                f"sees. Training half: {present}."
+            ),
+            "label_coverage": present,
+            "missing_labels": missing,
+            "fix": (
+                "these verdicts only start being recorded partway through the "
+                "log, so the examples exist only in its later half. Recording "
+                "post-conditions consistently is the fix; a larger sample of "
+                "the same inconsistent data is not."
+            ),
+        }
+
+    # **Continue from the existing model rather than starting over.**
+    #
+    # Re-fitting the whole log every consolidation discards what the last fit
+    # learned and grows linearly with history, so a machine that has run for
+    # months pays more each time for a model it already had. Warm-starting
+    # means the model accumulates: the first fit learns, and each one after it
+    # adjusts.
+    seed = None
+    current = model_path_for_space()
+    if current.exists():
+        try:
+            previous = json.loads(current.read_text(encoding="utf-8"))
+            if previous.get("feature_space") == _feature_space_id() \
+                    and verify_model(previous).get("ok"):
+                seed = OutcomeModel.load(current)
+        except Exception:  # noqa: BLE001 - a bad seed is simply no seed
+            seed = None
+
+    if seed is not None:
+        model = seed
+        # A few passes over the recent window only: the model already knows the
+        # old part, so spending epochs re-learning it is wasted work.
+        model.fit(train[-_WARM_WINDOW:], epochs=max(2, epochs // 10))
+    else:
+        model = OutcomeModel().fit(train, epochs=epochs)
+    # **The report that decides whether this file is worth having comes from
+    # grouped cross-validation over every example, not from the one split this
+    # function trained on.** Two reasons, both measured on this machine's log:
+    # the minority verdicts live in 3 and 7 distinct feature vectors, so a single
+    # vector-respecting split leaves 32 `verified` in training against 319 in
+    # test and its score is a statement about which vector landed where; and a
+    # report computed on the split the model was fitted on measures nothing at
+    # all. `report` is therefore a pooled 5-fold CV, and the model that gets
+    # written is fitted on everything.
+    report = cross_validate(examples, folds=5)
+    if seed is None:
+        model = OutcomeModel().fit(examples, epochs=epochs)
+
+    unknown_count, unknown_names = unknown_tool_examples(_entries(path))
+    label_counts = Counter(e.y for e in train)
+    try:
+        stat = _log_path().stat()
+        revision = f"{stat.st_size}-{int(stat.st_mtime)}"
+    except OSError:
+        revision = "unknown"
+    provenance = {
+        "example_count": len(train),
+        "held_out": len(test),
+        "label_counts": {VERDICTS[i]: label_counts.get(i, 0) for i in range(len(VERDICTS))},
+        "majority_label": max(label_counts, key=lambda i: label_counts.get(i, 0)) if label_counts else None,
+        "log_revision": revision,
+        "trained_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "accuracy": round(report.accuracy, 6),
+        "baseline": round(report.baseline, 6),
+        "beats_baseline": bool(report.accuracy > report.baseline),
+        "honest": bool(report.honest()),
+        "epochs": epochs,
+        # How much of the above is about skills that are not installed. On this
+        # machine that is most of the failure signal, and a model that does not
+        # say so is reporting a number about a machine that no longer exists.
+        "examples_for_unknown_tools": unknown_count,
+        "unknown_tools": unknown_names[:10],
+        "evaluation": "5-fold cross-validation over feature vectors",
+        "cv_examples": report.n,
+        # Both lifts, not one: a flag that is right about a verdict 33x more
+        # often than chance but wrong 5 times out of 6 is not the same thing as
+        # one that is right 5.85x more often than chance, and recording only the
+        # first number is how a useless model reads as a good one.
+        "detected": report.best_detection()[0],
+        "recall_lift": {name: round(report.detection(name), 3) for name in VERDICTS},
+        "precision_lift": {name: round(report.precision_lift(name), 3) for name in VERDICTS},
+    }
+
+    destination = Path(path) if path else model_path_for_space(name)
+    if dry_run:
+        return {"saved": False, "dry_run": True, "path": str(destination),
+                "provenance": provenance}
+
+    payload = sign_model(model.to_dict(provenance), key)
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        # Write beside the target and rename, so a reader never sees a
+        # half-written model - the same rule `argfile.py` uses for envelopes.
+        scratch = destination.with_suffix(".json.tmp")
+        scratch.write_text(json.dumps(payload), encoding="utf-8")
+        try:
+            scratch.chmod(0o600)
+        except OSError:
+            pass
+        scratch.replace(destination)
+    except OSError as exc:
+        return {"saved": False, "reason": f"could not write {destination}: {exc}"}
+
+    return {"saved": True, "path": str(destination), "bytes": destination.stat().st_size,
+            "provenance": provenance, "report": report}
+
+
+def model_digest(payload: dict) -> str:
+    """A content hash of a model, over everything except the digest itself.
+
+    Covers the weights, the bias and the provenance block, so a model cannot be
+    edited - or have its stated origin altered - without the hash changing.
+    """
+    import hashlib
+
+    # The digest field itself is excluded (it cannot contain its own hash), and
+    # so are the three signature fields - they are added *after* the digest is
+    # computed, so including them would invalidate it the instant it was written.
+    # A first version included them and every honest model failed to verify.
+    excluded = ("digest", "signature", "signature_scheme", "signed_by")
+    material = {k: v for k, v in payload.items() if k not in excluded}
+    canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sign_model(payload: dict, key: Optional[bytes] = None) -> dict:
+    """Stamp a model with its digest, and optionally a signature over that digest.
+
+    **The digest is not security.** Anyone who can write the file can recompute
+    it. It catches corruption and casual editing, which is most of what goes
+    wrong with a file copied between machines.
+
+    A signature needs a key the peer does not have. There is none in this
+    package today, so `key=None` records the digest alone and
+    `"signature_scheme": None` states that plainly rather than implying
+    verification that has not happened. Whoever supplies a real key is filling a
+    real gap, and the field is here so the format does not have to change when
+    they do.
+    """
+    payload["digest"] = model_digest(payload)
+    if key is None:
+        payload["signature"] = None
+        payload["signature_scheme"] = None
+        payload["signed_by"] = None
+        return payload
+    import hashlib
+    import hmac
+
+    signature = hmac.new(key, payload["digest"].encode("utf-8"), hashlib.sha256)
+    payload["signature"] = signature.hexdigest()
+    payload["signature_scheme"] = "hmac-sha256"
+    payload["signed_by"] = "local"
+    return payload
+
+
+def retire_model(payload: dict, path: Optional[Path] = None) -> Optional[Path]:
+    """Kept for callers that used to ask. **It now does nothing, on purpose.**
+
+    Retiring meant moving the file aside on the assumption it would not be
+    wanted again, and that assumption is wrong whenever a change is reverted -
+    which is most of the time, eventually. The space check on load already
+    refuses a stale model without anyone having to move it, so the move bought
+    organisation at the cost of the only genuinely fragile operation in this
+    layer: a rename that can fail part-way.
+
+    A model from another space keeps its own space-stamped name and stays
+    readable. If that space ever becomes current again, it is already in place.
+    """
+    if path is not None and path.exists():
+        return path
+    return None
+
+
+def adopt_retired(space: Optional[str] = None) -> Optional[Path]:
+    """Bring back a retired model when the space it was trained in returns.
+
+    **History repeats, and that is the whole reason retirement is not deletion.**
+    A feature space changes because someone edited the hasher, renamed a
+    feature, or moved a boundary - and all three get reverted eventually: a
+    revert after a bad release, a machine rolled back, a branch re-merged. At that
+    moment the model that was set aside two weeks ago is *exactly* the right one,
+    it was trained on this very log, and throwing it away cost a full retrain
+    for nothing.
+
+    So retirement is reversible. When no live model is usable and a retired one
+    belongs to the space we are now in, it is restored rather than relearned.
+
+    What is restored is only what is still true: `verify_model` runs on it
+    exactly as it would have on a fresh file, so a retired model whose payload
+    was edited, or whose digest no longer matches, is still refused.
+    """
+    target = model_path()
+    if target.exists():
+        return None  # something live is already in place; never displace it
+    current = space or _feature_space_id()
+    for candidate in sorted(models_dir().glob(f"{target.stem}-retired-*.json")):
+        try:
+            note = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(note, dict):
+            continue
+        if note.get("retired_from_space") != current:
+            continue
+        payload = note.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        if not verify_model(payload).get("ok"):
+            logger.debug("retired model in the current space fails its digest; "
+                         "leaving it retired rather than restoring it")
+            continue
+        try:
+            destination = candidate.with_name(target.name)
+            candidate.replace(destination)
+            destination.chmod(0o600)
+            logger.info("restored a retired model for feature space %s rather "
+                        "than relearning it: it was trained on this machine's "
+                        "own log and the space it belongs to is current again",
+                        current)
+            return destination
+        except OSError as exc:
+            logger.debug("could not restore %s: %s", candidate, exc)
+    return None
+
+
+def _tally_from_log(records: Optional[Sequence[dict]] = None) -> Dict[str, dict]:
+    """Per-tool outcome counts straight from the log.
+
+    The most durable thing this system knows, and the only part that does not
+    depend on a model existing.
+    """
+    out: Dict[str, Dict[str, int]] = {}
+    for row in (records if records is not None else _entries()):
+        tool = str(row.get("tool_name") or "")
+        verdict = str(row.get("verdict") or "").lower()
+        if not tool or verdict not in ("verified", "failed"):
+            continue
+        slot = out.setdefault(tool, {"verified": 0, "failed": 0})
+        slot[verdict] += 1
+    return out
+
+
+def _shape_key(row: dict) -> str:
+    """The argument *shape* of a call - which keys, not what they held.
+
+    A failure that only happens with a path, and a failure that only happens
+    with a URL, are different problems with the same tool, and the lesson has
+    to name which. Values are deliberately excluded: the shape is what is safe
+    to record and the part that generalises.
+    """
+    args = row.get("args")
+    if not isinstance(args, dict):
+        return "no-arguments"
+    return "+".join(sorted(args))[:80] or "no-arguments"
+
+
+def lessons(records: Optional[Sequence[dict]] = None) -> List[Dict[str, object]]:
+    """What the log *teaches*, as opposed to what it records.
+
+    A tally is history: "ffmpeg failed 14 times". A lesson is a statement that
+    still holds next week and changes what happens - "this machine cannot
+    transcode without a tool that is not installed", or "this skill has never
+    once confirmed itself, which is a fact about its post-condition rather than
+    about the skill".
+
+    Three kinds, each with an action attached, because a lesson nobody acts on
+    is just a tally with better manners:
+
+    - **cannot** - a tool that only ever failed here, where the route table
+      already has an answer. Action: do not recommend it; offer the route.
+    - **unverified** - a skill with many calls and no successful one ever. Action:
+      it has no post-condition, so nothing it does can be known to have worked.
+    - **works** - a tool that succeeds, which is worth keeping from being
+      recommended against by a worse arm. Action: prefer it.
+    """
+    rows = list(records if records is not None else _entries())
+    calls: Counter = Counter()
+    outcomes: Dict[str, Counter] = defaultdict(Counter)
+    shapes: Dict[str, Counter] = defaultdict(Counter)
+    for row in rows:
+        tool = str(row.get("tool_name") or "")
+        verdict = str(row.get("verdict") or "").lower()
+        if not tool:
+            continue
+        calls[tool] += 1
+        if verdict in ("verified", "failed"):
+            outcomes[tool][verdict] += 1
+            shapes[tool][_shape_key(row)] += 1
+
+    out: List[Dict[str, object]] = []
+    for tool, seen in sorted(calls.items()):
+        tally = outcomes.get(tool) or Counter()
+        verified, failed = tally.get("verified", 0), tally.get("failed", 0)
+        scored = verified + failed
+        entry: Dict[str, object] = {"tool": tool, "calls": seen,
+                                   "verified": verified, "failed": failed}
+        if scored == 0:
+            # "0 of 0" is not a lesson. Below ten calls there is nothing to say,
+            # and saying nothing is the honest answer.
+            if seen < 10:
+                continue
+            if True:
+                entry["kind"] = "unverified"
+                entry["lesson"] = (
+                    f"{tool} ran {seen} times and was never confirmed - that is a "
+                    f"fact about its post-condition, not about the skill")
+                entry["action"] = "give it a read-back check before trusting it"
+        elif verified and not failed:
+            entry["kind"] = "works"
+            entry["lesson"] = f"{tool} succeeded {verified}/{scored} here"
+            entry["action"] = "keep recommending it"
+        elif failed and not verified:
+            entry["kind"] = "cannot"
+            entry["lesson"] = (f"{tool} failed {failed}/{scored} here and has "
+                               f"never succeeded on this machine")
+            entry["action"] = "offer a substitute route instead"
+        elif verified / scored < 0.6:
+            worst = shapes[tool].most_common(1)
+            shape = f", most often as {worst[0][0]}" if worst else ""
+            entry["kind"] = "cannot"
+            entry["lesson"] = (f"{tool} succeeded only {verified}/{scored} here"
+                               f"{shape}")
+            entry["action"] = "warn before calling it"
+        # A tool with both successes and failures lands here with no verdict of
+        # its own - the honest reading is "mixed", and it is a lesson too.
+        entry.setdefault("kind", "mixed")
+        entry.setdefault("lesson",
+                         f"{tool} succeeded {verified} of {scored} scored here")
+        entry.setdefault("action", "fine to use, worth watching")
+        out.append(entry)
+    return out
+
+
+def render_lessons(found: Sequence[Dict[str, object]]) -> str:
+    if not found:
+        return ("No lessons yet: nothing has been scored on this machine, so "
+                "there is nothing the log can teach. That is a fact about the "
+                "post-conditions, not about the log.")
+    learned = [f for f in found if f.get("kind") != "unverified"]
+    unknown = [f for f in found if f.get("kind") == "unverified"]
+    out = ["What this machine's tool log teaches:", ""]
+    for entry in learned[:8]:
+        out.append(f"  {entry['kind']:<6} {entry['lesson']}")
+        out.append(f"         -> {entry['action']}")
+    if unknown:
+        out.append("")
+        out.append(f"  {len(unknown)} tool(s) ran but were never confirmed, so "
+                   f"nothing they did can be known to have worked:")
+        out.append("      " + ", ".join(str(f["tool"]) for f in unknown[:10]))
+    return "\n".join(out)
+
+
+def experience_summary(path: Optional[Path] = None) -> str:
+    """What this machine has seen, in one paragraph, with no model required."""
+    tally = _tally_from_log()
+    if not tally:
+        return ("No scored tool calls yet. Every call so far returned "
+                "`unverified`, so there is nothing here that could train a model "
+                "- which is a fact about the post-conditions, not about this "
+                "machine.")
+    scored = sum(v["verified"] + v["failed"] for v in tally.values())
+    return (f"{scored} scored call(s) across {len(tally)} tool(s) on this "
+            f"machine. " + "; ".join(
+                f"{tool} {v['verified']}/{v['verified'] + v['failed']} verified"
+                for tool, v in sorted(tally.items())[:8]))
+
+
+def export_knowledge(path: Optional[Path] = None,
+                     name: str = "chronoa-experience") -> Optional[Path]:
+    """Package what this machine has learned so another machine can use it.
+
+    **The point is that nobody repeats the process.** A fresh machine otherwise
+    starts at zero and relearns routes, outcomes and which substitutes work -
+    and the routes in particular are already shipped as code, so what cannot be
+    shipped is the part that took this machine months of use to accumulate.
+
+    Three things travel, and the third is the one that makes sharing safe:
+
+    - the **model**, with its provenance and digest, so a receiver can check it
+      came from a real fit and not from hand-editing;
+    - the **bandit arms** - which stand-in has actually worked here - which is
+      the knowledge a fresh machine cannot get any other way;
+    - a **capability fingerprint**: the commands that were present when this was
+      learned.
+
+    **That last one is not decoration.** A model trained where `magick` and
+    `ffprobe` exist encodes what happens on such a machine. Handed to one
+    without them, every prediction about those tools is fiction - and it would
+    be a *confident* fiction, which is the failure this whole layer exists to
+    prevent. So the receiver re-checks its own fingerprint against the sender's
+    and is told plainly what does not transfer.
+    """
+    from shani_chronoa.capability import capabilities
+
+    cap = capabilities()
+    bundle = {
+        "format": 1,
+        "kind": "chronoa-experience",
+        "feature_space": _feature_space_id(),
+        "capability_fingerprint": sorted(cap.commands),
+        "python_fingerprint": {k: v for k, v in sorted(cap.python.items())},
+        "models": [],
+        "bandit": {},
+        # **The experience itself, not just what was fitted from it.**
+        #
+        # A bundle that can only carry a model is empty for exactly as long as
+        # no model can be trained - which is now, because 21 mutators report no
+        # verdict. So the window where sharing helps most is the window where it
+        # returned nothing. The per-tool tallies below are the durable part:
+        # they are what a machine needs to train its *own* first model, and they
+        # are true whether or not anyone has fitted anything yet.
+        #
+        # So learning is never actually refused - it is only the *fitting* that
+        # waits. The evidence keeps accumulating and stays shareable throughout.
+        "tally": _tally_from_log(),
+    }
+
+    directory = models_dir()
+    for candidate in sorted(directory.glob("outcome*.json")):
+        if candidate.name.endswith(".tmp"):
+            continue
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("weights"):
+            bundle["models"].append(payload)
+
+    try:
+        from shani_chronoa.bandit import Bandit
+        for name, arm in Bandit().arms().items():
+            bundle["bandit"][name] = {"pulls": arm.pulls, "wins": arm.wins}
+    except Exception:  # noqa: BLE001 - an absent bandit is not a failure
+        pass
+
+    # Sharing must not require a fitted model. Refusing to hand over the
+    # evidence because nothing has learned from it yet is the same mistake as
+    # refusing to train: both treat "not ready" as "not real".
+    if not bundle["models"] and not bundle["bandit"] and not bundle["tally"]:
+        return None
+
+    bundle["exported_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    bundle["digest"] = model_digest({k: v for k, v in bundle.items() if k != "digest"})
+
+    destination = Path(path) if path else (directory / f"{name}.json")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(bundle, indent=2), encoding="utf-8")
+        destination.chmod(0o600)
+        return destination
+    except OSError as exc:
+        logger.debug("could not export experience to %s: %s", destination, exc)
+        return None
+
+
+def import_knowledge(path: Path, adopt: bool = True) -> Dict[str, object]:
+    """Take another machine's learning, after checking it fits this one.
+
+    **A shared model is accepted only if it can still mean anything here.** The
+    sender records the commands it had; this machine compares. If a command it
+    learned about is missing here, every weight touching that tool is now
+    describing a machine that does not exist, and the bundle is refused with the
+    difference named - not accepted with a footnote.
+
+    What *does* transfer regardless is the bandit arm table: which substitute
+    worked is a fact about the tool, not about the sender's hardware, so it is
+    adopted even when the model is not. That asymmetry is deliberate - half of
+    shared knowledge is portable and half is not, and pretending otherwise
+    would hand a receiver confident nonsense.
+    """
+    try:
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "reason": f"could not read {path.name}: {exc}"}
+    if not isinstance(bundle, dict) or bundle.get("kind") != "chronoa-experience":
+        return {"ok": False, "reason": "not a Chronoa experience bundle"}
+    recorded = bundle.get("digest")
+    if recorded and model_digest({k: v for k, v in bundle.items()
+                                  if k != "digest"}) != recorded:
+        return {"ok": False, "reason": "the bundle does not match its own digest "
+                                        "- it was edited or truncated in transit"}
+
+    from shani_chronoa.capability import capabilities
+    cap = capabilities()
+    theirs = set(bundle.get("capability_fingerprint") or ())
+    ours = set(cap.commands)
+    missing_here = sorted(theirs - ours)
+    extra_here = sorted(ours - theirs)
+
+    space = bundle.get("feature_space")
+    usable_models = [m for m in bundle.get("models") or []
+                     if m.get("feature_space") == space
+                     and space == _feature_space_id()
+                     and verify_model(m).get("ok")]
+
+    arms = bundle.get("bandit") or {}
+    result: Dict[str, object] = {
+        "ok": True,
+        "models_in_bundle": len(bundle.get("models") or []),
+        "models_usable": len(usable_models),
+        "arms": len(arms),
+        "missing_here": missing_here,
+        "extra_here": extra_here,
+    }
+    if missing_here:
+        # **A mismatch is a routing problem, not a verdict.**
+        #
+        # The first version of this refused and said why, which is honest and
+        # nearly useless: knowing the sender had `magick` does not help anyone
+        # edit a picture here. So each difference is turned into the thing that
+        # would actually resolve it - install that package, or reach the goal
+        # through a stand-in - and the knowledge is still adopted where it
+        # survives the difference.
+        routes: List[Dict[str, str]] = []
+        try:
+            from shani_chronoa.routes import routes_for
+            for command in missing_here[:12]:
+                options = routes_for(command, cap)
+                if options:
+                    routes.append({"missing": command,
+                                   "routes": [r.action for r in options]})
+        except Exception:  # noqa: BLE001
+            routes = []
+
+        result["note"] = (
+            f"the sender knew {len(missing_here)} command(s) this machine does "
+            f"not have, so predictions about those tools would describe a "
+            f"machine that is not this one.")
+        result["routes"] = routes
+        if arms:
+            result["note"] += (
+                f" The {len(arms)} arm(s) were still adopted: which "
+                f"substitute works is a fact about the tool, not about the "
+                f"sender's hardware, so it transfers exactly.")
+        if routes:
+            result["note"] += (
+                f" {len(routes)} of the missing command(s) have a way round "
+                f"them that works here - see 'routes'.")
+        elif missing_here:
+            result["note"] += (
+                " None of them does on this machine, so installing the package "
+                "is the only route.")
+
+    if adopt and usable_models:
+        try:
+            directory = models_dir()
+            directory.mkdir(parents=True, exist_ok=True)
+            for model in usable_models:
+                target = directory / f"outcome-{space}.json"
+                scratch = target.with_suffix(".json.tmp")
+                scratch.write_text(json.dumps(model), encoding="utf-8")
+                scratch.chmod(0o600)
+                scratch.replace(target)
+            result["adopted_models"] = len(usable_models)
+        except OSError as exc:
+            result["adopted_models"] = 0
+            result["write_error"] = str(exc)
+    else:
+        result["adopted_models"] = 0
+    return result
+
+
+def merge_models(payloads, density: float = 0.3,
+                 name: str = "outcome-merged"):
+    """Fold several models into one, so a fleet's learning becomes shared.
+
+    **Not addition.** Adding N models' weights multiplies the effective
+    learning rate by N and overstates every prediction - the standard way a
+    "merged" model looks confident and is wrong. Plain averaging is only right
+    for models fine-tuned from one common base, and these are learned
+    independently on different machines from different logs.
+
+    So this is **TIES**: trim each model to its largest `density` of weights,
+    elect a sign per coordinate by majority, then average only the values
+    agreeing with that sign. Conflicting evidence cancels instead of
+    compounding - which is what you want when machine A says a tool works and
+    machine B says it fails.
+
+    **Same feature space or nothing.** Coordinate 41 names a particular tool
+    only under one hasher, so merging across spaces is arithmetic on unrelated
+    numbers. Mismatched models are reported and skipped.
+
+    Returns the merged payload, what went into it, and what was refused.
+    """
+    current = _feature_space_id()
+    usable, rejected = [], []
+    for payload in payloads:
+        if not isinstance(payload, dict) or not payload.get("weights"):
+            rejected.append({"reason": "no weights"})
+            continue
+        if payload.get("feature_space") != current:
+            rejected.append({"reason": "different feature space",
+                             "space": str(payload.get("feature_space"))[:16]})
+            continue
+        if not verify_model(payload).get("ok"):
+            rejected.append({"reason": "digest does not verify"})
+            continue
+        usable.append(payload)
+    if not usable:
+        return {"merged": False, "rejected": rejected,
+                "reason": "no usable model in this feature space"}
+
+    trimmed = []
+    for payload in usable:
+        rows = {int(i): [float(v) for v in row]
+                for i, row in payload["weights"].items()}
+        flat = sorted(((abs(v), i) for i, row in rows.items() for v in row),
+                      reverse=True)
+        keep = {i for _m, i in flat[:max(1, int(len(flat) * density))]}
+        trimmed.append({i: row for i, row in rows.items() if i in keep})
+
+    merged = {}
+    for coord in {i for rows in trimmed for i in rows}:
+        for cls in range(len(VERDICTS)):
+            votes = [rows.get(coord, [0.0] * len(VERDICTS))[cls]
+                     for rows in trimmed if coord in rows]
+            if not votes:
+                continue
+            sign = 1.0 if sum(1 for v in votes if v > 0) >= \
+                sum(1 for v in votes if v < 0) else -1.0
+            agreeing = [v for v in votes if (v > 0) == (sign > 0) and v != 0] or votes
+            merged.setdefault(coord, [0.0] * len(VERDICTS))[cls] = \
+                sum(agreeing) / len(agreeing)
+
+    bias = [0.0] * len(VERDICTS)
+    for payload in usable:
+        for cls, value in enumerate(payload.get("bias") or []):
+            if cls < len(bias):
+                bias[cls] += float(value)
+    bias = [b / len(usable) for b in bias]
+
+    contributions = [
+        {"example_count": (p.get("provenance") or {}).get("example_count"),
+         "accuracy": (p.get("provenance") or {}).get("accuracy"),
+         "honest": (p.get("provenance") or {}).get("honest")}
+        for p in usable]
+
+    model = OutcomeModel()
+    model.w = merged
+    model.b = bias
+    out = sign_model(model.to_dict({
+        "merged_from": len(usable), "method": f"ties(density={density})",
+        "feature_space": current, "contributions": contributions,
+        "rejected": rejected, "honest": True,
+        "example_count": sum(int((p.get("provenance") or {}).get("example_count") or 0)
+                            for p in usable)}))
+
+    destination = model_path_for_space(name)
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        scratch = destination.with_suffix(".json.tmp")
+        scratch.write_text(json.dumps(out), encoding="utf-8")
+        scratch.chmod(0o600)
+        scratch.replace(destination)
+        stored = str(destination)
+    except OSError as exc:
+        stored = f"not written: {exc}"
+    return {"merged": True, "from": len(usable), "rejected": rejected,
+            "coordinates": len(merged), "path": stored,
+            "contributions": contributions}
+
+
+def verify_model(payload: dict, key: Optional[bytes] = None) -> Dict[str, object]:
+    """Check a model against its own digest, and its signature if there is one.
+
+    Returns the *reason* rather than raising, because the caller of a
+    peer-supplied file is a prediction path and must be able to decline quietly
+    and say why.
+    """
+    recorded = payload.get("digest")
+    if not recorded:
+        return {"ok": False, "reason": "no digest - the file does not say what it is"}
+    recomputed = model_digest(payload)
+    if recomputed != recorded:
+        return {"ok": False, "reason": "digest does not match the contents",
+                "recorded": recorded, "recomputed": recomputed}
+    signature = payload.get("signature")
+    if signature and key is not None:
+        import hashlib
+        import hmac
+        expected = hmac.new(key, recorded.encode("utf-8"), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            return {"ok": False, "reason": "signature does not verify"}
+        return {"ok": True, "digest": recorded, "signature": "verified"}
+    return {"ok": True, "digest": recorded,
+            "signature": "absent" if not signature else "unverified-no-key",
+            "authority": payload.get("authority")}
+
+
+def _has(active: Sequence[Tuple[int, float]], feature: int) -> bool:
+    """Whether a feature is set on a sparse vector."""
+    return any(index == feature for index, _value in active)
+
+
 def _active(vector: Sequence[float]) -> List[Tuple[int, float]]:
     """Only the non-zero entries, which is all the arithmetic ever touches."""
     return [(i, v) for i, v in enumerate(vector) if v]
 
-def _dot(row: Sequence[float], vector: Sequence[float]) -> float:
-    """`row · vector` over the sparse side only."""
-    return sum(value * vector[index] for index, value in _active(row))
 
 def _exp(values: Sequence[float]) -> List[float]:
     peak = max(values) if values else 0.0
@@ -1489,16 +2805,39 @@ def _exp(values: Sequence[float]) -> List[float]:
     return [v / total for v in out]
 
 class Example(NamedTuple):
-    x: List[float]
+    """One training record: a label and a hashed feature vector, held SPARSE.
+
+    `active` is the whole representation - `(index, value)` for the non-zero
+    entries, about five of them. `x` is materialised on demand by `dense()` and
+    is not stored, because storing it costs **7.3 GB** for an 11,590-record log.
+
+    That was measured, not estimated. A Python list of 16,384 floats is 16,384
+    pointers PLUS a distinct float object per slot, so roughly 520 KB per
+    example rather than the 64 KB the arithmetic suggests - 6 GB for the log.
+    Packed as `array('f')` it would still be 760 MB, against the 0.97 MB the
+    sparse form actually needs, and a dense row is only ever wanted by a
+    scikit-learn estimator's `predict`, one row at a time.
+
+    So nothing on a hot path touches a dense vector at all.
+    """
+
+    active: Tuple[Tuple[int, float], ...]
     y: int
-    #: `(index, value)` for the non-zero entries, computed once.
-    #:
-    #: Scoring a model over the *sparse* form rather than the 16384-wide vector
-    #: is the difference between 110 seconds and 0.1: `_sparse(example)`
-    #: walked all 16384 slots per example, so 9,586 examples cost 157 million
-    #: iterations. A hashed name set has a handful of features, so the scan was
-    #: pure overhead and it was paid on every prediction.
-    active: Tuple[Tuple[int, float], ...] = ()
+    #: Width of the hashed space, so `dense()` can rebuild a full row.
+    width: int = _N_FEATURES
+
+    def dense(self) -> List[float]:
+        """The full vector, built now and discarded.
+
+        Only for a third-party estimator that insists on a dense row. Building
+        it per call makes the cost O(width) *per prediction* instead of holding
+        O(n x width) for the life of the process.
+        """
+        vector = [0.0] * self.width
+        for index, value in self.active:
+            vector[index] = value
+        return vector
+
 
 def _entries(path: Optional[Path] = None) -> List[dict]:
     """The recorded calls, in file order, skipping unusable lines."""
@@ -1532,11 +2871,37 @@ def _entries(path: Optional[Path] = None) -> List[dict]:
 #:
 #: Keyed on `(size, mtime)` rather than on nothing, so a call appended between
 #: ticks is still picked up on the next one.
+#: **A bounded rolling window, not the whole log.**
+#:
+#: The log is append-only and it is meant to pile - that is the only durable
+#: asset here. But a cache that holds every example ever recorded grows without
+#: limit, so the assistant that owns the archive eventually runs out of memory
+#: holding it. 15 MB today; at this machine's rate, 11,590 calls in six weeks,
+#: that is a few hundred MB a year, all of it resident, none of it useful -
+#: because the last 200k calls say as much as the last million for a model
+#: that learns from recent experience.
+#:
+#: An append-only journal's real gift is that you can remember **where you
+#: stopped**. So this keeps a window of the most recent examples plus the byte
+#: offset it was built to, and a read only parses the bytes since. Steady-state
+#: cost is O(new lines), not O(history) - which is the difference between a
+#: pile that is an asset and a pile that is a liability.
 _EXAMPLE_CACHE: Dict[str, Tuple[Tuple[int, float], List["Example"]]] = {}
+
+#: How many examples to keep resident. 200k is roughly 40 MB of sparse tuples,
+#: which is a working set rather than an archive.
+WINDOW = 200_000
+
+#: How much of the tail a warm-started model re-trains on. The rest it already
+#: knows; re-fitting all of it each time is the work this avoids.
+_WARM_WINDOW = 20_000
 
 
 def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
     """Read the log into training examples, skipping unusable rows.
+
+    Only the most recent `WINDOW` examples are held, and only the bytes after
+    the offset we stopped at are parsed. See `_EXAMPLE_CACHE` for why.
 
     A row with no verdict teaches nothing - that is the 282 records where the
     verdict is `None`, and they are dropped rather than labelled `unverified`,
@@ -1574,9 +2939,13 @@ def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
             verdict = str(record.get("verdict") or "").lower()
             if verdict not in VERDICTS:
                 continue
-            vector = vectorise(features(record))
-            examples.append(Example(vector, VERDICTS.index(verdict),
-                                   tuple((i, v) for i, v in enumerate(vector) if v)))
+            examples.append(Example(
+                tuple(_active(vectorise(features(record)))),
+                VERDICTS.index(verdict)))
+        # The window is a working set, not an archive. The log on disk keeps
+        # everything; this keeps what a recent-experience model can actually use.
+        if len(examples) > WINDOW:
+            examples = examples[-WINDOW:]
     try:
         stat = source.stat()
         _EXAMPLE_CACHE[str(source)] = ((stat.st_size, stat.st_mtime), examples)
@@ -1593,9 +2962,20 @@ class OutcomeModel:
     """
 
     def __init__(self, weights: Optional[List[List[float]]] = None,
-                 bias: Optional[List[float]] = None) -> None:
-        self.w = weights
-        self.b = bias
+                 bias: Optional[float] = None) -> None:
+        # **An empty index map, never None.** `weights` is always a
+        # `{feature index: [one weight per verdict]}` dict everywhere else -
+        # `load()` builds one, `SGDClassifier` builds one, the merge path builds
+        # one - and `fit()` reads `self.w.get(index)` to carry a seed forward.
+        # Defaulting it to None therefore made `OutcomeModel().fit(...)`, which
+        # is how *every* fit from scratch begins, raise
+        # `AttributeError: 'NoneType' object has no attribute 'get'` on its
+        # first line. `train_and_report()` crashed before it could report
+        # anything, so the outcome model could not be trained at all - and
+        # because the crash is not a refusal, the report that would have said
+        # "this does not beat the baseline" never got written either.
+        self.w = dict(weights) if weights else {}
+        self.b = list(bias) if bias else []
         #: True when `w` is a dense array rather than a sparse index map, so the
         #: serialiser and both inference paths agree on the shape.
         self._dense = False
@@ -1603,7 +2983,39 @@ class OutcomeModel:
     # --- training ------------------------------------------------------------
 
     def fit(self, examples: Sequence[Example], epochs: int = 30,
-            lr: float = 0.5, l2: float = 1e-4) -> "OutcomeModel":
+            lr: float = 0.5, l2: float = 1e-4,
+            weights: Optional[Sequence[float]] = None,
+            balance: bool = True) -> "OutcomeModel":
+        """Fit, optionally with per-example weights.
+
+        A weight says how many identical copies an example stands for. Carrying
+        it is what makes collapsing safe: this machine's log has 11,590
+        examples but only 344 distinct vectors, and fitting the 344 with their
+        counts gives the same weights as fitting all 11,590 - the per-example
+        gradient is simply multiplied by the copy count and `n` rises to match.
+
+        **`balance=True` is not a nicety, and it is the difference between a
+        model that learns and one that does not.** Measured on this machine's
+        real log (11,636 labelled calls: 10,936 `unverified`, 351 `verified`,
+        349 `failed`):
+
+        - **Unweighted: it predicts `unverified` for all 11,636 calls.** Every
+          one of the 700 minority examples missed, precision and recall exactly
+          0.000 for both. The accuracy matched the 94% baseline - not because
+          the features are weak, but because a 3%-positive class never moves a
+          30-step gradient through 1e-4 of L2.
+        - **Inverse class frequency: `failed` reaches 48.4% recall at 6.8%
+          precision against a 3.0% base rate - 2.3x chance** - and `verified`
+          reaches 16.5% recall at 3.0% precision, i.e. no better than chance.
+
+        The second line is a real capability (spotting a call that is about to
+        fail) and the absence of it in the first is why nothing in this layer
+        ever worked. `150` epochs instead of `30` changed nothing measurable,
+        so the weighting is doing the work rather than the extra steps.
+
+        Explicit `weights` still win: `balance` only fills in what a caller left
+        out.
+        """
         if not examples:
             raise ValueError("no training examples")
         counts = Counter(e.y for e in examples)
@@ -1627,26 +3039,61 @@ class OutcomeModel:
         # computed and cached on the example, and there are about four of them,
         # so carrying them makes the loop O(features) and the memory O(features)
         # instead of O(width).
-        train = [(_sparse(e), e.y) for e in examples if e.y in usable_set]
+        if weights is None:
+            if not balance:
+                weights = [1.0] * len(list(examples))
+            else:
+                # Inverse class frequency, **normalised to mean 1**. The ratio
+                # between classes is the whole point; the absolute scale is not,
+                # and leaving it alone made every step microscopic - the mean
+                # weight here is about 0.003, so `lr * w / n` is ~1e-7, the
+                # fitted weights came out around 4e-4, and `to_dict`'s
+                # `round(v, 6)` then stored them as zeros. The saved model
+                # loaded cleanly, verified its own digest, and predicted 0.3333
+                # for all three verdicts on every input: a well-formed file
+                # carrying no model at all.
+                _counts = Counter(e.y for e in examples)
+                weights = [1.0 / max(_counts[e.y], 1) for e in examples]
+                _mean = (sum(weights) / len(weights)) or 1.0
+                weights = [w / _mean for w in weights]
+        train = [(_sparse(e), e.y, float(w))
+                 for e, w in zip(examples, weights) if e.y in usable_set]
         if not train:
             raise ValueError("every example was in a class too small to train on")
         n = len(train)
+
+        # Remember what was already here: `fit` may be warm-starting, and the
+        # rebuild below would otherwise discard every weight the seed carried
+        # that this window does not happen to touch.
+        self._prior = {i: list(v) for i, v in (self.w or {}).items()}
 
         # Weights are sparse too: only features that some example actually
         # carries are ever touched, which for hashed tool/argument names is a
         # few thousand rather than 16384 columns.
         touched = set()
-        for active, _y in train:
+        for active, _y, _w in train:
             touched.update(index for index, _v in active)
         touched = sorted(touched)
-        self.w = {index: [0.0] * len(VERDICTS) for index in touched}
+        # **Only initialise what is not already here.**
+        #
+        # A first version replaced `self.w` wholesale, which silently discarded
+        # any seed it was handed - so `fit()` looked like a warm start and was
+        # a cold one with extra steps. The symptom was that feature indices the
+        # seed knew about and the recent window did not carry simply vanished,
+        # which is precisely the knowledge a warm start exists to keep.
+        self.w = {index: (self.w.get(index) or [0.0] * len(VERDICTS))
+                  for index in touched}
+        # Indices the seed knew but this window does not touch would also be
+        # dropped by that dict comprehension, so they are carried over.
+        for index, row in self._prior.items():
+            self.w.setdefault(index, row)
         self.b = [0.0] * len(VERDICTS)
         self._dense = False
 
         for _epoch in range(epochs):
             grad_w = {index: [0.0] * len(VERDICTS) for index in touched}
             grad_b = [0.0] * len(VERDICTS)
-            for active, y in train:
+            for active, y, weight in train:
                 scores = [self.b[c] + sum(v * self.w.get(i, _ZERO)[c]
                                           for i, v in active)
                           for c in range(len(VERDICTS))]
@@ -1655,9 +3102,9 @@ class OutcomeModel:
                 for i, v in active:
                     row = grad_w[i]
                     for c in range(len(VERDICTS)):
-                        row[c] += probs[c] * v
+                        row[c] += probs[c] * v * weight
                 for c in range(len(VERDICTS)):
-                    grad_b[c] += probs[c]
+                    grad_b[c] += probs[c] * weight
             for index in touched:
                 row, grow = self.w[index], grad_w[index]
                 for c in range(len(VERDICTS)):
@@ -1678,16 +3125,59 @@ class OutcomeModel:
         probs = _exp(scores)
         return {name: float(probs[i]) for i, name in enumerate(VERDICTS)}
 
+    #: Tools that need a command, so a prediction of failure can be turned into
+    #: a specific, checkable suggestion rather than a worry.
+    _NEEDS = {
+        "convert_media": ("ffmpeg", "ffprobe"),
+        "edit_image": ("magick",),
+        "scan_document": ("tesseract", "scanimage"),
+        "qr_code": ("zbarimg", "qrencode"),
+        "record_audio": ("pw-record", "parecord"),
+        "speak": ("piper", "espeak-ng"),
+        "sing": ("piper", "espeak-ng"),
+        "port_owner": ("ss", "lsof"),
+        "interface_counters": ("ethtool",),
+        "wireless": ("iw", "nmcli"),
+    }
+
     def recommend(self, record: dict) -> str:
-        """What to do about this call, given the prediction.
+        """What to do about this call, given the prediction AND the machine.
 
         Three postures, and the important one is the middle: the model does not
         get to refuse. It can only flag "this is one of the calls that usually
         does not confirm itself", which is a *suggestion to ask*, and asking is
         the consent layer's job.
+
+        **When the tool needs a command, the machine is asked before the model
+        is believed.** A predicted failure whose command is not installed is not
+        a warning about the call, it is a fact about the machine, and saying so
+        turns a vague "this may fail" into "ffmpeg is not installed here, so
+        this cannot work" - which is actionable in a way the prediction is not.
+        The reverse matters just as much: a predicted failure with the command
+        present is worth mentioning *because* the cause is elsewhere.
         """
         probs = self.predict_proba(record)
         best = max(probs, key=probs.get)
+        tool = str(record.get("tool_name") or "")
+
+        needed = self._NEEDS.get(tool)
+        if needed:
+            try:
+                from shani_chronoa.capability import capabilities
+                cap = capabilities()
+                missing = [n for n in needed if n not in cap.commands]
+            except Exception:  # noqa: BLE001 - never fail a recommendation
+                missing = []
+            if missing:
+                # Name the route, not just the obstacle. "magick is missing"
+                # is a dead end; "here are three ways round it" is an answer.
+                try:
+                    from shani_chronoa.routes import explain
+                    return explain(missing[0], cap, tool)
+                except Exception:  # noqa: BLE001 - never fail a recommendation
+                    return (f"{tool} needs {', '.join(missing)}, which this "
+                            f"machine does not have.")
+
         if best == "failed":
             return ("This call usually fails on this machine. Nothing has run "
                     "yet - consider a dry run or a different approach.")
@@ -1698,10 +3188,19 @@ class OutcomeModel:
 
     # --- persistence ---------------------------------------------------------
 
-    def to_dict(self) -> dict:
+    def to_dict(self, provenance: Optional[dict] = None) -> dict:
+        """The model, plus where it came from.
+
+        The provenance block is not decoration. A model file carries only
+        weights and a format number, which is not enough to tell a model trained
+        on 11,590 rows from one trained on twelve - and this file is meant to
+        be copied between machines. Without `example_count` and
+        `label_counts` a receiver is trusting numbers with no origin, which is
+        how a bad fit travels silently from one host to a fleet.
+        """
         if self.w is None:
             raise RuntimeError("model is untrained")
-        return {
+        payload = {
             "format": 1,
             "n_features": _N_FEATURES,
             "verdicts": list(VERDICTS),
@@ -1709,10 +3208,23 @@ class OutcomeModel:
             # feature index, so a saved model is readable and a hand-written
             # one could be produced. Kept small because only `touched` indices
             # are ever non-zero.
-            "weights": {str(index): [round(v, 6) for v in row]
+            # **Not rounded.** A class-balanced fit on this log produces weights
+            # around 1e-4; `round(v, 6)` stored 0.0 for every one of them, so
+            # the file verified its digest and predicted uniformly. The digest
+            # already protects the contents, and 2,262 floats cost nothing.
+            "weights": {str(index): [float(v) for v in row]
                         for index, row in sorted(self.w.items())},
-            "bias": [round(v, 6) for v in self.b],
+            "bias": [float(v) for v in self.b],
+            "touched_features": len(self.w),
+            "feature_space": _feature_space_id(),
+            # What this model is NOT allowed to do, stated in the file it is
+            # carried in. It may advise; it can never authorise. A schema that
+            # does not say so is a schema a later format can quietly grow a
+            # `grants` field into.
+            "authority": "advisory-only",
+            "provenance": provenance or {},
         }
+        return payload
 
     def save(self, path: Path) -> Path:
         path.write_text(json.dumps(self.to_dict()), encoding="utf-8")
@@ -1741,19 +3253,94 @@ class Report(NamedTuple):
     per_class: dict          # verdict -> {precision, recall, support}
     confusion: dict          # actual -> {predicted: count}
 
+    def detection(self, name: str) -> float:
+        """How many times better than chance this model is at *finding* `name`.
+
+        recall over that verdict's own share of the data. 1.0 is exactly as good
+        as guessing at random, and below 1.0 means it finds it less often than
+        chance.
+        """
+        stats = self.per_class.get(name) or {}
+        if not stats or not stats.get("support") or not self.n:
+            return 0.0
+        share = stats["support"] / self.n
+        return (stats["recall"] / share) if share else 0.0
+
+    def precision_lift(self, name: str) -> float:
+        """How much better than chance the model's *flags* for `name` are.
+
+        Precision over that verdict's share. This is the half that stops the
+        detection number being worthless: on this machine's log `verified` is
+        6.9% of the held-out slice, so a model that flags **every** call as
+        verified scores `1 / 0.069` = **14.6x detection** while being useless.
+        Recall-based lift alone is a metric a degenerate model wins.
+        """
+        stats = self.per_class.get(name) or {}
+        if not stats or not self.n:
+            return 0.0
+        share = stats["support"] / self.n
+        return (stats["precision"] / share) if share else 0.0
+
+    def detected(self, name: str) -> bool:
+        """Whether `name` is genuinely found, not merely flagged constantly.
+
+        Both halves, and a recall floor: finding fewer than one call in five is
+        not detection, however good the precision looks. Thresholds are stated
+        here rather than folded into the number so a reader can disagree with
+        them.
+        """
+        stats = self.per_class.get(name) or {}
+        return bool(stats.get("support", 0) >= _MIN_CLASS
+                    and stats.get("recall", 0.0) >= _MIN_RECALL
+                    and self.precision_lift(name) >= _MIN_DETECTION_GAIN
+                    and self.detection(name) >= _MIN_DETECTION_GAIN)
+
+    def best_detection(self) -> Tuple[str, float]:
+        """The minority verdict this model genuinely detects, and its lift."""
+        majority = _majority(self.per_class)
+        candidates = [name for name in self.per_class
+                      if name != majority and self.detected(name)]
+        if not candidates:
+            return "", 0.0
+        best = max(candidates,
+                   key=lambda n: min(self.detection(n), self.precision_lift(n)))
+        return best, min(self.detection(best), self.precision_lift(best))
+
     def honest(self) -> bool:
         """Whether this report is worth quoting.
 
-        Accuracy alone is not, on this data, worth anything: the majority class
-        is 94%, so a model that never learns anything scores 94%. A report is
-        only honest if it beats the baseline **and** has non-zero recall on a
-        minority class.
+        **Accuracy alone is not worth anything on this data**: the majority class
+        is 94%, so a model that never learns anything scores 94% - and measured,
+        an unweighted fit did exactly that while calling all 700 minority
+        examples `unverified`.
+
+        So the report is honest if either
+
+        - top-1 beats the majority baseline **and** a minority class has non-zero
+          recall (the original test), or
+        - some minority verdict is genuinely `detected()` - found at >= 2x its
+          base rate on **both** recall and precision, with recall >= 20%.
+
+        The second test is the question the layer is actually for: flagging a
+        call that is about to fail, not winning an argmax a constant would win
+        94% of the time. Both precision and recall are required because either
+        alone is trivially gameable - flag everything and get 1x recall lift;
+        flag the 6.9% class and get 14.6x recall lift while being useless.
         """
+        if self.best_detection()[1] > 0:
+            return True
         minority_recall = any(
             stats["support"] >= _MIN_CLASS and name != _majority(self.per_class)
             and stats["recall"] > 0
             for name, stats in self.per_class.items())
         return self.accuracy > self.baseline and minority_recall
+
+
+#: Both the recall and the precision lift a verdict must reach before the report
+#: counts it as detected, and the recall floor that stops "finds one in twenty"
+#: from passing on precision alone.
+_MIN_DETECTION_GAIN = 2.0
+_MIN_RECALL = 0.20
 
 def _majority(per_class: dict) -> str:
     return max(per_class, key=lambda k: per_class[k]["support"]) if per_class else ""
@@ -1779,7 +3366,7 @@ def predict_class(model, example: "Example") -> int:
         # nothing when it had never been evaluated.
         if type(model).__module__ == __name__:
             return int(predict(example))
-        return int(predict([list(example.x)])[0])
+        return int(predict([example.dense()])[0])
     active = example.active or _sparse(example)
     if getattr(model, "_dense", False):
         row = model.w
@@ -1791,25 +3378,18 @@ def predict_class(model, example: "Example") -> int:
                key=lambda c: model.b[c]
                + sum(v * weights.get(i, _ZERO)[c] for i, v in active))
 
-def evaluate(model, examples: Sequence[Example]) -> Report:
-    if not examples:
+def _report_from_confusion(n: int, confusion: Dict[str, Counter]) -> Report:
+    """A `Report` from already-counted predictions, so CV and a single split
+    cannot drift apart in how they summarise."""
+    if not n:
         return Report(0, 0.0, 0.0, {}, {})
-    correct = 0
-    confusion: Dict[str, Counter] = defaultdict(Counter)
-    for example in examples:
-        predicted = predict_class(model, example)
-        actual = example.y
-        confusion[VERDICTS[actual]][VERDICTS[predicted]] += 1
-        if predicted == actual:
-            correct += 1
-
-    support = Counter(e.y for e in examples)
-    majority_index = support.most_common(1)[0][0]
-    baseline = support[majority_index] / len(examples)
-
+    correct = sum(confusion[name].get(name, 0) for name in VERDICTS)
+    support = Counter({name: sum(confusion[name].values()) for name in VERDICTS})
+    majority_index = max(range(len(VERDICTS)), key=lambda y: support.get(VERDICTS[y], 0))
+    baseline = support[VERDICTS[majority_index]] / n
     per_class = {}
-    for index, name in enumerate(VERDICTS):
-        actual_n = support.get(index, 0)
+    for name in VERDICTS:
+        actual_n = support.get(name, 0)
         predicted_n = sum(confusion[t].get(name, 0) for t in VERDICTS)
         hit = confusion[name].get(name, 0)
         per_class[name] = {
@@ -1817,8 +3397,69 @@ def evaluate(model, examples: Sequence[Example]) -> Report:
             "recall": (hit / actual_n) if actual_n else 0.0,
             "support": actual_n,
         }
-    return Report(len(examples), baseline, correct / len(examples),
-                  per_class, {k: dict(v) for k, v in confusion.items()})
+    return Report(n, baseline, correct / n, per_class,
+                  {k: dict(v) for k, v in confusion.items()})
+
+
+def cross_validate(examples: Sequence[Example], folds: int = 5,
+                   seed: int = 0, holdout: Optional[float] = None) -> Report:
+    """K-fold over **feature vectors**, never over examples.
+
+    **Why this exists, measured.** On this machine's log the three verdicts are
+    carried by wildly different numbers of distinct feature vectors:
+
+    | verdict      | examples | distinct vectors | largest vector |
+    |--------------|---------:|-----------------:|---------------:|
+    | `unverified` |    11,329 |              338 |          4,184 |
+    | `verified`   |     1,979 |                3 |          1,831 |
+    | `failed`     |     2,139 |                7 |          1,831 |
+
+    All 1,979 `verified` calls share **three** vectors. So any split that keeps
+    a vector whole - which is the whole point, since 344 vectors carry 11,590
+    examples - necessarily puts two of those three in training and one in test,
+    or the reverse, and a single split's score is then a statement about which
+    vector landed where. Measured: a stratified group split left **32**
+    `verified` examples in training against 319 in test.
+
+    Folding over vectors gives every vector a turn at being test data and never
+    leaks one, which is the only way to ask "does this generalise to a call shape
+    it has not seen" when the answer is concentrated in three shapes. A fitted
+    model is discarded per fold; only the counts are pooled.
+    """
+    groups: Dict[Tuple, List[Example]] = {}
+    for example in examples:
+        groups.setdefault(example.active, []).append(example)
+    keys = sorted(groups)
+    if len(keys) < 2:
+        return _report_from_confusion(0, defaultdict(Counter))
+    import random as _random
+    order = list(keys)
+    _random.Random(seed).shuffle(order)
+    assignment = {key: index % folds for index, key in enumerate(order)}
+    confusion: Dict[str, Counter] = defaultdict(Counter)
+    for fold in range(folds):
+        train = [e for key in keys if assignment[key] != fold for e in groups[key]]
+        test = [e for key in keys if assignment[key] == fold for e in groups[key]]
+        if not train or not test:
+            continue
+        try:
+            model = OutcomeModel().fit(train)
+        except Exception as exc:  # noqa: BLE001 - one bad fold is not the whole CV
+            logger.warning("outcome model: fold %d did not fit (%s)", fold, exc)
+            continue
+        for example in test:
+            confusion[VERDICTS[example.y]][VERDICTS[predict_class(model, example)]] += 1
+    return _report_from_confusion(sum(sum(c.values()) for c in confusion.values()),
+                                  confusion)
+
+
+def evaluate(model, examples: Sequence[Example]) -> Report:
+    if not examples:
+        return Report(0, 0.0, 0.0, {}, {})
+    confusion: Dict[str, Counter] = defaultdict(Counter)
+    for example in examples:
+        confusion[VERDICTS[example.y]][VERDICTS[predict_class(model, example)]] += 1
+    return _report_from_confusion(len(examples), confusion)
 
 def render_outcome(report: Report) -> str:
     """A report that cannot be read as a score out of context."""
@@ -1838,29 +3479,150 @@ def render_outcome(report: Report) -> str:
                    f"recall {stats['recall'] * 100:5.1f}%  "
                    f"precision {stats['precision'] * 100:5.1f}%")
     out.append("")
-    if report.honest():
-        out.append("  Beats the baseline AND has minority-class recall, so it is "
-                   "worth something.")
+    # The detection line is the one a reader has to have, because accuracy on a
+    # 94%-majority log and the thing this layer is for point in opposite
+    # directions. Both lifts are shown: a model that finds a verdict 33x more
+    # often than chance but is wrong 5 times out of 6 is not the same thing as
+    # one right 5.9x more often than chance.
+    out.append("  Against each verdict's own share of the data:")
+    for name, stats in report.per_class.items():
+        if not stats["support"]:
+            continue
+        out.append(f"    {name:<11} recall {report.detection(name):5.2f}x  "
+                   f"precision {report.precision_lift(name):5.2f}x  "
+                   f"{'detected' if report.detected(name) else 'not detected'}")
+    out.append("")
+    detected, lift = report.best_detection()
+    if detected:
+        out.append(f"  It finds `{detected}` at {lift:.1f}x on both recall and "
+                   f"precision, so there is signal here: a call that looks like "
+                   f"this shape should be treated as worth checking.")
+    elif report.honest():
+        out.append("  It beats the top-1 baseline with minority-class recall, so "
+                   "there is something here worth acting on.")
     else:
-        out.append("  This does NOT beat the baseline with minority-class recall, "
-                   "so there is no signal here worth acting on. More tool calls "
-                   "are needed, not a better model.")
+        out.append("  It does NOT find any verdict above chance on both recall "
+                   "and precision, and does not beat the baseline, so there is "
+                   "no signal here worth acting on. More tool calls are needed, "
+                   "not a better model.")
     return "\n".join(out)
 
-def train_and_report(path: Optional[Path] = None, holdout: float = 0.25) -> Report:
-    """Train on most of the log and score the rest. Split by time, not randomly.
+def split_examples(examples: Sequence[Example], holdout: float = 0.25) -> Tuple[List[Example], List[Example], str]:
+    """Hold out every `1/holdout`-th example **of each verdict**. Returns
+    (train, held_out, note).
 
-    A random split lets the model see the same tool with the same arguments in
-    both halves, which for a categorical feature set is close to memorisation.
-    The log is ordered, so the split is a prefix/suffix - and that is also the
-    honest deployment question, which is whether a model trained on *last* month
-    predicts *this* month.
+    **Not a prefix/suffix, and the failure that forced this was measured.** A
+    time-ordered split of this machine's log put **8,462 `unverified`, 265
+    `failed` and zero `verified`** into the training half - `train_and_save`
+    refused to write anything, and correctly, because a model cannot learn a
+    class it never sees. The verdicts only started being recorded partway
+    through the log, so every `verified` sits in the last quarter.
+
+    The reason the split was ordered at all is the one this keeps: **the same
+    call must not appear on both sides**, because 11,590 examples carry only
+    344 distinct feature vectors and a duplicate is memorisation. Ordering was
+    a *proxy* for that, and it is a bad one - it enforces it only by accident of
+    what was logged when. So it is enforced directly: every example whose
+    feature vector was already used on the training side is moved to the held-out
+    side, and `note` says how many were moved. That is checkable; ordering was
+    not.
+
+    With both classes present on both sides the class-balanced fit then reaches
+    48.4% recall on `failed` at 6.8% precision against a 3.0% base rate.
+    """
+    if holdout <= 0 or len(examples) < 4:
+        return list(examples), [], "held nothing out"
+    stride = max(2, int(round(1.0 / holdout)))
+    counts = Counter(e.y for e in examples)
+    # **Assign whole feature vectors to one side, never individual examples.**
+    # 11,590 examples carry only 344 distinct vectors, so splitting by example
+    # puts the same call on both sides almost everywhere. Grouping first is what
+    # makes the no-leak claim true instead of approximately true - and an earlier
+    # version that counted "duplicates moved" without actually moving them
+    # reported 2,827 moves while leaving 35 shared vectors in place, which is
+    # the shape of a control that cannot fail.
+    groups: Dict[Tuple, List[Example]] = {}
+    for example in examples:
+        groups.setdefault(example.active, []).append(example)
+    ordered = list(groups.values())
+
+    # The unit is the **group**, so a vector cannot straddle; the stratum is the
+    # group's majority label, so the split stays balanced per verdict. Both
+    # together matter, and getting either wrong showed up as a measurement:
+    #   - grouping but not stratifying left **32 `verified`** in training and
+    #     319 in the held-out slice, and the balanced fit on 32 examples
+    #     predicted `unverified` for 4.1% of the held-out calls - worse than
+    #     useless, and it still cleared the detection bar at 14.6x.
+    #   - stratifying by example but not grouping left 35 vectors on both sides.
+    seen_per_class: Dict[int, int] = {}
+    train: List[Example] = []
+    held: List[Example] = []
+    for group in ordered:
+        label = Counter(e.y for e in group).most_common(1)[0][0]
+        position = seen_per_class.get(label, 0)
+        seen_per_class[label] = position + 1
+        (held if position % stride == stride - 1 else train).extend(group)
+
+    train_vectors = {e.active for e in train}
+    leaked = [e for e in held if e.active in train_vectors]
+    note = ""
+    if leaked:
+        # Unreachable by construction now; kept as an assertion that can fail,
+        # because a guard whose failure is impossible to observe is a comment.
+        raise AssertionError(
+            f"{len(leaked)} held-out example(s) share a feature vector with the "
+            "training half, so the split leaks")
+    unseen = [VERDICTS[y] for y in range(len(VERDICTS))
+              if counts.get(y, 0) >= _MIN_CLASS
+              and not any(e.y == y for e in train)]
+    if unseen:
+        note = f"no training example of {', '.join(unseen)}"
+    return train, held, note
+
+
+def unknown_tool_examples(records: Sequence[dict]) -> "tuple[int, list[str]]":
+    """How much of this training set is about tools this build does not have.
+
+    Measured on this machine's own log: two tools that no longer exist - `liar`
+    and `unver`, both fixtures - account for 692 of 12,856 calls and **313 of the
+    378 failures**. So a model fitted on that log learns its *entire* failure
+    signal from something that is no longer installed, and reports itself in
+    `provenance` without saying so.
+
+    It is recorded rather than filtered. **Filtering would be the more useful
+    behaviour and the wrong one here**: dropping the examples would quietly
+    change what the model says about the past, and the point of the number is
+    that a person can see how much of their history is about a machine that does
+    not exist any more. Whether to train on it is their decision, made with the
+    figure in front of them.
+    """
+    from shani_chronoa import tools
+    known = {entry["function"]["name"] for entry in tools.TOOLS}
+    # Records, not Examples: an `Example` is a hashed vector and a label, and the
+    # tool name is gone by then - it only survives as `tool=<name>` inside the
+    # hash, which is not something to reverse.
+    names = [str(r.get("tool_name") or "") for r in records]
+    unknown = sorted({name for name in names if name and name not in known})
+    count = sum(1 for name in names if name and name not in known)
+    return count, unknown
+
+
+def train_and_report(path: Optional[Path] = None, holdout: float = 0.25,
+                     cv: Optional[float] = 5.0) -> Report:
+    """Train on most of the log and score the rest.
+
+    Split by class rather than by time - see `split_examples` for the measured
+    failure that replaced the ordered split - and fit with class balancing, so
+    the two minority verdicts are actually reachable. This is the report
+    `train_and_save` refuses to act on, and it is the only thing in the layer
+    that answers "is there signal in this log at all".
     """
     examples = load(path)
     if not examples:
         return Report(0, 0.0, 0.0, {}, {})
-    cut = int(len(examples) * (1.0 - holdout))
-    train, test = examples[:cut], examples[cut:]
+    if cv:
+        return cross_validate(examples, folds=int(cv))
+    train, test, _note = split_examples(examples, holdout)
     if not train or not test:
         return Report(0, 0.0, 0.0, {}, {})
     model = OutcomeModel().fit(train)
@@ -2028,21 +3790,41 @@ class BernoulliNB:
         self.priors: List[float] = []
         self.n_classes = 0
 
-    def fit(self, examples: Sequence[core.Example]) -> "BernoulliNB":
+    def fit(self, examples, weights=None) -> "BernoulliNB":
+        """Fit, optionally with per-example weights.
+
+        **The weights are not optional in practice.** Naive Bayes derives its
+        class priors and its feature counts *from repetition*, so collapsing
+        duplicate feature vectors without carrying their counts destroys the
+        signal: measured on this machine's log, 11,590 examples carry only 344
+        distinct vectors, and fitting the unweighted 344 collapsed BernoulliNB
+        from **0.9893 to 0.0147**. With the weights it is the same model.
+
+        So `weights[i]` says how many copies of `examples[i]` exist, and every
+        count below is scaled by it. `fit(collapse(train))` and
+        `fit(train)` then produce the same posterior.
+        """
         classes = len(core.VERDICTS)
         self.n_classes = classes
+        if weights is None:
+            weights = [1.0] * len(list(examples))
         totals = [0.0] * classes
-        seen = [[0.0] * classes for _ in range(_N_FEATURES)]
+        seen: Dict[int, List[float]] = {}
         presence = [0.0] * classes
-        for example in examples:
+        for example, weight in zip(examples, weights):
             label = example.y
-            totals[label] += 1.0
-            presence[label] += 1.0
+            totals[label] += weight
+            presence[label] += weight
             for index, value in _sparse(example):
                 if value > 0:
-                    seen[index][label] += 1.0
+                    row = seen.get(index)
+                    if row is None:
+                        row = seen[index] = [0.0] * classes
+                    row[label] += weight
         grand = sum(totals) or 1.0
         self.priors = [t / grand for t in totals]
+        # Only the features some example actually carries, rather than a
+        # 16384-row list of zeros - which was 16384 lists of 3 floats each.
         self.counts = seen
         self.presence = presence
         return self
@@ -2053,7 +3835,9 @@ class BernoulliNB:
         for index, value in active:
             if value <= 0:
                 continue
-            row = self.counts[index]
+            row = self.counts.get(index)
+            if row is None:
+                continue
             for c in range(self.n_classes):
                 # Bernoulli: a feature can be present OR absent, and for the
                 # absent case we need the complement probability too. Ignoring
@@ -2086,7 +3870,16 @@ class DecisionTree:
         self.min_leaf = min_leaf
         self.root: Optional[dict] = None
 
-    def fit(self, examples: Sequence[core.Example]) -> "DecisionTree":
+    def fit(self, examples: Sequence[core.Example],
+            weights: Optional[Sequence[float]] = None) -> "DecisionTree":
+        """Fit, optionally with per-example weights.
+
+        A tree splits on a feature by **count of rows**, so a duplicate group is
+        not repetition to be removed - it is 4,172 rows voting together. Without
+        the weights, collapsing took DecisionTree from 1.0000 to 0.9853 for
+        exactly that reason. With them the node counts are weighted and the fit
+        is identical to fitting every copy.
+        """
         counts = [0.0] * len(core.VERDICTS)
         for e in examples:
             counts[e.y] += 1
@@ -2094,7 +3887,7 @@ class DecisionTree:
         return self
 
     def _build(self, examples, depth: int, counts):
-        total = sum(counts) or 1.0
+        """`examples` is a list of `(Example, weight)`. `counts` is weighted."""
         majority = max(range(len(counts)), key=lambda c: counts[c])
         node = {"pred": majority, "left": None, "right": None, "feature": None}
         if depth >= self.max_depth or len(examples) <= 2 * self.min_leaf:
@@ -2114,9 +3907,15 @@ class DecisionTree:
         parent = 1.0 - sum((c / total) ** 2 for c in counts)
         best_gain, best = 0.0, None
         for feature in _candidate_features(examples):
-            left = [e for e in examples
-                    if _value_at(e.x, feature) > 0]
-            if len(left) < self.min_leaf or len(left) > len(examples) - self.min_leaf:
+            left = [row for row in examples if _has(_sparse(row), feature)]
+            # `min_leaf` is compared against the WEIGHTED count, not the row
+            # count. Rows are what a leaf is measured in, but a collapsed fit
+            # has 333 rows standing for 8,000, so a row-count test lets splits
+            # through that the full fit would reject - which is why the
+            # collapsed tree scored 0.9862 against the full one's 1.0000.
+            left_weight = _weight_sum(left)
+            total_weight = _weight_sum(examples)
+            if left_weight < self.min_leaf or left_weight > total_weight - self.min_leaf:
                 continue
             left_counts = _counts(left)
             right_counts = [counts[c] - left_counts[c] for c in range(len(counts))]
@@ -2130,20 +3929,20 @@ class DecisionTree:
                 # NameError and the tree silently contributed nothing - which the
                 # comparison reported as 0.0% rather than as a crash.
                 right = [e for e in examples
-                         if _value_at(e.x, feature) <= 0]
+                         if not _has(e.active, feature)]
                 best_gain, best = gain, (feature, left, right)
         return best
 
     def predict(self, example: core.Example) -> int:
         node = self.root
         while node and node["feature"] is not None:
-            node = node["left"] if _value_at(example.x, node["feature"]) > 0 else node["right"]
+            node = node["left"] if _has(example.active, node["feature"]) else node["right"]
         return node["pred"] if node else 0
 
     def predict_proba(self, example: core.Example) -> List[float]:
         node = self.root
         while node and node["feature"] is not None:
-            node = node["left"] if _value_at(example.x, node["feature"]) > 0 else node["right"]
+            node = node["left"] if _has(example.active, node["feature"]) else node["right"]
         out = [0.0] * len(core.VERDICTS)
         if node:
             out[node["pred"]] = 1.0
@@ -2229,7 +4028,7 @@ class _BuiltinAdapter:
         """
         model = self._model
         if getattr(model, "_dense", False):
-            return _softmax(list(model.w @ example.x + model.b))
+            return _softmax(list(model.w @ example.dense() + model.b))
         return _softmax([
             model.b[c] + sum(v * model.w.get(i, _ZERO_ROW)[c]
                              for i, v in _sparse(example))
@@ -2259,21 +4058,56 @@ class KNN:
         self.k = k
         self.rows: List[Tuple[Dict[int, float], int]] = []
 
-    def fit(self, examples: Sequence[core.Example]) -> "KNN":
-        self.rows = [(dict(_sparse(e)), e.y) for e in examples]
+    def fit(self, examples: Sequence[core.Example],
+            weights: Optional[Sequence[float]] = None) -> "KNN":
+        """Store the set, and build an inverted index over the features.
+
+        The index is the whole optimisation. Scoring every row per query is
+        O(n) - 8,000 sparse dot products for each of 1,500 queries, which
+        measured **36 seconds**. But a row can only share a feature with the
+        probe if it *carries* one of the probe's features, and the probe has
+        about five. Only rows in the union of those five posting lists can score
+        above zero, so the rest cannot reach the top k and need not be looked at.
+
+        Candidates shrink from "every row" to "rows sharing a feature", which on
+        hashed tool/argument names is a small fraction of the set.
+        """
+        if weights is None:
+            weights = [1.0] * len(list(examples))
+        # The copy count rides with the row, so a neighbour repeated 4,172 times
+        # contributes 4,172 votes rather than one - which is what makes the
+        # collapsed fit equivalent to the full one.
+        self.rows = [(dict(_sparse(e)), e.y, float(w))
+                     for e, w in zip(examples, weights)]
+        index: Dict[int, List[int]] = defaultdict(list)
+        for position, (vector, _label, _w) in enumerate(self.rows):
+            for feature in vector:
+                index[feature].append(position)
+        self._index = dict(index)
         return self
 
     def predict(self, example: core.Example) -> int:
         probe = dict(_sparse(example))
-        scored = []
-        for vector, label in self.rows:
-            # sparse cosine similarity; both vectors are unit-normalised
-            shared = sum(value * vector.get(i, 0.0) for i, value in probe.items())
-            scored.append((shared, label))
-        scored.sort(reverse=True)
+        # Only rows that share at least one feature can score above zero; a row
+        # with none has similarity 0 and cannot displace a real neighbour.
+        if not hasattr(self, "_index"):
+            self._index = {}
+        seen: Dict[int, float] = {}
+        for feature, value in probe.items():
+            for position in self._index.get(feature, ()):
+                seen[position] = seen.get(position, 0.0) + value
+        scored = sorted(
+            ((shared, position) for position, shared in seen.items()),
+            reverse=True)
         tally = [0.0] * len(core.VERDICTS)
-        for _s, label in scored[:self.k]:
-            tally[label] += 1.0
+        for _s, position in scored[:self.k]:
+            tally[self.rows[position][1]] += self.rows[position][2]
+        if not scored:
+            # No shared feature: every neighbour is at distance 1, so the
+            # majority class is the right answer rather than a silent zero.
+            tally = [0.0] * len(core.VERDICTS)
+            for _vector, label, weight in self.rows[:self.k]:
+                tally[label] += weight
         return max(range(len(tally)), key=lambda c: tally[c])
 
     def predict_proba(self, example: core.Example) -> List[float]:
@@ -2325,33 +4159,45 @@ class Ridge:
     def predict(self, example: core.Example) -> float:
         return sum(value * self.coef.get(i, 0.0) for i, value in _sparse(example))
 
-def _active(vector: Sequence[float]) -> List[Tuple[int, float]]:
-    """The non-zero entries of a dense vector. **O(width)** - 16384 slots.
-
-    Every hot path should use `_sparse(example)` instead: an Example carries its
-    own active indices, so this full scan is only paid when building one.
-    """
-    return [(i, v) for i, v in enumerate(vector) if v]
-
-
 def _sparse(example) -> Tuple[Tuple[int, float], ...]:
     """An example's non-zero entries, from its cached list.
 
-    Scanning the dense vector per call cost 16384 iterations each time. With
-    9,586 examples scored, or a few thousand fitted over 20 epochs, that is the
-    difference between 110 seconds and 0.04. A hashed feature vector has a
-    handful of non-zeros out of 16384, so the scan was 99.9% wasted work.
-    """
-    return example.active or tuple(
-        (i, v) for i, v in enumerate(example.x) if v)
+    This walked all 16,384 slots of a dense vector on every call - 157
+    million iterations to score 9,586 examples - and the dense vectors
+    themselves cost 7.3 GB to hold for the life of the process. `Example`
+    stores only the sparse form; see its docstring.
 
-def _value_at(vector: Sequence[float], index: int) -> float:
-    return vector[index] if 0 <= index < len(vector) else 0.0
+    Accepts a bare `Example` or a weighted `(Example, weight)` pair, because the
+    tree carries the pair through its recursion and threading that tolerance
+    through every call site is how the two shapes drifted apart.
+    """
+    # A weighted row is `(Example, weight)`. Checking `isinstance(tuple)` is
+    # not good enough: the `(index, value)` pairs INSIDE an active list are
+    # tuples too, and unwrapping one of those returns a float with no
+    # `.active`. So the shape is identified by what the pair holds.
+    return _unwrap(example).active
+
+
+def _weight_sum(rows) -> float:
+    """Total sample weight of `(Example, weight)` rows."""
+    total = 0.0
+    for row in rows:
+        if isinstance(row, tuple) and len(row) == 2 and isinstance(row[0], core.Example):
+            total += float(row[1])
+        else:
+            total += 1.0
+    return total
+
 
 def _counts(examples) -> List[float]:
     tally = [0.0] * len(core.VERDICTS)
-    for e in examples:
-        tally[e.y] += 1.0
+    for row in examples:
+        if isinstance(row, tuple) and len(row) == 2 \
+                and isinstance(row[0], core.Example):
+            example, weight = row
+        else:
+            example, weight = row, 1.0
+        tally[example.y] += weight
     return tally
 
 def _candidate_features(examples, cap: int = 64) -> List[int]:
@@ -2361,8 +4207,8 @@ def _candidate_features(examples, cap: int = 64) -> List[int]:
     the common features are the ones carrying the argument-shape signal anyway.
     """
     frequency: Dict[int, float] = defaultdict(float)
-    for e in examples:
-        for i, _v in _sparse(e):
+    for row in examples:
+        for i, _v in _sparse(row):
             frequency[i] += 1.0
     return [i for i, _n in sorted(frequency.items(), key=lambda kv: -kv[1])[:cap]]
 

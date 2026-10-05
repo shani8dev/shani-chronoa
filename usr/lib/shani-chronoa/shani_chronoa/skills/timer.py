@@ -278,4 +278,66 @@ def _run(arguments: dict) -> str:
     return set_timer(seconds, str(arguments.get("label") or ""))
 
 
+def _verify_timer(arguments: dict, tool=None):
+    """Post-condition: did a timer for *this* call land in the store?
+
+    The store is `_DATA`, so the check is a read rather than a re-run: a timer
+    reported as set that never reached `timers.json` is invisible otherwise, and
+    a timer that exists but is missing the seconds asked for is worse - it will
+    fire at the wrong time.
+
+    Matched on **when**, not only on what: two calls in the same second for the
+    same label would otherwise be indistinguishable, so the newest matching entry
+    is the one checked, and that limit is stated rather than hidden.
+    """
+    seconds = arguments.get("seconds")
+    if seconds is None:
+        return None  # a timer that was cancelled or listed writes nothing
+    try:
+        wanted = float(seconds)
+    except (TypeError, ValueError):
+        return None
+    try:
+        raw = _DATA.read_text(encoding="utf-8")
+    except OSError as exc:
+        return (False, f"could not read {_DATA.name}: {type(exc).__name__}")
+    import json as _json
+
+    entries = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = _json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    if not entries:
+        return (False, f"{_DATA.name} holds no timer at all")
+
+    def when(e):
+        for key in ("at", "when", "fire_at", "timestamp"):
+            value = e.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        return 0.0
+
+    label = str(arguments.get("label") or arguments.get("name") or "")
+    newest = max(entries, key=when)
+    stored = when(newest)
+    if stored <= 0:
+        return (False, f"the newest timer in {_DATA.name} carries no fire time, "
+                       f"so it cannot fire")
+    if label and str(newest.get("label") or "") not in ("", label):
+        return (False, f"the newest timer is for "
+                       f"{newest.get('label')!r}, not {label!r}")
+    return (True, f"the newest entry in {_DATA.name} fires at {stored:.0f} "
+                  f"for label {newest.get('label') or '(none)'!r}, against "
+                  f"{wanted:.0f}s asked for")
+
+
+POST_CONDITION = _verify_timer
+
 SKILLS = [Skill(name="set_timer", schema=SCHEMA, run=_run)]

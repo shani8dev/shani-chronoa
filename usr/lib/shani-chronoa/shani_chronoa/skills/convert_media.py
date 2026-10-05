@@ -81,4 +81,46 @@ def _run(arguments: dict) -> str:
     return f"Made {dst} ({dst.stat().st_size / 1e6:.1f} MB) from {src.name}; the original is unchanged."
 
 
+def _verify_converted_media(arguments: dict, tool=None):
+    """Post-condition: is the output real audio/video, and is it non-empty?
+
+    `ffmpeg` exits 0 and writes a file for a great many failures, so the exit
+    code proves nothing. **When `ffprobe` is available the check asks it what
+    the file actually is** - a codec and a duration - which is the only claim
+    here worth making. Without ffprobe it falls back to size alone and says so,
+    rather than implying it verified something it did not.
+    """
+    from pathlib import Path as _P
+    out = str(arguments.get("output") or arguments.get("out") or "").strip()
+    if not out:
+        return None  # nothing was written
+    target = _P(out)
+    if not target.exists():
+        return (False, f"{target.name} does not exist, so nothing was converted")
+    size = target.stat().st_size
+    if size == 0:
+        return (False, f"{target.name} is empty")
+    from shutil import which
+    if which("ffprobe"):
+        import subprocess
+        try:
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries",
+                 "format=duration,format_name", "-of", "default=nw=1",
+                 str(target)],
+                capture_output=True, text=True, timeout=30, check=False)
+            detail = " ".join(probe.stdout.split())[:120]
+        except Exception as exc:  # noqa: BLE001
+            return (False, f"ffprobe could not read {target.name}: "
+                           f"{type(exc).__name__}")
+        if probe.returncode != 0 or "duration" not in probe.stdout:
+            return (False, f"{target.name} is {size} bytes but ffprobe cannot "
+                           f"find a duration in it - not a usable media file")
+        return (True, f"ffprobe reads {target.name}: {detail}")
+    return (True, f"{target.name} is {size} bytes (ffprobe is not installed, so "
+                  f"the format was not confirmed)")
+
+
+POST_CONDITION = _verify_converted_media
+
 SKILLS = [Skill(name="convert_media", schema=_SCHEMA, run=_run)]

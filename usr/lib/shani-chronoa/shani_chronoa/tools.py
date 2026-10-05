@@ -228,6 +228,17 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     if blocked:
         return blocked
 
+    # The guardrail answers a different question from the reaction layer above:
+    # not "is this call wise" but "is it even well-formed". A model returning
+    # `1` where a string is declared, or omitting a required argument, would
+    # otherwise reach a subprocess and come back as a traceback three frames
+    # deep that tells the model nothing it can use. It sits here so both public
+    # entry points get it, and it can only ever *stop* a call the reaction layer
+    # allowed - it never authorises anything.
+    malformed = _guardrail_refuses(name, arguments)
+    if malformed:
+        return malformed
+
     # Record what the outcome model expects *before* the call, so a prediction
     # and its outcome can later be paired. Without this the loop never closes:
     # the dispatch log has the verdicts but nothing records what was expected,
@@ -236,13 +247,99 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     # Best-effort by design. A model that is absent, untrained or broken must
     # not stop a tool from running - this records when it can and says nothing
     # when it cannot.
-    _record_prediction(name, arguments)
+    advice = _advise(name, arguments, origin)
 
     activity = _light_hands(name, arguments if isinstance(arguments, dict) else {}, origin)
     try:
-        return _dispatch_inner(name, arguments, by_reference, origin)
+        result = _dispatch_inner(name, arguments, by_reference, origin)
     finally:
         _unlight_hands(activity)
+    if advice:
+        # Appended, not prepended: the tool did run, and this is an addition to
+        # what it produced rather than a substitute for it.
+        note = getattr(result, "text", "")
+        try:
+            result.text = (f"{note}\n\n{advice}" if note else advice)
+        except Exception:  # noqa: BLE001 - a read-only result is fine
+            pass
+    return result
+
+
+def _advise(name, arguments, origin):
+    """What the machine, the model and the bandit say - BEFORE the call.
+
+    It used to be recorded after the call had already returned, which made
+    the prediction path a filing exercise: every dispatch asked the model
+    and nobody was ever told the answer. A prediction that lands afterwards
+    explains a failure; one that lands first can prevent it.
+
+    Three sources, ordered by how much each can be trusted, and the order is
+    the design:
+
+    1. **the machine** - a missing command is a fact. If magick is absent the
+       route is known exactly and no model is consulted.
+    2. **the outcome model** - the non-deterministic part: given a call shape
+       this machine has failed before, say so.
+    3. **the bandit** - which stand-in has actually succeeded here lately.
+
+    Returns a sentence, or None. Never raises: a broken model must not stop a
+    tool, and an absent one must not add noise.
+    """
+    record = {"tool_name": name, "origin": origin,
+              "args": arguments if isinstance(arguments, dict) else {}}
+    try:
+        from shani_chronoa.capability import capabilities
+        from shani_chronoa import learning
+        cap = capabilities()
+    except Exception:  # noqa: BLE001
+        cap = None
+
+    # (1) the machine: deterministic, so it is asked first and wins outright.
+    if cap is not None:
+        needed = learning.OutcomeModel._NEEDS.get(name)
+        if needed:
+            missing = [n for n in needed if n not in cap.commands]
+            if missing:
+                try:
+                    from shani_chronoa.routes import explain
+                    return explain(missing[0], cap, name)
+                except Exception:  # noqa: BLE001
+                    return f"{name} needs {missing[0]}.",
+
+    # (2) the model, then (3) the bandit.
+    try:
+        model = _outcome_model()
+        if model is None:
+            return None
+        probs = model.predict_proba(record)
+        best = max(probs, key=probs.get)
+        _record_prediction(name, arguments)
+        known = []
+        try:
+            from shani_chronoa.learning import Bandit
+            live = Bandit().arms()
+            rivals = list(_ALTERNATIVES.get(name, ()))
+            known = [(a, live[a].wins / live[a].pulls) for a in rivals
+                     if a in live and live[a].pulls >= 3]
+            known = [k for k in known if k[1] > (probs.get(best) or 0.0)]
+        except Exception:  # noqa: BLE001
+            known = []
+        if best == "failed" and (probs.get("failed") or 0) > 0.5:
+            suggestion = (
+                f" {known[0][0]} has worked here more often "
+                f"({known[0][1]:.0%}); that may be the better path."
+                if known else
+                " A dry run would cost nothing and say more.")
+            return (f"This has failed here before "
+                    f"({probs.get('failed', 0):.0%} of recent calls)."
+                    + suggestion)
+        if best == "unverified" and (probs.get("unverified") or 0) > 0.9 and not known:
+            return ("Nothing has ever confirmed this call did anything on "
+                    "this machine. It may be fine; there is just no "
+                    "evidence.")
+    except Exception:  # noqa: BLE001 - advice must never block a tool
+        return None
+    return None
 
 
 def _record_prediction(name: str, arguments) -> None:
@@ -259,23 +356,98 @@ def _record_prediction(name: str, arguments) -> None:
 
 
 #: Loaded once, lazily, and only if a trained model has been saved. Absent is
-#: the normal state: nothing trains a model until someone runs the dream pass
-#: and the labels are good enough to be worth training on.
+#: The normal state is None: no model trains until the log carries enough
+#: scored calls for one to be worth having.
 _OUTCOME_MODEL = None
 _OUTCOME_TRIED = False
 
 
 def _outcome_model():
+    """The trained outcome model, or None.
+
+    **The path came from `learning.model_path()`, not from beside the
+    predictions log.** These pointed at two different files - `logs/` and
+    `models/` - so consolidation wrote a model that dispatch could never find.
+    Every part worked: training succeeded, saving succeeded, and the prediction
+    path still reported "no model". A chain whose ends disagree looks exactly
+    like a chain that is not wired, which is how I spent this round convinced the
+    layer was inert when it was mis-addressed.
+
+    **A model is also checked before it is used**, not only when it is written.
+    Three things disqualify it:
+
+    - **no digest** - a file that does not say what it is, which is the state of
+      every model written before signing existed;
+    - **a digest that does not match** - edited, truncated, or transferred
+      from somewhere that does not vouch for it;
+    - **`provenance.honest` false** - a model that never beat the majority
+      baseline. Loading one would mean acting on a model whose own report says
+      it knows nothing.
+
+    All three decline to None and say so in the log, which is the only honest
+    outcome: predicting nothing is better than predicting from a file that
+    cannot account for itself.
+    """
     global _OUTCOME_MODEL, _OUTCOME_TRIED
     if _OUTCOME_TRIED:
         return _OUTCOME_MODEL
     _OUTCOME_TRIED = True
     try:
-        from shani_chronoa.outcome_model import OutcomeModel, predictions_path
-        candidate = predictions_path().parent / "outcome-model.json"
-        if candidate.exists():
-            _OUTCOME_MODEL = OutcomeModel.load(candidate)
-    except Exception:  # noqa: BLE001
+        import json
+
+        from shani_chronoa.learning import (_feature_space_id as
+                                            learning_feature_space,
+                                            models_dir, verify_model)
+        from shani_chronoa.outcome_model import OutcomeModel
+
+        # **Every model keeps its own space-stamped name and nothing is moved.**
+        # So the question is not "is the file there" but "which of these was
+        # trained in the space this build produces" - and a model from another
+        # space simply does not match, which is the whole refusal mechanism.
+        # Nothing is ever deleted or renamed, so a space that comes back finds
+        # its model already in place, still valid, still carrying everything it
+        # learned about this machine.
+        current = learning_feature_space()
+        candidates = sorted(models_dir().glob("outcome*.json"))
+        preferred = [c for c in candidates if c.name == f"outcome-{current}.json"]
+        others = [c for c in candidates
+                  if c.name != f"outcome-{current}.json"
+                  and not c.name.endswith('.tmp')]
+        chosen = None
+        for candidate in preferred + others:
+            try:
+                if json.loads(candidate.read_text(encoding="utf-8")).get(
+                        "feature_space") == current:
+                    chosen = candidate
+                    break
+            except (OSError, ValueError):
+                continue
+        if chosen is None and candidates:
+            logger.info(
+                "no outcome model matches this build's feature space (%s); %d "
+                "model(s) from other spaces are kept on disk and still valid "
+                "if that space returns. Nothing was deleted - a space that "
+                "comes back finds its model already here.", current,
+                len(candidates))
+            return None
+        if chosen is None:
+            return None
+        candidate = chosen
+        payload = json.loads(candidate.read_text(encoding="utf-8"))
+        check = verify_model(payload)
+        if not check.get("ok"):
+            logger.debug("outcome model rejected: %s", check.get("reason"))
+            return None
+        provenance = payload.get("provenance") or {}
+        if provenance.get("honest") is False:
+            logger.debug(
+                "outcome model rejected: its own report says it did not beat "
+                "the majority baseline (%s vs %s), so it would predict from "
+                "nothing", provenance.get("accuracy"), provenance.get("baseline"))
+            return None
+        _OUTCOME_MODEL = OutcomeModel.load(candidate)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("outcome model unavailable: %s: %s", type(exc).__name__, exc)
         _OUTCOME_MODEL = None
     return _OUTCOME_MODEL
 
@@ -284,6 +456,40 @@ def _outcome_model():
 #: sharing it across turns is the point: a pattern is a pattern across the
 #: conversation, not within one tool call.
 _REACTIONS = ReactionLayer()
+
+
+def _guardrail_refuses(name: str, arguments):
+    """Ask `guardrail` whether this call is well-formed. Returns a
+    DispatchResult to return instead, or None to proceed.
+
+    Never raises, for the same reason `_reaction_refuses` does not: a layer that
+    cannot answer must not become the reason a tool fails. `guardrail.check` is
+    a pure comparison against the skill's own schema, so a failure there means
+    the guardrail is broken rather than that the call is malformed - and the
+    right response to a broken guardrail is to proceed to the real permission
+    layer, not to block a legitimate call.
+
+    Unlike the reaction layer this does *not* need `origin` or `destructive`:
+    it judges shape, not authority, and authority is already decided upstream.
+    """
+    try:
+        from shani_chronoa import guardrail
+
+        schema = next((t["function"] for t in TOOLS
+                       if t.get("function", {}).get("name") == name), None)
+        reason = guardrail.check(name, arguments if isinstance(arguments, dict) else {}, schema or {})
+    except Exception:  # noqa: BLE001
+        return None
+    if not reason:
+        return None
+    # `ran=False` again carries the meaning: the tool never executed. UNVERIFIED
+    # rather than FAILED for the same reason as the reaction layer above - the
+    # call did not run and break, it never ran at all.
+    return DispatchResult(
+        text=("Not run. " + reason),
+        verdict=verification.Verdict.UNVERIFIED,
+        ran=False,
+    )
 
 
 def _reaction_refuses(name: str, arguments, origin: str):

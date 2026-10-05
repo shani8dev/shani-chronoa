@@ -114,4 +114,50 @@ def _run(arguments: dict) -> str:
     return f"{what} in {time.monotonic() - started:.0f} s and saved it to {target}."
 
 
+def _verify_generated_image(arguments: dict, tool=None):
+    """Post-condition: is the generated file a real image, or a stub?
+
+    A diffusion backend that fails can leave a zero-byte or single-colour file,
+    and "here is your picture" is then false. So the check confirms the file
+    decodes as an image and, where Pillow is present, that it carries more than
+    one distinct colour - a flat frame is what a dead generator produces.
+
+    **A deliberately flat image (a solid background the user asked for) reads as
+    unverified rather than as a failure**, which is stated here rather than left
+    for someone to discover.
+    """
+    from pathlib import Path as _P
+    out = str(arguments.get("output") or "").strip()
+    if not out:
+        return None  # nothing was written
+    target = _P(out)
+    if not target.exists():
+        return (False, f"{target.name} does not exist, so nothing was generated")
+    size = target.stat().st_size
+    if size == 0:
+        return (False, f"{target.name} is empty")
+    try:
+        from PIL import Image
+    except ImportError:
+        return (True, f"{target.name} is {size} bytes (Pillow is not installed, "
+                      f"so it was not decoded to confirm it is an image)")
+    try:
+        with Image.open(target) as image:
+            image.load()
+            colours = image.convert("RGB").getcolors(maxcolors=4096)
+    except Exception as exc:  # noqa: BLE001 - a bad file is the failure
+        return (False, f"{target.name} is {size} bytes but does not decode as an "
+                       f"image ({type(exc).__name__})")
+    if colours is None:
+        return (True, f"{target.name} decodes as a {image.size} image with more "
+                      f"than 4096 colours")
+    if len(colours) <= 1:
+        return (False, f"{target.name} decodes but is a single flat colour, "
+                       f"which is what a failed generation leaves behind")
+    return (True, f"{target.name} decodes as a {image.size} image with "
+                  f"{len(colours)} distinct colours")
+
+
+POST_CONDITION = _verify_generated_image
+
 SKILLS = [Skill(name="generate_image", schema=SCHEMA, run=_run)]

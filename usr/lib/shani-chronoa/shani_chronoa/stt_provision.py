@@ -39,6 +39,7 @@ Public API:
 import hashlib
 import logging
 import os
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass
@@ -354,6 +355,100 @@ def _existing(key, resolve) -> Optional[Path]:
     return None
 
 
+#: Where a verified copy is kept so the next machine - or the next run on this
+#: one - does not fetch it again. ``SHANI_DOWNLOAD_CACHE`` overrides it.
+#:
+#: **This is the answer to "the model is already downloaded, why is it
+#: downloading again?"** The provisioning path is per-user by design (a model
+#: that needs root to install is a model nobody installs), which means two
+#: accounts on one machine each pay for the same 639 MB, and a test run that
+#: seeds a cache still pays again because nothing in the product looked there.
+#: Nothing is trusted for being in the cache: the copy is hashed against
+#: ``spec.sha256`` before it is used, exactly as the downloaded file is.
+_DEFAULT_CACHE_DIRS = ("/var/cache/shani-chronoa/models",)
+
+
+def cache_dir() -> Optional[Path]:
+    """The download cache directory, or None when there is nowhere usable.
+
+    Read at call time, never cached in a module global: the harness sets
+    ``SHANI_DOWNLOAD_CACHE`` and a test points it at a tmpdir, and a value
+    latched at import time would ignore both.
+    """
+    override = os.environ.get("SHANI_DOWNLOAD_CACHE", "").strip()
+    candidates = [Path(override)] if override else []
+    candidates += [Path(p) for p in _DEFAULT_CACHE_DIRS]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        if os.access(candidate, os.W_OK | os.X_OK):
+            return candidate
+    return None
+
+
+def _from_cache(spec: ModelSpec, destination: Path) -> Optional[Path]:
+    """Copy a verified copy out of the cache, or say there is not one.
+
+    Returns None for a miss *and* for a corrupt hit, deliberately the same
+    answer: a cache entry that fails its digest is not a cache entry, and
+    treating it as one would make every install fail in a way that looks like a
+    permissions problem.
+    """
+    directory = cache_dir()
+    if directory is None:
+        return None
+    source = directory / spec.filename
+    if not source.is_file() or source.stat().st_size != spec.size_bytes:
+        return None
+    if not file_matches(source, spec):
+        logger.info("cached %s does not match its pinned digest; fetching again",
+                    spec.filename)
+        try:
+            source.unlink()
+        except OSError:
+            pass
+        return None
+    files.ensure_private_dir(destination.parent)
+    handle, tmp_name = tempfile.mkstemp(dir=str(destination.parent),
+                                         prefix=f".{spec.filename}.", suffix=".fromcache")
+    os.close(handle)
+    tmp = Path(tmp_name)
+    try:
+        shutil.copyfile(source, tmp)
+        os.replace(tmp, destination)
+    except OSError as exc:
+        logger.info("could not use the cached %s (%s); fetching instead",
+                    spec.filename, exc)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return None
+    logger.info("installed %s from the download cache", spec.filename)
+    return destination
+
+
+def _to_cache(spec: ModelSpec, source: Path) -> None:
+    """Keep a verified copy for next time. Best effort, and never fatal."""
+    directory = cache_dir()
+    if directory is None:
+        return
+    target = directory / spec.filename
+    if target.exists():
+        return
+    try:
+        handle, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=f".{spec.filename}.",
+                                             suffix=".part")
+        os.close(handle)
+        shutil.copyfile(source, tmp_name)
+        os.replace(tmp_name, target)
+    except OSError as exc:
+        logger.debug("could not cache %s: %s", spec.filename, exc)
+
+
+
 def _install(
     spec: ModelSpec,
     *,
@@ -388,6 +483,17 @@ def _install(
         )
 
     files.ensure_private_dir(user_dir)
+
+    # **After the consent check, deliberately.** Serving from the cache is not
+    # egress - no bytes leave the machine - but it does put a model on this
+    # account that the person said they did not want fetched, and the next
+    # launch would start using it. Consent gates *having* the model, not only
+    # the network call, so the cache is consulted once that gate has passed.
+    cached = _from_cache(spec, destination)
+    if cached is not None:
+        if progress:
+            progress(spec.size_bytes, spec.size_bytes)
+        return cached
 
     # A private temp in the *destination directory*, so the final rename stays
     # within one filesystem and is therefore atomic.
@@ -457,6 +563,12 @@ def _install(
         os.replace(tmp, destination)
         files.restrict_file(destination)
         logger.info("Provisioned %s file %s to %s", label, spec.key, destination)
+        # Now that it is verified and in place, keep a copy. **After** the
+        # digest check and **after** the restrictive permissions are applied to
+        # the user's copy: a cache entry that is unreadable by the next user is
+        # not a cache, and copying from the 0600 original would make one that
+        # only ever works for the account that fetched it.
+        _to_cache(spec, destination)
         return destination
     except OSError as exc:
         raise ProvisionError(f"could not write the {label} file: {exc}") from exc

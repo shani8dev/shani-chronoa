@@ -134,6 +134,39 @@ Rules the split follows, so the next change keeps them:
   "fix up my photo". The only expected warnings are the re-exports in
   package `__init__.py` files.
 
+## What counts as done
+
+The governing principle, and the test every change is judged against:
+
+> **कर्मण्येवाधिकारस्ते मा फलेषु कदाचन** — we have the right to our
+> *actions*, never to the *fruits* of them. (Gita 2.47, and its chiasm in
+> Shanti Parva, Udyoga 153.10-11: *"You have a right to action, but the right
+> to its fruits is not yours."*)
+
+In engineering terms: **the work is the deliverable; the metric is an
+instrument, never the goal.**
+
+What this rules out, concretely:
+
+- **A metric as the objective.** Accuracy, `beats_chance`, a coverage count.
+  These are read, never chased. A change that moves a number without making
+  anything more true is not an improvement.
+- **A truthful refusal demoted as a failure.** `train_and_save()` declining with
+  *"the training split contains no example of verified"* is the correct output
+  for that data. Making it return something confident instead would be the
+  actual defect.
+- **A learned component that authorises anything.** It advises. Authority stays
+  with the consent keys - the same division as right-to-action, not
+  right-to-outcome.
+- **Discarding knowledge for being not-yet-useful.** Retire it with the reason
+  kept, and keep learning even when the result is not yet actionable.
+- **Machinery whose only purpose is to report success.** If a number cannot
+  honestly rise yet, the honest refusal beats the flattering figure.
+
+What survives being wrong: **the log, the post-conditions, and the machine's own
+evidence.** No model outlives its own justification, and none is allowed to
+have one that isn't measured.
+
 ## Empirical verification (mandatory)
 
 **Reading code is analysis; running code is verification.** A change is not
@@ -1052,6 +1085,692 @@ on what people actually ask. Judge changes by that, and **measure it**:
   a slot. `tests/test_task_eval.py` checks the scorer from both sides and that
   every case names a real tool and real arguments.
 
+### Measured, both local models (2026-10-02)
+
+Raw results: `shani-install-media/test-env/eval-out/eval-qwen3-{0.6b,1.7b}.md`.
+62 cases, right tool **and** right arguments, scored only - never executed.
+
+| config | 1.7B | 0.6B | mean seconds (1.7B) |
+|---|---|---|---|
+| `bare` (every schema) | **0/62** | 5/62 | 0.08 |
+| `select` (tool_select) | **56/62 (90%)** | 44/62 | 7.7 |
+| `select+recover` (the default) | 56/62 | 42/62 | 37.4 |
+| `+compact` | 52/62 | 38/62 | 8.7 |
+
+Four things this settles, all now the defaults in `local_llm.py`:
+
+- **The harness is what makes the small model work.** `bare` scores zero on the
+  1.7B, and not because the model is bad: 131 tool schemas are ~19,700 tokens
+  against an 8k context, so the request is rejected before the model reads a
+  word (`request (20724 tokens) exceeds the available context size (8192
+  tokens)`). Narrowing to the relevant tools takes the same weights from 0/62 to
+  56/62.
+- **`bare` scoring 5/62 on the 0.6B but 0/62 on the 1.7B is not the 0.6B being
+  better.** It is that the smaller model emits a shorter tool call that
+  occasionally fits under the limit. Both are unusable; neither is a result.
+- **`COMPACT_TOOLS = False`.** Shrinking the schemas further made it *worse*
+  (52/62 and 38/62), not better. Measured, not assumed - this reverses the
+  obvious guess.
+- **`select` beats `select+recover` on speed** - equal accuracy on the 1.7B
+  (56/62 either way) at 7.7 s against 37.4 s, and better on the 0.6B (44 vs 42),
+  so recover stays a fallback rather than the default path.
+
+The 1.7B run is the evidence for the whole `tool_select` design; read it before
+changing how tools are offered.
+
+## Distillation, and the student that now routes (2026-10-04)
+
+`distill.py` asks the **configured** model which skill answers a request, keeps
+only the answers a human already agreed with, and trains a small Bernoulli router
+on those. `tools/route_cases.json` is the labelled corpus (54 requests, 6 per
+skill, every label read off the live schema); `tools/distill_run.py` runs it and
+prints what was learned. Measured on a real booted `@blue` slot, teacher
+**llama.cpp / qwen3-0.6b** (`slot-tests/chronoa-distill.sh`, 9 pass 0 fail):
+
+| what | measured |
+|------|----------|
+| teacher agrees with the human label | **47/54 (87%)** |
+| student, held out by request | **62% vs a 12% majority baseline** (8 held out) |
+| student right across all 54 cases | 32/54 - it can never be right on the 7 the teacher got wrong |
+| `tool_select` sees the written student | yes, and picks `get_datetime` |
+| `tools/eval_cases.json` shape (one request per skill) | **refuses**, with the reason |
+
+**The teacher was unreachable for Claude, ChatGPT, Gemini, Groq, OpenRouter,
+opencode-zen and the keyless gateways**, because the first version called
+`.chat()` and only `OllamaLLM` defines that; llama.cpp and the whole cloud chain
+raised `AttributeError`, the loop moved on, and a machine with a configured
+Anthropic key reported "no language model is configured". The uniform interface is
+`chat_message()`, and `AnthropicLLM` reaches through the adapter already shipped.
+Both privacy gates (privacy off **and** cloud-fallback-enabled) gate anything off
+this machine, and keys are registered with `redactor` - without that the
+sanitisation of the routing cases is a silent no-op.
+
+**Four bugs in the student, all found by running it, not reading it:**
+
+- `parse_choice` returned the first `[a-z][a-z0-9_]*` in a reply, so "The skill
+  is `edit_image`" parsed as the skill **`he`**. It now segments whole
+  identifiers and accepts a token only if it is a skill that exists.
+- The per-class feature map was seeded from the **class** indices, so only the
+  handful of features hashing below the class count were counted and every score
+  came out equal for all but one class.
+- Bernoulli's absent-feature term summed `log(1 - p)` over all 16,384 columns,
+  which handed the most-used skill a ~450-point head **before a word was read**;
+  every request was answered with it. Counted over the fitted vocabulary only,
+  as scikit-learn does.
+- The split was a contiguous tail, so the 54-request corpus (grouped by skill)
+  put whole skills in the held-out half: a 91%-correct teacher "distilled" to a
+  student scoring **0% against a 100% baseline**. It is now stratified per skill
+  and never splits one request.
+
+**The student is a prior, never an authority.** `tool_select.distilled()` may only
+return names already in the candidate list, and only when the router separates
+first from second by a score margin - there is no probability to quote, so there
+is no confidence percentage anywhere. `distill.fallback()` carries a turn when
+**no model answers at all**, and only for a skill that `safe_to_run_unattended()`
+clears: nothing required (a router cannot fill in arguments) and nothing
+destructive or outward-facing - `delete_file` declares no required parameter, so
+the argument gate alone waves it through and the second gate is what stops a
+classifier from choosing to delete something.
+
+`distill.harvest_rows()` mines this machine's own sessions for
+(request, skill) pairs, filtered by the **recorded** verdicts rather than a
+prediction. On this machine it finds 11 rows, all of one repeated question, which
+is why no student is shipped here and the fixture was used instead.
+
+## The outcome model learns now, and this is the measured shape of it (2026-10-04)
+
+Before today it could not be trained at all, and the reason was four defects
+rather than weak features. All measured on this machine's own log - **11,636
+labelled calls: 10,936 `unverified`, 351 `verified`, 349 `failed`**:
+
+- `OutcomeModel.__init__` defaulted `self.w` to `None` while `fit()` read
+  `self.w.get(...)`, so **every fit from scratch raised `AttributeError`** and
+  `train_and_report()` crashed instead of reporting. A crash is not a refusal: the
+  report that would have said "no signal" never appeared either.
+- Unweighted, the model predicted `unverified` for **all 11,636 calls** -
+  precision and recall exactly 0.000 on both minority verdicts. A 3%-positive
+  class does not move a 30-step gradient through 1e-4 of L2. Inverse class
+  frequency fixes it; 150 epochs instead of 30 changed nothing measurable.
+- The balanced weights were **not normalised**, so every step was ~1e-7, the
+  fitted weights landed near 1e-4, and `to_dict`'s `round(v, 6)` stored them as
+  **zeros**: a file that verified its own digest and predicted 0.3333 for all
+  three verdicts on every input.
+- The split was ordered by time, so the training half held 8,462 `unverified`,
+  264 `failed` and **zero** `verified` and nothing could be written. Folding over
+  **feature vectors** fixed the starvation - all 1,979 `verified` calls live in
+  just **3** distinct vectors, so no split that keeps a vector whole can balance
+  them. `cross_validate()` is what `train_and_save` now judges on, and the model
+  written is fitted on everything.
+
+`Report.honest()` no longer asks only "does top-1 beat 94%?". That question
+cannot be answered by any model on this data, and the gate had never once been
+able to say yes. It now accepts a verdict that is genuinely **detected**: at
+**2x its own base rate on both recall and precision**, with recall >= 20%.
+Both halves are required because either alone is gameable - `verified` is 3% of
+the data, so a model that flags *everything* as verified scores **~33x recall
+lift** while being useless. `tests/test_outcome_model_learns.py` asserts that
+degenerate report is refused.
+
+**What it can and cannot do, on 5-fold grouped CV over all 11,636 calls:**
+
+| verdict | recall | precision | recall lift | precision lift | verdict |
+|---------|-------:|----------:|------------:|---------------:|---------|
+| `unverified` | 85.5% | 96.8% | 0.91x | 1.03x | not detected |
+| `verified` | 99.7% | 17.7% | **33.1x** | **5.86x** | **detected** |
+| `failed` | 0.0% | 0.0% | 0.00x | 0.00x | not detected |
+
+So: it can flag a call that looks like it will verify, 5.9x better than chance on
+precision; it **cannot** spot failures at all; and as a top-1 classifier it scores
+83% against a 94% constant, so it is a flag and not a predictor. `failed` is 7
+vectors and 2 of them are 1,831 examples each - there is nothing to generalise
+from. `tests/test_outcome_model_learns.py` holds all of this shut, and
+`learning.render_outcome()` prints both lifts so a 94% score cannot read as
+success.
+
+## Installing on immutable ShaniOS: verified, not assumed (2026-10-04)
+
+`shani-testbed/slot-tests/chronoa-state.sh` boots a slot and asks where
+Chronoa's state actually lands, because on this layout "it works on my machine"
+and "it works here" are different questions. The image's own
+`image_profiles/shared/overlay/rootfs/etc/fstab` is the spec:
+
+| path | what it is | consequence |
+|------|-----------|-------------|
+| `/` | read-only root slot (@blue/@green) | nothing may be written here |
+| `/etc` | overlay, upper in `/data` | writable, survives a switch |
+| `/var` | tmpfs (`systemd.volatile=state`) | **gone on reboot** |
+| `/home`, `/root` | `@home`, `@root` btrfs | persists |
+| `/data` | `@data` btrfs | persists |
+| `/var/cache` | `@cache` btrfs | persists, **shared between slots** |
+| `/var/log` | `@log` btrfs | persists |
+
+Measured in a booted slot: **every** Chronoa path is writable, none is on
+volatile storage, and a write-read-back round trip passes through all of them.
+
+**The download cache is on `@cache`, and that is not luck.** `stt_provision`
+defaults to `/var/cache/shani-chronoa/models`, which the fstab documents as the
+directory that exists "to avoid re-downloading packages after slot switches" - so
+a 639 MB model is fetched once per machine, not once per reboot *and not once per
+blue/green switch*. `SHANI_DOWNLOAD_CACHE` overrides it.
+
+**The write side was already right, and it is worth knowing why.**
+`stt_provision._install()` always writes to `user_dir` and treats `system_dir`
+(`/usr/share/piper`, `/usr/share/shani-chronoa/llm`, ...) as *read-only* - those
+paths are only where a reader may look. So a read-only root needs no special
+case: nothing tries to install into `/usr` in the first place.
+
+**Two failures this test reported that were the test's own:**
+
+- It exported `HOME=$T/home` under `/tmp`, then asked whether the paths were
+  volatile - so it audited its own scratch directory and reported, in all
+  seriousness, that Chronoa's models were "on tmpfs, so lost on reboot". The
+  verdict now runs under `env -u HOME -u XDG_DATA_HOME ...`, because the question
+  is where Chronoa puts things on a real machine.
+- It failed every path on "not in my list of persistent filesystems", which under
+  nspawn is `overlay` rather than `btrfs`. **Only tmpfs is a finding**; a
+  filesystem this test does not recognise is reported as unrecognised, not as a
+  defect - the same rule the diagnostics panel applies to `systemctl is-*`.
+
+Both are the shape of bug this repository documents: a check that fails for its
+own reasons and is then believed.
+
+## The UI features worth taking from assistd, sayri and Alpaca (2026-10-04)
+
+**Taken: the wait is now a state.** `assistd` carries
+`VoiceCaptureState::Queued` — "waiting for the GPU to free up before
+transcribing" — beside `Idle`, `Recording` and `Transcribing`. Chronoa had built
+the gate that produces that wait (`speech_gate.py`) without producing anything
+anyone could *see*: the orb simply paused between listening and thinking, which is
+indistinguishable from the microphone having died. There is now a real
+`AssistantState.QUEUED`, wired in `app/voice.py:_transcribe`, so the orb moves
+and holds there for as long as the wait lasts.
+
+Adding a state is not one line, and the tests that say so are the point:
+
+- `test_window_ux.py` refuses **any colour reuse**, because colour alone excludes
+  colourblind users. A first version deliberately reused listening's green - the
+  reading that felt right - and the existing invariant overruled it. Queued is
+  `#14b8a6`, teal, between listening (green) and thinking (amber), which is where
+  the state actually sits.
+- `test_window_theming.py` keeps an explicit `STATE_PALETTE` so a colour cannot
+  "quietly slip through", and requires a matching `halo-<state>` ring so the two
+  rings cannot disagree about what is happening.
+- `tests/test_queued_state.py` adds the forward guard: every state needs a
+  colour, an icon, a label, a CSS rule, and - **only if it animates** - a
+  reduced-motion rule. That last qualifier matters: a first version demanded one
+  of every state, which produced a test that could only fail.
+
+**And then taken, because it turned out to be a missing feature rather than a
+UI change: `assistd`'s presence cycle.** Measured on a real slot with a real
+model, `slot-tests/chronoa-presence.sh`:
+
+| step | measured |
+|------|----------|
+| while Active | **2,659 MB** resident in `llama-server` |
+| after "Free the model" | **no process remains** — the memory went back |
+| after a question | answering again, cold-started |
+| what the UI shows | `ACTIVE | Free the model` |
+
+**Chronoa could not release the model at all.** `local_llm` had `start_service()`
+and no `stop_service()`, and setup ran `systemctl --user enable --now` — so from
+the first login the unit came up on its own and stayed up, holding a 1.1-4 GB
+model resident whether or not anyone was talking to it. There was no lever.
+
+**Drowsy does not claim to unload weights**, because nothing here can. It is:
+listening, model not resident, next question loads it cold. Sleeping is the same
+but waits to be asked — which is the distinction a person actually wants between
+"let go of the memory for now" and "leave the machine alone". A state called
+"drowsy" that quietly meant "still fully loaded" would be the exact failure this
+repository documents. `tests/test_presence.py` pins the *wording*, because the
+wording is the claim.
+
+Two things release depends on, and both were missing:
+
+- `_use_local_server(wake=True)` now **starts the service** when it is not
+  answering. With a bare `is_up()` check, a released model was simply gone — a
+  question would have fallen through to the cloud fallback or nowhere. Releasing
+  a model nothing brings back is not a feature, it is a brick. `wake=False`
+  remains for callers that must not start anything: *checking* whether a model
+  exists is not a reason to load one.
+- The guard reads a **presence**, not the `_can_answer` bool. A bool cannot tell
+  "no model installed" from "asleep on purpose", and a first version compared the
+  bool to an enum — never true, so it silently disabled the whole guard.
+
+`stop_service()` deliberately does **not** `disable` the unit: it stays enabled
+so a question can start it again, which is what makes Drowsy mean *released, not
+gone*. Disabling would leave a machine whose assistant silently never answers.
+
+**Two measurement notes, both the same lesson.** The slot has no user session
+bus, so `systemctl --user` cannot be exercised there — which is also why every
+GUI run in that slot logs "Ollama not available" and starts with no model. The
+test therefore measures the *memory* claim directly, because that claim does not
+need systemd. And a first version started the binary straight from an `llm.env`
+that had never been written, so the server took its own default port — **8080**
+in llama.cpp 0.5.0, against the 8765 Chronoa configures — and the health check
+polled the wrong one for four minutes. Reproduce the product's *sequence*, not
+just its commands.
+
+**And then taken as well, on the user's instruction to do both.**
+
+### Alpaca's model manager — `gui/surfaces/models.py`
+
+An `Adw.NavigationPage` with a view stack: **On this machine** against **Available
+to add**, a search bar filtering both, and a `Gtk.FlowBox` per list whose
+`min/max-children-per-line` are bound to `Adw.Breakpoint`s at 560px and 1000px.
+Registered in `SURFACE_IDS` under "This machine", so it is in the sidebar.
+
+25 cards across all four engines, read from `local_llm.TIERS`,
+`stt_provision.MODELS`, `voices.VOICES`/`KOKORO_VOICES` and `local_vision.MODELS`
+rather than a list kept in step by hand. Kokoro's card says **one download covers
+every Kokoro voice**, because six cards without that sentence read as six
+purchases of the same 310 MB.
+
+**A card states a fact and offers one action; none of them loads a model.** A pin
+writes a setting and stops - the model comes back through a question, via
+`start_service()`, so a pin can never leave the assistant claiming to be ready
+while a server it never started stays down.
+
+Three things this cost, each found by building rather than by reading:
+
+- `Adw.SearchBar` **does not exist** on libadwaita 1.5; `Gtk.SearchBar` does. Same
+  shape as `Adw.BackButton` earlier - check the installed library.
+- `KOKORO_VOICES` holds `KokoroVoice` objects, not strings, so `.split` on one
+  raised on the first render.
+- **The Eyes list was silently empty.** The vision check called
+  `local_vision.is_provisioned`, which that engine does not have - the function is
+  `verify` - inside a bare `except: pass`. So the panel shipped with no vision
+  cards at all, which are exactly the models the "what do I have" view exists to
+  show. `except: pass` around a probe is how a panel ends up quietly incomplete;
+  the import guard is now around the *import* only, and a test asserts the kinds.
+
+`Adw.Breakpoint.new()` takes a condition rather than a width and the condition is
+built by `Adw.BreakpointCondition.parse()` - neither of which the first attempt
+used. `gui/sidebar.py` already documents both by calling the installed library
+and recording what raised, which is why this was copied rather than rediscovered.
+And `Adw.Breakpoint` exposes no way to read its setters back, so the binding is
+asserted where it is observable: the flowboxes' own column properties.
+
+### sayri's tray indicator — `app/tray.py`
+
+One click is one action: the indicator's `activate` calls the same
+`app.toggle-listening` the window's button calls, and `popup-menu` is swallowed, so
+there is no menu in the way. **There is one implementation of "start listening",
+not two that can disagree.** The icon's label follows `AssistantState`, so it never
+claims more than the assistant is.
+
+GTK4 removed `Gtk.StatusIcon`, so this needs `libappindicator`, which Chronoa does
+**not** depend on - and that is the point rather than a problem: `available()`
+returns `(usable, why)`, `build()` returns `None`, and the Desktop panel has a
+**"Tray icon"** row that names the package which would fix it. A tray that silently
+does not appear reads as a bug in the assistant; one that reports "not installed -
+the libappindicator package provides one" reads as a missing package.
+- **assistd's *Drowsy* in its original sense** - llama-server still running with
+  the weights unloaded, which needs llama-server's model-load API. What is built
+  stops the server instead, which frees the same memory from a person's point of
+  view at the cost of a cold start. The weights-unloaded variant is recorded here
+  rather than claimed.
+
+## What harness-study's assistd and sayri were worth (2026-10-04)
+
+`harness-study/` holds 20 third-party harnesses. Reading `assistd` (Rust,
+llama.cpp, Unix-socket IPC) and `sayri` (Python desktop assistant) against
+Chronoa's own code, **one of the two headline ideas was already here**:
+
+- **assistd streams TTS sentence by sentence** so playback starts before the
+  model has finished. Chronoa already has this - `speech.SpeechQueue`, built per
+  turn at `app/conversation.py:213` - and it is wired. Worth recording, because
+  the plausible assumption is that a streaming reply needs streaming speech, and
+  the sentence queue turns out to be the whole of it.
+
+- **assistd's `QueuedTranscriber` asks "is the GPU busy" before every
+  transcription**, and logs which way it went. Chronoa did not, so a transcript
+  starting mid-reply competed with llama.cpp for the same accelerator. Now
+  `speech_gate.py`, wired at `app/voice.py:_transcribe`: a bounded wait for the
+  model to finish generating, and **transcribes anyway at the timeout** rather
+  than losing what somebody said.
+
+  Two details worth keeping: the wait is on the executor, not the GTK thread (the
+  transcription is off-thread for the same reason), and `wait()` takes its clock
+  as a parameter, so the tests prove the *timeout* instead of measuring how long
+  four seconds is.
+
+  `waited` means **it actually slept**, not "it was busy on the first look" -
+  because assistd's `gpu_busy_timeout_ms = 0` means "ask, do not queue behind a
+  stream that may never end", and counting that as a deferral would put a number
+  on the log that never happened.
+
+## Channels and the jail: the two review points, audited rather than asserted (2026-10-05)
+
+From the same thread: *"you can connect other channels like whatsapp etc to give
+commands straight to your pc... so best to sandbox/jail the app fully."*
+
+**Channels are not a WhatsApp integration.** `gateway.py` is the part that has to
+exist before any of them can be written safely, and its shape is the argument:
+
+- **The session bus, not a socket.** No port, no listener, no network. Whatever
+  carries a message to it later is a separate component with its own credentials,
+  and Chronoa never sees a token.
+- **One method: `Submit(gateway, text)`.** A gateway cannot ask Chronoa to run a
+  skill, name a tool, read a file, or reach the model server. It hands over words
+  and gets words back.
+- **The text goes through the window's own `_submit`**, so it meets the same
+  whitelist, the same consent keys, the same post-conditions and the same log. A
+  gateway has no way to lower a gate because it never touches one - which is the
+  property that matters, since a second path into the assistant makes every gate
+  the window respects optional for whoever finds it.
+- **Ask-only by default.** Executing anything needs an explicit per-gateway
+  grant, *and* still goes through `tools.execute_tool_outcome`.
+- **Bounded**: 4,000 characters, 20 messages a minute, no attachments. An
+  unbounded pipe into an assistant that can run tools is a denial-of-service with
+  extra steps.
+- **Off unless asked for.** No registered gateway, nothing exported - so a
+  machine that has not opted in has no inbound interface at all.
+
+### The jail, measured
+
+`tests/test_exposure.py` audits the doors rather than asserting a slogan, because
+"we are local-first" is a claim about configuration and configuration drifts:
+
+| door | measured |
+|------|----------|
+| model servers | `local_llm`, `stt_server`, `model_service` all bind `127.0.0.1`; ports 8765/8766/8767-8769 |
+| the MCP server | stdio only - no `HTTPServer`, no socket, no `AF_INET` |
+| exported bus names | exactly one before this change: `dev.shani.chronoa.SearchProvider` |
+| the gateway | one method, and it reaches no tool - checked from the **AST**, not by grepping |
+
+Two failures of my own checks while writing it, both the same shape as the
+animation one: a grep that hit the module's own **docstring** (which explains, in
+prose, that a submission still goes through `tools.execute_tool_outcome` - the
+sentence *is* the argument), and a regex for `^HOST = "127.0.0.1"` that silently
+matched nothing because the line is `HOST, PORT = "127.0.0.1", 8766`.
+
+## Dictation: what the review asked for, and what actually blocked it (2026-10-05)
+
+From the GitHub issue: *"add features like transcription of Google Meet etc
+could be very useful as it will be able to listen locally on dev/snd directly."*
+
+**Chronoa had every part of it and could not do it.** `audio.py` already shells to
+`pw-record`, whisper.cpp was already there, and the turn pipeline was already
+there. The blocker was one number: **an ordinary spoken turn is capped at twenty
+seconds**, which is right for "what time is it" and wrong for talking *at* the
+machine - a paragraph is not twenty seconds, and 1.2 seconds of silence cuts at
+every pause *inside* a paragraph rather than at its end.
+
+So it is two ceilings chosen when the turn starts, not one compromise:
+
+| | ordinary turn | dictation |
+|---|---|---|
+| ceiling | 20s | **300s** |
+| silence to finish | 1.2s | **2.5s** |
+| started by | button or wake word | **<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+D** |
+
+`app.dictate()` reuses the same capture, transcription and turn, so there is no
+second audio path to keep honest, and it is stopped the same ways - the stop
+button, Esc, or the silence.
+
+**And it says when it was cut.** `audio.py` now records *why* it stopped
+(`silence` / `limit` / `cancelled`) because a recording that ended because the
+person finished and one that ended because the clock ran out are different facts,
+and only the second is a transcript that stops mid-sentence. A transcript that
+silently stops reads as "that is everything I said", which is the one thing a
+transcript must never imply. The first version of this had a
+`_dictation_note()` that claimed to report a cut and could never report one,
+because nothing set the flag.
+
+Two bugs of mine, both caught by writing the test before the run:
+
+- **`self._stop_listening()` does not exist.** The second press on dictation
+  would have raised `AttributeError` - at exactly the moment dictation most needs
+  to work. It now goes through `_toggle_listening`, the microphone button's own
+  handler, so there is one implementation of "stop listening".
+- **Restoring `1.2` overrode the person's setting.** `_start_listening` reads
+  `_listen_silence_seconds` *or the configured `end-of-speech-pause`*, so putting
+  the constant back meant one dictation silently overrode the user's own
+  microphone timing for every later turn. It restores `None`, which means "use
+  the setting".
+
+`tests/test_dictation.py`, 9 tests, drives the product's own methods rather than
+stand-ins.
+
+## What the assistant was actually learning from: two fixtures (2026-10-05)
+
+Built a per-skill verdict summary in the Tool activity panel - worst failure rate
+first, every rate carrying the count it is a proportion of - and it found the
+most important thing in the log on its first run.
+
+**`liar` failed every one of its 313 calls and never verified once.** It returns
+`"Created the file."` 343 times while its post-condition records *"the file was
+never created"*. There is no `skills/liar.py` in this tree: it is a fixture that
+did exactly what it was built to do.
+
+**`liar` and `unver` account for 692 of 12,856 logged calls and 313 of the 378
+failures.** So this machine's entire failure signal comes from tools that are no
+longer installed, and a model fitted on that log reports a number about a machine
+that does not exist any more - unless it says so. Two changes, both about
+*showing* rather than deciding:
+
+- The panel's row ends **"not installed any more, so this is history, not a
+  fault"**, because "failed 313 of 313" reads as *broken* and only the registry
+  can tell you that it was a fixture.
+- `train_and_save`'s provenance records **`examples_for_unknown_tools`** and
+  which tools. **Recorded, not filtered**: filtering would be the more helpful
+  behaviour and the wrong one, because it changes what the model says about the
+  past without saying it did. Whether to train on it is a decision for a person
+  holding the figure.
+
+This also explains the outcome model's failure blind spot, which I had put down
+to a weak feature space. Measured again on the same log: `liar` fails 313/344 and
+`delete_file` 60/2,176. The signal was never weak - it was *concentrated in a
+fixture*, and the feature view collapsed it into seven vectors.
+
+`unverified` calls are excluded from the per-skill rates on purpose: they are
+most calls, and counting them as successes would turn every rate into a statement
+about post-condition coverage rather than about the skill.
+
+## Auditing every surface for scroll, wrap, overflow and motion (2026-10-05)
+
+`tests/test_ui_layout_contract.py` is an audit turned into a contract, over all
+twenty surfaces. Measuring found two real defects that reading had not.
+
+**One surface could not scroll.** `inventory` passed its column straight into
+the toolbar's content slot, so a window shorter than its twenty-odd rows could
+not reach the bottom of them - and it is a list of every function and its state,
+so the last few are exactly the ones nobody can get to. Nineteen surfaces had a
+`Gtk.ScrolledWindow`; that one had none, and nobody had noticed, because a panel
+that is *mostly* visible looks fine in a screenshot taken at full height.
+
+**Every wizard page was too wide, and there was a horizontal scrollbar on all of
+them.** The bar in the bottom of every wizard screenshot - visible since the
+first slot run and unexplained until now. It belongs to
+`Adw.NavigationPage`'s *own* scroller, whose horizontal policy is the default, and
+it appears when the page content is wider than the page. The cause:
+
+> **`Gtk.Label.set_wrap(True)` does not bound a label.** It wraps the text *at
+> whatever width it is given* and reports its natural width as the full
+> unwrapped run. Measured: the wizard's welcome description asked for **947px in
+> a 560px window**; `set_max_width_chars(56)` brings the same label to **437px**.
+
+So `common.wrap_label()` and the wizard's `wrapping()` cap every wrapping label
+they create, and `tests/test_ui_layout_contract.py` fails if any is left
+uncapped. Thirteen of sixteen wizard pages now have no node wider than the window
+at all.
+
+**And the wizard is now clean too — all sixteen pages.** After the label caps,
+three pages still asked for more than the window (774, 956, 983px). The cause was
+**libadwaita 1.5 does not wrap its own text**, measured on the installed library:
+
+| widget | a 130-character string measures |
+|--------|----------------------------------|
+| `Adw.ActionRow` subtitle | **1,227px** |
+| `Adw.PreferencesGroup` description | **1,428px** |
+| a capped `wrapping()` label | 437px |
+
+So every piece of prose in the wizard now lives in a capped `wrapping()` label or
+a tooltip, and the libadwaita slots carry at most a few words. **Worst demand
+across all sixteen pages: 538px, in a 560px window.**
+
+Three measurement mistakes of my own, all recorded because each produced a
+confident wrong answer:
+
+- **Reading allocation as demand.** A widget allocated 900px reports 900px. The
+  number that decides whether a page needs a sideways scrollbar is what its
+  *content asks for*, measured on the child of the page's own scroller - not on
+  the page. This was chased in circles for a while because the page-level numbers
+  never moved when the text got shorter.
+- **`propagate_natural_width(False)` does nothing here.** Measured: a scrolled
+  window with a 900px child still reports 900. It is left out of the code rather
+  than left in under a comment claiming it works.
+- **The block regex counted prose as selectors**, so the first animation test
+  reported eleven uncovered animations and every one was a sentence.
+
+**Two things that looked like the fix and were not, both measured rather than
+assumed:**
+
+- `Gtk.ScrolledWindow.set_propagate_natural_width(False)` **does not reduce a
+  scrolled window's natural width** on this GTK: a 900px child still measures
+  900 with it off. It is left out of the code rather than left in under a comment
+  claiming it works.
+- My first version of the animation test reported eleven uncovered animations
+  and **every one was a sentence** - the block regex was capturing the sheet's
+  prose comments as selectors. Strip `/* ... */` before parsing CSS.
+
+**What the contract asserts**, each with a failure mode behind it: every surface
+has a scroller; none needs more than **480px** (the widest measured came to 256px
+before the fix, and the 560px wizard looked clipped because the harness has no
+window manager - a clipping that was the environment, not the layout); a label
+over 30 characters either wraps or ellipsises; and **every selector with an
+`animation` has a `.reduce-motion` rule**, because the desktop's accessibility
+setting is only honoured if something reads it. The sheet has three animations -
+the orb's listening and queued pulses, the suggestion-bar reveal, the transcript
+turn-in - and all three are stoppable.
+
+## Every page has an id, and the things that had no UI at all (2026-10-04)
+
+`pages.py` is the registry; `shani-chronoa --show-page=settings:privacy` and
+`app.show-page('setup:review')` reach any page of any window, and a retired id
+resolves to whatever absorbed it. This is shani-cassini's shape (`notebook.py`'s
+`PAGES`/`page_ids()`/`select(pid)`, `--section=`, a `show-section` action),
+generalised to three windows.
+
+It exists because **every page was reachable only by holding the mouse.** The
+settings sections by typing in a search box; the wizard steps by pressing Next;
+the main window by whatever happened to be open. So a notification could not say
+"open Settings on Privacy", a keybinding could not, and a test could not - it had
+to guess at pixel selectors, and the guessing is expensive:
+
+- `entry:Search settings` never matched, because a `Gtk.SearchEntry`'s role is
+  **`search-box`**, not `entry`. The typing went to no widget.
+- Four screenshots of four "different" settings sections came out
+  **byte-identical** (1024000 px, 0 different) while every step reported green.
+- Every wizard page's forward button was called "Next", so with a stack of
+  visited-but-alive pages behind it the tree lists several identical "Next" and a
+  script clicking "the first Next" lands on the wrong page's. They now read
+  **`Next: Ears`**, which is also the answer to "what am I agreeing to".
+- A fixed `sleep=25` after Download meant the click on "Start using Chronoa"
+  landed before the page was drawn, the wizard stayed up, and the "main window"
+  screenshot was the wizard.
+
+**Three bugs in that class were only findable by running it:**
+
+- `setup_wizard.build_window` **raised** on `Gtk.Box.connect("shown", ...)` -
+  only an `Adw.NavigationPage` emits `shown`. So `_open_setup` died, the app
+  carried on, and "the setup wizard is not shown" was the whole symptom. Three
+  runs of screenshots showed the main window every time.
+- The review page's Download handler took no argument, so `clicked`'s button
+  raised `TypeError` on the only press that matters - the one that would have
+  started the download.
+- **My own measurement was the broken thing once.** `get_accessible_property` does
+  not exist in this PyGObject, so a local probe read every accessible name as
+  `""` and I nearly reported that the settings window was unnamed. The harness's
+  AT-SPI tree says otherwise. A probe that cannot fail is not a probe.
+
+### What had no UI at all, and now does
+
+`gui/surfaces/learning.py` - **"What it has learned"** - is the surface for four
+pieces of machinery that had no entry point in the app at all:
+`learning.train_and_save()`, `distill.harvest_rows()`,
+`learning.export_knowledge()` and `distill.train_router()`. Five read rows (facts,
+bandit arms, routing pairs, a distilled router, the outcome model) and three
+actions (train outcome, train router, export), each off the main loop because
+every fit reads the whole log.
+
+It **leads with the detection, not the accuracy**, because on a 94%-majority log
+83% is what not learning scores too; and it checks a model's `honest` flag before
+quoting any number from that model's own report.
+
+### The extras got their own pages, and the hub went
+
+`generate_image` and `photos` were filed under **Files**, and `describe_screen`,
+`identify_sound`, `diarize_speakers`, `search_conversations` and `remember_fact`
+were **not mapped to any page at all** - so a 2.0 GB picture model was reachable
+only as "Files > make a picture", and three engines had nowhere to live. They now
+have Eyes, Imagine, Photos and video, Sounds and recordings, and Languages, in
+the same words the setup wizard uses.
+
+**Memory was nearly a false claim.** A first pass wrote that `local_embed` was
+"installed by the wizard and read by nothing at all", from grepping for the
+module name and not finding a caller. It is read - `conversation_store.search()`
+embeds the query and the stored turns through it, and the `conversations` skill
+exposes it as `action: search`. **"grep found no caller" is not "nothing calls
+it"**: the caller was two indirection away, in a module named after the *store*
+rather than the *embedding*, behind a skill whose tool name shares no word with
+either. This is the same shape as the `_outcome_model` mis-addressing above, and
+it is why the capability pages here were assigned from what each engine is
+actually imported by.
+
+The setup wizard has no "Optional extras" hub either: it existed only to list the
+other pages, and the review page now carries one row per extra.
+
+And the **welcome page lists all nine things individually, each with its real
+size** - Eyes 546 MB, Imagine 2.0 GB, Memory 146 MB, Photos 88 MB, Sounds 29 MB,
+Who said what 37 MB, Languages 432 MB, plus what Brain/Ears/Voice are doing. It
+used to say Chronoa "needs three things", list those three, and collapse the six
+extras into one row reading "eyes, pictures, memory and languages - after the
+voice" - so the first screen a new person saw named three of nine, and the only
+mention of a 2.0 GB picture model was inside a comma-separated string with three
+100 MB ones. Nine rows is four more lines, and each one can be clicked into,
+which the lumped row could not be because it was not a target.
+
+### And three log lines that were confident and wrong
+
+- `Whisper.cpp not available - STT disabled` - logged on a machine that had just
+  had whisper-cpp installed, because `is_available()` needs the binary *and* the
+  model and the model is a download. It now names what is missing.
+- `Initialized: ... stt=Whisper.cpp (medium)` on the same run, one line after
+  saying STT was disabled - it interpolated the backend's *label* rather than
+  whether it could listen.
+- `LLM unavailable (no Ollama, ...)` - on a machine where Ollama was never the
+  default and llama.cpp is. It now says which of the three backends is missing
+  what, which is the only reason that line exists.
+
+The same shape was in the UI: the state line read **"Ready"** on a machine with
+no model, while the line under it read "LLM unavailable". `set_can_answer()` now
+overrides it, because "Ready" is the idle label and so is true by construction on
+every machine.
+
+## Six functions that were alive in one copy of the tree and dead in the other (2026-10-04)
+
+`weights_from_records`, `weights_from_tracker`, `reorder`, `organ_status`,
+`reliability`, `weight` existed only under `pkg/shani-chronoa/...`, while
+`usr/lib/shani-chronoa/...` - the canonical package the tests import and the
+overlay installs - did not have them. `tool_select` still called them, inside
+`try/except`, so `learned_weights()` returned `{}` on **every** request and
+`reorder()` was never reached: the learned half of selection was dead and silent.
+16 tests in `tests/test_sleep_and_learning.py` were red about it.
+
+Restored, with the boundary named. **A guarded import of a function that does not
+exist is the absence-shaped green this workspace keeps being bitten by**, and the
+only test that could have caught it asserted the *effect*
+(`tool_selection_applies_what_was_learned`), not the import.
+
+`test_it_runs_nothing_on_its_own` was itself a false positive: it scanned the
+module text for `threading`, `asyncio`, `while True` and `sleep(`, which cannot
+tell an import from a paragraph - and `learning.py` is 4,000 lines of prose about
+why threading is the wrong shape here, so it went red on its own docstring. It
+parses the AST now, and carries a control module that really does import
+`threading` so the check is known to be able to fail. Same class as pinning an
+exact command line: assert on the shape of an interface, not its text.
+
 ## Optional extras (setup's More page, 2026-10-02)
 
 Each is opt-in, pinned by size and sha256, installed into the user's home, and
@@ -1143,6 +1862,86 @@ runs in a subprocess. `dbus-launch` is not installed on the dev box; use
 
 ## Audit-verified known issues (confirmed present)
 
+- **Four surfaces disagreed about which consent key opens the microphone. FIXED
+  2026-10-05.** The `heard-sound` sense gated on `heard-sound-sense-enabled`;
+  its own schema description told the model it needed `sound-sense-enabled`; the
+  `listen` skill in `skills/recording.py` gated on `sound-sense-enabled`; and
+  Settings → Privacy had a row for `sound-sense-enabled` and none for
+  `heard-sound-sense-enabled`. The sense was therefore **unreachable by a user** —
+  the only switch that granted it was not on screen. Verified by execution after
+  the fix (with the recorder stubbed to raise, so no audio is ever captured): one
+  switch, both paths.
+
+  Two keys for two things is correct and worth keeping: `heard-sound-sense-enabled`
+  is *ask and it listens once*, `sound-sense-enabled` is *an automatic rule may
+  listen for a doorbell*. A user who allows the second has not agreed to the
+  first, and one key cannot express that difference.
+
+- **Arm-time source validation matched English, so malformed sources armed.**
+  `manage_triggers` decided a source was unreadable by regex-matching the
+  openings of the readers' refusal messages, which only covered the three
+  readers whose wording happened to match. Five verified cases (`sound:12345`,
+  `sound:doorbell:1.5`, `powerstate:battery-below:0`, `…:abc`,
+  `journalmatch:unit:bad unit:x`) armed cleanly and then reported
+  `SIGNAL_UNAVAILABLE` on every poll forever, with `list` still showing them
+  enabled. Now the reader's **status** is consulted — a contract rather than
+  English — behind a small fixed list of phrases that distinguishes "your source
+  string is malformed" from "the thing it names does not exist yet", because
+  arming `git` on a repository you have not cloned yet is legitimate and must
+  keep working. All five now refuse; all legitimate cases still arm.
+
+
+- **Three skills were advertised to the model and to every MCP client, and
+  failed on every call. FIXED 2026-10-05.** `calendar_month`, `date_math` and
+  `stopwatch` were declared `run=lambda a: _run(a)`. A lambda passes
+  `callable()`, so the loader accepted it — but a non-local skill is executed in
+  a sandboxed child process whose program is built by interpolating the
+  handler's name:
+
+      from shani_chronoa.skills.stopwatch import <lambda>; import sys; ...
+
+  which is a `SyntaxError`. The tool's *result*, as the model saw it, was a
+  Python traceback. `tests/test_everyday_batch2.py`/`batch3.py` call the private
+  `_run()` directly, which works perfectly, so **the suite was green while three
+  skills were dead**. `tests/test_every_skill_handler_is_importable.py` now
+  asserts the transport-level property (every handler's `__name__` is a real
+  identifier and resolves in its own module), and `skills/__init__.py` refuses
+  the registration with a warning rather than shipping a broken tool.
+
+  The general lesson, and it is the same one as the `midi.py` entry below:
+  **a test that calls the function is not a test that the skill is reachable.**
+  Always exercise the registered handler through `execute_tool_outcome`.
+
+- **`guardrail.py` was fully built, unit-tested and never called. FIXED
+  2026-10-05.** It answers a different question from every other layer in the
+  dispatch path — not "is this call permitted" but "is it even well-formed" —
+  and `tools._dispatch` now consults it next to the reaction layer, where it can
+  only stop a call that was already allowed. It turns `speak(text=42)` and
+  `set_volume()` with no arguments into one readable sentence instead of a
+  traceback three frames down in a subprocess. Verified by execution: both
+  return `ran=False` and the well-formed call still runs.
+
+- **`dream.py` was built and had no caller. FIXED 2026-10-05.** It now runs on
+  the daemon's existing sleep tick (`senses` and `consolidation` already lived
+  there), separately guarded so a dream that cannot run cannot also cost the
+  consolidation pass above it. A separate timer unit would have meant a second
+  thing to start, stop and misfire.
+
+- **`memory` disclosed and deleted with consent off. FIXED 2026-10-05 — the
+  most serious of this batch.** The gate lived only on the write paths
+  (`remember_fact`, `link_entities`), so with `memory-sense-enabled=false` the
+  `recall`, `about`, `history` and `forget` operations still returned the full
+  contents of the durable store, and `forget` still erased from disk. Reproduced
+  by execution before fixing; the gate is now at the top of `_run`, so it covers
+  every operation. The per-write checks stay — they are reached directly by other
+  callers, and an entry-point gate is not a gate on the function.
+
+- **`labnetworks` raised `NameError` on every call. FIXED 2026-10-05.**
+  `_record_state()` called `record_path()`, which was never imported. The sense
+  was 100% broken — it could produce no reading at all, granted or not — and it
+  had **no test file whatsoever**, which is why it survived.
+  `tests/test_sense_labnetworks.py` now covers it, including an AST check that no
+  module uses a name it never binds (the general form of this bug).
 
 - **`midi.py` is the clearest illustration of this whole section — and it could
   not even be imported.** Added 2026-10-03 as a third member of this class
@@ -1150,7 +1949,10 @@ runs in a subprocess. `dbus-launch` is not installed on the dev box; use
   its melody to a line of syllables, it is 357 lines of careful code, and
   `grep -rn "\bmidi\b" --include=*.py usr/` finds **no importer at all** — the
   one hit is `senses/capture.py`'s regex for ALSA `pcm` nodes. There is no
-  `tests/test_midi.py` either.
+  `tests/test_midi.py` either. **Now reachable: `skills/sing.py` takes an
+  optional `midi_file` and fits that tune instead of a named contour, which is
+  the "a caller who wants a specific tune has to bring it" line its own
+  docstring always pointed at.**
 
   **It was also broken in the most basic way available, and 4603 passing tests
   said nothing.** A module-level line `_ = (os, struct)` referenced a name
@@ -1188,14 +1990,21 @@ runs in a subprocess. `dbus-launch` is not installed on the dev box; use
   and this entry is the reason to distrust any future "green, so it works"
   claim about a module with no callers.
 
-- **`singing.py` + `prosody.py` are fully built, unit-tested (`tests/test_singing.py`,
-  `tests/test_prosody.py`), verified on a real image — and nothing in the
-  product imports either module. OPEN as of 2026-10-03.** `grep -rn "singing\|prosody"
-  --include=*.py usr/` outside those two files returns **nothing**: no skill, no
-  trigger, no `tts.py` path, no CLI. Their only consumer is
-  `../shani-testbed/slot-tests/chronoa-singing.sh`. This is exactly the dead-code
-  class at the end of this section (a module that is green in isolation and
-  unreachable at runtime), so it is recorded rather than assumed shipped.
+- **`singing.py` + `prosody.py` were dead code; that is FIXED, and this entry is
+  kept because the lesson is the point.** They were fully built, unit-tested
+  (`tests/test_singing.py`, `tests/test_prosody.py`) and verified on a real
+  image, and as of 2026-10-03 nothing in the product imported either module -
+  `grep -rn "singing\|prosody" --include=*.py usr/` returned nothing, and their
+  only consumer was `../shani-testbed/slot-tests/chronoa-singing.sh`. **As of
+  2026-10-05 they are reachable**: `skills/sing.py` exposes
+  `SKILLS = [Skill(name="sing", ...)]`, verified by execution as both
+  *discovered* and *dispatchable* (`skills.discover_skills()` → 152 schemas,
+  `"sing" in handlers`). `midi.py` also imports `prosody` directly.
+
+  This was exactly the dead-code class at the end of this section - a module
+  that is green in isolation and unreachable at runtime. **Grep for a consumer
+  before believing "done", and do not leave a green-but-unwired module described
+  as shipped.**
 
   What *is* real, measured on a booted `@blue` (`shanios-20260925-gnome`,
   Chronoa overlaid, kokoro + soundstretch + sox present): per-note pitch is
@@ -1549,6 +2358,31 @@ statement about the 2026-09-18 measurement, not about the tree today.
    exists and IS wired into every LLM call path (`llm.py`, `cloud_llm.py`
    x3), but was a silent no-op against real keys until item 2's fix above
    made the vault aware of them — DONE as of 2026-09-18.**
+
+   **Same class, still open as of 2026-10-05** — three more modules that pass
+   their own tests and that **nothing that runs imports**. Measured, not read:
+   `grep -rn` for a real importer across `usr/lib/shani-chronoa/`, then each
+   candidate opened by hand:
+
+   - `midi.py` — reads a `.mid` into a `prosody.Melody`. `skills/sing.py` exists
+     and is dispatchable, but it **does not import it**: it takes notes the model
+     supplies. So the "sing me a real tune" path is the one thing still missing
+     from a feature that otherwise works.
+   - `guardrail.py` — a well-formedness check between model and tool. Only
+     referenced in `organism.py`'s metaphor text, which lists it as `BUILT`.
+   - `dream.py` — the offline pass over the day's tool calls.
+
+   **Two false positives worth remembering**, because a grep-only audit gets
+   these exactly backwards: `mcp.py` and `search_provider.py` *also* have no
+   importer inside the package, and both are genuinely shipped — they are entry
+   points reached by `usr/bin/shani-chronoa-mcp` and `usr/bin/shani-chronoa-search`.
+   **A module with no in-package importer may be a binary's `main`.** Check
+   `usr/bin/` and the systemd units before calling anything dead.
+
+   Not fixed here: each needs a design decision (what surfaces singing a real
+   tune, where a pre-tool check belongs in the dispatch order, what schedules
+   the dream pass), which is the same reason `ipc.py` was removed rather than
+   wired.
 
 4. **Peer-Validated IPC** (P3, 1 day) — **DECIDED AND CLOSED (2026-09-30):
    removed rather than wired in** (roadmap #28). `ipc.py`'s `PeerValidator` was

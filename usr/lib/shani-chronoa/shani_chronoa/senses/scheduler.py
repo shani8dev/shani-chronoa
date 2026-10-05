@@ -692,6 +692,16 @@ class AmbientScheduler:
         """
         if not self._reflexes:
             return []
+        # Consolidation rides this tick because it is the only thing guaranteed
+        # to run for the life of the process. It is off the hot path by its own
+        # gate - one stat of the log, one read of the model's provenance - and
+        # contained, because an offline pass that raises must not stop senses
+        # from being polled.
+        try:
+            self._reflexes.consolidate()
+        except Exception as exc:  # noqa: BLE001 - the tick must survive
+            logger.debug("consolidation failed and was skipped: %s: %s",
+                         type(exc).__name__, exc)
         try:
             urges = self._reflexes.due()
         except Exception as exc:  # noqa: BLE001 - the tick must survive

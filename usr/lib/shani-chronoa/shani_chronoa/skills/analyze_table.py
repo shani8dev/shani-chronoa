@@ -341,4 +341,45 @@ def _run(arguments: dict) -> str:
         return f"Could not read {source.name}: {exc}."
 
 
+def _verify_chart(arguments: dict, tool=None):
+    """Post-condition: for `chart`, is the SVG a real chart?
+
+    `analyze_table`'s other actions are read-only SQL and return their answer as
+    text, which needs no check. `chart` writes a file, and a chart that is a
+    well-formed but empty SVG is a chart of nothing - so the check confirms the
+    file holds actual drawn marks rather than only a header.
+
+    Matched on the `output` the skill was given, and reported as UNVERIFIED
+    rather than failed if the file merely has no bars in it, because an empty
+    result set legitimately produces an empty chart.
+    """
+    action = str(arguments.get("action") or "").strip().lower()
+    if action != "chart":
+        return None  # a query returns its answer as text; nothing to check
+    from pathlib import Path as _P
+    out = str(arguments.get("output") or "").strip()
+    if not out:
+        return None
+    target = _P(out)
+    if not target.exists():
+        return (False, f"{target.name} does not exist, so no chart was written")
+    size = target.stat().st_size
+    if size == 0:
+        return (False, f"{target.name} is empty")
+    try:
+        body = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return (False, f"could not read {target.name}: {exc}")
+    if "<svg" not in body:
+        return (False, f"{target.name} is {size} bytes but holds no <svg> element")
+    marks = sum(body.count(tag) for tag in ("<rect", "<path", "<circle", "<line"))
+    if marks == 0:
+        return (True, f"{target.name} is a valid but empty SVG ({size} bytes, "
+                      f"no drawn marks - consistent with an empty result set)")
+    return (True, f"{target.name} is a valid SVG of {size} bytes holding {marks} "
+                  f"drawn mark(s)")
+
+
+POST_CONDITION = _verify_chart
+
 SKILLS = [Skill(name="analyze_table", schema=SCHEMA, run=_run)]

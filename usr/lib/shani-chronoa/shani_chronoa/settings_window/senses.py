@@ -47,6 +47,10 @@ SENSE_LABELS = {
         "Transcribe speech",
         "Hear you through the microphone",
     ),
+    "heard-sound": (
+        "Name the sounds in the room",
+        "Listen for a few seconds and report a doorbell, a knock, a dog, speech",
+    ),
     "privilege": (
         "Who holds sensitive access",
         "Report which software can act as administrator",
@@ -182,7 +186,10 @@ SENSE_LABELS = {
     ),
     "wirelesslink": (
         "This machine's own WiFi link",
-        "Signal strength, negotiated speed, retries, and the regulatory domain capping transmit power",
+        # 88 characters. This was 92 and the one-line test caught it - the
+        # regulatory domain is the fourth fact, not the headline, so it goes
+        # last and the row keeps its place in a list of rows.
+        "Signal strength, negotiated speed, retries, and the transmit-power cap",
     ),
     "labnetworks": (
         "Lab networks on this machine",
@@ -294,6 +301,13 @@ SENSE_CATEGORIES = [
     ("Model capability",
      "What this machine can run, and whether the configured model fits",
      ["modelfit"]),
+    # Last deliberately: this opens the microphone, and the categories above are
+    # ordered by what most people want first. It is the one sense that hears
+    # the room rather than the machine, so it goes after everything a user
+    # would reach for without being asked.
+    ("Listening to the room",
+     "Naming sounds it hears, like a doorbell or a knock - off until you allow it",
+     ["heard-sound"]),
 ]
 
 # The everyday baseline, offered as a named action. `memory` is already on by

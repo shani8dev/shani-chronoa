@@ -122,4 +122,53 @@ def _run(arguments: dict) -> str:
     return f"Reminder written to {_STORE}: {text!r}.{when}{note}"
 
 
+
+def _verify_reminder(arguments: dict, tool=None):
+    """Post-condition: is the reminder text actually in the store?
+
+    `add_reminder` appends one JSON line to `_STORE`. The check reads the store
+    back and confirms the text asked for is present, because "I'll remind you"
+    followed by a store that does not contain it is the failure worth catching -
+    and a reminder is one of the few things a person will trust without
+    checking.
+
+    Matched on the text, not on position: two reminders added in the same
+    millisecond are otherwise indistinguishable, and matching the newest
+    matching line is what makes that safe.
+    """
+    text = str(arguments.get("text") or arguments.get("reminder") or "").strip()
+    if not text:
+        return None  # nothing was written, so nothing to check
+    try:
+        raw = _STORE.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return (False, f"could not read {_STORE.name}: {type(exc).__name__}")
+    import json as _json
+
+    entries = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = _json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    if not entries:
+        return (False, f"{_STORE.name} holds no reminder at all")
+    stored = [str(e.get("text") or e.get("body") or "") for e in entries]
+    if text not in stored:
+        return (False, f"{_STORE.name} holds {len(stored)} reminder(s) but "
+                       f"none of them says this one")
+    index = stored.index(text)
+    when = entries[index].get("at") or entries[index].get("when")
+    return (True, f"{_STORE.name} line {index + 1} carries this reminder"
+                  + (f", due {when}" if when else ", with no time recorded"))
+
+
+POST_CONDITION = _verify_reminder
+
+
 SKILLS = [Skill(name="add_reminder", schema=SCHEMA, run=_run)]

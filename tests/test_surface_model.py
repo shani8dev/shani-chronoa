@@ -57,6 +57,7 @@ from shani_chronoa import (  # noqa: E402
 )
 from shani_chronoa.gui.surfaces import model as surface  # noqa: E402
 from shani_chronoa.opencv import runtime as opencv_runtime  # noqa: E402
+from shani_chronoa.skills import solve_math  # noqa: E402
 
 
 class _StubConfig:
@@ -201,6 +202,18 @@ def on_disk(tmp_path, monkeypatch):
     # fixture that silently lost the race to `_isolate_xdg_data_home` would
     # write fixture bytes into the developer's own `~/.local/share`.
     assert str(local_vision.model_dir()).startswith(str(disk.root))
+    # **Maths is the one extra nothing on disk decides.** Its two engines are
+    # distro packages, so its row reads the environment - and this machine has
+    # `symengine` and `bc` installed, which made six tests here fail with counts
+    # they had assumed ("nothing is installed", "exactly two"). The fixture
+    # creates files for the other seven and cannot do that for this one, so it
+    # controls it instead: absent by default, the way a fresh install reads.
+    # `disk.maths()` puts it back, so the installed case is still reachable.
+    monkeypatch.setattr(solve_math, "se", None)
+    monkeypatch.setattr(solve_math, "_bc_available", lambda: False)
+    disk.maths = lambda: monkeypatch.setattr(
+        solve_math, "se", object(), raising=False) or monkeypatch.setattr(
+        solve_math, "_bc_available", lambda: True)
     return disk
 
 
@@ -503,16 +516,37 @@ class TestExtras:
             assert "Read from" in tooltip, tooltip
             assert "--setup" in tooltip, tooltip
 
-    def test_math_is_read_from_the_skill_that_gates_on_sympy(self):
-        """There is no maths page on the wizard - SymPy is a distro package -
-        so the state that answers this is `solve_math`'s own `sp`, the flag
-        `_run()` refuses on."""
+    def test_math_is_read_from_the_skill_that_gates_on_symengine(self):
+        """There is no maths page on the wizard - both engines are distro
+        packages - so the state that answers this is `solve_math`'s own flags:
+        `se`, the exact flag `_run()` refuses on, and `_bc_available()`, the one
+        the bc engine asks.
+
+        **This asserted `solve_math.sp`, which does not exist.** The skill moved
+        to `symengine` plus `bc`, and the row's probe raised `AttributeError`, so
+        the row came back *unknown* - which is why two other tests in this class
+        went red for a reason that had nothing to do with what they were
+        checking. A probe reading an attribute the product deleted is a stale
+        probe, not a failing test, and the fix belongs in the product.
+        """
         from shani_chronoa.skills import solve_math
 
         row = [r for r in surface.build(_StubApp()).extras() if r._extra_key == "math"][0]
-        assert row._extra_state is (solve_math.sp is not None)
-        if solve_math.sp is None:
-            assert "python-sympy" in _row_detail(row)
+        symbolic = solve_math.se is not None
+        arithmetic = solve_math._bc_available()
+        assert row._extra_state is (symbolic and arithmetic)
+        if not symbolic:
+            assert "python-symengine" in _row_detail(row)
+        if not arithmetic:
+            assert "bc" in _row_detail(row)
+
+    def test_the_maths_row_names_both_engines_rather_than_one(self):
+        """A row that reported symengine alone would say "installed" on a
+        machine where every integral raises, and one that reported `bc` alone
+        would say it where nothing symbolic can run."""
+        detail = _row_detail([r for r in surface.build(_StubApp()).extras()
+                              if r._extra_key == "math"][0])
+        assert "symengine" in detail and "bc" in detail
 
 
 # -- controls ---------------------------------------------------------------

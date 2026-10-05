@@ -165,6 +165,29 @@ def _report_framing(window):
 def on_activate(app):
     if THEME:
         Gtk.Settings.get_default().set_property("gtk-theme-name", THEME)
+    if WHICH.startswith("panel:"):
+        # Any panel in the registry, by its id: `panel:machine`, `panel:senses`.
+        #
+        # Added because "look at it" was otherwise impossible for most of this
+        # app. The four fixed views below cover the conversation, the settings
+        # window and the help window, and every one of the twenty panels -
+        # including the ones that were fixed in this pass - could not be
+        # photographed at all. A defect found by reading a screenshot is worth
+        # nothing if there is no way to take a screenshot of the screen it is on.
+        #
+        # The panel is pushed onto a real window through the real `_show_surface`,
+        # so this captures what a person gets after clicking the sidebar row,
+        # not a panel widget photographed on its own (which AGENTS.md records as
+        # rendering with an unpainted page background).
+        name = WHICH.split(":", 1)[1]
+        from shani_chronoa.gui import ChronoaWindow
+        window = ChronoaWindow(app)
+        window.show_page("panels")
+        window._show_surface(name)
+        window.present()
+        GLib.timeout_add(1800, lambda: _render(window, WIDTH, HEIGHT, OUT))
+        GLib.timeout_add(3200, lambda: (app.quit(), False)[1])
+        return None
     if WHICH == "tool-activity":
         from shani_chronoa.settings_window import SettingsWindow
         _seed_tool_activity()
@@ -173,12 +196,12 @@ def on_activate(app):
         from shani_chronoa.settings_window import SettingsWindow
         window = SettingsWindow(app)
     elif WHICH == "help":
-        from shani_chronoa.gui import CajitaWindow
-        parent = CajitaWindow(app)
+        from shani_chronoa.gui import ChronoaWindow
+        parent = ChronoaWindow(app)
         window = parent.open_help()
     else:
-        from shani_chronoa.gui import CajitaWindow
-        window = CajitaWindow(app)
+        from shani_chronoa.gui import ChronoaWindow
+        window = ChronoaWindow(app)
         if WHICH == "empty":
             pass
         else:

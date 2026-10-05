@@ -176,5 +176,12 @@ def build(_app=None) -> Gtk.Widget:
             _add(group, _organ_row(organ))
         column.append(group)
 
-    _put(column)
+    # **In a scroller, like every other surface.** This one was the only panel
+    # whose content went straight into the toolbar's content slot, so a window
+    # shorter than its twenty-odd rows could not reach the bottom of them - the
+    # panel is a list of every function and its state, and the last few are
+    # exactly the ones nobody can scroll to. Found by measuring all twenty
+    # surfaces for a `Gtk.ScrolledWindow` rather than by looking at them:
+    # nineteen had one and this had none.
+    _put(common.scrolled(column))
     return page

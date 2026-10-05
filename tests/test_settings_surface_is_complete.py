@@ -120,6 +120,13 @@ NOT_EXPOSED = {
     "extra-languages": "chosen on the setup window's More page, which installs each language's "
                        "reading data and voice at the same time; a text row could name a "
                        "language with nothing installed for it",
+    "setup-mode": "records which branch the setup window offered first - local "
+                  "or cloud - and is written by the window's own Mode page. It "
+                  "is not a switch: setting it by hand here would change what a "
+                  "*future* setup offers without changing anything about how "
+                  "this machine answers, which is the exact confusion the two "
+                  "real gates (privacy-mode, cloud-fallback-enabled) exist to "
+                  "avoid. Settings has \"Open setup\" instead.",
     "setup-dismissed": "set when the setup window is closed unfinished; Settings has \"Open setup\" instead",
     "setup-complete": "set by the setup window's own finish button; Settings offers "
                       "\"Open setup\" instead of a switch, because ticking it by hand "

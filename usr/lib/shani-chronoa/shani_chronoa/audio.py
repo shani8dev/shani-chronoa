@@ -453,6 +453,15 @@ class AudioRecorder:
         self._stop_epoch += 1
         self._auto_stop_cancel.set()
 
+    def auto_stop_reason(self) -> str:
+        """Why the last auto-stopped recording ended.
+
+        `"limit"` means the clock ran out mid-speech - the transcript is
+        incomplete, and anything that shows it has to say so. `"silence"` means the
+        person finished. Anything else is an error path.
+        """
+        return getattr(self, "_auto_stop_reason", "unknown")
+
     def _auto_stop_loop(
         self,
         proc: subprocess.Popen,
@@ -478,6 +487,12 @@ class AudioRecorder:
             detector = SilenceDetector(threshold=threshold, silence_seconds=silence_seconds, frame_seconds=_FRAME_SECONDS)
 
             deadline = time.monotonic() + max_seconds
+            # **Why it stopped, not just that it stopped.** A recording that ends
+            # because the person finished and one that ends because the clock ran
+            # out are different facts, and only the second one is a transcript
+            # that stops mid-sentence. The caller cannot tell them apart from an
+            # audio file, so it is recorded here and handed over.
+            self._auto_stop_reason = "cancelled"
             while time.monotonic() < deadline and not self._auto_stop_cancel.is_set():
                 # The read below blocks for up to one frame, so it can complete
                 # after the user pressed stop. A frame that straddles the stop
@@ -503,7 +518,15 @@ class AudioRecorder:
                 if on_level is not None and self._generation == generation:
                     on_level(normalize_level(rms(chunk)))
                 if detector.is_done():
+                    self._auto_stop_reason = "silence"
                     break
+            else:
+                # The loop ended on its condition rather than a `break`, which is
+                # only possible for the deadline - the cancel case sets the event
+                # and the loop simply stops, so both are checked explicitly.
+                self._auto_stop_reason = ("cancelled"
+                                          if self._auto_stop_cancel.is_set()
+                                          else "limit")
             if on_level is not None and self._generation == generation:
                 on_level(0.0)
         except Exception as e:

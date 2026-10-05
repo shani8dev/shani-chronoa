@@ -608,6 +608,19 @@ class TestTimerNotifications:
         self, monkeypatch, tmp_path, seconds
     ):
         # An LLM may send the number as a string; refusing that would be pedantic.
+        #
+        # **This asserted the product's success branch without providing the
+        # session it needs.** On a machine with no `systemd --user` - a
+        # container, a CI runner, this dev box - `timer._systemd_available()`
+        # returns False and the skill correctly refuses with "the timer was NOT
+        # set", so the test failed while the product was right. The neighbouring
+        # test above patches the probe; this one had to as well. A test that
+        # depends on the host having a login session is testing the host.
+        monkeypatch.setattr(
+            "shani_chronoa.skills.timer._systemd_available", lambda: True)
+        monkeypatch.setattr(
+            "shani_chronoa.skills.timer.subprocess.run",
+            lambda *a, **k: subprocess.CompletedProcess(a[0] if a else [], 0, "", ""))
         monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
         assert "Timer set for" in _run({"seconds": seconds})

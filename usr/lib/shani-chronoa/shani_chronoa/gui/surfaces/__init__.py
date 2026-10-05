@@ -50,9 +50,11 @@ SURFACE_IDS = (
     "conversations",
     # This machine
     "senses",
+    "models",
     "machine",
     # What Chronoa knows
     "memory",
+    "learning",
     "voice",
     # What Chronoa is, function by function. First in its section on purpose:
     # it is the answer to "what is this thing", which is the question a person
@@ -77,7 +79,15 @@ SURFACE_IDS = (
 #: The order the sidebar groups its sections in. Fixed rather than alphabetical
 #: because these are four questions a person asks in this order: what were we
 #: saying, what is this machine, what does it think I told it, what has it done.
-SECTION_ORDER = ("Conversation", "This machine", "What Chronoa knows",
+#:
+#: There is no "Conversation" section, and there never should be: the sidebar
+#: already opens with an untitled "Conversation" row for the live chat, so a
+#: heading by that name directly above a "Conversations" panel gave the sidebar
+#: two things called Conversation - a heading and a row - and a reader could not
+#: tell that the row was the chat and the panel was the saved list. The saved
+#: list belongs with what Chronoa has done, which is what a past conversation
+#: is; that section was already carrying Memory, Triggers and Activity.
+SECTION_ORDER = ("This machine", "What Chronoa knows",
                  "What Chronoa did", "Desktop and system", "Everything else")
 
 
@@ -86,7 +96,7 @@ SECTION_ORDER = ("Conversation", "This machine", "What Chronoa knows",
 #: "Everything else", which is what happened the first time - and a sidebar
 #: showing three of fourteen panels looks like a sidebar with three panels.
 DEFAULT_SECTION = {
-    "conversations": "Conversation",
+    "conversations": "What Chronoa did",
     "senses": "This machine",
     "machine": "This machine",
     "memory": "What Chronoa did",

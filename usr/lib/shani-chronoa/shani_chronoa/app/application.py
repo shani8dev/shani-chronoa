@@ -186,6 +186,56 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # mismatch that crashed do_startup() before it was fixed the same way.
         Gtk.Application.do_shutdown(self)
 
+    def _export_gateways(self) -> None:
+        """Put the channel on the bus, if any gateway is configured.
+
+        Kept out of the constructor so a test can register a gateway and export
+        it deliberately, and so "nothing is listening" is the state of a machine
+        that has not asked for it.
+        """
+        from shani_chronoa import gateway as gateway_module
+        if self._gateways is None:
+            self._gateways = gateway_module.Registry(self._submit_gateway_text)
+        if not self._gateways.names():
+            return
+        try:
+            self._gateway_owner = gateway_module.export(self._gateways)
+        except Exception as exc:  # noqa: BLE001 - a channel is optional
+            logger.warning("could not export the gateway interface: %s", exc)
+
+    def _submit_gateway_text(self, text: str) -> str:
+        """A channel's words, turned into a turn exactly as a typed one is.
+
+        This is the whole security argument in one method: the text goes through
+        `submit()` - the same entry the window's input uses - so it meets the same
+        whitelist, the same consent keys and the same post-conditions, and lands
+        in the same log. A gateway has no way to reach any of them directly.
+        """
+        # `_submit` is the window's own entry and returns nothing - the reply
+        # arrives asynchronously and lands in the window like any other turn.
+        # So a channel gets its answer the same way a person does: in the
+        # window. Returning a string here would mean running the turn twice.
+        self._submit(text)
+        return ""
+
+    def _on_show_page(self, _action, parameter) -> None:
+        """`app.show-page('settings:privacy')`, over D-Bus as well as in-process.
+
+        Says so when the target does not exist rather than opening something
+        nearby: a notification with a typo must not become a silently wrong page.
+        """
+        from shani_chronoa import pages
+        target = parameter.get_string() if parameter is not None else ""
+        if not self.show_page(target):
+            logger.warning("no page %r. Pages are:\n%s", target, pages.describe())
+            if self.window is not None:
+                self.window.set_status(f"No page called {target!r}")
+
+    def show_page(self, target: str) -> bool:
+        """Show "<window>:<id>" from Python, for a caller holding the application."""
+        from shani_chronoa import pages
+        return pages.show(target, application=self, config=self.config)
+
     def do_activate(self) -> None:
         """Handle application activation."""
         logger.info("Activating Shani Chronoa")
@@ -195,8 +245,28 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # 44 switches and the assistant would perceive nothing at all. Start() is
         # idempotent, so raising the window again does not spawn a second thread.
         self.sense_scheduler.start()
+        if getattr(self, "_show_page", None):
+            target = self._show_page
+            self._show_page = ""
+            from shani_chronoa import pages
+            if not pages.show(target, application=self, config=self.config):
+                logger.warning("--show-page=%r named no page. Pages are:\n%s",
+                               target, pages.describe())
         if not self.window:
             self.window = ChronoaWindow(self)
+            # A tray icon if the desktop has one. `build()` returns None where it
+            # does not - GTK4 removed `Gtk.StatusIcon`, so this needs
+            # libappindicator, which is not a dependency - and None is a normal
+            # outcome, not an error. The window is the whole application either
+            # way; the icon is one way of reaching it.
+            from shani_chronoa.app import tray as _tray
+            self._tray = _tray.build(self)
+            self._export_gateways()
+            # Carry the startup verdict onto the window, so a raise on an empty
+            # machine says "No model yet" rather than "Ready".
+            if getattr(self, "_can_answer", None) is not None:
+                self.window.set_can_answer(self._can_answer,
+                                           getattr(self, "_no_model_reason", ""))
             # the wake phrase only listens between turns
             self.window.state_observers = [
                 lambda s: self.wakeword.resume() if s is AssistantState.IDLE else self.wakeword.pause()
@@ -277,9 +347,24 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # Initialize STT
         self.stt = self._build_stt()
         if not self.stt.is_available():
+            # **Name what is missing.** "Whisper.cpp not available" was logged on
+            # a machine that had just had whisper-cpp installed from the
+            # repositories, because `is_available()` requires the binary *and*
+            # the model and the model is a download. So the one thing a person
+            # reading the log could act on - "install whisper-cpp" - was already
+            # done, and the message pointed somewhere else entirely.
+            missing = []
+            if not getattr(self.stt, "whisper_path", "") or not os.path.exists(
+                    getattr(self.stt, "whisper_path", "")):
+                missing.append("the whisper.cpp program (install whisper-cpp)")
+            if not os.path.exists(getattr(self.stt, "model_path", "")):
+                missing.append(
+                    "a speech model (Settings -> Voice, or the setup wizard's "
+                    "Ears page)")
             logger.warning(
-                "%s not available - STT disabled", self._stt_backend_label()
-            )
+                "%s cannot listen yet: %s. Speech input stays off until both "
+                "are there", self._stt_backend_label(),
+                " and ".join(missing) or "something unknown")
 
         # Initialize LLM - Ollama first, always (local-first by design).
         self.llm = OllamaLLM(
@@ -293,6 +378,20 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self._use_local_server()
         if not self._ollama_available:
             self._maybe_enable_cloud_fallback()
+        # Say so on the window, not only in the log. With nothing installed the
+        # state line read "Ready" while the line under it read "LLM unavailable":
+        # two states, one screen, one of them false - and "Ready" is the label the
+        # idle state always has, so it was true by construction on every machine.
+        self._can_answer = bool(self.llm)
+        # Which presence we are in, read from the machine rather than assumed:
+        # a remembered ACTIVE after the model was released is exactly the claim
+        # presence.py exists not to make.
+        from shani_chronoa.presence import detect
+        from shani_chronoa import local_llm
+        self._presence = detect(local_llm.is_up)
+        if not self._can_answer:
+            self._no_model_reason = (
+                "no language model is set up, so nothing can answer yet")
 
         # Perception is optional context, so this is wired unconditionally and
         # degrades to nothing: with no percepts stored, the assistant's prompts
@@ -354,9 +453,16 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # Read the STT off the live object: the model is resolved inside
         # `_build_stt`, and interpolating a local here instead raised
         # UnboundLocalError, which took all of `do_startup` down with it.
+        # The same line used to claim `stt=Whisper.cpp (medium)` on the very run
+        # that had just warned "STT disabled", because it interpolated the
+        # backend's *label* rather than whether it can listen. Two log lines a
+        # millisecond apart, disagreeing, is the kind of thing that costs an
+        # afternoon; so the state is read from the object.
+        stt_ready = bool(self.stt and self.stt.is_available())
         logger.info(f"Initialized: model={model}, "
-                    f"stt={self._stt_backend_label()} "
-                    f"({getattr(self.stt, 'model', '?')}), "
+                    f"stt={self._stt_backend_label() if stt_ready else 'none'}, "
+                    f"model={getattr(self.stt, 'model', '?') if stt_ready else '-'}, "
+                    f"listening={stt_ready}, "
                     f"profile={self.hardware.profile}")
 
     def _create_actions(self) -> None:
@@ -401,6 +507,40 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         quick_action.connect("activate", self.quick_ask)
         self.add_action(quick_action)
         self.set_accels_for_action("app.quick-ask", ["<Ctrl><Shift>a"])
+
+        # Dictation: one long turn with no wake word and nothing held down.
+        # <Ctrl><Shift>d, because <Ctrl><Shift>a is quick-ask and this is the
+        # same kind of thing - say something, get a turn - only without the
+        # twenty-second ceiling.
+        dictate_action = Gio.SimpleAction.new("dictate", None)
+        dictate_action.connect("activate", self.dictate)
+        self.add_action(dictate_action)
+        self.set_accels_for_action("app.dictate", ["<Ctrl><Shift>d"])
+
+        # An inbound channel on the session bus, for a meeting transcript or a
+        # message bridge to type into. It exposes exactly one method and cannot
+        # reach a tool - see `gateway.py` for why the interface is one method
+        # and lives on the bus rather than a socket. Exported only when a
+        # gateway has been registered, so a machine with none has nothing
+        # listening at all.
+        self._gateways = None
+        self._gateway_owner = None
+
+        # One action reaching any page of any window: `show-page` with
+        # "<window>:<id>" - "settings:privacy", "setup:review", "main:quick-ask".
+        #
+        # **Every page used to be reachable only by holding the mouse.** The
+        # settings sections by typing in a search box, the wizard steps by
+        # pressing Next, the main window by whatever was already open. So a
+        # notification could not say "open Settings on Privacy", a keybinding
+        # could not either, and a test could not - it had to guess at pixel
+        # selectors, which is how one run produced four screenshots of four
+        # "different" sections that were byte-identical while reporting every
+        # step green. `pages.py` holds the ids and their aliases; this is the
+        # doorway, and it answers over D-Bus as well as in-process.
+        show_page_action = Gio.SimpleAction.new("show-page", GLib.VariantType.new("s"))
+        show_page_action.connect("activate", self._on_show_page)
+        self.add_action(show_page_action)
 
         # The in-app browser. WebKitGTK is optional, so the action is only
         # *sensitive* when it is there rather than being absent: a shortcut that
@@ -495,6 +635,13 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         setup_action = Gio.SimpleAction.new("setup", None)
         setup_action.connect("activate", lambda *_: self._open_setup())
         self.add_action(setup_action)
+        # A keybinding as well as the header button, because "set up" is the
+        # answer to five panels' "not installed - the setup wizard's page installs
+        # it" and a panel that names the wizard should not make you hunt for it.
+        # `Ctrl+Shift+U` is the browser's, and an accelerator cannot be spelled
+        # two ways for one chord - Shift+u and Shift+U are the same keystroke,
+        # so taking it would have shadowed `app.open-browser`.
+        self.set_accels_for_action("app.setup", ["<Ctrl><Shift>s"])
 
     def _set_status(self, message: str) -> None:
         if self.window is not None:
@@ -505,6 +652,12 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         for arg in args:
             if arg == "--debug":
                 self.config.set("debug-mode", "true")
+            elif arg.startswith("--show-page="):
+                # `--show-page=settings:privacy` opens Settings on Privacy,
+                # `--show-page=setup:review` opens the wizard at the review step.
+                # Applied after activation, because both windows have to exist
+                # before a page can be shown in one of them.
+                self._show_page = arg.split("=", 1)[1]
             elif arg == "--privacy":
                 self.privacy.enable_local_mode()
             elif arg == "--local-only":

@@ -397,4 +397,84 @@ def _run(arguments: dict) -> str:
     return result["text"] if isinstance(result, dict) else result
 
 
+def _post_privacy(arguments: dict):
+    """Read the state back, rather than trusting the write.
+
+    This is the first mutator given a post-condition, and it is the cheapest
+    kind there is: the effect is a GSettings key, so verifying it means reading
+    that key. That turns "Chronoa believes it muted the microphone" into
+    something checkable, which is what makes the recorded verdict `verified`
+    rather than `unverified`.
+
+    **92% of the recorded traffic is `unverified`, and that is the reason
+    nothing in the learning layer can train.** `learning.train_and_save()`
+    refuses with "the training split contains no example of verified", and
+    `evaluate_bandit()` reports `beats_chance: False`. Both are downstream of
+    mutators like this one having no post-condition, so the gap is worth
+    closing one skill at a time rather than by assertion.
+
+    Returns `(ok, evidence)` because "it says it is muted" and "the key says
+    muted" are different claims, and the evidence should say which.
+    """
+    action = str(arguments.get("action") or "").strip()
+    if action not in ("mute_mic", "unmute_mic"):
+        return None  # nothing to check: not a mutating action
+
+    expected = action == "mute_mic"
+    try:
+        from shani_chronoa import config as config_mod
+        actual = bool(config_mod.ChronoaConfig().get_bool("privacy-mic-muted", False))
+    except Exception as exc:  # noqa: BLE001 - cannot check is not a failure
+        return (False, f"could not read the microphone state back: "
+                       f"{type(exc).__name__}")
+    if actual == expected:
+        return (True, f"microphone is {'muted' if expected else 'unmuted'}, "
+                      f"read back from settings")
+    return (False, f"expected the microphone to be "
+                   f"{'muted' if expected else 'unmuted'}, but settings say "
+                   f"{'muted' if actual else 'unmuted'}")
+
+
+POST_CONDITION = _post_privacy
+
+def _post_privacy(arguments: dict):
+    """Read the state back, rather than trusting the write.
+
+    This is the first mutator given a post-condition, and it is the cheapest
+    kind there is: the effect is a GSettings key, so verifying it means reading
+    that key. That turns "Chronoa believes it muted the microphone" into
+    something checkable, which is what makes the recorded verdict `verified`
+    rather than `unverified`.
+
+    **92% of the recorded traffic is `unverified`, and that is the reason
+    nothing in the learning layer can train.** `learning.train_and_save()`
+    refuses with "the training split contains no example of verified", and
+    `evaluate_bandit()` reports `beats_chance: False`. Both are downstream of
+    mutators like this one having no post-condition, so the gap is worth
+    closing one skill at a time rather than by assertion.
+
+    Returns `(ok, evidence)` because "it says it is muted" and "the key says
+    muted" are different claims, and the evidence should say which.
+    """
+    action = str(arguments.get("action") or "").strip()
+    if action not in ("mute_mic", "unmute_mic"):
+        return None  # nothing to check: not a mutating action
+
+    expected = action == "mute_mic"
+    try:
+        from shani_chronoa import config as config_mod
+        actual = bool(config_mod.ChronoaConfig().get_bool("privacy-mic-muted", False))
+    except Exception as exc:  # noqa: BLE001 - cannot check is not a failure
+        return (False, f"could not read the microphone state back: "
+                       f"{type(exc).__name__}")
+    if actual == expected:
+        return (True, f"microphone is {'muted' if expected else 'unmuted'}, "
+                      f"read back from settings")
+    return (False, f"expected the microphone to be "
+                   f"{'muted' if expected else 'unmuted'}, but settings say "
+                   f"{'muted' if actual else 'unmuted'}")
+
+
+POST_CONDITION = _post_privacy
+
 SKILLS = [Skill(name="set_privacy", schema=SCHEMA, run=_run)]

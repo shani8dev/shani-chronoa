@@ -20,6 +20,9 @@ from pathlib import Path
 import httpx
 import pytest
 
+from _pkgbuild import (arch_pkgbuild, depends as pkgbuild_depends,  # noqa: E402
+                       optdepends as pkgbuild_optdepends)
+
 from shani_chronoa import files, stt, stt_provision
 from shani_chronoa.stt import WhisperSTT
 from shani_chronoa.stt_parakeet import ParakeetSTT
@@ -274,8 +277,7 @@ def test_the_app_wires_the_factory_rather_than_a_backend_class():
     `app.py` reached `WhisperSTT` in three places before, and each was a place
     a new backend would silently skip.
     """
-    import inspect
-
+    
     import pathlib
 
     from shani_chronoa import app as app_mod
@@ -509,9 +511,15 @@ def test_no_hard_dependency_was_added_for_the_new_backend():
     # The shipping Arch manifest lives in the sibling shani-pkgbuilds repo; the
     # copy that used to sit here was removed because nothing built from it and
     # it had drifted (no llama-cpp, no tesseract at one point).
-    pkgbuild = (Path(__file__).resolve().parents[2] / "shani-pkgbuilds"
-                / "shani-chronoa" / "PKGBUILD").read_text()
-    depends = pkgbuild.split("depends=(", 1)[1].split(")", 1)[0]
+    # Through the shared reader, because `split(")", 1)` stops at the first `)`
+    # *anywhere* - including the one inside a comment in this very manifest:
+    #   # expand, factor, prime_factors, is_prime, linear solve) and bc runs the
+    # That truncated the array eleven lines early, so `whisper-cpp`, `llama-cpp`,
+    # `espeak-ng`, `libsecret` and `nmap` all read as absent and this test
+    # reported "a default install has no speech input" about a manifest that
+    # declares it in plain sight. See tests/_pkgbuild.py.
+    pkgbuild = arch_pkgbuild().read_text(encoding="utf-8")
+    depends = "\n".join(pkgbuild_depends(pkgbuild))
     # whisper-cpp IS a hard dependency, deliberately: Shanios ships voice input
     # working out of the box. This assertion used to forbid it, on the grounds
     # that `stt.py`'s is_available() degrades to "speech input is off" - which
@@ -526,9 +534,15 @@ def test_no_hard_dependency_was_added_for_the_new_backend():
     # No optdepends entry is wanted either: whisper-cpp is required, so an
     # optdepend line offering it would tell a user it is optional and send
     # them to install something they already have.
-    assert "'whisper-cpp:" not in pkgbuild, (
+    # Read out of the parsed array, not the file text. Searching the raw text for
+    # "whisper-cpp:" matched a *comment* on the depends line -
+    #   'whisper-cpp' # whisper-cpp: voice input (speech recognition)
+    # - and failed a manifest that does the right thing. Same failure as the
+    # `)` in a comment: a substring test is not a check.
+    offered = [name for name in pkgbuild_optdepends(pkgbuild) if "whisper" in name]
+    assert not offered, (
         "whisper-cpp is a hard dependency but is also still offered as an "
-        "optdepend, which tells the user it is optional"
+        f"optdepend, which tells the user it is optional: {offered}"
     )
     if False:  # retained only to keep the old assertion's context readable
         assert "'whisper-cpp: voice input" in pkgbuild, (
