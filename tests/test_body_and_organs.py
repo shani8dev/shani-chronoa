@@ -511,3 +511,80 @@ class TestTheMouthLightCoversPlaybackNotJustSynthesis:
         finally:
             audio._put_organ(fresh)
         assert not body_module.body.busy("mouth")
+
+
+class TestOrganIconsResolve:
+    """Every organ light draws an icon, so every icon name has to exist.
+
+    An icon name that does not resolve is not a subtle wrong. `Gtk.Image` draws
+    an empty box, and the organ strip is on screen in every conversation - so a
+    name that is absent from the installed theme is two of the eight lights
+    showing nothing at all, in the one strip whose entire job is to say what the
+    assistant is doing.
+
+    Two names here were absent and had been for a while:
+    `eye-open-negative-symbolic` (absent under that spelling and under the plain
+    one) and `brain-augemnted-symbolic` (a misspelling, and absent with the
+    `e` restored as well - Adwaita ships no brain icon at any spelling). Nothing
+    failed, because nothing checked.
+
+    The theme is queried rather than hard-coded to a name, so this test says
+    "this icon exists here" instead of "this string is what the file says" -
+    the second is a tautology that passes no matter how blank the light is.
+    """
+
+    def test_every_organ_icon_resolves_in_the_installed_theme(self):
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Gdk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gdk, Gtk
+
+        Adw.init()
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+
+        from shani_chronoa.gui.organs import ORGAN_ICONS
+
+        missing = [
+            f"{organ} -> {icon}"
+            for organ, (icon, _label) in sorted(ORGAN_ICONS.items())
+            if not theme.has_icon(icon)
+        ]
+        assert not missing, (
+            "organ icons that do not resolve, so those lights draw nothing: "
+            + ", ".join(missing)
+        )
+
+    def test_every_organ_in_the_body_has_an_icon(self):
+        """`ORGANS` and `ORGAN_ICONS` are two lists that must not drift.
+
+        An organ added to the body and not to the table is an organ with no
+        icon, and by the argument above that is a light that draws nothing -
+        so this is checked as a set, not as a count.
+        """
+        from shani_chronoa.gui.organs import ORGAN_ICONS
+
+        assert set(ORGANS) == set(ORGAN_ICONS), (
+            f"only in ORGANS: {sorted(set(ORGANS) - set(ORGAN_ICONS))}; "
+            f"only in ORGAN_ICONS: {sorted(set(ORGAN_ICONS) - set(ORGANS))}"
+        )
+
+    def test_the_control_icon_would_be_caught(self):
+        """A name this test is meant to reject, asserted to be absent.
+
+        Without this, a theme that somehow gained `brain-symbolic` would leave
+        the test above passing for the wrong reason, and a future edit could
+        reintroduce the typo unnoticed. The control has to fail, or it is not a
+        control.
+        """
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Gdk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gdk, Gtk
+
+        Adw.init()
+        theme = Gtk.IconTheme.get_for_display(Gdk.Display.get_default())
+        assert theme.has_icon("brain-augemnted-symbolic") is False

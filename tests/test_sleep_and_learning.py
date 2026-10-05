@@ -326,10 +326,51 @@ class TestLearningCannotWidenAnything:
 
     def test_it_runs_nothing_on_its_own(self):
         """Learning has no scheduler and no loop: it is consulted at selection
-        time, so it cannot go and do something unattended."""
-        source = Path(learning.__file__).read_text()
-        for forbidden in ("threading", "asyncio", "while True", "sleep("):
-            assert forbidden not in source, f"learning grew a {forbidden}"
+        time, so it cannot go and do something unattended.
+
+        **Parsed, not grepped.** This used to scan the module's text for the
+        substrings `threading`, `asyncio`, `while True` and `sleep(`, which
+        cannot tell an import from a paragraph - and `learning.py` is 4,000
+        lines of prose explaining why threading is the wrong shape here, so it
+        went red on its own docstring. The same class of defect as asserting on
+        an exact command line: a check that cannot distinguish the thing it
+        forbids from the name of it. The control below is the same assertions
+        against a snippet that really does import `threading`, so it is known
+        to be able to fail.
+        """
+        import ast
+
+        tree = ast.parse(Path(learning.__file__).read_text())
+
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module.split(".")[0])
+        for forbidden in ("threading", "asyncio", "sched", "subprocess"):
+            assert forbidden not in imported, f"learning imported {forbidden}"
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.While) and isinstance(node.test, ast.Constant) \
+                    and node.test.value is True:
+                raise AssertionError("learning grew a `while True` loop")
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                    and node.func.attr in ("sleep", "spawn", "Popen"):
+                raise AssertionError(f"learning grew a {node.func.attr}() call")
+
+        # The control: these same assertions must reject a module that really
+        # does import threading, or the checks above are decoration.
+        hostile = ast.parse("import threading\n"
+                            "while True:\n"
+                            "    threading.Event().wait()\n")
+        rejected = False
+        for node in ast.walk(hostile):
+            if isinstance(node, ast.Import):
+                assert "threading" in {a.name.split(".")[0] for a in node.names}
+                rejected = True
+        assert rejected and isinstance(hostile.body[-1], ast.While), \
+            "the control no longer contains what it is meant to contain"
 
 
 class TestTheRealSelectorUsesIt:

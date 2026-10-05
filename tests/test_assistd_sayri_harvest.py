@@ -162,9 +162,36 @@ def test_no_model_installed_opens_setup(monkeypatch):
     monkeypatch.setattr(local_llm, "installed", lambda: [])
     said, opened = [], []
     window = SimpleNamespace(set_orb_state=lambda s: None, set_response=said.append, set_status=lambda s: None)
-    app = SimpleNamespace(window=window, _open_setup=lambda: opened.append(1))
+    # The fake app implements the interface `_explain_no_model` actually uses.
+    # It grew a distilled-router step, and calling the real method on a stand-in
+    # that lacks the method raised `AttributeError` - which read as a product
+    # defect when it was a stale fake. A stand-in has to keep up with the
+    # interface, and this comment is here so the next method added is noticed.
+    app = SimpleNamespace(window=window, _open_setup=lambda: opened.append(1),
+                          _router_fallback=lambda text: False)
     ChronoaApplication._explain_no_model(app, "hello")
     assert opened and "no language model yet" in said[0]
+
+
+def test_a_distilled_router_carries_the_turn_before_setup_does(monkeypatch):
+    """The new middle step: no model, but a student that is sure enough."""
+    from shani_chronoa.app import ChronoaApplication
+    from shani_chronoa import distill
+    monkeypatch.setattr(local_llm, "installed", lambda: [])
+    monkeypatch.setattr(distill, "fallback", lambda text, margin=2.0: {
+        "tool": "get_datetime", "margin": 7.5, "runner_up": "get_weather",
+        "reason": "the distilled router separated this skill"})
+    said, opened, statuses = [], [], []
+    window = SimpleNamespace(set_orb_state=lambda s: None, set_response=said.append,
+                             set_status=statuses.append)
+    app = SimpleNamespace(window=window, _open_setup=lambda: opened.append(1))
+    app._router_fallback = lambda text: ChronoaApplication._router_fallback(app, text)
+    # A tool that exists and needs no arguments, so the proposal is real.
+    ChronoaApplication._explain_no_model(app, "what time is it")
+    assert not opened, "setup must not open when the router answered"
+    assert "get_datetime" in said[0]
+    assert "distilled router" in said[0]
+    assert any("distilled" in s for s in statuses)
 
 
 def test_speech_rate_and_pause_settings():

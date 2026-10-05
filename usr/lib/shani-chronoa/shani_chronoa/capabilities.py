@@ -144,7 +144,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "list_percepts": ("What Chronoa knows", "What it perceives"),
     "compute_hash": ("Files", "Checksum a file"),
     "manage_mount": ("Files", "Mount or unmount"),
-    "translate_text": ("Everyday tools", "Translate text"),
     "get_battery_status": ("Power and screen", "Battery status"),
     "set_brightness": ("Power and screen", "Screen brightness"),
     "get_volume": ("Sound", "Output volume"),
@@ -192,11 +191,34 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "do_not_disturb": ("Power and screen", "Do Not Disturb"),
     "read_document": ("Files", "Read a PDF or picture"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
-    "edit_image": ("Files", "Resize, compress or edit a picture"),
-    "generate_image": ("Files", "Make a new picture from a description, on this computer"),
-    "photo_video": ("Files", "Find faces and objects in a photo or video, add effects, or go through a video"),
-    "photos": ("Files", "Find your photos by what is in them, what is written on them, or when they were taken"),
-    "recording": ("Files", "Transcribe a recording or video, make subtitles, say who said what, or clean up noise"),
+    # ── the optional extras get their own pages ─────────────────────────────
+    #
+    # All five of these were filed under "Files", so a person who spent 2.0 GB on
+    # SD-Turbo found "make a picture" in *Files*, next to "list a directory" -
+    # and three engines had no page at all. The setup wizard has had one page per
+    # extra since it was split up; this is the other half of that, so the two
+    # places a person can look now agree with each other.
+    #
+    # Verified against what actually runs, not against what the wizard offers:
+    # `imagegen` is used by `skills/generate_image.py`, `local_vision` by
+    # `skills/photo_video.py`, and both `sounds` and `speakers` by
+    # `skills/recording.py`.
+    #
+    # **Memory was nearly wrong here.** A first pass concluded that `local_embed`
+    # was "installed by the wizard and read by nothing at all", from grepping for
+    # module names and not finding one. It is read: `conversation_store.search()`
+    # embeds the query and the stored turns through it, and the `conversations`
+    # skill exposes that as `action: search`. The mistake was worth writing down,
+    # because "grep found no caller" is not "nothing calls it" - the caller was
+    # two indirection away, in a module named after the *store* rather than the
+    # *embedding*, behind a skill whose tool name (`conversations`) shares no
+    # word with either.
+    "edit_image": ("Imagine", "Resize, compress or edit a picture"),
+    "generate_image": ("Imagine", "Make a new picture from a description, on this computer"),
+    "photo_video": ("Eyes", "Find faces and objects in a photo or video, add effects, or go through a video"),
+    "photos": ("Photos and video", "Find your photos by what is in them, what is written on them, or when they were taken"),
+    "recording": ("Sounds and recordings", "What a sound is, or who said what in a recording"),
+    "translate_text": ("Languages", "Translate text"),
     "encode_text": ("Everyday tools", "Encode or decode text"),
     "convert_color": ("Everyday tools", "Colour codes"),
     "find_emoji": ("Everyday tools", "Find an emoji"),
@@ -270,6 +292,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Next to `check_internet`, which it does not overlap: that one walks a
     # fixed ladder and takes no arguments, so it cannot be pointed at a host.
     "trace_route": ("System", "Trace the network path to a host"),
+    # The machine-asks-what-it-can-do layer. Grouped with the other System
+    # entries because that is what it answers: what this machine offers, and
+    # therefore which path to a goal is actually open here.
+    "machine_capabilities": ("System", "What this machine can actually do"),
     # The lab-network builder, grouped with the other System entries. All four
     # share one consent key, so a user cannot allow `vpc_status` - which only
     # reports reachability - while refusing `vpc_create`, which builds
@@ -312,6 +338,11 @@ GROUP_ORDER: tuple[str, ...] = (
     "Power and screen",
     "Clipboard",
     "Screen",
+    "Eyes",
+    "Photos and video",
+    "Imagine",
+    "Sounds and recordings",
+    "Languages",
     "Apps",
     "Files",
     "Code and git",
@@ -359,7 +390,7 @@ GATE_NAMES: dict[str, str] = {
     "calendar-sense-enabled": "Let Chronoa act before calendar events",
     "phone-control-enabled": "Let Chronoa use your paired phone",
     "phone-sense-enabled": "Let Chronoa act on your phone connecting",
-    "sound-sense-enabled": "Let Chronoa listen for sounds like the doorbell",
+    "heard-sound-sense-enabled": "Let Chronoa listen for sounds like the doorbell",
     "radio-control-enabled": "Let Chronoa switch airplane mode",
     "appearance-control-enabled": "Let Chronoa change the desktop look",
     "timezone-control-enabled": "Let Chronoa change the timezone",

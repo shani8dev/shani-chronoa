@@ -51,6 +51,34 @@ the machine unless you switch it twice on purpose.
 - **Privacy-first** — everything runs locally by default. Nothing leaves the
   machine unless you turn privacy mode off *and* separately enable
   `cloud-fallback-enabled`; two switches, so it never activates from one.
+- **Learning from outcomes** — every skill call is recorded with the verdict
+  its post-condition produced, and two models are fitted from that record.
+  Both are deliberately conservative about what they are allowed to claim, and
+  both numbers below were measured on a real machine's own log rather than
+  argued:
+  - **A routing student, distilled from a teacher.** `distill.py` asks the
+    configured model which skill answers a request, keeps only the answers a
+    human already agreed with, and fits a small router on those. Against
+    llama.cpp/Qwen3-0.6B on a booted ShaniOS slot: the teacher agreed with
+    the human label on **47 of 54 requests (87%)**, and the student scored
+    **62% on held-out requests against a 12% majority baseline**. The student
+    can only *reorder and narrow* skills that were already on offer and
+    checked the whitelist at call time; it cannot add one, and it cannot run
+    one. Run it yourself with `tools/distill_run.py`.
+  - **An outcome model that predicts what happened.** It is a flag, not a
+    predictor: on 5-fold cross-validation over feature vectors it finds
+    calls that will verify **33× more often than chance on recall and 5.9×
+    on precision**, and finds **nothing at all** in failures. It will say so,
+    and the report prints both lifts next to the accuracy, because a 94%
+    accuracy on this data is what a model that learned nothing also scores.
+
+  The refusals are part of the behaviour, not gaps in it. Distilling from the
+  bundled `tools/eval_cases.json` **declines to produce a student** and says
+  why: that file asks one request per skill, so any held-out request names a
+  skill the training half never saw. The outcome model will not write a file
+  unless it finds a verdict above chance on both recall *and* precision —
+  flagging everything as the 3% class scores 33× on recall alone and is
+  worthless.
 
 ## Senses, percepts and consent
 
@@ -236,10 +264,11 @@ and is still recorded.
 
 ## Architecture
 
-There is no daemon. `app.py` defines `ChronoaApplication(Gtk.Application)`,
-so the UI, the assistant and its tool loop, and the senses scheduler are all
-one process with one main loop. Anything that needs another process is an
-external engine, and each of those is optional:
+There is no daemon. `app/` is a package whose `application.py` defines
+`ChronoaApplication(Gtk.Application)`, so the UI, the assistant and its tool
+loop, and the senses scheduler are all one process with one main loop.
+Anything that needs another process is an external engine, and each of those is
+optional:
 
 ┌──────────────────────────────────────────────────────────┐
 │  shani-chronoa — one GTK4 process, one main loop         │
@@ -248,21 +277,26 @@ external engine, and each of those is optional:
 │    GTK4 UI   ·   assistant + tool loop  ·   senses       │
 │    settings  ·   consent checks         scheduler        │
 │    transcript ·  tool dispatch           percepts        │
+│    distilled router (prior only) ·  outcome model (flag) │
 │                                                          │
 └───────────────────────┬──────────────────────────────────┘
                           │ subprocess IPC — every skill is a child
                           │ process, so a bad one cannot take the
                           │ assistant down with it
-       ┌──────────────────┬──────────────────┐
+       ┌──────────────────┴──────────────────┐
                           ▼                  ▼
-           whisper.cpp          Ollama            Piper TTS
-              (STT)              (LLM)              (TTS)
+           whisper.cpp        llama.cpp / Ollama     Piper TTS
+              (STT)              (LLM)                  (TTS)
 ```
 
-A turn is audio → whisper.cpp transcribes → Ollama generates a response
-(possibly calling skills) → Piper speaks the reply. The MCP server is a
-*second entry point to the same skill set*, started on demand by
-`shani-chronoa-mcp`; it is not a service the running app depends on.
+A turn is audio → whisper.cpp transcribes → the local LLM generates a response
+(possibly calling skills) → Piper speaks the reply. `llama.cpp` and Ollama are
+interchangeable behind one `chat_message()` interface, and a cloud provider
+(Anthropic, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, and keyless
+gateways) is reachable behind the same interface **only** when privacy mode is
+off *and* `cloud-fallback-enabled` is on. The MCP server is a *second entry
+point to the same skill set*, started on demand by `shani-chronoa-mcp`; it is
+not a service the running app depends on.
 
 ## Confinement
 
@@ -464,7 +498,43 @@ package tree fails `test_no_pycache_in_packaged_payload` on the *next* run,
 and it is the previous run that put it there. If a packaging test goes red,
 check whether the bytecode is yours before assuming the repo is broken.
 
-Current state: **2968 passed, 8 skipped**, and no `.pyc` in the payload.
+Current state: **4911 passed, 36 skipped, 11 failed** (2026-10-04). All 11 are
+outside the learning and routing layers: four read a `PKGBUILD` path that lives
+in `shani-pkgbuilds/` rather than this repo, two assert dependencies the
+in-repo manifest is not the source of, one reads `solve_math.sp` after the
+`sympy`→`symengine` swap, two are timer notifications, and two are environment
+(`mtr` needs privileges the dev box lacks, and the GTK clipboard is empty in a
+headless session). Numbers here are from a real run — if you change one, run it.
+
+## Verifying the learning layers for real
+
+The unit suite cannot answer "does it learn", so two things exist that can:
+
+```bash
+# Distil whatever model is configured and print what was learned.
+# No model? It says so, and says why, rather than training from nothing.
+XDG_STATE_HOME=$(mktemp -d) python3 tools/distill_run.py --fresh
+
+# The real thing, on a booted ShaniOS slot against a real local model.
+# Needs --repo-pkg=llama-cpp and the model cache bound at /mnt/llm-models;
+# slot-tests/chronoa-distill.sh in shani-testbed prints the invocation.
+```
+
+The second one is the only place the distillation question can be answered,
+because a stubbed teacher cannot. It also runs the *negative* control — the
+one-request-per-skill corpus — and requires that corpus to be **refused**, so a
+gate that can no longer say no shows up as a failure rather than as a pass.
+
+For the outcome model, the numbers are printed rather than asserted:
+
+```bash
+PYTHONPATH=usr/lib/shani-chronoa python3 -c \
+  "from shani_chronoa import learning; print(learning.render_outcome(learning.train_and_report()))"
+```
+
+It reports accuracy *and* each verdict's recall lift and precision lift against
+its own base rate, because the majority class is 94% and a model that learned
+nothing scores 94%.
 
 ## Verification
 

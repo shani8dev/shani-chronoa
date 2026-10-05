@@ -35,4 +35,4 @@ def _run(arguments: dict, today: "date | None" = None) -> str:
     return text
 
 
-SKILLS = [Skill(name="calendar_month", schema=_SCHEMA, run=lambda a: _run(a))]
+SKILLS = [Skill(name="calendar_month", schema=_SCHEMA, run=_run)]

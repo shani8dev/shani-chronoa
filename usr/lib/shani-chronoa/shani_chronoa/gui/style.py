@@ -165,6 +165,14 @@ class StyleMixin:
             box-shadow: 0 0 22px rgba(34,197,94,0.55);
             animation: chronoa-listen 1.4s ease-in-out infinite;
         }
+        /* Waiting for the model before transcribing. Listening's green with the
+           slower pulse, because the microphone is open and has heard something -
+           what is missing is not the mic but the accelerator. */
+        .chronoa-orb.state-queued {
+            background-color: #14b8a6;
+            box-shadow: 0 0 18px rgba(20,184,166,0.4);
+            animation: chronoa-listen 2.6s ease-in-out infinite;
+        }
         .chronoa-orb.state-thinking {
             background-color: #f59e0b;
             box-shadow: 0 0 18px rgba(245,158,11,0.5);
@@ -199,6 +207,7 @@ class StyleMixin:
         }
         .chronoa-halo.halo-idle { border-color: alpha(@theme_fg_color, 0.18); }
         .chronoa-halo.halo-listening { border-color: rgba(34,197,94,0.65); }
+        .chronoa-halo.halo-queued { border-color: #14b8a6; }
         .chronoa-halo.halo-thinking { border-color: rgba(245,158,11,0.6); }
         .chronoa-halo.halo-speaking { border-color: rgba(59,130,246,0.6); }
         .chronoa-halo.halo-interrupting { border-color: rgba(168,85,247,0.7); }
@@ -213,6 +222,10 @@ class StyleMixin:
         .reduce-motion .chronoa-orb.state-listening {
             animation: none;
             box-shadow: 0 0 20px rgba(34,197,94,0.6);
+        }
+        .reduce-motion .chronoa-orb.state-queued {
+            animation: none;
+            box-shadow: 0 0 16px rgba(20,184,166,0.5);
         }
         .cajita-input {
             color: @theme_fg_color;
@@ -300,6 +313,92 @@ class StyleMixin:
             color: alpha(@theme_fg_color, 0.72);
             font-size: 12px;
         }
+        /* The open panel, in the sidebar.
+           `SidebarPage.select()` stamps `selected` on the row that is open and
+           removes it from every other. Until this rule existed the class was set
+           by code that nothing read, so the sidebar stopped saying where you
+           were - which is the exact regression `select()`'s own docstring says
+           it was written to fix, and it was invisible for the same reason: the
+           method ran, and marking nothing looks identical to marking something
+           that is styled like every other row.
+           The accent left edge is the part that survives a long list: the row's
+           own background is easy to miss when the panel has scrolled the list. */
+        .sidebar-row.selected {
+            background-color: alpha(@accent_bg_color, 0.16);
+            box-shadow: inset 3px 0 0 0 @accent_bg_color;
+        }
+
+        /* A diagnostics finding, by verdict. The three-word vocabulary the
+           diagnostics panel already uses - working, not working, could not
+           determine - was stamped onto each row as a CSS class and read by
+           nothing, so the panel's entire health language was body-text grey.
+           These are the orb's own colours, because it is the same event: a thing
+           that is not working is what the error state is for. */
+        .diagnostics-row-working { color: rgba(34,197,94,0.9); }
+        .diagnostics-row-not-working { color: #ef4444; }
+        .diagnostics-row-could-not-determine { color: rgba(245,158,11,0.95); }
+
+        /* A panel's own health, on the row that says it. The colours are the
+           diagnostics rows' three, reused rather than chosen again, so the app
+           has one visual language for health: green means working, red means
+           not working, amber means the panel could not tell.
+
+           Scoped to `.status-row` and to `.status-dot`/`.status-word` rather
+           than to the bare state names on purpose, and this was found by
+           looking at a render rather than by reading the CSS: the state class is
+           applied to the row as well as to the dot and the word, so a bare
+           `.status-attention { color: ... }` inherits into every descendant and
+           turned the entire summary sentence red because the dot beside it was
+           red. Only the dot and the one word carry the colour; the explanation
+           stays body text. */
+        .status-row.status-ok .status-dot,
+        .status-row.status-ok .status-word { color: rgba(34,197,94,0.9); }
+        .status-row.status-attention .status-dot,
+        .status-row.status-attention .status-word { color: #ef4444; }
+        .status-row.status-unknown .status-dot,
+        .status-row.status-unknown .status-word { color: rgba(245,158,11,0.95); }
+
+        /* A sidebar row's health dot. The state class is applied to the dot
+           itself rather than to a `.status-row` ancestor - a sidebar row is not
+           a status row - so the colours are named again here, from the same
+           three values, rather than reaching for a selector that cannot match. */
+        .status-dot.status-ok { color: rgba(34,197,94,0.9); }
+        .status-dot.status-attention { color: #ef4444; }
+        .status-dot.status-unknown { color: rgba(245,158,11,0.95); }
+
+        /* The dot. A round swatch rather than a glyph, because a glyph has to
+           come from the icon theme and an icon theme is free not to have it -
+           the whole class of bug where a missing name renders as an empty box.
+           10px, centred vertically against the row's text.
+
+           `currentColor` is the dot's own colour, resolved from the state rule
+           above; `background-color` takes it as a paint, so the label's text
+           colour is never what paints the circle. */
+        .status-dot {
+            background-color: currentColor;
+            border-radius: 5px;
+            min-width: 10px;
+            min-height: 10px;
+        }
+
+        /* The word. Fixed weight, so a column of panels can be read down its
+           left edge instead of each sentence being read in full. */
+        .status-word { font-weight: 600; }
+
+        /* Tabular sense output. The key column is right-aligned so the values
+           form a single edge; the value column takes the rest, because a long
+           path or a `df` row will not fit on one line whatever else is done. */
+        .key-value-row { padding: 1px 0; }
+        .key-value-key {
+            font-family: monospace;
+            font-size: 12px;
+            opacity: 0.75;
+        }
+        .key-value-text {
+            font-family: monospace;
+            font-size: 12px;
+        }
+
         /* The gate line is the whole reason this window exists, so it is the
            only coloured text in it: green when the skill is usable, amber when
            it will silently do nothing. */

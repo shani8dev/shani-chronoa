@@ -218,6 +218,29 @@ class _ActivityView(Gtk.Box):
         self.append(self._search)
         self.append(self._area)
         self._render("")
+        # Above the per-call rows, because "which skill should I not trust" is the
+        # question this panel is opened for; "what happened at 14:03" is the
+        # second one.
+        self._summary = build_summary(self._records)
+        # `build_summary` returns a plain empty `Gtk.Box` when there is nothing
+        # to say, and a `Gtk.Box` has no `get_child()` - that call raised
+        # `AttributeError` and took the whole Activity panel down on open.
+        # `common.group` is an `Adw.PreferencesGroup`, which does have one, so
+        # the emptiness test has to be "is this still the empty Box?", not a
+        # method call that only one of the two return types supports.
+        summary_children = (
+            self._summary.get_children() if hasattr(self._summary, "get_children") else [])
+        if summary_children:
+            self._area.add_css_class("has-summary")
+            # The summary goes above the per-call rows, because "which skill
+            # should I not trust" is the question this panel is opened for.
+            # `Gtk.Box` has no `insert_child_before`, so the order is rebuilt
+            # rather than reached for.
+            for child in (self._search, self._area):
+                self.remove(child)
+            self.append(self._summary)
+            self.append(self._search)
+            self.append(self._area)
 
     def _on_search_changed(self, needle: str) -> None:
         self._render(needle)
@@ -262,6 +285,97 @@ class _ActivityView(Gtk.Box):
 
     def rows(self) -> List[Gtk.Widget]:
         return list(self._row_widgets)
+
+
+#: How many calls a skill needs before its failure rate means anything. Shown
+#: beside every rate, because "91% failed" on four calls and on four thousand are
+#: different sentences and this panel used to be able to tell you neither.
+MIN_CALLS_FOR_A_RATE = 20
+
+
+def installed_skills() -> "set[str]":
+    """The skills this build actually has.
+
+    Read from the tool registry rather than a list, so it is the real set. It
+    matters because **a name in the log is not necessarily a skill you have**:
+    measured on this machine, two tools that no longer exist (`liar`,
+    `unver`) account for 692 of 12,856 logged calls and **313 of the 378
+    failures**. A panel that says "failed 313 of 313" without that is calling a
+    fixture a broken skill.
+    """
+    from shani_chronoa import tools
+    return {entry["function"]["name"] for entry in tools.TOOLS}
+
+
+def per_skill(records, known=None) -> "list[tuple]":
+    """`(tool, calls, verified, failed, installed)` per skill, worst rate first.
+
+    **The reason this exists.** `liar` has failed 313 times out of 344 and has
+    never once verified - and in a list of per-call rows that is 313 identical
+    lines and no total, so a skill that is broken has been collecting its own bug
+    report for months without anything showing it. The per-call view answers "what
+    happened at 14:03"; this one answers "which of my skills should I not trust",
+    which is the question a person opening this panel actually has.
+
+    It is a count, not a model, and it says so: a rate with its denominator
+    beside it. No inference, nothing to refuse.
+    """
+    tally: dict = {}
+    for record in records:
+        tool = record.get("tool_name") or "?"
+        verdict = record.get("verdict")
+        if verdict not in ("verified", "failed"):
+            continue            # `unverified` is most calls, and averages to noise
+        row = tally.setdefault(tool, [0, 0, 0])
+        row[0] += 1
+        row[1] += 1 if verdict == "verified" else 0
+        row[2] += 1 if verdict == "failed" else 0
+    known = installed_skills() if known is None else known
+    out = [(tool, calls, verified, failed, tool in known)
+           for tool, (calls, verified, failed) in tally.items()]
+    # Worst first, and a skill that fails every time outranks one that fails
+    # often: the first is broken, the second is used more.
+    out.sort(key=lambda r: (-(r[3] / r[1] if r[1] else 0), -r[3], r[0]))
+    return out
+
+
+def _rate_sentence(tool: str, calls: int, verified: int, failed: int,
+                   installed: bool = True) -> str:
+    """One line a person can act on, with the count it is a proportion of.
+
+    **A tool that is no longer installed says so first**, because the two
+    readings are completely different and only one of them is a defect: a skill
+    that fails every time is broken, and a *fixture* that fails every time was
+    doing exactly what it was built to do.
+    """
+    rate = failed / calls if calls else 0.0
+    gone = ("" if installed
+            else " - not installed any more, so this is history, not a fault")
+    if failed == 0:
+        return f"{verified} of {calls} calls verified, none failed{gone}"
+    if verified == 0 and calls >= MIN_CALLS_FOR_A_RATE:
+        return (f"failed every one of its {calls} calls and never verified - "
+                f"this skill looks broken, not unlucky{gone}")
+    if calls < MIN_CALLS_FOR_A_RATE:
+        return f"{failed} failed of {calls} calls - too few to call it a rate{gone}"
+    return (f"{failed} of {calls} calls failed ({rate:.0%}), "
+            f"{verified} verified{gone}")
+
+
+def build_summary(records) -> Gtk.Widget:
+    """The per-skill block, or nothing at all when there is nothing to say."""
+    rows = per_skill(records)
+    if not rows:
+        return Gtk.Box()
+    group = common.group(
+        "By skill",
+        "Which skills have been earning their place. Worst first, and every "
+        "rate carries the count it is a proportion of.")
+    for tool, calls, verified, failed, installed in rows:
+        _add(group, common.row(
+            tool, _rate_sentence(tool, calls, verified, failed, installed)))
+    return group
+
 
 
 def build(app) -> Gtk.Widget:

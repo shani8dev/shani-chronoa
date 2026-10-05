@@ -231,16 +231,34 @@ class TestModuleContract:
         Written as substrings rather than an exact list: this is a floor, not a
         ceiling, and a panel that grows a row nobody asked for is a different
         bug than one missing a subsystem.
+
+        `"solve_math"` rather than `"SymPy"`, because the engine is no longer SymPy:
+        `skills/solve_math.py` runs on `symengine` for the exact algebra and `bc`
+        for the exact rational arithmetic, and the row was renamed to say so when
+        the probe stopped asking about a module that no longer exists. A floor
+        written against the old name would fail on a panel that had been corrected
+        - and would have passed while the panel was still wrong about the engine.
         """
         wanted = (
             "Local model server", "Speech in", "Speech out",
             "Microphone", "Audio path",
             "Screen capture", "Screenshot portal", "Global shortcut portal",
-            "Search provider", "SymPy", "ffmpeg", "ImageMagick", "poppler",
+            "Search provider", "solve_math", "ffmpeg", "ImageMagick", "poppler",
             "at-spi", "vision server", "embed server", "imagine server",
         )
         for fragment in wanted:
             assert any(fragment in title for title in diagnostics.ROW_TITLES), fragment
+
+    def test_no_row_names_an_engine_that_is_not_installed(self):
+        """The maths row must name what the skill actually refuses without.
+
+        SymPy, numpy and symengine are all absent or present independently, and
+        a row that says "SymPy is installed" while the skill runs on symengine
+        describes a machine that does not exist.
+        """
+        titles = "\n".join(diagnostics.ROW_TITLES)
+        assert "SymPy" not in titles, "a row still promises SymPy"
+        assert "symengine" in titles, "the row should name the engine in use"
 
 
 # -- building ----------------------------------------------------------------

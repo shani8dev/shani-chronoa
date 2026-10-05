@@ -153,9 +153,13 @@ class PrivacyPage:
             ("Let Chronoa act on your phone connecting", "phone-sense-enabled",
              "Off: an automatic rule cannot trigger on your phone connecting or running low.",
              "a phone trigger is refused while this is off"),
-            ("Let Chronoa listen for sounds like the doorbell", "sound-sense-enabled",
-             "Off: an automatic rule cannot listen for a sound, and Chronoa will not listen when asked what it "
-             "hears. On, a rule records a few seconds at a time and keeps only what was recognised.",
+            ("Let Chronoa name a sound when you ask", "heard-sound-sense-enabled",
+             "Off: Chronoa will not listen when asked what it hears. On, it records a few seconds at a time, "
+             "names what it heard and keeps none of the audio.",
+             "the heard-sound sense is refused while this is off"),
+            ("Let an automatic rule listen for sounds like the doorbell", "sound-sense-enabled",
+             "Off: an automatic rule cannot trigger on a sound. On, a rule records a few seconds at a time and "
+             "keeps only what was recognised.",
              "a sound trigger is refused while this is off"),
             ("Let Chronoa read your calendar", "calendar-read-enabled",
              "Off: Chronoa cannot tell you what is on your calendar.",

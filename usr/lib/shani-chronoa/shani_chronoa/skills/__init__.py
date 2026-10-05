@@ -127,6 +127,23 @@ def _register(module: object, source: str, tools: list, handlers: dict) -> None:
         if not callable(skill.run):
             logger.warning(f"Skipping malformed skill entry in '{source}': run for '{name}' is not callable")
             continue
+        # A non-local skill is executed in a sandboxed child process built by
+        # interpolating `handler.__name__` into an import statement, so the name
+        # has to be a real identifier. `run=lambda a: _run(a)` passes
+        # `callable` and then generates `from module import <lambda>`, which is
+        # a SyntaxError - so the skill was advertised to the model and to every
+        # MCP client, and failed on every single call with that traceback as its
+        # result. Three skills shipped that way for as long as the tests called
+        # the private `_run` directly instead of the registered handler.
+        # Refusing the registration makes it a warning at load time instead.
+        handler_name = getattr(skill.run, "__name__", "")
+        if not handler_name.isidentifier():
+            logger.warning(
+                f"Skipping skill '{name}' in '{source}': run must be a named function, "
+                f"not {handler_name!r} - a non-local skill is dispatched by importing "
+                f"its handler by name, so a lambda or a partial cannot be called"
+            )
+            continue
         if name in handlers:
             logger.warning(
                 f"Skill '{name}' from '{source}' overrides an existing skill of the same name; "

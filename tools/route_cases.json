@@ -1,0 +1,67 @@
+{
+ "note": "A routing corpus, which tools/eval_cases.json cannot be. That file asks one request per skill (57 requests, 53 skills) because its job is to prove the skills exist and that the harness routes each one; a router needs the same skill asked for in several ways, because otherwise every held-out request names a skill the training half never saw and no student can beat 'always answer with the commonest skill'. Every label here was read off the live schema in shani_chronoa.tools.TOOLS, and every skill in it declares no required parameter, so a distilled router may also run one without inventing arguments. tests/test_distill.py refuses to train on data of the eval_cases shape and says why.",
+ "cases": [
+  {"say": "what time is it", "expect": [{"tool": "get_datetime"}]},
+  {"say": "what is the time now", "expect": [{"tool": "get_datetime"}]},
+  {"say": "tell me the current time", "expect": [{"tool": "get_datetime"}]},
+  {"say": "what is today's date and time", "expect": [{"tool": "get_datetime"}]},
+  {"say": "what's the clock saying", "expect": [{"tool": "get_datetime"}]},
+  {"say": "give me the date and time please", "expect": [{"tool": "get_datetime"}]},
+
+  {"say": "what is my battery level", "expect": [{"tool": "get_battery_status"}]},
+  {"say": "how much battery is left", "expect": [{"tool": "get_battery_status"}]},
+  {"say": "check my battery", "expect": [{"tool": "get_battery_status"}]},
+  {"say": "is my battery charging", "expect": [{"tool": "get_battery_status"}]},
+  {"say": "battery percentage please", "expect": [{"tool": "get_battery_status"}]},
+  {"say": "how much charge does the battery have", "expect": [{"tool": "get_battery_status"}]},
+
+  {"say": "what services are running", "expect": [{"tool": "list_services"}]},
+  {"say": "show me the system services", "expect": [{"tool": "list_services"}]},
+  {"say": "which services are active", "expect": [{"tool": "list_services"}]},
+  {"say": "list the systemd services", "expect": [{"tool": "list_services"}]},
+  {"say": "are any services enabled", "expect": [{"tool": "list_services"}]},
+  {"say": "give me the list of services", "expect": [{"tool": "list_services"}]},
+
+  {"say": "what is the volume", "expect": [{"tool": "get_volume"}]},
+  {"say": "what volume am I at", "expect": [{"tool": "get_volume"}]},
+  {"say": "is the sound muted", "expect": [{"tool": "get_volume"}]},
+  {"say": "how loud is it right now", "expect": [{"tool": "get_volume"}]},
+  {"say": "report the current volume level", "expect": [{"tool": "get_volume"}]},
+  {"say": "am I muted or not", "expect": [{"tool": "get_volume"}]},
+
+  {"say": "what is the screen brightness", "expect": [{"tool": "set_brightness"}]},
+  {"say": "how bright is the screen", "expect": [{"tool": "set_brightness"}]},
+  {"say": "report the brightness level", "expect": [{"tool": "set_brightness"}]},
+  {"say": "what brightness is it at", "expect": [{"tool": "set_brightness"}]},
+  {"say": "check the backlight level", "expect": [{"tool": "set_brightness"}]},
+  {"say": "how much light is the screen giving", "expect": [{"tool": "set_brightness"}]},
+
+  {"say": "what wifi networks are there", "expect": [{"tool": "list_wifi_networks"}]},
+  {"say": "scan for wifi", "expect": [{"tool": "list_wifi_networks"}]},
+  {"say": "list the wireless networks in range", "expect": [{"tool": "list_wifi_networks"}]},
+  {"say": "which wifi can I see", "expect": [{"tool": "list_wifi_networks"}]},
+  {"say": "show me the wifi networks", "expect": [{"tool": "list_wifi_networks"}]},
+  {"say": "what wireless networks are nearby", "expect": [{"tool": "list_wifi_networks"}]},
+
+  {"say": "what processes are running", "expect": [{"tool": "list_processes"}]},
+  {"say": "show me the running processes", "expect": [{"tool": "list_processes"}]},
+  {"say": "which programs are running", "expect": [{"tool": "list_processes"}]},
+  {"say": "list the processes", "expect": [{"tool": "list_processes"}]},
+  {"say": "give me the process list", "expect": [{"tool": "list_processes"}]},
+  {"say": "what is running on this machine", "expect": [{"tool": "list_processes"}]},
+
+  {"say": "tell me about this machine", "expect": [{"tool": "system_info"}]},
+  {"say": "what system is this", "expect": [{"tool": "system_info"}]},
+  {"say": "describe the computer", "expect": [{"tool": "system_info"}]},
+  {"say": "what distribution and kernel is this", "expect": [{"tool": "system_info"}]},
+  {"say": "give me the system information", "expect": [{"tool": "system_info"}]},
+  {"say": "how long has this machine been up", "expect": [{"tool": "system_info"}]},
+
+  {"say": "what is the weather", "expect": [{"tool": "get_weather"}]},
+  {"say": "is it going to rain today", "expect": [{"tool": "get_weather"}]},
+  {"say": "how warm is it outside", "expect": [{"tool": "get_weather"}]},
+  {"say": "give me the forecast", "expect": [{"tool": "get_weather"}]},
+  {"say": "what is the temperature", "expect": [{"tool": "get_weather"}]},
+  {"say": "will I need an umbrella", "expect": [{"tool": "get_weather"}]}
+ ]
+}

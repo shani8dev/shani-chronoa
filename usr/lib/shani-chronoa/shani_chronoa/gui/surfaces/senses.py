@@ -358,11 +358,36 @@ def _note(text: str) -> Gtk.Label:
     return label
 
 
-def _summary(granted: int, total: int) -> Gtk.Label:
-    """The count line above the rows."""
-    return _note(
-        f"{granted} of {total} senses have consent granted. "
-        "Rows with a granted permission are first."
+def _summary(granted: int, total: int) -> Gtk.Widget:
+    """The line above the rows: what this panel is, in a word and a count.
+
+    A panel that lists sixteen permissions and renders every one of them the
+    same shade of grey cannot be scanned - a person has to read all sixteen
+    subtitles to learn that nothing is switched on. So the state comes first,
+    in the one place the eye lands, and the sentence becomes the detail under
+    it rather than the only thing there was.
+
+    "Ready" here means *every sense has consent*, not *everything works*: this
+    panel's question is permission, and the answer to "can this read my
+    calendar" is a separate panel with its own answer. Saying so here is the
+    honest version of a green light.
+    """
+    if total == 0:
+        return common.status_row(
+            common.STATUS_UNKNOWN,
+            "No senses are registered",
+            "there is nothing to grant, which is not the same as nothing granted",
+        )
+    if granted == total:
+        return common.status_row(
+            common.STATUS_OK,
+            f"All {total} senses have consent granted",
+            "a sense with no permission is never invoked at all",
+        )
+    return common.status_row(
+        common.STATUS_ATTENTION,
+        f"{granted} of {total} senses have consent granted",
+        "rows with a granted permission are first; the rest are never invoked",
     )
 
 
@@ -380,6 +405,10 @@ def build(app) -> Gtk.Widget:
 
     body = _margined(common.page_body())
     registry = _registry()
+    # Holds this panel's verdict for `status()` below. A one-slot list rather
+    # than a nonlocal, because the closure is attached to the page after the
+    # body is built and the two must not be able to disagree.
+    _status_state: List[Optional[str]] = [None]
     if registry is None:
         body.append(_margined(common.empty_state(
             ICON,
@@ -397,7 +426,12 @@ def build(app) -> Gtk.Widget:
         )))
     else:
         entries = _ordered(registry, config)
-        body.append(_summary(sum(1 for entry in entries if entry[0]), len(entries)))
+        granted = sum(1 for entry in entries if entry[0])
+        body.append(_summary(granted, len(entries)))
+        _status_state[0] = (
+            common.STATUS_OK if granted == len(entries) and entries
+            else common.STATUS_ATTENTION
+        )
         group = common.group("Senses", "One switch per sense, granted first.")
         for _granted, name, sense, consent in entries:
             row = _sense_row(name, sense, consent)
@@ -409,6 +443,17 @@ def build(app) -> Gtk.Widget:
 
     set_content(common.scrolled(body))
     page._sense_rows = rows
+
+    # What this panel says about itself, for the sidebar's health dot. Computed
+    # from the same `entries` the rows were built from, so the dot cannot
+    # disagree with the panel - there is no second count to fall out of date.
+    def status() -> str:
+        live = _status_state[0]
+        if live is None:
+            return common.STATUS_UNKNOWN
+        return live
+
+    page.status = status
     return page
 
 

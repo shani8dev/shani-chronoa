@@ -37,6 +37,17 @@ from .organs import OrganPanel, OrganStrip, ORGAN_IDLE_CSS
 
 logger = logging.getLogger(__name__)
 
+#: The tag on the conversation page inside the content `Adw.NavigationView`.
+#:
+#: It exists because the way back to the conversation is `pop_to_tag`, and
+#: `pop_to_tag` needs a tag. `Adw.NavigationView` has no `set_visible_page` -
+#: measured on the installed libadwaita 1.5, `hasattr` is False - and the code
+#: that went back to the chat called it anyway, so every click on the
+#: "Conversation" row raised `AttributeError` and did nothing at all. From the
+#: outside that reads as a dead row: the sidebar's own chat entry, on the state
+#: the window opens in, silently broken, and with it every panel's back arrow.
+CHAT_TAG = "chronoa-chat"
+
 
 def _broken_page(name: str, exc: BaseException) -> "Adw.NavigationPage":
     """The page a panel shows when it could not be built.
@@ -63,6 +74,37 @@ def _broken_page(name: str, exc: BaseException) -> "Adw.NavigationPage":
     if common.adw_ready():
         return Adw.NavigationPage(child=body, title=name)
     return body
+
+
+def _panel_status(page: object) -> "str | None":
+    """What a panel says about itself, or None if it has nothing to say.
+
+    A panel may expose `status()` returning one of `common.STATUS_*`. This is
+    deliberately duck-typed and deliberately optional: twenty panels build
+    through several different shapes (`Adw.NavigationPage`, `Gtk.Box`, and the
+    ones that forward attributes through a loop), and requiring every one of
+    them to answer would be a large change for a cosmetic gain. A panel that
+    answers gets a dot; a panel that does not simply keeps none.
+
+    The one thing that *is* checked is the vocabulary. A panel returning a fourth
+    word would leave the dot uncoloured - the exact failure the closed vocabulary
+    exists to prevent - so it is treated as no answer at all rather than passed
+    through to a grey square. A `status()` that raises is likewise no answer: a
+    sidebar dot is not worth taking the window down for.
+    """
+    from shani_chronoa.gui.surfaces import common
+
+    status = getattr(page, "status", None)
+    if not callable(status):
+        return None
+    try:
+        answer = status()
+    except Exception:
+        logger.warning("A panel's status() raised", exc_info=True)
+        return None
+    if answer not in common.STATUS_CLASSES:
+        return None
+    return answer
 
 
 
@@ -240,7 +282,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         toolbar = Adw.ToolbarView()
         toolbar.add_top_bar(header_bar_holder)
         toolbar.set_content(self._toasts)
-        self._content_view.add(Adw.NavigationPage(child=toolbar, title="Conversation"))
+        self._content_view.add(Adw.NavigationPage(
+            child=toolbar, title="Conversation", tag=CHAT_TAG))
         self.set_content(self._split)
 
         # Header: an Adw.HeaderBar, not a row of widgets in a box.
@@ -259,6 +302,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._sidebar_toggle.update_property(
             [Gtk.AccessibleProperty.LABEL], ["Show or hide the panels"])
         self._sidebar_toggle.connect("toggled", self._on_sidebar_toggled)
+        # ...and the other direction: the split view collapsing on its own has to
+        # move the button, or the button lies about what is on screen.
+        self._split.connect("notify::collapsed", self._on_split_collapsed)
         header_bar.pack_start(self._sidebar_toggle)
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header = Gtk.Label(label="Shani Chronoa")
@@ -288,7 +334,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         quick_button.set_action_name("app.quick-ask")
 
         self._browser_button = Gtk.Button()
-        self._browser_button.set_icon_name("emblem-web-symbolic")
+        # `emblem-web-symbolic` is not in the installed theme - measured
+        # `has_icon` False - so this button showed a missing-glyph box on a
+        # machine where the feature worked. `web-browser-symbolic` exists.
+        self._browser_button.set_icon_name("web-browser-symbolic")
         self._browser_button.add_css_class("flat")
         self._browser_button.set_valign(Gtk.Align.CENTER)
         self._browser_button.set_tooltip_text("Browse the web (Ctrl+Shift+U)")
@@ -314,6 +363,25 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         settings_button.set_tooltip_text("Settings")
         settings_button.set_action_name("app.open-settings")
 
+        # Setup: the wizard that installs the model, the ears and the voice.
+        #
+        # `app.setup` was registered in `application.py` and mentioned in the
+        # shortcuts window, with no control anywhere in the UI to reach it - and
+        # five panels dead-end into "turn it on in Settings" with no button that
+        # leads there. An action with no control is the same class of thing this
+        # file keeps finding: built, registered, and not reachable. The shortcut
+        # exists for the same reason as the other two: a feature nobody can
+        # invoke is not a feature.
+        setup_button = Gtk.Button()
+        setup_button.set_icon_name("system-run-symbolic")
+        setup_button.add_css_class("flat")
+        setup_button.set_valign(Gtk.Align.CENTER)
+        setup_button.set_tooltip_text("Set Chronoa up: the model, listening and the voice")
+        setup_button.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Set Chronoa up"])
+        setup_button.set_action_name("app.setup")
+        self._setup_button = setup_button
+
         # Conversations: every saved conversation, newest first, with New.
         self._conversations_button = Gtk.MenuButton()
         self._conversations_button.set_icon_name("view-list-symbolic")
@@ -332,7 +400,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_bar.set_title_widget(header)
         header_bar.pack_start(self._conversations_button)
         header_bar.pack_start(self._mic_icon)
-        for widget in (quick_button, self._browser_button, help_button, settings_button):
+        for widget in (quick_button, self._browser_button, help_button,
+                       setup_button, settings_button):
             header_bar.pack_end(widget)
         self._header_row = header_row
         self._header_bar = header_bar
@@ -352,6 +421,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # transient detail (the last thing that changed). They used to share
         # one label, so any toggle notice overwrote the state.
         self._state_label = Gtk.Label(label="Ready")
+        #: Set by `set_can_answer`; None means "nothing has said yet".
+        self._can_answer = None
         self._state_label.add_css_class("cajita-state")
         self._state_label.set_halign(Gtk.Align.CENTER)
         main_box.append(self._state_label)
@@ -493,7 +564,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         the orb and the status line to show different things.
         """
         self._orb.set_state(self._state)
-        self._state_label.set_label(self._state.label)
+        # `set_can_answer` wins over the state machine's own label, because "no
+        # model" is true of every state at once while "Ready" is only true of
+        # one - and on a machine with nothing installed the label was showing the
+        # one.
+        if self._can_answer is False:
+            self._state_label.set_label("No model yet")
+            self._state_label.add_css_class("dim-label")
+        else:
+            self._state_label.set_label(self._state.label)
+            self._state_label.remove_css_class("dim-label")
         # The mic is genuinely hot in exactly two states.
         hot = self._state in (AssistantState.LISTENING, AssistantState.INTERRUPTING)
         self._mic_icon.set_visible(True)
@@ -538,6 +618,30 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     # ------------------------------------------------------------------
     # Detail line (never touches state)
     # ------------------------------------------------------------------
+
+    def set_can_answer(self, can: bool, why: str = "") -> None:
+        """Whether anything can answer at all, which the state line must show.
+
+        **The orb said "Ready" on a machine with no model**, and the line under
+        it said "LLM unavailable" - two states, one screen, one of them false.
+        "Ready" is the IDLE label, so it was true by construction on every
+        machine: the state machine describes what the assistant is *doing*, and
+        doing nothing is what idle means. What it must also answer is whether
+        there is anything here to do it *with*.
+
+        So this overrides the text when there is no model, and restores it when
+        there is. Deliberately only the text and the dimming - the orb's colour
+        still belongs to the state machine, because "nothing can answer" is not
+        an error and painting it red would be the opposite kind of lie.
+        """
+        self._can_answer = bool(can)
+        self._no_model_reason = why or ""
+        if not can:
+            self._state_label.set_tooltip_text(
+                why or "Chronoa cannot answer until a language model is set up")
+        else:
+            self._state_label.remove_css_class("dim-label")
+            self._state_label.set_tooltip_text("")
 
     def set_status(self, status: str) -> None:
         """Show a transient notice on the detail line.
@@ -602,6 +706,31 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     # -- the panels -------------------------------------------------------
 
+    # ── addressable pages ──────────────────────────────────────────────────
+    #
+    # The main window is one conversation view, so there is nothing here to
+    # scroll to - but three of its states are real destinations someone else may
+    # want to name: the conversation itself, the quick-question panel, and the
+    # panel containing the conversation list. Each is a page id so a
+    # notification or a keybinding can open one, and so a test does not have to
+    # click a button whose position it guessed.
+    def show_page(self, page_id: str) -> bool:
+        from shani_chronoa import pages as page_registry
+        page_id = page_registry.resolve("main", page_id) or page_id
+        if page_id == "conversation":
+            self.present()
+            return True
+        if page_id == "quick-ask":
+            action = self.lookup_action("app.quick-ask")
+            if action is None:
+                return False
+            action.activate(None)
+            return True
+        if page_id in ("conversations", "panels"):
+            self.toggle_sidebar()
+            return True
+        return False
+
     def toggle_sidebar(self) -> None:
         """F9, and anything else that wants to flip the panels."""
         if self._sidebar_toggle is not None:
@@ -616,6 +745,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         not leave the button showing the wrong state.
         """
         self._split.set_collapsed(button.get_active())
+
+    def _on_split_collapsed(self, _split: object, _param: object) -> None:
+        """Keep the toggle honest when something *else* collapses the sidebar.
+
+        The split view collapses on its own in three ways that never touch the
+        button: the `max-width: 720px` breakpoint on a narrow window, a drag of
+        the sidebar's edge, and `set_collapsed` from any other code. Measured
+        before this was connected: `collapsed=True, toggle_active=False` - the
+        button showed "panels hidden" as off while the panels were gone, so the
+        next click of it expanded nothing and looked broken. That is the
+        "sidebar won't come back" report.
+
+        `_sync_sidebar_toggle` only sets the button when it disagrees, so this
+        cannot loop: `set_active` emits `toggled`, which sets `collapsed` to the
+        value it is already at, which emits nothing further.
+        """
+        self._sync_sidebar_toggle()
 
     def _sync_sidebar_toggle(self) -> None:
         """Follow the split view, not the other way round.
@@ -641,21 +787,32 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._sidebar_page.select(None)
 
     def _show_chat(self) -> None:
-        """Back to the conversation, from any panel."""
-        self._content_view.set_visible_page(self._content_view.get_first_child())
+        """Back to the conversation, from any panel or from the sidebar row.
+
+        Uses `pop_to_tag(CHAT_TAG)`, which is the only way libadwaita 1.5 offers
+        to go back to a known page - there is no `set_visible_page`, and calling
+        it raised `AttributeError`, so clicking "Conversation" did nothing and
+        every panel's back arrow died with it.
+
+        Popping rather than setting the page also unwinds the stack, so going
+        back to the chat and opening a panel again builds it fresh instead of
+        pushing a second copy on top of the first.
+        """
+        view = self._content_view
+        if view.get_visible_page() is not view.find_page(CHAT_TAG):
+            view.pop_to_tag(CHAT_TAG)
         self._sidebar_page.select(None)
 
     def _pop_panel(self) -> None:
         """The back arrow inside a panel's own header bar.
 
-        `pop_to_tag` needs a tag and these pages are built by ten different
-        modules that none of them set; popping to the first page is the same
-        thing here, because the first page *is* the conversation and the only
-        other pages are the panels.
+        Same route as `_show_chat`, and for the same reason: these pages are
+        built by a dozen modules that none of them tag, so the only page worth
+        popping *to* is the conversation - which now has a tag for exactly this.
         """
         view = self._content_view
-        if view.get_visible_page() is not view.get_first_child():
-            view.pop_to_page(view.get_first_child())
+        if view.get_visible_page() is not view.find_page(CHAT_TAG):
+            view.pop_to_tag(CHAT_TAG)
         self._sidebar_page.select(None)
 
     def _show_surface(self, name: str) -> None:
@@ -688,6 +845,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             pass
         self._content_view.push(page)
         self._sidebar_page.select(name)
+        # Ask the panel how it is, and put that on its sidebar row. The panel
+        # answers with `page.status()` if it has one; most do not, and a panel
+        # that cannot say is not a panel that is broken - it is a panel with no
+        # opinion, so its row keeps no dot rather than being given a green one
+        # it did not earn.
+        self._sidebar_page.set_status(name, _panel_status(page))
         # With panels on the content stack, a narrow window has them covering the
         # conversation rather than sitting beside it; closing the sidebar is what
         # gets the chat back on a small screen.

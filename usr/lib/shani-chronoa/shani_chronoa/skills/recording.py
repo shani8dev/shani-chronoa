@@ -53,6 +53,62 @@ def _beside(src: Path, tag: str, suffix: str) -> Path:
     raise ValueError(f"too many copies beside {src.name} already")
 
 
+def _verify_recording(arguments: dict, tool=None):
+    """Post-condition: for the actions that write a file, is the file real?
+
+    `recording` has several actions and only two of them mutate anything on
+    disk: `clean` writes a denoised copy beside the source, and `subtitles`
+    writes an `.srt`. Both are exactly the shape `sing` verifies - a synthesis
+    that reports success and leaves nothing behind is the failure mode worth
+    catching - and both have a real artifact to check, which `speak` does not
+    because it plays rather than writes.
+
+    What is checked: the output exists, is not empty, and has the shape the
+    action promised. A cleaned copy that is zero bytes, or an `.srt` with no
+    subtitle blocks, is what "Saved ..." used to claim.
+
+    What is **not** claimed: anything about the audio content. That this file's
+    noise reduction actually helped is not observable here, and pretending
+    otherwise would be the kind of unmeasurable claim this layer exists to
+    replace.
+    """
+    action = str(arguments.get("action") or "").strip().lower()
+    source = str(arguments.get("path") or "").strip()
+    if action not in ("clean", "subtitles") or not source:
+        return None  # nothing was written, so nothing to check
+
+    src = Path(source)
+    if not src.exists():
+        return (False, f"{src.name} does not exist, so no output was produced")
+    if action == "clean":
+        target = _beside(src, "clean", src.suffix if src.suffix.lower() != ".webm" else ".mkv")
+        kind = "audio or video"
+    else:
+        target = _beside(src, "", ".srt")
+        kind = "subtitles"
+
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        return (False, f"no output beside {src.name}: {type(exc).__name__}")
+    if size == 0:
+        return (False, f"{target.name} was written but is empty")
+    if action == "subtitles":
+        try:
+            body = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return (False, f"could not read {target.name}: {exc}")
+        if "-->" not in body:
+            return (False, f"{target.name} has no subtitle timing lines in it")
+        blocks = body.count("-->")
+        return (True, f"{target.name} holds {blocks} subtitle block(s), "
+                      f"{size} bytes")
+    return (True, f"{target.name} was written as {kind} and is {size} bytes, "
+                  f"which is more than a header")
+
+
+POST_CONDITION = _verify_recording
+
 def _run(arguments: dict) -> str:
     from shani_chronoa import recordings
     action = (arguments.get("action") or "").strip().lower()
@@ -62,8 +118,8 @@ def _run(arguments: dict) -> str:
         from shani_chronoa import sounds
         from shani_chronoa.config import ChronoaConfig
         config = ChronoaConfig()
-        if not config.get_bool("sound-sense-enabled", False):
-            return ("Listening is turned off (enable 'Let Chronoa listen for sounds like the doorbell' in "
+        if not config.get_bool("heard-sound-sense-enabled", False):
+            return ("Listening is turned off (enable 'Let Chronoa name a sound when you ask' in "
                     "Settings -> Privacy).")
         problem = sounds.problem()
         if problem:

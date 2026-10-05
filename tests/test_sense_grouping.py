@@ -71,6 +71,9 @@ class TestTheGroupingCoversTheRegistryExactly:
             "The screen", "Network and wireless",
             "Disks and room", "The machine itself",
             "Security and privacy", "Printers and scanners", "Model capability",
+            # Last on purpose: it opens the microphone, so it is not something
+            # a user reaches for while setting the assistant up.
+            "Listening to the room",
         ]
 
     def test_no_group_is_empty(self):

@@ -77,6 +77,31 @@ def _chips(window):
     ]
 
 
+def _chip_text(chip):
+    """The prompt a chip shows, read from where it actually is.
+
+    A chip's text used to be `Gtk.Button(label=...)`, so `chip.get_label()` was
+    the prompt. It is a child `Gtk.Label` now, so it can ellipsise - a long
+    suggestion used to make one chip 300px+ wide with nothing to shrink it, and
+    a wrapping `FlowBox` cannot help a single chip wider than the window.
+
+    Two tests here kept calling `chip.get_label()` across that change. On this
+    PyGObject that returns **`None`** rather than raising, so both assertions
+    silently compared against `None`:
+    `test_clicking_a_chip_fills_the_input` asserted
+    `window.get_input_text() == chips[0].get_label()` and failed on a chip that
+    had filled the input correctly, and
+    `test_each_chip_is_a_focusable_button_with_a_spoken_prompt` asserted
+    `get_tooltip_text() == f"Send: {chip.get_label()}"` - i.e. `"Send: None"`.
+    A wrong assertion that reads as a broken product is worse than no
+    assertion, so this helper reads the child and the tests say what they mean.
+    """
+    child = chip.get_child()
+    if isinstance(child, Gtk.Label):
+        return child.get_label()
+    return chip.get_label()
+
+
 class TestSuggestionBar:
     def test_it_builds_one_chip_per_prompt(self):
         bar = SuggestionBar(["One", "Two", "Three"], lambda *a: None)
@@ -133,15 +158,16 @@ class TestEmptyState:
             # The accessible LABEL is set with `update_property`, but this
             # PyGObject build exposes no getter for it, so the tooltip is the
             # readable proxy - it carries the same prompt text.
-            assert chip.get_tooltip_text() == f"Send: {chip.get_label()}"
+            assert chip.get_tooltip_text() == f"Send: {_chip_text(chip)}"
 
 
 class TestClickFillsRatherThanSends:
     def test_clicking_a_chip_fills_the_input(self, app):
         window = ChronoaWindow(app, config=_Closed())
         chips = _chips(window)
+        shown = _chip_text(chips[0])
         chips[0].emit("clicked")
-        assert window.get_input_text() == chips[0].get_label()
+        assert window.get_input_text() == shown
         assert window.get_input_text() != "", "clicking a suggestion did nothing"
 
     def test_clicking_does_not_send_the_message(self, app):

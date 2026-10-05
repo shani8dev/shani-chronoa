@@ -38,8 +38,18 @@ from shani_chronoa.gui.surfaces import common
 logger = logging.getLogger(__name__)
 
 #: The row that is not a surface: back to the conversation.
+#:
+#: "Conversation" (singular) against the "Conversations" panel (plural), because
+#: this row is the live chat - the thing on screen now - and that panel is the
+#: list of saved ones. With both in the sidebar, and a "Conversation" section
+#: heading above the panel as well, the word appeared three times and meant two
+#: different things. The section is gone and the panel has moved to "What
+#: Chronoa did", so the singular here now names exactly one row.
 CHAT_TITLE = "Conversation"
-CHAT_ICON = "chat-bubble-symbolic"
+#: `chat-bubble-symbolic` does not exist on the installed theme (measured:
+#: `has_icon` False), so the conversation row rendered blank. `chat-symbolic` is
+#: checked to exist rather than assumed.
+CHAT_ICON = "chat-symbolic"
 
 
 class SidebarPage(Adw.NavigationPage):
@@ -69,10 +79,25 @@ class SidebarPage(Adw.NavigationPage):
         instances of it.
         """
         super().__init__(title="Panels")
+        # **No `Adw.HeaderBar` here, on purpose.**
+        #
+        # This page is the sidebar of an `Adw.NavigationSplitView`, and the split
+        # view already gives the window one header bar with the window controls
+        # and a title. The sidebar built a second one titled "Chronoa", so the
+        # window showed two title bars stacked - "Chronoa" above "Shani Chronoa"
+        # - and, because both belonged to the split view, **two back arrows**:
+        # counted in a rendered window, both were `AdwBackButton`, one per header
+        # bar, and neither was labelled. Two arrows that mean "close the sidebar"
+        # read as two different destinations.
+        #
+        # The split view paints the title, the window controls and the back
+        # affordance for the whole window, which is what it is for. Dropping this
+        # header also gives back ~48px of height on every panel - and `Machine`
+        # was overflowing its viewport.
+        #
+        # The `Adw.ToolbarView` is kept, because it is what `self` needs in order
+        # to hold a scrolled body, and its absence of a top bar is the point.
         toolbar = Adw.ToolbarView()
-        header = Adw.HeaderBar()
-        toolbar.add_top_bar(header)
-        header.set_title_widget(Gtk.Label(label="Chronoa"))
 
         self._app = app
         stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -102,8 +127,35 @@ class SidebarPage(Adw.NavigationPage):
                 on_surface(key)
 
         self._surface_rows = {}
+        self._dots = {}
         self._rows_by_title = {}
         groups = {}
+
+        # The conversation row, first and above every section.
+        #
+        # `CHAT_TITLE`/`CHAT_ICON` were module constants and this attribute was
+        # `None`, so the state the window actually opens in had no row at all:
+        # opening the chat marked nothing, because there was nothing to mark. The
+        # module docstring's "chat is the first row" was describing an intention
+        # the constructor did not carry out.
+        #
+        # It is appended *before* the section loop on purpose, and this comment
+        # is here because it was not: the block sat below the loop, so the row
+        # rendered last, under a section list it is nothing to do with, while
+        # the code above it said "first and above every section". The comment
+        # was describing the code as written somewhere else. Both the comment
+        # and the docstring were right about the intent and wrong about the
+        # tree; this is the line that carries the intent.
+        chat_row = Adw.ActionRow(title=CHAT_TITLE)
+        chat_row.add_css_class("sidebar-row")
+        chat_row.add_prefix(Gtk.Image.new_from_icon_name(CHAT_ICON))
+        chat_row.set_activatable(True)
+        chat_row.update_property([Gtk.AccessibleProperty.LABEL], [CHAT_TITLE])
+        chat_row.connect("activated", lambda _r: activate(_r, None))
+        body.append(common.group())  # no heading: it is above the sections
+        chat_group = body.get_last_child()
+        chat_group.add(chat_row)
+
         for section in _section_order():
             entries = []
             for name, (title, icon, _build) in _surfaces().items():
@@ -117,7 +169,31 @@ class SidebarPage(Adw.NavigationPage):
             groups[section] = group
             for name, title, icon in entries:
                 row = Adw.ActionRow(title=title)
+                # `sidebar-row` so the `selected` rule above is scoped to this
+                # list. `selected` is a libadwaita class name that a
+                # `PreferencesRow` may also carry, and a rule with no subject
+                # would style every selected row on screen rather than the open
+                # panel.
+                row.add_css_class("sidebar-row")
                 row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+                # The health dot, beside the icon rather than after the title.
+                #
+                # The sidebar is the only thing on screen that shows every panel
+                # at once, and it showed them all identically - so Conversation,
+                # Calendar and Diagnostics looked equally healthy, and the only
+                # way to find out which needed attention was to open each one in
+                # turn. Six pixels per row turns a list into a dashboard.
+                #
+                # It is *hidden* by default and only shown when a panel has
+                # something to report: a dot on every row would be a dot that
+                # means nothing, which is the state this is fixing.
+                dot = Gtk.Label(label="")
+                dot.add_css_class("status-dot")
+                dot.add_css_class("sidebar-dot")
+                dot.set_valign(Gtk.Align.CENTER)
+                dot.set_visible(False)
+                row.add_suffix(dot)
+                self._dots[name] = dot
                 row.set_activatable(True)
                 row.update_property([Gtk.AccessibleProperty.LABEL], [title])
                 row.connect("activated", lambda _r, key=name: activate(_r, key))
@@ -125,7 +201,8 @@ class SidebarPage(Adw.NavigationPage):
                 self._surface_rows[name] = (row, title.lower(), icon, section)
             self._rows_by_title[section] = entries
 
-        self._chat_row = None
+        self._chat_row = chat_row
+        self._chat_group = chat_group
         self._body = body
         self.search = search
         self.groups = groups
@@ -146,6 +223,39 @@ class SidebarPage(Adw.NavigationPage):
         self._filter = _filter
         search.connect("search-changed", lambda e: _filter(e.get_text()))
 
+    def set_status(self, key: Optional[str], status: Optional[str]) -> None:
+        """Mark a panel's row with a health dot, or clear it.
+
+        `status` is one of `common.STATUS_OK` / `_ATTENTION` / `_UNKNOWN`, or
+        None to hide the dot again. **A healthy panel still gets its dot**, but
+        a panel with nothing to say gets none - a dot on all twenty rows would be
+        the flat list it replaced, drawn smaller.
+
+        The dot is a `Gtk.Label` styled by `.status-dot` rather than an icon, for
+        the reason `machine.py` records for its own banner: an icon name is a
+        request the theme may not fill, and a missing one is an empty box that
+        looks like a rendering bug rather than a missing glyph.
+        """
+        dot = self._dots.get(key) if key is not None else None
+        if dot is None:
+            return
+        if status is None:
+            dot.set_visible(False)
+            return
+        if status not in common.STATUS_CLASSES:
+            raise ValueError(
+                f"unknown status {status!r}; expected one of "
+                f"{sorted(common.STATUS_CLASSES)} or None"
+            )
+        for existing in common.STATUS_CLASSES.values():
+            dot.remove_css_class(existing)
+        dot.add_css_class(common.STATUS_CLASSES[status])
+        dot.set_visible(True)
+        dot.set_tooltip_text(
+            f"{self._surface_rows[key][1].capitalize()}: "
+            f"{common.STATUS_WORDS[status]}"
+        )
+
     def select(self, key: Optional[str]) -> None:
         """Mark the open panel, so the sidebar says where you are.
 
@@ -153,12 +263,21 @@ class SidebarPage(Adw.NavigationPage):
         single-selection list to select from, so "where am I" is the `selected`
         CSS class on the row itself - which is also what makes it visible when
         the panel is tall and the list is scrolled.
+
+        `None` means the conversation is open, and the conversation has a row of
+        its own for exactly that reason: `select(None)` used to unmark every
+        panel and stop, which on the state the window opens in read as "nothing
+        is selected".
         """
         for name, (row, _title, _icon, _section) in self._surface_rows.items():
             if name == key:
                 row.add_css_class("selected")
             else:
                 row.remove_css_class("selected")
+        if key is None and self._chat_row is not None:
+            self._chat_row.add_css_class("selected")
+        elif self._chat_row is not None:
+            self._chat_row.remove_css_class("selected")
 
 
 def _section_of(name: str) -> str:

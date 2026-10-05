@@ -2,12 +2,14 @@
 
 
 import gi
+import re
+import threading
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 
-from shani_chronoa import model_choice
+from shani_chronoa import local_llm, model_choice
 
 from .senses import SensesPage
 from .privacy import PrivacyPage
@@ -28,6 +30,12 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             self.set_transient_for(app.window)
         # (widget, lowercase text to match against) for the search filter.
         self._searchable = []
+        #: section id -> group, including alias ids that resolve to a live group
+        self._by_id = {}
+        #: retired id -> the id that replaced it
+        self._aliases = {"tool-activity": "tool-activity",
+                         "privacy": "privacy", "sense": "senses",
+                         "model": "models", "voice": "voice"}
         # Sense switches, so their real state can be re-derived after a change
         # instead of trusting what the user just clicked.
         self._sense_rows = {}
@@ -41,6 +49,13 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         header = Adw.HeaderBar(show_end_title_buttons=False, show_start_title_buttons=True)
         self._search = Gtk.SearchEntry(hexpand=True)
         self._search.set_placeholder_text("Search settings")
+        # The placeholder is what a person sees; the label is what a screen
+        # reader announces, and it is not the same thing. The main window's own
+        # search entry sets one and this one did not, so the settings search was
+        # the one control in the app whose name came only from the greyed-out
+        # hint that disappears the moment you type in it.
+        self._search.update_property([Gtk.AccessibleProperty.LABEL],
+                                     ["Search settings"])
         self._search.connect("search-changed", self._on_search)
         header.pack_start(self._search)
         # Titlebar only. Adding it to `outer` as well is a second parent, and
@@ -49,6 +64,20 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         self.set_titlebar(header)
 
         page = Adw.PreferencesPage()
+        from shani_chronoa import pages as page_registry
+        page_registry.register(
+            "settings",
+            # Declared up front and deliberately: the ids a caller may use are a
+            # promise, and deriving them from the widgets that happen to be built
+            # would make the set depend on which sub-builder succeeded.
+            [("senses", "Senses"), ("privacy", "Privacy"),
+             ("approvals", "Approvals"), ("tool-activity", "Tool activity"),
+             ("voice", "Voice and speech"), ("models", "Models"),
+             ("system", "System")],
+            factory=lambda app, config=None: type(self)(app),
+            aliases={"model": "models", "tool": "tool-activity",
+                     "sense": "senses", "speech": "voice", "activity": "tool-activity"},
+        )
         self._build_senses(page)
         self._build_privacy(page)
         self._build_approvals(page)
@@ -65,14 +94,64 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
 
         self.connect("notify::visible", self._on_window_visible)
 
-    def _group(self, page, title, description="") -> Adw.PreferencesGroup:
+    # ── section ids ────────────────────────────────────────────────────────
+    #
+    # Every group has a stable id, and the window can be *told* to show one.
+    #
+    # **They were reachable only by typing into the search box**, which is fine
+    # for a person and useless for anything else: a notification cannot say
+    # "open Settings on Privacy", a keybinding cannot, and neither could a test
+    # - which is why driving this window meant a search box and a guessed
+    # selector, and why several screenshots in a row came out identical. shani-
+    # cassini has had this for a while (`notebook.py`'s `PAGES`/`page_ids()`/
+    # `select(pid)` plus `--section=` and a `show-section` action), so this is
+    # that shape rather than a new one.
+    def _group(self, page, title, description="", section_id="") -> Adw.PreferencesGroup:
         group = Adw.PreferencesGroup(
             title=title, description=description or None, margin_top=14, margin_bottom=14
         )
         page.add(group)
         self._searchable.append((group, f"{title} {description}".lower()))
         group._needle_extra = []  # rows to reveal if only they match
+        # Ids are lower-cased titles with the punctuation a shell would mangle
+        # removed, so `Tool activity` is `tool-activity` and a remembered id
+        # keeps working when the title is reworded slightly.
+        sid = section_id or re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+        group._section_id = sid
+        self._by_id[sid] = group
+        # A retired id keeps working: it names the section that absorbed it, the
+        # way cassini's `ALIASES` does, because a stored id that opens nothing
+        # is worse than one that opens somewhere honest.
+        for alias in self._aliases:
+            if self._aliases[alias] == sid:
+                self._by_id.setdefault(alias, group)
         return group
+
+    def show_page(self, page_id: str) -> bool:
+        """The registry calls every window the same thing; this is that name."""
+        return self.show_section(page_id)
+
+    def section_ids(self) -> list:
+        """Every section id, in the order they appear."""
+        return [g._section_id for g, _ in self._searchable]
+
+    def show_section(self, section_id: str) -> bool:
+        """Show one section and hide the rest. False if the id is unknown.
+
+        Filtering rather than scrolling is deliberate: a 9,000px page scrolled to
+        an offset is not a landing, and the search box already does exactly this
+        filtering - so showing a section is the same operation with an argument,
+        and there is one implementation of "what does 'Privacy' match" rather
+        than two that can disagree.
+        """
+        group = self._by_id.get(section_id)
+        if group is None:
+            return False
+        needle = (group.get_title() or section_id).lower()
+        self._search.set_text(needle)
+        self._search.grab_focus()
+        self.present()
+        return True
 
     def _action_button(self, group, title, subtitle, action_name,
                        sensitive=True, tooltip=""):
@@ -167,6 +246,75 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         group._needle_extra.append((row, f"{title}".lower()))
         return row
 
+    def _cycle_presence(self, button: Gtk.Button, row: Adw.ActionRow) -> None:
+        """Move to the next presence state, and say what happened.
+
+        The button's label is the *next* action, not the current state, because
+        a button reading "Drowsy" is a button whose meaning depends on what the
+        machine is already doing. And the row's subtitle always restates the
+        state in a sentence, because "the model was released" is a claim about
+        memory and has to be checkable.
+
+        Runs off the main loop: stopping a server is a `systemctl` call, and
+        waking one waits for a cold start.
+        """
+        from shani_chronoa import local_llm, presence
+        current = presence.detect(local_llm.is_up)
+        target = current.next()
+        row.set_subtitle("Working...")
+        button.set_sensitive(False)
+
+        def work() -> None:
+            reached, reason = presence.apply(
+                target, is_up=local_llm.is_up,
+                wake=local_llm.start_service, sleep=local_llm.stop_service)
+            def done() -> bool:
+                now = presence.detect(local_llm.is_up)
+                row.set_subtitle(now.detail() if reached
+                                 else f"Could not do that: {reason}")
+                button.set_label(now.action())
+                button.set_sensitive(True)
+                return False
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _model_choices(self, group, title: str, subtitle: str, keys,
+                       installed, on_pick, config=None) -> None:
+        """Pick a model from the ones that exist, rather than only typing one.
+
+        **This row exists because the entries above accept any string.** Typing
+        `qwen3:4b` when that model is not downloaded produced "llama.cpp is not
+        answering" in the log and "No model yet" on the orb, with the fix -
+        download it - three screens away in the setup wizard. Alpaca's whole
+        interface is this idea: you manage the models you have, not a name you
+        hope for.
+
+        Each button says whether that model is on disk and how big it is, and
+        marks the one in use, so the list is a state display and a picker in one.
+        Nothing is chosen for the person: the current pin stays until a button is
+        pressed.
+        """
+        from shani_chronoa import local_llm
+        present = [key for key in keys if installed(key)]
+        row = Adw.ActionRow(
+            title=title,
+            subtitle=(subtitle if present else
+                      f"{subtitle} Nothing is downloaded yet - open setup."))
+        row._in_use_key = ""
+        if present:
+            picked = Gtk.DropDown.new_from_strings(present)
+            current = local_llm.active() or ((config.model if config else "") or "")
+            if current in present:
+                picked.set_selected(present.index(current))
+            picked.connect("notify::selected", lambda w, *_: on_pick(
+                w.get_selected_item().get_string()))
+            picked.set_valign(Gtk.Align.CENTER)
+            row.add_suffix(picked)
+        group.add(row)
+        group._needle_extra.append((row, f"{title} {row.get_subtitle()}".lower()))
+        return row
+
     def _info_row(self, group, title, subtitle):
         row = Adw.ActionRow(title=title, subtitle=subtitle)
         group.add(row)
@@ -209,6 +357,16 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         group.add(setup_row)
         self._entry(group, "Text and tool-calling model", "Blank = hardware tier decides",
                     config.model, lambda t: config.set("model", t.strip()))
+        self._model_choices(
+            group, "Text and tool-calling model, from what is installed",
+            "Installed models, newest capability first. A name typed into the box "
+            "above that is not on this list is why the app says no model is "
+            "answering - and this row is the way out of that without opening the "
+            "setup wizard.",
+            [spec.key for spec, _label, _ram in local_llm.TIERS],
+            lambda key: local_llm.verify(key),
+            lambda key: config.set("model", key),
+            config=config)
         self._entry(group, "Vision model", "Blank = hardware tier decides",
                     config.vision_model, lambda t: config.set("vision-model", t.strip()))
         self._entry(group, "Whisper model (speech to text)", "Blank = hardware tier decides",
@@ -217,6 +375,19 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
                     config.ollama_host, lambda t: config.set("ollama-host", t.strip()))
         self._entry(group, "Piper voice", "TTS voice name",
                     config.piper_voice, lambda t: config.set("piper-voice", t.strip()))
+
+        # Presence: one control for how much of the machine Chronoa is holding.
+        # It belongs here because it is a fact about the *model*, and a person
+        # looking at a model list is the person who knows whether they want it
+        # resident.
+        presence_row = Adw.ActionRow(
+            title="Right now",
+            subtitle="A loaded model costs about as much memory as it is large.")
+        button = Gtk.Button(label="Free the model", valign=Gtk.Align.CENTER)
+        button.connect("clicked", lambda _b: self._cycle_presence(button, presence_row))
+        presence_row.add_suffix(button)
+        group.add(presence_row)
+        self._presence_row = presence_row
 
         # What is actually in effect, and why. A tier that guesses should look
         # like a guess, not be presented as a decision.

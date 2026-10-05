@@ -159,6 +159,34 @@ def start_service() -> str:
     return ""
 
 
+def stop_service() -> str:
+    """Stop the user service, so the model's memory is actually released.
+
+    **This did not exist, and its absence is why `presence.py` had to be honest
+    about Drowsy.** There was `start_service()` and nothing to undo it with, and
+    setup ran `systemctl --user enable --now` - so from the first login the unit
+    came up on its own and stayed up, holding a 1.1-4 GB model resident whether or
+    not anyone was talking to it. `assistd`'s one-key Active/Drowsy/Sleeping
+    cycle needs exactly this lever, and a laptop that cannot let go is a laptop
+    that runs warm and flat all day.
+
+    `disable` is deliberately **not** used: the unit stays enabled so a question
+    can start it again, which is what makes "drowsy" mean *released, not gone*.
+    Only the runtime stop is reversible; disabling would leave a machine whose
+    assistant silently never answers.
+
+    '' on success, else why not - the same contract as `start_service`.
+    """
+    if shutil.which("systemctl") is None:
+        return "systemctl is not available, so the model cannot be released"
+    proc = _systemctl("stop", UNIT)
+    if proc is None:
+        return "systemctl is not available, so the model cannot be released"
+    if proc.returncode != 0:
+        return (proc.stderr.strip() or f"systemctl exited {proc.returncode}")[:200]
+    return ""
+
+
 def is_up(timeout: float = 1.5) -> bool:
     import httpx
     try:

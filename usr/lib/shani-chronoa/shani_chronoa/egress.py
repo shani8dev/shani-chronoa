@@ -400,6 +400,24 @@ def check_destination(url: str) -> None:
         raise DestinationRefused(reason)
 
 
+#: Hosts a model may legitimately be fetched from, and nothing else.
+#:
+#: Matched on a **dot boundary**, not a substring suffix. `endswith("huggingface.co")`
+#: accepts `evil-huggingface.co`, which is the whole attack: a first version did
+#: exactly that and a test written to catch it failed on the first run.
+MODEL_HOSTS = ("huggingface.co", "hf.co", "github.com", "githubusercontent.com")
+
+
+def is_model_host(host: str) -> bool:
+    """Whether `host` is one a pinned model or voice archive is fetched from.
+
+    `cdn-lfs.huggingface.co` matches (it is that host); `evil-huggingface.co`
+    does not, because the character before the suffix must be a dot or nothing.
+    """
+    host = (host or "").lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in MODEL_HOSTS)
+
+
 @dataclass
 class Event:
     """One outbound request. Metadata only - never a payload."""
@@ -414,6 +432,11 @@ class Event:
     bytes_out: int = 0
     privacy_mode: bool = False
     violation: bool = False
+    #: Empty for an ordinary request. `"model-download"` for a fetch of a pinned
+    #: model or voice archive that the person asked for through a consented
+    #: button. **Set by the caller that knows**, never inferred here - see
+    #: `record`, which is the only place that decides `violation`.
+    purpose: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -464,6 +487,8 @@ def record(
     status: Optional[int] = None,
     bytes_out: int = 0,
     privacy_mode: bool = False,
+    purpose: str = "",
+    consented: bool = False,
 ) -> Event:
     """Append one event to the local log. Never raises.
 
@@ -471,18 +496,39 @@ def record(
     no log, so every failure here degrades to "not recorded".
     """
     local = is_local(url)
+    event_host = (urlsplit(url).hostname or "") if "://" in (url or "") else (url or "")
     event = Event(
         at=time.time(),
         component=component,
         url=url,
-        host=(urlsplit(url).hostname or "") if "://" in url else url,
+        host=event_host,
         local=local,
         method=method.upper(),
         status=status,
         bytes_out=int(bytes_out or 0),
         privacy_mode=bool(privacy_mode),
+        purpose=purpose,
         # Chronoa's documented invariant: privacy mode means nothing leaves.
-        violation=bool(privacy_mode and not local),
+        #
+        # **With one narrow, named exception: a model the person asked for.**
+        # Fetching a 639 MB language model through the setup wizard's "Download
+        # and start" is egress - bytes do go to huggingface.co - and it was
+        # recorded as a breach of the local-only guarantee every single time.
+        # That is not a harmless log line: a log that cries wolf for every
+        # consented setup is a log nobody reads, and the day something genuinely
+        # unexpected leaves the machine it is one line among hundreds that all
+        # look the same.
+        #
+        # So the exception is deliberately hard to reach. It needs *both* a
+        # caller that says what it is (`purpose`) and proof it was consented
+        # (`consented`), *and* a host on the pinned list - and the caller cannot
+        # supply `consented=True` without having passed the model's own consent
+        # gate first, which raises `ConsentRequired` instead of downloading. A
+        # search query, a page fetch and a cloud fallback have no way to set
+        # either, so they are unaffected.
+        violation=bool(privacy_mode and not local
+                       and not (consented and purpose == "model-download"
+                                and is_model_host(event_host))),
     )
     _light_skin(event)
     try:

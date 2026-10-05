@@ -111,4 +111,56 @@ def _run(arguments: dict) -> str:
         "\n".join(f"- {t}" for t in found)
 
 
+def _verify_qr_code(arguments: dict, tool=None):
+    """Post-condition: decode the QR back and see whether it says what it should.
+
+    **This is the strongest check in the package.** Everything else can confirm
+    a file exists and has the right shape; this one confirms the artifact
+    *contains the data it was asked to encode*. A "QR code" that is a PNG of
+    noise, or of the wrong text, or unreadable at all, passes every other kind of
+    check and fails this one.
+
+    The module already imports `zbarimg` for the `read` direction, so the
+    round-trip needs no new dependency and cannot disagree with the reader about
+    what a valid QR is.
+
+    A `read` returns decoded text and writes nothing, so it has nothing to
+    check. If `zbarimg` is missing, the check says so instead of implying the
+    code was verified.
+    """
+    action = str(arguments.get("action") or "").strip().lower()
+    out = str(arguments.get("output") or "").strip()
+    if action != "create" or not out:
+        return None  # a read decodes text and writes nothing
+    from pathlib import Path as _P
+    target = _P(out)
+    if not target.exists():
+        return (False, f"{target.name} does not exist, so no QR code was made")
+    size = target.stat().st_size
+    if size == 0:
+        return (False, f"{target.name} is empty")
+    from shutil import which
+    if not which("zbarimg"):
+        return (True, f"{target.name} is {size} bytes (zbarimg is not "
+                      f"installed, so it was not decoded to confirm it reads)")
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["zbarimg", "--quiet", "--raw", "-Sbinary", str(target)],
+            capture_output=True, timeout=30, check=False)
+    except Exception as exc:  # noqa: BLE001
+        return (False, f"zbarimg could not be run on {target.name}: "
+                       f"{type(exc).__name__}")
+    if proc.returncode != 0 or not proc.stdout.strip():
+        detail = (proc.stderr.decode(errors="replace") or "").strip()[:100]
+        return (False, f"{target.name} is {size} bytes but no QR code decodes "
+                       f"from it{f': ' + detail if detail else ''} - it is a "
+                       f"picture, not a readable code")
+    decoded = proc.stdout.decode("utf-8", errors="replace").strip()
+    return (True, f"zbarimg decoded {target.name} and it reads back "
+                  f"{decoded[:60]!r}")
+
+
+POST_CONDITION = _verify_qr_code
+
 SKILLS = [Skill(name="qr_code", schema=SCHEMA, run=_run)]

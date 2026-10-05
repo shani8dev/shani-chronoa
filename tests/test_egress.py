@@ -91,6 +91,54 @@ class TestRecording:
         assert egress.summary()["violations"] == 0
 
 
+class TestTheModelDownloadException:
+    """The one exception to "privacy mode means nothing leaves", and its edges.
+
+    A model download *is* egress, and it was logged as a breach every time - so
+    a log that cries wolf for every consented setup is a log nobody reads, and a
+    real breach is one line among hundreds that look identical. The exception is
+    deliberately hard to reach, and these are the ways it must not be reachable.
+    """
+
+    def test_an_ordinary_remote_request_is_still_a_violation(self):
+        event = egress.record("web_search", "https://duckduckgo.com/", privacy_mode=True)
+        assert event.violation is True
+
+    def test_a_consented_model_download_to_a_pinned_host_is_not(self):
+        event = egress.record("llm:provision", "https://huggingface.co/x/y.gguf",
+                              privacy_mode=True, purpose="model-download",
+                              consented=True)
+        assert event.violation is False
+        assert event.purpose == "model-download"
+
+    def test_consent_alone_does_not_help(self):
+        """Without the purpose, `consented=True` is just a claim."""
+        event = egress.record("web_search", "https://huggingface.co/",
+                              privacy_mode=True, consented=True)
+        assert event.violation is True
+
+    def test_the_purpose_alone_does_not_help(self):
+        event = egress.record("web_search", "https://huggingface.co/",
+                              privacy_mode=True, purpose="model-download")
+        assert event.violation is True
+
+    def test_a_host_that_merely_looks_like_a_model_host_is_still_a_violation(self):
+        """`not-huggingface.co` ends with `huggingface.co` as a string but is not
+        that host, which is the whole reason the match is on a dot boundary."""
+        assert egress.is_model_host("huggingface.co")
+        assert not egress.is_model_host("evil-huggingface.co")
+        assert egress.is_model_host("cdn-lfs.huggingface.co")
+        assert not egress.is_model_host("huggingface.co.evil.net")
+        event = egress.record("cloud_llm:x", "https://evil-huggingface.co/v1",
+                              privacy_mode=True, purpose="model-download",
+                              consented=True)
+        assert event.violation is True
+
+    def test_a_local_request_is_never_a_violation(self):
+        event = egress.record("ollama", "http://127.0.0.1:11434/", privacy_mode=True)
+        assert event.violation is False
+
+
 class TestTheLogItself:
     def test_the_log_is_owner_only(self):
         egress.record("ollama", "http://127.0.0.1:11434/")
@@ -102,11 +150,17 @@ class TestTheLogItself:
         egress.record("cloud_llm:x", "https://api.example.com/v1", bytes_out=len(secret))
         raw = egress.EGRESS_LOG.read_text(encoding="utf-8")
         assert secret not in raw
-        # Only the documented keys are present.
+        # Only the documented keys are present. `purpose` joined them when a
+        # consented model download was allowed to stop counting as a breach -
+        # it is a short label for what the request was for, never content, and
+        # the test that keeps it honest is the one below that asserts the value
+        # is a name and not a body.
         assert set(json.loads(raw.strip())) == {
             "at", "component", "url", "host", "local", "method",
-            "status", "bytes_out", "privacy_mode", "violation",
+            "status", "bytes_out", "privacy_mode", "violation", "purpose",
         }
+        assert json.loads(raw.strip())["purpose"] == "", (
+            "an ordinary request must not claim a purpose")
 
     def test_a_corrupt_line_is_skipped_rather_than_poisoning_the_log(self):
         egress.record("ollama", "http://127.0.0.1:1/")

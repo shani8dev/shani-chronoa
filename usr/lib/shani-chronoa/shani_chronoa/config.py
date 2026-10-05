@@ -140,6 +140,10 @@ _SENSE_CONSENT_KEYS = {
     # question, but the answer is theirs, not the hardware's.
     "git": "git-sense-enabled",
     "boots": "boots-sense-enabled",
+    # Opens the microphone. Its own key, and not the `sound` event's: one key
+    # gates one thing, and a user who allows the doorbell trigger has not
+    # agreed to let anything listen whenever it is asked.
+    "heard-sound": "heard-sound-sense-enabled",
 }
 
 # Trigger event types that are not senses, and the key gating each one.

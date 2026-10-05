@@ -118,7 +118,17 @@ _SYNONYMS: Dict[str, str] = {
 def _stem(word: str) -> str:
     for suffix in ("ing", "ies", "es", "s", "ed"):
         if len(word) > len(suffix) + 2 and word.endswith(suffix):
-            return word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+            short = word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+            # "running" -> "runn", "stopping" -> "stopp". English doubles the
+            # final consonant when a suffix goes on and takes one of them off
+            # again, so the doubled letter has to go with the suffix - otherwise
+            # "running", "run" and "runner" are three different words to
+            # everything downstream. Only after the length guard, so "sing" and
+            # "bed" are untouched.
+            if suffix in ("ing", "ed") and len(short) > 2 \
+                    and short[-1] == short[-2] and short[-1] not in "aeiousl":
+                short = short[:-1]
+            return short
     return word
 
 
@@ -179,6 +189,63 @@ def _tracker():
         return None
 
 
+#: Loaded once, lazily. Absent is the normal state, exactly as `_outcome_model`
+#: is: there is no distilled router until one has been trained from a teacher's
+#: agreements and has beaten the majority baseline on held-out requests.
+_ROUTER = None
+_ROUTER_TRIED = False
+
+#: How far below the best score a skill may be and still be promoted. A log
+#: score gap, not a probability: the router's scores are not calibrated
+#: frequencies, so converting them into "83% sure" would invent a number.
+DISTILLED_MARGIN = 2.0
+
+
+def distilled_router():
+    """The distilled router, or None. Never raises.
+
+    A router whose own report says it never beat the majority baseline, or
+    whose file cannot account for itself, is refused at the load path - so
+    reaching `None` here means "there is nothing trustworthy to add", not
+    "something went wrong".
+    """
+    global _ROUTER, _ROUTER_TRIED
+    if _ROUTER_TRIED:
+        return _ROUTER
+    _ROUTER_TRIED = True
+    try:
+        from .distill import load_router
+        _ROUTER = load_router()
+    except Exception:  # noqa: BLE001 - a missing router must not break selection
+        _ROUTER = None
+    return _ROUTER
+
+
+def distilled(request: str, tools: Iterable[dict], limit: int = 2,
+              margin: float = DISTILLED_MARGIN) -> List[str]:
+    """Skill names a distilled router would have this request sent.
+
+    Two rules, both load-bearing:
+
+    - **Only skills already in `tools` can come back.** The router ranks; it
+      never widens what exists, which is the same division the whitelist makes
+      and the reason this can be called without re-checking anything.
+    - **A router that is not decisive adds nothing.** With no student there is
+      nothing; with a student that cannot separate the top skill from the
+      runner-up, its opinion is not worth a schema's tokens.
+    """
+    router = distilled_router()
+    if router is None:
+        return []
+    available = {_name(t) for t in tools}
+    scored = router.score(request)
+    if not scored:
+        return []
+    best = scored[0][1]
+    return [name for name, score in scored[:limit]
+            if name in available and best - score <= margin]
+
+
 def ranked(request: str, tools: Iterable[dict],
            learned: Optional[Dict[str, float]] = None) -> "List[tuple]":
     """(score, tool name, how many request words are in the tool's own name), best first; only tools that matched."""
@@ -228,6 +295,12 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # match is noise that costs tokens
     floor = scored[0][0] / 3 if scored else 0
     keep |= {name for score, name, _hits in scored[:limit] if score >= floor}
+    # A distilled router may add a skill the word matcher scored zero. That is
+    # the point of having one: "increase the sound" shares no word with
+    # `set_volume`, and the human still meant the volume. It cannot add a skill
+    # that is not already in `tools`, so this widens what is *sent*, never what
+    # may be *run* - which is the guarantee this function already makes.
+    keep |= set(distilled(request, tools))
     return [t for t in tools if _name(t) in keep]
 
 

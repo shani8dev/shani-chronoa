@@ -49,7 +49,14 @@ def main() -> int:
     # loop wakes once a second regardless and only *considers* it every ten
     # minutes, which is checked with a monotonic deadline rather than a counter
     # so a slow pass cannot make it fire twice.
-    from shani_chronoa import consolidation
+    #
+    # The dream rides on the same tick rather than getting its own timer unit.
+    # It reads the tool-call log this machine already writes and asks what the
+    # day looks like - which skills kept failing, which errors repeat - and that
+    # is the same kind of offline reflection as consolidation, over the same
+    # evidence, on the same clock. A second timer would mean a second thing to
+    # stop, start and misfire independently.
+    from shani_chronoa import consolidation, dream as dream_module
     next_sleep = time.monotonic() + SLEEP_FIRST_DELAY_SECONDS
     try:
         while not stop.wait(1.0):
@@ -65,6 +72,14 @@ def main() -> int:
                     # here must not take down the rules and senses that are the
                     # point of running it.
                     logger.warning("consolidation failed", exc_info=True)
+                try:
+                    written = dream_module.write_dream()
+                    if written:
+                        logger.info("dreamed; wrote %s", written.name)
+                except Exception:
+                    # Same reasoning, and separately guarded: a dream that
+                    # cannot run must not also cost the consolidation above.
+                    logger.warning("dream pass failed", exc_info=True)
     finally:
         scheduler.stop()
         from shani_chronoa import runner_lock

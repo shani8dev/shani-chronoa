@@ -353,9 +353,43 @@ class ReflexRunner:
                  clock: Callable[[], float] = __import__("time").monotonic,
                  cooldown: float = _COOLDOWN_SECONDS) -> None:
         self._names = tuple(names)
+        #: How often `consolidate()` may actually retrain. The gate inside
+        #: `consolidate_if_due` is cheaper than this interval, not more
+        #: expensive; this is the outer bound so a busy log cannot turn a reflex
+        #: tick into a training loop.
+        self._consolidate_every = 1800.0
+        self._last_consolidated: Optional[float] = None
         self._clock = clock
         self._cooldown = cooldown
         self._last: Dict[str, float] = {}
+
+    def consolidate(self) -> object:
+        """Fold the day's experience into a model. Runs on this timer, not on a
+        call.
+
+        **This is what makes the learning chain live.** The reflex tick is the
+        one thing guaranteed to run for the life of the process, and the learning
+        layer has no other scheduler of its own. Without this,
+        `tools._outcome_model()` loaded a file nothing wrote, so nothing was ever
+        predicted, so nothing was ever logged to learn from - the whole layer was
+        inert rather than broken.
+
+        `consolidate_if_due()` is cheap when there is nothing to do: one `stat`
+        on the log and one read of the model's provenance. It returns what it
+        decided either way, and a refusal - "the training split has no example of
+        verified" - is the most useful thing it can say until post-conditions
+        have been recording for long enough.
+        """
+        if self._last_consolidated is None:
+            self._last_consolidated = self._clock()
+        if (self._clock() - self._last_consolidated) < self._consolidate_every:
+            return None
+        self._last_consolidated = self._clock()
+        try:
+            from shani_chronoa.learning import consolidate_if_due
+            return consolidate_if_due()
+        except Exception:  # noqa: BLE001 - consolidation must never stop a tick
+            return None
 
     def due(self) -> List[Urgence]:
         """Reflexes that want to speak and are not inside their cooldown.

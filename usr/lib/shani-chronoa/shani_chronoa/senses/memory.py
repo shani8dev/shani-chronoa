@@ -1063,6 +1063,22 @@ def _run(arguments: dict) -> Percept:
     operation = str(arguments.get("operation") or "").strip().lower()
     query = str(arguments.get("query") or "").strip()
     fact = str(arguments.get("fact") or "").strip()
+
+    # The gate is here, at the top, rather than only on the write paths.
+    # It used to sit inside `remember_fact` and `link_entities`, which left
+    # `recall`, `about`, `history` and `forget` ungated: with
+    # `memory-sense-enabled` false the sense still disclosed the whole durable
+    # store and still erased from disk, because the one key that says "may
+    # Chronoa remember anything?" governed only the writing half. A read is a
+    # disclosure of the same data the key covers, and `forget` is a deletion,
+    # which is more than a read - so both belong behind the same switch.
+    #
+    # This does not make the per-write checks redundant: they are reached
+    # directly by other callers, and a gate at the entry point is not a gate on
+    # the function.
+    denied = _consent_error()
+    if denied:
+        return _note(f"Did not {operation or 'use memory'}. {denied}")
     match operation:
         case "remember":
             valid_for = arguments.get("valid_for_minutes")

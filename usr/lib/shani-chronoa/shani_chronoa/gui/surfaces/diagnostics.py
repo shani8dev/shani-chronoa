@@ -647,27 +647,43 @@ def _binary_extra(binary: str, purpose: str) -> Probe:
     return probe
 
 
-def _sympy_extra() -> Tuple[str, str]:
-    """Whether SymPy is importable, which is the whole gate on `solve_math`."""
-    import importlib.util
+def _math_extra() -> Tuple[str, str]:
+    """Whether the two engines `solve_math` needs are both usable.
 
+    **This probed `sympy`.** `skills/solve_math.py` moved to `symengine` (exact
+    algebra) plus `bc` (the exact rational arithmetic symengine's own `solve`
+    segfaults on), so this panel had been describing a module that no longer
+    existed while the maths row on the setup wizard said nothing at all.
+
+    It asks the skill module rather than `find_spec`, because the skill is what
+    actually refuses: `se = None` is the exact flag `_run()` checks, and `bc` is
+    probed by the same `which("bc")` the bc engine uses. A module that is
+    importable but unusable is reported as unusable, because that is what the
+    caller experiences.
+    """
     try:
-        found = importlib.util.find_spec("sympy") is not None
-    except (ImportError, ValueError) as exc:
-        # Not "could not determine" written by hand: the module docstring of
-        # `skills/solve_math.py` puts this exact pair in an `except Exception`,
-        # so an unusable install is indistinguishable from an absent one to
-        # every caller that exists. This panel says which it found.
+        from shani_chronoa.skills import solve_math
+    except Exception as exc:  # noqa: BLE001 - an unimportable skill is not working
         return STATUS_NOT_WORKING, (
-            f"sympy is installed but Python cannot use it ({type(exc).__name__}: {exc}), "
-            "and solve_math treats that the same as it being absent"
-        )
-    if not found:
+            f"skills/solve_math.py cannot be imported ({type(exc).__name__}: {exc}), "
+            "so no maths question can be answered")
+    symbolic = getattr(solve_math, "se", None) is not None
+    arithmetic = bool(getattr(solve_math, "_bc_available", lambda: False)())
+    if symbolic and arithmetic:
+        return STATUS_WORKING, (
+            "symengine and bc are both usable, so skills/solve_math.py can do the "
+            "exact algebra and the exact arithmetic")
+    if symbolic:
         return STATUS_NOT_WORKING, (
-            "the sympy module is not importable, so skills/solve_math.py refuses every "
-            "symbolic question (python-sympy provides it)"
-        )
-    return STATUS_WORKING, "sympy is importable, so skills/solve_math.py can do symbolic algebra"
+            "bc is missing, so every integral, limit, sum and numeric evaluation "
+            "refuses; the exact algebra still works (install bc)")
+    if arithmetic:
+        return STATUS_NOT_WORKING, (
+            "symengine is missing, so every symbolic question refuses; numeric "
+            "evaluation still works (install python-symengine)")
+    return STATUS_NOT_WORKING, (
+        "neither python-symengine nor bc is installed, so skills/solve_math.py "
+        "refuses every maths question")
 
 
 def _atspi_extra() -> Tuple[str, str]:
@@ -763,7 +779,7 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
         "Each of these is missing on a fresh install and gates a whole feature "
         "behind it, so their absence is a reason and not a fault.",
         (
-            ("solve_math (SymPy)", _sympy_extra),
+            ("solve_math (symengine + bc)", _math_extra),
             ("ffmpeg (video, audio, subtitles)", _binary_extra(
                 "ffmpeg", "video keyframes, subtitles and the audio clean-up filters")),
             ("ImageMagick (edit_image, upscale)", _binary_extra(

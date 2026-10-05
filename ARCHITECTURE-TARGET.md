@@ -18,8 +18,12 @@ Status key:
 - ❌ **missing**: nothing yet.
 - 🚫 **deliberately not**: ruled out for a recorded reason (see Part 4).
 
-Mapped against the tree on 2026-10-02: 128 skills, 45 senses, 18 trigger event
+Mapped against the tree on 2026-10-05: 152 skills, 49 senses, 19 trigger event
 types, and 2 user units (`shani-chronoa-daemon`, `shani-chronoa-llm`).
+
+Those counts are measured, not remembered - `skills.discover_skills()`,
+`senses.discover_senses()` and `triggers.EVENT_TYPES` - so re-run them rather
+than incrementing a number by hand when adding one.
 
 ---
 
@@ -368,7 +372,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 |---|---|---|
 | Instinct / Safety | ✅ | consent keys, approvals, sandbox levels and per-origin profiles, Landlock, opt-in seccomp, redaction, egress log |
 | Perception: Eyes | ✅ | capture, Tesseract OCR (12 extra languages), a llama.cpp vision model (setup's Eyes), OpenCV faces/objects/people (setup's Photos) |
-| Perception: Ears | ✅ | whisper.cpp (CLI and persistent server), Parakeet, energy VAD, wake word, PipeWire/ALSA; sounds identified (CED-tiny) and speakers told apart (diarization) as extras |
+| Perception: Ears | ✅ | whisper.cpp (CLI and persistent server), Parakeet, energy VAD, wake word, PipeWire/ALSA; sounds identified (CED-tiny, on demand via the `heard-sound` sense or the `sound` trigger) and speakers told apart (diarization) as extras |
 | Perception: Smell | ✅ | about 40 machine-state senses: systemd, journald, D-Bus, hwmon, NetworkManager, firewall, LSMs |
 | Perception: Touch | 🟡 | idle time, USB/Bluetooth/devices inventory; no raw input events (on purpose) |
 | Eat / Ingest | 🟡 | file-watch (polling), journald, D-Bus, udev, web, office/PDF; no feeds, no MCP client |
@@ -380,7 +384,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Imagination / Curiosity / Affect | ❌ | only fragments (plan mode, loop detection, ask_user) |
 | Motivation | 🟡 | todo list, reminders, timers, scheduled triggers; no goal manager |
 | Language | ✅ | LLM, STT, TTS, translation |
-| Learning | 🟡 | memory facts and history; verification verdicts now reorder the tools already allowed (`learning.py`), but no preference learning from what you liked and no skill learning |
+| Learning | 🟡 | memory facts and history; verification verdicts reorder the tools already allowed (`learning.py`), and a **distilled routing student** (`distill.py`) can narrow them further - measured 62% on held-out requests vs a 12% baseline, from a teacher that agreed with the human label 47/54. Still no preference learning from what you liked, and no skill learning |
 | Taste / Evaluate | 🟡 | post-condition verification, guardrail, history repair, schema refusal; no judge or confidence |
 | Decision | ✅ | permissions, approvals, plan mode, presets, guardrail |
 | Reflex | ✅ | 18 event types, wake word, barge-in |
@@ -506,12 +510,12 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | llama.cpp | ✅ | `local_llm.py`, `shani-chronoa-llm.service`; CPU (`-ngl 0 -t N`) and Vulkan GPU (`-ngl 99`), chosen from `llama-server --list-devices` |
 | Ollama | ✅ | `ollama_llm.py`, optional |
 | ONNX Runtime | ❌ | not in the repos |
-| Model router | 🟡 | `model_choice.py` (one model per job), cloud fallback chain in `cloud_llm.py`; no routing per request by difficulty |
+| Model router | 🟡 | `model_choice.py` (one model per job), cloud fallback chain in `cloud_llm.py`, and every backend reachable behind one `chat_message()` interface (llama.cpp, Ollama, Anthropic's native adapter, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, keyless gateways) - but no routing per request by difficulty |
 | Context manager | ✅ | see Attention |
 | Prompt manager | ✅ | `user_prompts.py`; rules go in the head system message, changing percepts in the last user message |
 | Task planner | 🟡 | `planmode.py` is look-but-don't-touch, not a planner; `todo_list` tracks steps |
 | Agent runtime | ✅ | `assistant.py` tool loop with streaming, `loops.py` |
-| Tool router | ✅ | `tool_select.py`, `tools.py` |
+| Tool router | ✅ | `tool_select.py`, `tools.py`, plus a distilled student (`distill.py`) that may only re-rank and narrow names already on offer - it cannot add a skill, and `distill.fallback()` will not run one without arguments or one that deletes something |
 | MCP | ✅ (server) | `mcp.py`, `shani-chronoa-mcp` |
 | Event bus | 🟡 | see Fusion |
 
@@ -618,7 +622,7 @@ two desktops are detected in `desktop_session.py`. ✅
 
 | Box | Status | Where |
 |---|---|---|
-| Experience / feedback / error knowledge store | 🟡 | `tool_tracking.py` records every call with its verdict; `learning.py` reads it back to reorder tool selection |
+| Experience / feedback / error knowledge store | 🟡 | `tool_tracking.py` records every call with its verdict; `learning.py` reads it back to reorder tool selection, and fits an outcome model that detects `verified` calls at 33x recall / 5.9x precision lift over chance while detecting **no** failure signal at all |
 | Skill registry | ✅ | `skills/__init__.py`, user skills directory |
 | Preference store | 🟡 | `senses/memory.py` |
 | Environment model | 🟡 | the senses give the current state; no history or baseline |
@@ -775,7 +779,7 @@ there is no left pinky, because nothing in here has one.
 | Regulation | Circadian rhythm | rhythm: knowing what time it is and whether that matters now. | part | - | `senses/timebase.py`, `senses/idle.py` | the clock is read; nothing is scheduled *because* of the hour
 | Memory and learning | Hippocampus | what it was told, and what it perceived. | built | `memory` | `senses/store.py`, `conversation_store.py` |
 | Memory and learning | Sleep | consolidation: turning a long conversation into something usable. | built | - | `consolidation.py`, `compression.py` |
-| Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py` |
+| Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py`, `distill.py` - the outcome model is a **flag**, not a predictor: 83% top-1 against a 94% constant |
 | Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py` | faults and pressures are reported; there is no reward signal at all
 
 ### The gaps, in one place

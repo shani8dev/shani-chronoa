@@ -10,7 +10,6 @@ when the window was rendered and looked at, which is the point of these: they
 assert on the words, not on the widget tree.
 """
 
-import pathlib
 import re
 import sys
 

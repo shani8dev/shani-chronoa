@@ -252,6 +252,41 @@ def _verify_sung(arguments: dict, tool=None):
 POST_CONDITION = _verify_sung
 
 
+def _melody_for(arguments: dict, prosody, syllable_count: int):
+    """The melody to sing, and a note about where it came from.
+
+    Two sources, and the second is the reason `midi.py` is reachable at all:
+    a caller who wants a *specific* tune brings a `.mid` file, rather than
+    Chronoa guessing at a melody and calling it a named song. With no file this
+    is the original behaviour - one of the named contours.
+
+    Returns `(melody, note)`; `melody` is None only when the file was named and
+    could not be used, in which case `note` is the refusal to return. A file
+    that cannot be read is never silently replaced by a contour: that would
+    answer a request for one tune with a different tune and say nothing.
+    """
+    source = str(arguments.get("midi_file") or arguments.get("midi") or "").strip()
+    if not source:
+        shape = str(arguments.get("shape") or "arch").strip().lower()
+        return prosody.Melody.from_shape(shape, syllable_count), ""
+
+    from shani_chronoa import midi, singing
+
+    try:
+        notes = midi.read_notes(source)
+        fitted = midi.melody_for_syllables(notes, range(syllable_count),
+                                           max_semitones=singing.MAX_SEMITONES)
+        return prosody.Melody(tuple(fitted.semitones)), " " + midi.describe(fitted)
+    except midi.MidiError as exc:
+        return None, (f"Did not sing: {exc}. A named tune has to come from a "
+                      f"MIDI file this skill can read; nothing was substituted "
+                      f"for it.")
+    except FileNotFoundError:
+        return None, f"Did not sing: no MIDI file at {source!r}."
+    except Exception as exc:  # noqa: BLE001 - a message, never a traceback
+        return None, f"Could not read the MIDI file {source!r}: {type(exc).__name__}: {exc}"
+
+
 def _run(arguments: dict) -> str:
     from shani_chronoa import prosody, singing
 
@@ -296,7 +331,9 @@ def _run(arguments: dict) -> str:
                 return ("Could not sing: no syllables could be found in the text, "
                         "so there is nothing to lay a melody over.")
 
-            melody = prosody.Melody.from_shape(shape, len(syllables))
+            melody, melody_note = _melody_for(arguments, prosody, len(syllables))
+            if melody is None:
+                return melody_note
             plan = prosody.song_plan(syllables, melody,
                                      total=singing.duration_of(spoken))
             sung = os.path.join(workdir, "sung.wav")
@@ -318,6 +355,12 @@ def _run(arguments: dict) -> str:
     said = (f"Sang {len(syllables)} syllables as {len(plan)} notes on the "
             f"{shape} contour with {engine}{style_note}. That contour is not "
             "the tune of any named song.")
+    if melody_note:
+        # Replaces the sentence above rather than being appended to it: the
+        # claim "not the tune of any named song" is exactly what a real MIDI
+        # melody invalidates, and leaving both would contradict itself.
+        said = (f"Sang {len(syllables)} syllables as {len(plan)} notes with "
+                f"{engine}{style_note}.{melody_note}")
 
     saved, save_note = _keep_rendering(audio)
     said += f" Saved to {saved}." if saved else save_note
@@ -343,11 +386,12 @@ _SCHEMA = {
             "when installed and permitted, else Piper/RHVoice/espeak-ng) and the "
             "local pitch shifter. Use this when someone asks to be sung to, to "
             "hear a line sung, or for a melody. It sings the words it is given "
-            "on one of five named contours (rising, falling, arch, level, wave) "
-            "- it "
+            "on one of five named contours (rising, falling, arch, level, wave), "
+            "or on the real tune from a .mid file when 'midi_file' is given. It "
             "does NOT know any song's tune, so never present its output as a "
-            "specific song. Needs soundtouch or rubberband; reports the engine "
-            "it used and any part of the request it could not honour."
+            "specific song unless a MIDI file was supplied. Needs soundtouch or "
+            "rubberband; reports the engine it used and any part of the request "
+            "it could not honour."
         ),
         "parameters": {
             "type": "object",
@@ -372,6 +416,16 @@ _SCHEMA = {
                         "Optional voice-style preset (e.g. 'soothing', "
                         "'warm', 'narrator'). Omit it to use the voice style "
                         "already chosen in Settings."
+                    ),
+                },
+                "midi_file": {
+                    "type": "string",
+                    "description": (
+                        "Optional path to a .mid file whose melody is sung "
+                        "instead of a named contour. This is the way to sing a "
+                        "specific tune: give the file, and the notes are fitted "
+                        "to the voice's range and to the syllables of 'text'. "
+                        "Without it the shape below is used."
                     ),
                 },
             },

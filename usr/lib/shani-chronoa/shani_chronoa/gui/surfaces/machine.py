@@ -81,6 +81,16 @@ logger = logging.getLogger(__name__)
 TITLE = "Machine"
 ICON = "computer-symbolic"
 
+#: Every other panel carries one of these and this was the only one without, so
+#: opening Machine showed a bare title above its banner while every neighbour
+#: explained itself in one line first. Same shape as the others, and it says the
+#: thing that matters here: the readings are a snapshot, not a live feed.
+SUBTITLE = (
+    "What this machine is doing, read once from its own machine-state senses. "
+    "A sense that could not answer says so in its row; it is never shown as one "
+    "that did."
+)
+
 #: The rows this panel shows, grouped, in the order it shows them. Read
 #: top-to-bottom it is roughly "what keeps it alive, what it is made of, what
 #: it is doing, what is plugged into it".
@@ -548,16 +558,41 @@ def _revealed(notice: Gtk.Widget) -> Gtk.Widget:
 
 
 def _summary_label(readings: List[Reading]) -> Gtk.Widget:
+    """The line above the rows: whether this panel could read the machine.
+
+    Sixteen rows, each in the same grey, told a person nothing until they read
+    all sixteen. The count was already here - it was a sentence in body-text
+    grey, which is the one treatment indistinguishable from every other line on
+    the panel - so this promotes it to a status row and leaves the honest
+    sentence underneath.
+
+    A sense that could not answer is kept distinct from one that was not read on
+    purpose, because the two are different facts: a refused sense is working
+    exactly as designed, and merging the two would hide the probes that need a
+    human to look at them.
+    """
     said = sum(1 for reading in readings if reading.is_reading)
-    label = Gtk.Label(xalign=0.0, wrap=True)
-    label.add_css_class("dim-label")
     stamp = time.strftime("%H:%M:%S")
-    label.set_text(
-        f"{said} of {len(readings)} machine-state senses answered, read once at "
-        f"{stamp}. A sense that could not answer says so in its own row; it is "
-        f"never shown as one that did."
+    if not readings:
+        return common.status_row(
+            common.STATUS_UNKNOWN,
+            "No machine-state senses were found",
+            "the registry is empty, which is not the same as every sense being fine",
+        )
+    if said == len(readings):
+        return common.status_row(
+            common.STATUS_OK,
+            f"All {len(readings)} senses answered",
+            f"read once at {stamp}; a sense that could not answer would say so "
+            "in its own row, and is never shown as one that did",
+        )
+    silent = len(readings) - said
+    return common.status_row(
+        common.STATUS_ATTENTION,
+        f"{said} of {len(readings)} senses answered",
+        f"{silent} are not showing a reading, read once at {stamp}; each row "
+        "names which and why",
     )
-    return label
 
 
 def build(app) -> Gtk.Widget:
@@ -568,7 +603,7 @@ def build(app) -> Gtk.Widget:
     the permission could not be checked - a panel that raised because settings
     were not loaded yet would take the window down for a missing permission.
     """
-    page, set_content = common.surface(TITLE)
+    page, set_content = common.surface(TITLE, SUBTITLE)
     config = _app_config(app)
     registry = _registry()
 

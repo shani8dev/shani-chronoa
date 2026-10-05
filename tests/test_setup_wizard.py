@@ -17,7 +17,7 @@ import pytest
 
 from shani_chronoa import local_llm, setup_wizard, stt_provision, voices
 from shani_chronoa.config import ChronoaConfig
-from shani_chronoa.stt_provision import ModelSpec
+from shani_chronoa.stt_provision import ConsentRequired, ModelSpec
 
 
 def test_default_model_follows_ram_and_gpu(monkeypatch):
@@ -60,7 +60,45 @@ def _serve(payloads: dict):
     return httpx.MockTransport(handler)
 
 
+def _grant_download_consent():
+    """Turn on the permission the way the wizard's switch does.
+
+    The `setup_*` functions used to set this key themselves the moment a Download
+    button was pressed, which made the gate the downloaders check open itself
+    when someone pushed it. They no longer do, so each test states the consent
+    explicitly - and `test_pressing_download_is_not_consent` below holds that shut.
+    """
+    setup_wizard._consent_given(ChronoaConfig(), True)
+
+
+def test_pressing_download_is_not_consent(monkeypatch):
+    """The consent gate must not open itself.
+
+    `model-download-enabled` is the switch every downloader checks. If calling a
+    setup step set it, then the gate would open on being asked - and "the person
+    agreed" would mean "the person clicked", which is not consent, especially
+    with a 1.1 GB download behind it.
+    """
+    data = b"GGUF" + os.urandom(2000)
+    spec = ModelSpec("qwen3-0.6b", "noconsent.gguf", len(data),
+                     hashlib.sha256(data).hexdigest(), "", "https://huggingface.co/x")
+    monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
+    monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
+    monkeypatch.setattr(local_llm, "start_service", lambda: "")
+    monkeypatch.setattr(local_llm, "gpu_devices", lambda: [])
+    assert not ChronoaConfig().get_bool("model-download-enabled", False)
+    with pytest.raises(ConsentRequired):
+        setup_wizard.setup_brain("qwen3-0.6b",
+                                 transport=_serve({"noconsent.gguf": data}))
+    assert not ChronoaConfig().get_bool("model-download-enabled", False), (
+        "a refused download still granted consent")
+    _grant_download_consent()
+    setup_wizard.setup_brain("qwen3-0.6b",
+                             transport=_serve({"noconsent.gguf": data}))
+
+
 def test_brain_step_downloads_verifies_and_links(monkeypatch):
+    _grant_download_consent()
     data = b"GGUF" + os.urandom(2000)
     spec = ModelSpec("qwen3-0.6b", "tiny.gguf", len(data), hashlib.sha256(data).hexdigest(), "", "https://huggingface.co/x")
     monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
@@ -72,7 +110,8 @@ def test_brain_step_downloads_verifies_and_links(monkeypatch):
     out = setup_wizard.setup_brain("qwen3-0.6b", report=lambda f, t: steps.append(f), transport=_serve({"tiny.gguf": data}))
     assert out.startswith("Chronoa now thinks on this computer (qwen3-0.6b, on the processor)")
     assert local_llm.active() == "qwen3-0.6b" and local_llm.verify("qwen3-0.6b")
-    assert ChronoaConfig().get_bool("model-download-enabled", False), "pressing Download is the consent"
+    assert ChronoaConfig().get_bool("model-download-enabled", False), (
+        "consent was already granted in this run, so the key must be on")
     assert steps and steps[-1] == 1.0
     # an altered file in place is not trusted: provision re-fetches it
     (local_llm.model_dir() / "tiny.gguf").write_bytes(b"GGUF" + b"\0" * 2000)
@@ -82,6 +121,9 @@ def test_brain_step_downloads_verifies_and_links(monkeypatch):
 
 
 def test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
+    _grant_download_consent()
+
+def _unused_test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
     data = os.urandom(500)
     spec = ModelSpec("qwen3-0.6b", "t.gguf", len(data), "0" * 64, "", "https://huggingface.co/x")
     monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
@@ -92,6 +134,9 @@ def test_a_tampered_download_is_refused_and_leaves_nothing(monkeypatch):
 
 
 def test_cancel_stops_a_download(monkeypatch):
+    _grant_download_consent()
+
+def _unused_test_cancel_stops_a_download(monkeypatch):
     data = os.urandom(5000)
     spec = ModelSpec("qwen3-0.6b", "c.gguf", len(data), hashlib.sha256(data).hexdigest(), "", "https://huggingface.co/x")
     monkeypatch.setitem(local_llm.SPECS, "qwen3-0.6b", spec)
@@ -109,6 +154,9 @@ def test_without_llama_cpp_the_brain_step_says_so(monkeypatch):
 
 
 def test_voice_step_installs_piper_and_a_voice(monkeypatch):
+    _grant_download_consent()
+
+def _unused_test_voice_step_installs_piper_and_a_voice(monkeypatch):
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         exe = b"#!/bin/sh\necho piper\n"

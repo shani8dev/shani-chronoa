@@ -89,4 +89,4 @@ def _run(arguments: dict, today: "date | None" = None) -> str:
     return "Unknown date operation."
 
 
-SKILLS = [Skill(name="date_math", schema=_SCHEMA, run=lambda a: _run(a))]
+SKILLS = [Skill(name="date_math", schema=_SCHEMA, run=_run)]

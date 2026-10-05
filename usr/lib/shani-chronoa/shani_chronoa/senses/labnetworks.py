@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from shani_chronoa.config import ChronoaConfig
-from shani_chronoa.netprovision import load_record, state_dir
+from shani_chronoa.netprovision import load_record, record_path, state_dir
 from shani_chronoa.senses import SENSITIVITY_PUBLIC, Sense
 from shani_chronoa.senses.context import Percept
 from shani_chronoa import sysfs

@@ -69,6 +69,11 @@
       <summary>First-run setup has been finished</summary>
       <description>Set when the person presses "Start using Chronoa" in the setup window. While false, and while the language model, speech model or natural voice is missing, the setup window opens by itself when Chronoa starts. It can always be reopened from Settings.</description>
     </key>
+    <key name="setup-mode" type="s">
+      <default>'local'</default>
+      <summary>Where setup was pointed: on this computer, or in the cloud</summary>
+      <description>Which branch the setup window offered first. "local" downloads a language model and keeps every request on this machine; "cloud" downloads nothing and asks a provider the person supplies a key for. Both can be set up, and this records only which one was offered first - it is not a switch that stops the other from working, so it is a UI convenience rather than a privacy control. The two gates that do control egress are privacy-mode and cloud-fallback-enabled, and neither is set by this key.</description>
+    </key>
     <key name="model" type="s">
       <default>''</default>
       <summary>LLM model override</summary>
@@ -278,6 +283,11 @@
       <default>false</default>
       <summary>Let Chronoa read the capture devices and who is holding them</summary>
       <description>When true, Chronoa may read which capture devices this machine has - cameras and microphones - and which process currently holds each one open. Off by default because this names the applications you are running at this moment, which is about you rather than about the machine. A device that cannot be checked is reported as undetermined and never as free: a missing holder-lookup tool and a genuinely idle camera look identical from here, and only one of them means nobody is watching.</description>
+    </key>
+    <key name="heard-sound-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa listen for sounds in the room, like a doorbell</summary>
+      <description>When true, Chronoa may record a few seconds from the microphone and name what it hears - a doorbell, a knock, a dog, speech - using a small audio-tagging model. Off by default, and this is the most private switch in the settings: it hears the room, including any conversation in it. The recording is labelled and deleted immediately, and this sense is never polled - a background sense that opened the microphone on a timer would be a microphone that is never actually off. For continuous listening, arm a sound trigger instead, which asks for this key first. Heard nothing it can recognise is reported as that, and never as the room being silent.</description>
     </key>
     <key name="printing-sense-enabled" type="b">
       <default>false</default>

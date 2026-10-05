@@ -299,7 +299,7 @@ class TestTheRows:
         widget = machine.build(types.SimpleNamespace())
         for row in _rows(widget):
             assert "not read" in _row_state(row), (row.get_title(), _row_state(row))
-        assert "0 of 16 machine-state senses answered" in _all_text(widget)
+        assert "0 of 16 senses answered" in _all_text(widget)
 
     def test_the_real_registry_runs_for_real_and_answers_in_a_known_state(
         self,
@@ -535,7 +535,7 @@ class TestAFailingSenseIsNotACleanReading:
             "the sense's own words must still be shown - the state says how much "
             "to trust them, it does not replace them"
         )
-        assert "0 of 16 machine-state senses answered" in _all_text(widget)
+        assert "0 of 16 senses answered" in _all_text(widget)
 
     def test_a_sense_that_declines_is_not_shown_as_a_reading(self, monkeypatch):
         """`hwmon`'s own wording when it refuses, reached through a config that
@@ -629,7 +629,7 @@ class TestWhatThePanelSays:
         assert unread == 15, unread  # 14 names with no module here, plus hwmon
         said = _all_text(widget)
         assert f"{unread} of 16 machine-state senses are not showing a reading" in said, said
-        assert "1 of 16 machine-state senses answered" in said, said
+        assert "1 of 16 senses answered" in said, said
 
     def test_the_banner_is_revealed_not_merely_in_the_tree(self, monkeypatch):
         """`Adw.Banner` starts hidden, so a panel that appends one and stops puts

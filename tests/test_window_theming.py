@@ -27,7 +27,9 @@ GUI = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/gui/style.py")
 
 # The orb's states. Listed explicitly so that ADDING one is a deliberate act
 # that has to update this list, rather than a colour quietly slipping through.
-STATE_PALETTE = {"#22c55e", "#f59e0b", "#3b82f6", "#a855f7", "#ef4444"}
+# #14b8a6 is `queued` - the microphone is open and has heard something, but the
+# model is still busy, so it sits between listening (green) and thinking (amber).
+STATE_PALETTE = {"#22c55e", "#14b8a6", "#f59e0b", "#3b82f6", "#a855f7", "#ef4444"}
 
 
 def _css() -> str:

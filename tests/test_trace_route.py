@@ -267,6 +267,17 @@ def test_traces_a_real_host():
         out = tr._run({"host": "localhost", "probes": 3})
     if "is not installed" in out or "did not finish" in out:
         pytest.skip(f"mtr could not run here: {out[:80]}")
+    if "Failure to start" in out:
+        # **A third way mtr can decline, and it is the one this container takes.**
+        # Measured: `mtr: Failure to start mtr-packet: Invalid argument`, because
+        # starting the raw socket needs a privilege this dev box does not have.
+        # The skill already distinguishes this from an unreachable host - it says
+        # so in the message - and the assertion below is on *that* distinction,
+        # because it is the part a user relies on and the part worth testing when
+        # the trace itself cannot run. Two skips would have hidden it.
+        assert "not a finding that the host is unreachable" in out
+        assert "down" not in out.lower()
+        pytest.skip(f"mtr cannot open a raw socket here: {out[:80]}")
     assert "hop(s)" in out
     assert "The destination" in out or "No trace came back" in out
     # Whatever the machine's shape, a hop row must never claim a silent hop is up.

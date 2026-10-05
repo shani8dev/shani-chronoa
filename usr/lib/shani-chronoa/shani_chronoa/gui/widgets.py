@@ -8,7 +8,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, Pango
 
 from shani_chronoa import capabilities
 
@@ -27,6 +27,14 @@ class AssistantState(enum.Enum):
 
     IDLE = "idle"
     LISTENING = "listening"
+    #: "I heard you, and I am waiting for the model to finish before I
+    #: transcribe." `assistd` carries the same state as `VoiceCaptureState::
+    #: Queued` - "waiting for the GPU to free up before transcribing" - and
+    #: having built the gate that produces it, the only thing missing was for
+    #: anyone to be able to *see* it. Without this the wait is a pause in the
+    #: orb between listening and thinking, which is indistinguishable from the
+    #: microphone having stopped working.
+    QUEUED = "queued"
     THINKING = "thinking"
     SPEAKING = "speaking"
     INTERRUPTING = "interrupting"
@@ -45,6 +53,12 @@ class AssistantState(enum.Enum):
 _STATE_STYLE = {
     AssistantState.IDLE: ("#6b7280", "audio-input-microphone-symbolic"),
     AssistantState.LISTENING: ("#22c55e", "audio-input-microphone-symbolic"),
+    # Teal, not listening's green: `tests/test_window_ux.py` requires that no
+    # two states share a colour, because colour alone excludes colourblind users
+    # - and that invariant outranks the "it is still listening" reading. Teal is
+    # the nearest distinct hue that still sits between listening (green) and
+    # thinking (amber), which is where this state actually sits.
+    AssistantState.QUEUED: ("#14b8a6", "content-loading-symbolic"),
     AssistantState.THINKING: ("#f59e0b", "content-loading-symbolic"),
     AssistantState.SPEAKING: ("#3b82f6", "audio-volume-high-symbolic"),
     AssistantState.INTERRUPTING: ("#a855f7", "media-playback-stop-symbolic"),
@@ -54,6 +68,7 @@ _STATE_STYLE = {
 _STATE_LABELS = {
     AssistantState.IDLE: "Ready",
     AssistantState.LISTENING: "Listening…",
+    AssistantState.QUEUED: "Heard you — waiting for the model…",
     AssistantState.THINKING: "Thinking…",
     AssistantState.SPEAKING: "Speaking…",
     AssistantState.INTERRUPTING: "Interrupting…",
@@ -215,7 +230,15 @@ class SuggestionBar(Gtk.FlowBox):
             self.add_css_class("reduce-motion")
 
         for suggestion in suggestions:
-            button = Gtk.Button(label=suggestion)
+            button = Gtk.Button()
+            # A label inside the button rather than on it, so it can ellipsise.
+            # `Gtk.Button(label=...)` has no ellipsize: a long suggestion made
+            # one chip 300px+ wide with nothing to shrink it, and the row's own
+            # wrapping cannot help a single chip that is wider than the window.
+            # Thirty of these fit; this one did not.
+            chip_label = Gtk.Label(label=suggestion, ellipsize=Pango.EllipsizeMode.END,
+                                   xalign=0)
+            button.set_child(chip_label)
             button.add_css_class("suggestion-chip")
             button.set_tooltip_text(f"Send: {suggestion}")
             button.update_property(

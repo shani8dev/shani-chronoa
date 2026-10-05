@@ -248,4 +248,53 @@ def _run(arguments: dict) -> str:
             f"{total} entr(ies).")
 
 
+def _verify_extracted_archive(arguments: dict, tool=None):
+    """Post-condition: did members actually land on disk?
+
+    `extract_archive` is the skill with the largest blast radius in the package -
+    it unzips attacker-controlled archives - so "Extracted N files" is exactly
+    the claim that must not be taken on trust. The check confirms the
+    destination exists, is a directory, and holds at least one **regular file**
+    that is not a symlink and not inside a `__MACOSX` sidecar.
+
+    The symlink exclusion is not pedantry: a hostile archive can contain a
+    symlink pointing outside the target, and a directory full of links is a
+    successful extraction that put nothing where it said it would.
+    """
+    dest = str(arguments.get("target") or arguments.get("destination")
+                or arguments.get("output") or "").strip()
+    if not dest:
+        return None  # nothing was extracted to check
+    from pathlib import Path as _P
+    target = _P(dest)
+    if not target.exists():
+        return (False, f"{target} does not exist, so nothing was extracted")
+    if not target.is_dir():
+        return (False, f"{target} is not a directory")
+    try:
+        entries = list(target.iterdir())
+    except OSError as exc:
+        return (False, f"could not read {target}: {exc}")
+    if not entries:
+        return (False, f"{target} is empty, so nothing was extracted")
+    real = []
+    links = 0
+    for entry in entries:
+        if entry.is_symlink():
+            links += 1
+            continue
+        if "__MACOSX" in entry.parts:
+            continue
+        real.append(entry)
+    if not real:
+        return (False, f"{target} holds only symlinks or macOS sidecars - an "
+                       f"extraction that put nothing usable where it said")
+    files = [e for e in real if e.is_file()]
+    note = f" ({links} symlink(s) skipped)" if links else ""
+    return (True, f"{target} holds {len(real)} extracted entrie(s), "
+                  f"{len(files)} of them regular file(s){note}")
+
+
+POST_CONDITION = _verify_extracted_archive
+
 SKILLS = [Skill(name="extract_archive", schema=SCHEMA, run=_run)]

@@ -128,8 +128,13 @@ SHORTCUT_SECTIONS = (
             "installed; push to talk works without one.",
         ),
         Shortcut(
-            "Set Chronoa up", "setup", "",
-            "Settings, then “Set up Chronoa again”: the model, the ears, the voice.",
+            "Set Chronoa up", "setup", "<Ctrl><Shift>s",
+            "The model, the ears and the voice. Also the button in the header, "
+            "and “Set up Chronoa again” under Settings.",
+        ),
+        Shortcut(
+            "Dictate", "dictate", "<Ctrl><Shift>d",
+            "Type with the keyboard, but talk instead of pressing keys.",
         ),
         Shortcut("Quit", "quit", "<Ctrl>Q", "Close Chronoa."),
     )),

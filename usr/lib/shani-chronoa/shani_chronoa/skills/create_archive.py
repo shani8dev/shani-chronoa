@@ -252,4 +252,52 @@ def _create(source: Path, destination: str, is_tar: bool) -> str:
     return msg
 
 
+def _verify_created_archive(arguments: dict, tool=None):
+    """Post-condition: does the archive exist, and does it actually list?
+
+    `create_archive` builds a zip or tar from real files and reports the path.
+    Two things are checked that a return code alone would not catch: the archive
+    is **openable** (a truncated or empty one exists and is not an archive), and
+    it **lists something**. An archive of zero members is a real outcome -
+    the selection matched nothing - and reporting that as "Created ..." is the
+    failure worth naming.
+
+    Matched on the extension the skill itself wrote, and the member count comes
+    from `zipfile`/`tarfile`, the same libraries it used, so the check cannot
+    disagree with the writer about the format.
+    """
+    out = str(arguments.get("output") or arguments.get("path") or "").strip()
+    if not out:
+        return None  # nothing was written to check
+    from pathlib import Path as _P
+    target = _P(out)
+    if not target.exists():
+        return (False, f"{target.name} does not exist, so no archive was made")
+    try:
+        size = target.stat().st_size
+    except OSError as exc:
+        return (False, f"could not stat {target.name}: {exc}")
+    if size == 0:
+        return (False, f"{target.name} is empty")
+    try:
+        if target.suffix.lower() == ".zip":
+            import zipfile
+            with zipfile.ZipFile(target) as z:
+                members = [n for n in z.namelist() if not n.endswith("/")]
+        else:
+            import tarfile
+            with tarfile.open(target) as t:
+                members = [m.name for m in t.getmembers() if m.isfile()]
+    except Exception as exc:  # noqa: BLE001 - unreadable is the failure
+        return (False, f"{target.name} is {size} bytes but does not open as an "
+                       f"archive ({type(exc).__name__})")
+    if not members:
+        return (False, f"{target.name} opens but holds no files, so nothing was "
+                       f"archived")
+    return (True, f"{target.name} opens and lists {len(members)} file(s), "
+                  f"{size} bytes")
+
+
+POST_CONDITION = _verify_created_archive
+
 SKILLS = [Skill(name="create_archive", schema=SCHEMA, run=_run)]
