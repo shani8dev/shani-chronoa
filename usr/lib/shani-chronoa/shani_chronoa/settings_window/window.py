@@ -2,6 +2,7 @@
 
 
 import gi
+import pathlib
 import re
 import threading
 
@@ -359,6 +360,67 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         if self._tool_activity_state() != self._tool_state:
             self._render_tool_activity()
 
+    # -- model quality: measured, never assumed -------------------------------
+
+    @staticmethod
+    def _off_main(button: Gtk.Button, work) -> None:
+        """Run `work` on a worker thread, report into `button`, re-enable it."""
+        button.set_sensitive(False)
+
+        def report(text: str) -> None:
+            GLib.idle_add(
+                lambda: (setattr(button, "label", str(text)[:90]), False)[1])
+
+        def run() -> None:
+            try:
+                work(report)
+            except Exception as exc:  # noqa: BLE001 - a worker must still report
+                report(f"Failed: {type(exc).__name__}")
+            GLib.idle_add(lambda: (button.set_sensitive(True), False)[1])
+
+        threading.Thread(target=run, daemon=True).start()
+
+    @staticmethod
+    def _measure_quality(report) -> None:
+        """Perplexity of the model in use, against another one installed here."""
+        link = local_llm.current_link()
+        if not (link.exists() or link.is_symlink()):
+            report("No model is installed yet")
+            return
+        target = pathlib.Path(link).resolve()
+        others = [p for p in sorted(local_llm.model_dir().glob("*.gguf"))
+                  if p.resolve() != target]
+        report("Measuring perplexity...")
+        verdict = local_llm.quality_verdict(target, others[0] if others else None)
+        if not verdict.get("measured"):
+            report("Not measurable")
+            return
+        report(f"{float(verdict['perplexity']):.3f} - {str(verdict['why'])[:70]}")
+
+    @staticmethod
+    def _rebuild_calibrated(report) -> None:
+        """Produce a calibrated quantization of the largest un-quantized model here.
+
+        Only a **higher-precision source** is offered: re-quantizing an already
+        quantized file is meaningless, and the error would not be obvious - the
+        output would simply be worse than the input while claiming to be an
+        improvement.
+        """
+        if local_llm.shutil.which("llama-imatrix") is None:
+            report("llama-imatrix is not installed")
+            return
+        sources = [p for p in sorted(local_llm.model_dir().glob("*.gguf"))
+                   if p.stem.endswith(("-f16", "-bf16"))
+                   or "F16" in p.name or "BF16" in p.name]
+        if not sources:
+            report("No F16/BF16 model to re-quantize")
+            return
+        source = sources[0]
+        report("Fitting an importance matrix...")
+        out = local_llm.calibrated_quantize(source, "Q4_K_M")
+        report(f"Done: {out.get('target')}" if out.get("ok")
+               else f"Refused: {str(out.get('why'))[:70]}")
+
     def _build_models(self, page) -> None:
         config = self.app.config
         group = self._group(
@@ -391,6 +453,43 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
                     config.ollama_host, lambda t: config.set("ollama-host", t.strip()))
         self._entry(group, "Piper voice", "TTS voice name",
                     config.piper_voice, lambda t: config.set("piper-voice", t.strip()))
+
+        # **Quality, measured.** `local_llm.perplexity()` and
+        # `quality_verdict()` were written to run `llama-perplexity` - which is
+        # installed on this machine and was never invoked anywhere in this
+        # repository - and were reachable only through `use()`, i.e. only as a
+        # side effect of switching models. `calibrated_quantize()` had no caller
+        # at all. Both are actions a person may want without changing anything, so
+        # they are buttons here.
+        #
+        # Off the main loop: perplexity on a real model takes seconds and
+        # calibration takes minutes.
+        quality_row = Adw.ActionRow(
+            title="Is this model any good?",
+            subtitle="Measures its perplexity against the other model installed "
+                     "here. Provisioning checks a digest, which says the file is "
+                     "intact and nothing about whether the quantization is any "
+                     "good.")
+        quality_button = Gtk.Button(label="Measure", valign=Gtk.Align.CENTER)
+        quality_button.connect(
+            "clicked", lambda b: self._off_main(
+                b, lambda report: self._measure_quality(report)))
+        quality_row.add_suffix(quality_button)
+
+        rebuild_row = Adw.ActionRow(
+            title="Rebuild it with calibration",
+            subtitle="Re-quantizes an un-quantized model with an importance "
+                     "matrix fitted to this system's own source, so the "
+                     "precision budget goes where the activations say it "
+                     "matters. Needs llama-imatrix; without it this refuses "
+                     "rather than handing back an uncalibrated file.")
+        rebuild_button = Gtk.Button(label="Rebuild", valign=Gtk.Align.CENTER)
+        rebuild_button.connect(
+            "clicked", lambda b: self._off_main(
+                b, lambda report: self._rebuild_calibrated(report)))
+        rebuild_row.add_suffix(rebuild_button)
+        group.add(quality_row)
+        group.add(rebuild_row)
 
         # Presence: one control for how much of the machine Chronoa is holding.
         # It belongs here because it is a fact about the *model*, and a person

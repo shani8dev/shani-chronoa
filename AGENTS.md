@@ -1871,6 +1871,35 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### The model actions were reachable only as a side effect of changing models
+
+`local_llm.perplexity()` and `quality_verdict()` run `llama-perplexity` — which
+is installed on this machine and was **never invoked anywhere in this
+repository** — but were reachable **only through `use()`**, i.e. only as a side
+effect of switching which model is loaded. There was no way to ask "is this model
+any good?" without changing something. `calibrated_quantize()` had no caller at
+all.
+
+Two buttons on the Models page, both off the main thread (perplexity takes
+seconds, calibration takes minutes), both re-enabling themselves so one run does
+not end the feature for the session:
+
+- **Measure** — perplexity of the model in use against another installed here,
+  through the same gate `use()` applies. An unmeasurable result reads
+  *"Not measurable"*, never a number.
+- **Rebuild** — re-quantizes an **F16/BF16** source with a calibrated
+  importance matrix. It refuses when there is no high-precision source, because
+  **re-quantizing an already-quantized file is meaningless and the error is not
+  obvious** — the output is simply worse than the input while claiming to be an
+  improvement.
+
+Measured on this box, both report honestly rather than inventing: *"No model is
+installed yet"*, *"No F16/BF16 model to re-quantize"*.
+
+One test passed for the wrong reason first: it created a model file but no
+`current.gguf`, so the handler answered *"No model is installed yet"* and never
+reached the verdict under test.
+
 ### Which providers can do speech — the table was real and unreachable
 
 `cloud_voice.probe_capabilities()` was written and measured live on 2026-10-06,
