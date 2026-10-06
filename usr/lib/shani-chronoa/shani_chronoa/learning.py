@@ -2528,11 +2528,25 @@ def export_knowledge(path: Optional[Path] = None,
             bundle["models"].append(payload)
 
     try:
-        from shani_chronoa.bandit import Bandit
-        for name, arm in Bandit().arms().items():
+        # **`load_bandit()`, not `Bandit()`. Measured 2026-10-06.**
+        # `Bandit.__init__` does not read the file - a fresh instance has an
+        # empty `_arms` - so this loop never ran, on any machine, ever:
+        # `bundle["bandit"]` was always `{}`.
+        #
+        # The consequences were not small. With a bandit holding ten pulls of
+        # real history on disk (`say` 5/5, `espeak` 5/0), and no fitted model
+        # and no conversation log, the bundle came out empty and the function
+        # returned **None** - so the Export button told the user "there is no
+        # trained model on this machine yet" while the thing it wanted was
+        # sitting on disk. Both halves of this feature's own docstring describe
+        # the arms travelling ("the knowledge a fresh machine cannot get any
+        # other way"), and `import_knowledge` promises to adopt them "even when
+        # the model is not" - neither had ever happened.
+        from shani_chronoa.bandit import load_bandit
+        for name, arm in load_bandit().arms().items():
             bundle["bandit"][name] = {"pulls": arm.pulls, "wins": arm.wins}
     except Exception:  # noqa: BLE001 - an absent bandit is not a failure
-        pass
+        logger.debug("could not read the bandit arm table", exc_info=True)
 
     # Sharing must not require a fitted model. Refusing to hand over the
     # evidence because nothing has learned from it yet is the same mistake as

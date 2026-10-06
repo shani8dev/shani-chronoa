@@ -1871,6 +1871,77 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### The learning layer: the export dropped the one thing it exists to carry
+
+Found by AST-scanning `learning.py` for public names with **no caller anywhere in
+`usr/` or `tests/`** — 15 of 111. Most are a statistics toolbox (`bayes`,
+`timeseries`, `clustering`) that is legitimately library surface. Three were not,
+and all three are the portability feature.
+
+**`bundle["bandit"]` was always empty, on every machine, ever.**
+`export_knowledge()` read the arms with `Bandit().arms()`, and `Bandit.__init__`
+does not read the file — a fresh instance has an empty `_arms`. `load_bandit()`
+is what loads. Measured, with a bandit holding real history written to disk
+(`say` 5/5, `espeak` 5/0), no fitted model and no conversation log:
+
+```
+on disk, load_bandit() reads: {'say': (5, 5.0), 'espeak': (5, 0.0)}
+a fresh Bandit().arms()    : {}
+export_knowledge(...)      -> None
+```
+
+So the Export button said *"there is no trained model on this machine yet"* while
+the thing it wanted sat on disk. Both halves of the feature's docstring describe
+the arms travelling — "the knowledge a fresh machine cannot get any other way" —
+and `import_knowledge` promises to adopt them "even when the model is not".
+Neither had ever happened. Now `load_bandit()`, and the bundle carries
+`{'say': {'pulls': 5, 'wins': 5.0}, 'espeak': {'pulls': 5, 'wins': 0.0}}` with
+`import_knowledge` reporting `"arms": 2`.
+
+### …and "Written to `<path>`" on a model that lost to a constant
+
+Training this machine's real 16 MB log (14,094 examples, **24 s** on CPU) gives
+`accuracy 0.857` against `baseline 0.912` — *worse than always answering
+"unverified"* — and `_train_outcome` reported **"Written to …"** and stopped. A
+person reading that concludes the model is good, and then `recommend()` acts on
+it.
+
+The trap here is that **two flags answer two different questions** and
+conflating them hides the finding either way:
+
+- `beats_baseline` — "does it win the argmax a constant already wins 91% of the
+  time". Here **no**.
+- `Report.honest()` — "is it worth quoting". It accepts *either* a top-1 win
+  *or* a minority verdict genuinely `detected()` at ≥2× its base rate on **both**
+  recall and precision. Here **yes**: `verified` at **17.1× recall, 5.6×
+  precision**.
+
+So the model is legitimately loaded — `tools._outcome_model()` refuses only on
+`honest` being false — and the sentence has to say **both**. `_verdict_sentence()`
+does, and `learning.py`'s "saved whether or not it beat the baseline" stays: its
+docstring is explicit that the gate exists "to stop the *caller* from relying on
+a useless model", and **the caller was the thing failing**.
+
+The surface's own docstring claimed "writes a file only when the fit beat the
+majority baseline" — false, and contradicted by `learning.py`'s deliberate
+design. `_nothing_to_export_sentence()` and `_verdict_sentence()` now carry the
+truth; `_import_sentence()` reports a refusal as a refusal (arms adopted, model
+refused, *which was which*).
+
+**The Import button, which the module docstring described and did not have.**
+"Export and import are here because the models are portable" — beside an Export
+button. `import_knowledge` was fully implemented, digest-checking and refusing,
+with **zero callers**. It has a button now, and `_import_sentence()` says what
+actually happened rather than "imported".
+
+Six tests, six mutations confirmed to fail. **One of those six needed a second
+attempt**: my first mutation used 8 spaces of indentation against a 4-space line,
+so `str.replace` was a silent no-op and the suite stayed green — which is the
+"a negative control that cannot fail is not a control" trap, hit from a new
+direction. Every mutation after that asserts `s.count(old) == 1` before writing.
+
+Related suites: **151 passed, 2 skipped**.
+
 ### The grant is now enforced, and the whole thing hinged on a thread
 
 I called wiring it "a feature question, not an audit finding" and left it alone.

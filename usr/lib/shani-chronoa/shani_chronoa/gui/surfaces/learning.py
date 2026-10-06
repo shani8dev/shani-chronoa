@@ -38,7 +38,7 @@ fresh machine otherwise starts at zero and relearns what took months to accumula
 from __future__ import annotations
 
 import threading
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 import gi
 
@@ -336,9 +336,15 @@ def build(app: Any) -> Gtk.Widget:
              suffix=router_button)
 
     export_button = _button("Export", lambda b: _export(b, status))
+    import_button = _button("Import", lambda b: _import(b, status))
     _add_row(train, "Take it to another machine",
              "The model with its digest, the bandit arms, and a fingerprint of "
-             "what was installed when it was fitted.", suffix=export_button)
+             "what was installed when it was fitted. Importing checks that "
+             "digest and refuses a model fitted on a machine that had tools "
+             "this one does not; the bandit arms are still adopted, because "
+             "which stand-in worked is a fact about the tool and not about the "
+             "sender's hardware.",
+             suffix=_pair(import_button, export_button))
 
     body.append(train)
     body.append(status)
@@ -357,11 +363,81 @@ def _train_outcome(button: Gtk.Button, status: Gtk.Label) -> None:
         report("Reading the tool-call log...")
         result = learning.train_and_save()
         if result.get("saved"):
-            report(f"Written to {result.get('path')}")
+            report(f"Written to {result.get('path')}.{_verdict_sentence(result)}")
         else:
             report(f"Not written: {result.get('reason')}")
 
     _run_async(button, work, status)
+
+
+def _nothing_to_export_sentence() -> str:
+    """Why there is nothing to export - which is three possibilities, not one.
+
+    **This said only "there is no trained model on this machine yet".** But
+    `export_knowledge` returns `None` when the model, the bandit arms *and* the
+    tool tally are all empty, so a machine with no model but real bandit history
+    exports perfectly well - and the message described a cause that was not the
+    cause.
+
+    Measured here: a bandit holding `say` 5/5 and `espeak` 5/0 got exactly that
+    sentence, because the arms were read from an unpopulated `Bandit()` and never
+    counted at all. All three are named so the reader can tell which is missing.
+    """
+    return ("Nothing to export yet: no trained model, no bandit history, and no "
+            "recorded tool outcomes on this machine. Any of the three would go - "
+            "use Chronoa for a while, or train the outcome model above.")
+
+
+def _verdict_sentence(result: Dict[str, Any]) -> str:
+    """What the fit is actually worth, from the provenance `train_and_save` returns.
+
+    **Written 2026-10-06. This used to say only "Written to <path>".** Measured on
+    this machine's own 16 MB log: the fit came back
+    `accuracy 0.857` against `baseline 0.912` - *worse than always answering
+    "unverified"* - and the panel said "Written to …" and stopped. A person
+    reading that concludes the model is good, and then `recommend()` acts on it.
+
+    The two flags are **not** the same question and conflating them is the trap:
+
+    - `beats_baseline` is "does it win the argmax a constant already wins 91% of
+      the time". Here, no.
+    - `honest` is "is it worth quoting" - `Report.honest()` accepts *either* a
+      top-1 win *or* a minority verdict genuinely detected at >= 2x its base rate
+      on **both** recall and precision. Here, yes: `verified` at 17.1x recall
+      and 5.6x precision.
+
+    So this model is legitimately loaded - `tools._outcome_model()` refuses only
+    on `honest` being false - and the honest sentence has to say *both*: it is
+    usable, and it does not win the argmax. Reporting either alone is the
+    confident-wrong-answer shape; reporting "Written" is the worst of the three.
+    """
+    prov = result.get("provenance")
+    if not isinstance(prov, dict) or "accuracy" not in prov:
+        return ""
+    acc = prov.get("accuracy")
+    base = prov.get("baseline")
+    if not isinstance(acc, (int, float)) or not isinstance(base, (int, float)):
+        return ""
+    beats = bool(prov.get("beats_baseline"))
+    honest = bool(prov.get("honest"))
+    detected = str(prov.get("detected") or "")
+    recall = (prov.get("recall_lift") or {})
+    precision = (prov.get("precision_lift") or {})
+    bits = []
+    if honest:
+        gain_r = float(recall.get(detected) or 0.0)
+        gain_p = float(precision.get(detected) or 0.0)
+        bits.append(f"usable - it flags {detected or 'a minority verdict'} at "
+                    f"{gain_r:.1f}x recall and {gain_p:.1f}x precision"
+                    if detected else "usable - it detects a minority verdict")
+    else:
+        bits.append("not usable - it neither beats the constant nor detects a "
+                    "minority verdict, so nothing will act on it")
+    bits.append(f"but {acc:.1%} against a {base:.1%} constant, so it does "
+                "not win the argmax" if not beats else
+                f"and {acc:.1%} against a {base:.1%} constant, so it does win "
+                "the argmax")
+    return " " + "; ".join(bits) + "."
 
 
 def _train_router(button: Gtk.Button, status: Gtk.Label) -> None:
@@ -383,13 +459,110 @@ def _train_router(button: Gtk.Button, status: Gtk.Label) -> None:
     _run_async(button, work, status)
 
 
+def _import(button: Gtk.Button, status: Gtk.Label) -> None:
+    """Take another machine's learning, checking it fits this one.
+
+    **Wired 2026-10-06; the button was missing while this module's docstring
+    described `import_knowledge`'s refusal behaviour in detail** - "Export and
+    import are here because the models are portable and the experience is not",
+    with an Export button and nothing beside it. `import_knowledge` itself was
+    fully implemented, digest-checking and refusing, with zero callers in the
+    tree.
+
+    A refusal is reported as what it is rather than as a failure: a bundle whose
+    model was fitted where `magick` exists cannot describe this machine, and the
+    arms still arrive. Both halves are shown, because "nothing happened" and
+    "the model was refused but the arms were adopted" need different reactions.
+    """
+    def chosen(path: str) -> None:
+        def work(report: Callable[[str], None]) -> None:
+            from pathlib import Path
+
+            from shani_chronoa import learning
+            report("Checking the bundle...")
+            try:
+                result = learning.import_knowledge(Path(path))
+            except Exception as exc:  # noqa: BLE001 - a bad file is a refusal
+                report(f"Could not read that bundle: {exc}")
+                return
+            report(_import_sentence(result))
+
+        _run_async(button, work, status)
+
+    picker = Gtk.FileDialog()
+    picker.set_title("Import another machine's experience")
+    try:
+        picker.open(None, None, _on_chosen(picker, chosen))
+    except Exception:  # noqa: BLE001 - an older GTK has no file chooser here
+        report_line = getattr(status, "set_text", None)
+        if report_line:
+            report_line("This build has no file chooser; place the bundle in "
+                        "~/.local/share/shani-chronoa and use shani-chronoa.")
+
+
+def _on_chosen(dialog: Gtk.FileDialog, callback: Callable[[str], None]):
+    """A `Gtk.FileDialog.open` continuation that hands back one path."""
+    def done(source: "Gtk.FileDialog", result) -> None:
+        try:
+            gfile = source.open_finish(result)
+        except Exception:  # noqa: BLE001 - cancelled is not an error
+            return
+        path = getattr(gfile, "get_path", None)
+        if callable(path):
+            callback(path())
+    return done
+
+
+def _import_sentence(result: Dict[str, Any]) -> str:
+    """What actually happened, including the parts that are refusals."""
+    arms = int(result.get("arms") or 0)
+    adopted = int(result.get("adopted_models") or 0)
+    usable = int(result.get("models_usable") or 0)
+    bits = []
+    if arms:
+        bits.append(f"{arms} bandit arm{'s' if arms != 1 else ''} adopted")
+    else:
+        bits.append("no bandit arms in the bundle")
+    if adopted:
+        bits.append(f"{adopted} model{'s' if adopted != 1 else ''} fitted on "
+                    "this machine's own tools")
+    elif usable:
+        bits.append(f"{usable} model(s) refused - they were fitted where tools "
+                    "this machine does not have exist")
+    else:
+        bits.append("no trained model in the bundle")
+    note = (result.get("note") or "").strip()
+    return "; ".join(bits) + (f". {note}" if note else ".")
+
+
+def _pair(*buttons: Gtk.Button) -> Gtk.Box:
+    """Two buttons side by side, read left to right as import then export.
+
+    Built by appending rather than with a `children=` property: PyGObject's
+    `Gtk.Box` has no such property, and passing one raises
+    `TypeError: gobject 'GtkBox' doesn't support property 'children'` at build
+    time - which is exactly when a panel stops rendering.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    for button in buttons:
+        box.append(button)
+    return box
+
+
 def _export(button: Gtk.Button, status: Gtk.Label) -> None:
     """Package what this machine has learned so another machine can use it."""
     def work(report: Callable[[str], None]) -> None:
         from shani_chronoa import learning
         report("Packaging what this machine has learned...")
         path = learning.export_knowledge()
-        report(f"Wrote {path}" if path else
-               "Nothing to export - there is no trained model on this machine yet")
+        # **All three reasons, because there are three.** This said only "there
+        # is no trained model on this machine yet", but `export_knowledge`
+        # returns None when the model, the bandit arms *and* the tool tally are
+        # all empty - so a machine with no model but real bandit history exports
+        # fine, and the message described a cause that was not the cause.
+        # Measured on this machine: a bandit holding `say` 5/5 and `espeak` 5/0
+        # got exactly that sentence, because the arms were read from an
+        # unpopulated `Bandit()` and never counted.
+        report(f"Wrote {path}" if path else _nothing_to_export_sentence())
 
     _run_async(button, work, status)
