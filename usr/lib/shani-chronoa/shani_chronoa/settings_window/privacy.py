@@ -5,7 +5,9 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
+
+import threading
 
 from shani_chronoa import capabilities
 
@@ -80,6 +82,25 @@ class PrivacyPage:
             tooltip="cloud_voice.CloudTTS - the LAST link of the voice chain, so "
                     "turning this on cannot displace a local voice",
         )
+
+        # **The two switches above say "needs an API key" and stop there.**
+        # `cloud_voice.probe_capabilities()` is what answers the next question -
+        # *which* provider, for speech in and for speech out - and it had zero
+        # callers, so the measured table was a fact inside a maintenance function
+        # nobody could reach. It is a **button and not a row**, because it makes
+        # real requests to up to five providers with a 30 s timeout each, and a
+        # probe that can take two minutes cannot run while the window is drawn.
+        probe = Gtk.Button(label="Check which providers can do speech",
+                           valign=Gtk.Align.CENTER)
+        probe.connect("clicked", lambda b: self._probe_cloud_speech(b))
+        row = Adw.ActionRow(
+            title="What those two switches can actually reach",
+            subtitle="Cloud speech is not one service. Press the button to "
+                     "re-measure it on this machine, now.",
+            activatable=False)
+        row.add_suffix(probe)
+        group.add(row)
+        group._needle_extra.append((row, "cloud speech which providers can do speech check"))
 
         # The gate every actuator passes through. `triggers.py` refuses any
         # action without it and names it, so a user whose armed rules do
@@ -356,6 +377,30 @@ class PrivacyPage:
         # the position a person already knows it in.
         self._gateway_rows(group)
 
+    def _probe_cloud_speech(self, button: Gtk.Button) -> None:
+        """Re-measure which providers really have the audio routes, live.
+
+        Off the main loop: five providers at up to 30 s each. Every verdict is
+        kept distinct - "I could not ask" and "it does not have one" are different
+        answers, and collapsing them is what made the table wrong three times
+        before it was right.
+        """
+        button.set_sensitive(False)
+
+        def work(report) -> None:
+            from shani_chronoa import cloud_voice
+            report("Asking the providers which speech routes they have...")
+            try:
+                found = cloud_voice.probe_capabilities()
+            except Exception as exc:  # noqa: BLE001 - a failed probe is a report
+                report(f"Could not measure: {type(exc).__name__}")
+                return
+            report(_capability_sentence(found))
+            button.set_sensitive(True)
+
+        threading.Thread(
+            target=lambda: _probe_worker(work, button), daemon=True).start()
+
     def _gateway_rows(self, group) -> None:
         """The `gateways` entry, and a live row of what is actually listening.
 
@@ -404,3 +449,51 @@ class PrivacyPage:
         if errors:
             text += f". Ignored: {'; '.join(errors)}"
         row.set_subtitle(text)
+
+def _probe_worker(work, button: Gtk.Button) -> None:
+    """Run probe `work` on this thread and put every report on the button."""
+    def report(text: str) -> None:
+        GLib.idle_add(lambda: (setattr(button, "label", str(text)[:90]), False)[1])
+    try:
+        work(report)
+    except Exception as exc:  # noqa: BLE001 - a worker must still say something
+        report(f"Failed: {type(exc).__name__}")
+        GLib.idle_add(lambda: (button.set_sensitive(True), False)[1])
+
+
+def _capability_sentence(found: dict) -> str:
+    """The measured table, as one readable line.
+
+    **Read against the real shape.** `probe_capabilities()` returns
+    `{pid: {"base_url", "stt": {...}, "tts": {...}}}` where each side carries
+    `{"verdict", "status", "detail"}` and the verdicts are **`needs-key` and
+    `needs-paid`, hyphenated**. My first renderer invented keys of my own
+    (`stt_yes`, `needs_key`) and would have printed "none" for everything while
+    looking like a measurement - which is the failure this page exists to catch.
+
+    All five verdicts are kept apart. "I could not ask" and "it does not have
+    one" are different answers: the first is a network problem, the second a fact
+    about the provider.
+    """
+    yes_in, yes_out, keyed, paid, unreachable, absent = [], [], [], [], [], []
+    for pid in sorted(found or {}):
+        entry = found[pid] or {}
+        for side, bucket in (("stt", yes_in), ("tts", yes_out)):
+            verdict = str((entry.get(side) or {}).get("verdict") or "unknown")
+            if verdict == "yes":
+                bucket.append(pid)
+            elif verdict == "needs-key":
+                keyed.append(pid)
+            elif verdict == "needs-paid":
+                paid.append(pid)
+            elif verdict == "unreachable":
+                unreachable.append(pid)
+            else:
+                absent.append(f"{pid}/{side}")
+    def listed(rows: list) -> str:
+        return ", ".join(rows) if rows else "none"
+    return (f"Speech in: {listed(yes_in)}. Speech out: {listed(yes_out)}. "
+            f"Needs a key: {listed(sorted(set(keyed)))}. "
+            f"Needs payment: {listed(sorted(set(paid)))}. "
+            f"Could not be asked: {listed(sorted(set(unreachable)))}. "
+            f"No such route: {listed(sorted(set(absent)))}.")

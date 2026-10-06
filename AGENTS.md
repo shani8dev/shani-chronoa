@@ -1871,6 +1871,36 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### Which providers can do speech — the table was real and unreachable
+
+`cloud_voice.probe_capabilities()` was written and measured live on 2026-10-06,
+then left with **zero callers**. So the capability table lived inside a
+maintenance function no person could reach, while the two switches above it in
+Settings said only *"needs an API key"* and stopped.
+
+It is a **button and not a row**, because it makes real requests to up to five
+providers with a 30 s timeout each, and a probe that can take two minutes cannot
+run on the thread that draws the window.
+
+**My first renderer invented keys of its own** — `stt_yes`, `tts_yes`,
+`needs_key` — and would have printed *"none"* for every provider while looking
+like a measurement. The real shape is `{pid: {"base_url", "stt": {...},
+"tts": {...}}}` with `verdict` inside each, and the verdicts are **hyphenated**:
+`yes`, `no`, `needs-key`, `needs-paid`, `unreachable`. Read correctly it
+reproduces the measurement exactly: speech in from *groq, kilo, llm7, openai,
+openrouter*; speech out from *groq, openai, openrouter* only; **blockrun paid**;
+**anthropic with no route at all**.
+
+All five verdicts are kept apart, and two of them are the ones that matter:
+a route answering **402 for money** is not one that works, and **"could not be
+asked"** is not **"has no route"** — the first is a network problem, the second a
+fact about the provider. Collapsing them is what made the table wrong three times
+before it was right.
+
+Nine tests, four mutations confirmed to fail (hyphenated verdicts unrecognised,
+the paid route folded into "works", unreachable folded into "no route", and the
+probe moved onto the main loop).
+
 ### The last of the orphaned fifteen, wired — and one that misdescribed itself
 
 The AST scan found **15 public names in `learning.py` with no caller anywhere in
