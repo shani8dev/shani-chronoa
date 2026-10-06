@@ -1750,6 +1750,61 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### The root-side plan validator was a non-executable file
+
+Found by asking "which functions in this tree look like enforcement but have no
+caller?" — an AST scan for `may_`/`can_`/`enforce`/`require`/`check_`/`deny`/
+`refuse`/`consent`/`validate` names with no usage outside their own definition.
+
+Three came back at zero. **Two were false positives and one was a live
+shipped defect**, and the false positives taught the scan its own lesson:
+
+- `sandbox/landlock.py:apply_filesystem_allowlist` — called from line 594, which
+  is *inside the source string returned by `get_landlock_wrapper()`*. The
+  executor writes that generated program into the workspace and runs it, so the
+  caller is generated code, not the tree.
+- `netprovision.revalidate` — called by **`usr/bin/shani-chronoa-lab-network`**,
+  which my scan had not looked at because it only walked
+  `usr/lib/shani-chronoa/`. *Any scan of "who calls this" in this repo has to
+  include `usr/bin/`; the scripts there import the package and are the
+  privileged half.*
+- `cloud_llm.check_health` — genuinely uncalled, and consistently so: the Model
+  panel already says *"would answer through … never asked here; availability is
+  per-request"*, so nothing anywhere claims a health probe runs. A dead
+  convenience method, not a defect.
+
+**The live one.** `usr/bin/shani-chronoa-lab-network` was mode **`100644`** in git
+— the only non-executable file in `usr/bin/`, where all five siblings are
+`100755`. Measured on the repo copy:
+
+| mode | result |
+|---|---|
+| `644` | `Permission denied`, exit 126 |
+| `755` | runs, and refuses to do anything without root (exit 77) |
+
+`skills/lab_network.py` documents the root path as
+`pkexec /usr/bin/shani-chronoa-lab-network apply /path/to/plan.json`, so on any
+install built from this commit the lab-network skill's root path **could not be
+executed at all**.
+
+That matters more than a dead launcher usually does, because this file is the
+**only** enforcement point for a security claim.
+`netprovision.revalidate()`'s docstring says a plan file *"can only ever contain
+commands this module would have produced from a request it accepts — there is no
+path by which a plan file becomes an arbitrary root command"*, and this helper
+is what calls `revalidate()`. An unexecutable validator is the same defect as an
+uncalled one, pointed the other way: code that reads as a control nothing can
+reach.
+
+The existing `test_pkgbuild_installs_every_binary_not_a_hand_kept_list` could
+never have caught it — it checks that the **manifest mentions** each launcher,
+never its mode. The new test asserts **git's recorded mode** (`git ls-files -s`),
+not the working tree's, because the working tree's mode is what a local `chmod`
+papers over while a fresh checkout still produces a 644 file. Mutation run: mode
+back to `100644` in git → the test fails. It also caught the mode silently
+reverting when a `git stash`/`git stash pop` round-tripped the file, which is the
+second reason to read the index rather than `stat`.
+
 ### The gateway, driven from a second process — and a grant that is only a label
 
 I had verified the gateway in-process. This drove it across **two processes on a

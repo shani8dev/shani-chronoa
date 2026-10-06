@@ -3,6 +3,7 @@
 Each test fails for a named defect in the current code (failing-first / RED phase).
 """
 
+import subprocess
 import re
 import shlex
 from pathlib import Path
@@ -200,6 +201,66 @@ class TestPackagingMetadata:
             f"them: {missing}. A skill that shells out to one reports 'not "
             f"installed' on every machine."
         )
+
+    def test_every_launcher_in_usr_bin_is_executable(self):
+        """**The manifest test above cannot see this**, and this one file was dead.
+
+        `usr/bin/shani-chronoa-lab-network` was mode `100644` in git - the only
+        non-executable file in `usr/bin/`, where all five siblings are `100755`.
+        Measured, on the repo copy:
+
+            mode 644 -> `Permission denied`, exit 126
+            mode 755 -> runs, and refuses to do anything without root (exit 77)
+
+        And the skill documents the root path as
+        `pkexec /usr/bin/shani-chronoa-lab-network apply /path/to/plan.json`, so
+        on any install built from this tree the lab-network skill's root path
+        could not be executed at all.
+
+        That matters more than a dead launcher usually would, because this file
+        is the **only** enforcement point for a security claim.
+        `netprovision.revalidate()`'s docstring says a plan file "can only ever
+        contain commands this module would have produced from a request it
+        accepts - there is no path by which a plan file becomes an arbitrary
+        root command", and this helper is what calls `revalidate()`. An
+        unexecutable validator is the same defect as an uncalled one, pointed the
+        other way: the code reads as a control that nothing can reach.
+
+        Asserted against **git's recorded mode**, not the working tree's, because
+        the working tree's mode is what a local `chmod` can paper over while a
+        checkout from this commit still produces a 644 file on disk.
+        """
+        import stat as _stat
+
+        tracked = {}
+        for line in subprocess.run(
+                ["git", "ls-files", "-s", "--", "usr/bin"],
+                cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.splitlines():
+            mode, _, _, name = line.split(maxsplit=3)
+            tracked[name] = mode
+
+        launchers = sorted(p.name for p in (REPO_ROOT / "usr" / "bin").iterdir()
+                           if p.is_file())
+        assert launchers, "usr/bin is empty, so this test proves nothing"
+
+        not_executable = []
+        for name in launchers:
+            path = REPO_ROOT / "usr" / "bin" / name
+            with path.open("rb") as handle:
+                first = handle.readline()
+            if not first.startswith(b"#!"):
+                continue  # not a program; nothing to execute
+            mode = tracked.get(f"usr/bin/{name}")
+            assert mode is not None, f"{name} is not tracked in git at all"
+            if mode == "100644" or not _stat.S_IMODE(path.stat().st_mode) & 0o111:
+                not_executable.append(f"{name} (git {mode})")
+        assert not not_executable, (
+            f"these have a shebang but are not executable: {not_executable}. The "
+            "package installs them as-is, so the documented invocation fails with "
+            "Permission denied on every machine - and if one of them is the "
+            "root-side plan validator, the security check it performs is "
+            "unreachable.")
 
     def test_pkgbuild_installs_the_units_and_dbus_services_too(self):
         """Same class of omission, same fix. Without these the package has no
