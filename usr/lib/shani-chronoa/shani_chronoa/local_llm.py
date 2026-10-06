@@ -23,8 +23,9 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional
 
 from shani_chronoa import files
 from shani_chronoa.stt_provision import ModelSpec, _install
@@ -127,13 +128,172 @@ def provision(key: str, progress: Optional[Callable[[int, int], None]] = None, c
     return path
 
 
-def use(key: str) -> None:
+#: How much worse a candidate's perplexity may be than the model it would
+#: replace, as a fraction. 2% is roughly where a Q4_K_M starts to be felt in
+#: replies and 5% is where it is obvious; refusing past 2% leaves a margin under
+#: the "this quant is worse" threshold without refusing every rebuild.
+PERPLEXITY_REGRESSION_LIMIT = 0.02
+
+#: Fixed calibration text, so two models are scored on **the same bytes** and the
+#: comparison means something. Written here rather than shipped as a data file so
+#: it cannot go missing from a package and silently turn the gate into a no-op.
+_CORPUS = """\
+The perception layer reads the machine's own state rather than asking the user
+to describe it, because a person who wanted to narrate their own battery level
+would not need an assistant. Each sense answers whether it may run at all before
+anything is read, and the consent key is checked first, so an unconsented sense is
+never invoked even when the data is sitting on disk in plain text.
+
+Quantization reduces precision, and the cost is measured in perplexity rather
+than assumed: the upstream tooling reports it, and a number beats a feeling. Two
+models are only comparable when they are scored on identical bytes, so the corpus
+is fixed here rather than sampled per run, and a calibration file that can go
+missing from a package would silently turn a gate into a no-op.
+
+A blue whale is the largest animal known to have existed, and it eats krill in
+enormous quantities during the feeding season. The pattern generalizes: a system
+that appears to understand a narrow domain can still be wrong in a way that only
+shows up when the domain shifts slightly underneath it.
+
+Rain fell steadily through the afternoon, filling the gutter along the north side
+of the lane before the storm finally eased into a drizzle that lasted until dusk.
+Nobody in the village had expected the river to rise so far overnight.
+"""
+
+
+
+def perplexity(path: "Path", timeout: float = 180.0) -> "float | None":
+    """This model's perplexity on a fixed corpus, or None when it cannot be read.
+
+    **Perplexity, because that is how llama.cpp documents quantization loss** -
+    the upstream quantize README measures it in "ppl and/or KLD", and
+    `llama-perplexity` is the tool that reports it. It is already installed and
+    **was never invoked anywhere in this repository**: `local_llm.py`,
+    `local_vision.py` and `local_embed.py` all download *pre-quantized* GGUFs and
+    point `current.gguf` at one, so nothing here ever checked that the chosen
+    quantization is a good one. A truncated download, a mislabelled quant, or a
+    build that re-quantized badly all promoted silently.
+
+    None on every failure path - no binary, a timeout, unparseable output. This is
+    a gate and a probe at once, and a probe that could not read anything must say
+    "unknown" rather than "fine"; `None` is that answer, and callers must not
+    treat it as a pass without saying so.
+    """
+    binary = shutil.which("llama-perplexity")
+    if not binary:
+        logger.info("llama-perplexity is not installed, so quality is unmeasured")
+        return None
+    candidate = Path(path)
+    if not candidate.is_file():
+        logger.info("no model at %s to measure", candidate)
+        return None
+    with tempfile.TemporaryDirectory(prefix="chronoa-ppl-") as work:
+        corpus = Path(work) / "calibration.txt"
+        corpus.write_text(_CORPUS * 8, encoding="utf-8")
+        try:
+            done = subprocess.run(
+                [binary, "-m", str(candidate), "-f", str(corpus),
+                 "-c", "512", "-t", "4", "--no-mmap"],
+                capture_output=True, text=True, timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.info("perplexity of %s could not be measured: %s", candidate.name, exc)
+            return None
+    # **The real output is `Final estimate: PPL = 1.0128 +/- 0.00145`.** My
+    # first patterns were `perplexity = ...` and a case-sensitive `\bppl`, so
+    # every measurement came back `None` - on a box where the tool runs in four
+    # seconds. Verified against the installed `llama-perplexity` on
+    # SmolLM2-135M-Instruct-Q4_K_M.
+    output = done.stdout + done.stderr
+    matches = (re.findall(r"Final estimate:\s*PPL\s*=\s*([0-9.eE+-]+)", output)
+               or re.findall(r"\bPPL\s*=\s*([0-9.eE+-]+)", output, re.IGNORECASE)
+               or re.findall(r"\bperplexity\s*=\s*([0-9.eE+-]+)", output, re.IGNORECASE))
+    if not matches:
+        logger.info("llama-perplexity produced no perplexity for %s", candidate.name)
+        return None
+    try:
+        return float(matches[-1])
+    except ValueError:
+        return None
+
+
+def quality_verdict(candidate: "Path", reference: "Path | None" = None) -> Dict[str, object]:
+    """Should this model become `current.gguf`? With the numbers that decided it.
+
+    Two shapes of answer, and the difference matters:
+
+    - **measured and worse** - the candidate regresses against the model it would
+      replace by more than `PERPLEXITY_REGRESSION_LIMIT`, so it is not promoted.
+      A refusal that names both numbers is actionable; one that says "failed" is
+      not.
+    - **unmeasured** - `llama-perplexity` is absent or would not run, so nothing
+      is known. The model is **promoted** and the reason is recorded, because a
+      minimal install without the tool should not be unable to choose a model at
+      all. What is refused is the *claim*, not the choice: the caller reports
+      "quality not measured" rather than nothing.
+    """
+    measured = perplexity(candidate)
+    if measured is None:
+        return {"promote": True, "perplexity": None, "reference": None,
+                "measured": False,
+                "why": "perplexity could not be measured - llama-perplexity is "
+                       "absent or would not run, so this promotion is unverified"}
+    if reference is None:
+        return {"promote": True, "perplexity": measured, "reference": None,
+                "measured": True,
+                "why": f"perplexity {measured:.3f} with nothing to compare against"}
+    baseline = perplexity(reference)
+    if baseline is None:
+        return {"promote": True, "perplexity": measured, "reference": None,
+                "measured": True,
+                "why": f"perplexity {measured:.3f}; the model being replaced could "
+                       "not be measured, so there is no comparison"}
+    worse_by = (measured - baseline) / baseline if baseline else 0.0
+    if worse_by > PERPLEXITY_REGRESSION_LIMIT:
+        return {"promote": False, "perplexity": measured, "reference": baseline,
+                "measured": True, "regression": round(worse_by, 4),
+                "why": f"perplexity {measured:.3f} against {baseline:.3f} for the "
+                       f"model it would replace - {worse_by:.1%} worse, past the "
+                       f"{PERPLEXITY_REGRESSION_LIMIT:.0%} limit - so it was not "
+                       "made current. The file is still there if you want it."}
+    return {"promote": True, "perplexity": measured, "reference": baseline,
+            "measured": True, "regression": round(worse_by, 4),
+            "why": f"perplexity {measured:.3f} against {baseline:.3f} "
+                   f"({worse_by:+.1%}), inside the "
+                   f"{PERPLEXITY_REGRESSION_LIMIT:.0%} limit"}
+
+
+def use(key: str, gate: bool = True) -> Dict[str, object]:
+    """Point `current.gguf` at this model, after a quality gate.
+
+    **`gate=False` restores the previous behaviour** - one rename, no questions -
+    because this is the hot path for setup and a missing `llama-perplexity` must
+    not be able to stop somebody choosing a model at all.
+
+    The gate is what makes "installed" and "usable" different claims. Before it,
+    `provision()` verified a **digest** and nothing about the artifact: a
+    correctly-hashed bad quant passed every check there was.
+    """
     spec = SPECS[key]
     link = current_link()
+    target = model_dir() / spec.filename
+    verdict: Dict[str, object] = {"promote": True, "measured": False,
+                                   "why": "quality gate not run"}
+    if gate:
+        reference = None
+        try:
+            if link.is_symlink() or link.exists():
+                reference = link.resolve()
+        except OSError:
+            reference = None
+        verdict = quality_verdict(target, reference)
+        if not verdict.get("promote"):
+            logger.warning("not switching to %s: %s", key, verdict.get("why"))
+            return verdict
     tmp = link.with_suffix(".tmp")
     tmp.unlink(missing_ok=True)
     tmp.symlink_to(spec.filename)
     os.replace(tmp, link)
+    return verdict
 
 
 def _systemctl(*args: str) -> "subprocess.CompletedProcess | None":

@@ -1871,6 +1871,56 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### A model was promoted on a matching digest and nothing else
+
+`provision()` verifies a **digest**. Nothing verified the *artifact*: a
+correctly-hashed bad quant passed every check there was. Meanwhile
+`llama-perplexity` is installed on this machine and was **never invoked anywhere in
+this repository** — `local_llm.py`, `local_vision.py` and `local_embed.py` all
+download *pre-quantized* GGUFs and point `current.gguf` at one.
+
+Perplexity is the right measure because that is how llama.cpp documents
+quantization loss: the upstream `tools/quantize/README.md` measures it in
+"ppl and/or KLD", and `llama-imatrix` exists because the same calibration data
+improves the quant. So `local_llm.perplexity()` runs the installed tool over a
+**fixed** corpus — fixed so two models are scored on identical bytes, and
+written into the module so it cannot go missing from a package and silently turn
+the gate into a no-op.
+
+Measured on the two models already on this box:
+
+| model | perplexity |
+|---|---|
+| `SmolLM2-135M-Instruct-Q4_K_M` | **1.805** |
+| `Qwen3-0.6B-Q8_0` | **1.373** |
+
+and promoting the first for the second is **refused**: *31.5% worse, past the 2%
+limit*. Five seconds per model.
+
+**`None` means unknown, never "fine"** — no binary, a timeout, unparseable output
+and a missing file all read as `None`, because a probe that could not read
+anything must not report a pass. And an **unmeasured** model is still promoted,
+with the reason recorded: a minimal install without the tool should not be unable
+to pick a model at all. What is refused is the *claim*, not the choice.
+`use(key, gate=False)` is the explicit escape hatch.
+
+**My first parser matched nothing.** The installed tool prints
+`Final estimate: PPL = 1.0128 +/- 0.00145`; my patterns were `perplexity = ...`
+and a case-sensitive `\bppl`, so **every** measurement came back `None` on a box
+where the tool runs in four seconds. Verified against the real binary before
+writing the test, so the test asserts the real format.
+
+Thirteen tests. Five mutations; **one equivalent** (breaking the first of three
+parsing patterns leaves the two fallbacks matching, which is defence in depth by
+design) and the real break — all patterns removed — is caught by three tests. One
+assertion was too weak: the refusal quotes a percentage *derived* from the two
+numbers, so dropping the raw figures still left "31.5% worse" in the sentence. It
+asserts **both** absolute numbers now.
+
+`local_llm` / `modelfit` / `surface_model` / `vision` suites: **153 passed, 2
+skipped**, and the single failure is the recorded `grim` one — "no Wayland screen
+capture tool is installed".
+
 ### What the log taught, once something showed it — and the "cannot liar" sentence
 
 `learning.lessons()` and `render_lessons()` were fully written with **zero
