@@ -17,6 +17,7 @@ than guessed at.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from datetime import datetime, timedelta
@@ -32,13 +33,27 @@ SCHEMA = {
     "function": {
         "name": "add_reminder",
         "description": (
-            "Write a reminder to be read later - something still there "
-            "tomorrow, with no countdown involved. Optionally with a due time "
-            "in words, e.g. 'tomorrow 9am' or 'in 3 hours'."
+            "A dated list of reminders you can keep coming back to: add one, "
+            "list what is still due, mark one done, or remove one. Optionally "
+            "with a due time in words, e.g. 'tomorrow 9am' or 'in 3 hours'."
         ),
         "parameters": {
             "type": "object",
             "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["add", "list", "done", "remove"],
+                    "description": (
+                        "What to do. 'add' writes one (needs text), 'list' "
+                        "shows what is still due, 'done' marks one finished "
+                        "given its number, 'remove' deletes one given its "
+                        "number. Defaults to 'add'."
+                    ),
+                },
+                "number": {
+                    "type": "integer",
+                    "description": "Which reminder, as shown by 'list'. Required for done and remove.",
+                },
                 "text": {"type": "string", "description": "What to be reminded about."},
                 "due": {
                     "type": "string",
@@ -95,7 +110,76 @@ def _parse_due(raw: str) -> tuple[datetime | None, str]:
     )
 
 
+def _entries() -> list[dict]:
+    """The store, newest-appended last, unreadable lines skipped."""
+    try:
+        raw = _STORE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            out.append(entry)
+    return out
+
+
+def _save_entries(entries: list[dict]) -> str | None:
+    try:
+        _STORE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _STORE.with_suffix(".tmp")
+        tmp.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+        os.replace(tmp, _STORE)
+    except OSError as exc:
+        return files.describe(exc, _STORE, "write the reminders to")
+    return None
+
+
 def _run(arguments: dict) -> str:
+    action = (arguments.get("action") or "add").strip().lower()
+    if action not in ("add", "list", "done", "remove"):
+        return "Action must be one of add, list, done, remove."
+
+    entries = _entries()
+    if action == "list":
+        pending = [e for e in entries if not e.get("done")]
+        if not pending:
+            return "No reminders outstanding."
+        lines = []
+        for i, e in enumerate(entries):
+            if e.get("done"):
+                continue
+            when = f" (due {e['due'][:16].replace('T', ' ')})" if e.get("due") else ""
+            lines.append(f"  {i + 1}. {e.get('text', '')}{when}")
+        return "Reminders outstanding:\n" + "\n".join(lines)
+
+    if action in ("done", "remove"):
+        try:
+            number = int(arguments.get("number"))
+        except (TypeError, ValueError):
+            return "Pass the reminder's number (as shown by 'list')."
+        index = number - 1
+        if not (0 <= index < len(entries)) or entries[index].get("done") and action == "done":
+            return f"No such reminder: number {number}."
+        if action == "done":
+            entries[index]["done"] = True
+            err = _save_entries(entries)
+            if err:
+                return err
+            return f"Marked done: {entries[index].get('text', '')!r}."
+        entry = entries.pop(index)
+        err = _save_entries(entries)
+        if err:
+            return err
+        return f"Removed: {entry.get('text', '')!r}."
+
+    # add (default)
     text = (arguments.get("text") or "").strip()
     if not text:
         return "No reminder text was given, so there is nothing to write down."
@@ -107,20 +191,18 @@ def _run(arguments: dict) -> str:
         "text": text,
         "written_at": time.time(),
         "due": due.isoformat() if due else None,
+        "done": False,
     }
-    try:
-        _STORE.parent.mkdir(parents=True, exist_ok=True)
-        with open(_STORE, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry) + "\n")
-    except OSError as exc:
-        return files.describe(exc, _STORE, "write the reminder to")
+    entries.append(entry)
+    err = _save_entries(entries)
+    if err:
+        return err
 
     if not _STORE.exists():
         return f"Reported writing the reminder but {_STORE} is not there."
     when = f" Due {due.strftime('%Y-%m-%d %H:%M')}" if due else " No due time was given."
     note = f" {problem}" if problem else ""
     return f"Reminder written to {_STORE}: {text!r}.{when}{note}"
-
 
 
 def _verify_reminder(arguments: dict, tool=None):
@@ -136,6 +218,9 @@ def _verify_reminder(arguments: dict, tool=None):
     millisecond are otherwise indistinguishable, and matching the newest
     matching line is what makes that safe.
     """
+    action = str(arguments.get("action") or "add").strip().lower()
+    if action != "add":
+        return None  # a list/done/remove changes the store, so the add check does not apply
     text = str(arguments.get("text") or arguments.get("reminder") or "").strip()
     if not text:
         return None  # nothing was written, so nothing to check

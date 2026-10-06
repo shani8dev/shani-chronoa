@@ -592,3 +592,30 @@ class TestConnectWifiDoesNotGuessTheInterface:
         assert "nothing to leave" not in out, (
             f"an nmcli failure was reported as 'not connected': {out}")
         assert "Could not read" in out
+
+
+class TestRemindersAreFullCRUDNow:
+    """`add_reminder` was write-only and nothing could read or remove one."""
+
+    def test_list_done_remove(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
+        add_reminder._run({"text": "buy milk", "due": "in 2 hours"})
+        add_reminder._run({"text": "call dentist"})
+        listed = add_reminder._run({"action": "list"})
+        assert "buy milk" in listed and "call dentist" in listed, listed
+        assert add_reminder._run({"action": "done", "number": 1}).startswith("Marked done")
+        assert "buy milk" not in add_reminder._run({"action": "list"}), add_reminder._run({"action": "list"})
+        assert add_reminder._run({"action": "remove", "number": 2}).startswith("Removed")
+        assert add_reminder._run({"action": "list"}) == "No reminders outstanding."
+
+    def test_done_remove_need_a_number(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
+        assert "number" in add_reminder._run({"action": "done"}), add_reminder._run({"action": "done"})
+        assert "number" in add_reminder._run({"action": "remove"})
+        assert "No such reminder" in add_reminder._run({"action": "remove", "number": 9})
+
+    def test_post_condition_only_applies_to_add(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
+        # a list/done/remove must not trip the add-side post-condition
+        assert add_reminder.POST_CONDITION({"action": "list"}) is None
+        assert add_reminder.POST_CONDITION({"action": "done", "number": 1}) is None
