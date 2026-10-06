@@ -418,8 +418,53 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         source = sources[0]
         report("Fitting an importance matrix...")
         out = local_llm.calibrated_quantize(source, "Q4_K_M")
-        report(f"Done: {out.get('target')}" if out.get("ok")
-               else f"Refused: {str(out.get('why'))[:70]}")
+        if not out.get("ok"):
+            report(f"Refused: {str(out.get('why'))[:110]}")
+            return
+        # **Say where the file is, and let it be used.** `calibrated_quantize()`
+        # builds a model the `SPECS` catalogue cannot name - it re-quantizes
+        # whatever source was on disk - and `current.gguf` is a symlink, so
+        # before `adopt_path()` existed the result was unreachable: this button
+        # reported "Done: Q4_K_M" and left the file where nothing could load it.
+        # The path is in the report *and* adopted here, because a rebuilt model
+        # that is not the one in use has not fixed anything.
+        built = out.get("calibrated_path")
+        report(f"Built {out.get('target')} at {built}")
+        if not built:
+            report("but no path was reported, so nothing was adopted")
+            return
+        verdict = local_llm.adopt_path(pathlib.Path(built), gate=True)
+        if verdict.get("promote"):
+            report(f"In use now: {pathlib.Path(built).name} "
+                   f"({str(verdict.get('why'))[:60]})")
+        else:
+            report(f"Built, but NOT put into use: {str(verdict.get('why'))[:90]}")
+            report(f"It is at {built} if you want it anyway.")
+
+    @staticmethod
+    def _reclaim_scratch(report) -> None:
+        """Delete the copies a calibration run left behind, and say what happened.
+
+        **A staticmethod for the same reason `_rebuild_calibrated` is one.** It
+        was a closure inside `_build_models`, which meant no test could reach it -
+        and a mutation that replaced the call with a hardcoded "nothing to do"
+        passed the whole suite. A UI affordance that silently does nothing is
+        worse than one that is missing, because the button still looks right.
+
+        The report names every directory that was **kept** as well as every one
+        removed. That is the whole point of the refusal in
+        `reclaim_quant_scratch()`: if it declines to delete the directory a
+        loaded model lives in, the person pressing the button needs to know,
+        or "reclaimed" would be a claim it cannot back.
+        """
+        report("Checking for scratch directories...")
+        if not local_llm.quant_scratch_dirs():
+            report("Nothing to reclaim.")
+            return
+        out = local_llm.reclaim_quant_scratch()
+        report(str(out.get("why")))
+        for name in out.get("kept", []):
+            report(f"  kept (a model is loaded from it): {name}")
 
     def _build_models(self, page) -> None:
         config = self.app.config
@@ -490,6 +535,23 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         rebuild_row.add_suffix(rebuild_button)
         group.add(quality_row)
         group.add(rebuild_row)
+
+        # **Reclaiming the room a Rebuild takes.** Measured before this row: every
+        # call to `calibrated_quantize()` without an explicit `work=` left a
+        # directory holding a corpus, an `imatrix.dat` and **two** ~100 MB GGUFs,
+        # and nothing removed them on any exit path. One press, 200 MB. The
+        # directory the *current* model lives in is kept even if you ask.
+        scratch_row = Adw.ActionRow(
+            title="Reclaim rebuild scratch",
+            subtitle="Each calibration run keeps the uncalibrated build beside "
+                     "the calibrated one so the two can be compared. This deletes "
+                     "those copies - except any directory a model is loaded from.")
+        scratch_button = Gtk.Button(label="Reclaim", valign=Gtk.Align.CENTER)
+        scratch_button.connect(
+            "clicked", lambda b: self._off_main(
+                b, lambda report: self._reclaim_scratch(report)))
+        scratch_row.add_suffix(scratch_button)
+        group.add(scratch_row)
 
         # Presence: one control for how much of the machine Chronoa is holding.
         # It belongs here because it is a fact about the *model*, and a person

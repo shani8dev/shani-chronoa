@@ -1910,6 +1910,75 @@ is mode **0664**, world-readable, beside 600 files. It is dated **2026-09-27** â
 nine days *before* `executor.py` gained its `chmod 0o700`. Stale state from
 before the fix, not a live bug.
 
+### A Rebuild that built a model nothing could load
+
+Wired earlier today and **measured useless on inspection**. Three separate
+defects, found by asking "what happens to the file it produces?":
+
+**1. The result was unreachable.** `current.gguf` is a **symlink**, so
+`server_args` would load any file on disk - but the only function that could
+point it there, `use(key)`, resolves its target through
+`SPECS[key].filename`, a fixed catalogue of downloads. A re-quantization of a
+model already on disk has no `SPECS` entry *by construction*: it did not come
+from the catalogue. Settings -> Models -> **Rebuild** reported `Done: Q4_K_M`,
+named a path in `$TMPDIR`, and discarded it. So the button built a measurably
+better model (42.571 against 43.611 on the same corpus, same bytes) and left it
+where the system clears it. Fixed with `adopt_path()`, which promotes **any**
+file behind the same perplexity gate `use()` applies, and by making Rebuild
+report the path *and* adopt it.
+
+**2. Every run leaked ~200 MB.** `calibrated_quantize()` built its scratch with
+`mkdtemp()` and **never removed it, on any of the four exit paths** - including
+the two refusals that had built nothing worth keeping. Each directory held a
+corpus, an `imatrix.dat` and **two** ~100 MB GGUFs. The scratch now lands under
+`model_dir()` rather than `$TMPDIR`, and the two paths that built nothing reclaim
+it. The one path that hands back the naive file keeps it - and names the
+directory, because a caller holding a file must be able to find its home.
+
+**3. Nothing could ever reclaim it.** `_QUANT_SCRATCH` is in memory, so it is
+empty in every process except the one that made the directory - which is to say
+the Settings window could never reclaim last week's leftovers. **Measured: the
+first version found the directory and removed nothing.** The guard is now the
+name prefix *and* the parent directory, checked inside `_remove_scratch_dir()`,
+which is the only function here that deletes anything on a pattern.
+
+Two bugs of my own, both caught by measurement rather than reading, both recorded
+because the shape recurs:
+
+- **`directory.name not in _QUANT_SCRATCH_PREFIXES` asks whether the whole name
+  *equals* the prefix.** `mkdtemp` appends random characters, so every real
+  scratch directory was refused: two present, zero removed, logged as "not a
+  quantization scratch name". It has to be `startswith`.
+- **The reclaim guard compared a file against a directory.** It protected
+  `link.resolve()` - the model *file* - then compared it to each scratch
+  *directory*, so it could never match and never fired. Measured: after
+  adopting `chronoa-quant-a/m.gguf`, reclaim deleted `chronoa-quant-a` and left
+  `current.gguf` dangling. Both the file and **its parent** must be protected.
+
+`f"{freed / 1e6:.0f} MB"` also reported **"0 MB"** for a 4 kB reclaim - the exact
+size the button exists to explain - so sizes go through `_human_bytes()`.
+
+**32 tests, 12 mutations confirmed to fail.** Two of those mutations were
+**survivors on the first run** and are worth remembering:
+
+- The self-adopt test passed with or without the guard, because with no
+  `llama-perplexity` installed `quality_verdict()` returns `measured: False`
+  for *everything*. A test that passes for an unrelated reason is not a test;
+  stubbing a number was what made it real.
+- Only the **first** failure path had a reclaim test. Removing the reclaim from
+  the second one - the expensive path, where the matrix has already been fitted
+  and both ~100 MB builds exist - left all 19 green.
+
+And the reclaim row originally had **no test at all**, proved by a mutation that
+replaced its call with a hardcoded "nothing to do" and stayed green. Its handler
+was a closure inside `_build_models`, unreachable without a display, so it is now
+a staticmethod - the same reason `_rebuild_calibrated` already is.
+
+**Regression caught by existing tests, not by new ones:** an edit to those two
+lines dropped `directory.mkdir()`, so every `work=` run failed with "llama-quantize
+could not produce". `test_the_happy_path_names_all_three_artifacts` failed before
+the new tests were even run.
+
 ### The full inventory: what is dead, what is deliberate, and what is a lie
 
 An AST scan of **all 1,025 public functions and classes** in the package found

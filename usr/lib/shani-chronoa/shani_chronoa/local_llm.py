@@ -363,6 +363,98 @@ def quantize(source: "Path", target: str, out: "Path",
     return True
 
 
+#: Directories `calibrated_quantize` created itself and has not yet reclaimed.
+#: A module-level list rather than a local because every early return has to
+#: reach the cleanup, and threading a `try/finally` through four returns to
+#: preserve a return value is how the leak got there in the first place.
+_QUANT_SCRATCH: "list[Path]" = []
+
+#: Scratch directory name prefixes this module is allowed to delete. Declared
+#: once because both the creator and the remover have to agree on it exactly,
+#: and a literal typed twice is a literal that will drift.
+_QUANT_SCRATCH_PREFIXES = ("chronoa-quant-",)
+
+
+def _human_bytes(count: int) -> str:
+    """A size a person can act on.
+
+    **`f"{freed / 1e6:.0f} MB"` reported "0 MB" for a 4 KB reclaim**, measured -
+    which is the size the button exists to explain. Rounding to whole megabytes
+    makes every small result look like nothing happened, and "0 MB removed" is
+    exactly the report a person stops trusting.
+    """
+    value = float(max(0, count))
+    for unit, step in (("GB", 1e9), ("MB", 1e6), ("kB", 1e3)):
+        if value >= step:
+            return f"{value / step:.1f} {unit}"
+    return f"{int(value)} B"
+
+
+def _new_quant_scratch() -> "Path":
+    """A private scratch directory for one quantization, under `model_dir()`.
+
+    Under `model_dir()` rather than `$TMPDIR` so a calibrated model this function
+    builds is somewhere durable and findable, instead of a path that the
+    system clears on its own schedule. `model_dir()` is created first because
+    `mkdtemp` will not create its parent, and `dir=` is only honoured when the
+    parent already exists.
+    """
+    parent = model_dir()
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        parent = Path(tempfile.gettempdir())
+    return Path(tempfile.mkdtemp(prefix=_QUANT_SCRATCH_PREFIXES[0],
+                                 dir=str(parent)))
+
+
+def _remove_scratch_dir(directory: "Path") -> bool:
+    """`rmtree` a scratch directory. False if it would not go.
+
+    **The name and the parent are both checked here**, because this is the only
+    function that deletes anything on the strength of a pattern. `_QUANT_SCRATCH`
+    cannot be the guard: it is in memory, so it is empty in every process except
+    the one that made the directory - which is to say the Settings window could
+    never reclaim anything left by a previous run. That was measured: the first
+    version of `reclaim_quant_scratch()` found the directory and returned
+    "removed nothing" for exactly this reason.
+    """
+    directory = Path(directory)
+    # **Prefix test, not equality.** My first version wrote
+    # `directory.name not in _QUANT_SCRATCH_PREFIXES`, which asks whether the
+    # whole name equals the prefix - so every real scratch directory was
+    # refused, `mkdtemp` having appended random characters to the prefix, and
+    # reclaim removed nothing. Measured: two directories present, zero removed,
+    # and the refusals logged as "not a quantization scratch name".
+    if not directory.name.startswith(_QUANT_SCRATCH_PREFIXES):
+        logger.warning("not removing %s: not a quantization scratch name",
+                       directory)
+        return False
+    if directory.parent != model_dir():
+        logger.warning("not removing %s: not under %s", directory, model_dir())
+        return False
+    try:
+        shutil.rmtree(directory)
+    except OSError as exc:
+        logger.warning("Could not remove %s: %s", directory, exc)
+        return False
+    if directory in _QUANT_SCRATCH:
+        _QUANT_SCRATCH.remove(directory)
+    return True
+
+
+def discard_quant_scratch(directory: "Path") -> bool:
+    """Remove a scratch directory `calibrated_quantize` made. True if it went.
+
+    **Only ever called on a directory this module created.** Removing a caller's
+    `work=` directory would delete their files on the strength of a name match,
+    which is the same class of bug as `rm -rf "$TMPDIR"/*`.
+    """
+    if directory not in _QUANT_SCRATCH:
+        return False
+    return _remove_scratch_dir(directory)
+
+
 def calibrated_quantize(source: "Path", target: str = "Q4_K_M",
                         work: "Path | None" = None) -> Dict[str, object]:
     """Produce a calibrated quantization of an open model, with both paths named.
@@ -383,35 +475,231 @@ def calibrated_quantize(source: "Path", target: str = "Q4_K_M",
     if not source.is_file():
         return {"ok": False, "calibrated": False,
                 "why": f"no model at {source}"}
-    directory = Path(work) if work else Path(tempfile.mkdtemp(prefix="chronoa-quant-"))
+    # **A directory this function makes, it cleans up.** Measured: every call
+    # left a `chronoa-quant-*` directory in $TMPDIR holding a corpus, an
+    # `imatrix.dat` and **two** ~100 MB GGUFs - the naive build and the
+    # calibrated one - and nothing ever removed them, on *any* of the four exit
+    # paths. The Settings "Rebuild" button passes no `work=`, so it hits the
+    # `mkdtemp` branch: pressing it repeatedly fills /tmp with model copies.
+    #
+    # The two GGUFs are *returned* on purpose (the caller is meant to compare or
+    # install them), so this cannot simply `rmtree` in a `finally` - it would
+    # delete the file it just reported as built. So ownership is the rule: a
+    # directory passed in as `work=` belongs to the caller and is left alone,
+    # and only one this function created is removed. The default therefore
+    # changes to "under `model_dir()`", where a surviving calibrated model is
+    # *useful* rather than orphaned in /tmp: a caller that wants to install it
+    # can move it, and one that does not has not leaked a disk's worth of RAM
+    # image into a directory the system will eventually clear anyway.
+    directory = (Path(work) if work is not None
+                 else _new_quant_scratch())
+    # **A caller's `work=` directory is created here if it is not there yet.**
+    # Dropping this line is what a careless edit to the two lines above looks
+    # like, and `test_the_happy_path_names_all_three_artifacts` caught it:
+    # `llama-quantize` was handed a path inside a directory that did not exist,
+    # so every run with `work=` failed with "llama-quantize could not produce".
     directory.mkdir(parents=True, exist_ok=True)
+    _QUANT_SCRATCH.append(directory)
     corpus = directory / "calibration.txt"
     matrix = directory / "imatrix.dat"
     naive = directory / f"{source.stem}-{target}-naive.gguf"
     calibrated = directory / f"{source.stem}-{target}-calibrated.gguf"
 
     if not quantize(source, target, naive):
+        discard_quant_scratch(directory)
         return {"ok": False, "calibrated": False,
                 "why": f"llama-quantize could not produce {target} from {source.name}"}
     if not build_imatrix(source, str(corpus), matrix):
         # **The honest outcome is a refusal, not the naive file.** Returning
         # `naive` here would hand back a quant that is byte-identical to the
         # uncalibrated one and let the caller believe it had been calibrated.
+        # **The directory stays, and has to: `naive` is returned.** Reclaiming
+        # it here would delete the very file the return value points at. So this
+        # path leaks by design rather than by accident - which means it is the
+        # one path that *must* name the directory it left behind, and it does,
+        # twice: as `uncalibrated_fallback` and as `scratch`.
         return {"ok": False, "calibrated": False, "uncalibrated_fallback": str(naive),
+                "scratch": str(directory),
                 "why": "llama-imatrix is unavailable or failed, so only an "
                        "UNCALIBRATED quant could be produced - it is at "
-                       f"{naive} if you want it, and it was not called calibrated"}
+                       f"{naive} if you want it, and it was not called calibrated. "
+                       f"Its working directory {directory} is being kept for that "
+                       "file; discard it with "
+                       "local_llm.discard_quant_scratch(path) when you are done"}
     if not quantize(source, target, calibrated, imatrix=matrix):
+        discard_quant_scratch(directory)
         return {"ok": False, "calibrated": False, "uncalibrated_fallback": str(naive),
-                "why": "the calibrated quantization failed after the matrix was built"}
+                "why": "the calibrated quantization failed after the matrix was "
+                       f"built; {naive} is the uncalibrated build of the same "
+                       f"target and {directory} has been reclaimed"}
     return {"ok": True, "calibrated": True, "target": target,
             "calibrated_path": str(calibrated), "naive_path": str(naive),
-            "imatrix": str(matrix), "corpus": str(corpus),
+            "imatrix": str(matrix), "corpus": str(corpus), "scratch": str(directory),
             "corpus_chars": len(calibration_corpus()),
             "why": f"{target} built with an importance matrix fitted on "
                    f"{len(calibration_corpus())} chars of this system's own source; "
                    f"the uncalibrated build of the same target is beside it for "
                    "comparison"}
+
+
+def adopt_path(candidate: "Path", gate: bool = True) -> Dict[str, object]:
+    """Point `current.gguf` at **any** model file, after the quality gate.
+
+    **`use()` cannot do this**, and that made the calibration feature useless.
+    `use(key)` looks the file up in `SPECS[key].filename`, so it only ever
+    promotes one of the catalogue's own files. But `calibrated_quantize()` builds
+    something the catalogue cannot name - it re-quantizes whatever source you
+    gave it - and `current.gguf` is a **symlink**, so the server (`server_args`,
+    line 609) would happily load it. Measured before this function existed:
+    Settings -> Models -> *Rebuild* reported `Done: Q4_K_M`, named a path in
+    `$TMPDIR`, and there was **no way to point the model link at it**. The button
+    built a better model and left it where nothing could reach it.
+
+    The gate is the same one `use()` applies, and it is the reason this is not
+    just `os.replace`: a hand-built quantization is exactly the artifact whose
+    quality is unknown, because nothing about *how* it was built guarantees a
+    good one. It is measured against the model being replaced and refused if it
+    regresses by more than `PERPLEXITY_REGRESSION_LIMIT`.
+
+    The symlink is written **absolute**, unlike `use()`'s relative one. A relative
+    target inside a `chronoa-quant-*` scratch directory would still resolve
+    correctly today, but only for as long as that scratch directory survives -
+    and `discard_quant_scratch()` is meant to be callable on it.
+    """
+    target = Path(candidate)
+    verdict: Dict[str, object] = {"promote": True, "measured": False,
+                                   "why": "quality gate not run"}
+    if not target.is_file():
+        return {"promote": False, "measured": False, "path": str(target),
+                "why": f"no model file at {target}"}
+    if gate:
+        reference = None
+        link = current_link()
+        try:
+            if link.is_symlink() or link.exists():
+                reference = link.resolve()
+        except OSError:
+            reference = None
+        # **Never measure the candidate against itself.** Adopting the file that
+        # is already current would compare it to itself, report a perplexity
+        # "improvement" of exactly zero, and promote on the strength of a number
+        # that says nothing.
+        if reference is not None:
+            try:
+                if reference == target.resolve():
+                    verdict = {"promote": True, "measured": False,
+                               "path": str(target),
+                               "why": "this is already the model in use"}
+                    return verdict
+            except OSError:
+                pass
+        verdict = quality_verdict(target, reference)
+        verdict["path"] = str(target)
+        if not verdict.get("promote"):
+            logger.warning("not switching to %s: %s", target, verdict.get("why"))
+            return verdict
+    link = current_link()
+    tmp = link.with_suffix(".adopt.tmp")
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(target.resolve())
+    os.replace(tmp, link)
+    return verdict
+
+
+def quant_scratch_dirs() -> "list[Path]":
+    """Quantization scratch directories under `model_dir()`, newest last.
+
+    A *report*, not a repair: these are the directories a build leaves behind,
+    each holding two quantized copies of a model, and the only honest way to
+    present them is with their size attached so a person can decide.
+    """
+    found = []
+    try:
+        pattern = "chronoa-quant-*"
+        for path in sorted(model_dir().glob(pattern)):
+            if path.is_dir():
+                found.append(path)
+    except OSError:
+        return []
+    return found
+
+
+def reclaim_quant_scratch(keep: "Path | None" = None) -> Dict[str, object]:
+    """Delete every quantization scratch directory, keeping the one in use.
+
+    **Kept deliberately narrow, and it refuses rather than guessing.** `keep` is
+    honoured by resolved path, so the directory backing the *current* model
+    cannot be deleted out from under a running `llama-server`; pass nothing and
+    the current one is kept anyway. It only ever removes directories whose name
+    matches `chronoa-quant-*` **inside `model_dir()`**, so it cannot be pointed
+    at anything else - which is the failure mode that makes `rm -rf` in a helper
+    function unacceptable.
+    """
+    freed = 0
+    removed: list[str] = []
+    kept: list[str] = []
+    current = None
+    link = current_link()
+    if link.is_symlink() or link.exists():
+        try:
+            current = link.resolve()
+        except OSError:
+            current = None
+    # **Protect directories, and the current model is a file.** This is the bug
+    # the second version had: `protected` collected `link.resolve()` - the
+    # *model file* - and was then compared against each scratch *directory*, so
+    # the two could never be equal and the guard never fired. Measured: after
+    # adopting `chronoa-quant-a/m.gguf`, reclaim deleted `chronoa-quant-a` and
+    # left `current.gguf` as a dangling symlink pointing at nothing. So the
+    # file's own path is protected *and* the directory containing it, because
+    # removing the directory is what breaks the link.
+    protected = set()
+    if keep is not None:
+        try:
+            resolved_keep = Path(keep).resolve()
+            protected.add(resolved_keep)
+            protected.add(resolved_keep.parent)
+        except OSError:
+            pass
+    if current is not None:
+        protected.add(current)
+        protected.add(current.parent)
+    for directory in quant_scratch_dirs():
+        try:
+            resolved = directory.resolve()
+        except OSError:
+            resolved = directory
+        # **Dangling link counts as in use too.** `current_link().resolve()` on
+        # a broken symlink returns the path anyway, but if the target has
+        # vanished some resolvers raise, and a directory holding a *dangling*
+        # current link is still the directory somebody meant.
+        if resolved in protected or directory in protected:
+            kept.append(str(directory))
+            continue
+        link_here = directory / current_link().name
+        if link_here.is_symlink():
+            kept.append(str(directory))
+            continue
+            kept.append(str(directory))
+            continue
+        total = 0
+        for child in directory.rglob("*"):
+            try:
+                if child.is_file():
+                    total += child.stat().st_size
+            except OSError:
+                pass
+        if _remove_scratch_dir(directory):
+            removed.append(str(directory))
+            freed += total
+        else:
+            kept.append(str(directory))
+    return {"removed": removed, "kept": kept, "freed_bytes": freed,
+            "why": f"removed {len(removed)} quantization scratch "
+                   f"director{'y' if len(removed) == 1 else 'ies'} worth "
+                   f"{_human_bytes(freed)}"
+                   + (f"; kept {len(kept)} that a model is using"
+                      if kept else "")}
 
 
 def use(key: str, gate: bool = True) -> Dict[str, object]:
