@@ -560,3 +560,87 @@ def test_a_bad_entry_is_collected_rather_than_swallowed(monkeypatch):
     assert len(app._gateway_errors) == 1, (
         "the unparseable entry was dropped without a word, so the setting looks "
         "like it worked while half of it did not")
+
+class TestTheGrantIsALabelAndSaysSo:
+    """**`may_execute()` has no caller, and its name promises enforcement.**
+
+    Measured two ways. Across two processes on a private `dbus-daemon`, a channel
+    registered with the **default `ask` grant** took a `Submit` call and its text
+    reached the submit callable - so `ask` does not stop anything. And with an
+    AST search, `self.grant` is written once in `__init__` and read once, in
+    `may_execute()`, which nothing in the tree calls.
+
+    The safety argument does not depend on the grant: the submitted turn meets
+    the same per-sense consent keys as anything typed into the window, which is
+    why an inbound message cannot delete a file by itself. What does not exist is
+    any behavioural difference between the two grants.
+
+    These tests pin that, so that if somebody later *does* wire the grant the
+    failure is a test that says what changed - not a docstring quietly becoming
+    true.
+    """
+
+    def test_nothing_in_the_tree_calls_may_execute(self):
+        """An AST search, because a grep would find its own name in this file."""
+        import ast
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"
+        callers = []
+        for path in root.rglob("*.py"):
+            if "__pycache__" in str(path):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Attribute)
+                        and node.attr == "may_execute"
+                        and not (isinstance(node.ctx, ast.Store))):
+                    callers.append(f"{path.relative_to(root)}:{node.lineno}")
+        assert not callers, (
+            f"may_execute() now has callers {callers}, so the grant is being "
+            "enforced somewhere - update the docstring and these tests, because "
+            "they currently assert it is a label")
+
+    def test_an_ask_grant_is_submitted_exactly_like_an_execute_grant(self):
+        from shani_chronoa.gateway import ASK_ONLY, Registry
+
+        seen = []
+        registry = Registry(lambda text: (seen.append(text), f"got {text}")[1])
+        ask = registry.register("laptop")            # the default grant
+        execute = registry.register("phone", "execute")
+
+        assert ask.grant == ASK_ONLY
+        assert execute.grant == "execute"
+        assert ask.may_execute() is False and execute.may_execute() is True
+
+        # Both are submitted. That is the behaviour being pinned.
+        assert registry.submit("laptop", "ping") == "got ping"
+        assert registry.submit("phone", "ping") == "got ping"
+        assert seen == ["ping", "ping"], (
+            f"only {seen!r} was submitted - the grant has become enforced, so "
+            "this test and Gateway.may_execute's docstring both need updating")
+
+    def test_admit_enforces_the_three_limits_that_are_real(self):
+        """The ones that *are* wired, so the pair reads as a whole."""
+        import pytest
+
+        from shani_chronoa.gateway import MAX_TEXT, RATE_PER_MINUTE, Gateway, Refused
+
+        gw = Gateway("laptop", lambda t: t, "execute")
+        with pytest.raises(Refused, match="empty"):
+            gw.admit("   ")
+        with pytest.raises(Refused, match="the limit is"):
+            gw.admit("x" * (MAX_TEXT + 1))
+        for _ in range(RATE_PER_MINUTE):
+            gw.admit("ok")
+        with pytest.raises(Refused, match="messages a minute"):
+            gw.admit("ok")
+
+    def test_the_grant_is_still_surfaced_for_an_operator_to_see(self):
+        """It is a display value - so the Settings row must keep showing it."""
+        from shani_chronoa.gateway import describe, parse_config
+
+        entries, errors = parse_config("whatsapp, telegram:execute")
+        assert not errors
+        line = describe(entries)
+        assert "whatsapp (ask)" in line and "telegram (execute)" in line, line

@@ -1750,6 +1750,67 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### The gateway, driven from a second process — and a grant that is only a label
+
+I had verified the gateway in-process. This drove it across **two processes on a
+private `dbus-daemon`**, the app exporting and an unrelated client calling:
+
+```
+CLIENT Submit(phone,'what is the weather') -> "reply to 'what is the weather'"
+CLIENT Submit(laptop,'ping')               -> "reply to 'ping'"
+CLIENT Submit(nosuch,'ping')  -> <Refused: no gateway called 'nosuch'; registered: laptop, phone>
+CLIENT Submit(phone,'')       -> <Refused: empty message>
+CLIENT Submit(phone,'x'*99999)-> <Refused: message is 99999 characters; the limit is 4000>
+CLIENT bogus method           -> <UnknownMethod>
+```
+
+and the server's submit callable reported the text it actually received —
+`'what is the weather', 'ping'` — so the string crossed the bus rather than being
+echoed by a stub. Introspection advertises
+`dev.shani.chronoa.Gateways.Submit(ss) → (s)` correctly.
+
+**And it exposed a claim that is false.** The second line is a channel registered
+with the **default `ask` grant**, and it executed. An AST search confirms why:
+`self.grant` is written once in `__init__` and read once, in `may_execute()`,
+which **nothing in the tree calls**. So `ask` and `execute` behave identically
+today; the grant is what the Settings row displays.
+
+The security argument does not rest on the grant, and that is worth being precise
+about: the submitted turn meets the same per-sense consent keys as anything typed
+into the window, which is why an inbound message cannot delete a file by itself.
+What does not exist is any *behavioural* difference between the two grants.
+
+`Gateway.may_execute`'s docstring said the grant is "the *outer* limit". There is
+no outer limit. It now says plainly that it has no caller, that the enforced
+limits are `admit()`'s three plus the consent keys, and that a method named
+`may_execute` with no caller reads like a security control it is not — which is
+the same shape as `Registry.register()` having zero callers, the defect that
+kept the whole inbound channel dead. Four tests pin the behaviour (AST search for
+callers, both grants submitting, `admit`'s three limits, `describe` still showing
+the grant); four mutations confirmed to fail.
+
+**Wiring the grant is a decision, not a bug fix**, and I have not made it: an
+`ask` channel would have to be *refused* at the bus call, because there is nobody
+to ask interactively at that point, which would make the default grant useless.
+If somebody wants the distinction to be real it needs a consent path from an
+inbound call, and that is a feature question rather than an audit finding.
+
+**Three harness traps, each of which cost a wrong intermediate conclusion:**
+
+- `Gio.bus_get_sync` resolves `DBUS_SESSION_BUS_ADDRESS` on the **first**
+  session-bus connection and caches that connection for the process. Setting it
+  after `gi` is imported does nothing — my first server exported on the *real*
+  session bus (unique name `:1.10577`) while the client sat on the private one,
+  and the client got `ServiceUnknown`.
+- `Gio.TestDBus` is constructed as `Gio.TestDBus.new(flags)`, not
+  `Gio.TestDBus(flags)` — the latter is `TypeError: GObject.__init__() takes
+  exactly 0 arguments`.
+- **A bus server with no GLib main loop answers nothing.** My first probe
+  `time.sleep`ed instead of running a `MainLoop`, so every `Submit` timed out and
+  the handler never ran — which read exactly like a broken export. It was the
+  probe. (`Gio.bus_get_sync` was called before the loop existed, which is fine;
+  dispatch needs the loop, not the connection.)
+
 ### The cloud-speech privacy story, verified by running it end to end
 
 `cloud_voice` has a `_transport` hook, so the whole path can be driven for real

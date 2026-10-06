@@ -119,11 +119,35 @@ class Gateway:
         return self._submit(self.admit(text))
 
     def may_execute(self) -> bool:
-        """Whether this gateway may cause a side effect.
+        """Whether this channel is *labelled* `execute`, or `ask`.
 
-        **Almost never.** A gateway's own grant is the *outer* limit; the turn it
-        submits still meets the consent keys for whatever the model decides to do,
-        so this returning True does not let a message delete a file by itself.
+        **Nothing calls this, and the name overpromises. Measured 2026-10-06:**
+        `self.grant` is written once in `__init__` and read once here, so the
+        grant is a **label**, not an enforced gate - an `ask` channel's message
+        is submitted exactly as an `execute` channel's is. Proven across two
+        processes on a private bus: a channel registered `"laptop"` with the
+        default `ask` grant took a `Submit` call and its text reached the
+        submit callable.
+
+        The docstring here used to say the grant is "the *outer* limit", which
+        is false - there is no outer limit, only three inner ones:
+
+        - `admit()` enforces what is enforced: non-empty, `MAX_TEXT`, and
+          `RATE_PER_MINUTE`;
+        - the submitted turn then meets the same per-sense consent keys as
+          anything typed into the window, which is the limit that actually
+          matters - it is why an inbound message cannot delete a file by itself.
+
+        So the security property is real and does **not** depend on the grant.
+        What does not exist is any distinction in behaviour between the two
+        grants. A method called `may_execute` with no caller reads like a
+        security control to the next person auditing this file, and on this
+        module the recurring defect has been exactly that kind of un-wired
+        promise (`Registry.register()` had zero callers and the whole inbound
+        channel was dead). Kept because `describe()` and the Settings row show
+        the grant, so an operator can see what they configured - but it is a
+        display value today, and making it enforced is a decision about consent
+        on a bus call, not a bug fix.
         """
         return self.grant == "execute"
 
@@ -250,7 +274,9 @@ def parse_config(text: str) -> Tuple[List[Tuple[str, str]], List[str]]:
 
     `execute` is opt-in per channel and still does not mean the channel can act:
     the submitted turn meets the same consent keys as anything typed into the
-    window (see `Gateway.may_execute`).
+    window. **The grant itself is not enforced anywhere** - measured, and written
+    out at length in `Gateway.may_execute`, which has no caller. Today `ask` and
+    `execute` behave identically; the difference is what the Settings row shows.
     """
     entries: List[Tuple[str, str]] = []
     errors: List[str] = []
