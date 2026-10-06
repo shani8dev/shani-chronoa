@@ -2046,7 +2046,8 @@ def train_and_save(path: Optional[Path] = None,
                   holdout: float = 0.25,
                   epochs: int = 30,
                   dry_run: bool = False,
-                  key: Optional[bytes] = None) -> Dict[str, object]:
+                  key: Optional[bytes] = None,
+                  only_tools: Optional["frozenset[str]"] = None) -> Dict[str, object]:
     """Train on this machine's own tool-call log, and save the result.
 
     **This is the entry point that did not exist.** `OutcomeModel.save()` had
@@ -2070,7 +2071,7 @@ def train_and_save(path: Optional[Path] = None,
     # silently trained on the default one instead and got a report about
     # different data than it asked about. `train_and_report` and
     # `train_and_save` must agree on what `path` is, or the second is a trap.
-    examples = load(path)
+    examples = load(path, only_tools=only_tools)
     if not examples:
         return {"saved": False, "reason": "no labelled examples in the log"}
 
@@ -3036,7 +3037,13 @@ def _entries(path: Optional[Path] = None) -> List[dict]:
 #: offset it was built to, and a read only parses the bytes since. Steady-state
 #: cost is O(new lines), not O(history) - which is the difference between a
 #: pile that is an asset and a pile that is a liability.
-_EXAMPLE_CACHE: Dict[str, Tuple[Tuple[int, float], List["Example"]]] = {}
+#: **Keyed by file path *and* filter.** The value is the revision, so the entry
+#: is invalidated when the log is appended to. The second key exists because a
+#: cache that ignored `only_tools` would hand a *filtered* caller the unfiltered
+#: list from the same revision - so pressing "train on what I still have" would
+#: change nothing at all, silently, and look like it had worked. Measured as a
+#: design failure here before it was ever a runtime one.
+_EXAMPLE_CACHE: Dict[Tuple[str, "str"], Tuple[Tuple[int, float], List["Example"]]] = {}
 
 #: How many examples to keep resident. 200k is roughly 40 MB of sparse tuples,
 #: which is a working set rather than an archive.
@@ -3047,7 +3054,8 @@ WINDOW = 200_000
 _WARM_WINDOW = 20_000
 
 
-def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
+def load(path: Optional[Path] = None, limit: int = 200_000,
+         only_tools: Optional["frozenset[str]"] = None) -> List[Example]:
     """Read the log into training examples, skipping unusable rows.
 
     Only the most recent `WINDOW` examples are held, and only the bytes after
@@ -3057,12 +3065,30 @@ def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
     verdict is `None`, and they are dropped rather than labelled `unverified`,
     which would have quietly inflated the majority class.
 
+    **`only_tools` is the decision `unknown_tool_examples()` says is the
+    person's to make, finally made available.** Measured on this machine's own
+    log: `liar` and `unver` are fixtures this build no longer has, and between
+    them they are 712 of 14,395 records - and `liar` alone is **323 of the 423
+    failures** the model is fitted on, 76% of the entire failure signal. So the
+    model's strongest and most confident lesson is about a tool that cannot run.
+
+    The function deliberately only *reported* that, on the argument that
+    filtering would quietly change what the model says about the past. That
+    argument is right for a default and wrong as a dead end - so the default is
+    unchanged (`only_tools=None` trains on everything, exactly as before) and
+    the filter is there when a person wants it, with the figure already on
+    screen next to the button that turns it on.
+
     Cached per revision of the file; see `_EXAMPLE_CACHE`.
     """
     source = path or _log_path()
+    # A stable, order-independent key for the filter, so `{a, b}` and `{b, a}`
+    # share a cache entry instead of parsing the whole log twice.
+    filter_key = "" if only_tools is None else "\x00".join(sorted(only_tools))
+    cache_key = (str(source), filter_key)
     try:
         stat = source.stat()
-        cached = _EXAMPLE_CACHE.get(str(source))
+        cached = _EXAMPLE_CACHE.get(cache_key)
         if cached is not None and cached[0] == (stat.st_size, stat.st_mtime):
             return cached[1]
     except OSError:
@@ -3089,6 +3115,8 @@ def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
             verdict = str(record.get("verdict") or "").lower()
             if verdict not in VERDICTS:
                 continue
+            if only_tools is not None and str(record.get("tool_name")) not in only_tools:
+                continue
             examples.append(Example(
                 tuple(_active(vectorise(features(record)))),
                 VERDICTS.index(verdict)))
@@ -3098,7 +3126,7 @@ def load(path: Optional[Path] = None, limit: int = 200_000) -> List[Example]:
             examples = examples[-WINDOW:]
     try:
         stat = source.stat()
-        _EXAMPLE_CACHE[str(source)] = ((stat.st_size, stat.st_mtime), examples)
+        _EXAMPLE_CACHE[cache_key] = ((stat.st_size, stat.st_mtime), examples)
     except OSError:
         pass
     return examples
@@ -3758,7 +3786,8 @@ def unknown_tool_examples(records: Sequence[dict]) -> "tuple[int, list[str]]":
 
 
 def train_and_report(path: Optional[Path] = None, holdout: float = 0.25,
-                     cv: Optional[float] = 5.0) -> Report:
+                     cv: Optional[float] = 5.0,
+                     only_tools: Optional["frozenset[str]"] = None) -> Report:
     """Train on most of the log and score the rest.
 
     Split by class rather than by time - see `split_examples` for the measured
@@ -3767,7 +3796,7 @@ def train_and_report(path: Optional[Path] = None, holdout: float = 0.25,
     `train_and_save` refuses to act on, and it is the only thing in the layer
     that answers "is there signal in this log at all".
     """
-    examples = load(path)
+    examples = load(path, only_tools=only_tools)
     if not examples:
         return Report(0, 0.0, 0.0, {}, {})
     if cv:

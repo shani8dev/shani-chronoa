@@ -1979,6 +1979,79 @@ lines dropped `directory.mkdir()`, so every `work=` run failed with "llama-quant
 could not produce". `test_the_happy_path_names_all_three_artifacts` failed before
 the new tests were even run.
 
+### The 76% failure signal about a tool that no longer exists
+
+`unknown_tool_examples()` has been *reporting* this since before the Learning
+page existed, with a docstring that says the answer is the person's:
+
+> It is recorded rather than filtered. **Filtering would be the more useful
+> behaviour and the wrong one here**... Whether to train on it is their decision,
+> made with the figure in front of them.
+
+That argument is right for a **default** and wrong as a **dead end**. So the
+default is untouched - `only_tools=None` trains on everything, byte-identical to
+before - and the filter now exists for when a person wants it, **next to the
+figure on the same page**.
+
+Measured on this machine's log (14,395 records), via the code's own reader:
+
+| | |
+|---|---|
+| records naming tools this build lacks | **712** (4.9%), `liar` and `unver` |
+| of those, failures | **`liar`: 323 of the 423 total failures - 76%** |
+| examples dropped when filtered | 650 of 14,102 |
+
+So the outcome model's most confident, most heavily-repeated lesson is about a
+tool that cannot run, and its "detects failure" score is substantially a memory
+of `liar`. That is not a bug in the model; it is the model being faithful to a
+log full of a fixture.
+
+**`_EXAMPLE_CACHE` was the whole ballgame.** Keyed by path and revision alone,
+so the first unfiltered call populated it and a filtered caller was served the
+**unfiltered** list: 4 examples either way, from the same file, with the button
+appearing to work and changing nothing. A feature that does exactly what it says
+and does not do it is worse than a missing one. The key is now
+`(path, sorted-filter)` - sorted, so `{a, b}` and `{b, a}` share an entry rather
+than parsing the whole log twice.
+
+Three of my own test bugs, all the same shape - **asserting the implementation
+instead of the behaviour**:
+
+- Spied on `train_and_report` to prove the filter reaches the fit. It never gets
+  called: `train_and_save` splits and cross-validates itself. `load` is the one
+  boundary every route crosses.
+- Asserted `provenance` on a return that legitimately had none, because the real
+  model refused to be written on four examples. A test that needs a save to
+  succeed in order to check a filter breaks for the right reason at the wrong
+  time.
+- Asserted the filter reached `cross_validate` as a **kwarg**. It should not -
+  `load()` already filtered the list. What matters is that CV gets a *shorter
+  list*, which is what is asserted now.
+
+And `example_count` lives **inside `provenance`**, not at the top level of
+`train_and_save`'s return - reading it from the wrong level reports "Trained on
+None of your records".
+
+12 tests, 3 mutations confirmed to fail.
+
+### Not wired on purpose: a quality gate for the vision and embedding models
+
+`local_llm` gained a perplexity gate; `local_vision` and `local_embed` have
+none, and **copying it across would be theatre**:
+
+- **The embedding model cannot be measured by perplexity at all.** It runs with
+  `--embedding --pooling mean`, producing vectors rather than tokens, and
+  `llama-perplexity` has **zero** `--embedding` or pooling flags (measured:
+  `llama-perplexity --help | grep -c` returns 0). There is nothing to gate on, so
+  a "quality gate" here would be a check that cannot fail.
+- **The vision model's language backbone could be measured** - `llama-perplexity`
+  does accept `--mmproj` - but that scores how well it predicts *text*, which is
+  not the thing the vision model is for. It would be reported as if it were.
+
+Both stay digest-verified and unmeasured, which is what they honestly are. If
+this is revisited the measurement to reach for is retrieval quality against a
+labelled set, not perplexity.
+
 ### The full inventory: what is dead, what is deliberate, and what is a lie
 
 An AST scan of **all 1,025 public functions and classes** in the package found

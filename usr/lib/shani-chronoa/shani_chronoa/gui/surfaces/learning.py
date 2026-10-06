@@ -330,9 +330,12 @@ def build(app: Any) -> Gtk.Widget:
 
     outcome_button = _button("Train the outcome model",
                              lambda b: _train_outcome(b, status))
+    clean_button = _button("Leave out retired tools",
+                           lambda b: _train_outcome(b, status, only_known=True))
     _add_row(train, "Outcome model",
              "Fitted from the recorded verdicts. It is a flag, not a predictor.",
-             suffix=outcome_button)
+             suffix=_pair(clean_button, outcome_button))
+    _stale_tools_sentence(train)
 
     router_button = _button("Train a router", lambda b: _train_router(b, status))
     _add_row(train, "Routing router",
@@ -380,18 +383,74 @@ def build(app: Any) -> Gtk.Widget:
     return page
 
 
-def _train_outcome(button: Gtk.Button, status: Gtk.Label) -> None:
-    """Fit the outcome model and report what it decided - including refusing."""
+def _train_outcome(button: Gtk.Button, status: Gtk.Label,
+                   only_known: bool = False) -> None:
+    """Fit the outcome model and report what it decided - including refusing.
+
+    **`only_known` leaves out records for tools this build does not have**, which
+    is a decision `unknown_tool_examples()` has been *reporting* and refusing to
+    take on the person's behalf since before this row existed.
+
+    Measured on this machine's own log: `liar` and `unver` are fixtures that no
+    longer exist, and between them they are 712 of 14,395 records. `liar` alone
+    is **323 of the 423 failures** - 76% of the entire failure signal - so the
+    model's strongest and most confident lesson is about a tool that cannot run,
+    and its "detects failure" score is substantially a memory of `liar`.
+
+    The argument for leaving it out by default is that filtering quietly changes
+    what the model says about the past. So it is **not** the default: the plain
+    button is unchanged and trains on everything, exactly as before, and the
+    second button trains on what is still installed. Both are one press, with the
+    figure on screen.
+    """
     def work(report: Callable[[str], None]) -> None:
-        from shani_chronoa import learning
-        report("Reading the tool-call log...")
-        result = learning.train_and_save()
+        from shani_chronoa import learning, tools
+        only_tools = None
+        if only_known:
+            only_tools = frozenset({entry["function"]["name"]
+                                    for entry in tools.TOOLS})
+            report(f"Reading the tool-call log, keeping only the "
+                   f"{len(only_tools)} tools this build answers to...")
+        else:
+            report("Reading the tool-call log...")
+        result = learning.train_and_save(only_tools=only_tools)
+        if only_tools is not None:
+            # **`example_count` lives inside `provenance`**, not at the top
+            # level - my first version read it from the wrong place and would
+            # have reported "Trained on None of your records".
+            kept = (result.get("provenance") or {}).get("example_count")
+            if kept is not None:
+                report(f"Trained on {kept} records; the rest named tools this "
+                       f"build does not have.")
         if result.get("saved"):
             report(f"Written to {result.get('path')}.{_verdict_sentence(result)}")
         else:
             report(f"Not written: {result.get('reason')}")
 
     _run_async(button, work, status)
+
+
+def _stale_tools_sentence(group) -> None:
+    """How much of the training set is about tools that no longer exist.
+
+    **The figure goes above the buttons that act on it**, not only into
+    `provenance` where it has to be hunted for. It is the reason the second
+    button exists, and the reason it is not the default.
+    """
+    from shani_chronoa import learning
+    try:
+        count, names = learning.unknown_tool_examples(learning._entries())
+    except Exception:  # noqa: BLE001 - the row must build without a log
+        return
+    if not count:
+        _add_row(group, "Nothing stale in the log",
+                 "Every recorded tool is one this build still answers to.")
+        return
+    listed = ", ".join(names)
+    _add_row(group, f"{count} records name tools you no longer have",
+             f"Recorded under {listed}. They stay in the model by default, "
+             "because dropping them changes what the model says about the past "
+             "- so it is your call, and the button above makes it.")
 
 
 def _nothing_to_export_sentence() -> str:
