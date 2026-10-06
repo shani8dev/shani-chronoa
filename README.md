@@ -331,6 +331,29 @@ of it sit four layers:
 An explicit `sh -c` stays reachable as a visible opt-in, and one containing
 `$(`, a backtick or `${` is refused rather than guessed at.
 
+## Channels
+
+`shani-chronoa-bridge` carries messages from a chat channel to the assistant's
+inbound gateway and prints the reply back. Two channels are implemented:
+**Telegram** (Bot API long polling - the bridge dials out, so no public URL is
+needed) and **WhatsApp** (a Cloud API webhook, the one adapter with a port,
+looping back on `127.0.0.1` by default, every POST checked against
+`X-Hub-Signature-256` before it is believed).
+
+The bridge is a separate process with its own credentials
+(`CHRONOA_TELEGRAM_TOKEN`, `CHRONOA_WHATSAPP_TOKEN`,
+`CHRONOA_WHATSAPP_PHONE_NUMBER_ID`, `CHRONOA_WHATSAPP_VERIFY_TOKEN`,
+`CHRONOA_WHATSAPP_APP_SECRET`); Chronoa never sees a token. A channel cannot
+lower a gate: the text it submits goes through the window's own `_submit`, so
+the same consent keys, whitelist and post-conditions apply, and each channel
+is bounded (4,000 characters, 20 messages a minute) and ask-only unless it is
+marked `:execute` in the `gateways` setting.
+
+```
+shani-chronoa-bridge telegram [--gateway NAME] [--once]
+shani-chronoa-bridge whatsapp [--host 127.0.0.1] [--port 8765]
+```
+
 ## Untrusted text
 
 Everything the model reads or emits is treated as hostile, because most of it
