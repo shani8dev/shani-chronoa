@@ -395,7 +395,7 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
         ("shani_chronoa.tool_tracking", "LOG_DIR"),
         ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
         ("shani_chronoa.conversation_store", "SESSION_DIR"),
-        ("shani_chronoa.skills.add_reminder", "_STORE"),
+        ("shani_chronoa.skills.reminders", "_STORE"),
         ("shani_chronoa.skills.set_sleep_inhibit", "STATE_FILE"),
     ):
         module = pytest.importorskip(module_name)

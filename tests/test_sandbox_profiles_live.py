@@ -327,7 +327,7 @@ class TestThePerOriginProfileIsSelectedAndObservable:
             "empty_trash", "lock_screen", "create_directory", "move_or_copy_file",
             "edit_file", "find_and_replace", "type_text", "press_key", "speak",
             "control_service", "toggle_bluetooth", "connect_wifi",
-            "set_wallpaper", "set_theme", "set_timer", "add_reminder",
+            "set_wallpaper", "set_theme", "set_timer", "reminders",
             "todo_list", "manage_triggers", "kill_process", "set_timezone",
             "set_privacy", "set_power_profile", "set_screensaver",
             "set_keyboard_layout", "set_sleep_inhibit", "print_file",

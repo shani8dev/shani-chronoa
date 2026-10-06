@@ -6,7 +6,7 @@
     {"id": "timer-5min", "say": "Set a timer for 5 minutes.", "expect": [{"tool": "set_timer", "args": {"seconds": 300}}]},
     {"id": "timer-90s-label", "say": "timer 90 seconds for the eggs", "expect": [{"tool": "set_timer", "args": {"seconds": 90, "label": "~egg"}}]},
     {"id": "timer-list", "say": "what timers do I have running?", "expect": [{"tool": "set_timer", "args": {"action": "list"}}]},
-    {"id": "reminder", "say": "Remind me to call mom tomorrow at 6pm", "expect": [{"tool": "add_reminder", "args": {"text": "~mom"}}]},
+    {"id": "reminder", "say": "Remind me to call mom tomorrow at 6pm", "expect": [{"tool": "reminders", "args": {"text": "~mom"}}]},
     {"id": "volume-set", "say": "set the volume to 40 percent", "expect": [{"tool": "set_volume", "args": {"percent": 40}}]},
     {"id": "volume-get", "say": "how loud is it right now?", "expect": [{"tool": "get_volume"}]},
     {"id": "mute", "say": "mute the sound", "expect": [{"tool": "set_mute", "args": {"mute": true}}]},

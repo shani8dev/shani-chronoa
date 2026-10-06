@@ -23,7 +23,7 @@ def test_numbers_strings_lists_and_contains():
     assert task_eval.score(case, call("set_timer", seconds=90.0, label="Eggs")) [:2] == (True, True)
     assert task_eval.score(case, call("set_timer", seconds=900, label="eggs"))[:2] == (True, False)
     assert task_eval.score(case, call("set_timer", seconds=90))[:2] == (True, False), "a missing argument is wrong"
-    assert task_eval.score(case, call("add_reminder", text="eggs"))[:2] == (False, False)
+    assert task_eval.score(case, call("reminders", text="eggs"))[:2] == (False, False)
     cur = {"expect": [{"tool": "convert_currency", "args": {"from_currency": ["USD", "dollar"]}}]}
     assert task_eval.score(cur, call("convert_currency", from_currency="usd"))[1]
     assert not task_eval.score(cur, call("convert_currency", from_currency="EUR"))[1]

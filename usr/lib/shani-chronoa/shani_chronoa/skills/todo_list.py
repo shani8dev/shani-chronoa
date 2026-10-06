@@ -1,6 +1,6 @@
 """Skill: keep a list of things to do across turns and sessions.
 
-`add_reminder` writes a dated line and is never read back by anything. This is
+`reminders` writes a dated line and is never read back by anything. This is
 the other half: a mutable list with statuses, so "what's left" is answerable
 and a multi-step job can be tracked without the user holding it in their head
 or re-typing it after every turn. The common failure of an assistant asked to

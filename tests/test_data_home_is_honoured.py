@@ -29,7 +29,7 @@ DATA_PATHS = [
     ("shani_chronoa.tool_tracking", "LOG_DIR"),
     ("shani_chronoa.argfile", "_ARGFILE_ROOT"),
     ("shani_chronoa.conversation_store", "SESSION_DIR"),
-    ("shani_chronoa.skills.add_reminder", "_STORE"),
+    ("shani_chronoa.skills.reminders", "_STORE"),
 ]
 
 #: The two directories that hold user-supplied *code* rather than state. These

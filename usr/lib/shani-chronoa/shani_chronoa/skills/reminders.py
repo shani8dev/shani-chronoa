@@ -1,8 +1,14 @@
-"""Skill: leave a reminder for later.
+"""Skill: a list of reminders you can add to, list, mark done, and remove.
 
 `set_timer` is a countdown that fires while Chronoa is running. This is the
-other thing people mean by "remind me": something written down, still there
+other thing people mean by "remind me": things written down, still there
 tomorrow, with no timer involved and no assumption that anyone is listening.
+
+Full CRUD: `add` writes one, `list` shows what is outstanding, `done` marks one
+finished by its list number, `remove` deletes one. The skill is named `reminders`
+rather than `add_reminder` because it does all four, not just the first; the
+exposed tool name used to promise less than the skill did once done and remove
+landed.
 
 Stored in a plain JSON file under the per-user data directory, one entry per
 line, so a person can read it without Chronoa running at all. That is
@@ -31,7 +37,7 @@ _MAX_CHARS = 500
 SCHEMA = {
     "type": "function",
     "function": {
-        "name": "add_reminder",
+        "name": "reminders",
         "description": (
             "A dated list of reminders you can keep coming back to: add one, "
             "list what is still due, mark one done, or remove one. Optionally "
@@ -208,7 +214,7 @@ def _run(arguments: dict) -> str:
 def _verify_reminder(arguments: dict, tool=None):
     """Post-condition: is the reminder text actually in the store?
 
-    `add_reminder` appends one JSON line to `_STORE`. The check reads the store
+    `reminders` appends one JSON line to `_STORE`. The check reads the store
     back and confirms the text asked for is present, because "I'll remind you"
     followed by a store that does not contain it is the failure worth catching -
     and a reminder is one of the few things a person will trust without
@@ -256,4 +262,4 @@ def _verify_reminder(arguments: dict, tool=None):
 POST_CONDITION = _verify_reminder
 
 
-SKILLS = [Skill(name="add_reminder", schema=SCHEMA, run=_run)]
+SKILLS = [Skill(name="reminders", schema=SCHEMA, run=_run)]

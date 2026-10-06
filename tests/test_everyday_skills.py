@@ -42,7 +42,7 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa.config import ChronoaConfig  # noqa: E402
 from shani_chronoa.skills import (  # noqa: E402
-    add_reminder,
+    reminders,
     close_window,
     connect_wifi,
     create_directory,
@@ -77,7 +77,7 @@ def granted():
 
 def _sandbox(tmp_path, monkeypatch):
     """Point the three skills that reach outside tmp_path back inside it."""
-    monkeypatch.setattr(add_reminder, "_STORE",
+    monkeypatch.setattr(reminders, "_STORE",
                         tmp_path / "reminders.jsonl")
     return tmp_path
 
@@ -452,25 +452,25 @@ class TestTheDesktopSkillsRefuseWhenTheyCannotWork:
 class TestReminders:
     def test_it_writes_where_it_says(self, tmp_path, monkeypatch):
         _sandbox(tmp_path, monkeypatch)
-        out = add_reminder._run({"text": "buy milk", "due": "in 2 hours"})
+        out = reminders._run({"text": "buy milk", "due": "in 2 hours"})
         assert str(tmp_path / "reminders.jsonl") in out
-        assert add_reminder._STORE.exists()
+        assert reminders._STORE.exists()
 
     def test_a_relative_due_becomes_an_absolute_time(self, tmp_path, monkeypatch):
         _sandbox(tmp_path, monkeypatch)
-        out = add_reminder._run({"text": "x", "due": "in 2 hours"})
+        out = reminders._run({"text": "x", "due": "in 2 hours"})
         assert "Due " in out and "-" in out, "a relative time must be resolved"
 
     def test_an_unreadable_due_is_refused_not_guessed(self, tmp_path, monkeypatch):
         _sandbox(tmp_path, monkeypatch)
-        out = add_reminder._run({"text": "x", "due": "whenever I feel like it"})
+        out = reminders._run({"text": "x", "due": "whenever I feel like it"})
         assert "no due date" in out
         assert "No due time" in out
 
     def test_no_text_writes_nothing(self, tmp_path, monkeypatch):
         _sandbox(tmp_path, monkeypatch)
-        assert "nothing to write" in add_reminder._run({})
-        assert not add_reminder._STORE.exists()
+        assert "nothing to write" in reminders._run({})
+        assert not reminders._STORE.exists()
 
 
 class TestProcessListingIsHonest:
@@ -595,27 +595,27 @@ class TestConnectWifiDoesNotGuessTheInterface:
 
 
 class TestRemindersAreFullCRUDNow:
-    """`add_reminder` was write-only and nothing could read or remove one."""
+    """`reminders` was write-only and nothing could read or remove one."""
 
     def test_list_done_remove(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
-        add_reminder._run({"text": "buy milk", "due": "in 2 hours"})
-        add_reminder._run({"text": "call dentist"})
-        listed = add_reminder._run({"action": "list"})
+        monkeypatch.setattr(reminders, "_STORE", tmp_path / "reminders.jsonl")
+        reminders._run({"text": "buy milk", "due": "in 2 hours"})
+        reminders._run({"text": "call dentist"})
+        listed = reminders._run({"action": "list"})
         assert "buy milk" in listed and "call dentist" in listed, listed
-        assert add_reminder._run({"action": "done", "number": 1}).startswith("Marked done")
-        assert "buy milk" not in add_reminder._run({"action": "list"}), add_reminder._run({"action": "list"})
-        assert add_reminder._run({"action": "remove", "number": 2}).startswith("Removed")
-        assert add_reminder._run({"action": "list"}) == "No reminders outstanding."
+        assert reminders._run({"action": "done", "number": 1}).startswith("Marked done")
+        assert "buy milk" not in reminders._run({"action": "list"}), reminders._run({"action": "list"})
+        assert reminders._run({"action": "remove", "number": 2}).startswith("Removed")
+        assert reminders._run({"action": "list"}) == "No reminders outstanding."
 
     def test_done_remove_need_a_number(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
-        assert "number" in add_reminder._run({"action": "done"}), add_reminder._run({"action": "done"})
-        assert "number" in add_reminder._run({"action": "remove"})
-        assert "No such reminder" in add_reminder._run({"action": "remove", "number": 9})
+        monkeypatch.setattr(reminders, "_STORE", tmp_path / "reminders.jsonl")
+        assert "number" in reminders._run({"action": "done"}), reminders._run({"action": "done"})
+        assert "number" in reminders._run({"action": "remove"})
+        assert "No such reminder" in reminders._run({"action": "remove", "number": 9})
 
     def test_post_condition_only_applies_to_add(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(add_reminder, "_STORE", tmp_path / "reminders.jsonl")
+        monkeypatch.setattr(reminders, "_STORE", tmp_path / "reminders.jsonl")
         # a list/done/remove must not trip the add-side post-condition
-        assert add_reminder.POST_CONDITION({"action": "list"}) is None
-        assert add_reminder.POST_CONDITION({"action": "done", "number": 1}) is None
+        assert reminders.POST_CONDITION({"action": "list"}) is None
+        assert reminders.POST_CONDITION({"action": "done", "number": 1}) is None

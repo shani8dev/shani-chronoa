@@ -2,7 +2,7 @@
 
 Every reminder, every timer, every log timestamp and every certificate check in
 this project is downstream of the system clock. If the clock is wrong or
-unsynchronised, `add_reminder`'s "tomorrow 9am" lands on the wrong day and
+unsynchronised, `reminders`'s "tomorrow 9am" lands on the wrong day and
 `set_timer` fires early or late, with nothing in either reply saying so. Nothing
 in the project checked.
 
