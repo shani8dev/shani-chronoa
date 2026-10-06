@@ -22,6 +22,7 @@ TTL instead of surviving for the session.
 `build_messages()` returns a plain copy of `_history` and every prompt is
 byte-for-byte what it was before the senses layer existed.
 """
+from shani_chronoa import permissions
 from shani_chronoa import provenance
 
 import json
@@ -705,6 +706,18 @@ class Assistant:
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""),
                               "content": provenance.fence(
                                   result, Assistant._tool_source(call)).text})
+                # **"No, and stop this turn" now stops the turn.**
+                # `permissions.decide()` files a `Decision.CANCEL` when the user
+                # picks it, and until now nothing read it - the option was
+                # offered, recorded, and the turn carried on, which is an option
+                # whose label promises something the program does not do. The
+                # check sits after the result is recorded so the conversation
+                # stays valid: a tool_call with no tool_result is what every
+                # backend here rejects.
+                if permissions.turn_cancelled():
+                    logger.info("turn stopped: the user chose to stop it")
+                    self.close_interrupted_turn("cancelled")
+                    return ("Stopped - you asked to stop this turn.")
                 if loop.stopped:
                     self._turn_deadline = None
                     return loop.explain()

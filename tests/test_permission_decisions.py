@@ -136,9 +136,19 @@ class TestWhatThePromptSays:
         question, options = seen[0]
         assert "screenshot" in question.lower()
         assert "vision-sense-enabled" in question
-        assert options == [permissions.ALLOW_ONCE_CHOICE,
-                           permissions.ALLOW_SESSION_CHOICE,
-                           permissions.DENY_CHOICE]
+        # **Membership and order, not an exact list.** The exact list stopped
+        # being true on 2026-10-06 when `tools.dispatch` began passing
+        # `offer_cancel=True`, which appends "No, and stop this turn" - and the
+        # failure was correct: the option should now be offered. Asserting the
+        # whole list would have made adding it look like a regression.
+        #
+        # What this test is actually for is that the prompt *names the tool and
+        # its consent key*, so that is still asserted above; here the claims are
+        # that both allow choices come first and that a refusal is on offer.
+        assert options[:2] == [permissions.ALLOW_ONCE_CHOICE,
+                               permissions.ALLOW_SESSION_CHOICE], options
+        assert permissions.DENY_CHOICE in options, options
+        assert len(options) >= 3, options
 
     def test_the_refusal_is_offered_as_an_option_not_the_default(self):
         """Ordering carries meaning: the two allow choices come first, but the
@@ -147,7 +157,18 @@ class TestWhatThePromptSays:
         seen: list = []
         ask_bridge.set_presenter(_presenter("", seen))
         execute_tool_outcome("screenshot", {})
-        assert seen[0][1][-1] == permissions.DENY_CHOICE
+        options = seen[0][1]
+        # **"not the default" was never about the index.** The claim is that a
+        # dismissed prompt grants nothing, and that every refusal-shaped option
+        # sits after every allow-shaped one. The last index used to hold the
+        # refusal; it now holds "No, and stop this turn", which is if anything
+        # more conservative, so an index assertion would have inverted the test.
+        assert options[0] == permissions.ALLOW_ONCE_CHOICE, options
+        refusals = {permissions.DENY_CHOICE, permissions.CANCEL_CHOICE}
+        first_refusal = min(options.index(o) for o in refusals if o in options)
+        assert set(options[:first_refusal]) == {
+            permissions.ALLOW_ONCE_CHOICE, permissions.ALLOW_SESSION_CHOICE}, options
+        assert refusals & set(options), options
 
 
 class TestDecideRecordsWhatItWasTold:

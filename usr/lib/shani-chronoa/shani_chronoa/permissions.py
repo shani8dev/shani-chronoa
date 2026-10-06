@@ -539,3 +539,25 @@ def decide(action: str, resource: "str | None", consent_key: str,
 def cancel_requested(action: str, resource: str) -> bool:
     """Whether the user asked to stop the turn rather than just refuse this call."""
     return evaluate(action, resource) == Decision.CANCEL
+
+
+def turn_cancelled() -> bool:
+    """Whether *any* Cancel was chosen this session, for a caller that only has
+    the turn and not the (action, resource) pair.
+
+    **Wired 2026-10-06; `cancel_requested` had zero callers.** So "No, and stop
+    this turn" was offered, recorded as `Decision.CANCEL`, and then **nothing
+    stopped the turn** - the model saw a refusal and carried on. That is the same
+    shape as `ALLOW_SESSION` being recorded and ignored, one level up: an option
+    whose label promises something the program does not do.
+
+    Session-scoped rather than per-call on purpose. The caller that needs this is
+    the tool loop, which has the turn but not the `(action, resource)` key the
+    decision was filed under, and "did the user say stop" is a question about the
+    turn rather than about one call. Read-only: this reports, it does not clear,
+    so a later tool in the same turn cannot un-cancel the turn. `clear()` is the
+    only thing that forgets it.
+    """
+    with _lock:
+        return any(decision == Decision.CANCEL
+                   for _a, _p, decision in list(_standing) + list(_grants))

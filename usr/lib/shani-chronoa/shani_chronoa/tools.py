@@ -624,8 +624,15 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
                 and permissions.can_ask()
                 and not config_mod.ChronoaConfig().get_bool(consent_key, False)):
             title = capabilities.tool_title(name) or name
+            # **`offer_cancel=True`, wired 2026-10-06.** The option existed and
+            # was never offered here, and where it *was* offered (the inbound
+            # gateway) nothing acted on it - so either it is offered and honoured,
+            # or it is not offered at all. It is now offered here, and
+            # `assistant.py` ends the turn when `permissions.turn_cancelled()` is
+            # true, so the label is true.
             granted = permissions.decide(name, scoped_resource, consent_key,
-                                         describe=title.lower())
+                                         describe=title.lower(),
+                                         offer_cancel=True)
             if granted is None:
                 return DispatchResult(
                     f"The user did not allow {name}. Nothing was done.",
