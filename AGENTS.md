@@ -1750,6 +1750,35 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### A third instance, with the loudest alarm: Diagnostics said speech input was broken
+
+`gui/surfaces/diagnostics.py`'s `_speech_in()` constructed a `WhisperSTT`
+**directly**, so it could not see a `CloudSTT` even when that was the engine
+transcribing every utterance. On a machine with cloud recognition on, a key
+configured and no local model it returned
+
+> neither the whisper.cpp binary (…) nor a model file (…) is on this machine, so
+> speech input is off whatever the settings say
+
+— a **warning**, on a machine transcribing perfectly well. The row is titled
+"Speech in (whisper.cpp)", so the alarm was at least honestly titled; it was still
+an alarm about nothing.
+
+The row is now "what can transcribe here", and the local half is reported
+**alongside** rather than suppressed — a person who wants whisper.cpp locally is
+still told exactly what is missing. `STATUS_WORKING` with the cloud named first,
+then `"Locally: …"`.
+
+**Zero-argument probes, so this asks the engines directly rather than reading
+`app.stt`.** `Probe = Callable[[], Tuple[str, str]]` — no app, by design, so the
+panel stays usable from a script. That is the same availability question either
+way. `_cloud_speech_in()` is total: any exception is `''` — "not cloud" — so a
+broken probe can only ever *under*-report, never invent a working engine.
+
+Mutations run and confirmed to fail: the cloud half ignored (the original
+defect), a raising probe claiming `working`, the local truth dropped along with
+the alarm (1 each).
+
 ### Two engine rows could both claim to be the one answering
 
 `gui/surfaces/model.py`'s llama.cpp row rendered

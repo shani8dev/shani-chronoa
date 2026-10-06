@@ -392,16 +392,32 @@ def _brain() -> Tuple[str, str]:
 # -- probes: speech ----------------------------------------------------------
 
 def _speech_in() -> Tuple[str, str]:
-    """whisper.cpp's binary and whether a model file is on disk.
+    """Whatever can transcribe here: whisper.cpp, or a cloud provider, or neither.
 
-    Both halves, because one half is not enough and reporting either alone
-    would be a plausible-looking wrong answer: the binary without a model
-    transcribes nothing, and a model without the binary is never loaded. The
-    verdict is `WhisperSTT.is_available()` - the module's own answer - and the
+    Both halves of the local answer, because one half is not enough and reporting
+    either alone would be a plausible-looking wrong answer: the binary without a
+    model transcribes nothing, and a model without the binary is never loaded.
+    The verdict is `WhisperSTT.is_available()` - the module's own answer - and the
     two paths are reported so the missing half can be named.
+
+    **And the cloud engine, because this probe built a `WhisperSTT` directly and
+    therefore could not see one.** `cloud_voice.CloudSTT` is a legitimate engine
+    now, so on a machine with `cloud-stt-enabled` on, a key configured and no
+    local model, this used to report
+    *"neither the whisper.cpp binary nor a model file is on this machine, so
+    speech input is off whatever the settings say"* - a warning, on a machine
+    that was transcribing perfectly well. The row is even labelled
+    "Speech in (whisper.cpp)", so the alarm was at least honestly titled; it was
+    still an alarm about nothing.
+
+    Probes here are `Callable[[], Tuple[str, str]]` - zero-argument, no app - so
+    this asks the two engines directly rather than reading `app.stt`. That is the
+    same availability question either way, and it keeps the probe usable from a
+    script with no application.
     """
     from shani_chronoa import stt
 
+    cloud_note = _cloud_speech_in()
     engine = stt.WhisperSTT(model=stt.installed_model("base"))
     has_binary = os.path.exists(engine.whisper_path)
     has_model = os.path.exists(engine.model_path)
@@ -412,20 +428,39 @@ def _speech_in() -> Tuple[str, str]:
             f"{engine.model_path}, so transcribing is possible"
         )
     if not has_binary and not has_model:
-        return STATUS_NOT_WORKING, (
-            f"neither the whisper.cpp binary ({engine.whisper_path}) nor a model file "
-            f"({engine.model_path}) is on this machine, so speech input is off whatever "
-            "the settings say; setup's Languages page installs both"
-        )
-    if not has_binary:
-        return STATUS_NOT_WORKING, (
-            f"the {model} model is on disk at {engine.model_path} but the whisper.cpp "
-            f"binary is not: {engine.whisper_path} does not exist, so nothing can run it"
-        )
-    return STATUS_NOT_WORKING, (
-        f"whisper.cpp is at {engine.whisper_path} but no model file is on disk at "
-        f"{engine.model_path} (tried the {model} names, then the smaller quantised ones)"
-    )
+        local = (f"neither the whisper.cpp binary ({engine.whisper_path}) nor a "
+                 f"model file ({engine.model_path}) is on this machine, so local "
+                 "speech input is off whatever the settings say; setup's Ears page "
+                 "installs both")
+    elif not has_binary:
+        local = (f"the {model} model is on disk at {engine.model_path} but the "
+                 f"whisper.cpp binary is not: {engine.whisper_path} does not exist, "
+                 "so nothing can run it")
+    else:
+        local = (f"whisper.cpp is at {engine.whisper_path} but no model file is on "
+                 f"disk at {engine.model_path} (tried the {model} names, then the "
+                 "smaller quantised ones)")
+    if cloud_note:
+        return STATUS_WORKING, f"{cloud_note} Locally: {local}"
+    return STATUS_NOT_WORKING, local
+
+
+def _cloud_speech_in() -> str:
+    """Why a cloud provider is transcribing here, or '' when it is not.
+
+    Read fresh and duck-typed, because this module is a diagnostic: it must not
+    become the thing that decides. Any exception is '' - "not cloud" - so a broken
+    probe can only ever under-report, never invent a working engine.
+    """
+    try:
+        from shani_chronoa import cloud_voice
+        engine = cloud_voice.CloudSTT()
+        if not engine.is_available():
+            return ""
+        return ("a cloud provider transcribes instead: recordings are uploaded, "
+                "so there is nothing to install here")
+    except Exception:  # noqa: BLE001 - a diagnostic must not raise
+        return ""
 
 
 def _speech_out() -> Tuple[str, str]:
