@@ -52,6 +52,19 @@ CONTROLLED = {
     "debug-mode",              # toggle-debug
     "wake-word-enabled",       # toggle-wake-word
     "cloud-fallback-enabled",  # toggle-cloud-fallback
+    # The two cloud-voice gates, added 2026-10-06 with `cloud_voice.py`. Rows in
+    # the Privacy group, next to the fallback switch rather than in Voice,
+    # because they are privacy controls in the same sense it is - and because
+    # they are deliberately *not* `cloud-fallback-enabled`: that one says prompts
+    # may leave as text, and a person who agreed to that has not agreed to
+    # upload a recording. Two keys because recording and speaking are two
+    # separate disclosures and a person may well allow one and not the other.
+    "cloud-stt-enabled", "cloud-tts-enabled",
+    # The inbound channel, added 2026-10-06. An EntryRow and a live status row in
+    # the Privacy group. It had no row at all until then, which is the whole
+    # reason `gateway.py` had never been reachable: `_export_gateways()` ran at
+    # startup, found an always-empty registry and returned.
+    "gateways",
     "barge-in-vad-enabled",    # toggle-barge-in-vad
     "auto-start",              # toggle-auto-start
     "notification-enabled",    # written directly; gates the notify skill
@@ -110,6 +123,8 @@ CONTROLLED = {
     # BYOK provider keys
     "anthropic-api-key", "openai-api-key", "google-api-key", "groq-api-key", "opencode-zen-api-key", "openrouter-api-key",
     "llm7-api-key", "kilo-api-key", "blockrun-api-key",
+    # custom OpenAI-compatible endpoint rows in the Privacy page
+    "custom-llm-base-url", "custom-llm-model", "custom-llm-api-key",
 }
 
 # Keys deliberately not in the window, each with the reason. A new entry here

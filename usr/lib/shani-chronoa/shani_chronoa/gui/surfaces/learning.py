@@ -256,6 +256,24 @@ def _teachers_sentence() -> str:
     return "; ".join(n[0].upper() + n[1:] for n in notes)
 
 
+def _status_row(recorder: "common.StatusRecorder") -> Gtk.Widget:
+    """The panel's own health, from what is on the machine.
+
+    Written through `recorder` so the sidebar's dot reads the same word this
+    row shows.
+    """
+    facts = _facts_sentence()
+    if "none" in facts.lower() or "not" in facts.lower():
+        return recorder.row(
+            common.STATUS_UNKNOWN,
+            "No learning data on this machine",
+            facts)
+    return recorder.row(
+        common.STATUS_OK,
+        "Learning data is on this machine",
+        facts)
+
+
 # ---------------------------------------------------------------------------
 # the panel
 # ---------------------------------------------------------------------------
@@ -272,6 +290,13 @@ def build(app: Any) -> Gtk.Widget:
     body = common.page_body(18)
     body.set_margin_top(12)
     body.set_margin_bottom(12)
+
+    # The panel's own health, above every group: what is
+    # here, what is trained, what is not. One row, one
+    # dot, one word - the question the panel is opened
+    # for, before the rows that hold the learning state.
+    recorder = common.StatusRecorder()
+    body.append(_status_row(recorder))
 
     have = common.group(
         "What is here",
@@ -318,6 +343,10 @@ def build(app: Any) -> Gtk.Widget:
     body.append(train)
     body.append(status)
     set_content(common.scrolled(body))
+    # What this panel says about itself, for the sidebar's health dot. The same
+    # recorder that built the row at the top of the panel, so the dot and the
+    # row are one statement about one reading.
+    page.status = recorder.status
     return page
 
 

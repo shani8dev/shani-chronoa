@@ -67,8 +67,26 @@ class AttachingMixin:
         def done(dlg, result):
             try:
                 chosen = dlg.open_multiple_finish(result)
-            except GLib.Error:
-                return  # cancelled
+            except GLib.Error as exc:
+                if exc.code == Gtk.DialogError.DISMISSED:
+                    return  # cancelled: the right answer is silence
+                # Any other failure - no portal, the dialog never really ran,
+                # the endpoint died behind it - is the "looks like nothing
+                # happened" shape this repo keeps documenting. It now says
+                # itself on screen, and the log keeps the details for a bug
+                # report.
+                logger.warning("file dialog did not finish: %s (%s)", exc.message, exc.domain)
+                toast = getattr(self, "toast", None)
+                if callable(toast):
+                    toast("Can't open the file picker here - drop files on the window instead",
+                          seconds=4)
+                return
             self.add_attachments(chosen.get_item(i).get_path() for i in range(chosen.get_n_items())
                                  if chosen.get_item(i).get_path())
-        dialog.open_multiple(self, None, done)
+        try:
+            dialog.open_multiple(self, None, done)
+        except Exception as exc:  # noqa: BLE001 - opening the dialog failed, so say it
+            logger.warning("could not open the file dialog: %s", exc, exc_info=True)
+            toast = getattr(self, "toast", None)
+            if callable(toast):
+                toast("Can't open the file picker here - drop files on the window instead", seconds=4)

@@ -72,6 +72,14 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.percept_store: Optional[PerceptStore] = None
         self.percept_context: Optional[ContextBuilder] = None
         self.window: Optional[ChronoaWindow] = None
+        # The inbound channel. `_gateway_owner` and the two lists live here rather
+        # than only in `_create_actions`, because `_export_gateways()` reads and
+        # clears `_gateway_owner` and a reload can reach it before any action was
+        # ever created.
+        self._gateways = None
+        self._gateway_owner = None
+        self._gateway_entries: list = []
+        self._gateway_errors: list = []
         #: The Quick Ask popup, created on first use and reused after. Declared
         #: here rather than in do_startup so any caller can ask whether it is
         #: open without the application having been started.
@@ -187,21 +195,65 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         Gtk.Application.do_shutdown(self)
 
     def _export_gateways(self) -> None:
-        """Put the channel on the bus, if any gateway is configured.
+        """Register the configured channels and put them on the bus.
 
         Kept out of the constructor so a test can register a gateway and export
         it deliberately, and so "nothing is listening" is the state of a machine
         that has not asked for it.
+
+        **This used to be unreachable on every install.** It built the registry,
+        found `names()` empty - because *nothing in the tree ever called
+        `Registry.register()`*, measured with an AST search rather than a grep -
+        and returned. A complete, tested inbound channel with no switch to turn
+        it on. `gateways` in the schema is that switch, and `_reload_gateways()`
+        re-reads it so a channel added in Settings works without a restart.
         """
         from shani_chronoa import gateway as gateway_module
         if self._gateways is None:
             self._gateways = gateway_module.Registry(self._submit_gateway_text)
+        entries, errors = gateway_module.parse_config(
+            self.config.get("gateways", "") or "")
+        for message in errors:
+            # **Loud, and per entry.** A channel name that could not be parsed is
+            # a switch that looks set and does nothing, which is the defect this
+            # whole area keeps producing.
+            logger.warning("gateway setting ignored: %s", message)
+        for name in list(self._gateways.names()):
+            self._gateways.unregister(name)
+        for name, grant in entries:
+            try:
+                self._gateways.register(name, grant)
+            except ValueError as exc:            # parse_config should have caught it
+                logger.warning("gateway %r refused: %s", name, exc)
+        self._gateway_entries = entries
+        self._gateway_errors = errors
+        # Release the previous owner **and unregister the object**. `bus_unown_name`
+        # frees the name but leaves the object path taken, and `register_object`
+        # then refuses - so unowning alone made every reload after the first a
+        # silent no-op. Measured before the fix: reload 1 owned the name, reloads
+        # 2-4 reported `owner=False, on_bus=False` while the registry still listed
+        # the channel, and the Settings row said it was configured and nothing was
+        # listening.
+        if self._gateway_owner is not None or self._gateways.names() is not None:
+            try:
+                gateway_module.unexport(self._gateway_owner)
+            except Exception:                   # noqa: BLE001 - a channel is optional
+                logger.exception("could not release the previous gateway export")
+        self._gateway_owner = None
         if not self._gateways.names():
+            logger.info("gateways: none configured, so nothing is on the bus")
             return
         try:
             self._gateway_owner = gateway_module.export(self._gateways)
         except Exception as exc:  # noqa: BLE001 - a channel is optional
             logger.warning("could not export the gateway interface: %s", exc)
+
+    def _reload_gateways(self) -> None:
+        """Re-read `gateways` and re-export. Called when the setting changes."""
+        try:
+            self._export_gateways()
+        except Exception:                       # noqa: BLE001
+            logger.exception("could not reload the gateway configuration")
 
     def _submit_gateway_text(self, text: str) -> str:
         """A channel's words, turned into a turn exactly as a typed one is.

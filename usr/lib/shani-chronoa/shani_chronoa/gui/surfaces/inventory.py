@@ -33,7 +33,7 @@ from ... import organism
 from . import common
 
 TITLE = "Inventory"
-ICON = "system-run-symbolic"
+ICON = "view-app-grid-symbolic"
 SECTION = "What Chronoa knows"
 
 #: One icon per state, and its accessible name. A colour alone would fail
@@ -134,6 +134,10 @@ def _organ_row(organ: "organism.Organ") -> Gtk.Widget:
 
 def build(_app=None) -> Gtk.Widget:
     counts = organism.tally()
+    #: One tally, read once: the row below and the sidebar's dot both come from
+    #: this, so the count in the panel and the colour beside its row cannot be
+    #: built from two different walks of `organism`.
+    recorder = common.StatusRecorder()
     page, _put = common.surface(
         TITLE,
         f"{counts['total']} functions, mapped to what a body does. "
@@ -149,6 +153,30 @@ def build(_app=None) -> Gtk.Widget:
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
     column.set_margin_top(12)
     column.set_margin_bottom(18)
+
+    # The panel's own health, above every group: how many
+    # functions are built, how many are partial, how many are
+    # absent. One row, one dot, one word - the question the
+    # panel is opened for, before the rows that hold the organs.
+    if counts[organism.ABSENT] == 0:
+        status = recorder.row(
+            common.STATUS_OK,
+            f"{counts[organism.BUILT]} of {counts['total']} functions built",
+            f"{counts[organism.PART]} partial, {counts[organism.ABSENT]} "
+            "absent")
+    elif counts[organism.BUILT] + counts[organism.PART] > 0:
+        status = recorder.row(
+            common.STATUS_ATTENTION,
+            f"{counts[organism.ABSENT]} of {counts['total']} functions absent",
+            f"{counts[organism.BUILT]} built, {counts[organism.PART]} "
+            f"partial, {counts[organism.ABSENT]} absent")
+    else:
+        status = recorder.row(
+            common.STATUS_UNKNOWN,
+            "No functions built",
+            f"{counts[organism.ABSENT]} absent, {counts[organism.PART]} "
+            "partial")
+    _add(column, status)
 
     summary = common.group("What this is")
     _add(summary, common.row(
@@ -184,4 +212,5 @@ def build(_app=None) -> Gtk.Widget:
     # surfaces for a `Gtk.ScrolledWindow` rather than by looking at them:
     # nineteen had one and this had none.
     _put(common.scrolled(column))
+    page.status = recorder.status
     return page

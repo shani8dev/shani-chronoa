@@ -218,9 +218,16 @@ def on_activate(app):
         GLib.timeout_add(1500, lambda: _report_framing(window))
         GLib.timeout_add(1800, lambda: _render(window, WIDTH, HEIGHT, OUT))
     else:
-        GLib.timeout_add(1500, lambda: _render(window, WIDTH, HEIGHT, OUT))
+        # **The main window seeds every panel's health dot on idle after it
+        # maps**, twenty panels' worth of `systemctl`/`busctl`/`gsettings`, and
+        # that measures at about two seconds. Capturing at 1500ms photographed a
+        # sidebar with no dots on it at all - a screenshot of the window before
+        # it finished looking like itself, which is the failure this file exists
+        # to prevent. 3500ms is past the end of it.
+        settle = 3500 if WHICH in ("main", "empty") else 1500
+        GLib.timeout_add(settle, lambda: _render(window, WIDTH, HEIGHT, OUT))
     # The help window is modal, so app.quit() alone leaves it up and run() hangs.
-    GLib.timeout_add(2500 if WHICH == "help" else 3200,
+    GLib.timeout_add(2500 if WHICH == "help" else 5600,
                      lambda: (app.quit(), False)[1])
     return None
 

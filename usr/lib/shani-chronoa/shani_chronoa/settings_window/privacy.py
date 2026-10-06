@@ -55,6 +55,32 @@ class PrivacyPage:
             config.cloud_fallback_enabled,
             lambda a: self._app_toggle("toggle-cloud-fallback", a))
 
+        # **Two switches, not one, and not `cloud-fallback-enabled`.** Turning
+        # the cloud fallback on says prompts may leave this machine as text. It
+        # says nothing about sending a *recording*, and one switch cannot express
+        # that difference - so somebody happy with a text fallback is not thereby
+        # opted into uploading their voice.
+        self._switch(
+            group, "Cloud speech recognition",
+            "Off: with no local speech model installed, Chronoa cannot listen at "
+            "all. On: recordings are uploaded to a provider to be transcribed. "
+            "Needs an API key - no provider accepts an anonymous recording.",
+            self._read_bool("cloud-stt-enabled"),
+            lambda a: self._set_bool("cloud-stt-enabled", a),
+            tooltip="cloud_voice.CloudSTT - re-checked on every recording, so "
+                    "turning privacy mode on mid-dictation stops the next one",
+        )
+        self._switch(
+            group, "Cloud speech synthesis",
+            "Off: replies are spoken by Kokoro, Piper, RHVoice or espeak-ng, all "
+            "on this machine. On: if none of those can speak, the reply is sent "
+            "to a provider to be spoken. Needs an API key.",
+            self._read_bool("cloud-tts-enabled"),
+            lambda a: self._set_bool("cloud-tts-enabled", a),
+            tooltip="cloud_voice.CloudTTS - the LAST link of the voice chain, so "
+                    "turning this on cannot displace a local voice",
+        )
+
         # The gate every actuator passes through. `triggers.py` refuses any
         # action without it and names it, so a user whose armed rules do
         # nothing had no way to turn it on except `gsettings set` from a
@@ -321,3 +347,60 @@ class PrivacyPage:
         ):
             self._entry(byok, label, "", config.api_key_value(key),
                         lambda text, k=key: config.set_api_key(k, text.strip()), secret=True)
+
+        # **The inbound channel, which had no switch at all.** `gateway.py` is
+        # complete, `_export_gateways()` runs at startup - and measured with an
+        # AST search, nothing in the tree ever called `Registry.register()`, so
+        # `names()` was always empty and nothing was ever exported. A feature
+        # with no way to turn it on. Appended last so every switch above keeps
+        # the position a person already knows it in.
+        self._gateway_rows(group)
+
+    def _gateway_rows(self, group) -> None:
+        """The `gateways` entry, and a live row of what is actually listening.
+
+        The status row is not decoration. The whole failure here was a setting
+        that could be set and still do nothing, so the row that answers "what did
+        Chronoa make of what I typed?" is the point of the section - and it names
+        the entries that were **ignored**, because an entry the parser refused is
+        the case a person would otherwise debug for an hour.
+        """
+        def changed(text):
+            self._set_string("gateways", text)
+            app = getattr(self, "app", None)
+            if app is not None and hasattr(app, "_reload_gateways"):
+                # Live, not on restart: a channel you just named should work now.
+                app._reload_gateways()
+            self._refresh_gateway_status()
+
+        self._entry(
+            group, "Inbound channels",
+            "Comma-separated names, each optionally ':execute'. Empty means "
+            "nothing is listening on the session bus at all.",
+            self._read_string("gateways", ""), changed)
+        status = Adw.ActionRow(title="Listening for",
+                               subtitle="nothing is on the bus")
+        status.set_subtitle_selectable(True)
+        group.add(status)
+        group._needle_extra.append((status, "inbound channels listening bus"))
+        self._gateway_status = status
+        self._refresh_gateway_status()
+
+    def _refresh_gateway_status(self) -> None:
+        """Say what is registered, and what was ignored."""
+        from shani_chronoa import gateway as gateway_module
+        row = getattr(self, "_gateway_status", None)
+        if row is None:
+            return
+        entries, errors = gateway_module.parse_config(
+            self._read_string("gateways", ""))
+        text = gateway_module.describe(entries)
+        app = getattr(self, "app", None)
+        registry = getattr(app, "_gateways", None) if app is not None else None
+        registered = registry.names() if registry is not None else []
+        if registered:
+            text = (f"{gateway_module.describe(entries)} - on the bus as "
+                    f"{', '.join(registered)}")
+        if errors:
+            text += f". Ignored: {'; '.join(errors)}"
+        row.set_subtitle(text)

@@ -116,6 +116,30 @@ def build(app) -> Gtk.Widget:
     config = app.config
     page, set_content = common.surface(TITLE, SUBTITLE)
     body = common.page_body(18)
+    #: One recorder, so the sidebar's dot says the same word as the row at the
+    #: top of this panel. This panel is the one place where the two matter most:
+    #: "privacy mode is on" is the single most consequential claim the app makes
+    #: about itself, and a dot that disagreed with the row under it would be the
+    #: worst place to have that happen.
+    recorder = common.StatusRecorder()
+
+    # The panel's own health, above every group: is
+    # privacy mode on, is it keeping data local, or
+    # could it not be told? One row, one dot, one
+    # word - the question the panel is opened for,
+    # before the rows that hold the switches.
+    try:
+        privacy_on = bool(egress.privacy_mode_enabled())
+        body.append(recorder.row(
+            common.STATUS_OK if privacy_on else common.STATUS_ATTENTION,
+            "Privacy mode is on" if privacy_on else "Privacy mode is off",
+            "nothing leaves this machine" if privacy_on
+            else "Chronoa may use the network"))
+    except Exception:  # noqa: BLE001 - privacy_mode_enabled already fails on, belt and braces
+        body.append(recorder.row(
+            common.STATUS_UNKNOWN,
+            "Privacy mode could not be read",
+            "egress.privacy_mode_enabled() raised"))
 
     # -- privacy mode --------------------------------------------------------
     mode_group = common.group(
@@ -180,9 +204,18 @@ def build(app) -> Gtk.Widget:
     for event in reversed(events):
         host = str(event.get("host", "") or "(unknown)")
         when = event.get("at", "")
+        # **The purpose is the point of the row.** It used to be dropped, so an
+        # upload of a recording read as
+        # `POST https://api.openai.com/v1/audio/transcriptions - 53312 bytes` -
+        # which looks like a data POST and not like the voice of the person
+        # sitting at the machine. `egress.record` has carried a `purpose` since
+        # model downloads, and `cloud_voice` writes `speech-recognition` and
+        # `speech-synthesis`; none of it reached this panel.
+        purpose = str(event.get("purpose", "") or "")
         # Escaped, because these strings come out of a log file and an
         # `Adw.ActionRow` renders its title and subtitle as Pango markup.
-        detail = "{method} {url} - {bytes_out} bytes{violation}".format(
+        detail = "{purpose}{method} {url} - {bytes_out} bytes{violation}".format(
+            purpose=f"{purpose}: " if purpose else "",
             method=event.get("method", "GET"),
             url=event.get("url", ""),
             bytes_out=event.get("bytes_out", 0),
@@ -227,4 +260,5 @@ def build(app) -> Gtk.Widget:
     body.append(consent_group)
 
     set_content(common.scrolled(body))
+    page.status = recorder.status
     return page

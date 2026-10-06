@@ -519,24 +519,51 @@ def _reading_row(reading: Reading) -> Gtk.Widget:
     about what a sense needs is added when the sense did not answer - "pacman is
     not installed" is only actionable next to the fact that the sense wanted
     pacman - and the note about what a name actually means is always there.
+
+    **The reading is a table and was being rendered as a paragraph.** `power`
+    answers with a charge percentage, a wear figure, a cycle count, a chemistry
+    and whether mains is online; as one wrapped subtitle in a narrow column that
+    is six lines of the same weight, and the number anyone came for has to be
+    found by reading. It goes through `common.key_values()` instead, below the
+    subtitle, so the state stays prose and the data becomes scannable.
     """
-    parts = [reading.state_line()]
-    if reading.text:
-        parts.append(reading.text)
+    notes = []
     if not reading.is_reading:
         note = SENSE_REQUIRES.get(reading.name, "")
         if note:
-            parts.append(note)
+            notes.append(note)
     extra = SENSE_EXTRA_NOTE.get(reading.name, "")
     if extra:
-        parts.append(extra)
+        notes.append(extra)
+
+    # The subtitle is the verdict and any prose about it. The reading itself is
+    # not in it: a reading is data, and data in a wrapped label is what made
+    # this panel the densest screen in the app.
+    subtitle = "\n".join([reading.state_line(), *notes])
+
     widget = common.row(
         title=reading.name,
-        subtitle="\n".join(parts),
+        subtitle=subtitle,
         suffix=_when_label(reading),
     )
-    widget.add_css_class(ROW_CSS)
-    return widget
+
+    # Every sense is a block, whether or not it has a reading to lay out.
+    #
+    # The first version returned the bare row when there was no text and a box
+    # when there was, which meant `machine-reading` sat on two different kinds
+    # of node. A test walking that marker found an `Adw.ActionRow` for one sense
+    # and a `Gtk.Box` for the next, and every accessor that assumed one shape
+    # silently read the wrong sense - the panel's first row came back titled
+    # "battery" when it was "power". Uniform shape costs one box per row and
+    # makes the marker mean one thing.
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    box.append(widget)
+    if reading.text:
+        table = common.key_values(reading.text)
+        table.add_css_class("machine-reading-table")
+        box.append(table)
+    box.add_css_class(ROW_CSS)
+    return box
 
 
 def _revealed(notice: Gtk.Widget) -> Gtk.Widget:
@@ -557,7 +584,8 @@ def _revealed(notice: Gtk.Widget) -> Gtk.Widget:
     return notice
 
 
-def _summary_label(readings: List[Reading]) -> Gtk.Widget:
+def _summary_label(recorder: "common.StatusRecorder",
+                  readings: List[Reading]) -> Gtk.Widget:
     """The line above the rows: whether this panel could read the machine.
 
     Sixteen rows, each in the same grey, told a person nothing until they read
@@ -570,24 +598,28 @@ def _summary_label(readings: List[Reading]) -> Gtk.Widget:
     purpose, because the two are different facts: a refused sense is working
     exactly as designed, and merging the two would hide the probes that need a
     human to look at them.
+
+    Written through `recorder` so the dot on the sidebar's row is the same count
+    of the same `readings` list - the sixteen rows below can then change without
+    the dot and this sentence disagreeing about whether the machine was read.
     """
     said = sum(1 for reading in readings if reading.is_reading)
     stamp = time.strftime("%H:%M:%S")
     if not readings:
-        return common.status_row(
+        return recorder.row(
             common.STATUS_UNKNOWN,
             "No machine-state senses were found",
             "the registry is empty, which is not the same as every sense being fine",
         )
     if said == len(readings):
-        return common.status_row(
+        return recorder.row(
             common.STATUS_OK,
             f"All {len(readings)} senses answered",
             f"read once at {stamp}; a sense that could not answer would say so "
             "in its own row, and is never shown as one that did",
         )
     silent = len(readings) - said
-    return common.status_row(
+    return recorder.row(
         common.STATUS_ATTENTION,
         f"{said} of {len(readings)} senses answered",
         f"{silent} are not showing a reading, read once at {stamp}; each row "
@@ -641,7 +673,8 @@ def build(app) -> Gtk.Widget:
             f"{len(unread)} of {len(readings)} machine-state senses are not "
             f"showing a reading. Each row names which and why."
         )))
-    body.append(_summary_label(readings))
+    recorder = common.StatusRecorder()
+    body.append(_summary_label(recorder, readings))
 
     for title, names in SENSE_GROUPS:
         group = common.group(title)
@@ -657,6 +690,9 @@ def build(app) -> Gtk.Widget:
     body.append(footer)
 
     set_content(common.scrolled(body))
+    # What this panel says about itself, for the sidebar's health dot - from the
+    # same recorder the summary row was written through.
+    page.status = recorder.status
     return page
 
 

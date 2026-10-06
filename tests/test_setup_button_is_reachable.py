@@ -50,13 +50,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chro
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 Adw.init()
 
 from shani_chronoa.app import ChronoaApplication  # noqa: E402
-from shani_chronoa.config import ChronoaConfig  # noqa: E402
-from shani_chronoa.gui.window import ChronoaWindow  # noqa: E402
 
 
 #: The action the button must reach. Named here as well as in `application.py`
@@ -237,6 +235,68 @@ def test_pressing_the_setup_button_opens_the_wizard(monkeypatch):
     assert fired == 1, (
         "the setup button was pressed and the wizard did not open - the button "
         "is on screen and live but wired to nothing")
+
+
+def _first_run_cta(window):
+    """The in-context "Set Chronoa up" button in the composer column.
+
+    Found by its `pill` class, which the header's flat button does not carry, so
+    the two setup controls cannot be confused for one another here.
+    """
+    for node in _buttons(window):
+        if "pill" in node.get_css_classes():
+            return node
+    return None
+
+
+def test_the_first_run_cta_reaches_the_wizard_and_the_header_button_stays(monkeypatch):
+    """The button on the screen that says "no model" opens the wizard too.
+
+    `set_can_answer` puts a second setup control on the composer column, because
+    the whole point of it is that "no model" used to be stated in a tooltip on a
+    label with nothing to click. It activates `app.setup` through a handler
+    rather than `set_action_name`, so the header's button stays the only widget
+    that *declares* the action - which is what keeps `_setup_button()` above
+    unambiguous - and both must still reach the same `_open_setup`.
+
+    Both halves are asserted: that the CTA fires, and that the header button is
+    still found and still mapped. A CTA that reached nothing and a header button
+    that had been hidden would each pass one of those and are the two ways this
+    has actually gone wrong.
+
+    `in_a_window` is called **without** `monkeypatch`, for the reason
+    `test_pressing_the_setup_button_opens_the_wizard` above does the same: passing
+    it makes `in_a_window` install its own no-op `_open_setup`, replacing the stub
+    that records the press. With that mistake this test measured `fired == 0`
+    against a button that works, and would have failed for the harness.
+    """
+    opened = []
+    monkeypatch.setattr(ChronoaApplication, "_open_setup",
+                        lambda self, *_a: opened.append(1), raising=True)
+
+    def check(window):
+        cta = _first_run_cta(window)
+        assert cta is not None, (
+            "no setup control in the composer column, so 'no model' is still "
+            "stated with nothing to click beside it")
+        assert not cta.get_visible(), (
+            "the CTA is on screen on a machine that can answer - it is meant to "
+            "appear only while there is nothing to answer with")
+        window.set_can_answer(False, "no model")
+        assert cta.get_visible(), "set_can_answer(False) did not reveal the CTA"
+        before = len(opened)
+        cta.emit("clicked")
+        cta_fired = len(opened) - before
+
+        header = _setup_button(window)
+        assert header is not None, "the header setup button disappeared"
+        assert header.get_mapped(), (
+            "the header setup button is hidden while a model is missing; it is "
+            "also the route to the wizard on a working machine")
+        return cta_fired
+
+    assert in_a_window(check) == 1, (
+        "the in-context setup button was pressed and the wizard did not open")
 
 
 def test_only_the_wizard_builder_is_replaced(monkeypatch):

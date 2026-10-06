@@ -107,7 +107,7 @@ from shani_chronoa.opencv import runtime as opencv_runtime  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Model"
-ICON = "computer-symbolic"
+ICON = "media-playback-start-symbolic"
 SUBTITLE = ("Local state only. The cloud row is read from configuration and is never contacted; "
             "the two local probes ask a service running on this computer.")
 
@@ -160,6 +160,22 @@ def _read_bool(config: Any, key: str, default: bool = False) -> Optional[bool]:
     except Exception:  # noqa: BLE001 - unknown, which is what it is
         logger.debug("cannot read %s", key, exc_info=True)
         return None
+
+
+def _read_str(config: Any, key: str) -> str:
+    """A string setting, or "" when it could not be read at all.
+
+    `""` rather than None on purpose: both "unset" and "unreadable" mean the
+    same thing to the caller here - there is no usable endpoint - and inventing
+    a third state would only give the status line a way to be wrong.
+    """
+    if config is None:
+        return ""
+    try:
+        return str(config.get(key, "") or "")
+    except Exception:  # noqa: BLE001 - unreadable is the same as unset here
+        logger.debug("cannot read %s", key, exc_info=True)
+        return ""
 
 
 def _loopback(host: str) -> bool:
@@ -364,15 +380,27 @@ def _cloud_engine(config: Any) -> _Engine:
     try:
         from shani_chronoa.cloud_llm import (
             BYOK_PROVIDER_ORDER,
+            CUSTOM_ID,
             DEFAULT_PROVIDER_ORDER,
             CloudLLMChain,
+            custom_provider,
         )
 
         api_keys = config.cloud_llm_api_keys()
         order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
-        chain = CloudLLMChain(provider_ids=order, api_keys=api_keys)
+        # Mirrors app/brain.py:_maybe_enable_cloud_fallback: a usable hand-typed
+        # endpoint is put first, and is named in the list this panel shows. The
+        # two must agree - a status line that omits the endpoint actually in use
+        # is the confident-wrong-answer shape this repo keeps finding.
+        custom_url = _read_str(config, "custom-llm-base-url")
+        custom_model = _read_str(config, "custom-llm-model")
+        if custom_provider(custom_url, custom_model) is not None:
+            order = (CUSTOM_ID,) + order
+        chain = CloudLLMChain(provider_ids=order, api_keys=api_keys,
+                              custom_base_url=custom_url, custom_model=custom_model)
         ok = bool(chain.is_available())
-        named = [p for p in order if api_keys.get(p) or p in DEFAULT_PROVIDER_ORDER]
+        named = [p for p in order
+                 if api_keys.get(p) or p in DEFAULT_PROVIDER_ORDER or p == CUSTOM_ID]
         providers = ", ".join(named) or "none configured"
     except Exception as exc:  # noqa: BLE001 - a chain that cannot be built is unknown
         logger.debug("cannot read the cloud fallback state", exc_info=True)
@@ -688,21 +716,36 @@ class _ModelSurface(Gtk.Box):
         self._summary = _note("")
         self._serving = _note("")
 
+        # The panel's own health, above every group: is the
+        # model set up, is an engine answering, or could it
+        # not be told? One row, one dot, one word - the
+        # question the panel is opened for, before the rows
+        # that hold the model.
+        #: The panel's health, written once into the row above and read back
+        #: for the dot on its sidebar row. Same value, so the dot cannot
+        #: disagree with the sentence directly above it.
+        self.status_recorder = common.StatusRecorder()
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.append(self._status_slot)
+
         # Reload sits at the top of the content rather than in the page's
         # header bar: `common.surface()` builds that bar and offers no slot for
         # a button, and reaching into its tree to find one would make this page
-        # depend on how it built it. The title is in the bar; this is the one
-        # control.
-        self._reload_button = Gtk.Button(label="Reload")
-        self._reload_button.set_tooltip_text("Read the model, the engines and the extras from this machine again")
-        _access(self._reload_button, "Reload: read the model, the engines and the extras again")
-        self._reload_button.set_halign(Gtk.Align.END)
-        self._reload_button.set_valign(Gtk.Align.CENTER)
-        # The toolbar's bottom edge sits directly above the content, and a
-        # right-aligned button with no margin under it reads as touching the
-        # header bar (measured in a rendered window, not reasoned about).
-        self._reload_button.set_margin_top(6)
-        self._reload_button.connect("clicked", lambda *_a: self.refresh())
+        # depend on how it built it.
+        #
+        # **It is a banner, not a bare button**, and that is the same change
+        # `voice.py` made. As a right-aligned button it gave a reading and a
+        # control and never said the reading was from whenever the panel was
+        # built - and the sidebar builds a panel once and keeps it, so on this
+        # panel that can be a model downloaded minutes ago that is still reported
+        # as absent. The banner carries the reason and the control together, and
+        # its button inherits a tooltip and an accessible label from that reason.
+        self._reload_button = common.banner(
+            "Read once, when this panel was built. Nothing here is polled - press "
+            "Reload to read the model, the engines and the extras from this "
+            "machine again.",
+            "Reload",
+            lambda: self.refresh())
         self.append(self._reload_button)
         self.append(self._summary)
 
@@ -722,6 +765,70 @@ class _ModelSurface(Gtk.Box):
 
     # -- content ------------------------------------------------------------
 
+    def _status_row(self) -> Gtk.Widget:
+        """The panel's own health, from the model and its engines.
+
+        **The two states that have no model carry a button, because they are the
+        two a person can undo.** "No model is chosen" and "no engine answers"
+        both used to be sentences naming the setup wizard, which is a second
+        window with no link from here - and this panel is the answer to "why is
+        Chronoa not answering", so the place that explains the problem is the last
+        place that should make you go looking for the fix. The states where the
+        model is chosen and an engine will run it do not get one: there is nothing
+        to fix, and a button on every row would be noise.
+        """
+        app, config = self._app, getattr(self._app, "config", None)
+        hardware, profile = _hardware(app)
+        model, origin = _model_name(app, config, hardware)
+        engines = _engines(config, model)
+        if not model:
+            widget = self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No model is chosen",
+                f"{origin}; the setup wizard chooses one")
+            return self._with_setup(widget)
+        if not engines:
+            widget = self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No engine answers",
+                f"{model or '(none chosen)'}, {origin}; no engine "
+                "is available to run it")
+            return self._with_setup(widget)
+        available = sum(1 for e in engines if e.state)
+        if available:
+            return self.status_recorder.row(
+                common.STATUS_OK,
+                f"{model or '(none chosen)'} - {available} of "
+                f"{len(engines)} engines available",
+                f"{origin}; {available} of {len(engines)} engines "
+                "can run it")
+        return self.status_recorder.row(
+            common.STATUS_ATTENTION,
+            f"{model or '(none chosen)'} - no engine available",
+            f"{origin}; none of the {len(engines)} engines can run it")
+
+    def _with_setup(self, widget: Gtk.Widget) -> Gtk.Widget:
+        """A status row plus the one button that can act on it.
+
+        A column rather than a bare concatenation, because `refresh()` empties the
+        status slot on every reload and this has to go with it - a banner left
+        behind after the model appears would be a button offering to install a
+        model that is installed.
+        """
+        column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        column.append(widget)
+        button = Gtk.Button(label="Set Chronoa up")
+        button.add_css_class("suggested-action")
+        button.set_halign(Gtk.Align.CENTER)
+        button.set_tooltip_text(
+            "Open the setup wizard, which is the only thing that downloads a "
+            "model (Ctrl+Shift+S)")
+        button.update_property([Gtk.AccessibleProperty.LABEL],
+                               ["Set Chronoa up: download a model"])
+        button.connect("clicked", lambda _b: common.open_setup(self._app, self))
+        column.append(button)
+        return column
+
     def refresh(self) -> None:
         """Re-read everything and rebuild the rows.
 
@@ -730,6 +837,8 @@ class _ModelSurface(Gtk.Box):
         "available right now" is a claim about the moment it was read.
         """
         app, config = self._app, getattr(self._app, "config", None)
+        common.clear(self._status_slot)
+        self._status_slot.append(self._status_row())
         for group, previous in ((self._model_group, self._model_rows),
                                 (self._engine_group, self._engine_rows),
                                 (self._extra_group, self._extra_rows)):
@@ -815,6 +924,16 @@ class _ModelSurface(Gtk.Box):
         return self._serving.get_text()
 
     def reload_button(self) -> Gtk.Button:
+        """The Reload control inside the banner.
+
+        The banner is the widget on screen; this is the button inside it, which
+        is what `reload_button()` has always meant to callers.
+        """
+        child = self._reload_button.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Button):
+                return child
+            child = child.get_next_sibling()
         return self._reload_button
 
 
@@ -833,6 +952,9 @@ def build(app: Any) -> Gtk.Widget:
     set_content(common.scrolled(content))
     for name in _FORWARDED:
         setattr(page, name, getattr(content, name))
+    # What this panel says about itself, for the sidebar's health dot, from the
+    # same recorder the row at the top of the panel was written through.
+    page.status = content.status_recorder.status
     return page
 
 

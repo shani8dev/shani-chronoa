@@ -384,12 +384,43 @@ class _MemorySurface(Adw.NavigationPage):
     def __init__(self, app: Any) -> None:
         self._store = _store_of(app)
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        #: The panel's health, in the row it writes at the top of itself and in
+        #: the dot on its sidebar row. `refresh()` rebuilds the row, so the dot
+        #: follows the last refresh rather than the state at build time - which
+        #: is what makes "remember a fact and watch the dot change" work.
+        self.status_recorder = common.StatusRecorder()
 
         # Wrap content in a surface to get the header
         page_content, set_content = common.surface(TITLE, SUBTITLE)
         set_content(self._content)
 
         super().__init__(child=page_content, title=TITLE)
+        self.refresh()
+
+    # -- remembering one -----------------------------------------------------
+
+    def _remember(self, text: str) -> None:
+        """Store a fact the person typed, then rebuild from the store.
+
+        `remember_fact()` is the same path the `remember_fact` skill takes, so
+        the page cannot store something the assistant could not store. A blank
+        or refused write is reported in the log rather than as a toast, because
+        a "remembered" claim this page could not keep would be the same false
+        promise the whole repo audits for.
+        """
+        store = self._store
+        text = (text or "").strip()
+        if store is None or not text:
+            return
+        try:
+            from shani_chronoa.senses.memory import remember_fact
+
+            kept = remember_fact(text, store=store)
+        except Exception:  # noqa: BLE001 - a refused write must not take the window down
+            logger.warning("could not remember a fact", exc_info=True)
+            kept = None
+        if kept is None:
+            logger.warning("a fact was not remembered (empty or refused)")
         self.refresh()
 
     # -- content ------------------------------------------------------------
@@ -406,6 +437,49 @@ class _MemorySurface(Adw.NavigationPage):
             banner = common.banner(PRIVACY_NOTE)
             banner.add_css_class(BANNER_CSS)
             self._content.append(banner)
+
+        # The panel's own health, before any CRUD: is the store
+        # readable, is it holding facts, or could it not be told?
+        # One row, one dot, one word - the question the panel is
+        # opened for, before the rows that hold the facts.
+        if self._store is None:
+            self._content.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "The percept store is not reachable",
+                NO_STORE_DETAIL))
+        else:
+            percepts, error = _read(self._store)
+            if percepts is None:
+                self._content.append(self.status_recorder.row(
+                    common.STATUS_ATTENTION,
+                    "The percept store could not be read",
+                    error or "unknown error"))
+            elif not percepts:
+                self._content.append(self.status_recorder.row(
+                    common.STATUS_ATTENTION,
+                    "No facts remembered yet",
+                    EMPTY_DETAIL))
+            else:
+                self._content.append(self.status_recorder.row(
+                    common.STATUS_OK,
+                    f"{len(percepts)} fact(s) remembered",
+                    f"held by {len(_by_sense(percepts))} sense(s)"))
+
+        # The create half of CRUD, on the same page as the delete half: a page
+        # that can only forget cannot be the answer to "remember this for me".
+        if self._store is not None:
+            entry = Gtk.Entry(placeholder_text="Remember a fact…", hexpand=True)
+            button = Gtk.Button(label="Remember")
+            entry.connect("activate", lambda e: (self._remember(e.get_text()), e.set_text("")))
+            button.connect("clicked", lambda b: (self._remember(entry.get_text()), entry.set_text("")))
+            bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            bar.set_margin_top(6)
+            bar.set_margin_bottom(6)
+            bar.set_margin_start(12)
+            bar.set_margin_end(12)
+            bar.append(entry)
+            bar.append(button)
+            self._content.append(bar)
 
         if self._store is None:
             self._content.append(self._status(UNREADABLE_ICON, NO_STORE_TITLE, NO_STORE_DETAIL))
@@ -473,9 +547,15 @@ def build(app: Any) -> Gtk.Widget:
     """The memory page for `app`.
 
     Reads `app.percept_store` and `egress.privacy_mode_enabled()`, and writes
-    nothing except through a Forget the user pressed.
+    only through controls on this page: Remember (create) and Forget (delete).
     """
-    return _MemorySurface(app)
+    surface = _MemorySurface(app)
+    # What this panel says about itself, for the sidebar's health dot. Memory is
+    # the panel where a stale dot would matter most: "privacy off but facts
+    # stored" is the state a person needs to see from the sidebar without opening
+    # the panel that explains it.
+    surface.status = surface.status_recorder.status
+    return surface
 
 
 __all__ = ["TITLE", "ICON", "build"]

@@ -253,6 +253,15 @@ class PiperTTS:
             return "rhvoice"
         if shutil.which("espeak-ng"):
             return "espeak-ng"
+        # **Last, and only if the person asked.** Cloud synthesis sends the reply
+        # to somebody else's computer, which `cloud_voice.CloudTTS` decides
+        # (switch on AND privacy off AND a provider with a real speech route).
+        # It is the final link deliberately: `espeak-ng` is a hard package
+        # dependency, so on any working install this branch is never reached and
+        # turning the switch on cannot displace a local voice.
+        from shani_chronoa import cloud_voice
+        if cloud_voice.CloudTTS().is_available():
+            return "cloud"
         return None
 
     @staticmethod
@@ -264,6 +273,12 @@ class PiperTTS:
         _ANNOUNCED.add(key)
         if chosen == "kokoro":
             logger.info("Speaking with Kokoro")
+        elif chosen == "cloud":
+            # **Named explicitly, always.** A reply spoken by somebody else's
+            # computer is the one case where the log line matters most, because
+            # "Speaking with cloud" is the whole disclosure.
+            logger.info("Speaking with a cloud provider - the reply text was "
+                        "sent off this machine")
         elif kokoro_reason:
             logger.info("Speaking with %s: Kokoro was not used because %s",
                         chosen or "no engine", kokoro_reason)
@@ -386,6 +401,15 @@ class PiperTTS:
         # `engine("")` - the form `skills/speak.py` uses - still reports the
         # best engine that could speak here at all.
         eng = self.engine(text)
+        if eng == "cloud":
+            # Not a subprocess, so it cannot share the `cmd` path below - and
+            # it must not, because every branch there pipes the text through
+            # `stdin` to a local binary, which is the opposite of what this one
+            # does with it. `CloudTTS.synthesize` returns the same bool and
+            # writes the same WAV, so the timbre pass in `synthesize` and every
+            # caller above it are unaffected.
+            from shani_chronoa import cloud_voice
+            return cloud_voice.CloudTTS().synthesize(text, output_file)
         if eng == "kokoro":
             cmd = self._kokoro_command(text, output_file)
         elif eng == "piper":

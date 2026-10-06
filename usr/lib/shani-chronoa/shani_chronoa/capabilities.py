@@ -390,7 +390,7 @@ GATE_NAMES: dict[str, str] = {
     "calendar-sense-enabled": "Let Chronoa act before calendar events",
     "phone-control-enabled": "Let Chronoa use your paired phone",
     "phone-sense-enabled": "Let Chronoa act on your phone connecting",
-    "heard-sound-sense-enabled": "Let Chronoa listen for sounds like the doorbell",
+    "heard-sound-sense-enabled": "Let Chronoa name a sound when you ask",
     "radio-control-enabled": "Let Chronoa switch airplane mode",
     "appearance-control-enabled": "Let Chronoa change the desktop look",
     "timezone-control-enabled": "Let Chronoa change the timezone",

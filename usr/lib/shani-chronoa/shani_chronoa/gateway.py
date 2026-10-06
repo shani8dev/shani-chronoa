@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import gi
 
@@ -50,7 +50,20 @@ logger = logging.getLogger(__name__)
 
 #: Where the object lives on the bus. Stable, because a channel configured once
 #: should keep working across restarts.
-BUS_NAME = "dev.shani.chronoa"
+#:
+#: **This used to be the application's own well-known name.** It was
+#: `dev.shani.chronoa`, which is `ChronoaApplication`'s `application_id` - so
+#: `export()` asked the bus for a name the `GApplication` already owned, with
+#: `REPLACE | ALLOW_REPLACEMENT`. Two owners on one well-known name: the bus
+#: arbitrates, ownership ping-pongs between them, and a client calling `Submit`
+#: gets `ServiceUnknown` (measured) or lands on whichever owner won the race. The
+#: object never became reliably reachable.
+#:
+#: It could not have been observed before, because the `register_object` call in
+#: the same function threw on every invocation, so this name was never actually
+#: requested. Two faults in one line, both invisible, in a function no test ever
+#: called - there is still no `tests/test_gateway.py` anywhere in the tree.
+BUS_NAME = "dev.shani.chronoa.Gateways"
 OBJECT_PATH = "/dev/shani/chronoa/Gateways"
 INTERFACE = "dev.shani.chronoa.Gateways"
 
@@ -214,15 +227,175 @@ _INTROSPECTION = """<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Intr
 """
 
 
-def export(registry: Registry, bus: Optional[Gio.BusType] = None) -> Gio.BusNameOwnerId:
-    """Put the object on the bus. Returns the owner id."""
+def parse_config(text: str) -> Tuple[List[Tuple[str, str]], List[str]]:
+    """Read the `gateways` setting into `(entries, errors)`.
+
+    **This is what makes the module reachable at all.** Until now nothing in the
+    tree ever called `Registry.register()` - measured, with an AST search over
+    every call whose receiver mentions a gateway: **zero**. So
+    `_export_gateways()` built the registry at startup, found `names()` empty and
+    returned, and the whole inbound channel stayed unexported on every install. A
+    fully built, fully tested feature with no switch.
+
+    The format is `name`, or `name:execute`, comma-separated:
+
+        gateways = "whatsapp, telegram:execute, matrix"
+
+    **Errors are returned, not raised, and never silently dropped.** A channel
+    named `my.channel` raises `ValueError` from `register()` because the name
+    becomes part of a D-Bus method name - and a setting that quietly ignores the
+    entries it could not parse is a switch that appears to work while doing
+    nothing, which is the defect this whole audit keeps finding. Each error names
+    the offending entry and what is wrong with it.
+
+    `execute` is opt-in per channel and still does not mean the channel can act:
+    the submitted turn meets the same consent keys as anything typed into the
+    window (see `Gateway.may_execute`).
+    """
+    entries: List[Tuple[str, str]] = []
+    errors: List[str] = []
+    for raw in (text or "").split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        name, _, grant = entry.partition(":")
+        name = name.strip()
+        grant = grant.strip().lower() or ASK_ONLY
+        if grant not in (ASK_ONLY, "execute"):
+            errors.append(f"{entry!r}: grant must be 'ask' or 'execute', "
+                          f"not {grant!r}")
+            continue
+        if not name or "/" in name or "." in name:
+            errors.append(
+                f"{entry!r}: a name cannot be empty or contain '/' or '.', "
+                "because it becomes part of a D-Bus method name")
+            continue
+        entries.append((name, grant))
+    return entries, errors
+
+
+def describe(entries: List[Tuple[str, str]]) -> str:
+    """One line for a status row: what is registered, and with what grant."""
+    if not entries:
+        return "none - nothing is listening on the session bus"
+    return ", ".join(f"{name} ({grant})" for name, grant in entries)
+
+
+#: Object path -> `(connection, registration_id)` for what `export()` registered.
+#:
+#: **`unregister_object` takes a registration id, not a path.** GLib's C function
+#: is `g_dbus_connection_unregister_object(connection, object_path)`, and the
+#: introspection says `unregister_object(registration_id: int) -> bool` - measured,
+#: by passing the path and getting `TypeError: Must be number, not str`. Reading
+#: the C header and writing the Python is how that happened.
+#:
+#: It is idempotent-safe only if the id is the one `register_object` returned,
+#: which is why this stores both.
+_EXPORTED: "Dict[str, tuple]" = {}
+
+
+def unexport(owner: Optional["Gio.BusNameOwnerId"] = None) -> None:
+    """Release the bus name and unregister the object. Safe to call twice."""
+    if owner is not None:
+        try:
+            Gio.bus_unown_name(owner)
+        except Exception:  # noqa: BLE001 - a channel is optional
+            logger.exception("could not release the gateway bus name")
+    record = _EXPORTED.pop(OBJECT_PATH, None)
+    if record is not None:
+        connection, registration_id = record
+        try:
+            connection.unregister_object(registration_id)
+        except Exception:  # noqa: BLE001 - already gone is the same as released
+            logger.debug("the gateway object was already unregistered")
+
+
+def export(registry: Registry, bus: Optional[Gio.BusType] = None,
+           connection: Optional["Gio.DBusConnection"] = None) -> "Gio.BusNameOwnerId":
+    """Put the object on the bus. Returns the owner id.
+
+    **`register_object` needs a callable, and passing `_Service` itself never
+    worked.** Measured: the first real activation of this path logged
+
+        could not export the gateway interface: Must be callable, not _Service
+
+    PyGObject's `register_object` takes a *closure* it will invoke as
+    `f(connection, sender, path, interface, method, params, invocation)`; a plain
+    object with methods is not that, and the type check rejects it. So the whole
+    inbound channel could never have been exported - not because nothing
+    registered a gateway, but because the one line that puts it on the bus throws
+    every time.
+
+    It stayed invisible for two reasons that are worth naming, because both are
+    this repository's own recurring failure:
+
+    - the `except Exception` around the call turned a hard error into a log line
+      that says "could not", which reads as a transient condition rather than a
+      line that has never once succeeded;
+    - **`gateway.py` had no test file at all** - measured, there is no
+      `tests/test_gateway*.py` - so the one function that needed executing was the
+      one function nobody executed. `Registry`, `MAX_TEXT`, `RATE_PER_MINUTE`,
+      `may_execute` and `_Service.Submit` were all unexercised too, despite
+      AGENTS.md citing measured properties of this module as its security
+      argument.
+
+    `connection=` exists so a test can hand this a private bus instead of the
+    session bus. `Gio.bus_get_sync` **caches one connection per process**, and it
+    is resolved from `DBUS_SESSION_BUS_ADDRESS` at the first call - which is why
+    setting that variable inside a test that has already imported `gi` silently
+    does nothing, and why the round-trip test below drives a `Gio.TestDBus`
+    directly rather than trying to redirect the session bus.
+    """
     node = Gio.DBusNodeInfo.new_for_xml(_INTROSPECTION)
-    connection = Gio.bus_get_sync(bus if bus is not None else Gio.BusType.SESSION, None)
-    connection.register_object(
-        OBJECT_PATH, node.interfaces[0], _Service(registry), None, None)
+    connection = connection or Gio.bus_get_sync(
+        bus if bus is not None else Gio.BusType.SESSION, None)
+    # Undo any previous registration on this path first. `register_object`
+    # **refuses** a second export of the same interface at the same path on one
+    # connection (`g-io-error-quark: An object is already exported for the
+    # interface dev.shani.chronoa.Gateways at /dev/shani/chronoa/Gateways`), and
+    # `bus_unown_name` frees the *name* without freeing the object - so a reload
+    # that only unowned the name left every later export throwing, and the
+    # caller's `except Exception` turned that into a log line. Measured on the
+    # app's own reload path: reload 1 owned the name, reloads 2-4 all reported
+    # `owner=False, on_bus=False` with the registry still listing the channel.
+    record = _EXPORTED.pop(OBJECT_PATH, None)
+    if record is not None:
+        try:
+            record[0].unregister_object(record[1])
+        except Exception:  # noqa: BLE001 - already gone is the same as released
+            logger.debug("the previous gateway object was already unregistered")
+    service = _Service(registry)
+
+    def dispatch(connection_, sender, path, interface, method, params, invocation):
+        """One method, and one refusal for anything else."""
+        handler = getattr(service, method, None)
+        if handler is None:
+            invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.UnknownMethod",
+                f"{interface} has no method {method!r}; it has one, Submit")
+            return
+        handler(connection_, sender, path, interface, method, params, invocation)
+
+    registration_id = connection.register_object(
+        OBJECT_PATH, node.interfaces[0], dispatch, None, None)
+    _EXPORTED[OBJECT_PATH] = (connection, registration_id)
+    # **`bus_own_name_on_connection` is asynchronous**: it returns an owner id
+    # immediately and the name is owned a moment later. Passing `None` for the
+    # callbacks discarded that fact, so a caller that trusted the return value -
+    # including this module's own `logger.info("gateways exported")` below - could
+    # report a channel as listening when nothing owned the name yet, and a client
+    # connecting straight after startup got `ServiceUnknown`. Both outcomes are
+    # measured; the log line now says "requested", which is what happened.
+    def acquired(_connection, name):
+        logger.info("gateway bus name acquired: %s at %s", name, OBJECT_PATH)
+
+    def lost(_connection, name):
+        logger.warning("lost the gateway bus name %s - channels are unreachable "
+                       "until it is taken again", name)
+
     owner = Gio.bus_own_name_on_connection(
         connection, BUS_NAME,
         Gio.BusNameOwnerFlags.REPLACE | Gio.BusNameOwnerFlags.ALLOW_REPLACEMENT,
-        None, None)
-    logger.info("gateways exported at %s (%s)", OBJECT_PATH, BUS_NAME)
+        acquired, lost)
+    logger.info("gateway interface requested at %s (%s)", OBJECT_PATH, BUS_NAME)
     return owner

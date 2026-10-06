@@ -463,6 +463,10 @@ class _ExportView(Gtk.Box):
         self._statuses: Dict[Gtk.Widget, Gtk.Label] = {}
         self._body = common.page_body(12)
         self.append(common.scrolled(self._body))
+        #: The panel's health, in the row written at the top and in the dot on
+        #: its sidebar row. Recreated on every `refresh()` with the row, so the
+        #: two cannot describe different moments.
+        self.status_recorder = common.StatusRecorder()
         self.refresh()
 
     # -- reading what there is to export ------------------------------------
@@ -509,6 +513,33 @@ class _ExportView(Gtk.Box):
         root, sid, reason = self._open_conversation()
         if reason:
             self._body.append(self._banner(f"Nothing to export from a conversation: {reason}."))
+
+        # The panel's own health, above the
+        # export rows: is there a conversation
+        # to export, is it open, or could it
+        # not be told? One row, one dot, one
+        # word - the question the panel is
+        # opened for, before the rows that
+        # hold the exports.
+        if reason:
+            self._body.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "Nothing to export",
+                reason))
+        elif root is not None and sid:
+            try:
+                count = len(_turns(root, sid))
+            except Exception:  # noqa: BLE001 - the count is decoration
+                count = 0
+            self._body.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"A conversation is open - {count} message(s)",
+                f"{sid}: {count} message(s) you and Chronoa exchanged"))
+        else:
+            self._body.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "No conversation is open",
+                "the session index did not name an active one"))
 
         said = 0
         if root is not None and sid:
@@ -645,8 +676,18 @@ class _ExportView(Gtk.Box):
         # Set on the dialog, not on a path: the user still chooses where, and
         # `document.name` has already been through `safe_filename`.
         dialog.set_initial_name(document.name)
+        # **The callback takes `*_user_data` because PyGObject passes three
+        # arguments, not two.** `save` takes a `Gio.AsyncReadyCallback`, and
+        # measured on this PyGObject (`Gio.File.load_contents_async`, the same
+        # callback type) it is invoked as `(source_object, result, user_data)`.
+        # The two-argument lambda this replaced matched a *test fake* that called
+        # it with one argument, so it raised `TypeError` on every real save and
+        # both save tests failed for that one reason. Verified here by
+        # `tests/test_surface_export.py::TestCallbackArity`, which asserts the
+        # arity against the installed library rather than against a fake.
         dialog.save(_file_root(button), None,
-                    lambda result: self._saved(dialog, document, result, status))
+                    lambda _dlg, result, *_user_data: self._saved(
+                        dialog, document, result, status))
 
     def _saved(self, dialog: Gtk.FileDialog, document: Document, result: Any,
                status: Gtk.Label) -> None:
@@ -703,6 +744,10 @@ def build(app: Any) -> Gtk.Widget:
     set_content(view)
     page.rows = view.rows
     page.refresh = view.refresh
+    # What this panel says about itself, for the sidebar's health dot - read from
+    # the recorder the row at the top of the panel was written through, so the
+    # dot and the row cannot be describing different exports.
+    page.status = view.status_recorder.status
     return page
 
 

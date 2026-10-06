@@ -12,7 +12,13 @@ from gi.repository import Gio, GLib  # type: ignore
 
 
 
-from shani_chronoa.cloud_llm import CloudLLMChain, DEFAULT_PROVIDER_ORDER, BYOK_PROVIDER_ORDER
+from shani_chronoa.cloud_llm import (
+    BYOK_PROVIDER_ORDER,
+    CUSTOM_ID,
+    DEFAULT_PROVIDER_ORDER,
+    CloudLLMChain,
+    custom_provider,
+)
 from shani_chronoa.redaction import redactor
 
 
@@ -192,10 +198,21 @@ class BrainMixin:
         for provider_id, key_value in api_keys.items():
             redactor.register(f"cloud_llm_{provider_id}", key_value)
         provider_order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
-        cloud_llm = CloudLLMChain(provider_ids=provider_order, api_keys=api_keys)
+        # A hand-typed endpoint joins the chain ahead of the anonymous free
+        # providers: the person who wrote an address down has usually written it
+        # down because it is the one they trust to answer (their own router, a
+        # gateway they pay for). It is still gated by the same two switches as
+        # everything else here - reaching it is not a way around privacy mode.
+        custom_url = self.config.get("custom-llm-base-url", "")
+        custom_model = self.config.get("custom-llm-model", "")
+        if custom_provider(custom_url, custom_model) is not None:
+            provider_order = (CUSTOM_ID,) + provider_order
+        cloud_llm = CloudLLMChain(provider_ids=provider_order, api_keys=api_keys,
+                                  custom_base_url=custom_url, custom_model=custom_model)
         if not cloud_llm.is_available():
             return
-        active = [p for p in provider_order if api_keys.get(p) or p in DEFAULT_PROVIDER_ORDER]
+        active = [p for p in provider_order
+                  if api_keys.get(p) or p in DEFAULT_PROVIDER_ORDER or p == CUSTOM_ID]
         logger.warning(
             f"Falling back to cloud LLM providers ({', '.join(active)}) - privacy mode is "
             "off and cloud-fallback-enabled is set. Prompts will leave this machine."

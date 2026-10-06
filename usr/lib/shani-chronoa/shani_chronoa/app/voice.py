@@ -69,7 +69,17 @@ class VoiceMixin:
         return getattr(self.config, "stt_backend", "whisper") or "whisper"
 
     def _stt_backend_label(self) -> str:
-        """A human name for the backend, for status text and log lines."""
+        """A human name for the backend, for status text and log lines.
+
+        **From the object, not from the setting.** The configured backend is only
+        a hint about what will be *tried*; `_build_stt` may hand back a cloud
+        engine because nothing local is installed, and this line used to report
+        "Whisper.cpp" on such a machine - naming a program that was never run.
+        """
+        live = getattr(self, "stt", None)
+        own = getattr(live, "label", None)
+        if own:
+            return str(own)
         return "Parakeet" if self._stt_backend() == stt.BACKEND_PARAKEET \
             else "Whisper.cpp"
 
@@ -85,11 +95,30 @@ class VoiceMixin:
         model = self.config.whisper_model or stt.installed_model(self.hardware.get_whisper_model())
         if self._stt_backend() == stt.BACKEND_PARAKEET:
             model = stt_provision.PARAKEET_DEFAULT_MODEL
-        return stt.build_stt(
+        local = stt.build_stt(
             model=model,
             language=self.config.language,
             backend=self._stt_backend(),
         )
+        # **Local first, cloud only when local cannot listen.** The same shape as
+        # `_maybe_enable_cloud_fallback` for the LLM, and the reason it is a
+        # *selection* rather than a setting: installing a local model later must
+        # take precedence without anybody turning a switch back off, so the
+        # choice is re-made by `_build_stt` on the next utterance rather than
+        # latched at startup.
+        #
+        # `CloudSTT.is_available()` is the whole gate - switch on, privacy off,
+        # and a configured provider that actually has the route - and it is
+        # re-read on every `transcribe()` as well, because a microphone stays
+        # open long enough for privacy mode to be turned on mid-dictation.
+        if not local.is_available():
+            from shani_chronoa import cloud_voice
+            cloud = cloud_voice.CloudSTT(language=self.config.language)
+            if cloud.is_available():
+                logger.info("No local speech-recognition model; using a cloud "
+                            "provider, which means recordings are uploaded")
+                return cloud
+        return local
 
     def _toggle_listening(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle speech listening mode (the orb button / its accelerator).

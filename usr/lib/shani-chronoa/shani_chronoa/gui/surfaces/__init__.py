@@ -19,6 +19,51 @@ from typing import Any, Callable, Dict, Tuple
 Surfaces = Dict[str, Tuple[str, str, Callable[[Any], Any]]]
 
 
+#: Panel id -> the settings section that holds the controls for what it reports.
+#:
+#: **Only where the settings window genuinely has a control.** A panel with no
+#: entry here gets no gear on its row, and that is the point: the review this came
+#: from wanted one-click access to Settings from every panel, but a gear on a row
+#: whose subject Settings does not govern is a button that opens a page of
+#: unrelated switches - which is the same dead end in a different costume, and
+#: harder to recognise because it *does* open something.
+#:
+#: Read from the settings window's own declaration rather than from a list of its
+#: group titles: it registers fixed ids (`senses`, `privacy`, `approvals`,
+#: `tool-activity`, `voice`, `models`, `system`) and derives them from titles that
+#: may be reworded. `tests/test_settings_targets_resolve.py` resolves every entry
+#: here against the real registry, so a section that is renamed or dropped fails
+#: there rather than producing a gear that goes nowhere.
+SETTINGS_TARGETS = {
+    # The panel *is* the list; the switches that grant each of its senses are in
+    # Senses, and a person looking at a refused sense wants the switch beside it.
+    "senses": "senses",
+    # Consent keys are all in Privacy, whatever else the panel is about: the
+    # calendar's, the phone's, memory's and the trigger gate all live there.
+    "calendar": "privacy",
+    "devices": "privacy",
+    "daemon": "privacy",
+    "memory": "privacy",
+    "triggers": "tool-activity",
+    "skills": "tool-activity",
+    "voice": "voice",
+    "model": "models",
+    "models": "models",
+    "privacy": "privacy",
+}
+
+
+def settings_target(name: str) -> "str | None":
+    """The `pages.show` target for a panel's settings, or None if it has none.
+
+    `settings:<section>` rather than a bare section id, so the whole of the
+    navigation goes through one registry and an ambiguous bare id cannot resolve
+    to whichever window happens to have answered first.
+    """
+    section = SETTINGS_TARGETS.get(name)
+    return f"settings:{section}" if section else None
+
+
 def all_surfaces() -> "Surfaces":
     """Every surface whose module imports, and the reason one did not.
 

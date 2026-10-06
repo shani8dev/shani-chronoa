@@ -29,7 +29,7 @@ What is pinned, and why each is one a reader cannot get right from the diff:
   every reply goes through, and a page that turned a failed probe into "the
   floor" would describe a voice nobody is speaking with - and send someone to
   install a package whose absence was never established. Asserted from both
-  sides: the words are there, *and* none of the four engine names appears
+  sides: the words are there, *and* none of the engine names in
   anywhere in the row's title or detail.
 
 - **the sox-skipped reason appears when sox is absent** - `sox` is an optdepend
@@ -73,14 +73,27 @@ from gi.repository import Gtk  # noqa: E402
 
 Gtk.init()
 
-from shani_chronoa import sherpa, tts, voices  # noqa: E402
+from shani_chronoa import sherpa, stt, tts, voices  # noqa: E402
 from shani_chronoa.gui.surfaces import common, voice as surface  # noqa: E402
 
 REGISTRY = pathlib.Path(surface.__file__).with_name("__init__.py")
 
-#: The four names `tts.PiperTTS._engine` can return. Asserted absent from a row
-#: that could not be established, so they are a set rather than prose.
-ENGINE_NAMES = ("kokoro", "piper", "rhvoice", "espeak-ng")
+#: The real constructor, captured at import. `floor` patches
+#: `WhisperSTT.__init__` and `_pin_stt` still needs the original - a closure over
+#: a name defined inside the fixture would not be in `_pin_stt`'s scope, and the
+#: `NameError` would be swallowed by `_speech_input`'s `except`, turning a test
+#: wiring mistake into a silent "could not determine".
+_REAL_STT_INIT = stt.WhisperSTT.__init__
+
+#: The names `tts.PiperTTS._engine` can return. Asserted absent from a row that
+#: could not be established, so they are a set rather than prose.
+#:
+#: **It was four and is now five.** `_engine` grew a `cloud` link on 2026-10-06
+#: (`cloud_voice.CloudTTS`), and this list - used to prove a failed probe names
+#: *no* engine - would have kept passing while omitting the fifth, because a
+#: "cannot be determined" row mentioning no engine still mentions none of these.
+#: An omission in the guard is invisible to the guard.
+ENGINE_NAMES = ("kokoro", "piper", "rhvoice", "espeak-ng", "cloud")
 
 
 class _StubConfig:
@@ -124,6 +137,23 @@ class _StubApp:
         self.stt = None
 
 
+def _pin_stt(engine, model: str, binary: str, language: str) -> None:
+    """Build a real `WhisperSTT`, then point only its binary at a missing path.
+
+    Everything else - the model name, `model_path`, `use_server` - comes from the
+    real constructor, so the panel is described by the same object it would be in
+    the app and only the one host fact this file cannot control is pinned. The
+    model path stays inside the test's own data home, which the autouse
+    `XDG_DATA_HOME` fixture makes empty, so "the model file is not on disk" is
+    true here for the reason it is true on a fresh machine rather than by
+    accident.
+    """
+    _REAL_STT_INIT(engine, model=model, whisper_path=binary, language=language)
+    # Belt and braces: the constructor honours `whisper_path`, and this makes the
+    # pin visible to anything that re-reads the attribute.
+    engine.whisper_path = binary
+
+
 @pytest.fixture
 def floor(monkeypatch):
     """An engine chain with only the floor in it: espeak-ng, and nothing above.
@@ -134,7 +164,23 @@ def floor(monkeypatch):
     installed. Patching `tts.shutil.which` patches the attribute on the `shutil`
     module itself, so the panel's own `which` calls see it too - the one
     arrangement in which the panel and the chain cannot disagree.
+
+    **The speech-input binary is pinned too, and that was the missing half.**
+    `WhisperSTT` falls back to the literal `/usr/bin/whisper-cli` when `which`
+    finds nothing, and the panel then asks `os.path.exists` about that path - so
+    the engine row said *"run by /usr/bin/whisper-cli"* on this machine and
+    *"whisper.cpp is not installed"* on a machine without it. The test asserted
+    the second, so it was asserting a fact about the host: it passed on a bare
+    container and failed on a developer machine that had whisper-cpp installed
+    (which is where it was found). `_stt_for` is pointed at a path inside the
+    test's own data home, which cannot exist, so the "no program there" branch is
+    the one taken everywhere.
     """
+    absent = str(pathlib.Path(os.devnull).parent
+                 / "no-such-whisper-cli-in-this-test")
+    monkeypatch.setattr(stt.WhisperSTT, "__init__",
+                        lambda self, model="base", whisper_path=None, language="en":
+                        _pin_stt(self, model, absent, language))
     monkeypatch.setattr(tts.shutil, "which",
                         lambda name: "/usr/bin/espeak-ng" if name == "espeak-ng" else None)
     monkeypatch.setattr(tts.PiperTTS, "_rhvoice_has_voice", staticmethod(lambda: False))
@@ -282,7 +328,18 @@ class TestBuild:
         widget = surface.build(app)
         assert isinstance(widget, Gtk.Widget)
         assert widget.speaking_title() == "speaking with espeak-ng", widget.speaking_title()
-        assert [r._engine_state for r in widget.engine_rows()] == [False, False, False, True]
+        states = [r._engine_state for r in widget.engine_rows()]
+        # **Exactly one engine is present, and it is the floor.** Stated as a
+        # property rather than as a list, because the list was the thing that had
+        # to be edited twice today: once when `cloud` was added to the chain, and
+        # again because the cloud engine sits *after* espeak-ng and is False, so
+        # "all False then a True" was never going to be the right shape.
+        present = [key for key, state in zip(surface.CHAIN, states) if state]
+        assert present == ["espeak-ng"], (
+            f"the chain is {surface.CHAIN}, the states were {states}, so the "
+            f"engines in use read as {present} - expected only the floor, since "
+            "kokoro, piper and rhvoice are all stubbed absent and the cloud "
+            "engine is opt-in")
         # Kokoro's row names the half that is missing, and asks the switch only
         # after that - `tts.py:_kokoro_reason` checks in the same order, because
         # the first answer is the one a person can act on.
@@ -350,8 +407,8 @@ class TestTheCurrentEngine:
         """The point of the panel. A failed probe is not a negative answer, and a
         page that named the floor here would describe a voice nobody speaks with
         - then send somebody to install a package whose absence was never
-        established. Both halves are asserted: the words, and the absence of all
-        four engine names."""
+        established. Both halves are asserted: the words, and the absence of every
+        engine name in `ENGINE_NAMES`."""
         def _explode(*_a, **_k):
             raise OSError("the settings store went away")
 
@@ -395,7 +452,9 @@ class TestTheCurrentEngine:
         row = [r for r in widget.engine_rows() if r._engine_key == "rhvoice"][0]
         assert "unknown" in _row_title(row), _row_title(row)
         assert "EIO" in _row_detail(row), _row_detail(row)
-        assert len(widget.engine_rows()) == 4
+        assert len(widget.engine_rows()) == len(surface.CHAIN) == 5, (
+            f"the chain is {surface.CHAIN}, so the panel must render a row for each; "
+            f"it rendered {len(widget.engine_rows())}")
 
 
 # -- the voice and the timbre pass ------------------------------------------
@@ -649,3 +708,61 @@ def test_a_voice_present_on_disk_that_reports_absent_breaks_the_catalogue_row(
             _downloaded_row_state()
 
     assert _downloaded_row_state() == kept, "the control was not restored"
+
+def test_the_chain_and_the_real_cascade_cannot_drift_apart():
+    """**A fifth link appeared and this table was not updated.**
+
+    `tts.PiperTTS._engine` grew `"cloud"` on 2026-10-06 (`cloud_voice.CloudTTS`,
+    opt-in, reached only when none of the four local engines (all of which are local) can speak). This
+    module's `CHAIN` still listed four, so a machine whose chosen engine *was*
+    `cloud` would have found no entry at or above its own and been told it was
+    using nothing - the panel-silently-incomplete defect this file's own docstring
+    records for the Eyes list.
+
+    Asserted by **asking the real cascade for every outcome it can produce**
+    rather than by reading `_engine`'s body: the three ways it can reach its last
+    link are stubbed in turn, and each result must be a name this panel knows
+    about. A new engine therefore fails here, on a test, instead of on a screen.
+    """
+    from shani_chronoa.gui.surfaces import voice as surface
+
+    piper = tts.PiperTTS.__new__(tts.PiperTTS)
+    piper.piper_path = "/nonexistent/piper"
+    piper.voice_path = "/nonexistent/voice"
+    piper.piper_trial = False
+    piper.kokoro_trial_voice = ""
+    piper.rate = 1.0
+
+    # Kokoro off, so the cascade starts from the Piper link and walks down.
+    found = set()
+    with pytest.MonkeyPatch.context() as ctx:
+        ctx.setattr(surface.os.path, "exists", lambda p: False)
+        ctx.setattr(surface.shutil, "which", lambda name: None)
+        found.add(piper._engine("kokoro is off"))
+        # With every local engine absent and the cloud reachable, the last link.
+        from shani_chronoa import cloud_voice
+        ctx.setattr(cloud_voice.CloudTTS, "is_available", lambda self: True)
+        found.add(piper._engine("kokoro is off"))
+        # And with the cloud unavailable too, nothing at all.
+        ctx.setattr(cloud_voice.CloudTTS, "is_available", lambda self: False)
+        found.add(piper._engine("kokoro is off"))
+
+    assert found == {None, "cloud"}, (
+        f"the cascade produced {sorted(str(f) for f in found)}, which does not "
+        "match the stubbed conditions - so this test is not exercising it")
+    assert "cloud" in surface.CHAIN, (
+        "the cascade can choose 'cloud' but the panel's chain does not know the "
+        "name, so the current-engine row would have nothing above it to say and "
+        "would read as 'using nothing'")
+    assert "cloud" in surface.COST, (
+        "the cloud engine has no row in COST, so its detail falls back to the "
+        "unmeasured wording and loses the only thing that matters about it - "
+        "that the reply text leaves the machine")
+
+
+def test_the_cloud_row_says_the_reply_leaves_the_machine():
+    """The disclosure, not a latency figure, is this engine's cost."""
+    from shani_chronoa.gui.surfaces import voice as surface
+    cost = surface.COST["cloud"].lower()
+    assert "leaves the machine" in cost or "sent to a cloud provider" in cost, cost
+    assert "off by default" in cost, cost

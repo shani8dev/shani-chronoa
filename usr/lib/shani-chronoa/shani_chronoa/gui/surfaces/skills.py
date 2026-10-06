@@ -323,6 +323,19 @@ class _SkillsSurface:
         body = common.page_body()
         _margined(body)
 
+        # The panel's own health, above the search and the list: how many
+        # skills the whitelist holds, and whether the registry answered.
+        # One row, one dot, one word, before the rows the panel exists to
+        # show - "is the whitelist readable" is the question the panel is
+        # opened for, and it used to be answered only by counting rows.
+        #: The panel's health, written once into the row above and read back
+        #: for the dot on its sidebar row. Same value, so the dot cannot
+        #: disagree with the sentence directly above it.
+        self.status_recorder = common.StatusRecorder()
+        self._status_slot = common.page_body()
+        _margined(self._status_slot)
+        body.append(self._status_slot)
+
         self.search = common.search_entry("Filter skills by name or description")
         # One string as the accessible label and the front of the tooltip -
         # see `_switch_tooltip` for why the tooltip is the readable one.
@@ -366,6 +379,30 @@ class _SkillsSurface:
                 continue
             name, description = fields
             self._rows.append(self._add_row(name, description))
+
+        # The panel's own health, rendered once the registry has been
+        # read: how many skills the whitelist holds, and whether the
+        # registry answered at all. The status row is replaced, not
+        # appended to, so a reload cannot stack a second one.
+        common.clear(self._status_slot)
+        if self.registry_error:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "Could not read the registry",
+                _plain(self.registry_error)))
+        elif self._rows:
+            gated = sum(1 for row in self._rows if row.gate_key is not None)
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"{len(self._rows)} skills in the whitelist",
+                f"{gated} of them need a setting switched on first"))
+        else:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No skills loaded",
+                "The registry returned nothing. That is not the same "
+                "as having no capabilities: the skill modules may all "
+                "have failed to import."))
 
         if not self._rows:
             if self.registry_error:
@@ -556,4 +593,8 @@ def build(app: Any) -> Gtk.Widget:
     # change afterwards, so the page carries the answer rather than a live view
     # of an object it does not own.
     page.registry_error = surface.registry_error
+    # What this panel says about itself, for the sidebar's health dot. Read from
+    # the same recorder the row at the top of the panel was written through, so
+    # the dot and the row are one statement rather than two that can drift.
+    page.status = surface.status_recorder.status
     return page

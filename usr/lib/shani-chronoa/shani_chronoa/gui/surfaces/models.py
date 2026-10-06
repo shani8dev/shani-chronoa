@@ -149,7 +149,6 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
         if not installed:
             status.add_css_class("dim-label")
         button.set_label("Ready" if installed else "Set up")
-        button.set_sensitive(installed)
         button.set_tooltip_text(
             "In use" if installed else
             "Set this one up, then choose it - the setup window opens on its page")
@@ -159,7 +158,7 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
     button = Gtk.Button(halign=Gtk.Align.START, css_classes=["pill"])
     icon = Gtk.Image()
     button.set_child(icon)
-    button.connect("clicked", lambda _b: (_pick(app, card), on_changed()))
+    button.connect("clicked", lambda _b: _activate(app, card, box, on_changed))
     box.append(button)
 
     if card.get("shared"):
@@ -168,6 +167,56 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
     refresh()
     box._chronoa_card = card
     return box
+
+
+def _activate(app: Any, card: Dict[str, Any], box: Gtk.Widget,
+             on_changed: Callable) -> None:
+    """Do what the button says, which depends on whether the model is here.
+
+    **This button was insensitive for every model that was not installed**, from
+    `button.set_sensitive(installed)`. Measured on a machine with no models at
+    all: all 27 "Set up" buttons on the Models panel came back
+    `is_sensitive() == False`, and the only live control on the whole panel was
+    "Go to Available Models", which switches tab and lands you on the same dead
+    buttons. So the panel's stated answer to "Chronoa needs at least one model"
+    was a control that could not be pressed - and the tooltip underneath it
+    promised "the setup window opens on its page", so the disabled state was
+    also a broken promise rather than an honest "not available".
+
+    The inversion was almost certainly meant to be "you can only *choose* a model
+    that is installed", which is true and is what `_pick` does. But choosing and
+    obtaining are two different jobs, and only one of them had a live button:
+
+    - installed -> pin it (`_pick`), which is what choosing means.
+    - not installed -> open the setup wizard on this model's page. That is the
+      wizard's own job - it downloads, and it is the only thing in the app that
+      does - so the button delegates rather than downloading anything itself.
+
+    Setup is reached through `app.activate_action("setup", None)`, the same route
+    `privacy.py` uses for `toggle-privacy`, so the panel needs no reference to
+    the application object that owns `_open_setup`. If neither that nor a
+    `Gio.Application` is reachable - a bare stub, as the tests build - the
+    button says so in its own tooltip instead of silently doing nothing.
+    """
+    if card["installed"]:
+        _pick(app, card)
+        on_changed()
+        return
+    _open_setup(app, box)
+
+
+def _open_setup(app: Any, widget: Gtk.Widget) -> None:
+    """Open the setup wizard, the one thing here that can install a model.
+
+    **Delegates to `common.open_setup`,** which is the same function `model.py`
+    and `voice.py` use for their "not installed" buttons. This one used to be the
+    only copy, in one of the three panels that need it - so the other two had
+    either to import it across module boundaries or to write their own, and three
+    panels with three routes to the wizard is the arrangement this repo keeps
+    paying for. Kept as a named wrapper so this module's own callers and tests
+    keep the name they had.
+    """
+    common.open_setup(app, widget)
 
 
 def _pick(app: Any, card: Dict[str, Any]) -> None:
@@ -203,6 +252,38 @@ def build(app: Any) -> Gtk.Widget:
     search_bar.set_child(search_entry)
     search_bar.connect_entry(search_entry)
     root.append(search_bar)
+
+    # The panel's own health, above the two lists:
+    # how many models are installed, how many are
+    # available, how many could not be read. One
+    # row, one dot, one word - the question the
+    # panel is opened for, before the cards that
+    # hold the models.
+    cards = _cards(getattr(app, "config", None))
+    installed = sum(1 for c in cards if c["installed"])
+    available = len(cards) - installed
+    #: One tally of one card list, for the row here and the sidebar's dot. The
+    #: two used to be built from separate reads of the registry, and a model
+    #: finishing a download in between would put "2 installed" in the row and a
+    #: green dot for a panel claiming one.
+    recorder = common.StatusRecorder()
+    if installed:
+        root.append(recorder.row(
+            common.STATUS_OK,
+            f"{installed} installed, {available} available",
+            f"{installed} of {len(cards)} models are on this machine, "
+            f"{available} are available to add"))
+    elif available:
+        root.append(recorder.row(
+            common.STATUS_ATTENTION,
+            f"None installed, {available} available",
+            f"none of the {len(cards)} models are on this machine, "
+            f"{available} are available to add"))
+    else:
+        root.append(recorder.row(
+            common.STATUS_UNKNOWN,
+            "No models",
+            "the registry returned nothing"))
 
     # --- the two lists, as a view stack with a switcher under them ---------
     stack = Adw.ViewStack(vexpand=True)
@@ -243,12 +324,31 @@ def build(app: Any) -> Gtk.Widget:
     switch_btn.connect("clicked", lambda _: _switch_tab("available"))
     switch_btn.update_property(
         [Gtk.AccessibleProperty.LABEL], ["Go to Available Models"])
+
+    # The wizard itself, as a second button beside the tab switch.
+    #
+    # "Go to Available Models" only moves to the other tab - which lists the same
+    # models, behind the buttons that were all insensitive. So the empty state,
+    # which is the *only* thing a machine with no models ever shows, offered no
+    # route to actually obtaining one: two clicks from the panel's own stated
+    # problem and you were back where you started. This button opens the setup
+    # wizard, which is the only thing in the app that downloads a model.
+    wizard_btn = Gtk.Button(label="Set Chronoa up")
+    wizard_btn.add_css_class("suggested-action")
+    wizard_btn.connect("clicked", lambda _b: _open_setup(app, page))
+    wizard_btn.update_property(
+        [Gtk.AccessibleProperty.LABEL], ["Set Chronoa up: download a model"])
+    empty_buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8,
+                            halign=Gtk.Align.CENTER)
+    empty_buttons.append(wizard_btn)
+    empty_buttons.append(switch_btn)
+
     empty_added = common.empty_state(
         "application-x-executable-symbolic",
         "No models installed",
-        "Chronoa needs at least one model to answer questions. Choose one from "
-        "the 'Available to add' tab to get started.",
-        child=switch_btn,
+        "Chronoa needs at least one model to answer questions. Set it up, or "
+        "choose one from the 'Available to add' tab.",
+        child=empty_buttons,
     )
 
     empty_available = common.empty_state(
@@ -316,6 +416,8 @@ def build(app: Any) -> Gtk.Widget:
         _BREAKPOINTS.append(bp)
 
     set_content(root)
+    # What this panel says about itself, for the sidebar's health dot.
+    page.status = recorder.status
     return page
 
 

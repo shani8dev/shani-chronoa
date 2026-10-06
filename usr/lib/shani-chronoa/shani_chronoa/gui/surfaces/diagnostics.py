@@ -816,6 +816,42 @@ _FOOTER = (
 )
 
 
+def _status_row(recorder: "common.StatusRecorder",
+                findings: List[Finding]) -> Gtk.Widget:
+    """The panel's own health, from the findings it just measured.
+
+    Written through `recorder` so the sidebar's dot and this row are one
+    statement about the same list - the findings are walked once here, and
+    counting them a second time for the dot is exactly how the two would drift.
+    """
+    working = sum(1 for f in findings if f.status == STATUS_WORKING)
+    unknown = sum(1 for f in findings if f.status == STATUS_UNKNOWN)
+    broken = sum(1 for f in findings if f.status == STATUS_NOT_WORKING)
+    total = len(findings)
+    if broken:
+        return recorder.row(
+            common.STATUS_ATTENTION,
+            f"{broken} of {total} not working",
+            f"{working} working, {broken} not working, {unknown} "
+            "could not be determined")
+    if unknown and not working:
+        return recorder.row(
+            common.STATUS_UNKNOWN,
+            f"None of {total} could be determined",
+            f"{unknown} could not be determined, {working} working")
+    if unknown:
+        return recorder.row(
+            common.STATUS_ATTENTION,
+            f"{unknown} of {total} could not be determined",
+            f"{working} working, {unknown} could not be determined, "
+            f"{broken} not working")
+    return recorder.row(
+        common.STATUS_OK,
+        f"All {total} working",
+        f"{working} working, {broken} not working, {unknown} "
+        "could not be determined")
+
+
 def _summary(finding_statuses: List[str]) -> Gtk.Widget:
     """The headline: how many subsystems are working, and how many are unknown.
 
@@ -861,6 +897,14 @@ def build(app: Any = None) -> Gtk.Widget:
             _add_row(group, _row(finding))
         body.append(group)
 
+    # The panel's own health, above the summary: how
+    # many probes worked, how many did not, how many
+    # could not be told. One row, one dot, one word -
+    # the question the panel is opened for, before the
+    # rows that hold the findings.
+    recorder = common.StatusRecorder()
+    body.append(_status_row(recorder, findings))
+
     body.append(_summary([finding.status for finding in findings]))
 
     stamp = Gtk.Label(xalign=0.0, wrap=True)
@@ -876,6 +920,10 @@ def build(app: Any = None) -> Gtk.Widget:
     body.append(footer)
 
     set_content(common.scrolled(body))
+    # What this panel says about itself, for the sidebar's health dot. The same
+    # recorder that built the row at the top of the panel, so the dot and the
+    # row are one statement about one reading.
+    page.status = recorder.status
     return page
 
 

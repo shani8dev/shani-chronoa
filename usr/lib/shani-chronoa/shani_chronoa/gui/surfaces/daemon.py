@@ -388,6 +388,9 @@ class _DaemonSurface:
         self._updating = False
         self._switch: Optional[Gtk.Switch] = None
         self._state_label: Optional[Gtk.Label] = None
+        #: What this panel says about itself, in the two places that show it:
+        #: the row at the top of the panel and the dot on its sidebar row.
+        self.status_recorder = common.StatusRecorder()
         self.page = self._build()
 
     # -- the page -------------------------------------------------------------
@@ -396,11 +399,27 @@ class _DaemonSurface:
         page, set_content = common.surface(TITLE, MICROPHONE_NOTE)
         body = common.page_body(14)
 
+        # **One `systemctl` conversation, read once.** `_unit()` shells out
+        # twice (is-enabled, is-active) and the status row and "The unit" group
+        # both need it, so it is asked once here and passed to both. It was
+        # asked twice - four subprocesses for two facts - which is not just
+        # slower: on a machine where `systemctl` is slow or absent, the two
+        # reads can disagree, and the panel would then say the unit is not
+        # installed in one row and could not be asked in the other.
+        # `tests/test_surface_daemon.py` pins the count.
+        unit = _unit()
+
+        # The panel's own health, above every group: is the
+        # daemon running, is it enabled, or could it not be
+        # told? One row, one dot, one word - the question the
+        # panel is opened for, before the rows that hold the
+        # setting and the unit.
+        body.append(self._status_row(unit))
+
         setting = common.group("", SETTING_CAPTION)
         setting.add(self._setting_row())
         body.append(setting)
 
-        unit = _unit()
         about_unit = common.group("The unit", UNIT_CAPTION)
         about_unit.add(_row("Unit file", _file_sentence(unit)))
         about_unit.add(_row("Running now", _active_sentence(unit)))
@@ -409,6 +428,48 @@ class _DaemonSurface:
         body.append(self._log_group())
         set_content(common.scrolled(body))
         return page
+
+    def _status_row(self, unit: "_Unit") -> Gtk.Widget:
+        """The panel's own health, from the unit's own state.
+
+        Takes the unit rather than asking for it, so this and "The unit" below
+        it are one reading rather than two that can disagree - see `_build`.
+
+        Written through `self.status_recorder` rather than straight to
+        `common.status_row`, so the dot the sidebar draws reads the same word
+        this row shows.
+        """
+        row = self.status_recorder.row
+        active = unit.active_state
+        enabled = unit.file_state
+        if not active or not enabled:
+            return row(
+                common.STATUS_UNKNOWN,
+                "The daemon's state could not be read",
+                "systemctl did not answer, so nothing here was read")
+        if active == "active" and enabled in ("enabled", "enabled-runtime"):
+            return row(
+                common.STATUS_OK,
+                "Background mode is running and enabled",
+                "the unit is active and enabled, so Chronoa starts "
+                "at login and keeps running")
+        if active == "active":
+            return row(
+                common.STATUS_ATTENTION,
+                "Background mode is running but not enabled",
+                "the unit is active now, but it is not enabled, so "
+                "it will not start at the next login")
+        if enabled in ("enabled", "enabled-runtime"):
+            return row(
+                common.STATUS_ATTENTION,
+                "Background mode is enabled but not running",
+                "the unit is enabled, but it is not active, so "
+                "Chronoa is not running in the background")
+        return row(
+            common.STATUS_ATTENTION,
+            "Background mode is off",
+            "the unit is neither active nor enabled, so Chronoa "
+            "does not run in the background")
 
     # -- the setting ---------------------------------------------------------
 
@@ -577,7 +638,12 @@ def build(app: Any) -> Gtk.Widget:
     switch insensitive rather than raising, because a window that has not
     finished loading its settings is a normal state and not a broken install.
     """
-    return _DaemonSurface(app).page
+    surface = _DaemonSurface(app)
+    # The sidebar's health dot, from the same recorder the panel's own row was
+    # written through - so the dot cannot say the unit is running while the row
+    # under it says it is not.
+    surface.page.status = surface.status_recorder.status
+    return surface.page
 
 
 # Kept for tests and for surfaces that want the same read-only semantics.

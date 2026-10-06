@@ -335,6 +335,22 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         self.app.config.set(key, "true" if value else "false")
         self._refresh_sense_switches()
 
+    def _read_string(self, key: str, default: str = "") -> str:
+        """A string setting. Same "absent is the default" contract as `_read_bool`.
+
+        Added with the `gateways` row. `_read_bool` exists because `config.get()`
+        is documented for string keys and answers a boolean one with its default -
+        so a row reading a *string* setting has the mirror-image trap, and this is
+        the one place that gets it right.
+        """
+        try:
+            return self.app.config.get(key, default) or default
+        except Exception:  # noqa: BLE001 - an absent key is simply empty
+            return default
+
+    def _set_string(self, key: str, value: str) -> None:
+        self.app.config.set(key, value or "")
+
     def _on_window_visible(self, window, _param) -> None:
         if not window.get_visible():
             return

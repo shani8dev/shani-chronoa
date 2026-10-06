@@ -825,6 +825,10 @@ API_KEY_SETTINGS = {
     "llm7": "llm7-api-key", "kilo": "kilo-api-key", "blockrun": "blockrun-api-key", "openai": "openai-api-key",
     "anthropic": "anthropic-api-key", "google": "google-api-key", "groq": "groq-api-key",
     "opencode-zen": "opencode-zen-api-key", "openrouter": "openrouter-api-key",
+    # The custom endpoint's key, so it lands in the keyring like every other one
+    # rather than being the single secret in this table that is only ever
+    # plaintext.
+    "custom": "custom-llm-api-key",
 }
 
 

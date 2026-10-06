@@ -110,6 +110,17 @@ class _ConversationsView(Gtk.Box):
         self.empty_state: Gtk.Widget
 
         self.append(self._filter_row())
+        # The panel's own health, above the list: how many
+        # conversations the store holds, and whether the store
+        # could be read at all. One row, one dot, one word -
+        # the question the panel is opened for, before the rows
+        # that hold the conversations.
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.append(self._status_slot)
+        #: The same health in two places - the row above the list, and the dot
+        #: on the sidebar's row for this panel. One value, so the two cannot
+        #: disagree about the same store.
+        self.status_recorder = common.StatusRecorder()
         # One slot, three answers: the rows, the reason there are none, or the
         # reason they are hidden. Stacking them instead would say "no
         # conversations" under a list of nothing, or put a status page above the
@@ -156,6 +167,31 @@ class _ConversationsView(Gtk.Box):
         except Exception as exc:  # a missing or stale index is an empty state, not a crash
             listed = []
             error = exc
+
+        # The panel's own health, before the list: is the store
+        # readable, is it holding conversations, or could it not
+        # be told? One row, one dot, one word - the question the
+        # panel is opened for, before the rows that hold the
+        # conversations.
+        common.clear(self._status_slot)
+        if error is not None:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "The conversation store could not be read",
+                str(error)))
+        elif not listed:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "No conversations recorded",
+                "the store is empty, which is not the same as "
+                "every conversation having been deleted"))
+        else:
+            rows = [item for item in listed if item["messages"] or item["active"]]
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"{len(rows)} conversation(s) recorded",
+                f"{len(listed) - len(rows)} empty, {len(rows)} "
+                "with messages"))
 
         # Removed by reference. `Adw.PreferencesGroup` is a `Gtk.ListBox` with
         # libadwaita's own boxes inside it, so walking it for children finds
@@ -321,6 +357,10 @@ def build(app: Any) -> Gtk.Widget:
     for name in ("search", "new_button", "no_matches", "rows",
                  "visible_row_count", "empty", "_apply_filter"):
         setattr(page, name, getattr(view, name))
+    # What this panel says about itself, for the sidebar's health dot - read
+    # from the same recorder that built the row at the top of the list, so the
+    # dot and the row cannot say different things about the same store.
+    page.status = view.status_recorder.status
     return page
 
 

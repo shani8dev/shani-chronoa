@@ -9,7 +9,7 @@ gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Gdk, GObject, Adw
+from gi.repository import Gtk, Gdk, GLib, GObject, Adw
 
 # libadwaita has to be initialised before a single Adw widget exists, and the
 # failure mode is silent: the widgets render nothing, no exception, no warning.
@@ -107,6 +107,221 @@ def _panel_status(page: object) -> "str | None":
     return answer
 
 
+#: The mode strip's rules, kept out of `style.py` for the reason
+#: `organs.ORGAN_IDLE_CSS` is: these chips are *indicators*, and an indicator
+#: whose "on" colour follows the desktop theme changes what it means when the
+#: theme changes. It inherits `currentColor` rather than naming a hue, so a chip
+#: reads as "on" by weight and background rather than by a second colour
+#: vocabulary nobody would remember by the time they needed it.
+MODE_STRIP_CSS = """
+.mode-strip { padding: 2px 4px; }
+.mode-chip { padding: 1px 7px; border-radius: 9px; }
+.mode-chip-label { font-size: 10px; opacity: 0.6; }
+.mode-chip-on { background-color: alpha(currentColor, 0.14); }
+.mode-chip-on .mode-chip-label { opacity: 1.0; font-weight: 600; }
+"""
+
+
+class _ModeStrip(Gtk.Box):
+    """What Chronoa *is* right now: three switches and one button.
+
+    The organ strip beside it answers "what is Chronoa doing"; this answers "what
+    is Chronoa allowed to be". Those are different questions and they were both
+    answered only in Settings, so a user who had turned plan mode on had no way
+    to see it from the window they were talking to - and a mode that removes
+    capabilities without saying so reads as a bug the first time the assistant
+    declines something that was explicitly permitted.
+
+    **Each chip is the control, not a label for one.** It is a
+    `Gtk.ToggleButton` wired to the app's own action, which is the same path the
+    keyboard accelerator and the Settings window's switch take. A label that
+    reads "Plan mode: on" beside a switch in another window is two widgets that
+    can disagree; this is one widget, and the only way for it to be wrong is for
+    the action not to have run.
+
+    **The state is read back, not tracked.** `_syncing` guards `set_active()`
+    from re-entering the handler, and every read goes to the thing that owns the
+    state - `planmode.is_enabled()` for plan mode, the persisted
+    `wake-word-enabled` for the wake phrase, `privacy_mode` for local-only. A
+    chip that remembered its own last click would be right until something else
+    changed the setting, and then confidently wrong, which is the specific
+    failure `set_status()` already documents for state lines.
+
+    **Dictation is a button, not a fourth switch**, because it has no state to
+    hold: it is a way of starting one long turn, and a chip that stayed pressed
+    afterwards would claim a turn is still running when it ended on silence two
+    hundred seconds later.
+    """
+
+    #: (attribute, label, icon, action, how to read the state). Kept as a table
+    #: because the strip is rebuilt from it and a chip added by copy-paste is a
+    #: chip whose tooltip and its read-back can drift apart.
+    _CHIPS = (
+        ("_privacy_chip", "Local only", "security-high-symbolic",
+         "toggle-privacy", "_read_privacy"),
+        ("_plan_chip", "Plan mode", "document-edit-symbolic",
+         "toggle-plan-mode", "_read_plan_mode"),
+        ("_wake_chip", "Wake word", "audio-input-microphone-symbolic",
+         "toggle-wake-word", "_read_wake_word"),
+    )
+
+    def __init__(self, application, config=None) -> None:
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.add_css_class("mode-strip")
+        self.set_halign(Gtk.Align.CENTER)
+        #: The application is passed in rather than read from
+        #: `Gtk.Application.get_default()`. That global is process-wide, so a
+        #: strip built while *any* other application happens to be the default
+        #: activates its actions on the wrong one - measured: `tests/
+        #: test_mode_strip.py` passed alone and failed every activation when run
+        #: beside `test_window_ux.py`, whose fixture is the default by then.
+        #: `SidebarPage(self._app, ...)` a few lines up takes it the same way.
+        self._app = application
+        self._config = config
+        #: True while `refresh()` is writing the chips. `set_active()` emits
+        #: `toggled` even when nothing was clicked, so without this the strip
+        #: would activate its own actions every time it redrew - the loop
+        #: `set_can_answer()` and the organ strip both avoid by only ever
+        #: being written from one direction.
+        self._syncing = False
+        for attribute, label, icon, action, reader in self._CHIPS:
+            chip = self._chip(label, icon, action)
+            chip.connect("toggled", self._on_toggled, action)
+            setattr(self, attribute, chip)
+            self._readers = getattr(self, "_readers", {})
+            self._readers[attribute] = getattr(self, reader)
+            self.append(chip)
+        self.append(self._dictate_button())
+        self.refresh()
+
+    def _chip(self, label: str, icon: str, action: str) -> Gtk.ToggleButton:
+        """One switch: an icon and its word, in a toggle that is the control.
+
+        The word is in the chip rather than only in the tooltip because a chip
+        showing only a glyph is a control whose meaning has to be remembered, and
+        four of them in a row is four things to decode before reading any of
+        them.
+        """
+        chip = Gtk.ToggleButton()
+        chip.add_css_class("mode-chip")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        image = Gtk.Image.new_from_icon_name(icon)
+        image.set_pixel_size(13)
+        box.append(image)
+        text = Gtk.Label(label=label)
+        text.add_css_class("mode-chip-label")
+        box.append(text)
+        chip.set_child(box)
+        chip.set_tooltip_text(
+            f"{label}: off. Click to turn it on "
+            f"(the {action} action, the same one the shortcut uses)"
+        )
+        chip.update_property([Gtk.AccessibleProperty.LABEL],
+                             [f"{label} mode, currently off"])
+        return chip
+
+    def _dictate_button(self) -> Gtk.Button:
+        """The long-turn control, which has no state to hold."""
+        button = Gtk.Button()
+        button.add_css_class("mode-chip")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        image = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
+        image.set_pixel_size(13)
+        box.append(image)
+        text = Gtk.Label(label="Dictate")
+        text.add_css_class("mode-chip-label")
+        box.append(text)
+        button.set_child(box)
+        button.set_action_name("app.dictate")
+        button.set_tooltip_text(
+            "Dictate one long turn - up to five minutes, ending on a longer "
+            "silence than an ordinary turn (Ctrl+Shift+D)"
+        )
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Dictate: start one long listening turn"])
+        return button
+
+    # -- the state, read from whoever owns it ---------------------------
+
+    def _read_privacy(self) -> bool:
+        try:
+            return bool(self._config.privacy_mode)
+        except Exception:                               # noqa: BLE001
+            # A config that cannot answer must not take the window down over a
+            # chip. False is the safe reading: the local-only claim is the one
+            # that has to be earned, so an unreadable setting is shown as off.
+            logger.warning("could not read the privacy-mode setting",
+                           exc_info=True)
+            return False
+
+    def _read_plan_mode(self) -> bool:
+        try:
+            from shani_chronoa import planmode
+            return bool(planmode.is_enabled())
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the plan-mode state", exc_info=True)
+            return False
+
+    def _read_wake_word(self) -> bool:
+        try:
+            return bool(self._config.wake_word_enabled)
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the wake-word setting", exc_info=True)
+            return False
+
+    # -- keeping the chips honest ---------------------------------------
+
+    def refresh(self) -> None:
+        """Redraw every chip from the state that owns it.
+
+        Called on construction, after every toggle, and when the window regains
+        focus - because the Settings window flips the same settings through the
+        same actions, and a chip that only refreshed on its own click would go on
+        saying "off" for a setting that is on.
+        """
+        self._syncing = True
+        try:
+            for attribute, label, _icon, _action, _reader in self._CHIPS:
+                chip = getattr(self, attribute)
+                on = self._readers[attribute]()
+                chip.set_active(on)
+                if on:
+                    chip.add_css_class("mode-chip-on")
+                else:
+                    chip.remove_css_class("mode-chip-on")
+                chip.set_tooltip_text(f"{label}: {'on' if on else 'off'}")
+                chip.update_property(
+                    [Gtk.AccessibleProperty.LABEL],
+                    [f"{label} mode, currently {'on' if on else 'off'}"])
+        finally:
+            self._syncing = False
+
+    def _on_toggled(self, button: Gtk.ToggleButton, action: str) -> None:
+        """A chip was clicked: run the app's own action, then read back.
+
+        Not `set_action_name`. A `GSimpleAction` carries no boolean state, so a
+        toggle button bound to one keeps its own pressed state, flips it
+        locally, and diverges from the app - a chip that reads "on" for a plan
+        mode that was refused because the wake word was unavailable is worse
+        than no chip at all. So the action is activated explicitly and the chip
+        is then written from the truth.
+        """
+        if self._syncing:
+            return
+        app = self._app
+        if app is None:
+            # No application (a surface or a test built the strip alone): the
+            # chip goes back to what the state says rather than keeping a press
+            # nothing acted on.
+            self.refresh()
+            return
+        try:
+            app.activate_action(action, None)
+        finally:
+            # Whatever the action decided - including "refused, here is why" -
+            # the chip ends on the answer and not on the click.
+            self.refresh()
 
 
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
@@ -153,6 +368,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             logger.debug("the organ strip stylesheet could not be applied",
                          exc_info=True)
         self._sync_from_state()
+        # On an idle turn, not here: building twenty panels costs about two
+        # seconds of subprocesses, and a window that is on screen but not
+        # usable for two seconds is worse than one whose sidebar fills in.
+        # `_seed_status_dots` installs its own idle source and returns `None`,
+        # so it is *called* here rather than handed to `GLib.idle_add` - handing
+        # it over would re-add a source that returns `None`, i.e. never
+        # removing itself, and re-seed every panel forever.
+        # See `_seed_status_dots` for why the dots are drawn at all.
+        self.connect("map", lambda *_a: self._seed_status_dots())
 
     @staticmethod
     def _default_config():
@@ -205,6 +429,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(ORGAN_IDLE_CSS.encode())
+        provider.load_from_data(MODE_STRIP_CSS.encode())
         Gtk.StyleContext.add_provider_for_display(
             Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
@@ -267,7 +492,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_bar_holder = Adw.Bin()
         self._split = Adw.NavigationSplitView()
         self._sidebar_page = SidebarPage(
-            self._app, self._show_chat, self._show_surface)
+            self._app, self._show_chat, self._show_surface,
+            on_close=self._hide_panels)
         self._split.set_sidebar(self._sidebar_page)
         self._content_view = Adw.NavigationView()
         self._chat_page = Adw.NavigationPage(
@@ -305,6 +531,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # ...and the other direction: the split view collapsing on its own has to
         # move the button, or the button lies about what is on screen.
         self._split.connect("notify::collapsed", self._on_split_collapsed)
+        # `show_content` is the half that decides what a person can actually see,
+        # and nothing outside this window changes it - so it needs its own
+        # notification, or the button drifts the moment the panels are hidden and
+        # anything else looks.
+        self._split.connect("notify::show-content", self._on_split_collapsed)
         header_bar.pack_start(self._sidebar_toggle)
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header = Gtk.Label(label="Shani Chronoa")
@@ -427,6 +658,38 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._state_label.set_halign(Gtk.Align.CENTER)
         main_box.append(self._state_label)
 
+        # **The way out of "no model", on the screen that says it.**
+        #
+        # The state line says "No model yet" and its tooltip explains why, and
+        # that was the whole of it: the person asking a question on a fresh
+        # machine was told what was wrong in a tooltip they have to hover to
+        # read, with nothing to click. Every route to a fix was elsewhere - the
+        # header's setup button, or the Models panel - and both are one to three
+        # steps away from the one screen that reports the problem.
+        #
+        # So the button appears exactly when `can_answer` is False and goes away
+        # when it is not, driven from `set_can_answer` so it cannot disagree
+        # with the label beside it. It is `app.setup`, the same action the
+        # header button and `Ctrl+Shift+S` use, so all three are one path.
+        self._setup_cta = Gtk.Button(
+            label="Set Chronoa up", css_classes=["suggested-action", "pill"],
+            halign=Gtk.Align.CENTER, visible=False,
+            tooltip_text="Install a language model, and the ears and voice")
+        # Deliberately not `set_action_name("app.setup")`: the header's setup
+        # button already declares that action, and a tree walk for "the setup
+        # button" must find the one that is always on screen rather than this
+        # one, which is hidden until there is nothing to answer with. See
+        # `set_can_answer`. It still activates the same `GAction`, so the
+        # shortcut, the header button and this reach one implementation.
+        self._setup_cta.connect(
+            "clicked",
+            lambda _b: self._app.activate_action("setup", None)
+            if self._app is not None else None)
+        self._setup_cta.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Set Chronoa up: install a language model"])
+        main_box.append(self._setup_cta)
+
         self._detail_label = Gtk.Label(label="")
         self._detail_label.add_css_class("cajita-detail")
         self._detail_label.set_halign(Gtk.Align.CENTER)
@@ -538,11 +801,38 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # exactly like a broken one.
         self._organ_strip = OrganStrip(self._config)
         main_box.append(self._organ_strip)
+        # The mode strip sits between the organ strip and the composer:
+        # what Chronoa *is* (its modes) rather than what it is *doing*
+        # (its organs). Wake word, plan mode, privacy and dictation are
+        # four switches the user can flip, and a strip that shows which
+        # are on is the answer to "what is Chronoa" without opening
+        # Settings. Each chip is a toggle button wired to its own action,
+        # so the state shown and the control that changes it are the same
+        # widget - a label that says "on" and a switch elsewhere is two
+        # widgets that can disagree.
+        self._mode_strip = _ModeStrip(self._app, self._config)
+        main_box.append(self._mode_strip)
         main_box.append(input_row)
+        # ...and re-read whenever the window comes back, because the Settings
+        # window flips these same settings through the same actions. A strip
+        # that only refreshed on its own click would keep saying "off" for a
+        # mode that is on, which is the one thing an indicator must not do.
+        self.connect("notify::is-active", self._on_window_activated)
 
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
+
+    def _on_window_activated(self, *_args) -> None:
+        """The window came forward: re-read the modes from their owners.
+
+        Settings flips plan mode, privacy and the wake word through the same
+        actions this strip does, so the only way a chip learns about a change
+        made elsewhere is to look again. Reading is cheap - three gsetting
+        reads and one module flag - and it happens on focus, not on a timer.
+        """
+        if self._mode_strip is not None:
+            self._mode_strip.refresh()
 
     def set_state(self, state: AssistantState) -> None:
         """Set the assistant state. The single entry point for it."""
@@ -636,6 +926,27 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         self._can_answer = bool(can)
         self._no_model_reason = why or ""
+        # Shown only while there is nothing to answer with, so it cannot become
+        # a second thing offering setup on a machine that is already set up.
+        #
+        # The header's own setup button is deliberately *not* hidden here. The
+        # CTA answers "I cannot answer, fix it" on the screen that says so; the
+        # header button answers "open the wizard", which is wanted on a working
+        # machine too - to change the model, the voice, or to re-run a step. A
+        # first version hid both and `tests/test_setup_button_is_reachable.py`
+        # failed on it (`the setup button is not mapped`), which is the test
+        # earning its keep: an action that is registered, named in the shortcuts
+        # window and unreachable is the exact gap that file was written for.
+        #
+        # The CTA activates `app.setup` through a handler rather than through
+        # `set_action_name`, and that is load-bearing rather than incidental.
+        # Two widgets declaring the same action leaves "the setup button"
+        # ambiguous, and a finder that walks the tree then picks whichever it
+        # reaches first - which here is a control that is deliberately
+        # invisible until there is no model. The header button stays the one
+        # widget that declares the action; the CTA reaches the same
+        # `GAction` through it, so there is still one implementation.
+        self._setup_cta.set_visible(not can)
         if not can:
             self._state_label.set_tooltip_text(
                 why or "Chronoa cannot answer until a language model is set up")
@@ -736,31 +1047,133 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if self._sidebar_toggle is not None:
             self._sidebar_toggle.set_active(not self._sidebar_toggle.get_active())
 
-    def _on_sidebar_toggled(self, button: Gtk.ToggleButton) -> None:
-        """Show or hide the panels.
+    def _set_panels_visible(self, visible: bool) -> None:
+        """Show the panels as a column beside the chat, or take them away.
 
-        `set_collapsed` is what the split view actually understands; the toggle
-        only mirrors it, and mirroring is done in one direction here - the
-        breakpoint also collapses the sidebar on a narrow window, and that must
-        not leave the button showing the wrong state.
+        **`Adw.NavigationSplitView` has two properties, and "hidden" is not
+        either of them.** `collapsed` chooses the *layout* - a column beside the
+        content, or a drawer over it - and `show_content` chooses which pane is
+        on top while collapsed. Neither one alone hides the sidebar. Measured on
+        libadwaita 1.5, in a 1100x700 window:
+
+        | state | collapsed | show_content | sidebar | chat | toggle mapped |
+        |---|---|---|---|---|---|
+        | column | False | False | 275px | 825px at x=275 | yes |
+        | **hidden** | True | **True** | behind | **1100px at x=0** | **yes** |
+        | drawer | True | False | 1100px over everything | behind | **no** |
+
+        The last row is the bug that was reported as "clicking expands the
+        sidebar but there is no way to retract it". This used to do
+        `set_collapsed(button.get_active())` alone, which is row three: pressing
+        a button labelled *show or hide the panels* covered the entire window
+        with the panel list, and because the drawer is drawn over the content it
+        also covered the button that put it there - the header's own toggle went
+        `get_mapped() == False`. F9 was then the only way back, and the sidebar's
+        "Conversation" row did not close it either.
+
+        So the pair is the contract: `show_content` decides what a person can
+        see, `collapsed` decides whether it is a column or an overlay, and
+        "hidden" is the one combination where the toggle stays on screen.
+
+        **`show_content` is named for the *content*, not for the sidebar** -
+        `True` means the chat is on top. A first version passed `visible`
+        straight through and got the drawer instead of the hidden sidebar, so the
+        first fix reproduced the very symptom it was written for; measured in
+        both directions, which is the only reason this is stated rather than
+        assumed.
+
+        **The button is written last, and the notify handler stands down while
+        this runs.** The two properties notify *between* them, and the handler's
+        job is to set the button - which emits `toggled`, which calls straight
+        back in here. Measured: without the guard, `set_show_content(True)`
+        notified, the handler read the half-updated split (still `collapsed`,
+        which means "a column", which means "the panels are showing"), put the
+        button back to active, and that re-entered with `visible=True` and wrote
+        `show_content=False` - so a hide ended in the drawer again, having been
+        asked for the hidden sidebar. Two property writes are not a transaction
+        and GTK does not batch them; this guard is what makes them one.
         """
-        self._split.set_collapsed(button.get_active())
+        self._writing_panels = True
+        try:
+            self._split.set_show_content(not visible)
+            self._split.set_collapsed(not visible)
+        finally:
+            self._writing_panels = False
+        self._sidebar_toggle.set_active(visible)
+        self._sidebar_page.set_drawer_mode(self._panels_as_drawer())
+
+    def _panels_visible(self) -> bool:
+        """Whether the panels are on screen, in whichever layout is in force.
+
+        The single read the button's state is derived from, so the two cannot
+        disagree. Not `get_collapsed()`: that is a layout decision the
+        breakpoint makes on a narrow window, where the panels are *showing* as a
+        drawer - which is why a button reading "collapsed" was showing "off" while
+        the panel list was on screen.
+        """
+        if not self._split.get_collapsed():
+            return True
+        return not self._split.get_show_content()
+
+    def _hide_panels(self) -> None:
+        """The drawer's own close button: put the panel list away, change nothing else.
+
+        Separate from `_show_chat` because the drawer can be sitting over a panel
+        that is already open, and closing a drawer must not also pop the content
+        stack out from under it.
+        """
+        self._set_panels_visible(False)
+        self._sync_sidebar_toggle()
+
+    def _panels_as_drawer(self) -> bool:
+        """Whether the panels are an overlay covering the content.
+
+        The one state where the window's own toggle is not on screen - measured,
+        the overlay is allocated the whole window and covers the header - and so
+        the one state where the sidebar has to carry a close control of its own.
+        """
+        return bool(self._split.get_collapsed()
+                    and not self._split.get_show_content())
+
+    def _on_sidebar_toggled(self, button: Gtk.ToggleButton) -> None:
+        """Show or hide the panels - but only for a press, not for a sync.
+
+        The button is active when the panels are on screen, so this is the only
+        place the polarity is decided; every other route calls
+        `_set_panels_visible` and lets `_sync_sidebar_toggle` follow.
+
+        The `_writing_panels` guard is load-bearing and was found by a test, not
+        by reading. `_sync_sidebar_toggle` writes this button to match the split
+        view, and `set_active` emits `toggled`, which lands here - so a
+        *notification* from the split view was being answered by *overwriting* the
+        split view. Concretely: the breakpoint collapsed the sidebar, this
+        handler put the button where it belonged, and the handler that fired
+        because of that write immediately set both properties back to "panels
+        hidden", undoing the collapse. `tests/test_sidebar_toggle.py` catches it
+        as "the drawer state was never reached".
+        """
+        if getattr(self, "_writing_panels", False):
+            return
+        self._set_panels_visible(button.get_active())
 
     def _on_split_collapsed(self, _split: object, _param: object) -> None:
-        """Keep the toggle honest when something *else* collapses the sidebar.
+        """Keep the toggle honest when something *else* moves the sidebar.
 
-        The split view collapses on its own in three ways that never touch the
-        button: the `max-width: 720px` breakpoint on a narrow window, a drag of
-        the sidebar's edge, and `set_collapsed` from any other code. Measured
-        before this was connected: `collapsed=True, toggle_active=False` - the
-        button showed "panels hidden" as off while the panels were gone, so the
-        next click of it expanded nothing and looked broken. That is the
-        "sidebar won't come back" report.
+        The split view changes both properties without touching the button: the
+        `max-width: 720px` breakpoint on a narrow window, a drag of the sidebar's
+        edge, and `set_collapsed` from any other code. Without this the button
+        reads "panels hidden" while the panel list is on screen, which is the
+        control-whose-state-is-a-lie failure.
 
         `_sync_sidebar_toggle` only sets the button when it disagrees, so this
-        cannot loop: `set_active` emits `toggled`, which sets `collapsed` to the
-        value it is already at, which emits nothing further.
+        cannot loop: `set_active` emits `toggled`, which writes both properties
+        the values they already hold, which emits nothing further.
+
+        It does nothing at all while `_set_panels_visible` is mid-write; see
+        there for the measurement that made that guard necessary.
         """
+        if getattr(self, "_writing_panels", False):
+            return
         self._sync_sidebar_toggle()
 
     def _sync_sidebar_toggle(self) -> None:
@@ -768,11 +1181,28 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         Without this, collapsing the sidebar by dragging its edge, or by the
         breakpoint on a narrow window, leaves the button pressed while the panels
-        are off screen - a control whose state is a lie is worse than no control.
+        are off screen - or unpressed while they are on it.
         """
-        collapsed = self._split.get_collapsed()
-        if self._sidebar_toggle.get_active() != collapsed:
-            self._sidebar_toggle.set_active(collapsed)
+        visible = self._panels_visible()
+        # The same guard as `_set_panels_visible`, for the same reason and in the
+        # other direction: writing the button emits `toggled`, and without this
+        # the "follow the split view" path would answer its own notification by
+        # driving the split view back to whatever the button had just been set
+        # from. Written inside the guard so the button and the drawer's close bar
+        # always agree with each other.
+        writing = getattr(self, "_writing_panels", False)
+        self._writing_panels = True
+        try:
+            if self._sidebar_toggle.get_active() != visible:
+                self._sidebar_toggle.set_active(visible)
+            # The drawer gets its own close control, because in that state this
+            # button is under it. Hidden everywhere else, which is the whole
+            # point: in the column layout the button above is reachable and a
+            # second close arrow would be the duplicate this window already had
+            # once.
+            self._sidebar_page.set_drawer_mode(self._panels_as_drawer())
+        finally:
+            self._writing_panels = writing
 
     def open_body_page(self) -> None:
         """The full body register, for when the strip is not enough."""
@@ -802,6 +1232,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if view.get_visible_page() is not view.find_page(CHAT_TAG):
             view.pop_to_tag(CHAT_TAG)
         self._sidebar_page.select(None)
+        # Coming back to the conversation from inside the panel list also closes
+        # the list, and it has to. While the panels are showing as a drawer they
+        # are drawn over everything - including the header's own toggle, which
+        # goes `get_mapped() == False` - so a drawer with no way out of itself is
+        # a dead end. "Conversation" is the one row in it that means "not the
+        # panels", so this row is the drawer close button. `_pop_panel` below
+        # deliberately does not do this: the back arrow inside a panel means "back
+        # to the chat", not "and now hide the list I just used".
+        self._set_panels_visible(False)
+        self._sync_sidebar_toggle()
 
     def _pop_panel(self) -> None:
         """The back arrow inside a panel's own header bar.
@@ -814,6 +1254,63 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if view.get_visible_page() is not view.find_page(CHAT_TAG):
             view.pop_to_tag(CHAT_TAG)
         self._sidebar_page.select(None)
+
+    def _seed_status_dots(self) -> None:
+        """Ask every panel how it is, one per idle turn, and draw the dots.
+
+        **A dot that only appears once you have opened the panel is not a
+        dashboard.** Measured on the rendered window: with all twenty surfaces
+        exposing `status()`, a freshly opened window still showed twenty rows
+        with no dot at all, because `_show_surface` was the only caller of
+        `_panel_status` - so the sidebar could only ever tell you about a panel
+        you had already been inside. That defeats the entire point of a health
+        column: the question is "is anything wrong *now*", asked *before* opening
+        anything.
+
+        One panel per idle turn, not all twenty at once. Building them is real
+        work - they shell out to `systemctl`, `busctl` and `gsettings`, and read
+        the filesystem - and measured, twenty panels cost around two seconds.
+        Doing that synchronously in `_setup_ui` would put two seconds between
+        the window appearing and the window being usable. Idle turns cost
+        nothing a person can perceive and the dots fill in over the first second.
+
+        Failures are the existing contract: a panel that will not build gets no
+        dot, which is the same answer `_panel_status` gives for a panel that
+        cannot say. A panel that fails here is not pushed onto the content view,
+        so opening it later still builds it properly and reports the failure on
+        screen - this pass only asks for the summary.
+        """
+        from shani_chronoa.gui import surfaces
+
+        names = [n for n in surfaces.SURFACE_IDS
+                 if n in self._sidebar_page._surface_rows]
+        if not names:
+            return
+
+        available = surfaces.available_surfaces()
+
+        def one() -> bool:
+            while names:
+                name = names.pop(0)
+                page = self._surface_pages.get(name)
+                if page is None:
+                    build = available.get(name)
+                    if build is None:
+                        continue
+                    try:
+                        page = build[2](getattr(self, "_app", None))
+                    except Exception:                  # noqa: BLE001
+                        logger.info("panel %r did not build; its row keeps no "
+                                    "dot until it is opened", name,
+                                    exc_info=True)
+                        continue
+                    # Kept, so opening it later is instant and the dot cannot
+                    # change underneath the person who is looking at it.
+                    self._surface_pages[name] = page
+                self._sidebar_page.set_status(name, _panel_status(page))
+            return GLib.SOURCE_REMOVE
+
+        GLib.idle_add(one, priority=GLib.PRIORITY_DEFAULT_IDLE)
 
     def _show_surface(self, name: str) -> None:
         """Push a panel onto the content view.
@@ -851,12 +1348,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # opinion, so its row keeps no dot rather than being given a green one
         # it did not earn.
         self._sidebar_page.set_status(name, _panel_status(page))
-        # With panels on the content stack, a narrow window has them covering the
-        # conversation rather than sitting beside it; closing the sidebar is what
-        # gets the chat back on a small screen.
-        if self._split.get_collapsed():
-            self._split.set_collapsed(False)
-        self._sidebar_toggle.set_active(False)
+        # A panel was chosen from the sidebar, so the sidebar has done its job.
+        # `show_content` is what puts the chat back on top - setting `collapsed`
+        # alone would only trade a drawer for a column and, on a wide window,
+        # leave the panel's own list covering the panel.
+        self._set_panels_visible(False)
+        self._sync_sidebar_toggle()
 
     def set_browser_available(self, available: bool) -> None:
         """Hide the browser button when WebKitGTK is not installed.

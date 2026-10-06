@@ -109,6 +109,7 @@ import asyncio
 import json
 import logging
 from typing import NamedTuple, Optional
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -157,6 +158,61 @@ PROVIDERS: dict[str, CloudProvider] = {
 }
 
 DEFAULT_PROVIDER_ORDER = ("llm7", "kilo", "blockrun")
+
+#: Id of the provider built from a hand-typed base URL. Not in `PROVIDERS`,
+#: because its address is not knowable ahead of time - see `custom_provider()`.
+CUSTOM_ID = "custom"
+
+
+def custom_provider(base_url: str, model: str = "") -> "CloudProvider | None":
+    """A provider for any OpenAI-compatible endpoint, or None if unusable.
+
+    **Why this exists.** `PROVIDERS` was a closed table of hosted services, so
+    the only LLM endpoints Chronoa could reach were the eight named there. That
+    excludes a whole category the person may already be running: a router or
+    gateway of their own behind an OpenAI-compatible `/chat/completions` -
+    `http://localhost:20128/v1` and the rest - plus LM Studio, vLLM, Ollama's
+    own OpenAI shim, or llama.cpp's server. Setting one of those up was
+    impossible from the UI, and the honest answer ("pick one of our eight") was
+    never stated anywhere either.
+
+    The endpoint is **not** treated as trusted. It goes through the same
+    `CloudLLMChain` as every other provider, so `cloud-fallback-enabled` and
+    privacy mode gate it identically, and it is recorded in the egress log like
+    any other outbound request. What is different is only that the address came
+    from the person rather than from us, which is a reason to show it to them,
+    not a reason to exempt it.
+
+    Returns None - rather than raising - for a value that is not a usable URL,
+    because the caller is a settings field the person is typing into and an
+    exception there would be a crash rather than a message.
+    """
+    text = (base_url or "").strip()
+    if not text:
+        return None
+    if "://" not in text:
+        text = f"http://{text}"
+    try:
+        parts = urlsplit(text)
+        host = parts.hostname
+        # `parts.port` raises ValueError on a non-numeric port (`http://h:alert`),
+        # which is exactly the kind of thing a person types into a settings field -
+        # it must read as "not usable", not crash the chain's constructor.
+        port = parts.port
+    except ValueError:
+        return None
+    if not host:
+        return None
+    if parts.scheme not in ("http", "https"):
+        return None
+    return CloudProvider(
+        CUSTOM_ID,
+        # The host, so a status line says *where* it is answering from rather
+        # than the word "custom".
+        host + (f":{port}" if port else ""),
+        text.rstrip("/"),
+        model.strip() or "local-model",
+    )
 
 # BYOK-required providers, tried ahead of the free chain when a key is
 # configured for them (see app.py's cloud-fallback wiring). Anthropic is
@@ -586,7 +642,8 @@ class CloudLLMChain:
     we already know from live testing that it would just 401/400.
     """
 
-    def __init__(self, provider_ids: tuple = DEFAULT_PROVIDER_ORDER, api_keys: Optional[dict] = None) -> None:
+    def __init__(self, provider_ids: tuple = DEFAULT_PROVIDER_ORDER, api_keys: Optional[dict] = None,
+                 custom_base_url: str = "", custom_model: str = "") -> None:
         api_keys = api_keys or {}
         backends: list = []
         for p in provider_ids:
@@ -594,6 +651,19 @@ class CloudLLMChain:
             if p == "anthropic":
                 if key:
                     backends.append(AnthropicLLM(api_key=key, model=api_keys.get("anthropic_model") or _ANTHROPIC_DEFAULT_MODEL))
+                continue
+            if p == CUSTOM_ID:
+                # Built from the person's own address rather than the table, so
+                # a blank or unusable one contributes no backend - and says so,
+                # rather than leaving a provider that fails its first request.
+                provider = custom_provider(custom_base_url, custom_model)
+                if provider is None:
+                    if (custom_base_url or "").strip():
+                        logger.warning(
+                            "custom-llm-base-url is not a usable http(s) URL, ignored: %r",
+                            custom_base_url)
+                    continue
+                backends.append(OpenAICompatibleLLM(provider, api_key=key))
                 continue
             provider = PROVIDERS.get(p)
             if provider is None:

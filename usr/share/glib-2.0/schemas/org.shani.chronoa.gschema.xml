@@ -164,6 +164,36 @@
       <summary>Allow falling back to a free cloud LLM when Ollama is unavailable</summary>
       <description>When true AND privacy mode is off, Chronoa may send prompts to a free, no-API-key cloud LLM gateway (LLM7, Kilo Gateway, or BlockRun) if Ollama cannot be reached. Off by default - this is the one setting that sends data off the machine.</description>
     </key>
+    <key name="gateways" type="s">
+      <default>''</default>
+      <summary>Inbound channels that may send text to Chronoa, by name</summary>
+      <description>Comma-separated list of channel names, each optionally followed by ":execute" (for example "whatsapp, telegram:execute"). Empty means no channel is listening: Chronoa then exports nothing on the session bus at all, so a machine that has not asked for an inbound interface does not have one. A channel can only hand over words through one D-Bus method, Submit(gateway, text), and the text goes through the same whitelist, consent keys and post-conditions as anything typed into the window - so a channel cannot lower a gate. Each is bounded (4000 characters, 20 messages a minute) and ask-only unless it is marked :execute. A name cannot contain "/" or "." because it becomes part of a D-Bus method name; an entry that cannot be parsed is reported rather than ignored.</description>
+    </key>
+    <key name="cloud-stt-enabled" type="b">
+      <default>false</default>
+      <summary>Allow cloud speech recognition when no local speech model is installed</summary>
+      <description>When true AND privacy mode is off, Chronoa may upload a recording to a cloud provider's transcription endpoint (OpenAI, Groq, OpenRouter, Kilo or LLM7 - the only ones measured to have that route) if no local speech-recognition model is installed. Off by default, and a separate switch from cloud-fallback-enabled: that one describes a fallback for text, and this one is about sending recorded audio somewhere, which is a different thing to agree to. Checked on every single recording rather than once when a backend is chosen, because a microphone stays open for minutes and privacy mode can be turned on halfway through. Whether a given provider can actually do it is not uniform - Google, BlockRun and OpenCode Zen have no transcription route at all, and Anthropic has neither route.</description>
+    </key>
+    <key name="cloud-tts-enabled" type="b">
+      <default>false</default>
+      <summary>Allow cloud speech synthesis when no local neural voice is installed</summary>
+      <description>When true AND privacy mode is off, Chronoa may send a reply to a cloud provider's speech endpoint (OpenAI, Groq, OpenRouter, Kilo or BlockRun) for it to be spoken. This is the LAST link of the voice chain, after Kokoro, Piper and espeak-ng, so nothing local is displaced by turning it on - a machine with espeak-ng always keeps a voice. Off by default. LLM7, Google and OpenCode Zen have no speech route, so the free keyless fallback chain cannot provide a voice at all: with only llm7, kilo and blockrun configured there is recognition but silence.</description>
+    </key>
+    <key name="custom-llm-base-url" type="s">
+      <default>''</default>
+      <summary>Any OpenAI-compatible endpoint to use as a cloud LLM</summary>
+      <description>The base URL of an OpenAI-compatible /chat/completions endpoint, e.g. a router or gateway you run yourself. Empty means none is used. This is the one setting that reaches an address typed by hand rather than chosen from a fixed list, so it is deliberately separate from the provider keys: a value here is the person's own infrastructure, and Chronoa asks it exactly as it asks any other provider. It is still gated - nothing is sent unless cloud-fallback-enabled is on AND privacy mode is off.</description>
+    </key>
+    <key name="custom-llm-model" type="s">
+      <default>''</default>
+      <summary>Model name to ask a custom endpoint for</summary>
+      <description>The model identifier sent to custom-llm-base-url. Empty means ask the endpoint for its default model list, which is what a local router usually wants.</description>
+    </key>
+    <key name="custom-llm-api-key" type="s">
+      <default>''</default>
+      <summary>Bearer token for a custom endpoint, if it wants one</summary>
+      <description>Optional. Sent as an Authorization: Bearer header to custom-llm-base-url and nothing else. Empty sends no header at all, which is what a local server on this machine usually needs. When a keyring is available the value is stored there instead of here.</description>
+    </key>
     <key name="barge-in-vad-enabled" type="b">
       <default>false</default>
       <summary>Interrupt spoken replies as soon as you start talking</summary>

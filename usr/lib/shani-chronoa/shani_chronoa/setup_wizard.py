@@ -681,11 +681,44 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     core = Adw.PreferencesGroup(
         title="To think, hear you and talk back",
         description="These three are the ones a conversation needs.")
-    for name, ready, ok_text, missing_text in (
-            ("Brain", s["brain"]["ready"], "ready", "needs a language model"),
-            ("Ears", s["ears"]["ready"], "ready", "needs a speech-recognition model"),
-            ("Voice", s["voice"]["ready"], "natural voice ready", "using the basic voice")):
-        core.add(Adw.ActionRow(title=name, subtitle=ok_text if ready else missing_text))
+    def _jump_row(title: str, subtitle: str, tag: str) -> "Adw.ActionRow":
+        """One of the welcome rows, and it goes to its page when pressed.
+
+        **These rows were inert, and the comment above them said they were not.**
+        Every one was a bare `Adw.ActionRow(title=..., subtitle=...)`: not
+        activatable, no suffix control, and nothing connected to `activated`.
+        Measured by building the real wizard and walking the visible page for
+        pressable controls - **the Welcome page had exactly one: `Start`.** Nine
+        rows naming nine features and nine download sizes, none of them a target,
+        on the first screen a new person sees, two lines under a comment claiming
+        "each can be clicked into - which the lumped row could not be, because it
+        was not a target".
+
+        This module already knows how to make a row a target - `choice_group` uses
+        `activatable_widget` - so this is the same device applied to the case that
+        had it missing.
+
+        The suffix chevron is not decoration: `Adw.ActionRow` gives no affordance
+        of its own for "this is activatable", so a row that responds to a press and
+        looks like a label is its own small lie. The tooltip names the page, so the
+        destination is knowable before the press rather than after it.
+        """
+        row = Adw.ActionRow(title=title, subtitle=subtitle, activatable=True)
+        row.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        row.set_tooltip_text(f"Open the {_titles.get(tag, tag)} page")
+        row.update_property([Gtk.AccessibleProperty.LABEL],
+                             [f"{title}: open the "
+                              f"{_titles.get(tag, tag)} page"])
+        row.connect("activated", lambda _r, t=tag: goto(t))
+        return row
+
+    for name, tag, ready, ok_text, missing_text in (
+            ("Brain", "brain", s["brain"]["ready"], "ready", "needs a language model"),
+            ("Ears", "ears", s["ears"]["ready"], "ready",
+             "needs a speech-recognition model"),
+            ("Voice", "voice", s["voice"]["ready"], "natural voice ready",
+             "using the basic voice")):
+        core.add(_jump_row(name, ok_text if ready else missing_text, tag))
     box.append(core)
 
     optional = Adw.PreferencesGroup(
@@ -705,15 +738,15 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
              speakers_mod.SEGMENTATION.size_bytes + speakers_mod.EMBEDDING.size_bytes),
     ):
         ready = bool(s[tag].get("ready"))
-        optional.add(Adw.ActionRow(
-            title=title,
-            subtitle=("ready" if ready else f"{_mb(size_bytes)} to download")))
+        optional.add(_jump_row(
+            title, "ready" if ready else f"{_mb(size_bytes)} to download", tag))
     chosen = s["languages"]["chosen"]
-    optional.add(Adw.ActionRow(
-        title="Languages",
-        subtitle=(f"{len(chosen)} added" if chosen else
-                  f"{_mb(sum(languages.install_size(c) for c in languages.LANGUAGES))} "
-                  "if you add any")))
+    optional.add(_jump_row(
+        "Languages",
+        (f"{len(chosen)} added" if chosen else
+         f"{_mb(sum(languages.install_size(c) for c in languages.LANGUAGES))} "
+         "if you add any"),
+        "languages"))
     box.append(optional)
     start_btn = Gtk.Button(label="Start", css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
     start_btn.connect("clicked", lambda *_: goto("mode"))
@@ -1013,13 +1046,27 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         skip.connect("clicked", lambda *_: goto("review"))
         box.append(skip)
 
-    def navigate(box, next_tag: str, skip_label: str = "") -> None:
+    def navigate(box, next_tag, skip_label: str = "") -> "Gtk.Button":
         """Just the way forward: a Next button and a way past the rest.
 
         Split out from `worker_area` because a page that has nothing to download
         still needs a Next button, and borrowing `worker_area` for it puts a
         dead "Download" button on a page that has nothing to download.
+
+        `next_tag` may be a callable. **A page whose destination depends on an
+        answer the person has not given yet cannot bind the destination when it
+        is built** - see the Mode page below, where the whole point of the page
+        is the question and the question's answer decides where Next goes. The
+        callable is resolved on the press, and `retitle()` re-reads it for the
+        label, so the button never says one thing and do another.
         """
+        def resolve() -> str:
+            return next_tag() if callable(next_tag) else next_tag
+
+        def retitle(button: "Gtk.Button") -> None:
+            tag = resolve()
+            button.set_label(f"Next: {_titles.get(tag, tag)}")
+
         # **The button says where it goes.** Every page's forward button was
         # "Next", so on a page with a stack of visited-but-alive pages behind it
         # the accessibility tree lists several identical "Next" buttons - and a
@@ -1027,16 +1074,17 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # doing nothing. That is not only a scripting problem: a person reading
         # "Next" learns nothing about what they are agreeing to, and "Next:
         # Ears" is the answer to that at no cost.
-        nxt = Gtk.Button(label=f"Next: {_titles.get(next_tag, next_tag)}",
-                         css_classes=["suggested-action", "pill"],
+        nxt = Gtk.Button(label="Next", css_classes=["suggested-action", "pill"],
                          halign=Gtk.Align.CENTER)
-        nxt.connect("clicked", lambda *_: goto(next_tag))
+        nxt.connect("clicked", lambda *_: goto(resolve()))
         box.append(nxt)
+        retitle(nxt)
         if skip_label:
             skip = Gtk.Button(label=skip_label, css_classes=["flat"], halign=Gtk.Align.CENTER)
             skip.connect("clicked", lambda *_: goto(
-                "done" if next_tag != "done" else next_tag))
+                "done" if resolve() != "done" else resolve()))
             box.append(skip)
+        return nxt
 
     def pick_another(label: str) -> Gtk.Button:
         """A flat 'download a different one' that reveals the chooser again.
@@ -1090,11 +1138,27 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     ]
     group, chosen_mode = choice_group("Choose one to start with", modes, mode)
     box.append(group)
-    for _check in _choice_rows[id(group)].values():
-        _check.connect("toggled", lambda *_a: pick_mode(chosen_mode()))
     pick_mode(chosen_mode())
-    navigate(box, "cloud-keys" if chosen_mode() == "cloud" else "brain",
-             skip_label="Skip for now")
+    # **Where Next goes depends on the answer to this page, so it cannot be
+    # decided until the answer is given.** Measured on the real wizard: choosing
+    # "In the cloud", then pressing Next, landed on `brain` - the page that
+    # offers a 1.1 GB local download - because the destination had been baked
+    # in when this page was built, before anyone could toggle anything. The
+    # comment above this page says the whole point of asking first is that
+    # "offering 1.1 GB of Qwen to someone who intends to use Claude was asking
+    # them to pay for the answer to a question they had not been asked"; the
+    # question was asked and the answer discarded. Resolved on the press, and
+    # re-titled on the toggle so the label never disagrees with the destination.
+    def after_mode_picked() -> str:
+        return "cloud-keys" if chosen_mode() == "cloud" else "brain"
+
+    mode_next = navigate(box, after_mode_picked, skip_label="Skip for now")
+    for _check in _choice_rows[id(group)].values():
+        def _on_toggled(_button):
+            pick_mode(chosen_mode())
+            _dest = after_mode_picked()
+            mode_next.set_label(f"Next: {_titles.get(_dest, _dest)}")
+        _check.connect("toggled", _on_toggled)
     view.add(mode_page)
 
     # ── cloud keys ────────────────────────────────────────────────────────
@@ -1148,7 +1212,18 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     save_keys.connect("clicked", lambda *_: save())
     box.append(save_keys)
-    navigate(box, "done", skip_label="Skip for now")
+    # **On to the Ears, not to Done.** This used to be `navigate(box, "done")`,
+    # and it was the single worst routing in the wizard: the cloud branch is the
+    # one branch where nothing was downloaded, so routing straight to the end
+    # produced a Chronoa that could think and **could not hear**, with
+    # `setup-complete` set and `needs_setup()` returning False forever after.
+    #
+    # Measured by walking the real wizard: `mode -> In the cloud -> cloud-keys ->
+    # Next -> done`, and `on_finish` writes `setup-complete=true` unconditionally.
+    # So "nothing to download" was literally true and practically misleading - it
+    # was true because the wizard had stopped asking. The Ears page says what
+    # listening actually costs, whichever way this branch got here.
+    navigate(box, "ears", skip_label="Skip for now")
     view.add(keys_page)
 
     # ── where should Chronoa think? ─
@@ -1230,11 +1305,38 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     # 3. ears
     e = s["ears"]
-    ears, box = page("Ears", "ears", "To understand what you say, Chronoa needs a speech-recognition model "
-                                    "(whisper.cpp). It never sends your voice anywhere.")
-    items = ([] if _mode() == "cloud" else
-             [(k, f"{k.split('-')[0].title()}" + (" - recommended" if k == e["recommended"] else ""),
-               f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}") for k, spec in stt_provision.MODELS.items()])
+    ears, box = page("Ears", "ears", "To understand what you say, Chronoa needs to hear you.")
+    from shani_chronoa import cloud_voice as _cloud_voice
+    cloud_stt_ok = _cloud_voice.CloudSTT().is_available()
+    if _mode() == "cloud":
+        # **This page used to show nothing and still charge 60 MB.**
+        #
+        # In cloud mode the model list was built as `[]`, so the choice group was
+        # empty - and then the same `else` branch ran anyway and queued the
+        # recommended model's download. Measured on the real wizard with
+        # `setup-mode=cloud`: the Ears page listed **zero rows**, and the Review
+        # page then read **"Download 3 thing(s) ... 1.3 GB across 3
+        # download(s)"**, one of which was a 60 MB whisper model the person had
+        # no row to see, choose or decline.
+        #
+        # So the honest answer for someone who chose the cloud is stated rather
+        # than implied: **there is no cloud speech recognition unless you turn it
+        # on and have a key.** Both the choice and its cost are on screen.
+        if cloud_stt_ok:
+            box.append(wrapping(
+                "Cloud speech recognition is on: your recordings are uploaded to "
+                f"{_cloud_voice.CloudSTT().last_provider or 'a provider'} to be "
+                "transcribed, and never downloaded locally. Turn it off in "
+                "Settings, and privacy mode turns it off on its own."))
+        else:
+            box.append(wrapping(
+                "There is no cloud speech recognition switched on. Your voice has "
+                "to be heard on this computer, which needs a model downloaded - "
+                "the choices and their sizes are below. No provider accepts an "
+                "anonymous recording, so a cloud alternative needs both a switch "
+                "in Settings and an API key."))
+    items = [(k, f"{k.split('-')[0].title()}" + (" - recommended" if k == e["recommended"] else ""),
+              f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}") for k, spec in stt_provision.MODELS.items()]
     group, chosen_stt = choice_group("Choose how well it listens", items, e["recommended"])
     if e["model"]:
         have = [k for k in stt_provision.MODELS if stt_provision.is_provisioned(k)]
@@ -1250,6 +1352,14 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             worker_area(holder, "Download",
                         lambda report: setup_ears(chosen_stt(), report, win.cancel, config), "voice")))
         box.append(again)
+    elif cloud_stt_ok:
+        # Cloud recognition is live, so **nothing is downloaded for ears** - and
+        # saying so is the point. The model list is still there for somebody who
+        # would rather listen locally, and picking it queues the download as
+        # usual.
+        box.append(group)
+        unchoose("ears")
+        navigate(box, "voice", skip_label="Skip for now")
     else:
         box.append(group)
         _espec = stt_provision.MODELS[chosen_stt()]
@@ -1265,6 +1375,22 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     voice_page, box = page("Voice", "voice", "Pick the voice Chronoa answers with. Piper voices start "
                                             "speaking quickly; Kokoro voices sound most like a person but, on a "
                                             "processor, each reply starts a moment later.")
+    # **Say that a voice already exists before asking for 90 MB of one.** The
+    # basic voice is espeak-ng, which is a hard package dependency, so it is on
+    # every install; and cloud synthesis is the *last* link of the chain, so it
+    # can never be the reason to skip a local one. Both are true whichever branch
+    # this page takes, and neither is visible from a list of voice downloads.
+    from shani_chronoa import cloud_voice as _cloud_voice_tts
+    if shutil.which("espeak-ng"):
+        box.append(wrapping(
+            "Chronoa already has a basic voice on this machine (espeak-ng), so "
+            "you can skip all of this and still be answered out loud. These "
+            "choices are about sounding more like a person."))
+    if _cloud_voice_tts.CloudTTS().is_available():
+        box.append(wrapping(
+            "Cloud speech synthesis is on, and it is the last resort - it is "
+            "used only if none of the local engines can speak, so turning it on "
+            "does not replace any of these."))
     piper_mb = voices._PIPER.size_bytes / 1e6
     kokoro_mb = (sherpa.RELEASE.size_bytes + voices._KOKORO_MODEL.size_bytes) / 1e6
     items = [(k, f"{x.label.split(' - ')[0]} (Piper)",

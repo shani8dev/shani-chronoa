@@ -143,6 +143,48 @@ HEADLINE = {
     STATE_NONE_PAIRED: "No device is paired",
 }
 
+#: state -> the status word it is, beside `State.health`. `STATE_PERMITTED` is
+#: absent deliberately: it is not a gate, it is the absence of one, and the
+#: health of a panel that has devices to show comes from that count instead.
+HEALTH = {
+    STATE_REFUSED: common.STATUS_ATTENTION,
+    STATE_NO_LINK: common.STATUS_UNKNOWN,
+    STATE_LINK_DOWN: common.STATUS_UNKNOWN,
+    STATE_NONE_PAIRED: common.STATUS_UNKNOWN,
+}
+
+#: state -> one clause for the status row, and **not** `BODY`.
+#:
+#: The row and the empty state below it are two places saying one thing, and the
+#: obvious implementation - put the body in both - prints the same paragraph twice
+#: on the same screen, which is what a rendered window showed before this line
+#: existed: the status row carried all four lines of explanation, then the empty
+#: state carried them again, with the route banner wedged between.
+#:
+#: So the row gets the *reason the word is that word* and the empty state gets the
+#: full explanation. One clause above, one paragraph below, and the paragraph is
+#: read once.
+HEALTH_SUMMARY = {
+    STATE_REFUSED: f"'{CONSENT_KEY}' is off, so nothing about the phone was asked",
+    STATE_NO_LINK: "neither GSConnect nor kdeconnect-cli is installed here",
+    STATE_LINK_DOWN: "a backend is installed but would not answer",
+    STATE_NONE_PAIRED: "the link answered, with nothing paired to it",
+}
+
+#: state -> (button label, the `pages.show` target that fixes it). Only for the
+#: gates a person can act on.
+#:
+#: **A table, and only where there is something to open.** Two of the four
+#: states are absent on purpose: a machine with no phone link needs a package
+#: installed, not a setting flipped, and nothing paired needs a phone paired.
+#: Both of those still say exactly what to do in their body text. Only the
+#: refused gate has a switch behind it, so only the refused gate gets a button -
+#: a button on the others would open Settings and change nothing, which is a
+#: worse dead end than the sentence it replaced.
+ROUTES = {
+    STATE_REFUSED: ("Open Privacy settings", "settings:privacy"),
+}
+
 BODY = {
     STATE_REFUSED: (
         "Nothing on this panel was asked of your phone link, because "
@@ -203,6 +245,24 @@ class State:
 
     state: str
     why: str = ""
+
+    @property
+    def health(self) -> str:
+        """Which of the three status words this state is.
+
+        **A property on the state rather than a word chosen at each call site**,
+        because the word is the claim and the state is the fact - and a second
+        place to decide it is a second thing that can disagree. `build()` reads
+        it to record the sidebar's dot and to draw the row at the top of the
+        gate, and those two then cannot differ: both come from here.
+
+        Three of the four states are "could not determine". That is deliberate
+        and it is the honest reading: none of them is a fault in the machine or
+        in the pairing, and none of them is a healthy reading either - in each
+        case the panel simply has no answer about the phone, which is not the
+        same as "nothing is wrong with the phone".
+        """
+        return HEALTH.get(self.state, common.STATUS_UNKNOWN)
 
     @property
     def headline(self) -> str:
@@ -442,33 +502,99 @@ def build(app) -> Gtk.Widget:
     that could not be checked is not a granted one.
     """
     page, set_content = common.surface(TITLE, SUBTITLE)
+    #: One recorder for the panel's health, whether it reaches the rows below or
+    #: returns an empty state at one of four gates. Every one of those returns
+    #: used to hand back a page with no status at all - which is precisely the
+    #: information the sidebar dot needs, since each of them is a different
+    #: answer: not permitted, no link, could not read, and nothing paired.
+    recorder = common.StatusRecorder()
+
+    def gated(state: "State") -> Gtk.Widget:
+        """An empty state, *with* the status row that matches its own word.
+
+        Every one of the four gates below ends here, and each is a different
+        answer - not permitted, no link, could not read, nothing paired. Each
+        used to return the empty state alone, which left the sidebar's dot
+        asserting a word that nothing on screen said: `tests/
+        test_surface_health_status.py::test_the_dot_agrees_with_the_row_the_
+        panel_shows` caught exactly that, on the not-permitted gate.
+
+        So the row is drawn here rather than only on the happy path. The empty
+        state still carries the prose; the row above it carries the one word,
+        and both are read off the same recorder as the dot.
+        """
+        column = common.page_body(18)
+        column.set_margin_top(12)
+        # `recorder.row` - not `common.status_row`: this is the write that
+        # decides the sidebar's dot, and a plain row here would leave the dot
+        # reading whatever the previous panel said. The summary is the one-clause
+        # reason, not the body - see `HEALTH_SUMMARY` for why the two places this
+        # panel says the same thing must not say it identically.
+        column.append(recorder.row(state.health, state.headline,
+                                   HEALTH_SUMMARY.get(state.state, "")))
+        # **A gate that can be opened says so with a button, not a sentence.**
+        # The body for the refused gate used to end "Grant it in Settings, under
+        # Privacy." - naming the switch and providing no way to reach it, which is
+        # the dead end this panel existed to be the answer to. One place names
+        # which page fixes it; a gate with nothing to fix offers nothing, because
+        # a button that opens an unrelated page is worse than no button.
+        route = ROUTES.get(state.state)
+        if route is not None:
+            label, target = route
+            column.append(common.banner(
+                "This is a setting on this machine, not a fault.",
+                label,
+                lambda _l=label, _t=target: common.open_page(app, _t)))
+        column.append(common.empty_state(ICON, _text(state.headline),
+                                         _text(state.body)))
+        return common.scrolled(column)
 
     refusal = _permission(_app_config(app))
     if refusal.state != STATE_PERMITTED:
-        set_content(common.scrolled(common.empty_state(
-            ICON, _text(refusal.headline), _text(refusal.body))))
+        # `gated()` records through `State.health`, so the word beside the
+        # sidebar row and the row on screen are one value. Not permitted is
+        # "needs attention" and not a clean reading: `senses.py` treats a refused
+        # sense as working as designed, and the difference is that a sense's
+        # refusal is still a *reading* of something, while here there is no
+        # reading of the phone at all.
+        set_content(gated(refusal))
+        page.status = recorder.status
         return page
 
     which = _backend()
     if which is None:
-        missing = State(STATE_NO_LINK)
-        set_content(common.scrolled(common.empty_state(
-            ICON, _text(missing.headline), _text(missing.body))))
+        # No backend at all: the panel cannot tell whether anything is paired,
+        # so this is "could not determine", not "nothing paired". Those read the
+        # same in an empty state and mean opposite things in a dot.
+        set_content(gated(State(STATE_NO_LINK)))
+        page.status = recorder.status
         return page
 
     read_at = time.time()
     devices, problem = _paired()
     if problem is not None:
-        set_content(common.scrolled(common.empty_state(
-            ICON, _text(problem.headline), _text(problem.body))))
+        set_content(gated(problem))
+        page.status = recorder.status
         return page
     if not devices:
-        none_paired = State(STATE_NONE_PAIRED)
-        set_content(common.scrolled(common.empty_state(
-            ICON, _text(none_paired.headline), _text(none_paired.body))))
+        # The link answered and there is genuinely nothing paired. That is a
+        # clean answer about an empty thing, not a fault - but it is also not
+        # "ready", so it is the one state where neither is the whole truth.
+        set_content(gated(State(STATE_NONE_PAIRED)))
+        page.status = recorder.status
         return page
 
+    # The panel's own health, above the paired devices: are
+    # devices paired, is the link up, or could it not be told?
+    # One row, one dot, one word - the question the panel is
+    # opened for, before the rows that hold the devices.
     body = common.page_body(18)
+    body.set_margin_top(12)
+    body.set_margin_bottom(12)
+    body.append(recorder.row(
+        common.STATUS_OK,
+        f"{len(devices)} device(s) paired",
+        f"read once at {time.strftime('%H:%M:%S', time.localtime(read_at))}"))
     body.append(_revealed(common.banner(
         f"{len(devices)} paired device{'' if len(devices) == 1 else 's'}, read once "
         f"at {time.strftime('%H:%M:%S', time.localtime(read_at))}. Rebuild this "
@@ -503,6 +629,7 @@ def build(app) -> Gtk.Widget:
     body.append(footer)
 
     set_content(common.scrolled(body))
+    page.status = recorder.status
     return page
 
 

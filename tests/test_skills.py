@@ -55,33 +55,57 @@ class TestSkillValidation:
 
     def test_duplicate_override_keeps_single_schema(self):
         # Given: two skills with the same name (a user override of a built-in)
+        #
+        # **Named functions, not lambdas - and that is the whole fix.** These two
+        # tests could not pass as written: `skills/__init__.py` refuses a handler
+        # whose `__name__` is not an identifier (measured 2026-10-05, because
+        # `from module import <lambda>` is a SyntaxError and the skill was then
+        # advertised and failed on every call), so `run=lambda a: "a"` was
+        # skipped with a warning and `tools` stayed empty. The assertion read
+        # `assert 0 == 1` and the test was exercising the lambda rejection, not
+        # the duplicate-name behaviour it is named for.
+        #
+        # A first fix here made them lambdas at module scope to "keep it inline",
+        # which is the same mistake: a module-level `lambda` is still a lambda.
         from shani_chronoa.skills import Skill, _register
         tools, handlers = [], {}
         schema = {"type": "function", "function": {"name": "dup"}}
+
+        def _run_a(_a):
+            return "a"
+
+        def _run_b(_a):
+            return "b"
+
         _register(
-            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=schema, run=lambda a: "a")]),
+            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=schema, run=_run_a)]),
             "a", tools, handlers,
         )
         _register(
-            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=schema, run=lambda a: "b")]),
+            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=schema, run=_run_b)]),
             "b", tools, handlers,
         )
         # Then: exactly one schema must remain for the name
-        assert tools.count(schema) == 1
+        assert tools.count(schema) == 1, (
+            f"the override was skipped or duplicated: {tools}")
 
     def test_user_skill_override_does_not_duplicate_schema(self, temp_user_skills_dir):
         # Given: a user skill that overrides a built-in skill name
         (temp_user_skills_dir / "override.py").write_text(textwrap.dedent("""\
             from shani_chronoa.skills import Skill
             _SCHEMA = {"type": "function", "function": {"name": "get_volume", "description": "override", "parameters": {"type": "object", "properties": {}}}}
-            SKILLS = [Skill(name="get_volume", schema=_SCHEMA, run=lambda a: "overridden")]
+            def _run(arguments):
+                return "overridden"
+            SKILLS = [Skill(name="get_volume", schema=_SCHEMA, run=_run)]
         """))
         from shani_chronoa.skills import discover_skills
         # When: skills are discovered (built-ins + the user override)
         tools, handlers = discover_skills()
         # Then: exactly one schema exists for the overridden name
         names = [s.get("function", {}).get("name") for s in tools]
-        assert names.count("get_volume") == 1
+        # And the override is the one that survived, which is the point of it.
+        assert names.count("get_volume") == 1, (
+            f"the user override did not register once: {names}")
 
     def test_empty_string_skill_name_is_rejected(self):
         # Given: a skill whose name is an empty string
@@ -146,16 +170,26 @@ class TestSkillValidation:
 
     def test_override_replaces_prior_schema_in_place(self):
         # Given: two skills with the same name but different schemas
+        # Named handlers for the reason given on the sibling test: the loader
+        # refuses a non-identifier `__name__`, so a lambda here is skipped and
+        # this asserts nothing about replacement.
         from shani_chronoa.skills import Skill, _register
         tools, handlers = [], {}
         first = {"type": "function", "function": {"name": "dup", "description": "first"}}
         second = {"type": "function", "function": {"name": "dup", "description": "second"}}
+
+        def _run_first(_a):
+            return "a"
+
+        def _run_second(_a):
+            return "b"
+
         _register(
-            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=first, run=lambda a: "a")]),
+            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=first, run=_run_first)]),
             "a", tools, handlers,
         )
         _register(
-            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=second, run=lambda a: "b")]),
+            types.SimpleNamespace(SKILLS=[Skill(name="dup", schema=second, run=_run_second)]),
             "b", tools, handlers,
         )
         # Then: the prior schema is replaced, not appended alongside

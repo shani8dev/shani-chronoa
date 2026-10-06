@@ -20,14 +20,19 @@ labels as three unrelated strings.
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional
+import logging
+import re
+from typing import Any, Callable, List, Optional
 
 import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
+gi.require_version("Pango", "1.0")
 
-from gi.repository import Adw, Gtk  # type: ignore
+from gi.repository import Adw, Gtk, Pango  # type: ignore
+
+logger = logging.getLogger(__name__)
 
 #: Adwaita needs initialising before a single Adw widget is constructed, and it
 #: is idempotent, so it happens at import time rather than in every surface's
@@ -214,6 +219,58 @@ STATUS_ROW_CSS = "status-row"
 STATUS_WORD_CSS = "status-word"
 
 
+class StatusRecorder:
+    """One surface's own health, made once and shown in two places.
+
+    The row inside the panel and the dot on its sidebar row are the same
+    statement about the same data, so they are made once here rather than
+    computed twice. `row()` builds the visible row and remembers the word;
+    `status()` answers for the sidebar, via `window._panel_status`.
+
+    **Why this exists rather than twenty hand-written `status()` closures.** A
+    closure per surface would have to re-derive the answer from whatever the
+    surface had read - which is a second count, free to fall out of date, and
+    `senses.py` already had to guard against exactly that by hand:
+
+        # Computed from the same `entries` the rows were built from, so the dot
+        # cannot disagree with the panel - there is no second count to fall out
+        # of date.
+
+    That is the right instinct and the wrong mechanism, because it only holds
+    for the one surface that wrote it. Here the value is written on the way past
+    and read on the way back, so there is nothing to keep in step.
+
+    The initial value is `STATUS_UNKNOWN` rather than `STATUS_OK`: a panel that
+    has not said anything has not said it is fine.
+    """
+
+    def __init__(self, initial: str = STATUS_UNKNOWN) -> None:
+        if initial not in STATUS_WORDS:
+            raise ValueError(
+                f"unknown initial status {initial!r}; expected one of "
+                f"{sorted(STATUS_WORDS)}"
+            )
+        self._status = initial
+
+    def row(self, status: str, summary: str, detail: str = "") -> Gtk.Widget:
+        """Build the panel's status row *and* record the word it stands for."""
+        self._status = status
+        return status_row(status, summary, detail)
+
+    def set(self, status: str) -> str:
+        """Record a status without building a row, for a surface that has one already."""
+        if status not in STATUS_WORDS:
+            raise ValueError(
+                f"unknown status {status!r}; expected one of {sorted(STATUS_WORDS)}"
+            )
+        self._status = status
+        return status
+
+    def status(self) -> str:
+        """The recorded word, for `window._panel_status` to read."""
+        return self._status
+
+
 def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
     """One row that says whether this panel is healthy, before its contents.
 
@@ -309,6 +366,16 @@ def key_values(text: str) -> Gtk.Widget:
     The key column is fixed-width and right-aligned so the values line up; the
     value column takes the rest and wraps, because a long path is not going to
     fit on one line whatever else is done.
+
+    **The value column also ellipsises, and that is not tidiness.** Measured on
+    this GTK: a `wrap=True` label with `set_max_width_chars` set still reports a
+    **511px minimum** for a line carrying a 64-character unbreakable digest,
+    because a token with no break opportunity cannot be wrapped - and that one
+    label's minimum became the whole `Disks and filesystems` group's 523px and
+    then the panel's, breaking the 480px contract. Adding
+    `ellipsize=Pango.EllipsizeMode.MIDDLE` takes the same label to a **15px**
+    minimum. `MIDDLE` rather than `END` because the text here is paths and mount
+    points, and both ends are what identifies them.
     """
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
     box.add_css_class("key-value-grid")
@@ -324,16 +391,24 @@ def key_values(text: str) -> Gtk.Widget:
             name.add_css_class("key-value-key")
             name.set_yalign(Gtk.Align.START)
             row.append(name)
-            text_label = Gtk.Label(label=value, xalign=0.0, wrap=True, hexpand=True)
-            text_label.add_css_class("key-value-text")
-            row.append(text_label)
+            row.append(_value_label(value))
         else:
             # Not a pair: keep the line whole rather than inventing a split.
-            text_label = Gtk.Label(label=stripped, xalign=0.0, wrap=True, hexpand=True)
-            text_label.add_css_class("key-value-text")
-            row.append(text_label)
+            row.append(_value_label(stripped))
         box.append(row)
     return box
+
+
+def _value_label(text: str) -> Gtk.Label:
+    """One reading's value: wraps, and elides what wrapping cannot shorten.
+
+    Split out because `key_values` builds this label in two branches, and a rule
+    that has to be remembered twice is a rule one of them will forget.
+    """
+    label = Gtk.Label(label=text, xalign=0.0, wrap=True, hexpand=True)
+    label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+    label.add_css_class("key-value-text")
+    return label
 
 
 def _split_key_value(line: str, stripped: str) -> "tuple[str, str, bool]":
@@ -465,8 +540,110 @@ def empty_state(icon: str, title: str, description: str = "",
     return box
 
 
+def open_setup(app: Any, widget: "Gtk.Widget | None" = None) -> None:
+    """Open the setup wizard - the only thing in the app that installs a model.
+
+    Routed through `app.activate_action("setup", None)`, the same door the header
+    button and `Ctrl+Shift+S` use, which lands in `brain._open_setup`. Going
+    through the action rather than calling the method keeps a panel from needing
+    the object that owns the wizard, and keeps the shortcut, the header button
+    and every panel's "not installed" button on a single path.
+
+    **This is `models.py`'s `_open_setup`, lifted here** so the three panels that
+    say "not installed" reach the wizard the same way. It used to live in one of
+    them, and a second copy in a second module is the arrangement this repo keeps
+    paying for: three panels, three routes, and no way to tell from the code that
+    they are supposed to be the same door.
+
+    The two fallbacks are the ones that were there: a stub app has no action, and
+    the window may be able to name the real `Gtk.Application`. When neither
+    answers, the click is reported as a toast rather than swallowed - a button
+    that does nothing and says nothing is the dead end this whole change is
+    about.
+    """
+    activate = getattr(app, "activate_action", None)
+    if callable(activate):
+        activate("setup", None)
+        return
+    window = getattr(app, "window", None)
+    gtk_app = window.get_application() if window is not None else None
+    if gtk_app is not None and hasattr(gtk_app, "activate_action"):
+        gtk_app.activate_action("setup", None)
+        return
+    if widget is not None and adw_ready():
+        overlay = _toast_overlay(widget)
+        if overlay is not None:
+            overlay.add_toast(
+                Adw.Toast.new("Set Chronoa up from the header, or Ctrl+Shift+S"))
+            return
+    logger.warning("no route to the setup wizard")
+
+
+def _toast_overlay(widget: Gtk.Widget) -> "Adw.ToastOverlay | None":
+    """The nearest `Adw.ToastOverlay` above `widget`, or None."""
+    node: "Gtk.Widget | None" = widget
+    while node is not None:
+        if isinstance(node, Adw.ToastOverlay):
+            return node
+        node = node.get_parent()
+    return None
+
+
+def open_page(app: Any, target: str) -> None:
+    """Navigate to a page of any window, through the one registry.
+
+    **Every "turn it on in Settings" becomes a button, and this is what the
+    button calls.** Those sentences were the most-cited dead end in this app: five
+    panels said where the switch was without providing a way to reach it, so a
+    person who had just been told what was wrong had to go and find it. Routing
+    them through `pages.show` rather than each panel importing the settings window
+    keeps one implementation - the same one `app.show_page`,
+    `--show-page=settings:privacy` and a notification already use - so a panel
+    cannot reach a page the rest of the app cannot, and a retired page id is
+    resolved the same way for all of them.
+
+    Returns nothing and raises nothing. A panel that cannot navigate - built
+    against a stub app, or after the window has gone - must still build, and a
+    button that raises inside a signal handler takes the panel down with it. So
+    the failure is logged and the button is a no-op, which is the same reading
+    the empty states give.
+    """
+    from shani_chronoa import pages
+
+    try:
+        reached = pages.show(target, application=app, config=getattr(app, "config", None))
+    except Exception:  # noqa: BLE001 - a dead button must not take the panel down
+        logger.warning("could not open %r from a panel", target, exc_info=True)
+        return
+    if not reached:
+        logger.warning("no page at %r; the button had nowhere to go", target)
+
+
+def open_settings_button(label: str, target: str) -> Gtk.Widget:
+    """A button that opens `target` in another window, for a banner to hold.
+
+    Takes the target rather than the app so it can be built by a module-level
+    table - the states in `devices.py` and `calendar.py` are constants, and a
+    closure over `app` would mean rebuilding them per panel.
+    """
+    button = Gtk.Button(label=label)
+    button.add_css_class("suggested-action")
+    button.set_tooltip_text(f"Open {target.split(':')[-1].replace('-', ' ')} in Settings")
+    button.update_property(
+        [Gtk.AccessibleProperty.LABEL],
+        [f"{label}: opens the settings page it names"])
+    return button
+
+
+def wire_page_button(button: Gtk.Widget, app: Any, target: str) -> Gtk.Widget:
+    """Connect an `open_settings_button` to the app it was built beside."""
+    button.connect("clicked", lambda _b: open_page(app, target))
+    return button
+
+
 def banner(text: str, button_label: str = "",
-           on_button: Optional[Callable[[], None]] = None) -> Gtk.Widget:
+           on_button: Optional[Callable[[], None]] = None,
+           button_tooltip: str = "") -> Gtk.Widget:
     """A one-line notice above the content, with an optional action.
 
     Used where something is true and worth saying *before* the user acts on it -
@@ -484,14 +661,26 @@ def banner(text: str, button_label: str = "",
     was correct. The helper that every caller already goes through is the right
     place for this, so a new panel cannot repeat the mistake by omission.
 
-    **A button is not built on the Adw path, because `Adw.Banner` cannot hold
-    one.** Measured on the installed libadwaita 1.5: `Adw.Banner` exposes
+    **A button is not built on the Adw path, because `Adw.Banner` has no signal
+    to connect one to.** Measured on libadwaita 1.5: `Adw.Banner` exposes
     `set_button_label`/`get_button_label`, `add_button` does not exist, and the
     class has *no* signals at all (`GObject.signal_list_names(Adw.Banner)` is
     empty) - so there is nothing to click and nothing to connect. Calling
     `add_button` raised `AttributeError` and took the whole panel's build down
     with it. That was invisible for as long as it stayed unused, because every
     caller passes a bare string.
+
+    **Re-measured on libadwaita 1.9.1, because this was going to be wrong
+    eventually.** `Adw.Banner` has since grown a `button-style` property and an
+    internal `Gtk.Button` at depth 3 (its own dismiss control), and
+    `GObject.signal_list_names(Adw.Banner)` is still empty. So the label property
+    would draw a button that cannot be pressed, and there is still no
+    `button-clicked` to connect - `action-name` is the only hook, and routing
+    through it would mean every caller registering a named action instead of
+    passing a callable. The plain box below stays, and now a banner always
+    carries at most one button of *ours* carrying a label, which is what
+    `tests/test_reload_is_one_banner.py` asserts - rather than an empty tree,
+    which libadwaita's own dismiss control would fail.
 
     So a caller that asks for a button gets the notice as a `Gtk.Box` holding
     the label and a real `Gtk.Button`, rather than an `Adw.Banner` that cannot
@@ -514,8 +703,94 @@ def banner(text: str, button_label: str = "",
     if button_label and on_button is not None:
         button = Gtk.Button(label=button_label)
         button.connect("clicked", lambda _b: on_button())
+        # **Every banner button carries a tooltip and an accessible label**, and
+        # both default to the banner's own sentence when the caller gives
+        # neither. Two buttons reading "Reload" on adjacent panels say what they
+        # reload only in a tooltip, and a text button with no tooltip is
+        # indistinguishable from a label - which is how `voice.py`'s Reload came
+        # to be the only control in the app that a screen reader announced as
+        # "Reload" with nothing after it. Defaulting rather than leaving it empty
+        # means a caller cannot forget: the reason the banner is up is the best
+        # possible explanation of what its button does.
+        tip = button_tooltip or f"{button_label}: {text}"
+        button.set_tooltip_text(tip)
+        button.update_property([Gtk.AccessibleProperty.LABEL], [tip])
         box.append(button)
     return box
+
+
+#: A filesystem path as it appears inside a sentence.
+#:
+#: Deliberately narrow. It wants a leading `/` or a leading `~`, then segments of
+#: the characters a path is actually made of, and it must *stop* at the
+#: punctuation that ends a sentence rather than swallowing it - `/var/log/x, and`
+#: is not a path with a comma in it. A greedy matcher here would render half a
+#: panel's prose in a fixed-width font, which is worse than not marking paths at
+#: all, so the character class excludes every punctuation mark and the match ends
+#: at the first one.
+_PATH_RE = re.compile(
+    r"(?<![\w/])"                 # not the tail of a word, so `a/b` is not split
+    r"(?:~|\.{1,2})?/"            # `/`, `~/`, `./` or `../`
+    r"[\w.@+-]+"                  # one segment
+    r"(?:/[\w.@+*-]*)*"           # and the rest of them
+    # `*` is allowed in the later segments only. Triggers shows its rules as
+    # `/…/triggers/*.jsonl`, and stopping at the star left the glob half outside
+    # the fixed-width run - which is the part that most needs to be recognisable.
+    # `?` is deliberately not allowed: it is far more often punctuation.
+)
+
+
+def paths_markup(text: Any) -> str:
+    """`text` as escaped markup, with any filesystem path in it fixed-width.
+
+    **Prose stays prose.** The alternative - handing the whole sentence to
+    `monospace()` - makes the sentence harder to read rather than the path
+    easier, and these are sentences: "not installed - no model file in
+    /var/cache/shani-chronoa/models". Only the path changes face, which is what
+    makes the eye land on it.
+
+    The text is escaped **before** the markup is added, and the escaping is
+    applied to each piece separately - so a path containing `&` or `<` is shown
+    literally rather than becoming broken markup. Measured on the same library:
+    a raw description containing a bare `&` fails its markup parse and renders
+    nothing at all, so this is not a cosmetic concern.
+
+    This repo has been bitten three times by the alternative - a substring search
+    matching a docstring, a regex counting prose as a selector, and a test
+    comparing a widget against the table that built it - so the match is on the
+    rendered string and the escaping is on the pieces, not on the whole.
+    """
+    # Coerced, not assumed: the values reaching this come out of probes, and a
+    # `None` or an int in a string helper is normal here - `paths_markup(12345)`
+    # raised `TypeError: expected string or bytes-like object` before this line.
+    text = "" if text is None else str(text)
+    out = []
+    at = 0
+    for match in _PATH_RE.finditer(text):
+        if match.start() > at:
+            out.append(_escape(text[at:match.start()]))
+        out.append(f"<tt>{_escape(match.group(0))}</tt>")
+        at = match.end()
+    out.append(_escape(text[at:]))
+    return "".join(out)
+
+
+def paths_in(text: str, selectable: bool = False) -> Gtk.Widget:
+    """A label whose filesystem paths are fixed-width and whose prose is not.
+
+    `use_markup` is set explicitly, because `Adw.ActionRow`'s subtitle renders
+    markup whether or not the caller asked - measured on libadwaita 1.5, where an
+    unescaped `&` leaves the row blank. Plain `Gtk.Label` defaults to
+    `use-markup=False`, so without this line a path-aware label would show its
+    tags.
+    """
+    label = Gtk.Label()
+    label.set_use_markup(True)
+    label.set_markup(paths_markup(text))
+    label.set_xalign(0.0)
+    label.set_selectable(selectable)
+    wrap_label(label)
+    return label
 
 
 def monospace(text: str, selectable: bool = True) -> Gtk.Widget:
@@ -575,6 +850,29 @@ def page_body(margin: int = 0) -> Gtk.Box:
         box.set_margin_top(margin)
         box.set_margin_bottom(margin)
     return box
+
+
+def clear(container: Gtk.Widget) -> None:
+    """Empty a container, in GTK4.
+
+    **Not `container.foreach(...)`, which is GTK3.** `Gtk.Container.foreach` was
+    removed in GTK4 and PyGObject does not substitute anything: measured on the
+    installed 4.14, `Gtk.Box.foreach` raises `AttributeError: 'Box' object has no
+    attribute 'foreach'`. Eight surfaces each had a status slot to empty on
+    reload and each had copied the GTK3 line into it, so **every one of those
+    eight panels raised `AttributeError` the first time it was opened** - and the
+    surfaces that render a broken page instead of raising showed the shell of a
+    panel with no content and nothing saying why.
+
+    The sibling is captured *before* the removal, because removing the child
+    clears the pointer the walk uses to get to the next one and the loop would
+    stop after the first.
+    """
+    child = container.get_first_child()
+    while child is not None:
+        following = child.get_next_sibling()
+        container.remove(child)
+        child = following
 
 
 def rows_of(container: Gtk.Widget) -> List[Gtk.Widget]:

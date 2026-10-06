@@ -702,6 +702,19 @@ class _Workbench:
         body = common.page_body()
         _margined(body)
 
+        # The panel's own health, above every
+        # group: how many built-in skills, how
+        # many drop-ins, how many could not be
+        # read. One row, one dot, one word - the
+        # question the panel is opened for, before
+        # the rows that hold the skills.
+        #: The panel's health, written once into the row above and read back
+        #: for the dot on its sidebar row. Same value, so the dot cannot
+        #: disagree with the sentence directly above it.
+        self.status_recorder = common.StatusRecorder()
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(self._status_slot)
+
         self.search = common.search_entry("Filter skills by name or description")
         # `changed`, not the debounced `search-changed` `common.search_entry`
         # wires: the latter fires 150 ms after the last keystroke and
@@ -811,6 +824,30 @@ class _Workbench:
             fields = _schema_fields(schema)
             if fields is not None:
                 self._add_builtin(fields[0], fields[1])
+
+        # The panel's own health, after the registry has been
+        # read: how many built-in skills, how many drop-ins, and
+        # whether the registry answered. Replaced, not appended
+        # to, so a reload cannot stack a second one.
+        common.clear(self._status_slot)
+        if self.registry_error:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "Could not read the registry",
+                _plain(self.registry_error)))
+        elif self._builtin_rows:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"{len(self._builtin_rows)} built-in, "
+                f"{len(self._dropin_rows)} drop-in",
+                f"{len(self._builtin_rows)} built-in skills, "
+                f"{len(self._dropin_rows)} drop-in skills"))
+        else:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No skills loaded",
+                "The registry returned nothing, which is not the same as having "
+                "no capabilities: the modules may all have failed to import."))
 
         if not self._builtin_rows:
             # "No skills" and "we could not look" are different answers, and a
@@ -1056,4 +1093,7 @@ def build(app: Any) -> Gtk.Widget:
     page.ask_remove = workbench.ask_remove
     page.reload_drop_ins = workbench.reload_drop_ins
     page.registry_error = workbench.registry_error
+    # What this panel says about itself, for the sidebar's health dot, from the
+    # same recorder the row at the top of the panel was written through.
+    page.status = workbench.status_recorder.status
     return page

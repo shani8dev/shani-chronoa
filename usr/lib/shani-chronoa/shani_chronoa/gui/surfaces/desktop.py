@@ -295,19 +295,7 @@ def _add_row(container: Gtk.Widget, row: Gtk.Widget) -> None:
 # -- the session bus ---------------------------------------------------------
 
 def _bus_names() -> Tuple[Optional[List[str]], str]:
-    """Every name on this user's session bus, or `(None, why)` if unanswerable.
-
-    One call, read once per panel, shared by the two rows that need it. Read-only
-    by construction: the only argv built here is `--user --list --no-legend`,
-    which asks the bus what is on it and changes nothing.
-
-    An empty or unparseable stdout is **not** an empty bus. Measured on this
-    machine, a `DBUS_SESSION_BUS_ADDRESS` naming a socket that does not exist
-    produces exit 1, empty stdout and `Failed to connect to bus: No such file or
-    directory` - so returning `[]` there would report an unreachable bus as a
-    bus with nothing on it, which is a confident wrong answer rather than a
-    missing one.
-    """
+    """Every name on this user's session bus, or `(None, why)` if unanswerable."""
     if shutil.which("busctl") is None:
         return None, "busctl is not installed on this machine"
     try:
@@ -332,6 +320,29 @@ def _bus_names() -> Tuple[Optional[List[str]], str]:
     if not names:
         return None, "busctl printed no bus name this panel could read"
     return names, ""
+
+
+def _status_row(recorder: "common.StatusRecorder",
+                names: Optional[List[str]], problem: str) -> Gtk.Widget:
+    """The panel's own health, from the desktop integration it measures.
+
+    Written through `recorder` so the dot on the sidebar's row reads the same
+    word this row does, rather than a second reading of the same bus listing.
+    """
+    if names is None:
+        return recorder.row(
+            common.STATUS_UNKNOWN,
+            "The desktop integration could not be read",
+            problem or "the session bus did not answer")
+    if SEARCH_PROVIDER_NAME in names:
+        return recorder.row(
+            common.STATUS_OK,
+            "The desktop integration is answering",
+            f"{SEARCH_PROVIDER_NAME} is on the session bus")
+    return recorder.row(
+        common.STATUS_ATTENTION,
+        "The desktop integration is not answering",
+        f"{SEARCH_PROVIDER_NAME} is not on the session bus")
 
 
 # -- row 1 and 2: the desktop search provider -------------------------------
@@ -654,6 +665,13 @@ def build(app: Any) -> Gtk.Widget:
     body.set_margin_top(12)
     body.set_margin_bottom(12)
 
+    # The panel's own health, above every group: is the desktop
+    # integration in place, is it answering, or could it not be
+    # told? One row, one dot, one word - the question the panel is
+    # opened for, before the rows that hold the settings.
+    recorder = common.StatusRecorder()
+    body.append(_status_row(recorder, names, bus_problem))
+
     search = common.group(
         "Searching from the desktop",
         f"GNOME Shell's overview and Plasma's KRunner both ask D-Bus for "
@@ -693,6 +711,10 @@ def build(app: Any) -> Gtk.Widget:
     body.append(footer)
 
     set_content(common.scrolled(body))
+    # What this panel says about itself, for the sidebar's health dot. The same
+    # recorder that built the row at the top of the panel, so the dot and the
+    # row are one statement about one reading.
+    page.status = recorder.status
     return page
 
 

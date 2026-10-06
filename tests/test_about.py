@@ -135,22 +135,70 @@ _HARNESS = textwrap.dedent(
                 continue
             rows = []
             for row in walk(node, []):
-                if not isinstance(row, Adw.ActionRow):
+                if isinstance(row, Adw.ActionRow):
+                    # The fallback's shape: a real row with getters for both.
+                    get_accel = getattr(row, "get_accelerator", None)
+                    accel = get_accel() if callable(get_accel) else ""
+                    # The label is the widget's own, so read it where it is.
+                    for sub in walk(row, []):
+                        getter = getattr(sub, "get_accelerator", None)
+                        if callable(getter) and (getter() or ""):
+                            accel = getter()
+                    rows.append({
+                        "title": row.get_title() or "",
+                        "subtitle": row.get_subtitle() or "",
+                        "accelerator": accel or "",
+                    })
                     continue
-                get_accel = getattr(row, "get_accelerator", None)
-                accel = get_accel() if callable(get_accel) else ""
-                # The label is the widget's own, so read it where it is.
+                # The native dialog's shape, which is what runs on the
+                # installed libadwaita 1.9. Its rows are `AdwShortcutRow`,
+                # which is **not introspectable by name** on this binding -
+                # `Adw.ShortcutRow` raises AttributeError - so it is matched on
+                # the class name the tree actually reports. It exposes
+                # `get_title()` but **no `get_subtitle()`**, and the subtitle
+                # the app set on `Adw.ShortcutsItem` is rendered as the second
+                # label in the row, so that is where it is read. Measured: a row
+                # for "Settings" carries ['Settings', 'Every setting...', 'Ctrl',
+                # ',']; a keyless row carries the title, its explanation, and
+                # libadwaita's own "No Shortcut" - so "the row explains itself"
+                # holds on this path too.
+                if type(row).__name__ != "AdwShortcutRow":
+                    continue
+                labels = [
+                    sub.get_label() for sub in walk(row, [])
+                    if type(sub).__name__ == "Label" and (sub.get_label() or "").strip()
+                ]
+                accel = ""
                 for sub in walk(row, []):
-                    getter = getattr(sub, "get_accelerator", None)
-                    if callable(getter) and (getter() or ""):
-                        accel = getter()
+                    if type(sub).__name__ != "ShortcutLabel":
+                        continue
+                    # A keyless row still builds a ShortcutLabel; libadwaita
+                    # labels it "No Shortcut". Only a real accelerator counts,
+                    # or every row would look bound.
+                    candidate = sub.get_accelerator() or ""
+                    if candidate and candidate != "No Shortcut":
+                        accel = candidate
+                        break
                 rows.append({
                     "title": row.get_title() or "",
-                    "subtitle": row.get_subtitle() or "",
-                    "accelerator": accel or "",
+                    "subtitle": labels[1] if len(labels) > 1 else "",
+                    "accelerator": accel,
                 })
-            sections.append({"title": node.get_title() or "", "rows": rows})
-        out["sections"] = sections
+            if rows:
+                sections.append({"title": node.get_title() or "", "rows": rows})
+        # The native dialog brings its own chrome, and both of these are
+        # `Adw.PreferencesGroup` like a real section is. Measured: an untitled
+        # empty group (the search field's container) and an untitled group of
+        # **all 15** rows - its search-results view, which repeats every
+        # shortcut in the window a second time. Counting either would double
+        # the rows and add a fourth "section" that the app never declared, so
+        # only the declared titles are kept. Filtered by the table rather than
+        # by "is the title empty" so a genuinely untitled declared section would
+        # still be caught.
+        from shani_chronoa.gui.about import SHORTCUT_SECTIONS as _declared
+
+        wanted = {s.title for s in _declared}
+        out["sections"] = [s for s in sections if s["title"] in wanted]
 
         about = AboutWindow(a)
         about.present()
@@ -163,9 +211,13 @@ _HARNESS = textwrap.dedent(
             "licence_name": about.get_license_type().value_nick,
             "website": about.get_website() or "",
             "copyright": about.get_copyright() or "",
-            # A list of single characters, not the string GTK documents, so it
-            # has to be joined before it means anything.
-            "authors": "".join(about.get_authors() or []),
+            # The list of strings that went in, one entry per author. This used
+            # to be `"".join(...)` over a comment claiming `get_authors()`
+            # returns a list of single characters in this PyGObject; measured,
+            # it returns the list unchanged. Joining it would now produce
+            # "Shrinivas Vishnu Kumbharthe Shanios authors" - one run-on name -
+            # and every assertion below would fail for the wrong reason.
+            "authors": list(about.get_authors() or []),
             "icon": about.get_logo_icon_name() or "",
             "comments": about.get_comments() or "",
         }
@@ -374,12 +426,12 @@ def test_the_about_window_reports_the_manifests_version_and_url(built):
 def test_the_about_window_names_its_real_developers(built):
     pkgbuild = PKGBUILD_PATH.read_text(encoding="utf-8")
     maintainer = [ln for ln in pkgbuild.splitlines() if ln.startswith("# Maintainer:")][0]
-    # Name only: GTK's `authors` string is one entry per line, and the
-    # "name\nemail" pair form would interleave with that convention.
+    # Name only: `authors` is a list of names, so the "name\nemail"
+    # pair form would interleave with the declared entry.
     name = maintainer.split(": ", 1)[1].split("<", 1)[0].strip()
-    assert name in built["about"]["authors"].splitlines()
+    assert name in built["about"]["authors"]
     assert "the Shanios authors" in (REPO / "LICENSE").read_text(encoding="utf-8")
-    assert "the Shanios authors" in built["about"]["authors"].splitlines()
+    assert "the Shanios authors" in built["about"]["authors"]
     assert built["about"]["copyright"], "an about window with no copyright line"
 
 

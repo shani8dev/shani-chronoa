@@ -197,9 +197,26 @@ class _FakeDialog:
     def set_title(self, title):
         self.title = title
 
-    def save(self, parent, cancellable, callback):
+    def save(self, parent, cancellable, callback, user_data=None):
+        # **The callback is called with the arity PyGObject really uses, which
+        # is three.**
+        #
+        # `Gtk.FileDialog.save` takes a `Gio.AsyncReadyCallback`, and this fake
+        # used to call it with one argument - so it exercised a shape the real
+        # dialog never produces, and the production lambda
+        # (`lambda _dlg, result: ...`) matched the fake rather than GTK. Measured
+        # on this PyGObject with `Gio.File.load_contents_async`, whose callback is
+        # the same `Gio.AsyncReadyCallback`: it is invoked as
+        # `(GLocalFile, Gio.Task, None)` - source object, result, and the
+        # `user_data` that was passed in.
+        #
+        # So the real save button raised `TypeError: <lambda>() takes 2
+        # positional arguments but 3 were given` on **every** save, and both
+        # `TestSaving` tests here failed for the same reason while reading as
+        # two separate problems. A fake whose shape the real API never produces
+        # is a fake that hides the bug it was written to find.
         self.parent = parent
-        callback("fake-result")
+        callback(self, "fake-result", user_data)
 
     def save_finish(self, result):
         if type(self).cancelled:
@@ -581,6 +598,46 @@ class TestSaving:
         assert "no display" in _status_text(page), _status_text(page)
 
 
+class TestCallbackArity:
+    """The save callback's signature, checked against the installed PyGObject.
+
+    `Gtk.FileDialog.save` takes a `Gio.AsyncReadyCallback`, and this file's fake
+    used to invoke it with one argument - so it exercised a shape the real dialog
+    never produces. The production lambda matched the fake, and every real save
+    raised `TypeError: <lambda>() takes 2 positional arguments but 3 were given`.
+
+    Nothing caught it, because nothing drove a real dialog, and the fake was
+    written to match the code rather than the library. So the arity is asserted
+    here against a *real* `Gio.AsyncReadyCallback` - `Gio.File.load_contents_async`
+    takes one too - rather than against the fake above. If PyGObject ever changes
+    how many arguments it passes, this fails and the fake is corrected with it.
+    """
+
+    def test_an_async_ready_callback_is_called_with_three_arguments(self, tmp_path):
+        gi.require_version("Gio", "2.0")
+        from gi.repository import Gio, GLib
+
+        path = tmp_path / "probe.txt"
+        path.write_bytes(b"probe")
+        seen = []
+        loop = GLib.MainLoop()
+
+        def callback(*args):
+            seen.append(args)
+            loop.quit()
+
+        Gio.File.new_for_path(str(path)).load_contents_async(None, callback, None)
+        GLib.timeout_add(5000, loop.quit)
+        loop.run()
+
+        assert seen, "the callback never ran, so this proves nothing"
+        assert len(seen[0]) == 3, (
+            f"PyGObject passed {len(seen[0])} arguments "
+            f"({[type(a).__name__ for a in seen[0]]}); the export panel's save "
+            "callback and the fake above must both match this, and the fake "
+            "is the one that was wrong")
+
+
 # -- a missing conversation store -------------------------------------------
 
 
@@ -650,22 +707,59 @@ class TestMarkup:
 
     @pytest.mark.skipif(not common.adw_ready(), reason="no libadwaita: no markup is parsed")
     def test_with_adw_the_description_round_trips_to_the_characters(self, root, hostile, store):
-        """`Adw.PreferencesGroup` parses its description as markup, so the
-        panel escapes it first and the getter hands the characters back. The
-        failure mode of not escaping is measured rather than argued: the same
-        description unescaped fails its parse and renders empty, so the
-        assertions above cannot pass without the escape.
+        """`Adw.PreferencesGroup` parses its description as markup.
+
+        **The getter does not hand the characters back, and this test used to
+        assert that it did.** Measured on the installed libadwaita 1.9.1:
+
+            set_description("A &amp; B &lt; C &gt; \\"x\\"")
+              -> get_description() == 'A &amp; B &lt; C &gt; "x"'
+            set_description('A & B < C > "x"')
+              -> get_description() == 'A & B < C > "x"', and libadwaita
+                 warns "Failed to set text ... from markup due to error
+                 parsing markup" and renders nothing.
+
+        So the getter returns what was *set*, and the panel is right to set the
+        escaped form. What actually has to hold is narrower and checkable: the
+        description libadwaita receives **parses as markup**, which is exactly
+        what the raw string above fails. Asserting the round trip instead was
+        asserting a third-party library's behaviour, it failed against the
+        version installed here, and - being a shape assertion - it would have
+        been satisfied by a panel that escaped nothing at all.
 
         The row titles here are the module's own constants and are not what
         this is about.
         """
         gi.require_version("Adw", "1")
-        from gi.repository import Adw
+        gi.require_version("Pango", "1.0")
+        from gi.repository import Adw, Pango
 
         page = surface.build(_app(store))
         groups = [w for w in _walk(page) if isinstance(w, Adw.PreferencesGroup)]
-        described = " ".join(g.get_description() for g in groups)
-        assert self.HOSTILE in described, described
+        descriptions = [g.get_description() for g in groups]
+        assert descriptions, "no group descriptions to check"
+
+        described = [d for d in descriptions if "message(s)" in d]
+        assert described, f"the open conversation's description is missing: {descriptions}"
+
+        # The control for this assertion. Without it, a test that only checked
+        # "the description parses" would also pass on a description containing
+        # no markup at all - and this class exists precisely because the
+        # characters are markup.
+        with pytest.raises(GLib.Error):
+            Pango.parse_markup(self.HOSTILE, -1, "\0")
+
+        for description in described:
+            # What the panel set must parse, or libadwaita renders nothing at
+            # all - which is how this failure presents: a blank row, not a
+            # wrong character.
+            ok, _attrs, text, _accel = Pango.parse_markup(description, -1, "\0")
+            assert ok, description
+            # ...and the parse must hand back the *characters*, not the
+            # entities: this is the round trip, checked against Pango, which is
+            # the parser libadwaita itself uses.
+            assert self.HOSTILE in text, text
+
         assert groups[0].get_title() == "The open conversation", groups[0].get_title()
 
     @pytest.mark.skipif(common.adw_ready(), reason="libadwaita: rows are not Gtk.Labels")

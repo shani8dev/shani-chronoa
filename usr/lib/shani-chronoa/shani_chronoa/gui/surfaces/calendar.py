@@ -433,13 +433,33 @@ class _CalendarSurface:
         self._message = ""
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         set_content(self._content)
+        # The panel's own health, before any state it may show:
+        # is the calendar readable, is it granted, or could it
+        # not be told? One row, one dot, one word - the question
+        # the panel is opened for, before the rows that hold the
+        # events.
+        #: The panel's health, written once into the row above and read back
+        #: for the dot on its sidebar row. Same value, so the dot cannot
+        #: disagree with the sentence directly above it.
+        self.status_recorder = common.StatusRecorder()
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._content.append(self._status_slot)
         self.refresh()
 
     # -- content ------------------------------------------------------------
 
     def refresh(self) -> None:
         """Re-read the calendar and rebuild the page."""
-        self._empty(self._content)
+        # Everything below the status row is rebuilt; the status row
+        # itself is replaced, not appended to, so a refresh cannot
+        # stack a second one.
+        child = self._content.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._content.remove(child)
+            child = following
+        self._content.append(self._status_slot)
+        common.clear(self._status_slot)
         self._rows = []
         self._groups = []
         self._events = []
@@ -451,6 +471,10 @@ class _CalendarSurface:
         if not allowed:
             self._state = STATE_CONSENT
             self._message = detail
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "Calendar is not granted",
+                detail))
             self._show_state(CONSENT_TITLE, detail)
             return
 
@@ -464,9 +488,17 @@ class _CalendarSurface:
         self._message = detail
 
         if state == STATE_NO_BACKEND:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No calendar backend",
+                detail))
             self._show_state(NO_BACKEND_TITLE, detail)
             return
         if state == STATE_UNREADABLE:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "Calendar could not be read",
+                detail))
             self._show_state(UNREADABLE_TITLE, detail)
             return
         if state == STATE_EMPTY:
@@ -474,10 +506,18 @@ class _CalendarSurface:
                 label = _window(now)[2]
             except Exception:  # noqa: BLE001 - already reported, do not raise here
                 label = "window"
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                "No events in range",
+                detail))
             self._show_state(EMPTY_TITLE.format(label=label), detail)
             return
 
         self._events = list(events or [])
+        self._status_slot.append(self.status_recorder.row(
+            common.STATUS_OK,
+            f"{len(self._events)} event(s) in range",
+            detail))
         self._show_events(self._events, now)
 
     def _show_events(self, events: List[Any], now: float) -> None:
@@ -508,7 +548,20 @@ class _CalendarSurface:
         A status page rather than an empty group: an empty list with no
         explanation reads as a bug, and each of these has a reason that can be
         said exactly.
+
+        **The consent state carries a button, because it is the one state a
+        person can undo.** Its detail used to end "turn the key on in Settings" -
+        naming the switch and providing no way to reach it, which is the dead end
+        this panel is the answer to. The other three need a package installed, a
+        service running or permission from the desktop, and none of those is a
+        page in this app, so they keep their prose rather than growing a button
+        that would open Settings and change nothing.
         """
+        if self._state == STATE_CONSENT:
+            self._content.append(common.banner(
+                "Reading the calendar is a switch on this machine.",
+                "Open Senses settings",
+                lambda: common.open_page(self._app, "settings:senses")))
         widget = common.empty_state(ICON if self._state != STATE_UNREADABLE
                                     else "dialog-warning-symbolic",
                                     _plain(title), _plain(detail))
@@ -562,6 +615,10 @@ def build(app: Any) -> Gtk.Widget:
     page.events = surface.events
     page.state = surface.state
     page.message = surface.message
+    # What this panel says about itself, for the sidebar's health dot. Read from
+    # the same recorder the row at the top of the panel was written through, so
+    # the dot and the row are one statement rather than two that can drift.
+    page.status = surface.status_recorder.status
     return page
 
 

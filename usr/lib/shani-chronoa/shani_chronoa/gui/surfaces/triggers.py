@@ -254,11 +254,22 @@ def _access(widget: Gtk.Widget, label: str) -> None:
 
 
 def _note(text: str) -> Gtk.Label:
-    """A dim line of plain text. `set_text` takes no markup at all, which is the
-    one call that cannot be half-done for a string that came out of a file on
-    disk - and every message this panel writes is one of those."""
-    label = Gtk.Label(xalign=0, hexpand=True, wrap=True)
-    label.set_text(text)
+    """A dim line of plain text, with any filesystem path in it fixed-width.
+
+    Was `set_text` and nothing else, on purpose: that is the one call that cannot
+    be half-done for a string that came out of a file on disk, and every message
+    this panel writes is one of those. The source-path line *is* made of such
+    strings - it names the rules files it found - and a path set in a fixed-width
+    face is the difference between a run of slashes being recognisable and not.
+
+    So the safety property is kept and the face is added: `paths_in` escapes the
+    whole text and *then* adds its own tags, so a path containing `&` or `<` is
+    displayed literally and cannot introduce markup of its own. That is asserted
+    in `tests/test_paths_read_as_paths.py` with a hostile filename rather than
+    argued here - a comment like this one has been wrong in this repo before.
+    """
+    label = common.paths_in(text)
+    label.set_hexpand(True)
     label.add_css_class("dim-label")
     return label
 
@@ -292,6 +303,18 @@ class _TriggersSurface:
         self._source_label = _note("")
         body.append(self._source_label)
 
+        # The panel's own health, above every group: how
+        # many rules are armed, how many are not, or
+        # could it not be told? One row, one dot, one
+        # word - the question the panel is opened for,
+        # before the rows that hold the rules.
+        #: The panel's health, written once into the row above and read back
+        #: for the dot on its sidebar row. Same value, so the dot cannot
+        #: disagree with the sentence directly above it.
+        self.status_recorder = common.StatusRecorder()
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        body.append(self._status_slot)
+
         # One box for the groups and the problems, so a rebuild empties them
         # without disturbing the notes around them.
         self._rules_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
@@ -306,7 +329,25 @@ class _TriggersSurface:
             "Nothing here can act on its own. Ask Chronoa to arm one, or run "
             "shani-chronoa-sense trigger list to see this from the command line.",
         )
+        # **"Ask Chronoa to arm one" now has a way to be asked.** That sentence
+        # was a dead end: the arming itself is a skill call, not a page, and the
+        # panel sent the reader off to a chat window with nothing to type. What
+        # *is* reachable is the gate every armed rule has to pass - Settings >
+        # Tool activity - so that is the button, and the sentence above it stays
+        # true: arming a rule is still a conversation, not a switch.
+        #
+        # Shown and hidden with the empty state, so the button appears exactly
+        # when the panel is claiming there is nothing here.
+        self.empty_route: Gtk.Widget = common.banner(
+            "Rules need the tool-activity switch before any of them can act.",
+            "Manage triggers",
+            lambda: common.open_page(self._app, "settings:tool-activity"))
+        self.empty_route.set_visible(False)
         self.empty_state.set_visible(False)
+        # Appended once, here, and only ever shown or hidden afterwards. Built
+        # but not appended is the `Adw.Banner` failure this repo has already paid
+        # for twice: in the widget tree, and nowhere on screen.
+        body.append(self.empty_route)
         body.append(self.empty_state)
 
         self._gate_label = _note("")
@@ -327,6 +368,13 @@ class _TriggersSurface:
         self._problems = []
         self._source_paths = []
         paths: List[str] = []
+
+        # The panel's own health, before the rules: how many
+        # are armed, how many could not be read, or could it
+        # not be told? One row, one dot, one word - the
+        # question the panel is opened for, before the rows
+        # that hold the rules.
+        common.clear(self._status_slot)
 
         for kind, attribute, constructor in _KINDS:
             try:
@@ -349,7 +397,7 @@ class _TriggersSurface:
                 continue
             group = common.group(kind)
             for rule in rules:
-                self._add_row(group, rule)
+                self._add_row(group, rule, (kind, attribute, constructor))
             self._rules_box.append(group)
 
         self._source_paths = paths
@@ -357,13 +405,38 @@ class _TriggersSurface:
             "From " + ", ".join(paths) if paths else "No rules file could be located."
         )
         self._gate_label.set_text(self._gate_note())
-        self.empty_state.set_visible(not self._row_widgets and not self._problems)
+        nothing = not self._row_widgets and not self._problems
+        self.empty_state.set_visible(nothing)
+        # The route follows the empty state, rather than being appended when it
+        # appears: a banner added on demand has to be taken away again, and one
+        # that is only ever appended would stack a second "Manage triggers" under
+        # every refresh.
+        self.empty_route.set_visible(nothing)
+
+        # The status row is rendered after the rules are read, so it
+        # can say how many are armed and how many could not be read.
+        total = len(self._row_widgets)
+        if self._problems:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                f"{total} rule(s) armed, {len(self._problems)} could not be read",
+                "; ".join(self._problems)))
+        elif total:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"{total} rule(s) armed",
+                f"from {len(paths)} file(s)"))
+        else:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "No rules armed",
+                "nothing here can act on its own"))
 
     def _add_problem(self, text: str) -> None:
         self._problems.append(text)
         self._rules_box.append(_note(text))
 
-    def _add_row(self, group: Gtk.Widget, rule: Any) -> None:
+    def _add_row(self, group: Gtk.Widget, rule: Any, kind: Any = None) -> None:
         name = getattr(rule, "name", "") or "(unnamed rule)"
         state = _arm_state(rule)
         lines = [_detail(rule)]
@@ -371,7 +444,23 @@ class _TriggersSurface:
         if arguments:
             lines.append(f"arguments: {arguments}")
 
-        row = common.row(title=_plain(name), subtitle=_plain("\n".join(lines)))
+        suffix = None
+        if kind is not None:
+            toggle = Gtk.Switch(active=bool(getattr(rule, "enabled", True)),
+                                valign=Gtk.Align.CENTER)
+            toggle.set_tooltip_text("Enable or disable this rule")
+            toggle.connect("notify::active", lambda s, _p, n=name, a=kind[1], c=kind[2]:
+                           self._set_enabled(a, c, n, s.get_active()))
+            delete = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER)
+            delete.add_css_class("flat")
+            delete.set_tooltip_text("Delete this rule")
+            delete.connect("clicked", lambda _b, n=name, a=kind[1], c=kind[2]:
+                           self._delete_rule(a, c, n))
+            suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            suffix.append(toggle)
+            suffix.append(delete)
+
+        row = common.row(title=_plain(name), subtitle=_plain("\n".join(lines)), suffix=suffix)
         row.add_css_class(ROW_CSS)
         row.set_tooltip_text(_tooltip(rule))
         _access(
@@ -381,6 +470,28 @@ class _TriggersSurface:
         )
         _add(group, row)
         self._row_widgets.append(row)
+
+    def _delete_rule(self, attribute: str, constructor: Any, name: str) -> None:
+        try:
+            store = _open(self._app, attribute, constructor)
+            removed = bool(getattr(store, "remove", lambda _n: False)(name))
+        except Exception:  # noqa: BLE001 - a refused delete must not take the window down
+            logger.warning("could not delete rule %r", name, exc_info=True)
+            removed = False
+        if not removed:
+            logger.warning("deleting rule %r removed nothing", name)
+        self._refresh()
+
+    def _set_enabled(self, attribute: str, constructor: Any, name: str, enabled: bool) -> None:
+        try:
+            store = _open(self._app, attribute, constructor)
+            rule = store.get(name)
+            if rule is not None:
+                rule.enabled = bool(enabled)
+                store.add(rule)
+        except Exception:  # noqa: BLE001 - a refused change must not take the window down
+            logger.warning("could not change rule %r", name, exc_info=True)
+        self._refresh()
 
     def _gate_note(self) -> str:
         """The consent state that decides whether an armed rule could act.
@@ -448,6 +559,10 @@ def build(app: Any) -> Gtk.Widget:
     page.empty = surface.empty
     page.problems = surface.problems
     page.source_paths = surface.source_paths
+    # What this panel says about itself, for the sidebar's health dot. Read from
+    # the same recorder the row at the top of the panel was written through, so
+    # the dot and the row are one statement rather than two that can drift.
+    page.status = surface.status_recorder.status
     return page
 
 

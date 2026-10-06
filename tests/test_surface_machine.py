@@ -152,6 +152,24 @@ def _adw_row(row: Gtk.Widget) -> bool:
     return common.adw_ready() and hasattr(row, "get_subtitle")
 
 
+def _the_row(node: Gtk.Widget) -> "Gtk.Widget | None":
+    """The `Adw.ActionRow` inside a sense's block, if the node is a block.
+
+    A sense is now rendered as a row *plus* its reading laid out as a table
+    beside it, because a wrapped paragraph is what made this the densest screen
+    in the app. The `machine-reading` marker is on the block, so a test that
+    finds a sense by that class finds the block - and the accessors below want
+    the row inside it. Unwrapping here means every assertion in this file keeps
+    meaning what it meant when a sense was one row.
+    """
+    if _adw_row(node):
+        return node
+    for child in _tree(node):
+        if child is not node and _adw_row(child):
+            return child
+    return None
+
+
 def _row_title(row: Gtk.Widget) -> str:
     """The sense name a row is about.
 
@@ -159,6 +177,7 @@ def _row_title(row: Gtk.Widget) -> str:
     where libadwaita is there and a plain `Gtk.Box` of labels where it is not,
     and a surface's test should not have to know which one it got.
     """
+    row = _the_row(row) or row
     if _adw_row(row):
         return row.get_title()
     for label in _labels(row):
@@ -168,14 +187,72 @@ def _row_title(row: Gtk.Widget) -> str:
 
 
 def _row_text(row: Gtk.Widget) -> str:
-    """Everything the row says, one line per label, title first."""
-    if _adw_row(row):
-        return f"{row.get_title()}\n{row.get_subtitle()}"
-    return "\n".join(_labels(row))
+    """Everything the row says, one line per label, title first.
+
+    Reads the *block* rather than only the row inside it, so a reading laid out
+    as a table is still text to a test - the assertions below are about what the
+    panel says, and a table of the same words says the same thing.
+
+    **The table's two labels are rejoined into one `key: value` line.** A sense
+    reading is now rendered through `common.key_values()`, which puts the key
+    and the value in two separate `Gtk.Label`s of one `key-value-row`. Joining
+    every label with a newline - which is what this did first - turns the single
+    string `'hwmon0: 41 C, fan 1400 rpm - all nominal'` into four lines
+    (`hwmon` / `reading` / `not read` / `hwmon0` / `41 C, ...`), so an assertion
+    about what the panel says no longer matches it. That silently broke the
+    negative control in `TestAFailingSenseIsNotACleanReading`, which is worse
+    than a red test: a control that can no longer fail proves nothing, which is
+    exactly what this repo's own tooling rules warn about.
+    """
+    inner = _the_row(row) or row
+    if _adw_row(inner):
+        head = [inner.get_title() or "", inner.get_subtitle() or ""]
+    else:
+        head = []
+    lines = list(head)
+    for node in _tree(row):
+        if node is row:
+            continue
+        if not _is_key_value_row(node):
+            continue
+        found = _labels(node)
+        if len(found) >= 2:
+            # Key and value, back in the shape the sense actually returned.
+            lines.append(f"{found[0].strip()}: {found[1].strip()}")
+        else:
+            # A line `key_values()` could not classify: it stays whole, which is
+            # what the renderer does with it too.
+            lines.extend(found)
+    if not any(_is_key_value_row(node) for node in _tree(row)):
+        # No table in this block at all: the flat label list is the whole of it.
+        return "\n".join(_labels(row)) if not head else "\n".join(lines)
+    return "\n".join(lines)
+
+
+def _is_key_value_row(node: Gtk.Widget) -> bool:
+    """Whether this widget is one `key-value-row` of the reading table.
+
+    Matched on the CSS class the renderer actually adds, so a row that stopped
+    being a key-value row would stop being rejoined here too - the helper reads
+    what was built rather than what it assumes was built.
+    """
+    return any(
+        style is not None and "key-value-row" in (style or "")
+        for style in (node.get_css_classes() or [])
+    )
 
 
 def _row_state(row: Gtk.Widget) -> str:
-    """The row's second line: what kind of answer this is, and why."""
+    """The row's second line: what kind of answer this is, and why.
+
+    Read off the `Adw.ActionRow`'s own subtitle, not off "the second line of
+    everything the block says" - the table below it would otherwise become the
+    state, which is the one thing this helper must never return.
+    """
+    inner = _the_row(row) or row
+    if _adw_row(inner):
+        subtitle = inner.get_subtitle() or ""
+        return subtitle.splitlines()[0] if subtitle.strip() else ""
     lines = _row_text(row).splitlines()
     return lines[1] if len(lines) > 1 else ""
 

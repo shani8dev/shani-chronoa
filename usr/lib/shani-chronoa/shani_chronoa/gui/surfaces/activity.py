@@ -57,7 +57,7 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Activity"
-ICON = "view-list-symbolic"
+ICON = "view-continuous-symbolic"
 SUBTITLE = "Every skill Chronoa ran, newest first, from its own tool-call log."
 
 
@@ -206,6 +206,16 @@ class _ActivityView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._tracker = tracker
         self._records = _records(tracker)
+        # The panel's own health, above the filter and the rows:
+        # how many calls the log holds, and whether the log could be
+        # read at all. One row, one dot, one word - the question the
+        # panel is opened for, before the rows that hold the calls.
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.append(self._status_slot)
+        #: The same health in two places - the row above, and the dot on the
+        #: sidebar's row for this panel. One value, so the two cannot disagree.
+        self.status_recorder = common.StatusRecorder()
+        self._render_status()
         self._search = common.search_entry("Filter by tool name…", self._on_search_changed)
         self._group = common.group()
         self._rows_area = common.scrolled(self._group)
@@ -244,6 +254,36 @@ class _ActivityView(Gtk.Box):
 
     def _on_search_changed(self, needle: str) -> None:
         self._render(needle)
+
+    def _render_status(self) -> None:
+        """The panel's own health, before the filter and the rows."""
+        common.clear(self._status_slot)
+        if not self._records:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "No tool calls recorded",
+                "the log is empty, which is not the same as every call "
+                "having succeeded"))
+            return
+        verified = sum(1 for r in self._records if r.get("verified"))
+        failed = sum(1 for r in self._records if r.get("failed"))
+        if failed:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION,
+                f"{len(self._records)} calls, {failed} failed",
+                f"{verified} verified, {failed} failed, "
+                f"{len(self._records) - verified - failed} unverified"))
+        elif verified:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_OK,
+                f"{len(self._records)} calls, {verified} verified",
+                f"{verified} verified, {len(self._records) - verified} "
+                "unverified, none failed"))
+        else:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                f"{len(self._records)} calls, none verified",
+                f"{len(self._records)} unverified, none failed"))
 
     def _present(self, widget: Gtk.Widget) -> None:
         """One widget in the slot; whatever was there is removed."""
@@ -392,6 +432,10 @@ def build(app) -> Gtk.Widget:
     # page is a libadwaita widget and this is the one shape that works on it.
     page._search = view._search
     page.rows = view.rows
+    # What this panel says about itself, for the sidebar's health dot. The
+    # recorder is the view's own, so the dot cannot disagree with the row above
+    # it in the panel - there is no second count to fall out of date.
+    page.status = view.status_recorder.status
     return page
 
 

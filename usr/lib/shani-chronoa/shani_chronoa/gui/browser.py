@@ -624,8 +624,14 @@ class BrowserWindow(Gtk.Window):
         scheme = url.split(':', 1)[0].lower() if ':' in url else ''
         if scheme not in ('http', 'https'):
             return
+        # **A `purpose`, so the privacy panel can say what this line was.**
+        # It renders `{purpose}: {method} {url} - {bytes_out} bytes`, and without
+        # one a navigation read as a bare `GET https://...` - accurate, and
+        # indistinguishable in that panel from any other outbound request, which
+        # is the whole question the panel is opened to answer.
         egress.record("browser:navigate", url,
-                      privacy_mode=egress.privacy_mode_enabled())
+                      privacy_mode=egress.privacy_mode_enabled(),
+                      purpose="page-navigation")
 
     # -- attaching ---------------------------------------------------------
 

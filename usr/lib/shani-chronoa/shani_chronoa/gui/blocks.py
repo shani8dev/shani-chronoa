@@ -407,7 +407,7 @@ class CodeBlock(Gtk.Box):
         entry = SCRIPT_LANGUAGES.get(self.language.lower())
         default = (entry[0] if entry else "snippet.txt")
         dialog = Gtk.FileDialog()
-        dialog.save(self.get_root(), None, lambda result: self._saved(dialog, result, default))
+        dialog.save(self.get_root(), None, lambda _dlg, result: self._saved(dialog, result, default))
 
     def _saved(self, dialog: Gtk.FileDialog, result, default: str) -> None:
         try:
@@ -536,7 +536,7 @@ class TableBlock(Gtk.Box):
 
     def _on_save(self, button: Gtk.Button) -> None:
         dialog = Gtk.FileDialog()
-        dialog.save(self.get_root(), None, lambda result: self._saved(dialog, result))
+        dialog.save(self.get_root(), None, lambda _dlg, result: self._saved(dialog, result))
 
     def _saved(self, dialog: Gtk.FileDialog, result) -> None:
         try:

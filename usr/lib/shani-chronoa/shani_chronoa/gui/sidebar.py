@@ -52,6 +52,31 @@ CHAT_TITLE = "Conversation"
 CHAT_ICON = "chat-symbolic"
 
 
+def _settings_target(name: str) -> "Optional[str]":
+    """The panel's settings target, or None. Read through `surfaces`, not a copy.
+
+    A second table here would be a second thing to keep in step with the first -
+    and this file's own docstring is about exactly that failure, for the list of
+    panels themselves.
+    """
+    from shani_chronoa.gui import surfaces
+
+    return surfaces.settings_target(name)
+
+
+def _open_settings(app, target: str) -> None:
+    """Open a settings page from a sidebar row, and report a refusal as nothing.
+
+    Routed through `common.open_page`, which is the same function every panel's
+    own "Open Privacy settings" button uses - so a gear and a panel button are
+    one route, not two that can drift. That helper also refuses rather than
+    raises when the id is unknown, which matters here: `pages.show` returning
+    False for a retired id opens nothing, and a gear that visibly did nothing is
+    worse than no gear, so the failure is logged where a developer sees it.
+    """
+    common.open_page(app, target)
+
+
 class SidebarPage(Adw.NavigationPage):
     """The panel list: search, the sections, and the way back to the chat.
 
@@ -70,13 +95,18 @@ class SidebarPage(Adw.NavigationPage):
     reshuffle everything below it.
     """
 
-    def __init__(self, app=None, on_chat=None, on_surface=None) -> None:
+    def __init__(self, app=None, on_chat=None, on_surface=None,
+                 on_close=None) -> None:
         """Built by construction, not by a factory.
 
         `Adw.NavigationPage.__init__` has to run before any of this touches a
         widget, and a classmethod that returned a *different* object is exactly
         how `select()` ended up defined on a class whose instances were never
         instances of it.
+
+        `on_close` is separate from `on_chat` on purpose: closing a drawer must
+        not also pop the content stack, because the drawer can be sitting over a
+        panel that was already open.
         """
         super().__init__(title="Panels")
         # **No `Adw.HeaderBar` here, on purpose.**
@@ -96,8 +126,10 @@ class SidebarPage(Adw.NavigationPage):
         # was overflowing its viewport.
         #
         # The `Adw.ToolbarView` is kept, because it is what `self` needs in order
-        # to hold a scrolled body, and its absence of a top bar is the point.
+        # to hold a scrolled body, and its absence of a *permanent* top bar is the
+        # point - see `set_drawer_mode` for the one case where one appears.
         toolbar = Adw.ToolbarView()
+        toolbar.add_top_bar(self._build_drawer_bar(on_close))
 
         self._app = app
         stack = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -128,6 +160,9 @@ class SidebarPage(Adw.NavigationPage):
 
         self._surface_rows = {}
         self._dots = {}
+        #: panel id -> the settings gear on its row. Absent for the panels
+        #: Settings does not govern - see `surfaces.SETTINGS_TARGETS`.
+        self._gears = {}
         self._rows_by_title = {}
         groups = {}
 
@@ -194,6 +229,36 @@ class SidebarPage(Adw.NavigationPage):
                 dot.set_visible(False)
                 row.add_suffix(dot)
                 self._dots[name] = dot
+                # **A gear on the rows whose settings actually govern them.**
+                #
+                # The panels are read-only reports and the settings window holds
+                # the switches, which is the right split - and it made every
+                # "turn this on in Settings" a sentence naming a window with no
+                # way to reach it. The gear is one click from the row that says
+                # the thing is off, so the route is on the same screen as the
+                # complaint.
+                #
+                # Only on the panels `surfaces.settings_target` names. A gear that
+                # opens a section of unrelated switches is a dead end wearing a
+                # button, and a dot of honesty here costs the reader nothing: the
+                # rows without one are the ones Settings does not govern.
+                target = _settings_target(name)
+                if target is not None:
+                    gear = Gtk.Button(icon_name="preferences-system-symbolic")
+                    gear.add_css_class("flat")
+                    gear.add_css_class("sidebar-gear")
+                    gear.set_valign(Gtk.Align.CENTER)
+                    section_word = target.split(":")[-1].replace("-", " ")
+                    gear.set_tooltip_text(
+                        f"Open Settings on {section_word}")
+                    gear.update_property(
+                        [Gtk.AccessibleProperty.LABEL],
+                        [f"Open Settings on {section_word} for {title}"])
+                    gear.connect(
+                        "clicked",
+                        lambda _b, t=target: _open_settings(self._app, t))
+                    row.add_suffix(gear)
+                    self._gears[name] = gear
                 row.set_activatable(True)
                 row.update_property([Gtk.AccessibleProperty.LABEL], [title])
                 row.connect("activated", lambda _r, key=name: activate(_r, key))
@@ -255,6 +320,55 @@ class SidebarPage(Adw.NavigationPage):
             f"{self._surface_rows[key][1].capitalize()}: "
             f"{common.STATUS_WORDS[status]}"
         )
+
+    def _build_drawer_bar(self, on_close) -> Gtk.Widget:
+        """The one header bar this page has, and it only exists as a drawer.
+
+        **A drawer over the content needs its own way out, because the button
+        that opened it is underneath it.** Measured on libadwaita 1.5 in an
+        1100x700 window: with the sidebar showing as an overlay it is allocated
+        the whole 1100px and the window's own toggle reports `get_mapped() ==
+        False`. That is the "expand the sidebar and there is no button to retract
+        it" report - F9 worked, and so did the "Conversation" row, but both are
+        things a person has to already know about, and neither is on screen.
+
+        So this bar is shown **only** while the sidebar is an overlay, which is
+        the only state where it is needed and the only state where the window's
+        toggle is unreachable. In the column layout it stays hidden, because that
+        is exactly the duplicate title bar and duplicate back arrow this file's
+        constructor comment explains at length.
+
+        The title is "Panels" rather than "Chronoa" so a drawer does not read as
+        a second, differently-named window.
+        """
+        bar = Adw.HeaderBar()
+        self._drawer_close = Gtk.Button(
+            icon_name="window-close-symbolic")
+        self._drawer_close.add_css_class("flat")
+        self._drawer_close.set_tooltip_text("Close the panel list (F9)")
+        self._drawer_close.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Close the panel list"])
+        self._drawer_close.connect(
+            "clicked", lambda _b: on_close() if on_close else None)
+        bar.pack_start(self._drawer_close)
+        title = Adw.WindowTitle(title="Panels")
+        bar.set_title_widget(title)
+        bar.set_visible(False)
+        self._drawer_bar = bar
+        return bar
+
+    def set_drawer_mode(self, on: bool) -> None:
+        """Show the close bar exactly while the sidebar is an overlay.
+
+        Driven by `window._sync_sidebar_toggle`, which reads the split view, so
+        this cannot claim to be a drawer when the sidebar is a column - the
+        failure the constructor comment is all about. Setting `visible` on a
+        `Gtk.Widget` also stops it being mapped, so `on` is really "am I an
+        overlay covering the content", which is the question.
+        """
+        bar = getattr(self, "_drawer_bar", None)
+        if bar is not None:
+            bar.set_visible(bool(on))
 
     def select(self, key: Optional[str]) -> None:
         """Mark the open panel, so the sidebar says where you are.
