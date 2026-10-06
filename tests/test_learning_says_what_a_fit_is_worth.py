@@ -451,3 +451,182 @@ class TestALessonAboutAToolThisBuildDoesNotHaveIsNotALesson:
         from shani_chronoa import learning
 
         assert "No lessons yet" in learning.render_lessons([])
+
+
+# -- four more of the orphaned fifteen, wired ---------------------------------
+
+
+class TestTheRemainingOrphansAreReachable:
+    """An AST scan for public names with no caller in `usr/` or `tests/` found 15
+    of 111 in `learning.py`. Four have now been wired; these are the last three.
+
+    Each was **fully written** - not a stub - and none was reachable, so a machine
+    that had logged 14,000 tool calls could not be told whether its bandit was
+    learning, how much of its history was real, or how much learned weight it
+    could trust.
+    """
+
+    @staticmethod
+    def _panel():
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk
+
+        Adw.init()
+        from shani_chronoa.config import ChronoaConfig
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        app = type("App", (), {"config": ChronoaConfig()})()
+        buttons, texts = [], []
+
+        def walk(node):
+            if isinstance(node, Gtk.Button):
+                buttons.append(node.get_label())
+            for getter in ("get_label", "get_text"):
+                fn = getattr(node, getter, None)
+                if callable(fn):
+                    try:
+                        value = fn()
+                    except Exception:  # noqa: BLE001
+                        value = None
+                    if isinstance(value, str) and value.strip():
+                        texts.append(value)
+            child = node.get_first_child() if hasattr(node, "get_first_child") else None
+            while child is not None:
+                walk(child)
+                child = child.get_next_sibling()
+
+        walk(surface.build(app))
+        return buttons, texts
+
+    @pytest.mark.parametrize("title", [
+        "What the log teaches",            # lessons / render_lessons
+        "What this machine has seen",      # experience_summary
+        "Does the bandit beat chance",     # evaluate_bandit
+        "How much is trusted",             # organ_status
+    ])
+    def test_the_row_is_on_the_panel(self, title):
+        """Asserted through `build()`, not by calling the helper."""
+        _buttons, texts = self._panel()
+        assert any(title in t for t in texts), f"{title!r} is not on the panel"
+
+    def test_restoring_a_retired_model_has_a_button(self):
+        buttons, _texts = self._panel()
+        assert "Restore a retired model" in buttons, f"buttons are {buttons}"
+
+    def test_the_bandit_row_reports_a_negative_result_honestly(self, monkeypatch):
+        """**This machine's bandit does not beat chance, and the row must say so.**
+
+        `evaluate_bandit()` measures it and returns `beats_chance: False` with a
+        rank correlation of -0.5 over 3 ranked tools. The tempting row shows the
+        arms without this, and three thin estimates then read as a ranking - which
+        is the claim `evaluate_bandit` exists to stop being an assumption.
+        """
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "evaluate_bandit", lambda **k: {
+            "measured": True, "tools_ranked": 3, "precision_at_5": 0.3333,
+            "spearman_vs_empirical": -0.5, "beats_chance": False,
+            "top_tools": [("delete_file", 0.896)]})
+        said = surface._bandit_quality_sentence()
+        assert "does NOT rank them better than chance" in said, said
+        assert "-0.5" in said, said
+        assert "33%" in said, said
+
+    def test_a_bandit_that_does_beat_chance_is_told_so(self, monkeypatch):
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "evaluate_bandit", lambda **k: {
+            "measured": True, "tools_ranked": 12, "precision_at_5": 0.8,
+            "spearman_vs_empirical": 0.6, "beats_chance": True, "top_tools": []})
+        said = surface._bandit_quality_sentence()
+        assert "better than chance" in said, said
+        assert "does NOT" not in said, said
+
+    def test_an_unmeasurable_bandit_is_not_a_pass(self, monkeypatch):
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "evaluate_bandit",
+                            lambda **k: {"measured": False, "tools_ranked": 0})
+        assert "not measurable" in surface._bandit_quality_sentence()
+
+    def test_nothing_to_trust_says_so_rather_than_zero(self, monkeypatch):
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "organ_status",
+                            lambda *a, **k: {"tools_with_history": 0,
+                                             "trusted": 0, "doubted": 0})
+        said = surface._organ_status_sentence()
+        assert "none" in said.lower(), said
+        assert "0 tool" not in said, (
+            f"{said!r} reads as a measurement of zero rather than an absence")
+
+    def test_organ_status_belongs_to_learning_not_inventory(self):
+        """Its docstring claimed Inventory, which never mentioned it."""
+        import pathlib
+
+        from shani_chronoa import learning
+
+        # `.parent`, not `.parents[1]`: learning.py sits at
+        # <pkg>/shani_chronoa/learning.py, so the package directory is its parent.
+        # My first version climbed one level too far and read a path that does not
+        # exist - and `read_text` on a missing file is not the assertion I wanted.
+        inventory = pathlib.Path(learning.__file__).resolve().parent / "gui" / "surfaces" / "inventory.py"
+        assert inventory.is_file(), inventory
+        text = inventory.read_text(encoding="utf-8")
+        for claim in ("tools_with_history", "trusted", "doubted", "organ_status"):
+            assert claim not in text, (
+                f"inventory.py mentions {claim!r}, so the docstring's claim is "
+                "now true and the row may belong there instead")
+
+    def test_nothing_retired_says_nothing_was_retired(self, monkeypatch):
+        """**Reports the absence instead of claiming success.**
+
+        Retirement was removed on purpose, so on an ordinary machine there is
+        nothing set aside and this action has nothing to do. Saying "restored" or
+        staying silent would both be wrong; what it must say is that nothing was
+        set aside.
+        """
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "adopt_retired", lambda *a, **k: None)
+        reported = []
+        button = Gtk.Button()
+        status = Gtk.Label()
+        monkeypatch.setattr(surface, "_run_async",
+                            lambda b, work, label: work(reported.append))
+        surface._restore_retired(button, status)
+        assert reported, "the action said nothing at all"
+        assert "Nothing was set aside" in reported[0], reported
+
+    def test_a_restored_model_is_named(self, monkeypatch, tmp_path):
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        from gi.repository import Gtk
+
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        restored = tmp_path / "outcome-abc.json"
+        monkeypatch.setattr(learning, "adopt_retired", lambda *a, **k: restored)
+        reported = []
+        button = Gtk.Button()
+        status = Gtk.Label()
+        monkeypatch.setattr(surface, "_run_async",
+                            lambda b, work, label: work(reported.append))
+        surface._restore_retired(button, status)
+        assert str(restored) in reported[0], reported
+        assert "relearning" in reported[0], reported

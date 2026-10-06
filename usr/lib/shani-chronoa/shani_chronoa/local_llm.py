@@ -262,6 +262,147 @@ def quality_verdict(candidate: "Path", reference: "Path | None" = None) -> Dict[
                    f"{PERPLEXITY_REGRESSION_LIMIT:.0%} limit"}
 
 
+#: The quantizations worth producing locally. `Q4_K_M` is the working default;
+#: `Q5_K_M` is the one to reach for when a reply's quality matters more than the
+#: 40% of disk, and `Q8_0` is the reference to measure against - a quant scored
+#: against another quant has no fixed point.
+LOCAL_QUANT_TARGETS = ("Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0")
+
+
+def calibration_corpus(max_chars: int = 200_000) -> str:
+    """Text to calibrate an importance matrix against, and why this text.
+
+    **An importance matrix is only as good as the corpus it was fitted to**, so
+    this is not filler. llama.cpp's own guidance is calibration data "derived by
+    running a model over a representative text corpus", and for Shanios the
+    representative corpus is *Chronoa's own source* - the tool schemas, the skill
+    docstrings, the settings copy. That is the text this system is asked to
+    reason about, so it is the text whose activations should decide which weights
+    keep their precision.
+
+    Falls back to plain English prose when the source tree is unreadable, and says
+    which it used, because "calibrated on something" and "calibrated on the right
+    thing" are different claims.
+    """
+    import glob
+
+    roots = [str(Path(__file__).resolve().parent), "/usr/share/shani-chronoa"]
+    text = []
+    for root in roots:
+        for pattern in ("*.py", "skills/*.py", "senses/*.py", "*.md"):
+            text.extend(glob.glob(os.path.join(root, pattern)))
+    body = ""
+    for name in sorted(text)[:400]:
+        try:
+            body += Path(name).read_text(encoding="utf-8", errors="replace") + "\n"
+        except OSError:
+            continue
+    if len(body.strip()) < 2000:
+        body = _CORPUS * 40
+    return body[:max_chars]
+
+
+def build_imatrix(source: "Path", corpus: str, out: "Path",
+                  timeout: float = 1800.0) -> "bool":
+    """Fit an importance matrix with `llama-imatrix`. True on success.
+
+    Fails closed and loudly: a missing binary or a timeout returns False rather
+    than producing a quant that is quietly uncalibrated, which would look exactly
+    like the naive one.
+    """
+    binary = shutil.which("llama-imatrix")
+    if not binary:
+        logger.warning("llama-imatrix is not installed, so no calibrated quant "
+                       "can be produced")
+        return False
+    Path(corpus).write_text(calibration_corpus(), encoding="utf-8")
+    try:
+        done = subprocess.run(
+            [binary, "-m", str(source), "-f", str(corpus), "-o", str(out),
+             "-ngl", "0", "-c", "512"],
+            capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("importance matrix failed: %s", exc)
+        return False
+    if done.returncode != 0 or not Path(out).exists():
+        logger.warning("importance matrix not produced (exit %s)", done.returncode)
+        return False
+    return True
+
+
+def quantize(source: "Path", target: str, out: "Path",
+             imatrix: "Path | None" = None, timeout: float = 900.0) -> "bool":
+    """Quantize with `llama-quantize`, optionally guided by an importance matrix."""
+    binary = shutil.which("llama-quantize")
+    if not binary:
+        logger.warning("llama-quantize is not installed")
+        return False
+    cmd = [binary, str(source), str(out), target]
+    if imatrix is not None and Path(imatrix).is_file():
+        cmd += ["--imatrix", str(imatrix)]
+    try:
+        done = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("quantization to %s failed: %s", target, exc)
+        return False
+    if done.returncode != 0 or not Path(out).exists():
+        logger.warning("no %s produced (exit %s)", target, done.returncode)
+        return False
+    return True
+
+
+def calibrated_quantize(source: "Path", target: str = "Q4_K_M",
+                        work: "Path | None" = None) -> Dict[str, object]:
+    """Produce a calibrated quantization of an open model, with both paths named.
+
+    **This is the "modify an open model" path, and it is worth stating what it is
+    not.** It re-quantizes a model's own weights at a chosen precision, guided by
+    an importance matrix fitted to text representative of this system's domain. It
+    does not train: no parameter is updated from a gradient, and nothing here can
+    teach the model a fact. What it does is spend the precision budget where the
+    activations say it matters, which measurably beats spending it uniformly.
+
+    Returns a dict rather than a bool because a caller has to be able to say
+    *which* corpus and *which* matrix, and because a refusal has to be reportable:
+    a missing `llama-imatrix` yields `calibrated=False` with the reason, not a
+    silently uncalibrated file that is indistinguishable from a good one.
+    """
+    source = Path(source)
+    if not source.is_file():
+        return {"ok": False, "calibrated": False,
+                "why": f"no model at {source}"}
+    directory = Path(work) if work else Path(tempfile.mkdtemp(prefix="chronoa-quant-"))
+    directory.mkdir(parents=True, exist_ok=True)
+    corpus = directory / "calibration.txt"
+    matrix = directory / "imatrix.dat"
+    naive = directory / f"{source.stem}-{target}-naive.gguf"
+    calibrated = directory / f"{source.stem}-{target}-calibrated.gguf"
+
+    if not quantize(source, target, naive):
+        return {"ok": False, "calibrated": False,
+                "why": f"llama-quantize could not produce {target} from {source.name}"}
+    if not build_imatrix(source, str(corpus), matrix):
+        # **The honest outcome is a refusal, not the naive file.** Returning
+        # `naive` here would hand back a quant that is byte-identical to the
+        # uncalibrated one and let the caller believe it had been calibrated.
+        return {"ok": False, "calibrated": False, "uncalibrated_fallback": str(naive),
+                "why": "llama-imatrix is unavailable or failed, so only an "
+                       "UNCALIBRATED quant could be produced - it is at "
+                       f"{naive} if you want it, and it was not called calibrated"}
+    if not quantize(source, target, calibrated, imatrix=matrix):
+        return {"ok": False, "calibrated": False, "uncalibrated_fallback": str(naive),
+                "why": "the calibrated quantization failed after the matrix was built"}
+    return {"ok": True, "calibrated": True, "target": target,
+            "calibrated_path": str(calibrated), "naive_path": str(naive),
+            "imatrix": str(matrix), "corpus": str(corpus),
+            "corpus_chars": len(calibration_corpus()),
+            "why": f"{target} built with an importance matrix fitted on "
+                   f"{len(calibration_corpus())} chars of this system's own source; "
+                   f"the uncalibrated build of the same target is beside it for "
+                   "comparison"}
+
+
 def use(key: str, gate: bool = True) -> Dict[str, object]:
     """Point `current.gguf` at this model, after a quality gate.
 

@@ -310,6 +310,9 @@ def build(app: Any) -> Gtk.Widget:
     _add_row(have, ROW_TITLES[4], _router_sentence())
     _add_row(have, ROW_TITLES[5], _outcome_sentence())
     _add_row(have, "What the log teaches", _lessons_sentence())
+    _add_row(have, "What this machine has seen", _experience_sentence())
+    _add_row(have, "Does the bandit beat chance", _bandit_quality_sentence())
+    _add_row(have, "How much is trusted", _organ_status_sentence())
     body.append(have)
 
     # --- train -----------------------------------------------------------
@@ -346,6 +349,16 @@ def build(app: Any) -> Gtk.Widget:
              "which stand-in worked is a fact about the tool and not about the "
              "sender's hardware.",
              suffix=_pair(import_button, export_button))
+
+    restore_button = _button("Restore a retired model",
+                             lambda b: _restore_retired(b, status))
+    _add_row(train, "Bring back a model set aside earlier",
+             "When the feature space a model was fitted in comes back - after a "
+             "revert, a rollback, a branch re-merged - that model is exactly the "
+             "right one and relearning it costs a full fit. Nothing is moved "
+             "aside any more, so this only fires on a machine that already has "
+             "one, and says so when there is none.",
+             suffix=restore_button)
 
     merge_button = _button("Merge models", lambda b: _merge(b, status))
     _add_row(train, "Share what several machines learned",
@@ -558,6 +571,104 @@ def _pair(*buttons: Gtk.Button) -> Gtk.Box:
     for button in buttons:
         box.append(button)
     return box
+
+
+def _experience_sentence() -> str:
+    """What this machine has seen, in one paragraph, with no model required.
+
+    **Wired 2026-10-06.** `experience_summary()` had zero callers, so the one
+    function that answers "is there enough here to learn from?" was unreachable -
+    and it is the honest answer to a question the panel cannot otherwise ask,
+    because "no model" and "plenty of data, no fit yet" look identical from here.
+    """
+    from shani_chronoa import learning
+    try:
+        return learning.experience_summary().strip()
+    except Exception as exc:  # noqa: BLE001 - an unreadable log is not a summary
+        return f"could not be read ({type(exc).__name__})"
+
+
+def _bandit_quality_sentence() -> str:
+    """**Whether the bandit is actually learning, measured rather than assumed.**
+
+    `evaluate_bandit()` existed with zero callers, so "the bandit works" was an
+    assumption. It needs no labels - an arm earns a reward only on a `verified`
+    or `failed` verdict - so it is the one part of this layer that can be scored
+    on today's data at all.
+
+    On this machine it reports **`beats_chance: False`** with a rank correlation
+    of -0.5 over 3 ranked tools, and the row says so. A panel that showed the arms
+    without this would let three thin estimates read as a ranking.
+    """
+    from shani_chronoa import learning
+    try:
+        verdict = learning.evaluate_bandit()
+    except Exception as exc:  # noqa: BLE001
+        return f"could not be measured ({type(exc).__name__})"
+    if not verdict.get("measured"):
+        return "not measurable yet - the bandit needs scored calls to be ranked"
+    ranked = int(verdict.get("tools_ranked") or 0)
+    if not ranked:
+        return "no scored calls yet, so there is nothing to rank"
+    parts = [f"{ranked} tool(s) scored",
+             f"top-5 precision {float(verdict.get('precision_at_5') or 0.0):.0%}"]
+    if verdict.get("beats_chance"):
+        parts.append("and it ranks them better than chance")
+    else:
+        correlation = verdict.get("spearman_vs_empirical")
+        parts.append(
+            "but it does NOT rank them better than chance yet"
+            + (f" (rank correlation {float(correlation):+.1f})"
+               if isinstance(correlation, (int, float)) else ""))
+    return "; ".join(parts)
+
+
+def _organ_status_sentence() -> str:
+    """How much learned weight exists, and how much of it is trusted.
+
+    `organ_status()`'s docstring claimed the Inventory panel showed this. It does
+    not - Inventory renders `organism.INVENTORY`, a static table of which organs
+    are built, and never mentions tools, trust or doubt. So the function was
+    orphaned *and* the claim was wrong; the numbers belong here.
+    """
+    from shani_chronoa import learning
+    try:
+        found = learning.organ_status()
+    except Exception as exc:  # noqa: BLE001
+        return f"could not be read ({type(exc).__name__})"
+    total = int(found.get("tools_with_history") or 0)
+    if not total:
+        return ("none - no tool has been scored enough to carry a learned "
+                "weight, so nothing here is trusted or doubted yet")
+    return (f"{total} tool(s) with history: "
+            f"{int(found.get('trusted') or 0)} trusted, "
+            f"{int(found.get('doubted') or 0)} doubted")
+
+
+def _restore_retired(button: Gtk.Button, status: Gtk.Label) -> None:
+    """Put back a model that was set aside for a feature space that is current.
+
+    **Wired 2026-10-06.** `adopt_retired()` was fully written, digest-checking,
+    with zero callers. Retirement itself was removed on purpose - a rename is the
+    only genuinely fragile operation in this layer, and the space check on load
+    already refuses a stale model without anyone moving anything - so this fires
+    only on a machine that already has a set-aside model, from an older version.
+    When there is none, that is what it says, rather than reporting success.
+    """
+    def work(report: Callable[[str], None]) -> None:
+        from shani_chronoa import learning
+        try:
+            restored = learning.adopt_retired()
+        except Exception as exc:  # noqa: BLE001 - a bad file is a refusal
+            report(f"Could not restore: {exc}")
+            return
+        report(f"Restored {restored} rather than relearning it; it was fitted on "
+               "this machine's own log." if restored else
+               "Nothing was set aside for the current feature space - nothing is "
+               "moved aside any more, so this only finds a model left by an "
+               "older version. Nothing to do.")
+
+    _run_async(button, work, status)
 
 
 def _lessons_sentence() -> str:

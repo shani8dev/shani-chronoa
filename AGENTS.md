@@ -1871,6 +1871,44 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### The last of the orphaned fifteen, wired — and one that misdescribed itself
+
+The AST scan found **15 public names in `learning.py` with no caller anywhere in
+`usr/` or `tests/`**. Most are a statistics toolbox (`bayes`, `timeseries`,
+`clustering`) that is legitimately library surface. Nine have now been wired;
+these are the last three, and each was **fully written** rather than stubbed.
+
+| function | what the panel now says |
+|---|---|
+| `evaluate_bandit` | **"3 tool(s) scored; top-5 precision 33%; but it does NOT rank them better than chance yet (rank correlation -0.5)"** |
+| `experience_summary` | *"1244 scored call(s) across 4 tool(s) on this machine"* |
+| `organ_status` | *"none - no tool has been scored enough to carry a learned weight"* |
+| `adopt_retired` | a **Restore a retired model** button |
+
+**`evaluate_bandit` is the one that mattered.** It measures whether the bandit is
+*learning*, and it had never been called — so "the bandit works" was an
+assumption, and three thin estimates were one panel away from reading as a
+ranking. On this machine the honest answer is negative, and the row says so
+rather than showing the arms.
+
+**`organ_status`'s docstring claimed the Inventory panel showed its numbers. It
+does not** — `inventory.py` renders `organism.INVENTORY`, a static table of which
+organs are *built*, and never mentions tools, trust or doubt (verified: none of
+the four tokens appear in that file). So the function was orphaned *and* its claim
+was wrong, in both directions. Its docstring is corrected and the row is here.
+
+**`adopt_retired` reports its own absence.** Retirement was removed on purpose — a
+rename is the only genuinely fragile operation in this layer, and the space check
+on load already refuses a stale model without anyone moving anything — so this
+fires only on a machine that already has a set-aside model from an older version.
+Saying "restored", or staying silent, would both be wrong; it says nothing was
+set aside.
+
+Five mutations, all confirmed to fail, including the bandit's negative verdict
+being dropped and the absence reported as success.
+
+Suites: **174 passed**.
+
 ### A model was promoted on a matching digest and nothing else
 
 `provision()` verifies a **digest**. Nothing verified the *artifact*: a

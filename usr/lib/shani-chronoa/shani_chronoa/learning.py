@@ -1525,7 +1525,15 @@ def reorder(ranked: Sequence[Tuple], learned: Optional[Dict[str, float]] = None,
 
 
 def organ_status(tracker: Optional[object] = None) -> Dict[str, object]:
-    """What the Inventory panel shows, from the history that exists."""
+    """How much learned weight there is, and how much of it is trusted.
+
+    **This belonged to the Learning panel all along, and its docstring said
+    Inventory.** `gui/surfaces/inventory.py` renders `organism.INVENTORY` - a
+    static table of which organs are built - and never mentions tools with
+    history, trust or doubt. So the claim was wrong in both directions: this was
+    orphaned, *and* the panel it named does not show these numbers. The Learning
+    panel now does.
+    """
     learned = weights_from_tracker(tracker)
     if not learned:
         return {"tools_with_history": 0, "trusted": 0, "doubted": 0}
