@@ -46,7 +46,25 @@ def _run(arguments: dict) -> str:
         elif suffix in IMAGES:
             if not shutil.which("tesseract"):
                 return "Reading pictures needs tesseract."
-            r = subprocess.run(["tesseract", str(path), "-", "-l", "eng"], capture_output=True, text=True, timeout=120)
+            # **Read in the user's languages, not silently just English.** This
+            # used to hardcode `-l eng`, so a person who turned on Hindi or
+            # Marathi in setup got tesseract forcing every Latin-only guess onto
+            # a Devanagari page - confident-looking garbage, the same failure
+            # `scan_document` already refuses by routing through the OCR sense.
+            # `senses.ocr.default_languages()` is English plus every installed
+            # language the person turned on, and `find_tessdata_dir()` honours
+            # the `TESSDATA_PREFIX` setup set up - so no second copy of that
+            # knowledge lives here.
+            try:
+                from shani_chronoa.senses import ocr
+                argv = ["tesseract", str(path), "-", "-l",
+                        ocr.build_language_argument(ocr.default_languages())]
+                tessdata = ocr.find_tessdata_dir()
+                if tessdata:
+                    argv += ["--tessdata-dir", tessdata]
+            except Exception:  # noqa: BLE001 - a settings problem must not stop reading English
+                argv = ["tesseract", str(path), "-", "-l", "eng"]
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
         else:
             return f"I read PDFs and pictures; for {suffix or 'this'} files use read_text_file."
     except subprocess.TimeoutExpired:
