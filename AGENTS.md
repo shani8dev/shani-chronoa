@@ -1750,6 +1750,46 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### And the *input* side had the same defect, which fixing the output side did not
+
+I fixed the Voice panel's engine rows and stopped. The speech-**input** half of
+the same panel was wrong in the same way, and by the same mechanism:
+
+- **`_stt_for`'s guard was whisper-shaped.** It read
+  `hasattr(live, "model_path") and callable(live.is_available)` — which
+  identifies a speech engine by a field only the two *local* backends happen to
+  have. `CloudSTT` has `is_available` and `transcribe` and no `model_path`, so
+  the guard rejected the **running** object and the panel built a local
+  `WhisperSTT` instead. Measured: the row read **"Whisper.cpp (whisper-cli)"**
+  and *"the whisper.cpp model ggml-base.bin is not downloaded"* on a machine
+  that was transcribing in the cloud and had no whisper-cpp at all. The guard's
+  *intent* — "the panel must not describe a different object" — is right; the
+  implementation identified the object by the wrong thing.
+  `is_available` plus `transcribe` is the contract `stt.build_stt` says its own
+  two backends share, so that is what it asks for now.
+- **`senses/hearing.stt_problem` raised on it.** It read
+  `engine_stt.whisper_path` and `.model_path` directly, so any engine without
+  those attributes raised `AttributeError`; the caller caught it and reported
+  `unknown - AttributeError: 'CloudSTT' object has no attribute 'whisper_path'`.
+  Honest, and useless — it points at whisper-cpp on a machine that does not use
+  it. An engine with neither attribute is now asked **itself**, which is what
+  `CloudSTT.refusal()` is for: an engine that can explain its own absence beats
+  any explanation assembled from attributes it happens not to have.
+
+`CloudSTT.label` is **"Cloud provider"**, read verbatim by both
+`app/voice.py:_stt_backend_label()` and the panel, so the log line and the row
+say the same thing.
+
+Mutations run and confirmed to fail: the guard back to `hasattr(model_path)` (3),
+the label back to the configured backend (1), `stt_problem` reading
+`whisper_path` again (3), `stt_problem` refusing to ask the engine (2).
+
+**One test-hygiene note, because I wrote it badly first.** The test that
+exercises `stt_problem`'s refusal assigns `cloud_voice._read_switch` directly and
+restores it in a `finally`. If the assertion fails before the restore, the
+module stays globally patched for every later test in the file — a failure
+corrupting the rest of the run. It uses `monkeypatch` now.
+
 `COST["cloud"]` claims **no real-time factor**, and says why: the cost is not
 time but that the reply text leaves the machine, and quoting a latency would make
 the row read as a neutral alternative to Kokoro.

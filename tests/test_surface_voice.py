@@ -73,7 +73,7 @@ from gi.repository import Gtk  # noqa: E402
 
 Gtk.init()
 
-from shani_chronoa import sherpa, stt, tts, voices  # noqa: E402
+from shani_chronoa import cloud_voice, sherpa, stt, tts, voices  # noqa: E402
 from shani_chronoa.gui.surfaces import common, voice as surface  # noqa: E402
 
 REGISTRY = pathlib.Path(surface.__file__).with_name("__init__.py")
@@ -766,3 +766,128 @@ def test_the_cloud_row_says_the_reply_leaves_the_machine():
     cost = surface.COST["cloud"].lower()
     assert "leaves the machine" in cost or "sent to a cloud provider" in cost, cost
     assert "off by default" in cost, cost
+
+
+# -- cloud speech input: the panel must describe the engine that is running --
+
+
+class TestCloudSpeechInput:
+    """**By symmetry with the output side, which was fixed first.**
+
+    `PiperTTS.engine()` grew a `cloud` link and `_chain()` was not extended, so a
+    machine speaking through a provider was told it was using nothing. The input
+    side had the same defect and I fixed only the output side: `_stt_for`'s guard
+    was `hasattr(live, "model_path") and callable(live.is_available)`, which
+    identifies a speech engine by a field only the two *local* backends have.
+
+    Measured on the real functions with a running `CloudSTT`: the guard rejected
+    the running object, the panel built a local `WhisperSTT` instead, and the row
+    read **"Whisper.cpp (whisper-cli)"** with
+    *"the whisper.cpp model ggml-base.bin is not downloaded"* - on a machine that
+    was transcribing in the cloud and had no whisper.cpp at all.
+
+    `is_available` plus `transcribe` is the contract `stt.build_stt` says its own
+    two backends share, so that is what the panel asks for now.
+    """
+
+    @staticmethod
+    def _cloud_app(wires):
+        from shani_chronoa import cloud_voice
+        from shani_chronoa.config import ChronoaConfig
+        wires["stt"] = wires["tts"] = True
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(cloud_voice, "_read_switch",
+                       lambda name, config=None: True)
+        monkey.setattr(cloud_voice, "_provider_key",
+                       lambda pid, api_keys=None, config=None: "sk-test")
+        monkey.setattr(cloud_voice.egress, "privacy_mode_enabled", lambda: False)
+        config = ChronoaConfig()
+        app = type("A", (), {"config": config,
+                             "stt": cloud_voice.CloudSTT(),
+                             "dispatcher": None})()
+        return app, config, monkey
+
+    def test_the_panel_describes_the_engine_that_is_actually_running(self):
+        app, _config, monkey = self._cloud_app({})
+        try:
+            engine, where = surface._stt_for(app, app.config)
+        finally:
+            monkey.undo()
+        assert isinstance(engine, cloud_voice.CloudSTT), (
+            f"the panel rejected the running object ({engine!r}, via {where}) and "
+            "described a locally built engine instead - so it reports a whisper "
+            "binary and model as missing on a machine using neither")
+
+    def test_the_row_names_the_cloud_and_not_whisper(self):
+        app, _config, monkey = self._cloud_app({})
+        try:
+            speech = surface._speech_input(app, app.config)
+        finally:
+            monkey.undo()
+        assert speech.label == "Cloud provider", (
+            f"the row reads {speech.label!r} while a cloud provider is "
+            "transcribing, naming a program that was never invoked")
+        assert "hissper" not in speech.label, speech.label
+
+    def test_a_working_cloud_engine_reports_no_problem(self):
+        """`stt_problem` used to raise on it, and the caller showed the traceback."""
+        app, _config, monkey = self._cloud_app({})
+        try:
+            speech = surface._speech_input(app, app.config)
+        finally:
+            monkey.undo()
+        assert speech.state is True
+        assert speech.problem == "", (
+            f"an engine that can listen is reported as {speech.problem!r}, which "
+            "would send somebody to install whisper-cpp on a machine that does "
+            "not use it")
+        assert "unknown" not in speech.problem.lower(), speech.problem
+
+    def test_an_unavailable_cloud_engine_names_its_own_reason(self, monkeypatch):
+        """Not `whisper-cpp is not installed` - that is the wrong program.
+
+        **Through `monkeypatch`, not by assigning and restoring by hand.** The
+        first version did `cloud_voice._read_switch = ...` in a `try/finally`,
+        which leaves the module globally patched for every later test whenever
+        the assertion fails before the restore - and a failure is exactly when
+        you least want to also corrupt the rest of the file.
+        """
+        from shani_chronoa import cloud_voice
+        from shani_chronoa.senses import hearing
+
+        monkeypatch.setattr(cloud_voice, "_read_switch",
+                            lambda name, config=None: False)
+        problem = hearing.stt_problem(cloud_voice.CloudSTT())
+        assert "cloud-stt-enabled" in problem, (
+            f"the reason given is {problem!r}, which does not name the switch "
+            "that has to be turned on")
+        assert "hissper" not in problem, problem
+
+    def test_a_local_engine_is_unchanged(self):
+        """The fix must not move the two local backends' answers."""
+        from shani_chronoa.config import ChronoaConfig
+        app = type("A", (), {"config": ChronoaConfig(), "stt": None,
+                             "dispatcher": None})()
+        speech = surface._speech_input(app, app.config)
+        assert speech.label == "Whisper.cpp (whisper-cli)", speech.label
+        assert "model" in speech.problem or "installed" in speech.problem, speech.problem
+
+
+def test_stt_problem_does_not_raise_on_an_engine_without_whisper_paths():
+    """The AttributeError this guarded, asserted as a property rather than a shape."""
+    from shani_chronoa.senses import hearing
+
+    class Engine:
+        """No `whisper_path`, no `model_path`, and no `refusal()` either."""
+
+        def is_available(self):
+            return False
+
+        def transcribe(self, path):
+            return ""
+
+    problem = hearing.stt_problem(Engine())
+    assert isinstance(problem, str) and problem, (
+        "an engine with nothing to check must still be given an answer, not an "
+        "AttributeError")
+    assert "hissper" not in problem, problem

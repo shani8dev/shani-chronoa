@@ -225,7 +225,31 @@ def stt_problem(engine_stt: STT) -> str:
     The parameter is not named `stt` because that is the module imported at the
     top of this file, and shadowing it inside a function that reasons about
     engines is the kind of quiet trap this repo keeps paying for.
+
+    **Duck-typed from 2026-10-06, and the previous version raised.**
+    `engine_stt.whisper_path` and `.model_path` were read directly, so an engine
+    without those attributes - which is every engine that is not one of the two
+    local ones - raised `AttributeError`. `cloud_voice.CloudSTT` has neither, so
+    on a machine with cloud recognition switched on and no local model this
+    function blew up and the caller reported
+    `unknown - AttributeError: 'CloudSTT' object has no attribute 'whisper_path'`
+    - honest, and useless: it would send somebody to install whisper-cpp on a
+    machine that was transcribing perfectly well in the cloud.
+
+    So an engine with neither attribute is asked **itself** first. That is what
+    `CloudSTT.refusal()` is for, and preferring it over a guess is the whole
+    fix: an engine that can explain its own absence beats any explanation
+    assembled from attributes it happens not to have.
     """
+    if not hasattr(engine_stt, "whisper_path") and not hasattr(engine_stt, "model_path"):
+        refusal = getattr(engine_stt, "refusal", None)
+        if callable(refusal):
+            try:
+                return str(refusal() or "")
+            except Exception:  # noqa: BLE001 - fall through to the generic answer
+                logger.debug("the engine's own refusal() raised", exc_info=True)
+        return ("this speech engine has no local program or model to check, so "
+                "whether it can listen is not something this page can tell you")
     engine = "parakeet-cli" if isinstance(engine_stt, ParakeetSTT) else "whisper.cpp"
     if not engine_stt.whisper_path or not os.path.exists(engine_stt.whisper_path):
         return (

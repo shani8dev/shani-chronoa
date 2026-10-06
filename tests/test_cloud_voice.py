@@ -409,7 +409,7 @@ def test_the_status_line_names_the_engine_that_actually_ran(wires, monkeypatch):
 
     app = ChronoaApplication()
     app.stt = app._build_stt()
-    assert app._stt_backend_label() == "Cloud", (
+    assert app._stt_backend_label() == "Cloud provider", (
         f"the status line says {app._stt_backend_label()!r} while a cloud "
         "provider is transcribing, naming a program that was never run")
     assert "Whisper.cpp" not in app._stt_backend_label()

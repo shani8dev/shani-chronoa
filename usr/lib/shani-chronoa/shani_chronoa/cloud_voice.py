@@ -514,12 +514,18 @@ class CloudSTT:
         self._config = config
         self.last_provider = ""
 
-    #: What the app's status line must call this. `_stt_backend_label()` used to
-    #: answer from the *configured* backend, so a machine running cloud
-    #: recognition logged "stt=Whisper.cpp" and named a program that was never
-    #: invoked - the repo's own "two log lines a millisecond apart, disagreeing"
-    #: failure, reached from a different direction. Read off the object instead.
-    label = "Cloud"
+    #: What the app's status line and the Voice panel must call this.
+    #:
+    #: `_stt_backend_label()` used to answer from the *configured* backend, so a
+    #: machine running cloud recognition logged `stt=Whisper.cpp` and named a
+    #: program that was never invoked - the repo's own "two log lines a
+    #: millisecond apart, disagreeing" failure, reached from a different
+    #: direction. `gui/surfaces/voice.py` had the same problem for the same
+    #: reason, and both now read this.
+    #:
+    #: It names the *engine*, not the transport, deliberately: "cloud provider"
+    #: is what somebody would say, and it is what the panel's row should say too.
+    label = "Cloud provider"
 
     # -- the gate ---------------------------------------------------------
     def refusal(self) -> Optional[str]:

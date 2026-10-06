@@ -638,9 +638,22 @@ def _stt_for(app: Any, config: Any) -> Tuple[Optional[Any], str]:
     actually installed, and Parakeet's own default when that backend is chosen.
     A stub app with neither a live STT nor a hardware profile falls back to the
     same `base` `senses/hearing.py` falls back to.
+
+    **The guard tests the contract, not a whisper attribute.** It used to be
+    `hasattr(live, "model_path") and callable(live.is_available)` - which
+    identifies a speech engine by a field only the two local backends happen to
+    have. `cloud_voice.CloudSTT` has `is_available` and `transcribe` and no
+    `model_path`, so on a machine running cloud recognition the guard rejected
+    the *running* object and the panel described a locally built `WhisperSTT`
+    instead - reporting the whisper binary and a model file as missing on a
+    machine that was transcribing in the cloud. Measured.
+
+    `is_available` plus `transcribe` is the whole contract `stt.build_stt` says
+    its two backends share, so it is what the panel asks for now.
     """
     live = getattr(app, "stt", None)
-    if hasattr(live, "model_path") and callable(getattr(live, "is_available", None)):
+    if (callable(getattr(live, "is_available", None))
+            and callable(getattr(live, "transcribe", None))):
         return live, "the running app's own stt object"
     backend = _read_setting(config, "stt_backend", stt.BACKEND_WHISPER) or stt.BACKEND_WHISPER
     model = _read_setting(config, "whisper_model", "")
@@ -675,6 +688,14 @@ def _speech_input(app: Any, config: Any) -> _Speech:
         else "Whisper.cpp (whisper-cli)"
     try:
         engine, where = _stt_for(app, config)
+        # **From the object, once there is one.** The label above answers the
+        # *configured* backend, which is only a hint about what will be tried -
+        # and the running engine can be something else. `CloudSTT.label` is
+        # "Cloud", and reading it is what stops this panel saying "Whisper.cpp"
+        # on a machine that has no whisper.cpp at all.
+        own = getattr(engine, "label", None)
+        if own:
+            label = str(own)
     except Exception as exc:  # noqa: BLE001 - a construction that raised is unknown
         logger.debug("cannot construct the speech-input engine", exc_info=True)
         return _Speech(backend, label, "", "", "", None, None, f"unknown - {_clip(exc)}",
