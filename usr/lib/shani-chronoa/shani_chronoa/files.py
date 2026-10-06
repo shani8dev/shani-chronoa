@@ -91,18 +91,41 @@ def resolve_in_home(raw: str) -> Path:
 
 
 def refuse_catalogue(path: Path, verb: str) -> None:
-    """Refuse to `verb` a filesystem root or the user's entire home directory.
+    """Refuse to `verb` a filesystem root, the user's home, **or anything that
+    contains one**.
 
     A whole-filesystem or whole-home delete is almost never what was meant, and
     `shutil.rmtree` would do it without complaint.
+
+    **The ancestry test is the load-bearing part, and it was missing.** This
+    compared `path == root`, which refuses `/` and `~` and nothing else - but
+    `path` being a *parent* of a protected root destroys it just as completely.
+    Measured on this machine, with the home directory relocated to a temp tree
+    so nothing real was at risk: `delete_file` with `recursive=True` and
+    `path=<the parent of $HOME>` called
+    `shutil.rmtree` on that directory, which held the user's entire home
+    directory inside it, and `refuse_catalogue` said nothing.
+
+    So the check is `root.is_relative_to(path)` - "does this path contain a
+    protected root" - and equality is just the `path is root` case of it.
+
+    **Severity, honestly stated.** On a conventional multi-user Linux box the
+    parent of `$HOME` is `/home`, which is root-owned, so the `rmtree` fails
+    with `EACCES` and the filesystem stops what this guard missed. It is a
+    real hole on any layout where the parent is writable by the user - a
+    single-user system with `$HOME` directly under a user-owned directory, or
+    any of the four other callers (`extract_archive`, `trash_file`,
+    `edit_file`, `undo_last_change`) handed such a path - and it is a hole in
+    the function whose documented job is to be the thing that does not have
+    one.
     """
     for root in PROTECTED_ROOTS:
         try:
-            if path == root:
+            if root.is_relative_to(path):
                 raise PathProblem(
-                    f"Refusing to {verb} {path}: that is a whole filesystem or "
-                    f"home directory, not a file. Delete the specific files "
-                    f"inside it instead."
+                    f"Refusing to {verb} {path}: it is a whole filesystem or "
+                    f"home directory, not a file - and it contains "
+                    f"{root}. Delete the specific files inside it instead."
                 )
         except PermissionError:  # pragma: no cover - root comparison is best-effort
             continue
