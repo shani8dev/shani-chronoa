@@ -1784,6 +1784,17 @@ Mutations run and confirmed to fail: the guard back to `hasattr(model_path)` (3)
 the label back to the configured backend (1), `stt_problem` reading
 `whisper_path` again (3), `stt_problem` refusing to ask the engine (2).
 
+**Every other `hasattr` guard in the tree was checked and is deliberate**, so
+nobody re-audits them: 19 name a specific attribute, and the only one that
+identified a *pluggable implementation* by an implementation detail was the guard
+above. The rest are legitimate — `settings_window/voice.py`'s
+`hasattr(live, "use_config")` guards a *call* on the single class that has one;
+`gui/surfaces/models.py`'s `hasattr(voice, "label")` exists precisely because
+`KOKORO_VOICES` holds `KokoroVoice` objects on one path and strings on another;
+`midi.py`'s `hasattr(..., "read_bytes")` is the documented fix for `_Bytes`;
+the `SIGALRM`/`setitimer`/`flatten`/`get_children` ones are GTK- and
+platform-version probes.
+
 **One test-hygiene note, because I wrote it badly first.** The test that
 exercises `stt_problem`'s refusal assigns `cloud_voice._read_switch` directly and
 restores it in a `finally`. If the assertion fails before the restore, the
