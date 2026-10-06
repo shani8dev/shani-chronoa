@@ -193,6 +193,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_video": ("Files", "Read a video's length, size, and format"),
     "read_audio": ("Files", "Read an audio file's length, format, and bitrate"),
     "read_image": ("Files", "Read a picture's dimensions, format, and colour"),
+    "create_video": ("Imagine", "Make a slideshow or colour clip"),
+    "create_document": ("Files", "Create a markdown, text, or HTML document"),
+    "convert_document": ("Files", "Convert a document between md, txt, and html"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
     # ── the optional extras get their own pages ─────────────────────────────
     #
@@ -667,7 +670,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
-    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image",
+    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image", "create_document", "convert_document",
     "encode_text", "convert_color", "calendar_month", "cleanup_report", "tailscale_status",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
@@ -727,7 +730,7 @@ MUTATING_TOOLS = frozenset({
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "reminders", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
-    "generate_password", "do_not_disturb", "convert_media", "edit_image", "edit_video", "edit_audio",
+    "generate_password", "do_not_disturb", "convert_media", "edit_image", "edit_video", "edit_audio", "create_video",
     "find_emoji", "stopwatch", "bluetooth_devices",
     # writes only new files (a saved result, a chart); the source is never written
     "analyze_table", "qr_code", "generate_image", "photo_video", "recording",
