@@ -492,3 +492,93 @@ class TestNegativeControl:
         assert restored.status == diagnostics.STATUS_UNKNOWN, (
             "the honest answer did not come back after the restore"
         )
+
+class TestTwoMoreProbesThatExistedAndWereNotAsked:
+    """`audio.audio_status()` and `sandbox.seccomp.is_active()` had no callers.
+
+    Both are query-shaped and non-blocking, which is exactly what this panel is
+    for - and each carries a distinction its own docstring says a caller needs.
+    """
+
+    def test_audio_status_names_all_three_states(self, monkeypatch):
+        """`audio_status()`'s docstring: a caller "has to be able to tell 'not
+        started yet' from 'hung' from 'gone', because only one of those three is
+        worth waiting for." A boolean cannot carry that."""
+        from shani_chronoa import audio
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+
+        class Child:
+            def __init__(self, name, state):
+                self.name, self.state = name, state
+
+        monkeypatch.setattr(audio, "audio_status", lambda: [
+            Child("pw-record", "running"), Child("play", "starting"),
+            Child("stale", "gone")])
+        status, detail = surface._audio_children()
+        assert status == surface.STATUS_NOT_WORKING, detail
+        # All three named, and which one is worth waiting for.
+        assert "stale" in detail and "gone" in detail.lower(), detail
+        assert "starting" in detail.lower(), detail
+        assert "worth waiting for" in detail, detail
+
+    def test_no_children_reads_as_not_yet_rather_than_a_fault(self, monkeypatch):
+        from shani_chronoa import audio
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+
+        monkeypatch.setattr(audio, "audio_status", lambda: [])
+        status, detail = surface._audio_children()
+        assert status == surface.STATUS_UNKNOWN, detail
+        assert "before the first recording" in detail, detail
+
+    def test_all_running_is_working(self, monkeypatch):
+        from shani_chronoa import audio
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+
+        class Child:
+            def __init__(self, name, state):
+                self.name, self.state = name, state
+
+        monkeypatch.setattr(audio, "audio_status",
+                            lambda: [Child("pw-record", "running")])
+        assert surface._audio_children()[0] == surface.STATUS_WORKING
+
+    def test_a_raising_probe_is_unknown_not_a_fault(self, monkeypatch):
+        from shani_chronoa import audio
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+
+        def boom():
+            raise RuntimeError("no supervisor")
+
+        monkeypatch.setattr(audio, "audio_status", boom)
+        status, detail = surface._audio_children()
+        assert status == surface.STATUS_UNKNOWN, detail
+        assert "RuntimeError" in detail, detail
+
+    def test_seccomp_refuses_to_claim_a_machine_wide_fact(self, monkeypatch):
+        """**Its own docstring's caution, kept.** The filter is installed in each
+        sandboxed child, so this long-lived process reads False while every skill
+        call is still filtered - a row that said "no seccomp" would be a lie."""
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+        from shani_chronoa.sandbox import seccomp
+
+        monkeypatch.setattr(seccomp, "is_active", lambda: False)
+        status, detail = surface._seccomp()
+        assert status == surface.STATUS_UNKNOWN, (
+            f"reading False must not read as a working filter: {detail}")
+        assert "sandboxed child" in detail, detail
+
+    def test_seccomp_true_is_reported_plainly(self, monkeypatch):
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+        from shani_chronoa.sandbox import seccomp
+
+        monkeypatch.setattr(seccomp, "is_active", lambda: True)
+        assert surface._seccomp()[0] == surface.STATUS_WORKING
+
+    def test_both_rows_use_only_the_closed_vocabulary(self):
+        """`STATUS_WORDS` is three words and a row may not use a fourth."""
+        from shani_chronoa.gui.surfaces import diagnostics as surface
+
+        for probe in (surface._audio_children, surface._seccomp):
+            status, _detail = probe()
+            assert status in surface.STATUS_WORDS, (
+                f"{probe.__name__} used {status!r}, which is not one of the three")

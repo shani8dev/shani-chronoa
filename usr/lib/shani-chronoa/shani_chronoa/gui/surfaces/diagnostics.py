@@ -541,6 +541,77 @@ def _prettify_engine(key: str) -> str:
 
 # -- probes: the microphone and the audio path -------------------------------
 
+def _audio_children() -> Tuple[str, str]:
+    """Every audio child under supervision right now, **including healthy ones**.
+
+    `audio.audio_status()` had zero callers, and its own docstring says why that
+    is a loss: it returns the statuses "rather than a boolean for the reason
+    `check_heartbeats` documents - **a caller has to be able to tell 'not started
+    yet' from 'hung' from 'gone', because only one of those three is worth
+    waiting for.**" A boolean cannot carry that, and this panel is where somebody
+    looks when audio is not working.
+
+    So it names all three, and says which are worth waiting for.
+    """
+    try:
+        from shani_chronoa import audio
+        found = audio.audio_status()
+    except Exception as exc:  # noqa: BLE001 - a probe that raised is unknown
+        logger.debug("cannot read the audio children", exc_info=True)
+        return STATUS_UNKNOWN, (
+            f"the supervisor could not be asked ({type(exc).__name__})")
+    if not found:
+        return STATUS_UNKNOWN, (
+            "no audio child under supervision, which is what it looks like "
+            "before the first recording rather than a fault")
+    alive, starting, gone = [], [], []
+    for item in found:
+        state = str(getattr(item, "state", item) or "unknown").lower()
+        name = str(getattr(item, "name", "?"))
+        if "run" in state or "alive" in state or "ok" in state:
+            alive.append(name)
+        elif "start" in state or "spawn" in state:
+            starting.append(name)
+        else:
+            gone.append(name)
+    if gone:
+        # **One of the module's three words, not a fourth.** `STATUS_WORDS` is a
+        # closed vocabulary and a row may not use a new one, so a gone child is
+        # "not working" - which is true of the child, and the detail names the
+        # three states so the word is not doing more than it can.
+        return STATUS_NOT_WORKING, (
+            f"{len(gone)} audio child(ren) gone ({', '.join(gone)}), "
+            f"{len(alive)} running ({', '.join(alive) or 'none'}). A child that "
+            "is gone is not worth waiting for; one that is still starting is.")
+    if starting:
+        return STATUS_UNKNOWN, (
+            f"starting: {', '.join(starting)} - still worth waiting for")
+    return STATUS_WORKING, f"running: {', '.join(alive) or 'none named'}"
+
+
+def _seccomp() -> Tuple[str, str]:
+    """Whether *this* process is under a seccomp filter, stated narrowly.
+
+    `sandbox.seccomp.is_active()` had no caller. Its own docstring is careful
+    about what it can answer - the filter is installed in the **sandboxed child**,
+    so this long-lived process reads `False` even while every skill call is
+    filtered - and this row keeps that honesty rather than reporting a
+    machine-wide claim it cannot support.
+    """
+    try:
+        from shani_chronoa.sandbox import seccomp
+        active = bool(seccomp.is_active())
+    except Exception as exc:  # noqa: BLE001
+        return STATUS_UNKNOWN, f"could not be asked ({type(exc).__name__})"
+    if active:
+        return STATUS_WORKING, (
+            "yes - this process is under a seccomp filter")
+    return STATUS_UNKNOWN, (
+        "not for this process, which is expected and says nothing about the "
+        "skills: the filter is installed in each sandboxed child, so this panel "
+        "reads false while every skill call is still filtered")
+
+
 def _microphone() -> Tuple[str, str]:
     """The microphones `pipewire` can see, i.e. the nodes `pw-record` can target."""
     from shani_chronoa import pipewire
@@ -843,6 +914,7 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
         (
             ("Microphone", _microphone),
             ("Audio path (PipeWire / WirePlumber)", _audio_path),
+            ("Audio children under supervision", _audio_children),
         ),
     ),
     (
@@ -868,6 +940,7 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
             ("poppler (read_document, page scans)", _binary_extra(
                 "pdftotext", "reading a PDF's text aloud")),
             ("at-spi (ui_elements)", _atspi_extra),
+            ("Seccomp filter (this process)", _seccomp),
         ),
     ),
     (

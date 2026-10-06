@@ -1871,6 +1871,40 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### Two more that existed, answered nothing, and were exactly what a panel is for
+
+A second scan — not "never called" this time, but **query-shaped functions whose
+return value is discarded at a call site** — turned up two, and both are the
+Diagnostics panel's job:
+
+- **`audio.audio_status()`** — zero callers, and its own docstring says why that
+  is a loss: it returns the statuses *"rather than a boolean for the reason
+  `check_heartbeats` documents — a caller has to be able to tell **'not started
+  yet' from 'hung' from 'gone', because only one of those three is worth waiting
+  for**."* A boolean cannot carry that, and Diagnostics is where somebody looks
+  when audio is not working.
+- **`sandbox.seccomp.is_active()`** — zero callers, and its docstring is careful
+  about scope: the filter is installed in the **sandboxed child**, so this
+  long-lived process reads `False` while every skill call is still filtered. The
+  row keeps that honesty: `False` reads **"could not determine"**, never
+  "working", because a row that said *"no seccomp"* would be a lie.
+
+**`STATUS_WORDS` is a closed vocabulary of three and a row may not use a fourth**,
+so a gone audio child is `STATUS_NOT_WORKING` with the three states named in the
+detail — my first draft invented a fourth word, which would have broken the
+rule the module states in its own constants.
+
+**Two mutations, and one of them was my fault twice.** Collapsing the three audio
+states into one boolean left the suite green on the first attempt, because I put
+the mutation **before** the loop that classifies them — a no-op dressed up as a
+test. Redone in the right place: caught. That is the second time this session a
+`str.replace` "mutation" silently did nothing; every mutation now asserts
+`s.count(old) == 1` **and** is placed where it actually changes behaviour.
+
+`check_destination` also showed up in the discarded-result scan and is a **false
+positive**: it returns `None` and raises on refusal, so discarding the value is
+correct and `_guard()` fails closed.
+
 ### The model actions were reachable only as a side effect of changing models
 
 `local_llm.perplexity()` and `quality_verdict()` run `llama-perplexity` — which
