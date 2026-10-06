@@ -1750,6 +1750,42 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### Two engine rows could both claim to be the one answering
+
+`gui/surfaces/model.py`'s llama.cpp row rendered
+`f"{HOST}:{PORT} is answering with {active}"` off `local_llm.is_up()` — a claim
+about the **app** made from a probe of the **server**.
+
+Those genuinely diverge, because the LLM is chosen **once, at startup**:
+`_maybe_enable_cloud_fallback` returns early on
+`isinstance(self.llm, CloudLLMChain)` and never reconsiders. So a machine that
+started without llama-server and started it afterwards has an *available* local
+engine and a *selected* cloud one. Measured in exactly that state: the local row
+said **"127.0.0.1:8765 is answering with qwen3-1.7b"** while `app.llm` held a
+`CloudLLMChain`, and the cloud row said it "would answer". Two rows, one
+asserting something false.
+
+The rows stay availability-scoped ("is up and X is ready to load"), and
+`_selected_engine(app)` names the choice **from `app.llm` itself** — because
+re-deriving the condition is exactly how the two came to disagree. It also says
+*why* they can differ: "chosen at startup, and not reconsidered since".
+
+**This is the opposite of the Voice panel, deliberately.** There,
+`PiperTTS.engine()` is asked per reply, so the running object and the selected
+engine coincide and resolving through `app.tts` is right. Here the LLM is
+selected once. Copying either approach to the other panel would be wrong, and
+that is the note worth leaving.
+
+Mutations run and confirmed to fail: "is answering" restored (1), selection
+derived from config rather than the object (2), `isinstance` check dropped (1,
+**only after the assertion was tightened**), the "chosen at startup" caveat
+removed (1).
+
+That last one is the interesting one. `assert "cloud" in chosen.lower()` **also
+matches "Answers through CloudLLMChain"** — the class name contains the word — so
+a mutation that deleted the `isinstance` check entirely ran green. The assertion
+is on the phrase *"cloud provider"* and on the class name *not* appearing.
+
 ### And the *input* side had the same defect, which fixing the output side did not
 
 I fixed the Voice panel's engine rows and stopped. The speech-**input** half of

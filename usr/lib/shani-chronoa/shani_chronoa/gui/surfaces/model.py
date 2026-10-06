@@ -343,8 +343,23 @@ def _local_engine() -> _Engine:
             return _Engine("local", "llama.cpp on this computer", None,
                            f"unknown - the probe failed: {_clip(exc)}", source)
         if up:
+            # **Availability, not selection.** This used to read
+            # "... is answering with qwen3-1.7b", and that is a claim about the
+            # app that the probe cannot support. `local_llm.is_up()` asks the
+            # *server*, not the dispatcher, and the two genuinely diverge: once
+            # `app/brain.py:_maybe_enable_cloud_fallback` has selected the cloud
+            # chain it returns early on `isinstance(self.llm, CloudLLMChain)` and
+            # never re-evaluates - so starting llama-server afterwards leaves the
+            # app answering through the cloud while this panel says the local one
+            # is answering.
+            #
+            # That state is trivially reachable (start without llama.cpp, start it
+            # later) and both rows claimed to answer. Measured: this row read
+            # "127.0.0.1:8765 is answering with qwen3-1.7b" while `app.llm` held a
+            # `CloudLLMChain`.
             return _Engine("local", "llama.cpp on this computer", True,
-                           f"{local_llm.HOST}:{local_llm.PORT} is answering with {active}", source)
+                           f"{local_llm.HOST}:{local_llm.PORT} is up and "
+                           f"{active} is ready to load", source)
         return _Engine("local", "llama.cpp on this computer", False,
                        f"installed ({binary}) with {active}, but nothing is listening on "
                        f"{local_llm.HOST}:{local_llm.PORT}", source)
@@ -410,6 +425,41 @@ def _cloud_engine(config: Any) -> _Engine:
                        f"would answer through: {providers} (never asked here; availability is per-request)",
                        source)
     return _Engine("cloud", "Cloud fallback", False, "no cloud provider is configured", source)
+
+
+def _selected_engine(app: Any) -> str:
+    """Which engine the app is actually holding, from `app.llm` itself.
+
+    **This is the one authoritative answer on the panel**, and it is not
+    derivable from the rows above it. Availability and selection are different
+    questions here, unlike in the Voice panel:
+
+    - `PiperTTS.engine()` is asked per reply, so the running object and the
+      selected engine coincide - which is why `gui/surfaces/voice.py` resolves
+      through `app.tts`;
+    - the LLM is chosen **once**, at startup. `_maybe_enable_cloud_fallback`
+      returns early when `isinstance(self.llm, CloudLLMChain)`, so a machine that
+      fell back to the cloud never reconsiders - and starting llama-server
+      afterwards adds an *available* engine without changing the *selected* one.
+
+    So the rows stay availability-scoped and this names the choice. Reads the
+    object rather than re-deriving the condition, because re-deriving it is
+    exactly how the two came to disagree in the first place.
+    """
+    llm = getattr(app, "llm", None)
+    if llm is None:
+        return "No engine has been chosen yet."
+    name = type(llm).__name__
+    try:
+        from shani_chronoa.cloud_llm import CloudLLMChain
+        if isinstance(llm, CloudLLMChain):
+            providers = str(getattr(llm, "model", "") or "")
+            return ("Answers through a cloud provider"
+                    + (f" ({providers})" if providers else "")
+                    + " - chosen at startup, and not reconsidered since")
+    except Exception:  # noqa: BLE001 - a name is better than no row
+        logger.debug("cannot identify the selected engine", exc_info=True)
+    return f"Answers through {name}, chosen at startup."
 
 
 def _engines(config: Any, model: str) -> List[_Engine]:
@@ -795,13 +845,14 @@ class _ModelSurface(Gtk.Box):
                 "is available to run it")
             return self._with_setup(widget)
         available = sum(1 for e in engines if e.state)
+        chosen = _selected_engine(app)
         if available:
             return self.status_recorder.row(
                 common.STATUS_OK,
                 f"{model or '(none chosen)'} - {available} of "
                 f"{len(engines)} engines available",
                 f"{origin}; {available} of {len(engines)} engines "
-                "can run it")
+                f"can run it. {chosen}")
         return self.status_recorder.row(
             common.STATUS_ATTENTION,
             f"{model or '(none chosen)'} - no engine available",

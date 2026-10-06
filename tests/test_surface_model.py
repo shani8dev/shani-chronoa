@@ -651,3 +651,88 @@ def test_a_present_extra_that_reports_absent_reads_not_installed(on_disk):
         row = [r for r in surface.build(_StubApp()).extras() if r._extra_key == "eyes"][0]
     assert row._extra_state is False
     assert row is not None and _row_title(row) == "Eyes - not installed"
+
+class TestTwoEnginesCannotBothClaimToAnswer:
+    """**Availability and selection are different questions here, unlike in Voice.**
+
+    `PiperTTS.engine()` is asked per reply, so the running object and the
+    selected engine coincide - which is why `gui/surfaces/voice.py` resolves
+    through `app.tts`. The LLM is chosen **once, at startup**, and
+    `app/brain.py:_maybe_enable_cloud_fallback` returns early on
+    `isinstance(self.llm, CloudLLMChain)` and never reconsiders.
+
+    So a machine that started without llama-server and started it afterwards has
+    an *available* local engine and a *selected* cloud one. The panel used to read
+    `f"{HOST}:{PORT} is answering with {active}"` off `local_llm.is_up()` -
+    a claim about the app made from a probe of the server.
+
+    Measured, in exactly that state: the local row said **"127.0.0.1:8765 is
+    answering with qwen3-1.7b"** while `app.llm` held a `CloudLLMChain`, and the
+    cloud row said it "would answer". Two rows, one of them claiming a fact about
+    the app that was false.
+    """
+
+    @staticmethod
+    def _diverged():
+        from shani_chronoa import cloud_llm, local_llm
+        from shani_chronoa.config import ChronoaConfig
+
+        cfg = ChronoaConfig()
+        cfg.set("privacy-mode", "false")
+        cfg.set("cloud-fallback-enabled", "true")
+        monkey = pytest.MonkeyPatch()
+        monkey.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
+        monkey.setattr(local_llm, "installed", lambda: ["qwen3-1.7b"])
+        monkey.setattr(local_llm, "active", lambda: "qwen3-1.7b")
+        monkey.setattr(local_llm, "is_up", lambda: True)
+        app = type("App", (), {
+            "config": cfg, "hardware": None,
+            "llm": cloud_llm.CloudLLMChain(
+                provider_ids=cloud_llm.DEFAULT_PROVIDER_ORDER, api_keys={}),
+        })()
+        return app, cfg, monkey
+
+    def test_the_local_row_does_not_claim_to_be_the_one_answering(self):
+        from shani_chronoa.gui.surfaces import model as surface
+        app, cfg, monkey = self._diverged()
+        try:
+            rows = {e.key: e for e in surface._engines(cfg, "qwen3-1.7b")}
+        finally:
+            monkey.undo()
+        assert "is answering" not in rows["local"].detail, (
+            f"the local row asserts it is answering ({rows['local'].detail!r}) "
+            "from a probe of the server, while the app holds a cloud chain")
+        assert "is up" in rows["local"].detail, rows["local"].detail
+
+    def test_the_selected_engine_is_named_from_the_object_the_app_holds(self):
+        from shani_chronoa.gui.surfaces import model as surface
+        app, _cfg, monkey = self._diverged()
+        try:
+            chosen = surface._selected_engine(app)
+        finally:
+            monkey.undo()
+        # **The phrase, not the substring.** `"cloud" in chosen.lower()` also
+        # matches "Answers through CloudLLMChain" - the class name - so a mutation
+        # that dropped the isinstance check entirely ran green. Asserted on what
+        # the sentence says instead of on a word it happens to contain.
+        assert "cloud provider" in chosen.lower(), chosen
+        assert "cloudllmchain" not in chosen.lower(), (
+            f"the selected engine is reported by its class name ({chosen!r}), so a "
+            "person is shown an implementation detail rather than what answers")
+        # And it says why the two can differ, because that is the whole point.
+        assert "startup" in chosen.lower(), chosen
+
+    def test_it_names_a_local_engine_when_that_is_what_is_held(self):
+        from shani_chronoa.gui.surfaces import model as surface
+        app, _cfg, monkey = self._diverged()
+        try:
+            app.llm = type("OllamaLLM", (), {})()
+            chosen = surface._selected_engine(app)
+            app.llm = None
+            none = surface._selected_engine(app)
+        finally:
+            monkey.undo()
+        assert "OllamaLLM" in chosen, chosen
+        assert "cloud" not in chosen.lower(), chosen
+        assert "startup" in chosen.lower(), chosen
+        assert "no engine" in none.lower(), none
