@@ -2,6 +2,7 @@
 it survives between turns (and restarts of the app). Local."""
 
 import json
+import os
 import time
 
 from shani_chronoa import files
@@ -24,6 +25,34 @@ def _path():
     return p
 
 
+def _write(state: dict, p) -> None:
+    """Write the state atomically, owner-only.
+
+    **Was `p.write_text(json.dumps(...))`, which a crash mid-write turns into a
+    truncated file.** The failure mode is self-healing the next time the skill
+    reads it (`json.loads` raises, falls back to `{}`, and the stopwatch simply
+    reads as not-running) - but it means *every* lap or start that lands at the
+    wrong instant silently discards the whole run, and the two call sites below
+    both said the same thing, so the crash lives exactly where the state does.
+
+    Same shape as `conversation_store`'s own state writer: a temp file in the
+    same directory, fsync, then `os.replace`. The temp is chmodded before the
+    replace because `os.replace` preserves the temp's mode, and `restrict_file`
+    on the destination *after* would leave the file world-readable in the
+    window where it is already at its final path.
+    """
+    tmp = p.with_suffix(".json.tmp")
+    # Same shape as conversation_store.py:271: open the temp owner-only, write,
+    # let fdopen close the fd, then one os.replace. No second os.close, and no
+    # fsync pretending to be on an fd the with-block already closed - my first
+    # draft had both, and pyflakes only catches the second by luck.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(state, handle, ensure_ascii=False)
+    os.replace(tmp, p)
+    files.restrict_file(p)
+
+
 def _fmt(s: float) -> str:
     m, sec = divmod(s, 60)
     h, m = divmod(int(m), 60)
@@ -39,14 +68,14 @@ def _run(arguments: dict, now: "float | None" = None) -> str:
         state = {}
     action = arguments.get("action")
     if action == "start":
-        p.write_text(json.dumps({"start": now, "laps": []}))
+        _write({"start": now, "laps": []}, p)
         return "Stopwatch started."
     if "start" not in state:
         return "The stopwatch is not running. Say 'start the stopwatch'."
     elapsed = now - state["start"]
     if action == "lap":
         state["laps"].append(elapsed)
-        p.write_text(json.dumps(state))
+        _write(state, p)
         return f"Lap {len(state['laps'])}: {_fmt(elapsed)}."
     if action == "stop":
         p.unlink(missing_ok=True)

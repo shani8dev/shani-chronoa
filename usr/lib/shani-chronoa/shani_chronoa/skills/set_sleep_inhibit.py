@@ -156,7 +156,18 @@ def _write_state(state: "dict | None") -> None:
             _STATE_FILE.unlink(missing_ok=True)
             return
         _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _STATE_FILE.write_text(json.dumps(state))
+        # **Atomic, same shape as conversation_store:271.** `write_text` was a
+        # truncate-then-write, so a crash mid-write leaves a half-written PID
+        # record - and then the failure the comment below already names (cannot
+        # release the inhibitor early by its recorded pid) happens *for the
+        # usual reason*, not the unusual one. The temp+os.replace means the
+        # state file is either the old one or the complete new one, never a
+        # truncation of the two.
+        tmp = _STATE_FILE.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False)
+        os.replace(tmp, _STATE_FILE)
     except OSError:
         # Losing the record costs us the ability to release early by pid, not the ability to
         # hold or to report. The bound still ends itself.
