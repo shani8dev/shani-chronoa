@@ -194,6 +194,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_audio": ("Files", "Read an audio file's length, format, and bitrate"),
     "read_image": ("Files", "Read a picture's dimensions, format, and colour"),
     "create_video": ("Imagine", "Make a slideshow or colour clip"),
+    "capture_video": ("Eyes", "Record a short video from the camera"),
     "create_document": ("Files", "Create a markdown, text, or HTML document"),
     "convert_document": ("Files", "Convert a document between md, txt, and html"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
@@ -730,7 +731,7 @@ MUTATING_TOOLS = frozenset({
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "reminders", "open_application", "speak", "ask_user",
     "media_control", "scan_document", "accessibility",
-    "generate_password", "do_not_disturb", "convert_media", "edit_image", "edit_video", "edit_audio", "create_video",
+    "generate_password", "do_not_disturb", "convert_media", "edit_image", "edit_video", "edit_audio", "create_video", "capture_video",
     "find_emoji", "stopwatch", "bluetooth_devices",
     # writes only new files (a saved result, a chart); the source is never written
     "analyze_table", "qr_code", "generate_image", "photo_video", "recording",
