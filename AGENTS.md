@@ -907,6 +907,33 @@ collection, and sent me looking for a segfault in a GTK teardown that had never
 been reached. Confirm the log has grown before believing any result about a run
 that "crashed".
 
+**⚠️ And the `[p]` trick fixes *self-match only* — it is not a safety guard.**
+This repo's D-Bus work is where that became expensive on 2026-10-06. Cleaning up
+the private `dbus-daemon`s from the gateway round-trip harness, I ran
+`pkill -f '[d]bus-daem'`. The brackets stopped the pattern matching pkill's own
+command line, and it **still matched every real `dbus-daemon`** — so it killed
+the user's session bus at `/run/user/1001/bus`, GNOME Shell lost it and logged
+out, and logind tore down four sessions in a row (`40`, `41`, `c3`, `42`,
+journaled at 16:04:26–16:04:59). It had been run in several commands, hence four
+teardowns.
+
+Two things to take from it:
+
+- **Never `pkill -f` a daemon the desktop depends on** — `dbus-daemon`,
+  `systemd`, `pipewire`, `gdm`, `gnome-shell`, `at-spi*`, `ibus*`. Bracketing
+  changes nothing about that; it only hides the pattern from `ps`.
+- **Clean up by PID, not by name.** The private daemons are created with
+  `--print-address --fork`, so the address (and therefore the PID, from
+  `pgrep -f "dbus-daemon --config-file=$CFG"` where `$CFG` is *your* mktemp
+  file) is knowable. Kill that PID. If you cannot name the PID, you cannot
+  safely clean up, so leave it and say so.
+
+And a heuristic that would have caught it in one second: **`pkill: killing pid N
+failed: Operation not permitted` is not a partial success.** It means the pattern
+matched a root-owned process — i.e. it matched more than you meant — and
+everything else it matched was killed. Stop and re-read the pattern there
+instead of continuing.
+
 > **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
 > `initialize` (protocol 2024-11-05), `tools/list` (70 tools), and `tools/call`
 > for a normal call, a malformed call, a shut consent gate, an unknown tool, and
@@ -1844,11 +1871,58 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
-**Wiring the grant is a decision, not a bug fix**, and I have not made it: an
-`ask` channel would have to be *refused* at the bus call, because there is nobody
-to ask interactively at that point, which would make the default grant useless.
-If somebody wants the distinction to be real it needs a consent path from an
-inbound call, and that is a feature question rather than an audit finding.
+### The grant is now enforced, and the whole thing hinged on a thread
+
+I called wiring it "a feature question, not an audit finding" and left it alone.
+Asked for a decision that is secure *and* useful long-term, I took the third
+option rather than the second: `ask` now goes through `permissions.decide()`,
+the layer that already exists and already fails closed.
+
+- **Reused, not reinvented.** `permissions.decide()` returns `None` for a
+  refusal, a dismissal, a timeout and a headless run alike, records the refusal
+  so the same question is not put again on a retry, and gives the user "yes,
+  this once" and "yes, for this session" for free. The session grant is keyed on
+  the **channel**, so answering once for `phone` does not answer for `laptop`.
+- **The action is its own** - `submit_from_gateway`, not one of the existing
+  actions - so a rule written for an inbound gateway cannot accidentally widen
+  something else.
+- **Fails closed on every path.** Verified across two processes on a private bus:
+
+  | what happened | `phone` (`ask`) | `desk` (`execute`) | server received |
+  |---|---|---|---|
+  | approved | submitted | submitted | both |
+  | refused | **refused**, switch named | submitted | desk only |
+  | dismissed | **refused**, switch named | submitted | desk only |
+  | nobody there | **refused**, *"nothing is on screen"* | submitted | desk only |
+
+**Why I rejected "refuse `ask` at the bus"**, which was the smaller change: it is
+secure and useless. The default grant would do nothing until somebody edited a
+setting, so the feature would ship dark. This way the default works - one click,
+then not again for the rest of the session.
+
+**And why that needed a worker thread, which is the part worth remembering.**
+A GDBus method handler runs *on* the main loop, and `decide()` blocks on a
+`threading.Event` that only the main loop can set. So an approval asked from the
+handler **cannot be answered** - it waits out its full timeout every time, which
+would have looked exactly like the gate working. Measured with a presenter that
+resolves from an idle callback: **3.0 s and no answer on the main loop thread,
+0.0 s on a worker.** `export()` now dispatches through `off_the_main_loop()`,
+which is a named function so the property can be asserted directly rather than
+only observed through a live bus. The rate limit and the submit callable no
+longer run on the main loop either, which was blocking the whole UI on a slow
+call.
+
+**Four pre-existing tests failed when the gate landed, and all four were right
+to fail.** `test_submitted_text_reaches_the_window_entry`, the length limit, the
+rate limit and the bus round-trip all submitted through an `ask` channel with
+nobody present. They are tests about the bus and the limits, not about approval,
+so they now use `execute` - with a note saying why. A gate that changes what
+other tests can be about is worth noticing; the fix was not to weaken the gate.
+
+Mutations run and confirmed to fail: the gate removed (5), `None` treated as yes
+(2), the headless check removed (1), `execute` channels asked as well (2),
+dispatch put back on the calling thread (1), the question no longer showing the
+message (1).
 
 **Three harness traps, each of which cost a wrong intermediate conclusion:**
 

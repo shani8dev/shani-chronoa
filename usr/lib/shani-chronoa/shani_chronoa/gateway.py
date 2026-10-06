@@ -38,6 +38,7 @@ property of this module.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -62,10 +63,12 @@ logger = logging.getLogger(__name__)
 #: It could not have been observed before, because the `register_object` call in
 #: the same function threw on every invocation, so this name was never actually
 #: requested. Two faults in one line, both invisible, in a function no test ever
-#: called - there is still no `tests/test_gateway.py` anywhere in the tree.
+#: called - and there was no `tests/test_gateway.py` anywhere in the tree, which is why the file now has one.
 BUS_NAME = "dev.shani.chronoa.Gateways"
-OBJECT_PATH = "/dev/shani/chronoa/Gateways"
+#: The one interface, named once: the introspection XML, the error prefix and
+#: `dispatch`'s refusal all have to agree and none of them may drift.
 INTERFACE = "dev.shani.chronoa.Gateways"
+OBJECT_PATH = "/dev/shani/chronoa/Gateways"
 
 #: A request longer than this is not a person dictating and not a message; it is
 #: a paste, a file, or an attempt to spend someone else's context window.
@@ -116,7 +119,70 @@ class Gateway:
         return text
 
     def ask(self, text: str) -> str:
-        return self._submit(self.admit(text))
+        """Admit, gate, then submit. In that order.
+
+        **The grant is enforced here as of 2026-10-06, and it fails closed.**
+        `_require_approval()` returns normally only when somebody said yes; every
+        other outcome - a refusal, a dismissed prompt, a timeout, and a headless
+        run with nobody to ask - raises `Refused`, which `Registry.submit`
+        counts and the bus reports as a specific error. There is no path on
+        which an unapproved message reaches `_submit`.
+
+        The permission layer is reused rather than a second one invented, because
+        `permissions.decide()` already fails closed on all four of those outcomes
+        by design and records the refusal so the same question is not put again
+        on a retry. The user gets "yes, this once" and "yes, for this session",
+        and a session grant is per *channel*, so answering once for `phone` does
+        not also answer for `laptop`.
+
+        **This is why `export()` dispatches on a worker thread.** `decide()`
+        blocks on a `threading.Event` that only the main loop can set, so calling
+        it from a GDBus method handler - which runs *on* the main loop - cannot
+        be answered and waits out its timeout. Measured, with a presenter that
+        resolves the event from an idle callback: 3.0 s and no answer on the main
+        loop thread, 0.0 s on a worker thread.
+        """
+        checked = self.admit(text)
+        if not self.may_execute():
+            self._require_approval(checked)
+        return self._submit(checked)
+
+    #: The permission system's vocabulary for "this text arrived from outside".
+    #: Not one of the existing actions: no other caller can produce this request,
+    #: so a rule written for it cannot accidentally widen something else.
+    ACTION = "submit_from_gateway"
+
+    def _require_approval(self, text: str) -> None:
+        """Put this message to the user, or raise `Refused`.
+
+        Fails closed on every path, deliberately. `permissions.decide()` returns
+        `None` for a refusal, a dismissal, a timeout and a headless run alike,
+        and its own docstring is explicit that `None` is the only value a caller
+        may treat as "no". So this treats it as "no" and says which switch makes
+        it yes - a refusal that names its own remedy is one somebody can act on
+        instead of turning the channel off.
+        """
+        from shani_chronoa import permissions
+
+        if not permissions.can_ask():
+            # Said plainly rather than as a bare "no": the difference between
+            # "nobody answered" and "somebody said no" decides what the operator
+            # should change, and on a daemon the answer is always the former.
+            raise Refused(
+                f"nothing is on screen to approve a message from {self.name!r}, "
+                f"so it was not submitted. Set {self.name}:execute in the "
+                f"'gateways' setting to take messages from this channel without "
+                "asking.")
+        granted = permissions.decide(
+            self.ACTION, self.name, "gateways",
+            describe=(f"{text!r} arrived from the {self.name!r} gateway, over "
+                      "the session bus, from another program"),
+            offer_cancel=True)
+        if granted is None:
+            raise Refused(
+                f"the message from {self.name!r} was not approved, so it was not "
+                f"submitted. Set {self.name}:execute in the 'gateways' setting "
+                "to take messages from this channel without asking.")
 
     def may_execute(self) -> bool:
         """Whether this channel is *labelled* `execute`, or `ask`.
@@ -237,10 +303,12 @@ class _Service:
         invocation.return_value(GLib.Variant("(s)", (reply or "",)))
 
 
-_INTROSPECTION = """<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
+#: The one interface's XML, interpolated so the name cannot drift from
+#: `INTERFACE` - it is also the prefix of every error this module returns.
+_INTROSPECTION = f"""<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
 <node>
-  <interface name="dev.shani.chronoa.Gateways">
+  <interface name="{INTERFACE}">
     <method name="Submit">
       <arg name="gateway" type="s" direction="in"/>
       <arg name="text" type="s" direction="in"/>
@@ -336,6 +404,25 @@ def unexport(owner: Optional["Gio.BusNameOwnerId"] = None) -> None:
             logger.debug("the gateway object was already unregistered")
 
 
+def off_the_main_loop(work: "Callable[[], None]", name: str) -> threading.Thread:
+    """Run `work` on a daemon thread and return it, so the caller can join it.
+
+    **Named and separate because this is load-bearing and needed a test.** A
+    GDBus method handler runs on the thread owning the main context, and the
+    approval gate blocks on a `threading.Event` that only the main loop can set,
+    so asking on that thread cannot be answered - measured at 3.0 s and no answer
+    on the main loop against 0.0 s on a worker. The property is worth asserting
+    directly rather than only through a live bus, so it lives in a function a
+    test can call.
+
+    Daemon, so a hung call cannot keep the process alive; and the thread is
+    returned rather than fire-and-forget so a caller that wants to wait can.
+    """
+    thread = threading.Thread(target=work, name=f"chronoa-{name}", daemon=True)
+    thread.start()
+    return thread
+
+
 def export(registry: Registry, bus: Optional[Gio.BusType] = None,
            connection: Optional["Gio.DBusConnection"] = None) -> "Gio.BusNameOwnerId":
     """Put the object on the bus. Returns the owner id.
@@ -358,9 +445,9 @@ def export(registry: Registry, bus: Optional[Gio.BusType] = None,
     - the `except Exception` around the call turned a hard error into a log line
       that says "could not", which reads as a transient condition rather than a
       line that has never once succeeded;
-    - **`gateway.py` had no test file at all** - measured, there is no
-      `tests/test_gateway*.py` - so the one function that needed executing was the
-      one function nobody executed. `Registry`, `MAX_TEXT`, `RATE_PER_MINUTE`,
+    - **`gateway.py` had no test file at all** - measured, there was no
+      `tests/test_gateway*.py` anywhere - so the one function that needed
+      executing was the one function nobody executed. There is one now. `Registry`, `MAX_TEXT`, `RATE_PER_MINUTE`,
       `may_execute` and `_Service.Submit` were all unexercised too, despite
       AGENTS.md citing measured properties of this module as its security
       argument.
@@ -393,14 +480,57 @@ def export(registry: Registry, bus: Optional[Gio.BusType] = None,
     service = _Service(registry)
 
     def dispatch(connection_, sender, path, interface, method, params, invocation):
-        """One method, and one refusal for anything else."""
+        """One method, and one refusal for anything else.
+
+        **On a worker thread, since 2026-10-06, and this is load-bearing rather
+        than tidy.** A GDBus method handler runs on the thread that owns the main
+        context - the main loop. `Gateway.ask()` may block on
+        `permissions.decide()`, which blocks on a `threading.Event` that only the
+        main loop can set. So an `ask`-grant channel, answered from here, could
+        never be answered: the prompt would be queued and the call would wait out
+        its full timeout every time.
+
+        Measured, with a presenter that resolves its event from an idle callback -
+        exactly what the GTK one does: **3.0 s and no answer when asked from the
+        main loop thread, 0.0 s when asked from a worker.** So the handler is
+        dispatched off the main loop and replies from there; a `GDBusMethodInvocation`
+        may be completed from any thread once the handler returns.
+
+        The other reason is independent of the approval: `admit()`'s rate limit
+        and the submit callable both ran on the main loop too, so one slow
+        `Submit` blocked the whole UI. They no longer do.
+
+        One thread per call, bounded by `RATE_PER_MINUTE` per channel - the same
+        bound that was always stated for a single channel, and a caller that
+        opens many channels still gets one thread each, which is what the bus
+        will have allowed anyway.
+        """
         handler = getattr(service, method, None)
         if handler is None:
             invocation.return_dbus_error(
                 "org.freedesktop.DBus.Error.UnknownMethod",
                 f"{interface} has no method {method!r}; it has one, Submit")
             return
-        handler(connection_, sender, path, interface, method, params, invocation)
+
+        def run() -> None:
+            try:
+                handler(connection_, sender, path, interface, method, params,
+                        invocation)
+            except Exception as exc:  # noqa: BLE001 - a worker must still reply
+                # Without this the caller waits out its timeout instead of being
+                # told. A `Refused` from `_require_approval` is the *expected*
+                # outcome and is handled inside `_Service.Submit`, so anything
+                # arriving here is a bug - and it is reported as one rather than
+                # leaving the caller to time out.
+                logger.exception("the gateway %s handler raised", method)
+                try:
+                    invocation.return_dbus_error(
+                        f"{INTERFACE}.Error.Failed",
+                        f"the {method} call failed: {exc}")
+                except Exception:  # noqa: BLE001 - the caller is already gone
+                    logger.debug("could not report the failure to the caller")
+
+        off_the_main_loop(run, f"gateway-{method}")
 
     registration_id = connection.register_object(
         OBJECT_PATH, node.interfaces[0], dispatch, None, None)

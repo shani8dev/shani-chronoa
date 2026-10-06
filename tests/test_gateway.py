@@ -156,7 +156,11 @@ def test_an_unknown_channel_is_refused_and_says_which_exist():
 
 def test_submitted_text_reaches_the_window_entry():
     registry, seen = _registry()
-    registry.register("whatsapp")
+    # `execute`, not the `ask` default: this is a test that submitted text
+    # arrives, and the approval gate has its own tests below. Left on `ask` it
+    # stopped testing the bus and started testing the gate - and it failed for
+    # the right reason, which is the gate working.
+    registry.register("whatsapp", "execute")
     assert registry.submit("whatsapp", "what time is it") == "ack"
     assert seen == ["what time is it"], (
         "the text did not reach the window's own entry, which is the entire "
@@ -165,7 +169,7 @@ def test_submitted_text_reaches_the_window_entry():
 
 def test_an_empty_message_is_refused():
     registry, seen = _registry()
-    registry.register("a")
+    registry.register("a", "execute")
     for text in ("", "   "):
         with pytest.raises(gw.Refused) as raised:
             registry.submit("a", text)
@@ -176,7 +180,7 @@ def test_an_empty_message_is_refused():
 def test_an_over_long_message_is_refused_with_the_number():
     """A refusal that does not say what was wrong is a channel that gets turned off."""
     registry, seen = _registry()
-    registry.register("a")
+    registry.register("a", "execute")
     over = "x" * (gw.MAX_TEXT + 1)
     with pytest.raises(gw.Refused) as raised:
         registry.submit("a", over)
@@ -189,7 +193,7 @@ def test_an_over_long_message_is_refused_with_the_number():
 
 def test_the_rate_limit_is_real_and_counts_only_the_last_minute():
     registry, seen = _registry()
-    registry.register("a")
+    registry.register("a", "execute")
     for i in range(gw.RATE_PER_MINUTE):
         registry.submit("a", f"message {i}")
     with pytest.raises(gw.Refused) as raised:
@@ -331,7 +335,9 @@ def test_export_actually_exports_and_a_client_can_submit(bus):
     _testbus, connection = bus
     seen = []
     registry = gw.Registry(lambda text: (seen.append(text), "ack")[1])
-    registry.register("whatsapp")
+    # Both `execute` - see above: this round-trip is about the bus, and an `ask`
+    # channel needs a person to approve it, which a bus test has no way to be.
+    registry.register("whatsapp", "execute")
     registry.register("telegram", "execute")
 
     owner = gw.export(registry, connection=connection)
@@ -393,7 +399,7 @@ def test_an_unregistered_method_is_refused_rather_than_crashing(bus):
     """
     _testbus, connection = bus
     registry, _ = _registry()
-    registry.register("a")
+    registry.register("a", "execute")
     owner = gw.export(registry, connection=connection)
     try:
         _pump(500)
@@ -561,71 +567,197 @@ def test_a_bad_entry_is_collected_rather_than_swallowed(monkeypatch):
         "the unparseable entry was dropped without a word, so the setting looks "
         "like it worked while half of it did not")
 
-class TestTheGrantIsALabelAndSaysSo:
-    """**`may_execute()` has no caller, and its name promises enforcement.**
+class TestTheGrantIsEnforcedAndFailsClosed:
+    """**`ask` and `execute` now behave differently, and this is that test.**
 
-    Measured two ways. Across two processes on a private `dbus-daemon`, a channel
-    registered with the **default `ask` grant** took a `Submit` call and its text
-    reached the submit callable - so `ask` does not stop anything. And with an
-    AST search, `self.grant` is written once in `__init__` and read once, in
-    `may_execute()`, which nothing in the tree calls.
+    They did not. Measured across two processes on a private `dbus-daemon`: a
+    channel registered with the **default `ask` grant** took a `Submit` call and
+    its text reached the submit callable. An AST search said why - `self.grant`
+    was written once in `__init__` and read once, in `may_execute()`, which
+    **nothing in the tree called**. A method called `may_execute` with no caller
+    reads like a security control it is not.
 
-    The safety argument does not depend on the grant: the submitted turn meets
-    the same per-sense consent keys as anything typed into the window, which is
-    why an inbound message cannot delete a file by itself. What does not exist is
-    any behavioural difference between the two grants.
+    The fix routes `ask` through `permissions.decide()`, the layer that already
+    fails closed on all four of its own outcomes and records the refusal so the
+    same question is not put again on a retry. It reuses the existing permission
+    system rather than inventing a second one, so the user also gets "yes, this
+    once" and "yes, for this session" from it - and a session grant is keyed on
+    the *channel*, so answering once for `phone` does not answer for `laptop`.
 
-    These tests pin that, so that if somebody later *does* wire the grant the
-    failure is a test that says what changed - not a docstring quietly becoming
-    true.
+    **Every non-approval path is a refusal.** A refusal, a dismissed prompt, a
+    timeout and a headless run all mean the same thing, which is that nobody
+    said yes, and all four are asserted below. There is no path on which an
+    unapproved message reaches `_submit`.
     """
 
-    def test_nothing_in_the_tree_calls_may_execute(self):
-        """An AST search, because a grep would find its own name in this file."""
+    @staticmethod
+    def _registry(monkeypatch, *, answer, present=True, calls=None):
+        """A registry whose approval gate answers `answer`.
+
+        `answer` is what `permissions.decide()` returns: a granted decision, or
+        `None` for every refusal-shaped outcome (refused, dismissed, timed out,
+        headless) - `permissions` collapses all four to `None` by design, so the
+        gateway must treat `None` as "no" and nothing else.
+        """
+        from shani_chronoa import gateway, permissions
+
+        seen = []
+        calls = [] if calls is None else calls
+        registry = gateway.Registry(lambda text: (seen.append(text), f"got {text}")[1])
+        registry.register("laptop")                 # ask  - the default
+        registry.register("desk", "execute")         # execute
+
+        monkeypatch.setattr(permissions, "can_ask", lambda: present)
+        monkeypatch.setattr(permissions, "decide", lambda *a, **k: (calls.append((a, k)), answer)[1])
+        return registry, seen
+
+    def test_an_ask_grant_is_not_submitted_when_nobody_answers(self, monkeypatch):
+        """The headless case first: a daemon has nobody to ask, so it is a no."""
+        import pytest
+
+        from shani_chronoa.gateway import Refused
+        registry, seen = self._registry(monkeypatch, answer=None, present=True)
+        with pytest.raises(Refused) as caught:
+            registry.submit("laptop", "delete everything in Downloads")
+        assert seen == [], f"an unapproved message was submitted: {seen!r}"
+        assert "execute" in str(caught.value), (
+            f"the refusal does not name the switch that makes it yes: "
+            f"{caught.value}")
+
+    def test_the_headless_refusal_says_nobody_is_there(self, monkeypatch):
+        """'nobody answered' and 'somebody said no' want different fixes."""
+        import pytest
+
+        from shani_chronoa.gateway import Refused
+        registry, seen = self._registry(monkeypatch, answer=None, present=False)
+        with pytest.raises(Refused, match="nothing is on screen"):
+            registry.submit("laptop", "hello")
+        assert seen == []
+
+    def test_a_refusal_and_a_dismissal_are_both_refusals(self, monkeypatch):
+        """`decide()` collapses both to None, and None means no."""
+        import pytest
+
+        from shani_chronoa.gateway import Refused
+        for label in ("refused", "dismissed", "timed out"):
+            registry, seen = self._registry(monkeypatch, answer=None)
+            with pytest.raises(Refused):
+                registry.submit("laptop", "hello")
+            assert seen == [], f"{label}: submitted anyway"
+            assert registry.rejected == 1, f"{label}: not counted as rejected"
+
+    def test_an_approved_ask_grant_is_submitted(self, monkeypatch):
+        from shani_chronoa import permissions
+
+        calls = []
+        registry, seen = self._registry(
+            monkeypatch, answer=permissions.Decision.ALLOW_ONCE, calls=calls)
+        assert registry.submit("laptop", "what is 2 + 2") == "got what is 2 + 2"
+        assert seen == ["what is 2 + 2"]
+
+    def test_the_question_names_the_channel_and_shows_the_message(self, monkeypatch):
+        """Otherwise a person cannot tell which channel is asking."""
+        from shani_chronoa import permissions
+
+        calls = []
+        registry, _seen = self._registry(
+            monkeypatch, answer=permissions.Decision.ALLOW_ONCE, calls=calls)
+        registry.submit("laptop", "delete everything in Downloads")
+        assert len(calls) == 1, calls
+        args, kwargs = calls[0]
+        assert "laptop" in args, args
+        assert "delete everything in Downloads" in kwargs.get("describe", ""), kwargs
+        # The action is its own, so a rule written for an inbound gateway cannot
+        # accidentally widen something else.
+        assert args[0] not in ("delete_file", "control_service", "*"), args
+
+    def test_an_execute_grant_is_never_asked(self, monkeypatch):
+        """Otherwise `execute` buys nothing, and the switch is theatre."""
+        calls = []
+        registry, seen = self._registry(
+            monkeypatch, answer=None, calls=calls)   # approval would refuse
+        assert registry.submit("desk", "what is the weather") == "got what is the weather"
+        assert seen == ["what is the weather"]
+        assert calls == [], f"an execute channel still asked the user: {calls!r}"
+
+    def test_the_gate_is_what_calls_may_execute(self):
+        """The inverse of the old test, which asserted it had no caller.
+
+        pytest is already imported at the top of this file.
+
+        That test is the reason this change is trustworthy: it pinned the
+        *absence* of enforcement, so the change could not land quietly.
+        """
         import ast
         import pathlib
 
-        root = pathlib.Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"
+        from shani_chronoa import gateway
+        from shani_chronoa.gateway import Refused
+
         callers = []
+        root = pathlib.Path(gateway.__file__).resolve().parent
         for path in root.rglob("*.py"):
             if "__pycache__" in str(path):
                 continue
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            for node in ast.walk(tree):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
                 if (isinstance(node, ast.Attribute)
-                        and node.attr == "may_execute"
-                        and not (isinstance(node.ctx, ast.Store))):
-                    callers.append(f"{path.relative_to(root)}:{node.lineno}")
-        assert not callers, (
-            f"may_execute() now has callers {callers}, so the grant is being "
-            "enforced somewhere - update the docstring and these tests, because "
-            "they currently assert it is a label")
+                        and node.attr == "may_execute"):
+                    callers.append(f"{path.name}:{node.lineno}")
+        assert callers, (
+            "may_execute() has no caller again, so the grant is a label once more")
 
-    def test_an_ask_grant_is_submitted_exactly_like_an_execute_grant(self):
-        from shani_chronoa.gateway import ASK_ONLY, Registry
+        # And it is the gate that calls it, not something incidental.
+        called = []
+        real = gateway.Gateway.may_execute
+        gateway.Gateway.may_execute = lambda self: (called.append(self.name), real(self))[1]
+        try:
+            registry = gateway.Registry(lambda text: f"got {text}")
+            registry.register("laptop")
+            registry.register("desk", "execute")
+            registry.submit("desk", "hello")   # execute: reaches the submit
+            with pytest.raises(Refused):
+                registry.submit("laptop", "hello")   # ask: refused at the gate
+        finally:
+            gateway.Gateway.may_execute = real
+        assert called == ["desk", "laptop"], (
+            f"the gate consulted may_execute for {called!r}, so it is deciding on "
+            "the grant")
 
-        seen = []
-        registry = Registry(lambda text: (seen.append(text), f"got {text}")[1])
-        ask = registry.register("laptop")            # the default grant
-        execute = registry.register("phone", "execute")
+    def test_the_threaded_dispatch_is_not_the_main_loop(self):
+        """**The property the gate depends on, asserted directly.**
 
-        assert ask.grant == ASK_ONLY
-        assert execute.grant == "execute"
-        assert ask.may_execute() is False and execute.may_execute() is True
+        `permissions.decide()` blocks on an Event only the main loop can set, and
+        a GDBus handler runs *on* the main loop - so if this regressed to
+        in-thread, every approval would silently time out and every `ask` channel
+        would refuse, which reads like the gate working rather than the UI being
+        frozen. Measured: 3.0 s and no answer on the main loop, 0.0 s on a worker.
+        """
+        import threading
 
-        # Both are submitted. That is the behaviour being pinned.
-        assert registry.submit("laptop", "ping") == "got ping"
-        assert registry.submit("phone", "ping") == "got ping"
-        assert seen == ["ping", "ping"], (
-            f"only {seen!r} was submitted - the grant has become enforced, so "
-            "this test and Gateway.may_execute's docstring both need updating")
+        from shani_chronoa.gateway import off_the_main_loop
 
-    def test_admit_enforces_the_three_limits_that_are_real(self):
-        """The ones that *are* wired, so the pair reads as a whole."""
+        where = {}
+        done = threading.Event()
+
+        def work():
+            where["thread"] = threading.current_thread().name
+            done.set()
+
+        caller = threading.current_thread().name
+        thread = off_the_main_loop(work, "test")
+        assert done.wait(5), "the work never ran"
+        thread.join(5)
+        assert where["thread"] != caller, (
+            f"the work ran on the calling thread ({caller}) - an approval asked "
+            "from here cannot be answered")
+        assert where["thread"].startswith("chronoa-"), where["thread"]
+        assert not thread.is_alive(), "the worker outlived the test"
+
+    def test_admit_enforces_the_three_limits_before_the_gate(self):
+        """Order matters: a flood is refused without putting a question to anyone."""
         import pytest
 
         from shani_chronoa.gateway import MAX_TEXT, RATE_PER_MINUTE, Gateway, Refused
-
         gw = Gateway("laptop", lambda t: t, "execute")
         with pytest.raises(Refused, match="empty"):
             gw.admit("   ")
@@ -635,9 +767,12 @@ class TestTheGrantIsALabelAndSaysSo:
             gw.admit("ok")
         with pytest.raises(Refused, match="messages a minute"):
             gw.admit("ok")
+        # `admit` is a pure check: it asked nobody anything, and it handed back
+        # nothing, so the gate is never reached with a message it should not have.
+        assert gw._times and len(gw._times) == RATE_PER_MINUTE
 
     def test_the_grant_is_still_surfaced_for_an_operator_to_see(self):
-        """It is a display value - so the Settings row must keep showing it."""
+        """Now enforced *and* displayed: the setting is worth having either way."""
         from shani_chronoa.gateway import describe, parse_config
 
         entries, errors = parse_config("whatsapp, telegram:execute")
