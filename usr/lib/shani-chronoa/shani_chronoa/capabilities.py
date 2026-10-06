@@ -192,6 +192,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "read_document": ("Files", "Read a PDF or picture"),
     "read_video": ("Files", "Read a video's length, size, and format"),
     "read_audio": ("Files", "Read an audio file's length, format, and bitrate"),
+    "read_image": ("Files", "Read a picture's dimensions, format, and colour"),
     "convert_media": ("Files", "Convert audio, video and pictures"),
     # ── the optional extras get their own pages ─────────────────────────────
     #
@@ -666,7 +667,7 @@ READ_ONLY_TOOLS = frozenset({
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",
     "spell_word", "explain_command", "check_internet", "data_usage",
-    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio",
+    "date_math", "random_pick", "my_ip_address", "read_document", "read_video", "read_audio", "read_image",
     "encode_text", "convert_color", "calendar_month", "cleanup_report", "tailscale_status",
     # Read-only, and deliberately not gated: a user must be able to see what
     # the machine will do, and what is armed, without first being granted
