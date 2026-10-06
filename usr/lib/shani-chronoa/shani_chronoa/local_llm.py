@@ -337,9 +337,20 @@ def quantize(source: "Path", target: str, out: "Path",
     if not binary:
         logger.warning("llama-quantize is not installed")
         return False
-    cmd = [binary, str(source), str(out), target]
+    # **Flags first, then the positionals.** The installed tool's usage is
+    # `llama-quantize [--imatrix file] model-f32.gguf [model-quant.gguf] type
+    # [nthreads]`, and the trailing `[nthreads]` is positional - so appending
+    # `--imatrix` after the model paths makes it parse the flag as a thread count:
+    #
+    #     main: invalid nthread '--imatrix' (stoi)
+    #
+    # Measured, not assumed: that is the actual output of the wrong order on this
+    # box, and it costs the whole calibration silently because the function
+    # returns False with no more clue than that.
+    cmd = [binary]
     if imatrix is not None and Path(imatrix).is_file():
         cmd += ["--imatrix", str(imatrix)]
+    cmd += [str(source), str(out), target]
     try:
         done = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout, check=False)

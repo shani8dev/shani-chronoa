@@ -1909,6 +1909,50 @@ being dropped and the absence reported as success.
 
 Suites: **174 passed**.
 
+### Calibrated quantization — and a flag-order bug that failed silently
+
+The "modify an open model with its own weights" path. It **does not train** — no
+parameter is updated from a gradient — but it re-quantizes at a chosen precision
+guided by an importance matrix, so the precision budget goes where activations
+say it matters. That is the whole of what is available without CUDA or torch.
+
+`calibration_corpus()` builds the imatrix corpus from **Chronoa's own source**,
+not filler: llama.cpp's guidance is calibration data "derived by running a model
+over a representative text corpus", and the representative corpus for this system
+is the tool schemas, skill docstrings and settings copy it is asked to reason
+about.
+
+**The bug, found by running it rather than reading it.** My first `quantize()`
+appended `--imatrix` after the model paths. The installed tool's usage is
+
+```
+llama-quantize [--imatrix file] model-f32.gguf [model-quant.gguf] type [nthreads]
+```
+
+and that trailing `[nthreads]` is **positional**, so the flag is parsed as a
+thread count:
+
+```
+main: invalid nthread '--imatrix' (stoi)
+```
+
+That is the verbatim output on this box. It costs the entire calibration while
+reporting only that — which is why the flag now precedes the positionals, and why
+there is a test asserting the order rather than a comment.
+
+`calibrated_quantize()` **refuses rather than pretending**: with no
+`llama-imatrix` it returns `calibrated: False` and names the uncalibrated file as
+`uncalibrated_fallback`. Handing that back under `calibrated: True` would be worse
+than failing, because the caller could not tell them apart — and the entire point
+of an importance matrix is that it is not the same file.
+
+Nine tests, three mutations confirmed to fail (flag order moved back, the naive
+file relabelled as calibrated, a timeout turned into a pass).
+
+Measured on the real model, base `SmolLM2-135M-Instruct-F16` (259 MB) from
+`unsloth/SmolLM2-135M-Instruct-GGUF`: naive `Q4_K_M` in **751 ms**, calibrated
+`Q4_K_M` in **10.9 s** with the 631 KB matrix.
+
 ### A model was promoted on a matching digest and nothing else
 
 `provision()` verifies a **digest**. Nothing verified the *artifact*: a
