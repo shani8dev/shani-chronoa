@@ -1871,6 +1871,60 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### A merge was marked trustworthy by construction — the worst thing I found today
+
+`merge_models()` wrote `"honest": True` into the payload it signed and **never
+evaluated the weights it had just combined**. Every writeup on TIES/DARE/SLERP
+says the same thing about merging: the result is a *hypothesis* and you evaluate
+it like one. Sign election makes conflicts cancel; nothing guarantees the outcome
+beats the models that went into it, and on independently fitted models — which is
+what these are — there is no shared base to make it likely. That is precisely why
+the module's own docstring rejects addition and plain averaging.
+
+It was not a stylistic shortcut. **`tools._outcome_model()` refuses any model
+whose `provenance.honest` is false**, so a merge that was pure noise was stamped
+trustworthy *by construction* and then loaded.
+
+Now the merged weights are scored against this machine's own log, the provenance
+carries the measured `accuracy`/`baseline`/`beats_baseline`/`detected`/both
+lifts, and **a merge that fails the same bar a fitted model must pass is not
+written at all**:
+
+```
+three noise models -> merged=False
+  reason: the merged model is not worth quoting (0.0% against a 91.2% constant,
+          and no minority verdict is detected), so it was not written
+```
+
+Two genuine merges, measured on the real 16 MB log:
+
+| | accuracy | vs constant | detected |
+|---|---|---|---|
+| model A (half the log) | 0.857 | 0.913 | `verified` 17.5× / 5.6× |
+| model B (the other half) | 0.858 | 0.910 | `verified` 16.8× / 5.6× |
+| **TIES merge of A+B** | **0.880** | 0.912 | **`failed` 25.4×** |
+
+So the merge **beat both parents** (0.880 > 0.858) and found a class neither
+parent did — and now that is a measurement rather than an assumption. It also
+**fails closed**: with nothing to measure against, it refuses rather than writing
+an unmeasured model.
+
+**One equivalent mutant, kept and documented.** Replacing
+`"honest": bool(report.honest())` with `"honest": True` leaves the file green —
+necessarily, because the gate above it only lets a file be written when
+`honest()` is already true, so the expression is redundant *given the gate*.
+Deleting the gate (mutation 2) **is** caught, which is what proves the gate is
+load-bearing rather than decorative.
+
+**A fixture that made a test unfalsifiable, twice.** The first version of the
+"the refusal quotes its numbers" test passed against a mutation that hardcoded
+`"0.0%"`, because the synthetic held-out data had **no `failed` examples at
+all** — so a noise merge predicted the absent class and scored exactly 0.0%,
+which is the string the mutation hardcoded. Right answer, unfalsifiable test. Two
+fixes: all three verdicts are now present, and the **baseline** is the
+load-bearing assertion (0.0% accuracy against a **50.0%** constant), because
+accuracy alone on this fixture can coincide with a plausible constant.
+
 ### The learning layer: the export dropped the one thing it exists to carry
 
 Found by AST-scanning `learning.py` for public names with **no caller anywhere in

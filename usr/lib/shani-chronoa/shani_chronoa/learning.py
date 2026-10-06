@@ -2675,8 +2675,27 @@ def import_knowledge(path: Path, adopt: bool = True) -> Dict[str, object]:
     return result
 
 
+def _lifts(report: "Report", which: str) -> Dict[str, float]:
+    """Per-class lift over base rate, from the report's own confusion matrix.
+
+    `which` is "recall" or "precision". The report already computes both for
+    `best_detection()`; this exposes the whole row so a merged model's provenance
+    records what it found rather than only the best thing about it.
+    """
+    support = {name: row.get("support", 0) for name, row in report.per_class.items()}
+    total = sum(support.values()) or 1
+    base = {name: n / total for name, n in support.items() if n}
+    lifts: Dict[str, float] = {}
+    for name, row in report.per_class.items():
+        rate = row.get(which, 0.0)
+        floor = base.get(name, 0.0)
+        lifts[name] = round(rate / floor, 3) if floor else 0.0
+    return lifts
+
+
 def merge_models(payloads, density: float = 0.3,
-                 name: str = "outcome-merged"):
+                 name: str = "outcome-merged",
+                 examples: Optional[Sequence[Example]] = None):
     """Fold several models into one, so a fleet's learning becomes shared.
 
     **Not addition.** Adding N models' weights multiplies the effective
@@ -2753,10 +2772,57 @@ def merge_models(payloads, density: float = 0.3,
     model = OutcomeModel()
     model.w = merged
     model.b = bias
+
+    # **Measure the merge. It used to write `"honest": True` unconditionally.**
+    #
+    # Every writeup on TIES/DARE/SLERP says the same thing about merging: the
+    # merged model is a *hypothesis*, and you evaluate it like one. Sign election
+    # makes conflicts cancel, but nothing guarantees the result is any better
+    # than the models that went into it - and on independently fitted models
+    # there is no shared base to make it likely.
+    #
+    # Marking it honest by construction was not a small shortcut. `tools.
+    # _outcome_model()` refuses any model whose `provenance.honest` is false, so
+    # a merge that was pure noise was stamped as trustworthy and loaded. The
+    # honest flag now comes from a real `Report` over real examples, and a merge
+    # that fails the same bar a fitted model must pass is not written at all.
+    if examples is None:
+        try:
+            examples = load()
+        except Exception:  # noqa: BLE001 - no log is not a reason to fake a verdict
+            logger.debug("no log to evaluate the merge against", exc_info=True)
+            examples = []
+    report = evaluate(model, examples) if examples else None
+    if report is None:
+        return {"merged": False, "reason":
+                "no examples to evaluate the merge against, so it could not be "
+                "measured - and a merge is a hypothesis until it is measured",
+                "from": len(usable), "rejected": rejected}
+    if not report.honest():
+        return {"merged": False, "reason":
+                f"the merged model is not worth quoting ({report.accuracy:.1%} "
+                f"against a {report.baseline:.1%} constant, and no minority "
+                "verdict is detected), so it was not written",
+                "from": len(usable), "rejected": rejected,
+                "accuracy": round(report.accuracy, 6),
+                "baseline": round(report.baseline, 6)}
+
     out = sign_model(model.to_dict({
         "merged_from": len(usable), "method": f"ties(density={density})",
         "feature_space": current, "contributions": contributions,
-        "rejected": rejected, "honest": True,
+        "rejected": rejected,
+        # **From the report, never asserted.**
+        "honest": bool(report.honest()),
+        "accuracy": round(report.accuracy, 6),
+        "baseline": round(report.baseline, 6),
+        "beats_baseline": bool(report.accuracy > report.baseline),
+        "evaluated_on": len(examples),
+        "evaluation": "the merged weights scored against this machine's own log",
+        "detected": report.best_detection()[0],
+        "recall_lift": {k: round(v, 3)
+                        for k, v in _lifts(report, "recall").items()},
+        "precision_lift": {k: round(v, 3)
+                           for k, v in _lifts(report, "precision").items()},
         "example_count": sum(int((p.get("provenance") or {}).get("example_count") or 0)
                             for p in usable)}))
 
@@ -2772,7 +2838,13 @@ def merge_models(payloads, density: float = 0.3,
         stored = f"not written: {exc}"
     return {"merged": True, "from": len(usable), "rejected": rejected,
             "coordinates": len(merged), "path": stored,
-            "contributions": contributions}
+            "contributions": contributions,
+            "honest": bool(report.honest()),
+            "accuracy": round(report.accuracy, 6),
+            "baseline": round(report.baseline, 6),
+            "beats_baseline": bool(report.accuracy > report.baseline),
+            "detected": report.best_detection()[0],
+            "report": report}
 
 
 def verify_model(payload: dict, key: Optional[bytes] = None) -> Dict[str, object]:
