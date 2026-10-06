@@ -1750,6 +1750,44 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### The cloud-speech privacy story, verified by running it end to end
+
+`cloud_voice` has a `_transport` hook, so the whole path can be driven for real
+with `httpx.MockTransport` — real `_post`, real `_record`, real httpx, only the
+wire faked. Measured with a hand-built 16 kHz mono WAV (32044 B) and a real
+provider-shaped reply:
+
+| | privacy off | privacy on |
+|---|---|---|
+| `CloudTTS.synthesize_to_bytes` | 32044 B of real RIFF WAV back | `CloudVoiceRefused` |
+| `CloudSTT.transcribe` | the provider's text back | `CloudVoiceRefused` |
+| ledger rows added | 2, both with a `purpose` | **0** |
+| wire hits | 2 | **0** |
+
+The two directions record **different** things, correctly:
+
+```
+purpose='speech-synthesis'   component='cloud_tts:openai'  bytes_out=11
+purpose='speech-recognition' component='cloud_stt:openai'  bytes_out=32044
+```
+
+Synthesis records the 11 bytes of **reply text**, because that is what left;
+recognition records the 32044 bytes of **audio**, because that is what left.
+Answering "how much of my voice left this machine" means reading `bytes_out` on
+a `speech-recognition` row — which is exactly what the egress panel's `purpose`
+column now makes possible.
+
+**A harness trap worth knowing, because it nearly had me reading a real user's
+data.** `egress.EGRESS_LOG` is a module-level constant built from `~/.local/share`
+and is **not** where a redirected run writes. `record()` resolves the path per
+call through `egress._egress_log()`, which honours `XDG_DATA_HOME` and gives a
+pinned `EGRESS_LOG` priority. So a probe that sets `XDG_DATA_HOME` and then reads
+`egress.EGRESS_LOG` silently reads the *real* `~/.local/share/shani-chronoa/…`
+ledger — 1256 lines of this machine's actual history, which is what it printed
+before I noticed. Read `egress._egress_log()` in a probe, and set
+`XDG_DATA_HOME` as well as `XDG_STATE_HOME`; `egress` does not look at
+`XDG_STATE_HOME` at all.
+
 ### A hardcoded cascade count that went stale the same day I made it go stale
 
 `_speech_out()` resolved through the **real** `PiperTTS.engine()` — correct — and
