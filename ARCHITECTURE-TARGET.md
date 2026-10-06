@@ -383,13 +383,13 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Brain | ✅ | llama.cpp (default), Ollama, cloud fallback chain, tool loop, MCP server |
 | Imagination / Curiosity / Affect | ❌ | only fragments (plan mode, loop detection, ask_user) |
 | Motivation | 🟡 | todo list, reminders, timers, scheduled triggers; no goal manager |
-| Language | ✅ | LLM, STT, TTS, translation |
+| Language | ✅ | LLM, STT, TTS, translation; **cloud STT as a fallback** (`cloud_voice.CloudSTT`, opt-in, and **only when no local model can listen**) - every cloud speech route measured needs a key, so it is never anonymous |
 | Learning | 🟡 | memory facts and history; verification verdicts reorder the tools already allowed (`learning.py`), and a **distilled routing student** (`distill.py`) can narrow them further - measured 62% on held-out requests vs a 12% baseline, from a teacher that agreed with the human label 47/54. Still no preference learning from what you liked, and no skill learning |
 | Taste / Evaluate | 🟡 | post-condition verification, guardrail, history repair, schema refusal; no judge or confidence |
 | Decision | ✅ | permissions, approvals, plan mode, presets, guardrail |
 | Reflex | ✅ | 18 event types, wake word, barge-in |
 | Hands | ✅ | D-Bus, systemd, GNOME and Plasma backends, portals, AT-SPI, typed input; no generic shell (on purpose) |
-| Voice output | ✅ | Piper (English + six Indian-language voices), Kokoro (sherpa-onnx, six voices, opt-in), espeak-ng floor, streaming sentence by sentence |
+| Voice output | ✅ | Piper (English + six Indian-language voices), Kokoro (sherpa-onnx, six voices, opt-in), espeak-ng floor, streaming sentence by sentence; **cloud synthesis as the last link** (`cloud_voice.CloudTTS`, opt-in per capability, checked on every reply) |
 | Creation | 🟡 | text, documents, sheets, slides, image looks and upscale; pictures from a description and photo edits by description (stable-diffusion.cpp); no audio/video/3D generation |
 | Pain / Reward | 🟡 | faults, coredumps, resource pressure, loop detection; no reward signal |
 | Sleep / Dream / Consolidate | 🟡 | idle consolidation of finished conversations (`consolidation.py`, extractive digest plus a queue of proposed facts, from the daemon's tick); no dream engine |
@@ -468,6 +468,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | PipeWire | ✅ | audio-device event |
 | Network APIs / REST | 🟡 | `netjson.py` (one JSON GET, used by weather, currency and similar); no GraphQL |
 | MCP (as a client) | 🚫 | Chronoa is an MCP server only; a client needs a human decision |
+| Inbound channels (WhatsApp, Telegram, anything D-Bus) | ✅ | `gateway.py`: one method, `Submit(gateway, text)`, on the session bus at `dev.shani.chronoa.Gateways`. Configured by the `gateways` setting and editable in Settings → Privacy, which reloads live. Ask-only by default; the text goes through the window's own `_submit`, so it meets the same whitelist, consent keys and post-conditions as anything typed. Bounded (4,000 chars, 20/min), off unless asked for. **No channel integration itself** - a WhatsApp or Telegram bridge is a separate component with its own credentials |
 | Web / feeds | 🟡 | `webtext.py`, `senses/web.py`, `skills/web_search.py`; no RSS/Atom |
 | PDFs / Office / images | ✅ | `skills/read_document.py`, `office/` (docx/xlsx/pptx/odf), `skills/analyze_table.py`, OCR |
 

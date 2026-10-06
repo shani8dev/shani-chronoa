@@ -828,7 +828,33 @@ the research result it cannot produce.
 Full methodology, the eight running-only bugs, the research correction, and
 the live security finding are in **`AUDIT-HISTORY.md`**.
 
-**Verification status:** unit suite green on Ubuntu (1878 passed, 6 skipped)
+**Verification status 2026-10-06: 5364 passed, 27 failed, 39 skipped** (run in
+six chunks, because a single 44-minute run kept being lost to a killed process
+group). **All 27 failures are in test files this work never touched** - verified
+by intersecting the failure list with the modified-file list, which is empty.
+Every one is environmental on this box, and each is a real capability that is
+genuinely absent rather than a defect:
+
+| file | why |
+|---|---|
+| `test_browser_window_probe.py` (7) | WebKitGTK is not installed (`require_version` fails for both 6.0 and 4.1); the file's own message says it "proves nothing" in that case |
+| `test_setup_extras.py` (6) | `ConsentRequired` - model downloads are gated shut in this environment. Verified pre-existing on the **unmodified** tree |
+| `test_sandbox_seccomp.py` (2), `test_sandbox_profiles_live.py` (1) | Landlock and seccomp need the real kernel; AGENTS.md already says so |
+| `test_sense_idle.py` (3) | real clock and real X resources, headless |
+| `test_everyday_skills.py` (2), `test_input_skills.py` (1) | xdotool / X11 not present |
+| `test_permission_decisions.py` (2) | no Wayland screen-capture tool (`grim`, `gnome-screenshot`) |
+| `test_portal_input.py` (1) | no `org.freedesktop.impl.portal.RemoteDesktop` backend |
+| `test_recordings.py` (1) | the consent switch is off here, so the honest refusal is returned instead of the granted path |
+| `test_vision_sense.py` (1) | a real screenshot of this desktop, which needs `grim` |
+
+**Two failures were mine to fix and are fixed**: `test_packaging.py`'s two
+bytecode checks (690 stray `.pyc` left by ad-hoc probes - AGENTS.md's documented
+trap, and the only reason to prefer `PYTHONDONTWRITEBYTECODE=1` on *every* probe)
+and `test_skills.py`'s two lambda handlers (above). Cleaning the bytecode also
+silenced four ordering-dependent failures elsewhere, which is worth knowing:
+**stray `.pyc` changes what a full run exercises.**
+
+Earlier in the same session: unit suite green on Ubuntu (1878 passed, 6 skipped)
 
 **Run the suite with `XDG_STATE_HOME` set, or it writes to the real home
 directory.** `skills/timer.py` resolves its store from `XDG_STATE_HOME`,
@@ -849,6 +875,37 @@ makes `test_no_pycache_in_packaged_payload` and
 suite itself leaks nothing. Clean the tree before trusting a red packaging
 test — and check whether the bytecode is yours before assuming the repo is
 broken.
+
+**Two tests in `test_skills.py` could not pass as written - FIXED 2026-10-06.**
+Both registered `Skill(run=lambda a: ...)`, and `skills/__init__.py` **refuses a
+handler whose `__name__` is not an identifier** (the 2026-10-05 fix: a non-local
+skill is dispatched by interpolating `handler.__name__` into an import, so
+`from module import <lambda>` is a SyntaxError and the skill was advertised to
+the model and failed on every call). So both lambdas were skipped with a warning,
+`tools` stayed empty, and `test_duplicate_override_keeps_single_schema` read
+`assert 0 == 1`. They were testing the **lambda rejection**, not the
+duplicate-name behaviour they are named for. Now they use named module-level
+functions.
+
+Worth recording because of how it looked: the failure was `assert 0 == 1`, which
+points at "the dedupe did not happen", and the dedupe was fine. A green-looking
+assertion about a *count* is ambiguous between "the thing was removed" and "the
+thing was never added", and only the warning line above the traceback said which.
+
+**A module-level `lambda` is still a lambda.** The first fix here moved them to
+module scope to "keep it inline", which reproduced the same skip.
+
+**Kill a stale suite in one command and start the new one in another.**
+`pgrep -f` has the same self-match as the `pkill -f` trap the workspace
+AGENTS.md records, and the `[p]` trick does not save you when the pattern is a
+fragment of your own command line. Measured 2026-10-06: a single command that
+both killed a stale run and launched a fresh one matched *its own shell* — the
+`/bin/bash -c` line contained the literal text `pytest tests/` — so `kill -9`
+killed itself and the new suite died **before writing a byte**. Two consecutive
+"SIGKILL, empty log" results read exactly like a suite that crashes on
+collection, and sent me looking for a segfault in a GTK teardown that had never
+been reached. Confirm the log has grown before believing any result about a run
+that "crashed".
 
 > **MCP stdio verified 2026-09-29** against a real JSON-RPC client:
 > `initialize` (protocol 2024-11-05), `tools/list` (70 tools), and `tools/call`
@@ -1439,6 +1496,394 @@ Chronoa's own code, **one of the two headline ideas was already here**:
   stream that may never end", and counting that as a deferral would put a number
   on the log that never happened.
 
+## Cloud voice, and the wizard's cloud branch that never asked (2026-10-06)
+
+**There was no cloud voice at all, and "In the cloud" produced an assistant that
+could not hear.** Three defects, all found by walking the real wizard and reading
+what it said.
+
+### 1. "Nothing to download" was true because the wizard had stopped asking
+
+The Mode page's "In the cloud" row reads *"nothing to download"*. The flow it
+produced was `welcome -> mode -> cloud-keys -> done`, and `on_finish` writes
+`setup-complete=true` unconditionally - after which `needs_setup()` returns False
+forever. So somebody who deliberately chose the cloud got a Chronoa that could
+think and **could not hear**, and was never asked about it. The cloud branch now
+goes `cloud-keys -> ears -> voice`, and Ears and Voice both say what they cost.
+
+### 2. The Mode page's radio did nothing, and the Ears page charged for nothing
+
+**The question was asked and the answer discarded.** `navigate()` took the
+destination as a string and bound it into the button's handler when the page was
+built - before anyone could toggle a radio on it. Measured: choose "In the cloud",
+press Next, land on `brain`, the page offering a 1.1 GB local download. That is
+the specific failure the page's own comment says it exists to prevent, three lines
+above the wiring that caused it. `navigate()` now takes a callable, and the Mode
+page re-titles the button on `toggled` so the label cannot disagree with the
+destination (`tests/test_mode_choice_routes_the_flow.py`; both halves are asserted,
+because a button that *goes* to Cloud keys while still reading "Next: Brain" is
+the same defect wearing a different hat).
+
+**In cloud mode the Ears page showed nothing and still charged 60 MB.** The model
+list was built as `[]`, so the choice group rendered no rows - and then the same
+`else` branch ran anyway and queued the recommended model's download. Measured with
+`setup-mode=cloud`: Ears listed **zero rows** and the Review page read
+**"Download 3 thing(s) ... 1.3 GB across 3 download(s)"**, one of which had no row
+in front of it to see, choose or decline. A charge with no row in front of it is
+not a choice, and that page's own subtitle promises *"Everything you picked, and
+nothing you did not."* Fixed in `tests/test_cloud_branch_is_honest.py`.
+
+**A gap that test file had, found by mutation rather than by reading it.** Three of
+its four mutations were caught; `cloud-keys -> done` was **not**, because the tests
+reached `ears` and `review` with `push_by_tag` - a test that navigates *around* a
+route is not a test of the route. It now presses Next on the page the branch
+actually lands on. This is the "negative control that cannot fail" trap in a new
+place, and the fourth time in this repo that a source-level check has agreed with
+code that does nothing.
+
+### 3. `cloud_voice.py`: speech recognition and synthesis over the API
+
+`stt.py`, `stt_parakeet.py`, `tts.py`, `sherpa.py` and `voices.py` contained
+**five URLs between them and every one is a download** - a sherpa-onnx release, two
+Piper releases, a Piper-voice archive. Speech itself was whisper-cli, Parakeet,
+espeak-ng, Piper and sherpa-onnx, all local subprocesses; "cloud" meant
+`cloud_llm.py`'s text and nothing else.
+
+`cloud_voice.py` adds `CloudSTT` (`is_available`/`transcribe`/`transcribe_stream`,
+`WhisperSTT`'s exact surface) and `CloudTTS` (`synthesize_to_bytes`/`synthesize`,
+`PiperTTS`'s), so each is a *selection* rather than a branch at every call site.
+
+**Four reasons it is not just another provider in `cloud_llm.py`:**
+
+- **Audio is a different disclosure from text.** `redactor` keeps API keys out of
+  prompts; nothing makes "the last thirty seconds of your microphone" safe. So it
+  gets **two** switches, `cloud-stt-enabled` and `cloud-tts-enabled`, both default
+  **false** - deliberately *not* `cloud-fallback-enabled`. A person who allowed
+  prompts to leave as text has not agreed to upload a recording, and one switch
+  cannot express that difference.
+- **"Fallback" is the wrong word** for the primary listener on a machine with no
+  local model. Hence separate names.
+- **The privacy gate is per request here, and that is the structural difference.**
+  `cloud_llm` enforces privacy at chain *selection*
+  (`_maybe_enable_cloud_fallback`) and on toggle (`_toggle_privacy` drops
+  `self.llm`); `cloud_llm` itself only *records* `egress.privacy_mode_enabled()`.
+  Sound for a chat turn, which is request-scoped. **A microphone stays open for
+  minutes** - dictation's ceiling is 300 s against an ordinary turn's 20 - so
+  privacy mode can be turned on halfway through and the next chunk would be sent
+  by a chain chosen legally before the person changed their mind.
+  `_privacy_refusal()` is therefore called *inside* `transcribe()` and
+  `synthesize_to_bytes()`, failing closed.
+  `test_privacy_turned_on_mid_dictation_stops_the_next_chunk` builds that exact
+  sequence, because a gate only ever tested in one state cannot tell "reads the
+  flag every time" from "read it once at construction".
+- **`egress.MODEL_HOSTS` is a model-*download* allowlist** and `cloud_llm` never
+  calls `check_destination`, only `egress.record()`. Reusing it would be wrong in
+  both directions, so `cloud_voice` records its own events with `purpose` set to
+  `speech-recognition`/`speech-synthesis` and `bytes_out` set to the **real audio
+  size** - `payload_size` is meaningless here.
+
+**It displaces nothing local.** Cloud TTS is the *last* link of
+`PiperTTS.engine()`'s cascade, after Kokoro, Piper, RHVoice and espeak-ng -
+`espeak-ng` is a hard package dependency, so on any working install that branch is
+never reached and turning the switch on cannot displace a local voice.
+`app/voice.py:_build_stt` only reaches for the cloud when `local.is_available()`
+is False, and re-decides per utterance so installing a local model later takes
+precedence without anybody turning a switch back off.
+
+**Every refusal case in `tests/test_cloud_voice.py` installs a transport that
+raises if reached.** Checking `is_available() is False` proves a flag was read; it
+does not prove a request was not made. The three refusals are kept apart because
+they are three sentences and only one is actionable: the switch is off, privacy
+mode is on *right now*, or nothing configured has the route.
+
+### The capability table was wrong three times before it was right
+
+**The first table was built from an empty POST, reading `400` as "the route
+exists".** That is wrong, and each of the three failures looks exactly like a
+working provider:
+
+| provider | a real body says | the 400-based guess claimed |
+|---|---|---|
+| `kilo` | `"This endpoint only accepts the path /chat/completions"` | has a speech route |
+| `blockrun` | `"Unknown speech model: tts-1. Available models: elevenlabs/..."` | right answer, wrong reason |
+| `openrouter` | `ZodError ... response_format ... values: ["mp3","pcm"]` | returns WAV |
+
+**A status code is not a capability; the server's own sentence about what is wrong
+is.** `probe_capabilities()` now sends a real body and a real WAV and returns four
+verdicts - `yes` / `no` / `needs-key` / `unreachable` - because "I could not ask"
+and "it does not have one" are different answers.
+
+Four findings that shape the design, all from the corrected probe:
+
+- **No cloud speech is anonymous anywhere.** Every provider with a route answers
+  401 without a key, Kilo with `"PAID_MODEL_AUTH_REQUIRED": "You need to sign in
+  to use speech-to-text."` This matters because the *text* chain is deliberately
+  keyless, so "speech follows suit" is a natural and wrong assumption: enabling
+  `cloud-stt-enabled` with no key configured enables **nothing**.
+- **The free keyless chain (`llm7, kilo, blockrun`) has exactly one speech
+  provider** - BlockRun, and it names its models after ElevenLabs. So somebody with
+  no API key gets a cloud *brain* and a local *voice*, and a provider whose free
+  tier has run out gets silence.
+- **OpenRouter cannot return WAV**, so `_to_wav` converts with the `ffmpeg` already
+  used by `recordings.py` and **raises** if ffmpeg is absent - never handing back
+  MP3 under a name every caller here believes means WAV.
+- **BlockRun's speech endpoint bills crypto.** Measured: HTTP 402 with an x402
+  challenge - `{"x402Version":2,"accepts":[{"scheme":"exact","network":
+  "eip155:8453","amount":"2000"}],"error":"Payment Required","message":"This
+  endpoint requires x402 payment","price":{"amount":"0.002000","currency":"USD"}}`.
+  0.002 USD in USDC on Base, **per request**. Its *chat* tier is free, which is
+  exactly what makes this easy to get wrong, so BlockRun is deliberately **not**
+  offered for speech - a switch labelled "Cloud speech synthesis" that quietly
+  bills a wallet is worse than not offering the provider. Its ElevenLabs model
+  name stays in `TTS_MODELS` so the finding is recorded in the module, and
+  `probe_capabilities()` reports `needs-paid` rather than losing it.
+
+**And the corrected classifier caught its own author.** `verdict()` needed a
+`needs-paid` state because its first version read BlockRun's 402 as `no` - the
+same "a status code is not a capability" mistake this module documents, made one
+function above where it was being described. Found by running the live probe
+against the table and diffing all nine providers: it disagreed on exactly one,
+and the disagreement was in the direction that would have shipped a crypto bill.
+The probe and the table now agree on all nine.
+
+**Also fixed while in there:** `_stt_backend_label()` answered from the
+*configured* backend, so once `_build_stt` could return a cloud engine the startup
+line named `Whisper.cpp` on a machine that never ran it. It now reads the object
+(`CloudSTT.label = "Cloud"`) - the same "two log lines a millisecond apart,
+disagreeing" failure this file has recorded before, reached from a new direction.
+
+### Tests and mutations
+
+`tests/test_cloud_voice.py` (23), `tests/test_cloud_branch_is_honest.py` (5),
+`tests/test_mode_choice_routes_the_flow.py` (2),
+`tests/test_welcome_rows_are_targets.py` (14). Mutations run and confirmed to
+fail: privacy read once at construction (1 test), switch ignored (2), keyless
+providers allowed (2), Kilo put back in the routes (2), MP3 returned as WAV (1),
+empty cloud model list restored (1), cloud branch skipping Ears (1, after the gap
+above was closed), ears queued anyway when cloud is on (1), honest paragraph
+removed (1), welcome rows inert (11), a wrong row tag (1), `Start` renamed (1).
+
+**The probe method was wrong before the code was.** An empty POST to Kilo returns
+`400`, and so does a *valid* body to a provider that merely names its models
+differently - so the first table agreed with three providers that cannot do what
+it said. `tests/test_cloud_voice.py` pins the four-verdict classification
+specifically so the mistake cannot come back quietly.
+
+### The egress panel answered "what left?" with a URL and a byte count
+
+`gui/surfaces/privacy.py`'s **Recent network activity** group rendered
+
+    {method} {url} - {bytes_out} bytes
+
+— accurate about bytes and **silent about the only part that matters**. An upload
+of a recording therefore read as
+
+    POST https://api.openai.com/v1/audio/transcriptions - 53312 bytes
+
+which looks like a data POST and not like the voice of the person sitting at the
+machine. The person opening that panel is asking one question, *what left?*, and
+for the newest kind of egress the answer was a URL and a size.
+
+**The byte count is the kind of number that reads as complete.** 53,312 bytes of
+anything looks like a request; 53,312 bytes of 16 kHz mono PCM is fourteen
+seconds of somebody speaking. The panel cannot tell the difference, because
+`payload_size` is a *length* and a length does not say what was measured — only
+the `purpose` does. `egress.record` has carried that field since model
+downloads, and `cloud_voice` writes `speech-recognition` /
+`speech-synthesis`; none of it reached the screen. Now it does, and events with
+no purpose render **exactly** as before, because an addition that made old rows
+unreadable would be the worse regression.
+
+Deliberately **not** done: deriving seconds from the byte count. That needs a
+sample rate and a channel count, and guessing either is the confident wrong
+answer this panel exists to avoid. `tests/test_egress_panel_says_why.py`
+(3 tests, mutations: purpose dropped 2, prefix applied unconditionally 1,
+hardcoded prefix 3).
+
+`gui/browser.py`'s `_record_navigation` had the same gap and now records
+`purpose="page-navigation"`, so a page the person opened is legible in the same
+panel as everything else. Its two existing properties are pinned alongside, both
+because they are easy to break while adding a field: `privacy_mode` is still
+**read at the call site** (omitted it computes `violation=False` structurally,
+which is how `webtext.retrieve` was uninstrumented while looking instrumented),
+and a `file://` page is still **not recorded at all** (an alarm that fires for
+local files is an alarm nobody reads).
+
+**Two test-shape mistakes here, both worth recording.** The file's first version
+*skipped* when the panel build raised — a skip reads as coverage and is not, so it
+now builds through the real `surface.build(app)` with a config stub and has no
+skip path. And its "old rows are unchanged" assertion was a **substring** check
+(`"GET ... - 12 bytes" in texts`), which a mutation that prefixed every row with
+`request: ` still satisfied, because the prefix goes *before* the string being
+looked for. That mutation ran green. It now asserts **equality on the egress
+row**, selected by host — the panel also renders privacy mode, the switches and
+every consent row, so "the rendered text contains X" was never the right shape.
+
+### The Voice panel did not learn about its own fifth engine
+
+Adding the link to `tts.PiperTTS._engine` is not adding it to the panel.
+`gui/surfaces/voice.py`'s `_chain()` had its own four engines, so a machine
+speaking through a provider would have found no row at or above its own and been
+told it was using nothing — the panel-silently-incomplete defect the file's own
+docstring records for the Eyes list.
+
+The instructive part is what the tests said while it was broken. Two existing
+assertions **passed anyway**:
+
+- `test_a_probe_that_raises_is_unknown_not_absent` proves a failed probe names no
+  engine, by asserting the absence of `ENGINE_NAMES` — and `ENGINE_NAMES` listed
+  four, so omitting the fifth was invisible to the guard. **An omission in a
+  negative-space guard cannot fail.**
+- `ENGINE_NAMES` was the same four-tuple in a second place, kept in step by hand.
+
+Both now derive from `surface.CHAIN`, and the state list is asserted as a
+*property* ("exactly one engine is present, and it is the floor") rather than as
+a literal — because `cloud` sits **after** `espeak-ng` and is False, so
+"all False then a True" was never going to be the right shape and I wrote it that
+way first.
+
+**And the panel is read-only, which `cloud_voice` had to learn.** Asking the cloud
+engine's availability by constructing a `ChronoaConfig()` instantiates a
+`Gio.Settings`, which on first use creates `~/.config/glib-2.0` —
+`test_building_writes_nothing_to_the_data_home` caught it, correctly. `CloudTTS`
+and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
+use it when given. Better dependency direction anyway; the injectable half exists
+because a read-only page that creates a settings directory is not read-only.
+
+`COST["cloud"]` claims **no real-time factor**, and says why: the cost is not
+time but that the reply text leaves the machine, and quoting a latency would make
+the row read as a neutral alternative to Kokoro.
+
+Mutations run and confirmed to fail: `cloud` dropped from the panel chain (2), the
+disclosure removed from `COST` (1), the panel building its own config again (1).
+
+## The inbound gateway: two faults in one function, and no test file at all (2026-10-06)
+
+`gateway.py` is the channel AGENTS.md's "Channels and the jail" section cites as
+its security argument - one D-Bus method, `Submit(gateway, text)`, whose text
+goes through the window's own `_submit` so it meets the same whitelist, consent
+keys and post-conditions. That argument was written about a module **with no
+`tests/test_gateway*.py` anywhere in the tree**, and whose one activation
+function had never once succeeded.
+
+### The three findings
+
+**Nothing could turn it on.** `_export_gateways()` runs from `do_activate` and
+returns early because `Registry.names()` is empty - because, measured with an
+AST search over every call whose receiver mentions a gateway, **nothing in the
+tree ever called `Registry.register()`**. No config key, no CLI flag, no Settings
+row. A complete, tested-by-nobody inbound channel with no switch.
+
+**`export()` threw on every call.** It passed the `_Service` object to
+`register_object`, which needs a *closure*; a plain object with methods is not
+one, and the type check rejects it. Measured:
+
+    could not export the gateway interface: Must be callable, not _Service
+
+The `except Exception` around it turned a line that had never once worked into a
+log message reading "could not", which reads as transient.
+
+**`BUS_NAME` was the application's own name.** It was `dev.shani.chronoa`, which
+is `ChronoaApplication`'s `application_id`, so `export()` requested a name the
+`GApplication` already held, with `REPLACE | ALLOW_REPLACEMENT`. Two owners on
+one well-known name: the bus arbitrates, ownership ping-pongs, and a client gets
+`ServiceUnknown`. Now `dev.shani.chronoa.Gateways`, matching the interface name
+the introspection XML already declared.
+
+**The second fault was invisible *because* of the first** - the name was never
+requested, because `register_object` threw first. "Fixed the error" and "the
+feature works" are different claims and only running it settles which one you
+have. Verified end to end afterwards: export, own the name, `Submit` over a real
+private bus, and the text arrives at the window's entry point, with every refusal
+specific (`no gateway called 'signal'; registered: telegram, whatsapp`,
+`message is 5000 characters; the limit is 4000`, `empty message`).
+
+### Three ways this took longer than it should have, all recorded because all three will recur
+
+- **`Gio.bus_get_sync` caches one session-bus connection per process**, resolved
+  from `DBUS_SESSION_BUS_ADDRESS` at first call. Spawning a private
+  `dbus-daemon` and setting that variable *inside* a script that has already
+  imported `gi` does nothing. Measured: the service owned `:1.7503` on the real
+  bus and the client sat on `:1.0`, and every call returned `ServiceUnknown`
+  while the log said `gateway bus name acquired`. `export(..., connection=)` now
+  exists so a test can hand it a bus, and `tests/test_gateway.py` uses
+  `Gio.TestDBus` - which also needs `up()` before `get_bus_address()` returns
+  anything but `None`.
+- **`register_object` refuses a second export of the same interface at the same
+  path on one connection**, and `bus_unown_name` releases the name without
+  unregistering the object. So the bus fixture is function-scoped: a shared
+  connection would let the first export decide every later one's outcome.
+- **A registry captures `self._submit_gateway_text` when it is built**, so
+  replacing that attribute on the instance afterwards is never read - and the
+  resulting "the text did not arrive" looks exactly like a product bug.
+
+### And a third fault, which only exists *because* the first two are fixed
+
+Editing a channel name reloads rather than restarting, so `export()` runs
+repeatedly on one connection. **`register_object` refuses a second export of the
+same interface at the same path** (`g-io-error-quark: An object is already
+exported for the interface dev.shani.chronoa.Gateways at
+/dev/shani/chronoa/Gateways`), and `bus_unown_name` frees the *name* while
+leaving the *object* registered.
+
+Measured on the app's own reload path before the fix: **reload 1 owned the name;
+reloads 2, 3 and 4 all reported `owner=False, on_bus=False`** while the registry
+still listed the channel - so the Settings row would have read "on the bus as
+whatsapp" while nothing was listening. A feature that works once and stops
+working the first time you edit it.
+
+The fix needed the **registration id**, and that is the trap: GLib's C function
+is `g_dbus_connection_unregister_object(connection, object_path)`, but PyGObject
+introspects it as `unregister_object(registration_id: int)` - measured by passing
+the path and getting `TypeError: Must be number, not str`. Reading the C header
+and writing the Python is how that happened, and it is the same class of mistake
+as assuming a 400 means a route exists: **the signature you remember is not the
+one you are calling.** `test_reloading_keeps_the_channel_reachable` asserts the
+reload works rather than that a particular unregister call is spelled correctly,
+so it survives the next re-spelling.
+
+**This is also why the round-trip test's bus fixture is function-scoped** - one
+root cause seen from two directions. And it was found by running the reload path
+I had just written, immediately after fixing a test fixture that failed for the
+identical reason: I had witnessed the constraint and then written code that
+violated it.
+
+### One equivalent mutant, kept rather than hidden
+
+Deleting the `if handler is None` guard inside `dispatch` leaves the file **fully
+green**: GDBus refuses any method absent from the interface info before the
+closure runs, so that branch is unreachable over D-Bus. The guard is kept (it is
+the right thing to have if the XML ever grows a method with no handler) and the
+test now says so, including that GDBus's own wording is `No such method
+"RunAnything"` - accurate, and it does not point at the one method that exists.
+
+### Now reachable
+
+`gateways` in the schema, parsed by `gateway.parse_config` into `(entries,
+errors)` - **errors are returned, never raised and never dropped**, because a
+channel name containing `/` or `.` cannot work (it becomes part of a D-Bus method
+name) and a setting that silently ignores what it cannot parse is a switch that
+appears set and does nothing. Format: `name` or `name:execute`, comma-separated.
+An invalid entry is logged per-entry, the good ones still register, and the
+Settings row reports both.
+
+Settings → Privacy gained **"Inbound channels"** and a live **"Listening for"**
+row that names what is on the bus and what was ignored. Changes reload live
+(`_reload_gateways`, which releases the previous owner before taking a new one,
+so a reload does not leave two owners of one name).
+
+`tests/test_gateway.py`, 32 tests, mutation-checked: object-instead-of-closure (2
+fail), `BUS_NAME` back to the application's (1), rate limit removed (1), length
+limit removed (2), bad entry silently dropped (3).
+
+**Also corrected here:** AGENTS.md said `register_agent`/`broadcast_message`
+"remain dead". They no longer exist - removed in the 2026-10-02 structure review,
+per `child_supervisor.py`'s own docstring. What is left of that module *is* live,
+imported by `audio.py:42` to supervise the `pw-record`/`pw-play` children. And a
+naming collision worth knowing: **"Kilo Gateway API key" in Settings is an LLM
+provider**, unrelated to this module; "gateway" means two unrelated things in
+this codebase.
+
 ## Channels and the jail: the two review points, audited rather than asserted (2026-10-05)
 
 From the same thread: *"you can connect other channels like whatsapp etc to give
@@ -1730,6 +2175,20 @@ voice" - so the first screen a new person saw named three of nine, and the only
 mention of a 2.0 GB picture model was inside a comma-separated string with three
 100 MB ones. Nine rows is four more lines, and each one can be clicked into,
 which the lumped row could not be because it was not a target.
+
+**Those nine rows were not clickable, and this file said they were - FIXED
+2026-10-06.** Walking the real welcome page for anything pressable gave exactly
+one answer: `Start`. All nine were bare `Adw.ActionRow(title=..., subtitle=...)`
+with no `activatable`, no suffix control, and nothing on `activated`, two lines
+under a comment claiming they were targets - and that claim is also the *reason*
+given for splitting the lumped row, so the rationale rested on a capability the
+rows did not have. The module already knew the device (`choice_group` passes
+`activatable_widget` to every row it builds); it had been left off here. Each row
+is now activatable, carries a chevron and a tooltip naming its page, and is
+verified by **pressing it** - one fresh wizard per row, because `goto()`
+truncates its own history and a reused window made the first version of that
+test report `Brain -> voice` and `Ears -> imagine`, which looks like a routing
+bug and is a probe sharing state (`tests/test_welcome_rows_are_targets.py`).
 
 ### And three log lines that were confident and wrong
 
