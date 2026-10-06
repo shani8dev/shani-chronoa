@@ -1871,6 +1871,50 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### The full inventory: what is dead, what is deliberate, and what is a lie
+
+An AST scan of **all 1,025 public functions and classes** in the package found
+**57 never called anywhere**. The 379 "called only inside their own module" are
+ordinary internal helpers and were not treated as findings. Triaged in full so
+nobody re-derives this:
+
+**Wired this session (15).** `merge_models`, `lessons`, `render_lessons`,
+`experience_summary`, `evaluate_bandit`, `organ_status`, `adopt_retired`,
+`import_knowledge`, `probe_capabilities`, `perplexity`, `quality_verdict`,
+`calibrated_quantize`, `audio_status`, `seccomp.is_active`, and
+`permissions.cancel_requested` (which had a caller added rather than a caller
+found).
+
+**Deliberate, and the reason is recorded in the code.**
+`retire_model` is a no-op on purpose — a rename is the only genuinely fragile
+operation in that layer and the space check on load already refuses a stale
+model. `summarize_tool_results` / `summarize_history` take an opt-in
+`summarizer` that `assistant.py:185` passes none of, so compression is
+elision-only by choice, not by omission. `open_settings_button` /
+`wire_page_button` are **speculative API, not duplication**: the four call sites
+that navigate to Settings use `banner()`'s own button, not a suffix button, so
+the helper has no user. `bayes`, `timeseries`, `clustering`, `classification`,
+`anomaly` are a statistics toolbox. `Point`, `Cert`, `Busy` are dataclasses.
+`prctl_set_seccomp_attempt` is the legacy path kept on purpose.
+
+**False positives a `usr/lib`-only scan produces, and the two that bit me.**
+`apply_filesystem_allowlist` is called from *generated code* inside
+`get_landlock_wrapper()`. `revalidate` and `read_envelope` are called by
+`usr/bin/shani-chronoa-lab-network` — **any scan of "who calls this" in this
+repo has to include `usr/bin/`**, because that is where the privileged half
+lives. `check_destination` appeared in the discarded-result scan and is
+correct: it returns `None` and raises on refusal, so `_guard()` fails closed.
+
+**Still unwired, genuinely candidate.** `run_from_file`, `webkit_version`,
+`known_organ`, `page_titles` / `forget_window`, `install_hint`,
+`is_parakeet_provisioned`, `voices_for`, `pending_count`, `price`,
+`collapse`, `help_prompt`, `capability_for`, `summarize_*` siblings, `from_url`, `save_record`, `lab_network_namespace`,
+`encode_rejection`, `describe_captured`, `remember_from_turn`, `tempo_map` /
+`apply_contour` / `within`.
+
+**All 154 schema keys are read** — there is no unwired setting in this
+repository. Worth recording as a clean result.
+
 ### Two more that existed, answered nothing, and were exactly what a panel is for
 
 A second scan — not "never called" this time, but **query-shaped functions whose
