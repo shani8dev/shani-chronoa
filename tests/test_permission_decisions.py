@@ -163,3 +163,140 @@ class TestDecideRecordsWhatItWasTold:
         execute_tool_outcome("screenshot", {})
         assert permissions.evaluate("screenshot", "*") == \
             permissions.Decision.DENY_SESSION
+
+
+class TestTheOptionsMeanWhatTheySay:
+    """**"Allow for this session" asked again on the very next call.**
+
+    `decide()` short-circuited on a rule already on record, but the set it
+    checked was only the three *refusals*. A session **grant** was written to
+    `_grants` and then never read, so choosing the option recorded a decision
+    that changed nothing and put the same question back on screen immediately.
+
+    Measured before the fix, with a presenter that always picks the session
+    option: **three calls, three prompts**, two of them on the same channel, and
+    `_grants` holding the same rule twice.
+
+    The inbound gateway surfaced this first — a phone channel with a session
+    grant re-prompted on every message — but it is not the gateway's bug, and
+    `decide()` is shared by every tool, so the fix is here rather than there.
+
+    `ALLOW_ONCE` is deliberately **not** short-circuited, and that is the test
+    that stops this being over-fixed into "the prompt never appears".
+    """
+
+    @staticmethod
+    def _answer(monkeypatch, choice):
+        """Patch the two `ask_bridge` seams `decide()` uses, so no UI is needed."""
+        from shani_chronoa import ask_bridge
+
+        asked = []
+        monkeypatch.setattr(ask_bridge, "has_presenter", lambda: True)
+
+        def fake_ask(question, options, timeout=0.0):
+            asked.append(question)
+            assert choice in options, (
+                f"{choice!r} was not offered; the test would be asserting "
+                f"behaviour nobody can reach: {options!r}")
+            return choice
+
+        monkeypatch.setattr(ask_bridge, "ask", fake_ask)
+        return asked
+
+    @staticmethod
+    def _clear():
+        from shani_chronoa import permissions
+        permissions.clear(session_only=True)
+
+    def test_a_session_grant_does_not_ask_again(self, monkeypatch):
+        from shani_chronoa import permissions
+
+        self._clear()
+        asked = self._answer(monkeypatch, permissions.ALLOW_SESSION_CHOICE)
+        try:
+            results = [permissions.decide("act", "res", "key", "d")
+                       for _ in range(3)]
+        finally:
+            self._clear()
+        assert len(asked) == 1, (
+            f"the person was asked {len(asked)} times after choosing "
+            "'Allow for this session' - the option recorded a decision and then "
+            "ignored it")
+        assert results == [permissions.Decision.ALLOW_SESSION] * 3, results
+
+    def test_allow_once_still_asks_every_time(self, monkeypatch):
+        """"This once" means once. Without this, the fix above is a regression."""
+        from shani_chronoa import permissions
+
+        self._clear()
+        asked = self._answer(monkeypatch, permissions.ALLOW_ONCE_CHOICE)
+        try:
+            results = [permissions.decide("act", "res", "key", "d")
+                       for _ in range(3)]
+        finally:
+            self._clear()
+        assert len(asked) == 3, (
+            f"asked {len(asked)} times; 'Allow this once' must not suppress the "
+            "question, or the grant outlives the thing it was granted for")
+        assert results == [permissions.Decision.ALLOW_ONCE] * 3, results
+
+    def test_a_denial_still_settles_it(self, monkeypatch):
+        """The behaviour the short-circuit was originally written for."""
+        from shani_chronoa import permissions
+
+        self._clear()
+        asked = self._answer(monkeypatch, permissions.DENY_CHOICE)
+        try:
+            results = [permissions.decide("act", "res", "key", "d")
+                       for _ in range(3)]
+        finally:
+            self._clear()
+        assert len(asked) == 1, asked
+        assert results == [None, None, None], results
+
+    def test_a_session_grant_is_scoped_to_its_own_resource(self, monkeypatch):
+        """Answering for one channel must not answer for another."""
+        from shani_chronoa import permissions
+
+        self._clear()
+        asked = self._answer(monkeypatch, permissions.ALLOW_SESSION_CHOICE)
+        try:
+            permissions.decide("act", "phone", "key", "d")
+            permissions.decide("act", "phone", "key", "d")
+            permissions.decide("act", "laptop", "key", "d")
+        finally:
+            self._clear()
+        assert len(asked) == 2, (
+            f"asked {len(asked)} times; the second channel must still be asked")
+
+    def test_an_identical_rule_is_not_recorded_twice(self, monkeypatch):
+        """One rule per decision, not one per call - measured growing per message."""
+        from shani_chronoa import permissions
+
+        self._clear()
+        self._answer(monkeypatch, permissions.ALLOW_SESSION_CHOICE)
+        try:
+            for _ in range(5):
+                permissions.decide("act", "res", "key", "d")
+            recorded = [r for r in permissions.rules() if r[1] == "res"]
+        finally:
+            self._clear()
+        assert len(recorded) == 1, (
+            f"the same rule is recorded {len(recorded)} times: {recorded!r} - it "
+            "grew by one entry per approved call for the whole session, and "
+            "evaluate() walks the list on every check")
+
+    def test_recording_an_identical_rule_preserves_order(self):
+        """Replacing rather than appending must not reorder anything."""
+        from shani_chronoa import permissions
+
+        permissions.clear()
+        try:
+            permissions.add_rule("a", "*", "deny_once")
+            permissions.add_rule("b", "*", "allow_once")
+            permissions.add_rule("a", "*", "deny_once")   # duplicate, first entry
+            assert permissions.rules() == [("a", "*", "deny_once"),
+                                           ("b", "*", "allow_once")], (
+                f"order changed: {permissions.rules()!r}")
+        finally:
+            permissions.clear()

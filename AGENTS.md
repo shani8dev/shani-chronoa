@@ -1895,6 +1895,59 @@ the layer that already exists and already fails closed.
   | dismissed | **refused**, switch named | submitted | desk only |
   | nobody there | **refused**, *"nothing is on screen"* | submitted | desk only |
 
+### …and then the thing I built it on turned out to have a no-op in it
+
+Wiring the grant to `permissions.decide()` means the gateway now inherits
+whatever `decide()` actually guarantees — so I measured that rather than reading
+it, and **"Allow for this session" asked again on the very next call.**
+
+`decide()` had a short-circuit for an answer already on record, and the set it
+checked was only the three **refusals**. A session *grant* was written to
+`_grants` and then never read. Measured, with a presenter that always picks the
+session option: **three calls, three prompts**, two of them on the same channel:
+
+```
+1st='allow_session' 2nd='allow_session' other-channel='allow_session'
+times the person was asked: 3   (3 calls, 2 on 'phone')
+rules recorded: [('submit_from_gateway', 'phone', 'allow_session'),
+                 ('submit_from_gateway', 'phone', 'allow_session'),
+                 ('submit_from_gateway', 'laptop', 'allow_session')]
+```
+
+So the option was offered, recorded, and did nothing — a label that lies. Same
+shape as the grant itself being a label, one level down, and it is **not the
+gateway's bug**: `decide()` is shared by every tool, so the fix belongs there.
+
+`ALLOW_SESSION` is now honoured. `ALLOW_ONCE` is deliberately still asked every
+time, because "this once" means once — and that contrast is the test that stops
+this being over-fixed into "the prompt never appears". Measured after:
+
+| the person picks | prompts for 3 calls | returns |
+|---|---|---|
+| Allow for this session | **1** | `allow_session` ×3 |
+| Allow this once | **3** | `allow_once` ×3 |
+| No, don't allow | **1** | `None` ×3 |
+
+**The second defect was in the same three lines of output above**: `_grants` held
+the *same rule twice* for two calls on one channel. `add_rule` appended
+unconditionally, so a channel with a session grant grew `_grants` by one entry
+per approved message for the whole session — and `evaluate()` walks the whole
+list on *every* permission check, so the cost is paid by checks that did not
+record it. Identical rules are now not re-appended; replacing rather than
+appending is a no-op for "last match wins", since an identical triple contributes
+the same answer wherever it sits.
+
+Six tests, five mutations confirmed to fail (including the over-fix, and one
+where the dedupe reorders instead of skipping). Blast radius: **250 passed**
+across every consent, permission, tool-activity, approval and gateway suite; the
+only 2 failures are the recorded environmental `grim` ones.
+
+**A harness note, because I made this mistake twice in one afternoon:** calling
+`permissions.decide()` from a GLib timeout callback — i.e. on the main loop —
+hangs for `DECISION_TIMEOUT_SECONDS`, which is **120**, not the 60 one assumes. My
+first probe did exactly that and looked like a permissions bug. Ask from a
+worker, which is what the gateway now does.
+
 **Why I rejected "refuse `ask` at the bus"**, which was the smaller change: it is
 secure and useless. The default grant would do nothing until somebody edited a
 setting, so the feature would ship dark. This way the default works - one click,

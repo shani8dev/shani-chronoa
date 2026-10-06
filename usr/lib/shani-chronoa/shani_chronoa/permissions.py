@@ -95,12 +95,30 @@ def _matches(pattern: str, candidate: str) -> bool:
 
 def add_rule(action: str, pattern: str, decision: str,
              session_only: bool = False) -> None:
-    """Record a rule. Later rules win, so register specific before general."""
+    """Record a rule. Later rules win, so register specific before general.
+
+    **An identical rule already in this bucket is not appended again.** Measured
+    on the inbound gateway: a channel with a session grant appends one rule per
+    approved message, so `_grants` grew by one entry per message for the whole
+    session - and because `evaluate()` walks the whole list on every call, the
+    cost of that growth is paid on every permission check, not just the ones
+    that recorded it. Three calls on two channels produced two identical `phone`
+    rows.
+
+    Replacing rather than appending keeps this a no-op for the "last match wins"
+    rule: an identical triple contributes the same answer wherever it sits in the
+    list, so leaving the original where it is preserves order exactly.
+    """
     with _lock:
         bucket = _grants if session_only else _standing
-        bucket.append((action, pattern, decision))
-        logger.info("Permission rule: %s %s -> %s%s", action, pattern, decision,
-                    " (this session)" if session_only else "")
+        entry = (action, pattern, decision)
+        if entry not in bucket:
+            bucket.append(entry)
+            logger.info("Permission rule: %s %s -> %s%s", action, pattern,
+                        decision, " (this session)" if session_only else "")
+        else:
+            logger.debug("Permission rule already recorded: %s %s -> %s", action,
+                         pattern, decision)
 
 
 def clear(session_only: bool = False) -> None:
@@ -461,12 +479,33 @@ def decide(action: str, resource: "str | None", consent_key: str,
     # again on the next attempt - and, because the tool loop retries, up to
     # four times inside a single turn. A prompt people click through without
     # reading is worse than no prompt.
-    if evaluate(action, resource or "*") in (Decision.DENY_ONCE,
-                                              Decision.DENY_SESSION,
-                                              Decision.CANCEL):
+    on_record = evaluate(action, resource or "*")
+    if on_record in (Decision.DENY_ONCE, Decision.DENY_SESSION, Decision.CANCEL):
         logger.info("Permission for %s %s already refused this session",
                     action, resource)
         return None
+    # **`ALLOW_SESSION` was missing here, and the option's label is a promise.**
+    # The tuple above covered only the three refusals, so a session *grant* was
+    # written to `_grants` and then never read: choosing "Allow for this
+    # session" asked again on the very next call. Measured, with a presenter
+    # that always picks the session option - three calls, three prompts, two of
+    # them on the same channel:
+    #
+    #     rules recorded: [('submit_from_gateway', 'phone', 'allow_session'),
+    #                      ('submit_from_gateway', 'phone', 'allow_session'), ...]
+    #
+    # So the choice existed, was offered, was recorded, and did nothing. A user
+    # who picks "for this session" and is asked again immediately learns that
+    # the option is a lie, which is worse than not offering it - and it is the
+    # same shape as the gateway grant being a label.
+    #
+    # `ALLOW_ONCE` is deliberately **not** in this set: "this once" means once,
+    # so the next call must ask again. That is the whole difference between the
+    # two options, and it is only meaningful because the other one now works.
+    if on_record == Decision.ALLOW_SESSION:
+        logger.info("Permission for %s %s already granted this session",
+                    action, resource)
+        return Decision.ALLOW_SESSION
 
     if not ask_bridge.has_presenter():
         # Nobody to ask. Refusing is the only honest answer, and asking a
