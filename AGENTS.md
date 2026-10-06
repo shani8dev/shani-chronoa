@@ -1871,6 +1871,63 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### What the log taught, once something showed it — and the "cannot liar" sentence
+
+`learning.lessons()` and `render_lessons()` were fully written with **zero
+callers**, so a machine that had logged 14,000 tool calls could not be told what
+any of it meant. Wired, and the first thing it showed was nonsense:
+
+```
+cannot  liar  failed 323/323 here and has never succeeded on this machine
+```
+
+`liar` is not a skill. Neither is `unver`. **712 records** name those two — four
+and five characters, always `args: {}`, always in pairs ~80 ms apart, all
+`origin: user` — and the count matches `provenance.examples_for_unknown_tools`
+exactly, so the training path already knew.
+
+**This is not a new finding about the log.** `unknown_tool_examples()` has
+documented those two by name for a while, including that they are "**313 of the
+378 failures**" — so a model fitted on this log learns its entire failure signal
+from something no longer installed. What was missing is anywhere a *person* would
+see it, and the lessons row is the first such place. Worth being explicit,
+because I nearly wrote it up as a discovery.
+
+The renderer now names those apart from real findings, so `get_clipboard failed
+5/5` keeps its authority and `liar` stops borrowing it.
+
+**My first fix was worse than the bug.** I resolved names with
+`skills.discover_skills()`, which returns 152 names that do **not** correspond to
+the log's `tool_name` values — so it immediately reclassified `delete_file
+succeeded 820 of 915` and `get_clipboard failed 5/5` as "tools this build does
+not have". There is one registry and it is `tools.TOOLS`, the same one
+`unknown_tool_examples()` uses. There is also a test for exactly that, because
+the second attempt is the one that would have stuck.
+
+### Merging, and the two features beside it that nothing could reach
+
+`merge_models` now has a **Merge models** button, and the group explains that the
+result is scored before it is written. `_merge_verdict()` reports the numbers
+including the argmax, so a merge that detects `failed` at 25× while losing the
+argmax says both.
+
+Also removed a **dead duplicate** `outcome_button` assignment that passed its
+handler as `_run_async(b, _train_outcome, status)` while every live button used
+`_handler(b, status)` — it was overwritten immediately, and had it ever run it
+would have raised on the arity.
+
+And the Train group's subtitle repeated the false claim this commit removes: it
+said an outcome model that does not beat the majority baseline "is not written".
+The test is not that, and the group now says which test it is.
+
+**Four mutations, and the first attempt at one of them was not caught** — the
+lessons test called `_lessons_sentence()` directly, so deleting the *row* from
+`build()` left it green. A helper can be correct and still be unreachable, which
+is the entire subject of this batch, so the row's title is now asserted through
+the built widget. Redone: caught.
+
+Learning/distill/surface suites: **149 passed**.
+
 ### A merge was marked trustworthy by construction — the worst thing I found today
 
 `merge_models()` wrote `"honest": True` into the payload it signed and **never

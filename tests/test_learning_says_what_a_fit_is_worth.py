@@ -235,3 +235,219 @@ class TestImportIsWired:
         said = surface._import_sentence({"arms": 2, "models_usable": 0})
         assert "2 bandit arms adopted" in said, said
         assert "no trained model" in said, said
+
+
+# -- the panel can now merge, and can say what the log teaches ----------------
+
+
+class TestMergeAndLessonsAreReachable:
+    """Three more of the 15 never-called public names in `learning.py`.
+
+    An AST scan for public names with no caller anywhere in `usr/` or `tests/`
+    found 15 of 111. `merge_models`, `lessons` and `render_lessons` were among
+    them: all fully written, all unreachable, so a machine that had logged 14,000
+    tool calls could neither share what it learned nor be told what any of it
+    meant.
+    """
+
+    def test_the_panel_offers_merging(self):
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw, Gtk
+
+        Adw.init()
+        from shani_chronoa.config import ChronoaConfig
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        app = type("App", (), {"config": ChronoaConfig()})()
+        labels = []
+
+        def walk(node):
+            if isinstance(node, Gtk.Button):
+                labels.append(node.get_label())
+            child = node.get_first_child() if hasattr(node, "get_first_child") else None
+            while child is not None:
+                walk(child)
+                child = child.get_next_sibling()
+
+        walk(surface.build(app))
+        assert "Merge models" in labels, f"buttons are {labels}"
+
+    def test_a_merge_of_one_model_is_refused_with_a_reason(self):
+        """Merging is not a no-op that reports success on one input."""
+        from shani_chronoa.gui.surfaces import learning as surface
+        import inspect
+
+        source = inspect.getsource(surface._merge)
+        assert "needs at least two" in source, (
+            "merging a single model must be refused by name, not silently "
+            "produce a copy of it")
+        assert "No merged model" in source, source
+
+    def test_the_merge_verdict_reports_the_lost_argmax(self):
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        said = surface._merge_verdict({"from": 2, "coordinates": 268,
+                                       "accuracy": 0.88, "baseline": 0.912,
+                                       "beats_baseline": False,
+                                       "detected": "failed"})
+        assert "88.0%" in said and "91.2%" in said, said
+        assert "does not win the argmax" in said, said
+        assert "failed" in said, said
+
+    def test_the_lessons_row_is_on_the_panel(self):
+        """**Asserted through `build()`, not by calling the helper directly.**
+
+        My first version called `_lessons_sentence()` and passed even with the
+        row deleted from `build()` - a helper can be correct and still be
+        unreachable, which is the defect this whole batch is about. So the row's
+        *title* has to appear in the built widget.
+        """
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw
+
+        Adw.init()
+        from shani_chronoa.config import ChronoaConfig
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        app = type("App", (), {"config": ChronoaConfig()})()
+        texts = []
+
+        def walk(node):
+            for getter in ("get_label", "get_text"):
+                fn = getattr(node, getter, None)
+                if callable(fn):
+                    try:
+                        value = fn()
+                    except Exception:  # noqa: BLE001
+                        value = None
+                    if isinstance(value, str) and value.strip():
+                        texts.append(value)
+            child = node.get_first_child() if hasattr(node, "get_first_child") else None
+            while child is not None:
+                walk(child)
+                child = child.get_next_sibling()
+
+        walk(surface.build(app))
+        assert any("What the log teaches" in t for t in texts), (
+            "the lessons row is not on the panel; the panel's texts were "
+            f"{sorted(set(texts))[:8]}")
+
+    def test_the_lessons_row_reads_the_log(self, tmp_path, monkeypatch):
+        """Both honest shapes: lessons, or the reason there are none.
+
+        My first version asserted the word "teaches", which the empty state does
+        not contain - it says "nothing the log can teach". Both are correct
+        outputs, and the row must produce one of them rather than nothing.
+        """
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        said = surface._lessons_sentence()
+        assert said, "the row said nothing at all"
+        assert ("teaches" in said.lower() or "teach" in said.lower()), said
+
+    def test_it_renders_real_lessons_from_a_real_log(self, tmp_path, monkeypatch):
+        import json
+
+        from shani_chronoa import learning
+        from shani_chronoa.gui.surfaces import learning as surface
+
+        monkeypatch.setattr(learning, "_log_path", lambda: tmp_path / "calls.jsonl")
+        rows = []
+        for i in range(10):
+            rows.append({"tool_name": "get_clipboard", "verdict": "failed",
+                         "args": {"x": 1}, "result": ""})
+            rows.append({"tool_name": "calculate", "verdict": "verified",
+                         "args": {}, "result": "4"})
+        (tmp_path / "calls.jsonl").write_text(
+            "\n".join(json.dumps(r) for r in rows), encoding="utf-8")
+        said = surface._lessons_sentence()
+        assert "teaches" in said.lower(), said
+        assert "get_clipboard" in said, said
+
+
+class TestALessonAboutAToolThisBuildDoesNotHaveIsNotALesson:
+    """**`cannot liar failed 323/323` is not a sentence.**
+
+    This machine's log has 712 records naming `liar` and `unver` - four and five
+    characters, always `args: {}`, always in pairs ~80 ms apart, all
+    `origin: user`. `unknown_tool_examples()` has documented exactly those two by
+    name for a while ("313 of the 378 failures"), so this is **not** a new finding
+    about the log; what was missing is anywhere a *person* would see it, and the
+    lessons row is the first place it appears.
+
+    The renderer turned them into lessons with the same confidence as "cannot
+    get_clipboard", which is a real and useful finding. They are now named apart,
+    with the reason.
+    """
+
+    FOUND = [
+        {"kind": "cannot", "tool": "liar",
+         "lesson": "cannot  liar  failed 323/323 here and has never succeeded",
+         "action": "offer a substitute route instead"},
+        {"kind": "cannot", "tool": "get_clipboard",
+         "lesson": "cannot  get_clipboard  failed 5/5 here and has never succeeded",
+         "action": "offer a substitute route instead"},
+    ]
+
+    def test_a_name_the_build_lacks_is_grouped_apart(self):
+        from shani_chronoa import learning
+
+        said = learning.render_lessons(self.FOUND)
+        # The real finding survives.
+        assert "get_clipboard" in said, said
+        assert "offer a substitute route instead" in said, said
+        # The nonsense does not stand as a lesson.
+        lesson_lines = [ln for ln in said.splitlines()
+                        if "cannot" in ln and "->" not in ln]
+        assert not any("liar" in ln for ln in lesson_lines), (
+            f"'cannot liar' is still presented as a lesson: {lesson_lines}")
+        assert "does not have" in said, said
+
+    def test_it_names_where_the_number_already_lives(self):
+        from shani_chronoa import learning
+
+        said = learning.render_lessons(self.FOUND)
+        assert "provenance" in said, said
+
+    def test_the_registry_is_tools_TOOLS_not_discover_skills(self):
+        """**My first attempt used the wrong registry and made things worse.**
+
+        `skills.discover_skills()` returns 152 names that do not correspond to the
+        log's `tool_name` values, so it immediately reclassified the real findings
+        (`delete_file`, `get_clipboard`) as unknown. There is one registry and it
+        is `tools.TOOLS` - the same one `unknown_tool_examples()` uses.
+        """
+        from shani_chronoa import learning, tools
+
+        known = learning._known_tool_names()
+        assert known is not None
+        expected = {str(e["function"]["name"]) for e in tools.TOOLS}
+        assert known == expected, (
+            "the resolver drifted from tools.TOOLS, which is the registry the "
+            "training path and unknown_tool_examples() both use")
+        for real in ("delete_file", "get_clipboard", "write_text_file"):
+            assert real in known, (
+                f"{real!r} is a real tool and must not be reclassified as unknown")
+
+    def test_an_unreadable_registry_does_not_invent_lessons(self):
+        """None, not an empty set - an empty set calls every tool unknown."""
+        import shani_chronoa.tools as tools_module
+        from shani_chronoa import learning
+
+        original = tools_module.TOOLS
+        tools_module.TOOLS = None
+        try:
+            assert learning._known_tool_names() is None
+        finally:
+            tools_module.TOOLS = original
+
+    def test_render_lessons_still_handles_the_empty_case(self):
+        from shani_chronoa import learning
+
+        assert "No lessons yet" in learning.render_lessons([])

@@ -309,6 +309,7 @@ def build(app: Any) -> Gtk.Widget:
     _add_row(have, ROW_TITLES[3], _recall_sentence())
     _add_row(have, ROW_TITLES[4], _router_sentence())
     _add_row(have, ROW_TITLES[5], _outcome_sentence())
+    _add_row(have, "What the log teaches", _lessons_sentence())
     body.append(have)
 
     # --- train -----------------------------------------------------------
@@ -317,12 +318,12 @@ def build(app: Any) -> Gtk.Widget:
         "Train",
         "Both fits read the whole tool-call log and take minutes, so each runs "
         "off the main loop and reports what it decided. Neither writes a file it "
-        "cannot justify: a router that loses to 'always answer with the "
-        "commonest skill' is not written, and an outcome model that does not beat "
-        "the majority baseline is not either.")
-
-    outcome_button = _button("Train the outcome model", lambda b: _run_async(
-        b, _train_outcome, status))
+        "cannot justify - but the test is not the one this used to claim. A "
+        "router that loses to 'always answer with the commonest skill' is not "
+        "written, and an outcome model is judged by whether it *detects* a "
+        "minority verdict at least twice as well as chance on both recall and "
+        "precision, which a model can do while still losing the plain argmax to "
+        "a constant. Winning that argmax is reported, not required.")
 
     outcome_button = _button("Train the outcome model",
                              lambda b: _train_outcome(b, status))
@@ -345,6 +346,16 @@ def build(app: Any) -> Gtk.Widget:
              "which stand-in worked is a fact about the tool and not about the "
              "sender's hardware.",
              suffix=_pair(import_button, export_button))
+
+    merge_button = _button("Merge models", lambda b: _merge(b, status))
+    _add_row(train, "Share what several machines learned",
+             "Folds every model in this feature space into one with TIES: trim "
+             "each to its largest weights, agree a sign per coordinate, average "
+             "only what agrees. Conflicts cancel instead of compounding. The "
+             "result is scored against this machine's own log and is not written "
+             "unless it is worth quoting - a merge is a hypothesis until it has "
+             "been measured.",
+             suffix=merge_button)
 
     body.append(train)
     body.append(status)
@@ -547,6 +558,73 @@ def _pair(*buttons: Gtk.Button) -> Gtk.Box:
     for button in buttons:
         box.append(button)
     return box
+
+
+def _lessons_sentence() -> str:
+    """What the log teaches, in the panel's own words.
+
+    **Wired 2026-10-06.** `learning.lessons()` and `render_lessons()` were fully
+    written - and had **zero callers**, so a machine that had logged 14,000 tool
+    calls could not be told what any of it meant. `experience_summary()` sits
+    beside them, also uncalled. A tally is history ("ffmpeg failed 14 times"); a
+    lesson is a statement about *when* it fails, and the difference is the whole
+    point of the function.
+    """
+    from shani_chronoa import learning
+    try:
+        return learning.render_lessons(learning.lessons()).strip()
+    except Exception as exc:  # noqa: BLE001 - an unreadable log is not a lesson
+        return f"could not be read ({type(exc).__name__})"
+
+
+def _merge(button: Gtk.Button, status: Gtk.Label) -> None:
+    """Fold every model in this feature space into one, and report the verdict."""
+    def work(report: Callable[[str], None]) -> None:
+        from shani_chronoa import learning
+
+        try:
+            candidates = [p for p in sorted(learning.models_dir().glob("outcome*.json"))
+                          if not p.name.endswith(".tmp")
+                          and p.name != f"outcome-merged-{learning._feature_space_id()}.json"]
+        except Exception as exc:  # noqa: BLE001
+            report(f"Could not look for models: {exc}")
+            return
+        if len(candidates) < 2:
+            report(f"Nothing to merge: {len(candidates)} model in this feature "
+                   "space, and a merge needs at least two. Fit models from "
+                   "different halves of the log, or import another machine's.")
+            return
+        payloads, unreadable = [], []
+        for candidate in candidates:
+            try:
+                payloads.append(__import__("json").loads(
+                    candidate.read_text(encoding="utf-8")))
+            except Exception as exc:  # noqa: BLE001
+                unreadable.append(f"{candidate.name}: {type(exc).__name__}")
+        report(f"Merging {len(payloads)} of {len(candidates)} models...")
+        if unreadable:
+            report(f"Skipped {len(unreadable)} unreadable: {unreadable[0]}")
+        result = learning.merge_models(payloads)
+        if not result.get("merged"):
+            report(f"No merged model: {result.get('reason')}")
+            return
+        report(f"Merged {result['from']} models into {result.get('coordinates')} "
+               f"coordinates.{_merge_verdict(result)}")
+
+    _run_async(button, work, status)
+
+
+def _merge_verdict(result: Dict[str, Any]) -> str:
+    """What the merged model turned out to be worth."""
+    bits = []
+    acc, base = result.get("accuracy"), result.get("baseline")
+    if isinstance(acc, (int, float)) and isinstance(base, (int, float)):
+        bits.append(f"{acc:.1%} against a {base:.1%} constant")
+    if result.get("detected"):
+        bits.append(f"detects {result['detected']}")
+    if not result.get("beats_baseline"):
+        bits.append("does not win the argmax")
+    return (" " + "; ".join(bits) + ".") if bits else ""
 
 
 def _export(button: Gtk.Button, status: Gtk.Label) -> None:

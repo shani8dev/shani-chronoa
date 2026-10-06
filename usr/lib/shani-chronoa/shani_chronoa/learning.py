@@ -2439,16 +2439,72 @@ def render_lessons(found: Sequence[Dict[str, object]]) -> str:
                 "post-conditions, not about the log.")
     learned = [f for f in found if f.get("kind") != "unverified"]
     unknown = [f for f in found if f.get("kind") == "unverified"]
+    # **A lesson about a name this machine cannot resolve is a claim about the
+    # log, not about a tool.** This machine's log has 712 records naming `liar`
+    # and `unver` - four and five characters, always `args: {}`, always in pairs
+    # about 80 ms apart, all `origin: user`. **This is not a new finding:**
+    # `unknown_tool_examples()` has documented exactly these two by name for a
+    # while, including that they are "313 of the 378 failures", and
+    # `provenance.examples_for_unknown_tools` counts them. What was missing is
+    # anywhere a *person* would see it.
+    #
+    # The old rendering turned them into lessons anyway:
+    #
+    #     cannot  liar  failed 323/323 here and has never succeeded
+    #
+    # "cannot liar" is not a sentence. It asserts a fact about a tool that does
+    # not exist, and it is presented with the same confidence as "cannot
+    # get_clipboard", which is a real and useful finding. Grouping them apart is
+    # also actionable: 712 records naming tools this build does not have is a
+    # fact about the log worth surfacing, and hiding it inside a lesson list is
+    # how it survived.
+    resolvable = _known_tool_names()
+    if resolvable is None:
+        real, nameless = learned, []
+    else:
+        real = [f for f in learned if str(f.get("tool")) in resolvable]
+        nameless = [f for f in learned if str(f.get("tool")) not in resolvable]
     out = ["What this machine's tool log teaches:", ""]
-    for entry in learned[:8]:
+    for entry in real[:8]:
         out.append(f"  {entry['kind']:<6} {entry['lesson']}")
         out.append(f"         -> {entry['action']}")
+    if nameless:
+        names = ", ".join(sorted({str(f["tool"]) for f in nameless})[:6])
+        out.append("")
+        out.append(f"  {len(nameless)} tool(s) in that list are ones this build "
+                   f"does not have ({names}), so nothing above can be concluded "
+                   "about whether they work. `provenance` records how much of the "
+                   "history is about them - on this machine it is most of the "
+                   "failure signal, and `unknown_tool_examples()` has said so "
+                   "since before this row existed.")
     if unknown:
         out.append("")
         out.append(f"  {len(unknown)} tool(s) ran but were never confirmed, so "
                    f"nothing they did can be known to have worked:")
         out.append("      " + ", ".join(str(f["tool"]) for f in unknown[:10]))
     return "\n".join(out)
+
+
+def _known_tool_names() -> "Optional[frozenset]":
+    """The tool names this build answers to, or None if they cannot be read.
+
+    **`tools.TOOLS`, the same source `unknown_tool_examples()` uses.** My first
+    attempt used `skills.discover_skills()` instead, which returns 152 names that
+    do *not* correspond to the log's `tool_name` values - it immediately
+    reclassified the real findings `delete_file succeeded 820 of 915` and
+    `get_clipboard failed 5/5` as "tools this build does not have", which is
+    worse than the bug it was fixing. There is one registry and this is it.
+
+    None rather than an empty set on failure: an empty set would claim every tool
+    in the log is unknown, which is the confident-wrong-answer shape pointed the
+    other way. Callers treat None as "do not judge names".
+    """
+    try:
+        from shani_chronoa import tools
+        return frozenset(str(entry["function"]["name"]) for entry in tools.TOOLS)
+    except Exception:  # noqa: BLE001 - a broken registry must not invent lessons
+        logger.debug("could not read the tool registry", exc_info=True)
+        return None
 
 
 def experience_summary(path: Optional[Path] = None) -> str:
