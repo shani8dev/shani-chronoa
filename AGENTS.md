@@ -3018,6 +3018,33 @@ prose, that a submission still goes through `tools.execute_tool_outcome` - the
 sentence *is* the argument), and a regex for `^HOST = "127.0.0.1"` that silently
 matched nothing because the line is `HOST, PORT = "127.0.0.1", 8766`.
 
+## The channel bridge: Telegram and WhatsApp, thin clients of `Submit` (2026-10-06)
+
+`channel_bridge.py` (`shani-chronoa-bridge`) is the other half of the inbound
+channel: adapters that *carry* a message to `gateway.Submit` and print the
+reply. Telegram (Bot API `getUpdates` long poll - dials out, no public URL)
+and WhatsApp (Cloud API webhook - the one adapter with a port, loopback by
+default, every POST checked against `X-Hub-Signature-256` before it is
+believed). Tokens come from the bridge process's environment
+(`CHRONOA_TELEGRAM_TOKEN`, `CHRONOA_WHATSAPP_*`); Chronoa never sees one, and
+a reply that mentions one is redacted before it is logged.
+
+**Verified by running, not by reading:** 16 tests in
+`tests/test_channel_bridge.py` - `httpx.MockTransport` for both wires, a real
+loopback HTTP server for the webhook (challenge GET + signed POST + a 403 on
+a forged signature), and the bus call itself driven **across two processes on
+a real `dbus-daemon`**: the app's own `gw.export` on one side, `cb.submit` on
+the other, asserting the reply round-trips and an unconfigured channel is
+refused by name. An in-process `Gio.TestDBus` **cannot** drive `cb.submit` -
+its `call_sync` needs the connection's main context iterating and deadlocks
+against the gateway's worker-thread reply (measured: the test hung until
+killed). The launcher itself was run directly: `--help` works, and both
+channels exit 2 naming the missing env var rather than starting token-less.
+
+`shani-pkgbuilds/shani-chronoa/PKGBUILD` gained the `install -Dm755` line for
+the new binary (the packaging test reads git's recorded mode, so the file is
+staged; a checkout that is not committed still fails that test by design).
+
 ## Dictation: what the review asked for, and what actually blocked it (2026-10-05)
 
 From the GitHub issue: *"add features like transcription of Google Meet etc

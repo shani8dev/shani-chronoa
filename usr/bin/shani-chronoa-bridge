@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - bridge a chat channel to the assistant's inbound gateway.
+
+Runs Telegram polling or a WhatsApp (Cloud API) webhook, and forwards each
+incoming text message through `dev.shani.chronoa.Gateways.Submit`. Tokens
+come from the bridge process's environment (CHRONOA_TELEGRAM_TOKEN,
+CHRONOA_WHATSAPP_*); Chronoa itself never sees them.
+"""
+
+import os
+import sys
+
+# The package lives at usr/lib/shani-chronoa, one directory deeper than a
+# naive dirname(dirname(__file__)) reaches - see usr/bin/shani-chronoa.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa.channel_bridge import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main())
