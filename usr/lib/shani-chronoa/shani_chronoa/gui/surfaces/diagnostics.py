@@ -482,15 +482,61 @@ def _speech_out() -> Tuple[str, str]:
     kokoro = ""
     if reason:
         kokoro = f"; Kokoro was not used because {reason}"
+    # **The chain is read, not retyped.** This said "four-way" in a hardcoded
+    # string and listed four engines by hand. `gui/surfaces/voice.py` grew a
+    # fifth link (cloud) and this row went on calling the cascade four-way while
+    # resolving it through the five-link chain - so the count was wrong on a box
+    # where nothing had changed. Worse, when nothing could speak the message
+    # listed only the four it knew about, so on a machine relying on the cloud
+    # the reason it was not working - no provider with a speech route - was
+    # invisible. Measured: the row read "speech out would use cloud, resolved
+    # from PiperTTS.engine()'s own four-way chain".
+    #
+    # `CHAIN` is the one place the order is written down, and a count that can
+    # go stale on the same day a feature lands is not worth writing twice.
+    chain = _tts_chain()
+    shape = f"{len(chain)}-way" if chain else "unknown-shape"
+    pretty = ", ".join(_prettify_engine(e) for e in chain) or "no engines known"
     if chosen is None:
         return STATUS_NOT_WORKING, (
-            "no engine in the tts.py chain can speak here: Kokoro, Piper, RHVoice and "
-            f"espeak-ng were all unavailable{kokoro}"
+            f"no engine in the tts.py chain can speak here: {pretty} were all "
+            f"unavailable{kokoro}"
+        )
+    if chosen == "cloud":
+        # **The disclosure belongs here, and this row is where somebody looks.**
+        # `tts.PiperTTS._announce` puts it in the log and the Speech-in row puts
+        # it on the panel; this row used to say "would use cloud" and stop,
+        # which is the least useful sentence in a panel whose job is "what is
+        # wrong here".
+        return STATUS_WORKING, (
+            f"speech out would use a cloud provider, resolved from "
+            f"PiperTTS.engine()'s own {shape} chain - the reply text is sent to "
+            f"that provider to be turned into audio{kokoro}"
         )
     return STATUS_WORKING, (
         f"speech out would use {chosen}, resolved from PiperTTS.engine()'s own "
-        f"four-way chain{kokoro}"
+        f"{shape} chain{kokoro}"
     )
+
+
+def _tts_chain() -> Tuple[str, ...]:
+    """The TTS cascade as one list, read from wherever it is actually written.
+
+    Falls back to empty rather than raising: this is a diagnostic, and a row
+    that says "no engines known" is honest where an `AttributeError` is not.
+    """
+    try:
+        from shani_chronoa.gui.surfaces.voice import CHAIN
+        return tuple(str(e) for e in CHAIN)
+    except Exception:  # noqa: BLE001 - a diagnostic must not raise
+        logger.debug("cannot read the tts cascade", exc_info=True)
+        return ()
+
+
+def _prettify_engine(key: str) -> str:
+    """`espeak-ng` and `rhvoice` as a person would write them in a sentence."""
+    return {"kokoro": "Kokoro", "piper": "Piper", "rhvoice": "RHVoice",
+            "espeak-ng": "espeak-ng", "cloud": "the cloud provider"}.get(key, key)
 
 
 # -- probes: the microphone and the audio path -------------------------------

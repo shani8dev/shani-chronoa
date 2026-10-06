@@ -1750,6 +1750,36 @@ and `CloudSTT` now take an optional `config` and `_read_switch`/`_provider_key`
 use it when given. Better dependency direction anyway; the injectable half exists
 because a read-only page that creates a settings directory is not read-only.
 
+### A hardcoded cascade count that went stale the same day I made it go stale
+
+`_speech_out()` resolved through the **real** `PiperTTS.engine()` — correct — and
+then described it in a hand-typed sentence:
+
+```
+speech out would use cloud, resolved from PiperTTS.engine()'s own four-way chain
+```
+
+`gui/surfaces/voice.py` gained a **fifth** link (cloud) and this row went on
+saying "four-way" while resolving it through the five-link chain. A count that
+can be wrong on the same day a feature lands is not worth writing twice, so the
+count and the list are now **read from `voice.CHAIN`** — the one place the order
+is written down.
+
+Two more false claims in the same row, both measured:
+
+- **When cloud wins, nothing said the text left the machine.** `tts._announce`
+  puts it in the log ("the reply text was sent off this machine") and the
+  Speech-in row puts it on the panel; this row said "would use cloud" and stopped
+  — the least useful sentence in a panel whose job is *what is wrong here*.
+- **When nothing worked, the message listed only the four it knew about**, so on
+  a machine relying on the cloud, the reason it was not working — no provider
+  with a speech route — was invisible.
+
+Mutations run and confirmed to fail: "four-way" hardcoded again (1), the cloud
+disclosure removed (1), the nothing-works list back to four (1), and
+`_tts_chain` returning a hardcoded tuple instead of reading `CHAIN` (3 — the one
+that proves the number is derived rather than retyped).
+
 ### A third instance, with the loudest alarm: Diagnostics said speech input was broken
 
 `gui/surfaces/diagnostics.py`'s `_speech_in()` constructed a `WhisperSTT`
