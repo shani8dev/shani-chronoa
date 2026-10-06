@@ -1871,6 +1871,45 @@ kept the whole inbound channel dead. Four tests pin the behaviour (AST search fo
 callers, both grants submitting, `admit`'s three limits, `describe` still showing
 the grant); four mutations confirmed to fail.
 
+### A logic-pattern scan across all 377 files: one live finding, three clean results
+
+Structural scans were done, so this one went after **logic patterns** instead.
+
+**`argfile._make_argfile_dir()`'s docstring said "A private 0700 directory" and
+delivered the umask default.** Measured on this machine with the usual
+`umask 002`: `~/.local/share/shani-chronoa/argfiles/` is **0775**, sitting beside
+`egress/`, `logs/`, `sessions/`, `models/` and `percepts/`, all 0700.
+
+Not a disclosure hole — the per-call directories come from `mkdtemp`, so they are
+0700 whatever the umask, and the envelopes inside are written 0600. An
+**integrity** one: a 0775 directory lets another local account unlink and replace
+an entry. And the function's own docstring claimed a mode it was not delivering.
+
+**`mkdir` then `chmod`, not `mkdir(mode=0o700)` alone**, which is the part worth
+remembering and is already documented in `egress.py`: with `parents=True` the
+mode argument applies to the **leaf only** — intermediate directories are created
+at the umask default — and `exist_ok=True` leaves an already-created directory
+exactly as it was. So a root that predates the mode argument stays 0775 forever.
+The `chmod` makes the docstring true on every machine. Two mutations confirmed
+to fail (chmod removed, chmod to a wrong mode).
+
+**Three clean results worth having, so nobody re-derives them:**
+
+- **Zero `subprocess.run` / `check_output` / `call` without a timeout.** My first
+  scan said "28 subprocess calls with no timeout" and that was **wrong** — it
+  matched `Thread.run` and `asyncio.run` by attribute name. The 12 real `Popen`
+  calls are long-lived children (audio capture, playback, the STT server,
+  wakeword, the sandbox executor) where a timeout would *kill the thing it
+  started*, so none is a defect.
+- **Zero `shell=True`**, so no string-built command lines to inject into. The
+  sandbox executor's comment records that it used to.
+- **Zero bare `except:`.**
+
+One artifact looked like a finding and is not: `sandboxes/t/landlock_wrapper.py`
+is mode **0664**, world-readable, beside 600 files. It is dated **2026-09-27** —
+nine days *before* `executor.py` gained its `chmod 0o700`. Stale state from
+before the fix, not a live bug.
+
 ### The full inventory: what is dead, what is deliberate, and what is a lie
 
 An AST scan of **all 1,025 public functions and classes** in the package found

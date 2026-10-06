@@ -235,7 +235,28 @@ def _encoded_size(value: Any) -> int:
 def _make_argfile_dir() -> str:
     """A private 0700 directory for one call's envelope and payloads."""
     try:
-        _ARGFILE_ROOT.mkdir(parents=True, exist_ok=True)
+        _ARGFILE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # **`mkdir` then `chmod`, not `mkdir(mode=...)` alone.** The mode
+        # argument is masked by the umask, and `exist_ok=True` means an
+        # already-created directory keeps whatever mode it already had - so on a
+        # machine with the usual `umask 002` this root came out **0775**, while
+        # every other directory this program makes is 0700. Measured on this
+        # machine: `~/.local/share/shani-chronoa/` is 775, and so is `argfiles/`
+        # inside it, next to `egress/`, `logs/`, `sessions/` and `models/` all at
+        # 700.
+        #
+        # The per-call directories were always private, because `mkdtemp` is 0700
+        # whatever the umask, and the envelopes inside are written 0600 - so this
+        # is not a disclosure hole. It is an **integrity** one: a 0775 directory
+        # lets another local account unlink and replace an entry, and the
+        # docstring above claims "a private 0700 directory", which was simply not
+        # true. The chmod is what makes the claim true, including on a machine
+        # where the directory already exists with the wrong mode.
+        try:
+            os.chmod(_ARGFILE_ROOT, 0o700)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s",
+                           _ARGFILE_ROOT, exc)
         return tempfile.mkdtemp(prefix="call-", dir=str(_ARGFILE_ROOT))
     except OSError as e:
         # A read-only or missing HOME must not make tool calls fail outright;
