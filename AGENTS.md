@@ -2034,6 +2034,36 @@ None of your records".
 
 12 tests, 3 mutations confirmed to fail.
 
+### `refuse_catalogue` refused `/` and `~`, and nothing around them
+
+The guard for `delete_file`, `extract_archive`, `trash_file`, `edit_file` and
+`undo_last_change` tested `path == root`. Measured by relocating `$HOME` into a
+temp tree and recording any `shutil.rmtree` call instead of performing it:
+`delete_file` with `recursive=True` and `path=<the parent of $HOME>` called
+`shutil.rmtree` on a directory **holding the user's entire home directory**, and
+`refuse_catalogue` said nothing.
+
+The check is now `root.is_relative_to(path)` - equality is the narrowest case of
+"this path contains a protected root"; the parents are the rest, and deleting a
+parent deletes the root inside it just as surely. Subdirectories of home, deep
+descendants, and siblings of home are still allowed, and nine tests pin the
+difference.
+
+**Severity, honestly.** On a conventional multi-user Linux box, the parent of
+`$HOME` is `/home`, root-owned, so the `rmtree` fails with `EACCES` and the
+filesystem stops what the guard missed. The trade fails open in the guard and
+closed in the permissions, so the guard is the second line. It was the *first*
+line on any layout where the parent is user-writable - a single-user system
+with `$HOME` directly under a user-owned directory - and it is a hole in the
+function whose own docstring said its job was to close it.
+
+Also: both concurrency candidates this scan turned up are already covered -
+`planmode` reads `_enabled` and `_reason` under a lock, `ask_bridge` touches
+`_presenter` only once at startup. No fix was the honest outcome there, and no
+`open()` call outside a `with` block is an actual leak (each is closed by a
+later `with handle:`). The HTTP layer sets a timeout on every client; zero were
+missing. Positive results recorded so nobody re-derives them.
+
 ### Not wired on purpose: a quality gate for the vision and embedding models
 
 `local_llm` gained a perplexity gate; `local_vision` and `local_embed` have
