@@ -115,7 +115,7 @@ def _flattened(data: bytes, what: str) -> str:
 def _camera(arguments: dict) -> str:
     from shani_chronoa.config import ChronoaConfig
     config = ChronoaConfig()
-    if not config.sense_allowed("vision"):
+    if not config.vision_sense_enabled:
         return f"Using the camera is not permitted: {config.sense_allowed_reason('vision')}."
     from shani_chronoa import screengrab
     device = (arguments.get("device") or "").strip() or None

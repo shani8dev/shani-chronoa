@@ -125,6 +125,7 @@ def _run(arguments: dict) -> str:
                   else files.resolve_in_home(arguments.get("path") or ""))
         if action != "read":
             files.refuse_catalogue(target, "change")
+            files.refuse_sensitive(target, "change")
     except files.PathProblem as exc:
         return str(exc)
     ext = target.suffix.lower()

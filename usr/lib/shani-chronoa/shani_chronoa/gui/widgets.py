@@ -849,9 +849,45 @@ class TranscriptView(Gtk.ScrolledWindow):
             self._blocks.insert_child_after(card, cards[-1])
         self._scroll_to_end()
 
-    def _blocks_tool_cards(self):
+    def add_notice_row(self, sentence: str, kind: str = "compaction") -> None:
+        """One dim line in the transcript about the turn's own housekeeping.
+
+        Two kinds today, both things a person would otherwise have to guess at:
+        `compaction` (older context was shortened to fit the window - cline's
+        `CompactionRow`, OpenHands' `CondensationEvent`) and `cloud` (this turn
+        was answered off the machine). Placed *inside* the assistant's turn
+        rather than as its own message, because it is a note about the turn, not
+        something the assistant said.
+        """
+        self._note_position()
         if self._blocks is None:
-            return []
+            self._current_assistant = self._append_turn("assistant", "")
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Neither `cloud-symbolic` nor `view-convert-symbolic` is a glyph this
+        # theme ships - checked with `Gtk.IconTheme.has_icon`, which is what
+        # `test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`
+        # now checks for every `-symbolic` literal in this package. A name the
+        # theme lacks draws nothing and leaves the gap, which reads as a broken
+        # row rather than as a missing glyph.
+        #
+        # `network-transmit-receive-symbolic` for a turn answered off this
+        # machine, because that is the thing it depicts. `view-convert` was
+        # standing in for compaction, where it meant nothing; a justified block
+        # of text is what compaction acts on.
+        icon = Gtk.Image.new_from_icon_name(
+            "network-transmit-receive-symbolic" if kind == "cloud"
+            else "format-justify-fill-symbolic")
+        icon.add_css_class("dim-label")
+        row.append(icon)
+        label = Gtk.Label(label=sentence)
+        label.add_css_class("dim-label")
+        label.set_xalign(0.0)
+        label.set_wrap(True)
+        row.append(label)
+        self._blocks.insert_child_after(row, self._blocks.get_first_child())
+        self._scroll_to_end()
+
+    def _blocks_tool_cards(self):
         return [child for child in self._blocks_tool_children()
                 if isinstance(child, reply_blocks.ToolCallCard)]
 

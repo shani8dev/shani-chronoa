@@ -103,6 +103,43 @@ def test_cards_come_from_the_engines_and_track_what_is_installed():
             assert card["installed"] == local_llm.verify(card["key"])
 
 
+def test_the_parakeet_catalogue_is_on_the_panel_too(tmp_path, monkeypatch):
+    """Parakeet is a second speech backend and the panel listed only the first.
+
+    `stt_provision.MODELS` holds the whisper.cpp models; Parakeet is served from
+    a different repository and deliberately cannot join that table (see the note
+    above it). So a machine with a Parakeet model on disk showed **every** speech
+    card as "not downloaded" - the confident-wrong-answer shape this file already
+    records for the Eyes list, reached from the other direction.
+
+    Measured after the fix: planting the q4_0 file under
+    `parakeet_model_dir()` flips that one card to True and leaves the others
+    alone, so the two catalogues are genuinely separate and neither card is
+    reporting the other's file.
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    cards = manager._cards(ChronoaConfig())
+    parakeet = [c for c in cards if c["kind"] == "stt"
+                and c["key"].startswith("parakeet:")]
+    assert {c["key"] for c in parakeet} == {
+        f"parakeet:{k}" for k in stt_provision.PARAKEET_MODELS}
+    assert all(c["size"] > 0 for c in parakeet)
+    assert not any(c["installed"] for c in parakeet), \
+        "a fresh home directory has no Parakeet model; the probe is lying"
+
+    directory = stt_provision.parakeet_model_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    key = stt_provision.PARAKEET_DEFAULT_MODEL
+    (directory / stt_provision.PARAKEET_MODELS[key].filename).write_bytes(b"gguf")
+
+    after = {c["key"]: c["installed"] for c in manager._cards(ChronoaConfig())
+             if c["kind"] == "stt"}
+    assert after[f"parakeet:{key}"] is True, \
+        "an installed Parakeet model is still reported as not downloaded"
+    assert not any(after[k] for k in stt_provision.MODELS), \
+        "a Parakeet file must not make a whisper.cpp card look installed"
+
+
 def test_a_kokoro_card_says_the_download_is_shared():
     """Six voices, one download. A card per voice without that sentence reads as
     six separate purchases of the same 310 MB."""

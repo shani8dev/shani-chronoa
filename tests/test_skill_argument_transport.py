@@ -99,14 +99,27 @@ class TestThroughTheRealSubprocess:
 
         A transport that dropped the argument would also avoid the NameError,
         so the failure mode has to be distinguished from the fix.
+
+        The discriminator is the **difference** between the two answers, not
+        the presence of a word. The first version asserted the failed-only
+        reply contained "service unit(s)", which quietly required this machine
+        to have something in the failed state - and `systemctl --failed` here
+        returns none, so the test failed on a healthy box and passed on a sick
+        one. If the boolean were dropped the two replies would be identical,
+        so the comparison below is the property this was after.
         """
         everything = execute_tool("list_services", {"failed_only": False})
         failed_only = execute_tool("list_services", {"failed_only": True})
         assert "service unit(s)" in everything
-        assert "service unit(s)" in failed_only
         assert everything != failed_only, (
             "True and False produced identical output, so the argument did not "
             "reach the handler as a boolean at all")
+        # And the filtered answer is about the filter, not about the machine
+        # being broken: an empty failed-state list is the good case, and the
+        # skill must not present it as an anomaly.
+        assert "not expected on a running system" not in failed_only, (
+            f"an empty failed-state list was reported as a broken machine: "
+            f"{failed_only[:160]!r}")
 
     def test_a_quote_in_an_argument_does_not_break_the_program(self, gsettings_env):
         out = execute_tool("calculate", {"expression": "2+2"})

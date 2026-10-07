@@ -135,6 +135,22 @@ def _load() -> "tuple[list | None, str]":
     return parsed, ""
 
 
+def open_tasks() -> "tuple[list | None, str]":
+    """Every task, outstanding or not, for a UI that wants to show progress.
+
+    `(items, problem)`, exactly like `_load` - "you have no tasks" and "your
+    task list could not be read" are different facts, and a card that conflates
+    them tells a person their work is empty when it is unreadable.
+
+    **Consent is the caller's to check.** This function does not gate on
+    `_CONSENT_KEY`, because the writer gates and a reader that silently
+    returned nothing would be indistinguishable from an empty list; the GUI
+    reads `todo-list-enabled` itself so it can *say* that the list is off rather
+    than pretending there is nothing in it.
+    """
+    return _load()
+
+
 def _save(items: list) -> str:
     path = _store_path()
     try:

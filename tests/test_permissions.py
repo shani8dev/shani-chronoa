@@ -167,9 +167,11 @@ class TestTheAllowHalfIsWired:
     """
 
     def test_a_session_grant_opens_the_consent_gate(self):
-        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+        #: calendar_events, not delete_file: the file tools are bypass-immune
+        #: and must not answer from standing grants, by design.
+        permissions.add_rule("calendar_events", "*",
                              permissions.Decision.ALLOW_SESSION, session_only=True)
-        out = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+        out = execute_tool("calendar_events", {"range": "today"})
         assert "turned off" not in out, (
             "a session grant still does not satisfy the skill's own consent "
             "check - the grant is consumed but never reaches get_bool"
@@ -191,20 +193,20 @@ class TestTheAllowHalfIsWired:
         )
 
     def test_allow_once_is_consumed_by_being_used(self):
-        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+        permissions.add_rule("calendar_events", "*",
                              permissions.Decision.ALLOW_ONCE, session_only=True)
-        first = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
-        second = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+        first = execute_tool("calendar_events", {"range": "today"})
+        second = execute_tool("calendar_events", {"range": "today"})
         assert "turned off" not in first
         assert "turned off" in second or "not permitted" in second.lower(), (
             "'allow once' allowed twice"
         )
 
     def test_allow_session_survives_repeated_calls(self):
-        permissions.add_rule("delete_file", "/home/me/Downloads/*",
+        permissions.add_rule("calendar_events", "*",
                              permissions.Decision.ALLOW_SESSION, session_only=True)
         for _ in range(3):
-            out = execute_tool("delete_file", {"path": "/home/me/Downloads/a.txt"})
+            out = execute_tool("calendar_events", {"range": "today"})
             assert "turned off" not in out
             assert "not permitted" not in out.lower()
 

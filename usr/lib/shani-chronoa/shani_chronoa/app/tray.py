@@ -107,7 +107,21 @@ class Tray:
 
 
 def _toggle(app: Any) -> None:
-    """The window's own toggle, so there is one way to start listening."""
+    """One button, one action - which one depends on where Chronoa is.
+
+    Hidden (tray/minimised after a wake-word close): the click brings the
+    window back, since a user cannot talk to a window that is not there.
+    On screen: the click toggles listening, same as the window's button.
+    """
+    window = getattr(app, "window", None)
+    if window is not None:
+        try:
+            if not window.get_visible():
+                window.show()
+                return
+        except Exception as exc:            # noqa: BLE001 - a tray click must not raise
+            logger.warning("tray click could not show the window: %s", exc)
+            return
     activate = getattr(app, "activate_action", None)
     if activate is None:
         return
@@ -120,6 +134,9 @@ def _toggle(app: Any) -> None:
 def _menu(app: Any) -> Gio.Menu:
     """A small menu for the secondary actions. The primary click never uses it."""
     menu = Gio.Menu()
+    show = Gio.MenuItem.new("Show Chronoa", None)
+    show.set_action_and_target_value("app.show-window", None)
+    menu.append_item(show)
     ask = Gio.MenuItem.new("Ask one question", None)
     ask.set_action_and_target_value("app.quick-ask", None)
     menu.append_item(ask)

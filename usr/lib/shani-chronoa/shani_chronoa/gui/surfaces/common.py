@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
+import textwrap
 from typing import Any, Callable, List, Optional
 
 import gi
@@ -59,9 +60,23 @@ MAX_WRAP_CHARS = 56
 
 
 def wrap_label(label: "Gtk.Label", chars: int = MAX_WRAP_CHARS) -> "Gtk.Label":
-    """Let `label` wrap *and* stop it deciding how wide the page is."""
+    """Let `label` wrap *and* stop it deciding how wide the page is.
+
+    Also pre-wraps the existing text with real newlines, because of a mismatch
+    this machine measured in GTK4 on 2026-10-07: with `wrap=True` and
+    `max_width_chars` the *height-for-width* measure uses the allocated width,
+    while the paint pass breaks lines at `max_width_chars`. At window width the
+    subtitle therefore painted three lines into about two lines of allocation,
+    overlapping the banner beneath it. Pre-broken text makes the measure and
+    the painted lines agree regardless of window width.
+    """
     label.set_wrap(True)
     label.set_max_width_chars(chars)
+    text = label.get_label()
+    if text and "\\n" not in text:
+        label.set_label("\\n".join(
+            textwrap.fill(paragraph, width=chars)
+            for paragraph in text.split("\\n\\n")))
     return label
 
 
@@ -218,6 +233,35 @@ STATUS_CLASSES = {
 STATUS_ROW_CSS = "status-row"
 STATUS_WORD_CSS = "status-word"
 
+#: The dot's diameter, and the one place it is decided.
+#:
+#: It has to be a `Gtk.DrawingArea` and not a `Gtk.Label`. An empty label
+#: measures to its *font's* line height - 18px against a 10px `min-height` on
+#: this machine - and GTK4's CSS has no `width`/`height` to correct that with,
+#: so the 5px `border-radius` on an 18px-tall box paints a rounded rectangle and
+#: not a dot. Measured on a rendered panel, the dot beside "Needs attention" was
+#: a square; measured on the sidebar rows, it was 10 x 18. Both were the same
+#: one-line mistake.
+#:
+#: Half of `.status-dot`'s `border-radius`, so the radius closes the circle.
+STATUS_DOT_PX = 10
+
+
+def status_dot() -> "Gtk.DrawingArea":
+    """The coloured dot `.status-dot` paints. One implementation, two callers.
+
+    `status_row()` built its own on the libadwaita path and another on the plain
+    one, and `sidebar.py` built a third; all three were `Gtk.Label`s, so all
+    three rendered as squares. It is kept here rather than in `style.py` because
+    the size is a widget property - GTK4's CSS cannot express it.
+    """
+    dot = Gtk.DrawingArea()
+    dot.set_content_width(STATUS_DOT_PX)
+    dot.set_content_height(STATUS_DOT_PX)
+    dot.add_css_class("status-dot")
+    dot.set_valign(Gtk.Align.CENTER)
+    return dot
+
 
 class StatusRecorder:
     """One surface's own health, made once and shown in two places.
@@ -306,9 +350,7 @@ def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
         row.set_subtitle(spoken)
         row.add_css_class(STATUS_ROW_CSS)
         row.add_css_class(STATUS_CLASSES[status])
-        dot = Gtk.Label(label="")
-        dot.add_css_class("status-dot")
-        dot.set_valign(Gtk.Align.CENTER)
+        dot = status_dot()
         row.add_prefix(dot)
         label = _first_label(row)
         if label is not None:
@@ -318,8 +360,7 @@ def status_row(status: str, summary: str, detail: str = "") -> Gtk.Widget:
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     box.add_css_class(STATUS_ROW_CSS)
     box.add_css_class(STATUS_CLASSES[status])
-    dot = Gtk.Label(label="")
-    dot.add_css_class("status-dot")
+    dot = status_dot()
     box.append(dot)
     text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
     head = Gtk.Label(label=word, xalign=0.0)

@@ -51,6 +51,7 @@ SCHEMA = {
 def _run(arguments: dict) -> str:
     try:
         target = files.resolve(arguments.get("path") or "")
+        files.refuse_sensitive(target, "read")
     except files.PathProblem as exc:
         return str(exc)
     if target.is_dir():

@@ -2117,14 +2117,98 @@ lives. `check_destination` appeared in the discarded-result scan and is
 correct: it returns `None` and raises on refusal, so `_guard()` fails closed.
 
 **Still unwired, genuinely candidate.** `run_from_file`, `webkit_version`,
-`known_organ`, `page_titles` / `forget_window`, `install_hint`,
-`is_parakeet_provisioned`, `voices_for`, `pending_count`, `price`,
-`collapse`, `help_prompt`, `capability_for`, `summarize_*` siblings, `from_url`, `save_record`, `lab_network_namespace`,
-`encode_rejection`, `describe_captured`, `remember_from_turn`, `tempo_map` /
-`apply_contour` / `within`.
+`known_organ`, `page_titles`, `install_hint`, `pending_count`, `price`,
+`collapse`, `capability_for`, `summarize_*` siblings, `from_url`,
+`save_record`, `lab_network_namespace`, `encode_rejection`,
+`describe_captured`, `remember_from_turn`, `tempo_map` / `apply_contour` /
+`within`.
 
 **All 154 schema keys are read** — there is no unwired setting in this
 repository. Worth recording as a clean result.
+
+### Re-run of the same scan: eight names wired, and five were live defects
+
+The scan above re-run (a token-count pass over `usr/lib`, `usr/bin`, `tests/`
+and the root scripts, excluding each definition's own line) found 49. Eleven
+were wired; **five of those eleven were not missing features but shipped
+defects**, which is the argument for running the scan again rather than
+trusting the list above. Each was found by running the real thing, not by
+reading the caller.
+
+**`--show-page=` did not work, for five of six destinations.** `pages.py`'s
+own docstring gives `--show-page=settings:privacy` as the example. Measured on a
+real app: `main:conversation`, `settings:senses`, `settings:privacy` all
+returned **False**, and `setup:review` logged *"setup cannot show a page"*. Four
+separate causes, none of them visible in the registry:
+
+- **The registry was only populated by building the window.** `register()` ran
+  inside `SettingsWindow.__init__` and inside `build_window`, so `show()`'s
+  `window_id not in _PAGES` check fired *before* the factory that could have
+  built the window was ever consulted. The factory was unreachable code. Both
+  now register at import time, and `pages._DECLARERS` imports the declaring
+  module on demand so an id is answerable before anything has been built.
+- **`senses` and `privacy` matched no group at all.** The seven ids the registry
+  promises are **sections**; the window's groups are 25 and are titled after
+  their own content ("Getting started", "Privacy and network"). Measured on a
+  real window: declared-but-not-built was exactly `['privacy', 'senses']`. So
+  the search-based `show_section` could never land on them — while a window with
+  fourteen sense rows sat there. `group._section_family` is now set by each
+  builder and `show_section` reveals a family when the id names one.
+- **The wizard's `show_page` was a closure held only by the local scope that
+  built it.** `pages.show()` looks for `window.show_page`; there was no
+  attribute to find, and the wizard logged "cannot show a page" on a wizard with
+  the Review page fully built. It is attached now.
+- **`forget_window` had no caller**, so `_WINDOWS` grew forever and a
+  destroyed window stayed addressable. Now dropped on `destroy` — not on
+  `close`, because closing a `Gtk.Window` can merely hide it and forgetting it
+  then would make `show()` build a second copy of a live window.
+- **Clearing the search box did not restore the window.** `_on_search` with an
+  empty needle fell through to "no needle, so everything matches" only by
+  accident of the `not needle or` clause; after `show_section` had set
+  visibility directly, clearing the box left the person with a fraction of the
+  window. Measured: `25 → 14 (senses) → 3 ("camera") → 25` after the fix, and it
+  stopped at 14 before it.
+
+The three lookup functions (`page_ids`, `resolve`, `page_titles`, `windows`)
+also load their declarer first, so "does this id exist" cannot depend on which
+module happened to be imported already. `_DECLARERS` maps to a **callable**, not
+a module: importing once is not enough, because `tests/test_pages.py` resets the
+registry and would otherwise leave every window permanently undeclared.
+
+**Four more, each measured before and after:**
+
+| helper | what it was doing | what was wrong |
+|---|---|---|
+| `ChronoaWindow.clear_input` | unused | Ctrl+N emptied the transcript and left a half-typed question in the composer, so the next Enter asked about the *previous* conversation |
+| `capabilities.help_prompt` | unused | `/help what can you do?` opened the window and **threw the question away**; the command now fills the composer, and `set_input_text` is a separate method from `submit_text` because "show this" and "send this" are different acts |
+| `permissions.allows_prompting` | unused | The Approvals page read only `can_ask()`, so `DONT_ASK` **with a listener present** said "Chronoa will ask before running a gated action" — a policy `decide()` refuses on the spot, on the one page whose subject is what the app enforces |
+| `is_parakeet_provisioned` | unused | The Models panel listed only `stt_provision.MODELS`, so a machine with a Parakeet model installed showed **every speech card** as "not downloaded" — the confident-wrong-answer shape this file already records for the Eyes list, reached from the other direction |
+
+Plus `provenance.describe_boundary()` into `SYSTEM_PROMPT`: every tool result
+has been fenced as untrusted data since provenance landed, and the model was
+never told what the markers meant. **A fence the model cannot interpret is
+decoration.** And `organism.Organ.is_live` into the Inventory panel's per-row
+tooltip, so "a light means something is happening" and "this row has no light"
+are reconciled on the same screen rather than only in the summary group.
+
+`voices_for("en")` now answers the wizard's question instead of the wizard
+filtering `VOICES` itself — which voices may be offered is a fact about the
+catalogue, and one list re-deriving it is how a catalogue change would show up
+in one place and not the other.
+
+**Mutation-verified, all failing when reverted:** wizard `show_page` detached
+(1), `senses` family removed (1), search-clear restore removed (1), family
+filter widened to everything (1), composer clear removed (1), `/help` argument
+discarded (1), approvals mode check falling back to `can_ask()` (1), Parakeet
+cards removed (1), boundary line removed from the prompt (1).
+
+**`tests/test_pages.py::test_all_three_windows_answer_to_show_page` was
+green while two of the three windows were unaddressable**, because it grepped
+the source for `def show_page`. Rewritten against the real registry and a real
+wizard, plus `test_every_declared_settings_id_shows_something`, which builds the
+window and asserts each declared id reveals *some but not all* groups — an id
+that hides nothing is as wrong as one that shows nothing. A negative-space guard
+that cannot fail is the same failure as a test that always passes.
 
 ### Two more that existed, answered nothing, and were exactly what a panel is for
 
@@ -3388,6 +3472,548 @@ Lessons from building these, each found by running:
   profile's 512 MB RLIMIT_AS, so every model runs as a loopback service and
   skills are HTTP clients; slow skills get a named longer timeout
   (`tools._SLOW_TOOLS`), still capped by the profile.
+
+## The right rail, and what it may say (2026-10-07)
+
+The window had a left sidebar and a transcript, and nothing else. Three
+questions a person has while talking to an assistant with its hands on their
+machine had nowhere to live, because the conversation is a *transcript*: it
+grows downward and the useful part scrolls off the top. `gui/rail.py` is a
+right-hand column answering them, in that order:
+
+1. **Now** - the live state and the tool currently running, read from
+   `_state_label` and `_detail_label` rather than tracked separately. The
+   first version kept its own copy and rendered "Idle" while the window said
+   "Ready"; reading the widgets is the fix, and it is also why the rail is
+   built at the *end* of `_setup_ui` - built earlier it reads labels that do
+   not exist yet.
+2. **Timers** - pending countdowns with the time left, so a countdown is a
+   countdown rather than a number that never moves.
+3. **Changed** - files Chronoa wrote that the undo ring can still put back,
+   each row a button that opens the Diff panel. Same store the Diff panel
+   reads, deliberately: a second change log would drift from the first.
+4. **Tasks** - outstanding items from the task list, **only when its consent
+   key is on**. With the key off it says so, because silence would read as
+   "no tasks" when the truth is "you are not looking at them".
+5. **Posture** - permission mode, memory consent, sandbox qualification. Three
+   lines that each change what a reply is allowed to mean.
+
+**Not in it, on purpose.** Not the senses and not health - those panels own
+them, with a per-row reason. Not goals or a plan: `goals.py` has no producer
+yet, and a card for a queue nothing can enqueue is a dead control. Every
+section above reads a store that already exists and renders an honest
+sentence when it is empty, because a rail of decoration is worse than no rail:
+it looks like it knows something.
+
+**Two bugs found by rendering, not by reading.** The rail's scroller had
+`set_propagate_natural_width(True)`, so a long posture line pushed the column
+past its own width request and off the right edge of the window - the one
+thing a fixed-width column exists to prevent. And `RailBreakpoint` was first
+handed the *row* holding the conversation, so at 600px it hid the conversation
+too: an empty right half with no orb, no transcript, no composer.
+
+**`SidebarBreakpoint` was a dead control too, and the narrow layout was
+impossible for a reason nobody had looked for.** The breakpoint was constructed
+and returned; nobody ever called `window.add_breakpoint()`, and an
+`Adw.Breakpoint` no window knows about is never evaluated. Registering both is
+what makes the rail responsive - but at 600px the sidebar still did not
+collapse, and the cause was upstream of it: the split view reported it needed
+**762px**, because **the organ strip asked for 470px of its own**. Eight little
+status lights were the single reason the conversation could not fit a narrow
+window.
+
+`OrganStrip` is now a `Gtk.FlowBox`, so it wraps instead of demanding a row
+(measured: 470px minimum -> 90px). Two follow-ups the render forced: the cells
+must not be *homogeneous* (equal-width cells broke "thinking" onto a second row
+at 1280px with room to spare), and `max_children_per_line` is set explicitly
+because the default still wrapped early. The collapse itself is applied on
+width change rather than by the breakpoint alone - the breakpoint's setter runs
+before the split view finishes setting itself up and is then overwritten - and
+it goes through `_set_panels_visible`, because `collapsed` alone leaves the
+drawer *open* over the conversation, which is the exact bug that method's own
+docstring records for F9.
+
+Two declarations were also doing nothing but printing a warning on every window
+build: `width`/`height` on `.sidebar-dot` and `cursor: pointer` in the diff
+stylesheet. GTK4's CSS parser has neither property; the dot was being sized by
+its `min-*` pair all along, and the pointer is now set through `set_cursor`
+where GTK is new enough for it.
+
+
+
+`../harness-study/HARVEST-2/` mined 42 agent harnesses; every item it proposed
+is now in the code or rejected with a reason in its own `00-MASTER-BACKLOG.md`
+implementation log. Three rounds: Tranche 1 patches, then the feasible Tranche 2
+items, then the T3 structural core. What landed, and the reasoning that decided
+the shape:
+
+- **`ToolFailure` (`toolfailure.py`)** — a skill that ran but whose effect did
+  not hold says so in-band; the child carries it as a stdout marker, and both
+  the local and the sandboxed path report `ran=True, verdict=FAILED`. This is
+  the first honest fourth state; everything else in `DispatchResult` is
+  "ran/not ran" crossed with "verified/not".
+- **Per-origin round budgets (`assistant.py`)** — `handle(origin=...)` is the
+  parameter the T2.17 blocker analysis kept asking for. A person gets 4 rounds,
+  a trigger-driven turn gets 1, an origin nobody has named gets 1 (fails closed
+  like `profile_for_origin`). The same parameter now reaches `execute_tool`, so
+  the audit log can finally tell a typed turn from a bridge turn.
+- **`permissions.Mode` — `DEFAULT` / `DONT_ASK` / `EXPLORE`, plus
+  `bypass_immune`** — `DONT_ASK` refuses every ask and suspends session grants
+  (the unattended-trigger default); `EXPLORE` refuses anything outside
+  `capabilities.READ_ONLY_TOOLS`; destructive tools never answer from a
+  standing grant and no longer *offer* one. **This is the item most likely to
+  be argued with**, and the argument is worth having: `delete_file` asking again
+  on the third call in a session is friction that buys a property. It buys it
+  because the alternative is a session grant written by one "yes" standing in
+  for every later delete, and the harvest is explicit that the answer to
+  "should this be delegated" is per-tool.
+- **Requery/validation budget** — three never-run calls in a row ends the turn
+  honestly. A round where the only tool output is refusal, repeated, is a circle
+  more rounds do not break.
+- **`goals.py`** — a plain-data goal run that can `park` and `resume`, with
+  `PlannedStep` variable dependencies that refuse to run a step whose inputs do
+  not exist yet. Deliberately un-wired into the UI: a task card over a queue
+  nothing can enqueue is a dead control.
+- **`restart.py` / `sandbox/qualify.py`** — the bounded restart table and a
+  fail-closed qualification that reports `missing`/`unknown` rather than
+  blending "off" into "yes". On this unprivileged machine it correctly reports
+  `proven is False`.
+
+**What the wiring audit caught, which the unit tests had not:** `ToolFailure`
+was only ever proved in-process — a live dispatch through the real subprocess
+was the first thing that proved the marker crosses; the permanent test includes
+a control that must succeed, so the assertion can fail. The event sink had no
+live subscriber until `ConversationMixin` started handing it to `handle()` in
+place of three callback slots. And two surfaces (`diff`, `artifact_store`)
+returned pages with no `status()` at all, so every surface walker raised — the
+new `diff-symbolic` icon was a glyph this theme does not ship.
+
+**The permission-mode row is session-scoped on purpose.** Every subtitle says
+"Back to Normal when Chronoa restarts". Persisting `EXPLORE` would leave a
+restarted assistant unable to change anything with no visible cause; that is the
+"an option whose label promises something the program does not do" failure the
+module already has a scar for.
+
+## Six defects the first full run after the harvest work found (2026-10-07)
+
+The first complete run since that work landed: **53 failed, 5739 passed, 39
+skipped** in 45:44. Eleven of the failure *files* were already on the
+environmental list below and are unchanged; these are the rest.
+
+**`office/` was mid-rewrite when the run started, and was reverted while it ran.**
+At the start of the run `office/write.py` was an uncommitted rewrite that had
+dropped `make_docx`, `make_pptx`, `rows_from_text`, `_Strings` and `_xlsx_cell`
+— `skills/analyze_table.py:312` and three tests call the missing `make_xlsx`, so
+`save_as='~/x.xlsx'` raised `AttributeError` on every call, and `office/edit.py:105`
+still called a `_Strings` that no longer existed. Nine `test_office_document.py`
+failures came from that. **Partway through this pass `office/` was reverted
+outside the session** and now matches HEAD, which carries its own `make_xlsx`
+(shared-string table, `fullCalcOnLoad`, `[Content_Types].xml` first).
+`test_office_document.py` (11) and `test_analyze_table.py` (13) both pass
+against it. Nothing here is claimed as the fix: **a suite someone else's
+`git checkout` turned green is not a repair**, and the one genuine finding from
+that thread is worth keeping — the rewrite's xlsx writer emitted `<w:row>` into a
+document binding only `x:` and `r:id` into a workbook that never declared `r:`,
+so the file it produced failed `read_xlsx_rows` with `OfficeError: workbook.xml
+inside the file is not well-formed XML (unbound prefix)`. No test caught that
+because nothing ever read a workbook this module had written.
+
+**Zeroing the organ strip's cell padding removed the gap between the lights.**
+The `OrganStrip` is a `Gtk.FlowBox` so it wraps on a narrow window, and the
+`flowboxchild` padding was costing ~230px of width — `padding: 0; margin: 0`
+fixed that measurement and broke the reading: the eight labels rendered as
+**"listening looking speaking network sensing remembering acting thinking"**,
+one run-on string rather than eight named lights. No test caught it, because
+constructing the strip is not looking at it and the width test *passed* the
+whole time.
+
+The first repair put a 4px CSS **margin** back, which is what the render wanted
+— and left the gap in two places (that stylesheet plus
+`OrganStrip.set_column_spacing`'s 2px), so no test could measure it and either
+half could be removed without failing anything. It is now
+`set_column_spacing(6)` in `organs.py` and nothing else, with
+`test_the_organ_lights_are_separated_by_a_gap` on that property. **The lesson
+is the width measurement's blind spot**: it measured the right number and the
+render was still broken.
+
+**The organ strip: what was asked, what is actually wrong, and the lead.**
+Asked whether the strip is misaligned and whether it drops anything. Measured,
+not read:
+
+| question | measurement | verdict |
+|---|---|---|
+| does every organ appear? | `ORGANS` 8, `ORGAN_ICONS` 8, no key either way, **8 of 8 cells mapped** at 1280 and 640 | nothing is missing |
+| is any label truncated? | every word whole in the render at both widths | no |
+| is each icon over its own label? | pixel-measured: worst offset **1.0px** across the eight | yes, centred |
+| is the *row* aligned? | labels span x=296..791 (centre 543) while the mode chips below span 477..782 (centre 629) | **86px off** |
+
+So the misalignment is the row, not the icons: it is hard against the left of
+the chat column while the chips and composer beneath it are centred. **Two fixes
+were tried and both are measurably no-ops, which is why neither is in the tree:**
+
+- `set_halign(Gtk.Align.CENTER)` on the strip: the property is set and no pixel
+  moves. A vertical `Gtk.Box` hands its child the full cross-axis width whatever
+  the child's alignment is — the strip was allocated **680px of a 680px box**
+  with `halign=CENTER`.
+- Wrapping it in a horizontal row between two expanding spacers, the usual
+  trick: also nothing, because **there is no slack to distribute** — the strip
+  fills its container.
+
+The numbers nobody had looked at are why. Measured in the real window at 1280:
+
+```
+strip.measure(HORIZONTAL, -1)  ->  min 90,  natural 834,  allocated 680
+cells allocated                 ->  58, 50, 59, 56, 50, 90, 41, 54   (= 458)
+7 gaps x 6px                                                (=  42)
+                                                            total  500
+```
+
+So the strip is handed the whole 680px column, its cells fill only **500px** of
+it, and the ~180px left over is the lopsided right edge. Its *reported* natural
+width (834) is larger than the sum of its children's own naturals (500) by
+almost exactly 8 x the default flow-box child padding - so the measure counts
+padding the allocation does not apply. That is why `halign` and the spacer trick
+both had nothing to work with: the strip is measured as full and allocated as
+full while its contents sit at the left.
+
+Two more measurements, both contradicting the story I wrote down first, and
+recorded for that reason:
+
+- **`.organ-strip > flowboxchild { padding: 0 }` does match.** Loaded in
+  isolation against eight synthetic cells: 444px natural without it, **402px
+  with it** - worth 42px, not the ~350px the 834 figure suggested. The
+  stylesheet does what it says; it is not the missing 334px.
+- `ORGAN_IDLE_CSS` in `organs.py` is a **second** stylesheet declaring
+  `.organ { padding: 2px 6px }` and `.organ-label { font-size: 10px }`. Neither
+  reaches the widget either: the cells allocate exactly their labels' natural
+  widths (58px for "listening", whose text is 57px). Two stylesheets for one
+  strip and one of them does nothing - worth knowing before editing either.
+
+`Gtk.Center` and `Gtk.Alignment` are both gone in GTK4 and `Gtk.FlowBox` has no
+`justify`, so this is not a one-liner: centring has to happen inside the flow box,
+or the strip has to stop being *measured* as full. Recorded as an open lead with
+its numbers rather than a fix nobody could verify.
+
+**Three defects the second full run found, all of them mine.**
+
+- **`show()` replaced `present()` on the activation path.** The start-hidden
+  work (`_start_hidden` + `toggle-start-hidden` + `show-window`) swapped
+  `self.window.present()` for `self.window.show()` in two places. `show` only
+  maps a window; `present` maps it **and** asks the desktop to raise and focus
+  it. The assistant therefore opened behind whatever was already in front, with
+  nothing wrong-looking to explain it — and
+  `tests/test_sense_scheduler_is_live.py` failed on a stub window that only ever
+  implemented the older call, which is how it surfaced. Both sites are `present()`
+  again, `show-window` included: "show the window" from a tray icon or a
+  notification means raise and focus.
+- **The Diff preview tests asserted on process-wide state they did not own.**
+  `recent_changes()` reads the undo ring, and *any* earlier test that wrote a
+  file through `write_text_file` or `edit_file` added a pre-image to it — so
+  `assert len(pairs) == 1` was really asserting that no other test in the
+  process had ever edited a file. Measured: 3 failures in a chunked run, 0 in
+  isolation. The helper now empties the ring first, through the module's own
+  `_save` so the on-disk format stays the one the module writes.
+- **The slash-command menu had no test at all**, and it is the one part of that
+  UI whose reachability nobody had ever checked: the registry tests assert each
+  command runs, and nothing asserted that typing `/` opens the menu. New
+  `tests/test_slash_menu_opens.py` drives a real window in a real main loop,
+  inserts a real `/` through `insert_text()` (not `set_text()`, which emits no
+  `changed`), and presses a row. Three mutations confirm it can fail: the menu
+  never pops up (caught), it never pops down (caught), and `/diagnostics` is
+  neutered (caught, 2/2 — after one false start recorded below).
+
+  **The first version of that last assertion was vacuous and measured green
+  against a dead command.** It asserted `"diagnostics" in window._surface_pages`
+  — but the window **pre-builds every surface in an idle callback**, so that key
+  is present from startup whatever the command does. Asserting on the click at
+  all was also the wrong shape: a row *completes* the text (`/diagnostics `) and
+  hands focus back, which is cline's behaviour and the reason the menu is a
+  discovery aid rather than a one-click macro. It now asserts the completion and
+  then that submitting it brings the Diagnostics page to the front.
+
+**And two test bugs of my own that a green suite was hiding.**
+
+- `_CONSENT_NAMES` in `test_skill_gates_are_enforced.py` was missing
+  `vision_sense_enabled`, so a correct skill (`screenshot.py`, which gates by
+  reading `config.vision_sense_enabled` — a property that returns
+  `sense_allowed("vision")`) was reported as ungated. The control test then made
+  it worse by demanding the *implementation detail* (`"sense_allowed" in names`)
+  rather than that a gate was consulted at all. Fixed to
+  `set(_CONSENT_NAMES) & gated`, mutation-verified: deleting the gate from
+  `screenshot.py` fails three tests including this one.
+- `test_paths_read_as_paths.py` asserted a path appeared unbroken in a label
+  that **wraps mid-path at the hyphen** ("shani-\nchronoa"), so it read as "the
+  panel stopped showing the path" when the panel was showing it perfectly.
+  Pre-existing — it fails identically with `gui/style.py` unmodified from HEAD.
+
+**A test kept reading a declaration out of a class that no longer holds it.**
+`test_dead_ends_have_buttons.py::test_every_settings_target_is_a_page_that_exists`
+parsed `inspect.getsource(SettingsWindow)` for a `register([...])` call and
+checked five settings page ids against it. Two things moved under it, and it was
+reading neither: the declaration became `_declare_families()` at module level
+(still called at the bottom of the module, so still at **import** time — nothing
+changed about *when* registration happens, which is why `pages.py` can now also
+call it on demand for a lazy `--show-page`), and the call passes
+`list(_SECTION_FAMILIES)` rather than an inline list literal. The class source
+then contained no `register` call at all, so the scan read an **empty set** and
+reported five working buttons as dead ends.
+
+Measured both directions: it fails against the current module and passes against
+the pre-change one, which is how a *reader* defect gets told apart from a
+*behaviour* defect. It now resolves the module-level table and additionally
+asserts the registry call passes that table — the stronger claim, because a
+literal-list scan could not tell a complete table from one nothing registers.
+Two mutations confirm it can fail: dropping a family id, and replacing
+`list(_SECTION_FAMILIES)` with `[]`.
+
+**`RESERVE_DISTINCT_KEYS` was discarding facts.** The reserve loop kept *one*
+fact per key and `continue`d past every other, so two true facts about the same
+subject lost one — and it broke a pre-existing ordering test. The reserve's
+stated purpose is that a bulk of one key cannot starve another subject; two
+passes (one per distinct key, then fill) gives that without dropping facts. This
+is the failure this file keeps describing under another name: a loop written to
+*reorder* silently *filtered*.
+
+**`execute_tool(name, args, origin=…)` broke a two-argument test stub.** The
+stub was out of date, not the call.
+
+**`_apply_narrow_layout` re-opened the panels the person had just closed.** Its
+"widening" branch ran on every width notification rather than on a transition,
+so a late notification undid the toggle. Measured 2 of 5 runs failing with it,
+0 of 5 without; now keyed on a `_narrow_applied` bucket.
+
+**Two `test_approval_ux.py` tests proved grant scoping through
+`bypass_immune`'s back door.** Both used `delete_file`, whose session grant is
+now ignored on purpose (T2.6), so the narrow-grant property they were written
+for had no witness left. They now run on `edit_file`, which is not immune, and a
+new one asserts the immunity itself — through dispatch, because an assertion on
+`evaluate()` alone reads the ignored grant as "granted".
+
+**`list_services` called a healthy machine broken.** `failed_only=True` with
+nothing failed returned "systemctl returned no service units, which is not
+expected on a running system" — the anomaly sentence, on the one input where
+an empty answer is the good one. The test that caught it had the mirror-image
+fault: it required this machine to *have* a failed unit, so it failed on a
+healthy box and would have passed on a sick one.
+
+**One thing deliberately left alone, with the numbers.** `tests/test_sidebar_toggle.py`
+is flaky for an environmental reason: it measures on-screen layout, this runner
+has no compositor, so the sidebar's slide animation is advanced only when a
+frame happens to arrive (4 of 6 runs pass with the harness fixes; 4 of 6 with
+`window.py` **unmodified from HEAD**, which is how you show the residue is not
+yours). Two harness fixes there are real and measured: the width is now *stated*
+(`ChronoaWindow` defaults to 460x640, below the sidebar's collapse threshold, so
+a harness that takes what it is handed measures the drawer contract while
+asserting the column one), and a control asserting the header toggle is
+unreachable in the drawer state was removed because today's measurement
+contradicts it (at 1100px the overlay is not allocated over the header: header
+y=0..46, sidebar 0x0, toggle mapped) — it also failed against `window.py`
+unmodified.
+
+Its settling step is a **fixed pump, deliberately not a convergence loop**:
+with animations on and no compositor the state after "show the panels" is
+correct while the column measures 0px, and that state is *stable* — so "wait
+until two readings agree" is satisfied by the broken frame, and the test then
+reports a layout that has not happened. `gtk-enable-animations` off is what makes
+it reliable (3 of 3 recovered, against 0 of 3 with it on); `queue_draw`,
+`queue_resize`, `present()` and `set_default_size` were each tried as a nudge
+first and none moves it, because the widget waits on the frame clock.
+
+**And the run itself nearly produced nothing.** It was launched as
+`pytest … | tail -60`; after 45 minutes the shell was still alive with an empty
+log, because the pytest process had exited normally while a **forked child still
+held the write end of the pipe**, so `tail` never saw EOF. `kill <that pid>`
+recovered the entire summary. This is what the "44-minute run keeps getting
+lost" note above actually was: **a suite whose output is piped is at the mercy
+of any process that inherits the pipe.** Write to a file, then read the file.
+
+## Two UI gaps verified by looking at them, and what looking found (2026-10-07)
+
+The harvest work was verified by behaviour throughout — tests drove the real
+paths and the mutations were confirmed to fail. That is not the same as having
+*looked* at it, and this repository's own history is that a widget can behave and
+still be broken: the organ strip passed its width test while rendering as one
+run-on string. So both new surfaces were rendered and read.
+
+**The slash-command menu** (`tests/test_slash_menu_opens.py` added first, because
+it had no coverage at all). Rendered with the menu open: six named commands,
+each with a plain-language summary, anchored under the composer — and one defect
+the tests could not see. **A summary ran straight into the popover's rounded
+corner** with nothing between the last letter and the border, so "Show what
+Chronoa changed, file by file" read as a sentence cut in half. Ten pixels of
+right margin; the menu went 398px -> 408px and now has visible padding.
+
+Three harness facts worth keeping, each found by the attempt before the real one:
+
+- **A `Gtk.Popover` is its own surface.** The first capture was a 1280x900 image
+  of the *window* with the menu reporting `visible: True` and six rows, and no
+  menu in it. Capturing the popover itself is what shows the menu.
+- **A widget captured on its own looks invisible.** `WidgetPaintable` of the task
+  card produced near-white text on transparency: the theme's foreground with
+  nothing painted behind it. Indistinguishable from a legibility defect, and not
+  one — the window has to be captured and the card cropped out of it.
+- **Pump the loop before capturing.** Without a compositor nothing guarantees an
+  allocation, and `snapshot.to_node()` on an unallocated widget returns `None` —
+  "NO NODE", which reads like a rendering bug.
+- Also: `ChronoaApplication` hardcodes the single-instance name
+  `dev.shani.chronoa`, so a render collides with a running app and fails with
+  "Failed to register: Timeout was reached". The harnesses use a minimal
+  `Gtk.Application` with their own id, as `_render_one.py` already does.
+
+**The task card.** Rendered with three seeded tasks: all three states read
+correctly and are distinguishable **without colour** (ellipsis / circle / warning
+triangle, plus the words "doing" and "blocked"). One real gap: the blocked row
+said "blocked check the backup" and the reason was **only in a tooltip** — which
+needs a hover or a keyboard focus, never appears on touch, and is in no
+screenshot. `blocked_by` exists to say what is in the way, so "waiting on disk
+full" is now on the row, dimmed, wrapping, with the tooltip kept.
+
+**And the change immediately regressed something the render caught and the tests
+did not:** the first version returned a fresh vertical box holding the two
+labels and left the icon behind, so the next render showed "blocked" with no
+warning triangle — the one marker distinguishing it from "doing" without colour.
+The head box goes *inside* the row rather than being replaced by it. Both halves
+are now covered: the test asserts the reason is in the rendered text **and** that
+the blocked row still carries `dialog-warning-symbolic`, and each was confirmed
+to fail when its half is removed.
+
+## The suite, run in chunks because one long run keeps dying (2026-10-07)
+
+A single full run is not a reliable way to get a number out of this suite on
+this box: over the course of one afternoon it lost its output three ways, and
+only the third is obvious.
+
+| what happened | why | what it cost |
+|---|---|---|
+| `pytest ... | tail -60`, log stayed empty after 45 min | the pytest process had exited **normally** and a forked child still held the write end of the pipe, so `tail` never saw EOF | the whole summary, sitting in a buffer |
+| SIGTERM twice | the process group was killed | 45 minutes each |
+| `Fatal Python error: Aborted` at ~60% | `g_application_run` asserts inside `tests/test_setup_button_is_reachable.py:123` | everything after that test |
+
+**Write the output to a file, not down a pipe**, and **run it in chunks**. Eight
+chunks of ~36 files, one summary file each: **36 failed, 5845 passed, 39
+skipped**, no abort. A crash then costs one chunk instead of the run.
+
+Of those 36, **27 were the environmental list above**, unchanged. Ten were real
+and are fixed; the residue after the fixes was re-measured over every file that
+had failed, and came to **26 failed / 451 passed / 2 skipped — every one of the 26
+on the documented environmental list** (browser_window_probe 7, setup_extras 6,
+sense_idle 3, sandbox_seccomp 2, permission_decisions 2, everyday_skills 2,
+sandbox_profiles_live 1, input_skills 1, portal_input 1, vision_sense 1).
+
+The abort is **pre-existing and still unexplained**: that test passes alone
+(12/12, three runs) and no file pair I tried reproduced it. A dead session bus
+was my first hypothesis and it is **ruled out** — pointing
+`DBUS_SESSION_BUS_ADDRESS` at a nonexistent socket and caching the connection
+with `Gio.bus_get_sync` first still lets `app.run()` return normally. Recorded
+as an open item rather than a fix.
+
+### What the chunked run also showed: two order-dependent failures of mine
+
+- **`test_settings_targets_resolve.py` had the same defect as
+  `test_dead_ends_have_buttons.py`**: a generator that read the page ids out of
+  the `SettingsWindow` class body yielded **nothing** once the declaration moved
+  to `_declare_families()`, so every assertion built on it passed for the wrong
+  reason. Fixed the same way, mutation-verified.
+- **`test_skills.py::test_execute_tool_non_dict_arguments_are_ignored` picked its
+  handler by insertion order**, and the first candidate is `airplane_mode` —
+  which is consent-gated (`radio-control-enabled`, off by default). So the test
+  passed or failed depending on whether an earlier test in the process had left
+  that switch on: intermittent in a full run, never in isolation. It now picks
+  the first **sorted**, **ungated**, non-read-only handler with no required
+  arguments (`audio_output` today) — the point being that the claim is about
+  argument handling, and a gated tool never gets far enough to exercise it.
+
+## Six harness-UI gaps closed (2026-10-07)
+
+Comparing Chronoa's UI against what opencode, cline, Roo-Code, OpenHands and
+sayri ship surfaced six things we did not have. All six are now in, each
+verified by execution rather than by the feature existing:
+
+1. **Context meter** (`context_meter.py`) - opencode's
+   `session-context-usage.tsx` + `session-context-breakdown.ts`. A headline
+   (`781 of 8,192 tokens (9.5%)`), a per-segment breakdown (instructions /
+   percepts / user / assistant / tool results / tool schemas), and a
+   *usable* percent that reserves reply room. Two rules the comparison
+   forced: when the window size is unknown the meter says `None` rather than
+   inventing a percentage against a made-up denominator, and its divisor is
+   *read from* `local_llm.CHARS_PER_TOKEN` - my first guess (4) was wrong;
+   the shipped one is 3, and the test that caught it is permanent.
+2. **Compaction says what it cut.** `compression.compress()` now reports into
+   `last_elision()` (messages shortened, characters removed), the assistant
+   fires an `on_compaction` sink event once per turn, and the transcript
+   shows a dim row. cline's `CompactionRow`, OpenHands' `CondensationEvent`.
+   A local assistant that elides silently looks like it forgot.
+3. **A cloud-turn is announced.** `CloudLLMChain` tracks `last_provider`; the
+   assistant fires `on_cloud_turn` once per turn; the transcript shows "This
+   turn was answered by X, not on this machine." The privacy strip and the
+   egress audit existed for this, but neither told a person their sentence had
+   left - they had to have known they enabled a fallback at all.
+4. **Slash commands.** `gui/commands.py` - kimi-cli's registry, cline's
+   `SlashCommandMenu`. Six commands, each with a real action behind it:
+   `/new /diff /undo /tasks /diagnostics /help`. `/undo` runs the real skill,
+   so the permission layers are not bypassed. A command with no wired action
+   is the dead-control class this repo keeps meeting; the test refuses it.
+5. **The plan sits in the chat.** `gui/task_card.py` - OpenHands' 3-state
+   `TaskItem`, placed above the composer where it cannot scroll away, hidden
+   entirely when there is nothing outstanding, and *absent* (not blank) when
+   its consent key is off or the store is unreadable - "you have no tasks"
+   and "you cannot read them" are different facts.
+6. **Tool output is collapsible.** This turned out to already be there
+   (`ToolCallCard` has a toggle + revealer); a test pins it so it is not
+   "fixed" twice.
+
+## Twenty skills from the matrix shortlist (2026-10-07)
+
+Picked from `chronoa-matrix.json`'s `ideas` after checking each against the
+existing skills (`open_surfaces` measures calls, not answers - see above).
+Read-only: `snapshot_status` (shani-deploy `--status --json` + the snapshots
+sense), `security_status`, `list_containers` (adds `distrobox list`),
+`list_vms` (`virsh`, session and system separately), `boot_report`
+(`systemd-analyze time`/`blame`), `disk_health` (LUKS found by walking `lsblk`
+ancestors), `temperatures`, `usb_devices` (adds `boltctl`), `driver_info`
+(`/proc/modules`, `/sys/module`, `device/driver` links), `list_fonts`
+(`fc-list` + `fc-match`, substitutions called out), `photo_metadata` (own stdlib
+EXIF reader - no exiv2 on the image, Pillow not a dependency), `crash_report`,
+`login_history` (`last`, else wtmp parsed directly). Changing: `audio_output`
+(`wpctl set-default`), `default_apps` (`xdg-mime`/`xdg-settings`), `pdf_pages`
+(poppler merge/split/extract; no rotate - `qpdf` is not on the image),
+`print_queue` (cancel), `set_hostname`, `set_locale`, `speed_test`.
+
+Rules they follow, so the next one does too:
+
+- **A skill that reports a sense's facts shares that sense's switch**, checked in
+  the skill's own source (`sense_reading.py` explains why; the precedent is
+  `git_inspect`). Only the sense half of a mixed skill is withheld - turning the
+  snapshots sense off hides the snapshot list, not the deploy state. Found by
+  running them for real: five of the eight senses gate inside `_run` and three do
+  not, so the first version's "consent is not consulted" docstrings were false
+  for five of them.
+- `audio_output` and `pdf_pages` are ungated, by precedent: `set_volume` for
+  one, `convert_document` (writes only new files) for the other. The other five
+  changers each have their own key, default off; `speed_test` also refuses in
+  privacy mode, which defaults on.
+- `set_locale` passes back every existing assignment: `localectl set-locale`
+  replaces all of them with exactly the list given, so changing LANG alone
+  would drop LC_TIME. Mutation-tested.
+- `pdf_pages`' post-condition requires the output to be fresh: a refused call
+  leaves an older file of the same name, and matching its page count would
+  verify work that never happened. The first control could not catch this (a
+  non-PDF fails the page count for another reason); it is now a real 4-page PDF
+  dated in the past.
+
+**`mcp.py` builds a Python signature in schema property order**, so a required
+property listed after an optional one raises `ValueError: non-default argument
+follows default argument` and takes the **whole MCP server** down, not just that
+tool. `default_apps` hit it; its properties are reordered. The fix belongs in
+`mcp.py` (sort required first) and is not made here.
+
+Verified: `tests/test_matrix_skills.py` (51, every skill through
+`execute_tool_outcome`; 16 mutations, all caught), `tool_select` picks the right
+skill for 28 of 28 natural phrasings, and shani-testbed
+`slot-tests/chronoa-matrix-skills.sh` on `@blue` (`shanios-20261006-plasma`):
+**29 PASS, 0 FAIL** - every binary present, shani-deploy's status read, a real
+poppler merge VERIFIED, all five gated paths refuse, and the control names
+`fontconfig` for a hidden `fc-list`.
 
 ## Approve from a notification, and four more event types (2026-10-01)
 

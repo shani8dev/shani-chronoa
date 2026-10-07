@@ -385,6 +385,32 @@ class TestLevelHalo:
         assert win._orb.get_level() > 0.5
         win.destroy()
 
+    def test_playback_level_is_ignored_unless_speaking(self, gtk_app):
+        """A level arriving after the turn ended must not pulse at nothing."""
+        win = ChronoaWindow(gtk_app)
+        win.set_state(AssistantState.IDLE)
+        win.set_playback_level(1.0)
+        _pump(0.5)
+        assert win._orb.get_level() == 0.0
+
+        win.set_state(AssistantState.SPEAKING)
+        win.set_playback_level(1.0)
+        _pump(1.5)
+        assert win._orb.get_level() > 0.5
+        win.destroy()
+
+    def test_leaving_a_listening_or_speaking_state_settles_the_halo(self, gtk_app):
+        """The last level must not freeze on a thinking/idle halo."""
+        win = ChronoaWindow(gtk_app)
+        win.set_state(AssistantState.SPEAKING)
+        win.set_playback_level(1.0)
+        _pump(1.5)
+        assert win._orb.get_level() > 0.5
+        win.set_state(AssistantState.IDLE)
+        _pump(1.5)
+        assert win._orb.get_level() == 0.0
+        win.destroy()
+
     def test_halo_colour_tracks_the_state(self, gtk_app):
         win = ChronoaWindow(gtk_app)
         for state in AssistantState:

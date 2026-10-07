@@ -70,7 +70,7 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Memory"
-ICON = "avatar-default-symbolic"
+ICON = "text-x-generic-symbolic"
 
 SUBTITLE = (
     "What Chronoa believes it was told, read from the running assistant's own "

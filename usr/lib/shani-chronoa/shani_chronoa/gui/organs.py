@@ -114,12 +114,57 @@ def tone_wav(path: Path, frequency: float, milliseconds: int = 140) -> bool:
         return False
 
 
-class OrganStrip(Gtk.Box):
-    """The row of organ lights. Subscribes to the body and redraws on change."""
+class OrganStrip(Gtk.FlowBox):
+    """The row of organ lights. Subscribes to the body and redraws on change.
+
+    **A `Gtk.FlowBox`, not a `Gtk.Box`, and that is the whole point of the
+    change.** Measured: as a horizontal box this strip asked for **470px** of
+    its own, which made the conversation column 498px minimum, which made the
+    `Adw.NavigationSplitView` need 762px - so a 600px window could never fit
+    chat plus sidebar, and the sidebar could therefore never collapse into a
+    drawer. One decorative row of eight status lights was the single reason the
+    narrow layout was broken.
+
+    A flow box wraps onto a second row instead, so the strip's minimum is one
+    cell wide and the conversation keeps whatever width it has. Every light is
+    still drawn at every width; none is hidden to make room.
+    """
 
     def __init__(self, config=None) -> None:
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        super().__init__()
         self.add_css_class("organ-strip")
+        self.set_selection_mode(Gtk.SelectionMode.NONE)
+        # Centring was tried and reverted: `halign` is honoured by nothing
+        # between here and the window (see the note at the append site in
+        # `gui/window.py`, with the measurement).
+        # Not homogeneous: with equal-width cells the strip wrapped to two rows
+        # even at 1280px (measured) because six wide cells plus two is a line
+        # break, not because the words needed it. Cells size to their label, so
+        # a wide window keeps the single row it always had and a narrow one
+        # wraps as late as it genuinely must.
+        self.set_homogeneous(False)
+        # 6px, and it is the *only* gap between the cells. Zeroing the
+        # `flowboxchild` padding in the stylesheet recovered ~230px of width -
+        # and left nothing between the lights, so the eight labels rendered as
+        # "listening looking speaking network sensing remembering acting
+        # thinking": one run-on string, not eight named lights. The first fix
+        # put the margin in CSS, which left the gap split across two places -
+        # 2px of spacing here and 4px of margin there - so no test could
+        # measure it and removing either half silently re-broke the reading.
+        # One property, one number, and
+        # `tests/test_now_rail.py::test_the_organ_lights_are_separated_by_a_gap`
+        # asserts it.
+        self.set_column_spacing(6)
+        self.set_row_spacing(2)
+        self.set_min_children_per_line(0)
+        # Set explicitly rather than relying on the default: rendered at 1280px
+        # with the default, the strip still broke "thinking" onto a second row
+        # when all eight lights fitted (measured: eight cells need ~470px of a
+        # ~660px column). Naming the number removes the guess - and there is no
+        # `Gtk.FLOW_MAX_CHILDREN_PER_LINE` constant in this PyGObject build to
+        # name "unlimited" with.
+        self.set_max_children_per_line(64)
+        self.set_orientation(Gtk.Orientation.HORIZONTAL)
         self.set_margin_top(4)
         self._config = config
         self._labels: dict = {}
@@ -146,7 +191,7 @@ class OrganStrip(Gtk.Box):
 
             row.add_css_class("organ")
             row.add_css_class("organ-idle")
-            self.append(row)
+            self.insert(row, -1)
             self._rows[organ] = row
             self._labels[organ] = label
         self.refresh()

@@ -127,6 +127,8 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self._ollama_available = False
         self._async = AsyncBridge()
         self._model_override: Optional[str] = None
+        self._start_hidden = False
+        self._hidden_hold = False
 
     def do_startup(self) -> None:
         """Handle application startup."""
@@ -150,6 +152,16 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # exist yet (`do_activate` builds it), which is why the presenter takes a
         # getter rather than a window.
         ask_bridge.set_presenter(self._spoken_presenter(make_question_presenter(lambda: self.window)))
+
+        # Same hook, same getter, different presenter: the question one answers
+        # "pick an option", this one answers "type a sentence" - the free-form
+        # path a permission question's "Provide feedback" offer leads to.
+        # `set_text_presenter` had no caller anywhere, so that path always
+        # resolved to an empty answer: a dead option. Installed deliberately
+        # *next to* its question sibling, not in a settings window that is
+        # built lazily, or feedback could not arrive on a normal run.
+        from shani_chronoa.gui.questions import make_text_presenter
+        ask_bridge.set_text_presenter(make_text_presenter(lambda: self.window))
 
         # Initialize components based on hardware and config
         self._init_components()
@@ -193,6 +205,12 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # this build's super().do_shutdown() has the same zero-arg vfunc
         # mismatch that crashed do_startup() before it was fixed the same way.
         Gtk.Application.do_shutdown(self)
+
+    def _release_hidden_hold(self) -> None:
+        """Drop the explicit hold a start-hidden activation took."""
+        if self._hidden_hold:
+            self.release()
+            self._hidden_hold = False
 
     def _export_gateways(self) -> None:
         """Register the configured channels and put them on the bus.
@@ -255,19 +273,25 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         except Exception:                       # noqa: BLE001
             logger.exception("could not reload the gateway configuration")
 
-    def _submit_gateway_text(self, text: str) -> str:
+    def _submit_gateway_text(self, text: str, channel: str = "") -> str:
         """A channel's words, turned into a turn exactly as a typed one is.
 
         This is the whole security argument in one method: the text goes through
         `submit()` - the same entry the window's input uses - so it meets the same
         whitelist, the same consent keys and the same post-conditions, and lands
         in the same log. A gateway has no way to reach any of them directly.
+
+        `channel` carries which surface said it ("telegram", "whatsapp",
+        "phone"). It is needed because nothing downstream wants the name except
+        one thing: remembering which surface a remembered fact came from, so
+        a private fact captured on a channel never appears in another
+        channel's recall. Default "" for the unspecified surfaces.
         """
         # `_submit` is the window's own entry and returns nothing - the reply
         # arrives asynchronously and lands in the window like any other turn.
         # So a channel gets its answer the same way a person does: in the
         # window. Returning a string here would mean running the turn twice.
-        self._submit(text)
+        self._submit(text, channel=channel)
         return ""
 
     def _on_show_page(self, _action, parameter) -> None:
@@ -291,6 +315,11 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
     def do_activate(self) -> None:
         """Handle application activation."""
         logger.info("Activating Shani Chronoa")
+        if self.window is not None and self._start_hidden:
+            # A later launch forwards to this running instance: the user is
+            # summoning the window. The startup-only flag must be cleared or
+            # every later activation would keep it hidden.
+            self._start_hidden = False
         self._start_global_shortcut()
         # Every consent-gated sense in Settings was inert until this line: the
         # scheduler was constructed but never started, so a user could enable all
@@ -336,11 +365,29 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self.window.set_status(
                 self._device_warnings[0] if self._device_warnings else self._llm_status_text()
             )
-            self.window.present()
+            if not self._start_hidden:
+                # `present()`, not `show()`: `show` only maps the window,
+                # `present` maps it *and* asks the desktop to raise and focus
+                # it. The start-hidden work swapped one for the other and the
+                # assistant then opened behind whatever was already in front,
+                # with nothing wrong-looking to explain it - and
+                # `tests/test_sense_scheduler_is_live.py` failed on a stub
+                # window that only ever implemented the older call.
+                self.window.present()
+                self._release_hidden_hold()
             # A fresh install cannot think, hear or speak naturally yet: offer setup once.
-            GLib.idle_add(lambda: (self._open_setup() if self._setup_needed() else None, False)[1])
-        else:
+            if not self._start_hidden:
+                GLib.idle_add(lambda: (self._open_setup() if self._setup_needed() else None, False)[1])
+        elif not self._start_hidden:
             self.window.present()
+            self._release_hidden_hold()
+        elif not self._hidden_hold:
+            # No window will ever be presented on this activation: hold the
+            # application explicitly, because a GtkApplication with no window
+            # of its own has no reason to stay alive. Released when the window
+            # is first shown.
+            self.hold()
+            self._hidden_hold = True
 
     def do_command_line(self, command_line: Gio.ApplicationCommandLine) -> int:
         """Handle command line arguments."""
@@ -475,6 +522,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             percept_store=self.percept_store,
             context_builder=self.percept_context,
             session_path=conversation_store.active_path(conversation_store.session_dir()),
+            config=self.config,
         )
 
         # Initialize TTS
@@ -618,6 +666,14 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self.add_action(sidebar_action)
         self.set_accels_for_action("app.toggle-sidebar", ["F9"])
 
+        # The right rail, on F10 - adjacent to F9 for the left one, because they
+        # are the same question ("show me the state of this machine") about two
+        # different halves of the window.
+        rail_action = Gio.SimpleAction.new("toggle-rail", None)
+        rail_action.connect("activate", lambda *a: self.window.toggle_rail())
+        self.add_action(rail_action)
+        self.set_accels_for_action("app.toggle-rail", ["F10"])
+
         browser_action = Gio.SimpleAction.new("open-browser", None)
         browser_action.connect("activate", self.open_browser)
         self.add_action(browser_action)
@@ -644,6 +700,17 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         auto_start_action = Gio.SimpleAction.new("toggle-auto-start", None)
         auto_start_action.connect("activate", self._toggle_auto_start)
         self.add_action(auto_start_action)
+
+        start_hidden_action = Gio.SimpleAction.new("toggle-start-hidden", None)
+        start_hidden_action.connect("activate", self._toggle_start_hidden)
+        self.add_action(start_hidden_action)
+
+        show_window_action = Gio.SimpleAction.new("show-window", None)
+        # `present()` again: "show the window" from a tray icon or a
+        # notification means raise it and focus it, not merely map it.
+        show_window_action.connect(
+            "activate", lambda _a, _p: self.window.present() if self.window else None)
+        self.add_action(show_window_action)
 
         # Cloud-fallback and barge-in-VAD toggles - added alongside the
         # settings window so every toggle in it goes through one real
@@ -718,6 +785,9 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 model = arg.split("=", 1)[1]
                 self.config.set("model", model)
                 self._model_override = model
+            elif arg == "--hidden":
+                # Start without a window: the autostart entry for wake-word use.
+                self._start_hidden = True
             elif arg.startswith("--voice="):
                 voice = arg.split("=", 1)[1]
                 self.config.set("piper-voice", voice)

@@ -77,6 +77,21 @@ _HARNESS = textwrap.dedent(
 
         def check():
             result["visible_groups"] = [g.get_title() for g in groups if g.get_visible()]
+            # The haystack the filter itself matches against, read from the
+            # window rather than rebuilt here: a list of group titles and
+            # descriptions would go stale the moment a group is reworded,
+            # and a stale list makes "did the search really match it" a
+            # question about the copy rather than about the code.
+            result["group_needles"] = [
+                # Exactly what `_on_search` matches against: the group's own
+                # haystack plus every row needle inside it, so "this group
+                # mentions it" is read off the filter's own inputs rather
+                # than rebuilt from the widgets.
+                (g.get_title(), " ".join(
+                    [h for _g, h in w._searchable if _g is g]
+                    + [text for _row, text in g._needle_extra]).lower())
+                for g in groups
+            ]
             # By sense name: "hwmon" is titled "Temperatures, fans and power"
             # is titled "Microphone and camera in use".
             result["needle_visible"] = w._sense_rows["hwmon"].get_visible()
@@ -210,16 +225,44 @@ class TestSearchActuallyFilters:
 
         Expected group is derived from the category table rather than written
         out, so regrouping does not make this lie the way a hardcoded name did.
+
+        **Not exactly one group any more, and the second one is honest.** The
+        `temperatures` skill shares the `hwmon` sense's consent key - the
+        rule `sense_reading.py` states - so the Approvals group lists
+        `hwmon-sense-enabled` and genuinely mentions the needle. Asserting
+        exclusivity here would have been a test of a coincidence: it passed
+        while no other group contained the string, and would have failed for
+        a *correct* reason. So the assertion is that the owner group survives,
+        that the window narrowed a long way, and that every extra survivor
+        really does contain the needle (see
+        `test_every_surviving_group_really_contains_the_needle`).
         """
         from shani_chronoa.settings_window import SENSE_CATEGORIES
 
         owner = next(
             title for title, _d, names in SENSE_CATEGORIES if "hwmon" in names
         )
-        assert built["visible_groups"] == [owner], (
-            f"searching 'hwmon' should leave only the group holding that "
-            f"sense ({owner!r}), got {built['visible_groups']}"
+        assert owner in built["visible_groups"], (
+            f"searching 'hwmon' hid the group holding that sense ({owner!r}); "
+            f"got {built['visible_groups']}"
         )
+        assert len(built["visible_groups"]) < 3, (
+            f"'hwmon' narrowed the window to {built['visible_groups']} - the "
+            f"search is not filtering"
+        )
+
+    def test_every_surviving_group_really_contains_the_needle(self, built):
+        """The other half: a survivor that does not mention it would be a
+        group the search failed to hide, which reads as a match."""
+        for title, haystack in built["group_needles"]:
+            if "hwmon" in haystack:
+                assert title in built["visible_groups"], (
+                    f"{title!r} mentions 'hwmon' and was hidden"
+                )
+            elif title in built["visible_groups"]:
+                raise AssertionError(
+                    f"{title!r} survived a 'hwmon' search without containing it"
+                )
 
     def test_a_matching_row_inside_a_group_survives(self, built):
         """The group title does not contain the needle, but a row inside it

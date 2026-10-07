@@ -612,6 +612,95 @@ def _seccomp() -> Tuple[str, str]:
         "reads false while every skill call is still filtered")
 
 
+def _qualify() -> Tuple[str, str]:
+    """What the sandbox's *own qualification* says of this process, not a
+    machine-wide promise. It reads the same procfs/ABI fields the executor's
+    qualification would read before trusting seccomp/NoNewPrivs/Landlock, so
+    a row that says "proven" here is a row that would say yes for a skill."""
+    try:
+        from shani_chronoa.sandbox.qualify import qualify
+        q = qualify()
+    except Exception as exc:  # noqa: BLE001 - a broken probe must not break the panel
+        return STATUS_UNKNOWN, f"could not be asked ({type(exc).__name__})"
+    if q.proven:
+        return STATUS_WORKING, (
+            "the sandbox's qualification proves its mechanisms here: "
+            "NoNewPrivs, a seccomp filter, Landlock")
+    bits = []
+    if q.no_new_privs:
+        bits.append("NoNewPrivs on")
+    else:
+        bits.append("NoNewPrivs off")
+    bits.append("seccomp filter " + ("on" if q.seccomp_is_filter else "off"))
+    if q.landlock_abi:
+        bits.append(f"Landlock ABI {q.landlock_abi}")
+    else:
+        bits.append("no Landlock")
+    return STATUS_UNKNOWN, (
+        "not yet proven here (" + ", ".join(bits) + "). This process runs "
+        "without a filter installed; a sandboxed skill only gets the filter "
+        "inside its own child, so this panel cannot confirm enforcement "
+        "without leaving the process it is reporting on")
+
+
+def _sandbox_policy_files() -> Tuple[str, str]:
+    """User policy files, and whether each one is readable.
+
+    `sandbox/policy.py` documents itself as *"loadable from a file"* for
+    *user-edited* files under `~/.config/shani-chronoa/sandbox/`, and its
+    `load_policy()` had **no caller** — so the directory a person is told to
+    edit was never read by anything. A policy file with a typo in it is the case
+    the schema exists for (`deny_unknown_fields`, so `"tiemout"` cannot mean
+    "the default timeout"), and the only way to find out is to load it.
+
+    Each file is loaded for real through `load_policy()` and reported by what it
+    resolves to — level, timeout, and what it blocks. A file that will not load
+    names the key it did not understand, because a policy nobody can read is the
+    one case where naming the key *is* the answer.
+
+    **Read carefully: this row does not claim the policy is in effect.** Nothing
+    applies these files — `load_policy()` builds a `SandboxConfig`, and the
+    executor is configured from the Python profiles in `profiles.py`. So the row
+    answers the question that was previously unanswerable (is the file I was
+    told to edit readable, and what does it say) without implying a second thing
+    that is not true. Making these files the effective policy is a separate
+    decision, and the wording below says so on screen rather than in a comment.
+    """
+    from shani_chronoa.files import config_home
+
+    directory = config_home() / "shani-chronoa" / "sandbox"
+    if not directory.is_dir():
+        return STATUS_UNKNOWN, (
+            f"no {directory}. A policy file placed there is read by this row and "
+            "applied by nothing, so it changes no skill's sandbox")
+    files = sorted(directory.glob("*.json"))
+    if not files:
+        return STATUS_UNKNOWN, (
+            f"{directory} holds no policy file. One is a JSON object with "
+            "name, level, timeout_seconds, blocked_binaries, allow_network and "
+            "isolated_dir; an unknown key is refused rather than ignored. "
+            "Nothing applies these files yet - skills are configured from the "
+            "Python profiles - so this row reports what a file says, not what "
+            "is in force")
+    from shani_chronoa.sandbox.policy import PolicyError, load_policy
+
+    said = []
+    for path in files:
+        try:
+            policy = load_policy(path)
+        except PolicyError as exc:
+            said.append(f"{path.name}: refused ({exc})")
+            continue
+        except Exception as exc:  # noqa: BLE001 - a file is not a crash
+            said.append(f"{path.name}: could not be read ({type(exc).__name__})")
+            continue
+        blocked = ", ".join(policy.blocked_binaries) or "nothing extra"
+        said.append(
+            f"{path.name}: {policy.level.name}, {policy.timeout_seconds}s timeout, "
+            f"network {'on' if policy.allow_network else 'off'}, blocks {blocked}")
+    return STATUS_WORKING, "; ".join(said)
+
+
 def _microphone() -> Tuple[str, str]:
     """The microphones `pipewire` can see, i.e. the nodes `pw-record` can target."""
     from shani_chronoa import pipewire
@@ -941,6 +1030,8 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
                 "pdftotext", "reading a PDF's text aloud")),
             ("at-spi (ui_elements)", _atspi_extra),
             ("Seccomp filter (this process)", _seccomp),
+            ("Sandbox qualification (this process)", _qualify),
+            ("Sandbox policy files", _sandbox_policy_files),
         ),
     ),
     (

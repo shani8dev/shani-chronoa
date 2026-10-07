@@ -85,6 +85,7 @@ class VoicePage:
         row._timbre_base = subtitle
 
     def _build_voice(self, page) -> None:
+        self._section_family = "voice"
         config, app = self.app.config, self.app
         group = self._group(page, "Voice", "How Chronoa listens and speaks.")
         self._switch(group, "Wake-word activation", "Start listening without being clicked",

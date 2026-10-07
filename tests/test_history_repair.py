@@ -530,7 +530,7 @@ class TestRepairOrphansForAnEndedTurn:
             "unlabelled")
 
     def test_each_reason_names_itself(self):
-        for reason in ("budget", "interrupted", "orphaned"):
+        for reason in ("budget", "interrupted", "orphaned", "limit", "error"):
             content = hr.synthesized_tool_result(_call("c1"), reason)["content"]
             assert "not executed" in content, f"{reason} does not say so"
         assert "time budget" in hr.synthesized_tool_result(_call(), "budget")["content"]

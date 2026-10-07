@@ -381,14 +381,23 @@ class TestToolExecutionGuards:
 
         monkeypatch.setattr(tools_mod._SANDBOX, "execute", fake_execute)
         # A handler with no required arguments, so the required-argument check
-        # does not answer first, and one that acts (not read-only), since only an
-        # action's result is marked unverified. Not "the first one registered":
-        # that depends on which skill sorts first.
+        # does not answer first; one that acts (not read-only), since only an
+        # action's result is marked unverified; and **one that is not
+        # consent-gated**, because a gated one is refused before it ever reaches
+        # the sandbox and the test would be measuring the gate instead of the
+        # argument handling. That filter is not decoration: the first ungated-
+        # looking candidate by insertion order is `airplane_mode`, which *is*
+        # gated (`radio-control-enabled`, off by default), so this test passed or
+        # failed depending on whether some earlier test in the process had left
+        # that switch on - measured as an intermittent failure in a full run and
+        # never in isolation. Sorted, so the pick cannot move when a skill is
+        # added.
         from shani_chronoa.capabilities import READ_ONLY_TOOLS
         schemas = {t["function"]["name"]: t["function"] for t in tools_mod.TOOLS}
-        handler_name = next(n for n in tools_mod._HANDLER_FNS
+        handler_name = next(n for n in sorted(tools_mod._HANDLER_FNS)
                             if n not in READ_ONLY_TOOLS
-                            and not schemas.get(n, {}).get("parameters", {}).get("required"))
+                            and not schemas.get(n, {}).get("parameters", {}).get("required")
+                            and tools_mod._consent_key_for(n) is None)
         # When: it is called with a non-dict arguments value
         result = tools_mod.execute_tool(handler_name, "not-a-dict")
         # Then: the arguments are treated as empty (`{}`) in the program built
@@ -630,8 +639,8 @@ class TestTimerNotifications:
         monkeypatch.setattr("shani_chronoa.skills.timer.subprocess.run", fake_run)
         monkeypatch.setattr(
             "shani_chronoa.skills.timer._systemd_available", lambda: True)
-        monkeypatch.setattr(
-            "shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        monkeypatch.setattr("shani_chronoa.skills.timer._data_path",
+                           lambda: tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
         result = _run({"seconds": 60, "label": "pasta"})
         assert "NOT set" in result
@@ -655,7 +664,8 @@ class TestTimerNotifications:
         monkeypatch.setattr(
             "shani_chronoa.skills.timer.subprocess.run",
             lambda *a, **k: subprocess.CompletedProcess(a[0] if a else [], 0, "", ""))
-        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        monkeypatch.setattr("shani_chronoa.skills.timer._data_path",
+                           lambda: tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
         assert "Timer set for" in _run({"seconds": seconds})
 
@@ -665,13 +675,15 @@ class TestTimerNotifications:
     ):
         # `true` is the interesting one: isinstance(True, int) is True, so an
         # unguarded int() silently scheduled a 1-second timer.
-        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        monkeypatch.setattr("shani_chronoa.skills.timer._data_path",
+                           lambda: tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
         result = _run({"seconds": bad})
         assert "Invalid timer duration" in result
         assert not (tmp_path / "t.json").exists(), "a refused timer was still stored"
 
     def test_a_missing_duration_says_how_to_pass_one(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("shani_chronoa.skills.timer._DATA", tmp_path / "t.json")
+        monkeypatch.setattr("shani_chronoa.skills.timer._data_path",
+                           lambda: tmp_path / "t.json")
         from shani_chronoa.skills.timer import _run
         assert "seconds=600" in _run({})

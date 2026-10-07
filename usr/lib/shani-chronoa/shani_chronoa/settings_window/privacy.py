@@ -15,6 +15,16 @@ from shani_chronoa import capabilities
 
 
 
+#: What each mode does, in one sentence, including that it lasts this run. The
+#: subtitle is the only place a user reads before picking, so it has to carry
+#: the whole consequence including its duration.
+_MODE_SUBTITLES = {
+    "default": "Each risky call asks the first time it happens. Back to Normal when Chronoa restarts.",
+    "dont_ask": "Everything not already allowed is refused on the spot - no prompts. Back to Normal when Chronoa restarts.",
+    "explore": "Any tool that changes something is refused, and reads still work. Back to Normal when Chronoa restarts.",
+}
+
+
 class PrivacyPage:
     """Privacy and permissions: privacy mode, cloud fallback, API keys, permission presets and every action permission. - a part of SettingsWindow, which mixes it in."""
 
@@ -39,9 +49,45 @@ class PrivacyPage:
         group.add(row)
         group._needle_extra.append((row, "permission preset what chronoa may change chat everyday full control"))
 
+    def _mode_row(self, group) -> None:
+        """The dispatch posture in named terms (T2.6): a session that never asks
+        (DONT_ASK) or may only look (EXPLORE), not a prompt-help guessing game.
+
+        Deliberately **not persisted**. Persisting `EXPLORE` would leave the
+        assistant unable to change anything with no visible cause after a
+        restart - a switch whose effect outlives it and whose label does not.
+        Persisting `DONT_ASK` would make "never ask" the silent default for
+        every unattended login. So the mode lasts this run and every subtitle
+        says so, which is the difference between a promise and a surprise.
+        """
+        from shani_chronoa import permissions
+        names = [permissions.Mode.DEFAULT, permissions.Mode.DONT_ASK, permissions.Mode.EXPLORE]
+        labels = ["Normal", "No questions asked (everything risky is a no)",
+                  "Explore first (see only, touch nothing)"]
+        current = permissions.get_mode()
+        row = Adw.ComboRow(title="How Chronoa treats a risky call")
+        row.set_model(Gtk.StringList.new(labels))
+        row.set_selected(names.index(current) if current in names else 0)
+        row.set_subtitle(_MODE_SUBTITLES[current])
+
+        def changed(r, _pspec):
+            index = r.get_selected()
+            if index >= len(names):
+                return
+            try:
+                permissions.set_mode(names[index])
+            except ValueError:  # the model is a fixed list; this is a bug, not a user error
+                r.set_selected(0)
+                return
+            r.set_subtitle(_MODE_SUBTITLES[names[index]])
+        row.connect("notify::selected", changed)
+        group.add(row)
+        group._needle_extra.append((row, "permission mode dont_ask explore no questions refused look but do not touch"))
+
     # -- sections ------------------------------------------------------------
 
     def _build_privacy(self, page) -> None:
+        self._section_family = "privacy"
         config = self.app.config
         group = self._group(
             page, "Privacy and network",
@@ -49,6 +95,7 @@ class PrivacyPage:
             "screen and sensed data on this machine and sends nothing to a cloud provider.",
         )
         self._presets_row(group)
+        self._mode_row(group)
         self._switch(group, "Privacy mode (local only)", "Master switch for leaving this machine",
                      config.privacy_mode, lambda a: self._app_toggle("toggle-privacy", a))
         self._switch(
@@ -165,6 +212,29 @@ class PrivacyPage:
              "available, but cannot change it. It is a system-wide change that "
              "moves every timestamp at once, and it needs root.",
              "set_timezone refuses while this is off"),
+            ("Let Chronoa change which apps open files", "default-apps-enabled",
+             "Off: Chronoa can report which app opens a kind of file, and the "
+             "default browser, but cannot change them. A change alters what "
+             "every later double-click opens.",
+             "default_apps refuses to change a default while this is off"),
+            ("Let Chronoa cancel print jobs", "print-control-enabled",
+             "Off: Chronoa can show the print queue but cannot cancel a job. A "
+             "cancelled job cannot be resumed.",
+             "print_queue refuses to cancel while this is off"),
+            ("Let Chronoa rename this computer", "hostname-control-enabled",
+             "Off: Chronoa can report this computer's name but cannot change it. "
+             "Other devices on the network see the new name.",
+             "set_hostname refuses while this is off"),
+            ("Let Chronoa change the language and formats", "locale-control-enabled",
+             "Off: Chronoa can report the system language and date, number and "
+             "money formats, but cannot change them. A change applies to every "
+             "program from the next login.",
+             "set_locale refuses to change while this is off"),
+            ("Let Chronoa run speed tests", "speed-test-enabled",
+             "Off: Chronoa cannot measure your connection speed. A test moves "
+             "several megabytes to Cloudflare, which costs money on a metered "
+             "connection. Privacy mode refuses it regardless.",
+             "speed_test refuses while this is off"),
             ("Let Chronoa switch Bluetooth", "bluetooth-control-enabled",
              "Off: Chronoa can report which Bluetooth devices are paired and "
              "whether the adapter is on, but cannot turn it off. Separate from "

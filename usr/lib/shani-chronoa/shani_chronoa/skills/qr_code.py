@@ -81,7 +81,7 @@ def _run(arguments: dict) -> str:
         return "zbarimg (zbar) is not installed."
     if arguments.get("screen"):
         config = ChronoaConfig()
-        if not config.sense_allowed("vision"):
+        if not config.vision_sense_enabled:
             return f"Reading the screen is not permitted: {config.sense_allowed_reason('vision')}."
         from shani_chronoa.screengrab import capture_screen
         try:

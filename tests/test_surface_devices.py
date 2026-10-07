@@ -234,7 +234,7 @@ def _said(widget: Gtk.Widget) -> str:
 class TestModuleContract:
     def test_it_exports_what_the_registry_reads(self):
         assert devices.TITLE == "Devices"
-        assert devices.ICON == "phone-symbolic"
+        assert devices.ICON == "network-wireless-symbolic"
         assert devices.SECTION == "This machine"
         assert callable(devices.build)
 

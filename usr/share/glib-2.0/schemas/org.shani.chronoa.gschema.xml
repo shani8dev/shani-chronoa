@@ -37,6 +37,16 @@
       <summary>A named voice character</summary>
       <description>A whole set of voice character settings chosen by name, rather than one slider at a time: warmth, brightness, resonance, breathiness, articulation, dynamics, room and colour. Applied by SoX in the same single pass as tts-pitch, tts-tempo and tts-rate, and on top of them, so the two compose instead of fighting. 'natural' is the identity and costs nothing - no effects are added at all. An unknown name is ignored and the reply speaks unstyled, because a bad preset must not cost a reply. The full list is in voice_style.py, which is also where the acoustic meaning of each name lives; the choices above are only the ones offered first in Settings.</description>
     </key>
+    <key name="reply-style" type="s">
+      <choices>
+        <choice value="ordinary"/>
+        <choice value="brief"/>
+        <choice value="explanatory"/>
+      </choices>
+      <default>'ordinary'</default>
+      <summary>How a reply is paced</summary>
+      <description>A named reply-style preset, one config key, so one user's style setting cannot drift between sessions or require learning prompt syntax. 'ordinary' is the base; 'brief' keeps only the direct answer; 'explanatory' adds one sentence of mechanism around the same facts. The same style line is appended to the system prompt on every turn, so a change applies immediately and is live in settings rather than stored anywhere.</description>
+    </key>
     <key name="tts-rate" type="d">
       <range min="0.5" max="2.0"/>
       <default>1.0</default>
@@ -133,6 +143,11 @@
       <default>false</default>
       <summary>Auto-start on login</summary>
       <description>Whether to automatically start shani-chronoa on user login.</description>
+    </key>
+    <key name="start-hidden-at-login" type="b">
+      <default>false</default>
+      <summary>Start hidden at login</summary>
+      <description>When true (and auto-start is on), the autostart entry launches Chronoa with --hidden: the wake word and tray are live, but no window is shown until it is asked for.</description>
     </key>
     <key name="notification-enabled" type="b">
       <default>true</default>
@@ -463,6 +478,31 @@
       <default>false</default>
       <summary>Let Chronoa change the system timezone</summary>
       <description>Off: Chronoa can report the current timezone and list the available ones but cannot change it. It is a system-wide change that moves every timestamp on the machine at once, and it needs root.</description>
+    </key>
+    <key name="default-apps-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change which apps open your files</summary>
+      <description>Off: Chronoa can report which application opens a kind of file, and the default web browser, but cannot change either. A change alters what every later double-click opens, in every application.</description>
+    </key>
+    <key name="print-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa cancel print jobs</summary>
+      <description>Off: Chronoa can show the printers and the jobs waiting to print, but cannot cancel one. A cancelled job cannot be resumed, and on a shared printer it may not be yours.</description>
+    </key>
+    <key name="hostname-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa rename this computer</summary>
+      <description>Off: Chronoa can report this computer's name but cannot change it. Other machines on the network, Bluetooth and paired phones see the new name.</description>
+    </key>
+    <key name="locale-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change the system language and formats</summary>
+      <description>Off: Chronoa can report the system language and the formats for dates, numbers and money, and list what is available, but cannot change them. A change applies to every program and to the login screen from the next login.</description>
+    </key>
+    <key name="speed-test-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa run internet speed tests</summary>
+      <description>Off: Chronoa cannot measure your connection speed. A test downloads and uploads several megabytes to Cloudflare's speed-test servers, which costs money on a metered or mobile connection. Privacy mode refuses it regardless.</description>
     </key>
 <key name="bluetooth-control-enabled" type="b">
       <default>false</default>

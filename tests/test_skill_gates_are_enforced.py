@@ -46,6 +46,13 @@ _CONSENT_NAMES = (
     # Read as a property, in the skills that consult an existing accessor.
     "notification_enabled",
     "input_control_enabled",
+    # `config.vision_sense_enabled` is the same kind of read and was missing
+    # here, so `screenshot.py` was reported as "consults the vision sense, and
+    # the reader missed it" - a false alarm about a gate that exists and works
+    # (`config.py:627` is a property that returns `sense_allowed("vision")`).
+    # It is listed, not special-cased, so the check stays "did the module
+    # consult a real gate" rather than "does the reader know about this file".
+    "vision_sense_enabled",
 )
 # `get_bool` is deliberately NOT in that list even though every gate reads a key
 # through it. It appears *inside* the `_consent` helper's own body, so accepting
@@ -99,6 +106,23 @@ _IMPL = {
     "desktop_setting": "shani_chronoa.skills.desktop_setting",
     "set_theme": "shani_chronoa.skills.set_theme",
     "set_timezone": "shani_chronoa.skills.set_timezone",
+    # The 2026-10-07 matrix skills that change something, plus login_history,
+    # which reuses the `sessions` sense's key.
+    "default_apps": "shani_chronoa.skills.default_apps",
+    "print_queue": "shani_chronoa.skills.print_queue",
+    "set_hostname": "shani_chronoa.skills.set_hostname",
+    "set_locale": "shani_chronoa.skills.set_locale",
+    "speed_test": "shani_chronoa.skills.speed_test",
+    "login_history": "shani_chronoa.skills.login_history",
+    # Sense-backed: each checks its sense's switch in its own source.
+    "snapshot_status": "shani_chronoa.skills.snapshot_status",
+    "security_status": "shani_chronoa.skills.security_status",
+    "list_containers": "shani_chronoa.skills.list_containers",
+    "boot_report": "shani_chronoa.skills.boot_report",
+    "disk_health": "shani_chronoa.skills.disk_health",
+    "temperatures": "shani_chronoa.skills.temperatures",
+    "usb_devices": "shani_chronoa.skills.usb_devices",
+    "crash_report": "shani_chronoa.skills.crash_report",
     "set_screensaver": "shani_chronoa.skills.set_screensaver",
     "set_sleep_inhibit": "shani_chronoa.skills.set_sleep_inhibit",
     # All three share `appearance-control-enabled` with set_theme: they are the
@@ -279,8 +303,18 @@ class TestEveryDeclaredGateIsEnforced:
         """
         gated = _consulted_names("shani_chronoa.skills.screenshot")
         assert "capture_screen" in gated, "failed to read the module's own code"
-        assert "sense_allowed" in gated, (
-            "screenshot does consult the vision sense, and the reader missed it")
+        # **Any recognised gate name, not `sense_allowed` specifically.**
+        # `screenshot.py` consults the vision gate by reading the property
+        # `config.vision_sense_enabled` (`config.py:627` returns
+        # `sense_allowed("vision")`), and never calls `sense_allowed` itself -
+        # so demanding that exact name asserted *how* the gate is consulted
+        # rather than *that* it is, and failed against a correct skill. The
+        # mutation that matters is still caught: deleting the gate from
+        # `screenshot.py` empties this intersection and fails the test
+        # (verified, alongside two others that also catch it).
+        assert set(_CONSENT_NAMES) & gated, (
+            f"screenshot consults a gate and the reader missed all of "
+            f"them: {sorted(_CONSENT_NAMES)}")
 
         # `calculate` is an ungated skill: it must not look like it consults
         # consent just because the reader is matching too freely.

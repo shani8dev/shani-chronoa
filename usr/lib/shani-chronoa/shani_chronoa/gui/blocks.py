@@ -380,7 +380,7 @@ class CodeBlock(Gtk.Box):
         label.set_xalign(0.0)
         header.append(label)
         if self.language.lower() in SCRIPT_LANGUAGES and terminal_available():
-            header.append(_flat_button("execute-from-symbolic", "Open this in a terminal",
+            header.append(_flat_button("system-run-symbolic", "Open this in a terminal",
                                        self._on_run))
         header.append(_flat_button("folder-download-symbolic", "Save this script",
                                    self._on_save))

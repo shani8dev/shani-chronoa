@@ -84,7 +84,7 @@ def counted_tools(monkeypatch):
     """Record which tools actually executed, and stub out the real ones."""
     executed: "list[str]" = []
 
-    def _execute(name, args):
+    def _execute(name, args, origin=None):
         executed.append(name)
         return "battery: 87%"
 

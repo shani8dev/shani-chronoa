@@ -44,7 +44,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 from gi.repository import Gtk, Pango
 
-from shani_chronoa import conversation_store, markdown_lite
+from shani_chronoa import conversation_store, history_repair, markdown_lite
 from shani_chronoa.gui.surfaces import common
 
 logger = logging.getLogger(__name__)
@@ -216,15 +216,20 @@ class _ConversationsView(Gtk.Box):
         root = conversation_store.session_dir()
         for item in rows:
             haystack = item["title"]
+            notice = ""
             try:
-                text = " ".join(_text_of(m) for m in conversation_store.load(root / f"{item['id']}.jsonl"))
+                messages = conversation_store.load(root / f"{item['id']}.jsonl")
+                text = " ".join(_text_of(m) for m in messages)
+                # The transcript is already in hand for the search haystack, so
+                # noticing a turn that never finished costs nothing here.
+                notice = history_repair.unfinished_notice(messages)
             except OSError:
                 text = ""
             haystack = haystack + " " + text
-            self._add_row(item, haystack)
+            self._add_row(item, haystack, notice)
         self._apply_filter(self.search.get_text())
 
-    def _add_row(self, item: dict, haystack: str) -> None:
+    def _add_row(self, item: dict, haystack: str, notice: str = "") -> None:
         """Add one conversation's row, and remember the widgets it is made of.
 
         Both controls are `Gtk.Button`s inside an `Adw.ActionRow`, rather than a
@@ -243,7 +248,12 @@ class _ConversationsView(Gtk.Box):
         open_btn.set_child(open_label)
         open_btn.add_css_class("flat")
         open_btn.set_hexpand(True)
-        open_btn.set_tooltip_text("Open this conversation")
+        # A tooltip rather than a subtitle on purpose. `Adw.ActionRow` does not
+        # wrap its own subtitle on libadwaita 1.5 - a 130-character one measured
+        # 1,227px - and this surface is under the layout contract that fails on a
+        # horizontal scrollbar. A tooltip is text with no layout cost at all.
+        open_btn.set_tooltip_text(
+            f"{notice}\n\nOpen this conversation" if notice else "Open this conversation")
         _access(open_btn, f"Open conversation titled {item['title']}")
         open_btn.connect("clicked", lambda _b: self._call("_open_conversation", item["id"]))
         delete = Gtk.Button(icon_name="user-trash-symbolic")

@@ -51,6 +51,24 @@ CHAT_TITLE = "Conversation"
 #: checked to exist rather than assumed.
 CHAT_ICON = "chat-symbolic"
 
+#: One icon size for the whole sidebar - rows, the chat row and the gear.
+#:
+#: **Every one of the 22 icons exists in the installed theme** (checked with
+#: `Gtk.IconTheme.has_icon`, not assumed), and all of them measured 16px tall,
+#: because nothing here ever asked for a size and 16px is what libadwaita
+#: defaults to. That is legible for `chat-symbolic` and `audio-volume-high-symbolic`
+#: and effectively invisible for `phone-symbolic` and `view-app-grid-symbolic`,
+#: which at 16px render as an empty rectangle and a faint dot grid.
+#:
+#: So the complaint that "some of them have no icon" is not a missing name - it
+#: is a missing size. The icons that survived being too small are the ones drawn
+#: with the most strokes.
+#:
+#: 20px is a deliberate bump rather than a larger one: the rows are ~40px tall,
+#: and past ~22px the icons start crowding the title rather than helping.
+SIDEBAR_ICON_PX = 20
+
+
 
 def _settings_target(name: str) -> "Optional[str]":
     """The panel's settings target, or None. Read through `surfaces`, not a copy.
@@ -183,7 +201,9 @@ class SidebarPage(Adw.NavigationPage):
         # tree; this is the line that carries the intent.
         chat_row = Adw.ActionRow(title=CHAT_TITLE)
         chat_row.add_css_class("sidebar-row")
-        chat_row.add_prefix(Gtk.Image.new_from_icon_name(CHAT_ICON))
+        chat_icon = Gtk.Image.new_from_icon_name(CHAT_ICON)
+        chat_icon.set_pixel_size(SIDEBAR_ICON_PX)
+        chat_row.add_prefix(chat_icon)
         chat_row.set_activatable(True)
         chat_row.update_property([Gtk.AccessibleProperty.LABEL], [CHAT_TITLE])
         chat_row.connect("activated", lambda _r: activate(_r, None))
@@ -210,7 +230,9 @@ class SidebarPage(Adw.NavigationPage):
                 # would style every selected row on screen rather than the open
                 # panel.
                 row.add_css_class("sidebar-row")
-                row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+                panel_icon = Gtk.Image.new_from_icon_name(icon)
+                panel_icon.set_pixel_size(SIDEBAR_ICON_PX)
+                row.add_prefix(panel_icon)
                 # The health dot, beside the icon rather than after the title.
                 #
                 # The sidebar is the only thing on screen that shows every panel
@@ -222,12 +244,26 @@ class SidebarPage(Adw.NavigationPage):
                 # It is *hidden* by default and only shown when a panel has
                 # something to report: a dot on every row would be a dot that
                 # means nothing, which is the state this is fixing.
-                dot = Gtk.Label(label="")
-                dot.add_css_class("status-dot")
+                # `common.status_dot()` rather than a widget of our own: the
+                # sidebar row and the panel's own status row are the same mark,
+                # and three separate `Gtk.Label`s is how three separate squares
+                # happened. `.sidebar-dot` adds only the sidebar's own shape.
+                dot = common.status_dot()
                 dot.add_css_class("sidebar-dot")
-                dot.set_valign(Gtk.Align.CENTER)
                 dot.set_visible(False)
-                row.add_suffix(dot)
+                # A **prefix**, beside the icon - which is what the comment above
+                # this block has always said, and what `add_suffix` did not do.
+                #
+                # As a suffix the dot was the last thing before the gear, so it
+                # sat at a different x on every row that has one: measured on the
+                # rendered sidebar, the dot on `Machine` was hard against the
+                # right edge while the dot on `Senses` was 40px further left. The
+                # whole reason for a dot per row is that the sidebar is the one
+                # thing on screen showing every panel at once, so its job is to be
+                # scannable - and a column of markers in two columns is not one.
+                # As a prefix it lands after the icon on every row, whatever else
+                # that row carries.
+                row.add_prefix(dot)
                 self._dots[name] = dot
                 # **A gear on the rows whose settings actually govern them.**
                 #
@@ -244,7 +280,17 @@ class SidebarPage(Adw.NavigationPage):
                 # rows without one are the ones Settings does not govern.
                 target = _settings_target(name)
                 if target is not None:
-                    gear = Gtk.Button(icon_name="preferences-system-symbolic")
+                    # A child `Gtk.Image` rather than `icon_name=`, because
+                    # GTK4's button icon size is the `icon-size` CSS property and
+                    # that takes a `Gtk.IconSize` enum, not pixels - so there is
+                    # no way to make the gear exactly 20px through the icon_name
+                    # route, and `Gtk.Button.set_icon_size()` is GTK3 and does not
+                    # exist (measured: AttributeError). An image child takes
+                    # pixels, which is what matching the rows actually needs.
+                    gear_icon = Gtk.Image.new_from_icon_name(
+                        "preferences-system-symbolic")
+                    gear_icon.set_pixel_size(SIDEBAR_ICON_PX)
+                    gear = Gtk.Button(child=gear_icon)
                     gear.add_css_class("flat")
                     gear.add_css_class("sidebar-gear")
                     gear.set_valign(Gtk.Align.CENTER)
@@ -296,10 +342,10 @@ class SidebarPage(Adw.NavigationPage):
         a panel with nothing to say gets none - a dot on all twenty rows would be
         the flat list it replaced, drawn smaller.
 
-        The dot is a `Gtk.Label` styled by `.status-dot` rather than an icon, for
-        the reason `machine.py` records for its own banner: an icon name is a
-        request the theme may not fill, and a missing one is an empty box that
-        looks like a rendering bug rather than a missing glyph.
+        The dot is drawn rather than asked for as a glyph, for the reason
+        `machine.py` records for its own banner: an icon name is a request the
+        theme may not fill, and a missing one is an empty box that looks like a
+        rendering bug rather than a missing glyph.
         """
         dot = self._dots.get(key) if key is not None else None
         if dot is None:
@@ -444,6 +490,15 @@ class SidebarBreakpoint:
         not exist - the constructor is `parse()`, and the binding is
         `add_setter`. `max-width: 720px` is resolved by GTK's own breakpoint
         machinery, so it follows the same scale the rest of the stylesheet does.
+
+        **The returned breakpoint must still be given to the window**
+        (`window.add_breakpoint(...)`). Constructing one binds nothing: libadwaita
+        only evaluates breakpoints registered with an `AdwWindow`. This function
+        returned its breakpoint and `window.py` discarded it, so the sidebar
+        never collapsed at any width - measured at 600px, where the conversation
+        was squeezed to a 150px column between two sidebars rather than the
+        sidebar becoming a drawer. That is this repo's own dead-control class
+        wearing a responsive-design costume.
         """
         # `BreakpointCondition.parse()` is the constructor on libadwaita 1.5 -
         # there is no `.new()` - and `Breakpoint.add_setter` is how a condition

@@ -347,7 +347,7 @@ def test_a_working_voice_offers_no_setup_button(monkeypatch):
 
 
 def test_every_settings_target_is_a_page_that_exists():
-    """The four targets are real page ids, read from the settings window.
+    """The five targets are real page ids, read from the settings window.
 
     A button that opens a page id nothing registers would look identical to a
     working one from here - `pages.show` logs and returns False - so the ids are
@@ -356,24 +356,55 @@ def test_every_settings_target_is_a_page_that_exists():
     import ast
     import inspect
 
-    from shani_chronoa.settings_window.window import SettingsWindow
+    from shani_chronoa.settings_window import window as settings_window
 
     # Reading the declaration out of the source, because importing the window
     # needs a live `Gtk.Application` and this is a claim about a table.
     # `inspect.getsourcefile`, not `__file__`: a `Gtk.ApplicationWindow` subclass
     # has no `__file__`, and `inspect.getsource` resolves the module file for us.
-    source = inspect.getsource(SettingsWindow)
+    #
+    # **The whole module, and the table it registers, rather than a literal
+    # list.** Two things changed under this test and it was reading neither:
+    # the declaration moved out of the `SettingsWindow` class body into
+    # `_declare_families()` (still called at the bottom of the module, so still
+    # at import time — and `pages.py` can now call it on demand for a lazy
+    # `--show-page`), and the call passes `list(_SECTION_FAMILIES)` instead of
+    # an inline list literal. Reading the class therefore left the scan with an
+    # empty set and reported five correct buttons as dead ends (measured: fails
+    # with the current module, passes with the pre-change one). Resolving the
+    # name is also the stronger claim — it pins that the table below *is* what
+    # gets registered, which a literal-list scan could not tell.
+    source = inspect.getsource(settings_window)
     tree = ast.parse(source)
+
+    families = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "_SECTION_FAMILIES" in names:
+                families = node.value
+    assert families is not None, (
+        "the settings module no longer declares _SECTION_FAMILIES, so nothing "
+        "in this test can say what the window registers")
     declared = set()
+    for element in getattr(families, "elts", []):
+        if isinstance(element, ast.Tuple) and element.elts:
+            first = element.elts[0]
+            if isinstance(first, ast.Constant):
+                declared.add(str(first.value))
+    assert declared, "the family table parsed to nothing"
+
+    registered = False
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "register":
             for arg in node.args:
-                if isinstance(arg, ast.List):
-                    for element in arg.elts:
-                        if isinstance(element, ast.Tuple) and element.elts:
-                            first = element.elts[0]
-                            if isinstance(first, ast.Constant):
-                                declared.add(str(first.value))
+                text = ast.dump(arg)
+                if "_SECTION_FAMILIES" in text:
+                    registered = True
+    assert registered, (
+        "nothing registers _SECTION_FAMILIES with the page registry any more, "
+        "so every settings page id below is dead however complete the table is")
+
     for target in ("settings:privacy", "settings:senses",
                    "settings:tool-activity", "settings:models",
                    "settings:voice"):

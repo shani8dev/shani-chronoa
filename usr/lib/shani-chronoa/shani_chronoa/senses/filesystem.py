@@ -200,7 +200,7 @@ def _read_bounded(path: Path, limit: int) -> "tuple[bytes, os.stat_result]":
 
 def _run(arguments: dict) -> Union[str, Percept]:
     config = ChronoaConfig()
-    if not config.sense_allowed("filesystem"):
+    if not config.filesystem_sense_enabled:
         return f"Not reading the file: {config.sense_allowed_reason('filesystem')}."
 
     raw = str(arguments.get("path") or "").strip()

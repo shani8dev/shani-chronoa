@@ -415,3 +415,48 @@ def test_the_rules_file_is_the_real_one(tmp_path):
     surface = triggers.build(_StubApp(reloaded, _event_store(tmp_path)))
     assert surface.row_count() == 1
     assert json.loads(store.path.read_text(encoding="utf-8"))[0]["name"] == "pizza"
+
+def test_a_backing_off_rule_does_not_merely_say_armed():
+    """Armed, parked, and *waiting* are three states, and the panel knew two.
+
+    An event rule that has failed is neither firing nor stopped: `retry_at` is
+    set, `backoff_delay()` returns the exponential ramp, and it will start again
+    by itself with nothing being re-armed. The panel said "armed", so a person
+    looking at a rule that had stopped responding had no way to tell a rule
+    waiting out a backoff from one that had never failed — and no way to tell
+    how long the wait is.
+
+    The delay comes from the rule's own policy rather than being restated here,
+    so the number on screen is the number the engine waits.
+    """
+    import time as _time
+
+    from shani_chronoa.gui.surfaces.triggers import _arm_state
+    from shani_chronoa.triggers.event_rules import EventRule
+
+    def rule(**kwargs):
+        return EventRule(name="r", event_type="powerstate", source="BAT0",
+                         actuator="notify", arguments={}, **kwargs)
+
+    assert _arm_state(rule()) == "armed", "a rule that has never failed"
+
+    failing = rule()
+    for _ in range(3):
+        failing.consecutive_failures += 1
+        failing.attempt += 1
+        failing.retry_at = _time.time() + failing.backoff_delay()
+    said = _arm_state(failing)
+    assert said != "armed", \
+        "a rule in backoff reads as armed, which is the state it is not in"
+    assert "waiting" in said and f"{failing.backoff_delay():.0f}s" in said, said
+    assert "3" in said, f"the count of failures is not reported: {said}"
+
+    parked = rule()
+    parked.parked = True
+    assert _arm_state(parked).startswith("armed, parked"), _arm_state(parked)
+
+    class _PerceptRule:
+        enabled = True
+
+    assert _arm_state(_PerceptRule()) == "armed", \
+        "a percept rule has no backoff counters and must not borrow one"

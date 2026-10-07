@@ -381,6 +381,36 @@ class StyleMixin:
             min-height: 10px;
         }
 
+        /* A circle, not a pill. `.status-dot` above is a *minimum*, and a
+           `Gtk.Label` carries padding, so the dot was never 10x10 - measured on
+           a rendered sidebar row it came out about 8 wide by 14 tall, and a 5px
+           radius on a tall box is a rounded rectangle. A dot that is not round
+           reads as a clipped bar, which is a different signal from "one thing
+           needs attention". Fixed size, no padding, radius half of it.
+
+           The `width`/`height` declarations this rule used to carry are gone:
+           GTK4's CSS parser has no such properties, so both were dropped with
+           `No property named "width"` on every single window build. What
+           actually makes the dot 10x10 is the `min-*` pair below plus
+           `padding: 0` - the first version was fixed by accident. */
+        .sidebar-dot {
+            min-width: 10px;
+            min-height: 10px;
+            padding: 0;
+            border-radius: 5px;
+        }
+
+        /* **Both of these classes were applied in Python with no rule here at
+           all**, which is why the dot looked wrong and nobody could say why:
+           `add_css_class("sidebar-dot")` reads like a control and controlled
+           nothing. They now do something. */
+        .sidebar-gear {
+            padding: 0;
+            margin-left: 4px;
+            min-width: 24px;
+            min-height: 24px;
+        }
+
         /* The word. Fixed weight, so a column of panels can be read down its
            left edge instead of each sentence being read in full. */
         .status-word { font-weight: 600; }
@@ -408,6 +438,55 @@ class StyleMixin:
         }
         .help-row-gate-open { color: rgba(34,197,94,0.9); }
         .help-row-gate-closed { color: rgba(245,158,11,0.95); }
+
+        /* The right rail. Rendered first without any of this: five sections of
+           text sat flush against the conversation with no edge, and read as
+           loose labels belonging to the chat rather than as a column of their
+           own. A one-pixel separator and a section heading small enough to stay
+           subordinate to the conversation are what make it a place. */
+        .now-rail {
+            border-left: 1px solid alpha(@theme_fg_color, 0.12);
+        }
+        .rail-heading {
+            font-size: 11px;
+            font-weight: 700;
+            /* Letterspaced small caps look like a section label rather than a
+               heading competing with the conversation's own. */
+            opacity: 0.75;
+        }
+        .rail-section label {
+            font-size: 13px;
+        }
+        .rail-section label.dim-label {
+            font-size: 12px;
+        }
+
+        /* The task card in the chat. It is above the composer and below the
+           mode strip, which is the one place it cannot scroll away - so it has
+           to look like part of the conversation rather than like a panel that
+           fell into it: a hairline and no fill, or it competes with the
+           composer for the eye. */
+        .task-card {
+            padding: 8px 10px;
+            border: 1px solid alpha(@theme_fg_color, 0.10);
+            border-radius: 10px;
+        }
+
+        /* The organ lights became a `Gtk.FlowBox` so they can wrap on a narrow
+           window, and a flow box wraps each child in a `flowboxchild` that
+           carries default padding. Measured with that default in place: the
+           strip needed ~700px instead of ~470, so at 1280px it broke "thinking"
+           onto a second line for no reason. Zeroed here.
+
+           **No margin here on purpose.** Padding: 0 also removed the only gap
+           between the cells, and the first fix put a 4px margin back - which
+           split the gap across two places (this stylesheet and
+           `OrganStrip.set_column_spacing`) so that no test could measure it.
+           The gap is `set_column_spacing(6)` in `organs.py` and nothing else. */
+        .organ-strip > flowboxchild {
+            padding: 0;
+            margin: 0;
+        }
         """
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(css_data)

@@ -42,10 +42,9 @@ from shani_chronoa.skills import Skill
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 20
-_DATA = (
-    Path(os.environ.get("XDG_STATE_HOME", str(Path.home() / ".local" / "state")))
-    / "shani-chronoa" / "timers.json"
-)
+#: Kept only as a *name* for messages; the path itself is resolved per call by
+#: `_data_path()` (see its docstring for why it is not a module constant).
+_DATA_NAME = "timers.json"
 _PREFIX = "shani-chronoa-timer"
 _MAX_SECONDS = 86400 * 7
 # The payload is a template rather than a fixed string for two reasons the
@@ -65,12 +64,49 @@ def _escape(text: str) -> str:
     return str(text).replace("'", "'\\''")[:60]
 
 
+def active_timers() -> "list[tuple[str, str, float]]":
+    """Pending timers as `(id, label, seconds_left)`, soonest first.
+
+    Exists so a reader other than this skill's own text output can ask the
+    store a question without reaching into `_load` and re-deriving the "is
+    this one still in the future" filter - which is the part that is easy to get
+    subtly wrong (a timer whose moment has passed is not a pending timer, and
+    listing it would be a promise nobody keeps).
+
+    An unreadable store is an empty list, not an exception: this is a glance,
+    and a glance that raises takes the window with it.
+    """
+    now = time.time()
+    pending = [(str(t.get("id") or ""), str(t.get("label") or "timer"),
+                float(t.get("due", 0)) - now)
+               for t in _load() if float(t.get("due", 0) or 0) > now]
+    return sorted(pending, key=lambda row: row[2])
+
+
 def _load() -> List[dict]:
     try:
-        parsed = json.loads(_DATA.read_text())
+        parsed = json.loads(_data_path().read_text())
     except (OSError, ValueError):
         return []
     return parsed if isinstance(parsed, list) else []
+
+
+def _data_path() -> Path:
+    """Where the timer store lives, resolved per call and never at import time.
+
+    The module used to hold this as a module-level `_DATA`, captured when the
+    module was first imported. That is the repo's recorded contamination lesson
+    - a path resolved from `$HOME`/`$XDG_STATE_HOME` at import has already
+    written into a real user's state directory in every process that imported it
+    before `XDG_STATE_HOME` was pointed elsewhere, and `conftest.py` carries an
+    autouse fixture per store for exactly this reason. Resolving late is also
+    what lets a test point `XDG_STATE_HOME` at a temp dir at all.
+
+    `_DATA` is kept as a name because other modules and older callers refer to
+    it in messages, but nothing resolves through it any more.
+    """
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    return Path(base) / "shani-chronoa" / "timers.json"
 
 
 def _save(timers: List[dict]) -> None:
@@ -78,9 +114,10 @@ def _save(timers: List[dict]) -> None:
     # process umask and lands permissive without error. This directory was only
     # ever incidentally private, because `triggers.py` happened to chmod the same
     # parent - which stops being true the moment that runs first, or not at all.
-    files.ensure_private_dir(_DATA.parent)
-    _DATA.write_text(json.dumps(timers, indent=1))
-    files.restrict_file(_DATA)
+    path = _data_path()
+    files.ensure_private_dir(path.parent)
+    path.write_text(json.dumps(timers, indent=1))
+    files.restrict_file(path)
 
 
 def _systemd_available() -> bool:
@@ -281,7 +318,7 @@ def _run(arguments: dict) -> str:
 def _verify_timer(arguments: dict, tool=None):
     """Post-condition: did a timer for *this* call land in the store?
 
-    The store is `_DATA`, so the check is a read rather than a re-run: a timer
+    The store is the timers file, so the check is a read rather than a re-run: a timer
     reported as set that never reached `timers.json` is invisible otherwise, and
     a timer that exists but is missing the seconds asked for is worse - it will
     fire at the wrong time.
@@ -298,9 +335,9 @@ def _verify_timer(arguments: dict, tool=None):
     except (TypeError, ValueError):
         return None
     try:
-        raw = _DATA.read_text(encoding="utf-8")
+        raw = _data_path().read_text(encoding="utf-8")
     except OSError as exc:
-        return (False, f"could not read {_DATA.name}: {type(exc).__name__}")
+        return (False, f"could not read {_DATA_NAME}: {type(exc).__name__}")
     import json as _json
 
     entries = []
@@ -315,7 +352,7 @@ def _verify_timer(arguments: dict, tool=None):
         if isinstance(entry, dict):
             entries.append(entry)
     if not entries:
-        return (False, f"{_DATA.name} holds no timer at all")
+        return (False, f"{_DATA_NAME} holds no timer at all")
 
     def when(e):
         for key in ("at", "when", "fire_at", "timestamp"):
@@ -328,12 +365,12 @@ def _verify_timer(arguments: dict, tool=None):
     newest = max(entries, key=when)
     stored = when(newest)
     if stored <= 0:
-        return (False, f"the newest timer in {_DATA.name} carries no fire time, "
+        return (False, f"the newest timer in {_DATA_NAME} carries no fire time, "
                        f"so it cannot fire")
     if label and str(newest.get("label") or "") not in ("", label):
         return (False, f"the newest timer is for "
                        f"{newest.get('label')!r}, not {label!r}")
-    return (True, f"the newest entry in {_DATA.name} fires at {stored:.0f} "
+    return (True, f"the newest entry in {_DATA_NAME} fires at {stored:.0f} "
                   f"for label {newest.get('label') or '(none)'!r}, against "
                   f"{wanted:.0f}s asked for")
 

@@ -424,7 +424,7 @@ class BrowserWindow(Gtk.Window):
             ("view-refresh-symbolic", "Reload", self.reload, None),
             ("go-next-symbolic", "Open in browser", self.open_in_browser, None),
             ("go-home-symbolic", "Go home", self.go_home, None),
-            ("chat-attach-symbolic", "Attach this page to the conversation",
+            ("mail-attachment-symbolic", "Attach this page to the conversation",
              self.attach, "suggested-action"),
         ):
             button = Gtk.Button()

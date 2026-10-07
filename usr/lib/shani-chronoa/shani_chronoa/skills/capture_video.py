@@ -37,9 +37,16 @@ def _run(arguments: dict) -> str:
     device = (arguments.get("device") or "/dev/video0").strip()
     if not re.fullmatch(r"/dev/video[0-9]{1,3}", device):
         return f"{device!r} is not a camera like /dev/video0."
-    if not ChronoaConfig().get_bool("vision-sense-enabled", False):
-        return ("Recording from the camera is off - enable the vision sense in "
-                "Settings before I will read a camera.")
+    # Through `vision_sense_enabled`, not a raw `get_bool` on the key: this skill
+    # reads a camera, so it must answer the *same* question every other vision
+    # reader answers. A hand-rolled key read skips the consent-key aliases and
+    # the privacy-mode refusal that `sense_allowed` applies, which is how a
+    # skill ends up able to open a device the senses layer considers refused.
+    config = ChronoaConfig()
+    if not config.vision_sense_enabled:
+        return config.sense_allowed_reason("vision") or (
+            "Recording from the camera is off - enable the vision sense in "
+            "Settings before I will read a camera.")
     seconds = arguments.get("seconds") or 5
     try:
         seconds = max(1, min(float(seconds), 60))

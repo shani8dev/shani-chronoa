@@ -374,7 +374,7 @@ def run(arguments: dict) -> "str | Percept":
     tesseract - a clear reason, never a traceback.
     """
     config = ChronoaConfig()
-    if not config.sense_allowed("hearing"):
+    if not config.hearing_sense_enabled:
         return _refusal(config.sense_allowed_reason("hearing"))
 
     try:

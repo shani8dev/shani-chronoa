@@ -10,8 +10,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 
-from gi.repository import GLib
-
+from gi.repository import GLib, Gtk
 
 
 logger = logging.getLogger(__name__)
@@ -103,6 +102,56 @@ def make_question_presenter(window_getter):
         # `list(options)`: ask_bridge already copies, and show_question reads the
         # list on the GTK thread long after this call has returned.
         GLib.idle_add(_show, window, question, list(options), resolve)
+        return done
+
+    return present
+
+
+def make_text_presenter(window_getter):
+    """The `ask_for_text` presenter, built the way the question one is.
+
+    Same threading: off the GTK thread we only make the event and queue the
+    widget call with `GLib.idle_add`. The only difference from
+    `make_question_presenter` is what the answer *is* - a typed sentence rather
+    than one of the buttons - so it reuses the same question row and the same
+    "type instead of tapping" path the main window already answers questions
+    with.
+
+    **`ask_bridge.set_text_presenter` had no caller in the tree**, so the one
+    free-form prompt — "Provide feedback" in a permission question — resolved
+    to `""` every time: a dead control. Installed next to its question sibling
+    in `application.py`, so the option gate in `permissions.options_with_cancel()`
+    now sees a presenter and shows the choice.
+    """
+    from shani_chronoa import ask_bridge
+
+    def _show(window, prompt, placeholder, done, resolve) -> bool:
+        """Runs on the GTK thread: put the prompt on screen, or fail honestly."""
+        try:
+            label = Gtk.Label(label=prompt)
+            label.set_wrap(True)
+            label.set_xalign(0.0)
+            window._clear_question_widgets()
+            window._question_widgets.append(label)
+            window._question_row.append(label)
+            window._question_row.set_visible(True)
+            window._input_entry.set_placeholder_text(
+                placeholder or "Type your answer…")
+            # `_resolve_question` clears the row and resets the placeholder when
+            # the typed answer arrives, so this only has to hand it the answer.
+            window._pending_question = resolve
+        except Exception as exc:  # noqa: BLE001 - a prompt that cannot appear is not a choice
+            logger.warning("text prompt could not be put on screen: %s", exc)
+            resolve("")
+        return GLib.SOURCE_REMOVE
+
+    def present(prompt: str, placeholder: str) -> "threading.Event":
+        done, resolve = ask_bridge.make_event()
+        window = window_getter()
+        if window is None:
+            resolve("")
+            return done
+        GLib.idle_add(_show, window, prompt, placeholder, done, resolve)
         return done
 
     return present

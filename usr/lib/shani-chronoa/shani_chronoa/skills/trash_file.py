@@ -135,6 +135,7 @@ def _run(arguments: dict) -> str:
 
     try:
         files.refuse_catalogue(path, "move to the trash")
+        files.refuse_sensitive(path, "move to the trash")
     except PathProblem as exc:
         return str(exc)
 

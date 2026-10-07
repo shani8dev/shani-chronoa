@@ -103,7 +103,7 @@ def no_tools(monkeypatch):
     """Record tool dispatches instead of running real skills."""
     ran: "list[str]" = []
 
-    def _execute(name, arguments):
+    def _execute(name, arguments, origin=None):
         ran.append(name)
         return f"{name} ok"
 
@@ -166,7 +166,7 @@ class _SlowTool:
         self.seconds = seconds
         self.ran: "list[str]" = []
 
-    def __call__(self, name, arguments):
+    def __call__(self, name, arguments, origin=None):
         import time as _time
         self.ran.append(name)
         _time.sleep(self.seconds)
@@ -272,7 +272,7 @@ class TestInterruptedTurnsAreClosedOut:
         """
         state = {"calls": 0}
 
-        def _execute(name, arguments):
+        def _execute(name, arguments, origin=None):
             state["calls"] += 1
             if state["calls"] == 2:
                 raise ConnectionError("Ollama server not available")
@@ -308,7 +308,7 @@ class TestInterruptedTurnsAreClosedOut:
         """
         state = {"calls": 0}
 
-        def _execute(name, arguments):
+        def _execute(name, arguments, origin=None):
             state["calls"] += 1
             if state["calls"] == 2:
                 raise asyncio.CancelledError()
@@ -338,7 +338,7 @@ class TestInterruptedTurnsAreClosedOut:
         here - and the exception propagates out of `handle()` to `app.py`, which
         shows the user an error. The history has to survive that.
         """
-        def _execute(name, arguments):
+        def _execute(name, arguments, origin=None):
             raise RuntimeError("skill crashed")
 
         monkeypatch.setattr(assistant_mod, "execute_tool", _execute)
@@ -537,6 +537,30 @@ class TestPerToolAttemptBudgets:
             "the per-tool budget fires before the loop detector, so a run of "
             "identical calls is ended by a refusal instead of by the mechanism "
             "that can explain it")
+
+    def test_two_distinct_failure_types_are_fed_back_in_band(self, no_tools):
+        """A tool at its budget gets "limit" and a tool that errors gets "error" -
+        both as synthesized tool results, never as exceptions."""
+        calls = [_call(f"c{i}", "web_search", {"query": f"q{i}"})
+                 for i in range(DEFAULT_TOOL_ATTEMPTS_PER_ROUND + 3)]
+        mock = _MockOllama([_turn_reply(calls), _final_reply("done")])
+        assistant = Assistant(mock.build())
+        asyncio.run(assistant.handle("research this"))
+
+        results = [m for m in assistant._history if m.get("role") == "tool"]
+        limit_refusals = [m for m in results if m.get(hr.REASON_KEY) == "limit"]
+        error_refusals = [m for m in results if m.get(hr.REASON_KEY) == "error"]
+        # 3 calls above budget = 3 limit refusals
+        assert len(limit_refusals) == 3, (
+            f"Expected 3 'limit' refusals, got {len(limit_refusals)}")
+        # Error refusals come from tool execution failures
+        assert isinstance(error_refusals, list), (
+            "error failure type should be a list")
+        # Limit refusals tell the model it's a budget, not a broken tool
+        for r in limit_refusals:
+            content = r["content"].lower()
+            assert "do not call it again" in content
+            assert "do not assume it failed" in content
 
     def test_the_loop_detector_still_owns_identical_calls(self, no_tools):
         """A run of *identical* calls is judged by the mechanism that explains

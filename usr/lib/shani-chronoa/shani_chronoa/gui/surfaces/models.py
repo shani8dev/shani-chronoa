@@ -47,7 +47,7 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Models"
-ICON = "application-x-executable"
+ICON = "preferences-desktop-font-symbolic"
 SECTION = "This machine"
 SUBTITLE = ("Everything Chronoa can run, what each one costs, and which are "
             "already here")
@@ -77,6 +77,19 @@ def _cards(config=None) -> List[Dict[str, Any]]:
                     "label": f"{key.split('-')[0].title()} ({key})",
                     "size": spec.size_bytes,
                     "installed": stt_provision.is_provisioned(key)})
+    # Parakeet is a **second** speech backend with its own catalogue, served from
+    # a different repository, so it cannot live in `stt_provision.MODELS` (see
+    # the note above that table) - and the panel listed only that one. A machine
+    # whose Parakeet model is installed therefore showed every speech card as
+    # "not downloaded", which is the confident-wrong-answer shape this file
+    # already records for the Eyes list. Each backend's own check is named here,
+    # and the key is prefixed so a Parakeet card cannot collide with a whisper
+    # one of the same name.
+    for key, spec in stt_provision.PARAKEET_MODELS.items():
+        out.append({"kind": "stt", "key": f"parakeet:{key}",
+                    "label": f"Parakeet ({key})",
+                    "size": spec.size_bytes,
+                    "installed": stt_provision.is_parakeet_provisioned(key)})
     for key, spec in voices.VOICES.items():
         out.append({"kind": "voice", "key": key,
                     "label": f"{spec.label.split(' - ')[0]} (Piper)",
@@ -298,12 +311,21 @@ def build(app: Any) -> Gtk.Widget:
     stack.add_titled(scroll_added, "added", "On this machine")
     stack.add_titled(scroll_available, "available", "Available to add")
 
-    switcher = Adw.ViewSwitcher(stack=stack, halign=Gtk.Align.CENTER)
+    # **One switcher, not two.** Both an `Adw.ViewSwitcherBar` (revealed, at
+    # the top) and a plain `Adw.ViewSwitcher` (at the bottom) were attached to
+    # this stack, so every model list showed the same two tabs twice - once as
+    # pills under the status row and once as flat buttons at the foot of the
+    # cards, each with its own highlight of the same page. Measured on the
+    # rendered panel: both strips visible at once, and the card list squeezed
+    # between them.
+    #
+    # The bar is the one kept, because `reveal=True` is what lets it get out of
+    # the way when the list is scrolled - which is the entire reason to have a
+    # switcher over a list rather than under one.
     switcher_bar = Adw.ViewSwitcherBar(stack=stack, reveal=True)
     body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0, vexpand=True)
     body.append(switcher_bar)
     body.append(stack)
-    body.append(switcher)
     root.append(body)
 
     # --- the cards, and the search over them --------------------------------

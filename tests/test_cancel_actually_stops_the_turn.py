@@ -127,8 +127,13 @@ class TestTheLoopHonoursIt:
                             lambda q, o, timeout=0.0: _answer(permissions, "cancel"))
         # The gated tool refuses, having recorded the Cancel - which is exactly
         # what `tools.dispatch` now does when the user picks that option.
+        # `origin=` is part of `execute_tool`'s signature (per-origin round
+        # budgets and the audit log), so a stub has to accept it. `**kw`
+        # rather than naming it: this test is about cancellation, and a stub
+        # that had to track the production signature would need editing again
+        # the next time a parameter is added.
         monkeypatch.setattr(assistant_module, "execute_tool",
-                            lambda name, args: permissions.decide(
+                            lambda name, args, **kw: permissions.decide(
                                 name, str(args.get("path")), "delete-file",
                                 "delete a file", offer_cancel=True) and "deleted")
         return assistant_module.Assistant(llm), llm, permissions

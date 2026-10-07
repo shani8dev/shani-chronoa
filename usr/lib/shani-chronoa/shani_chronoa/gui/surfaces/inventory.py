@@ -33,7 +33,7 @@ from ... import organism
 from . import common
 
 TITLE = "Inventory"
-ICON = "view-app-grid-symbolic"
+ICON = "applications-utilities-symbolic"
 SECTION = "What Chronoa knows"
 
 #: One icon per state, and its accessible name. A colour alone would fail
@@ -115,9 +115,20 @@ def _organ_row(organ: "organism.Organ") -> Gtk.Widget:
     except Exception:
         pass
     row = common.row(organ.anatomy, _subtitle(organ), suffix=icon)
+    # Whether the organ has a status light, and where it is - the panel's whole
+    # claim is that a built organ and an instrumented one are different things,
+    # and it asserted that only in the summary group. Per row, an organ with no
+    # indicator says so, so "the panel says a light means something is happening"
+    # and "this row has no light" are reconciled on the same screen. `is_live`
+    # was the existing answer and had no caller.
+    light = ("The strip has a light for this one: " + organ.indicator
+             if organ.is_live else
+             "No status light for this one yet - a gap in the instrument, not a "
+             "claim that the function is idle.")
     row.set_tooltip_text(
         f"{organ.anatomy} - {state_label}\n"
         f"{organ.function}\n\n"
+        f"{light}\n\n"
         f"Implemented in: {', '.join(organ.code)}")
     try:
         row.update_property([Gtk.AccessibleProperty.DESCRIPTION], [state_label])

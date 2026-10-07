@@ -50,36 +50,40 @@ SCHEMA = {
 class TestMalformedCallsAreCaught:
     def test_a_wrong_type_is_rejected(self):
         reason = guardrail.check("read_text_file", {"path": 12345}, SCHEMA)
-        assert reason is not None
-        assert "path" in reason
+        assert not reason.should_run
+        assert "path" in reason.message
 
     def test_the_reason_names_the_argument_and_the_expectation(self):
         """A traceback in a subprocess tells the model nothing it can use."""
         reason = guardrail.check("read_text_file", {"path": 12345}, SCHEMA)
-        assert "wants string" in reason
-        assert "int" in reason
+        assert "wants string" in reason.message
+        assert "int" in reason.message
 
     def test_a_missing_required_argument_is_rejected(self):
         reason = guardrail.check("read_text_file", {}, SCHEMA)
-        assert "required" in reason
-        assert "path" in reason
+        assert not reason.should_run
+        assert "required" in reason.message
+        assert "path" in reason.message
 
     def test_a_boolean_is_not_an_integer(self):
         """bool subclasses int, so a declared "integer" would accept True."""
         reason = guardrail.check("x", {"path": "/a", "count": True}, SCHEMA)
-        assert reason is not None
-        assert "boolean" in reason
+        assert not reason.should_run
+        assert "boolean" in reason.message
 
     def test_a_union_type_allows_either(self):
         """`["string", "null"]` is legitimate and appears in real schemas."""
-        assert guardrail.check("x", {"path": "/a", "mode": None}, SCHEMA) is None
-        assert guardrail.check("x", {"path": "/a", "mode": "fast"}, SCHEMA) is None
+        reason = guardrail.check("x", {"path": "/a", "mode": None}, SCHEMA)
+        assert reason.should_run
+        reason2 = guardrail.check("x", {"path": "/a", "mode": "fast"}, SCHEMA)
+        assert reason2.should_run
 
 
 class TestWhatIsNotRejected:
     def test_a_well_formed_call_passes(self):
-        assert guardrail.check("read_text_file",
-                               {"path": "/tmp/a", "recursive": True}, SCHEMA) is None
+        reason = guardrail.check("read_text_file",
+                                 {"path": "/tmp/a", "recursive": True}, SCHEMA)
+        assert reason.should_run
 
     def test_an_undeclared_argument_is_allowed_by_default(self):
         """JSON Schema allows extras unless told otherwise.
@@ -87,22 +91,27 @@ class TestWhatIsNotRejected:
         A skill that ignores a field it did not declare is not thereby unsafe,
         and refusing would break calls the skill handles perfectly well.
         """
-        assert guardrail.check("x", {"path": "/a", "surprise": 1}, SCHEMA) is None
+        reason = guardrail.check("x", {"path": "/a", "surprise": 1}, SCHEMA)
+        assert reason.should_run
 
     def test_extras_are_refused_only_when_the_schema_says_so(self):
         strict = {**SCHEMA, "additionalProperties": False}
         reason = guardrail.check("x", {"path": "/a", "surprise": 1}, strict)
-        assert reason is not None and "surprise" in reason
+        assert not reason.should_run
+        assert "surprise" in reason.message
 
     def test_no_schema_means_nothing_to_check(self):
-        assert guardrail.check("x", {"anything": object()}, {}) is None
-        assert guardrail.check("x", {"anything": object()}, None) is None
+        reason = guardrail.check("x", {"anything": object()}, {})
+        assert reason.should_run
+        reason2 = guardrail.check("x", {"anything": object()}, None)
+        assert reason2.should_run
 
     def test_an_unknown_type_is_left_unconstrained(self):
         """Guessing at a schema we do not understand would reject good calls."""
         odd = {"type": "object", "properties": {"x": {"type": "wat"}},
                "required": []}
-        assert guardrail.check("x", {"x": 5}, odd) is None
+        reason = guardrail.check("x", {"x": 5}, odd)
+        assert reason.should_run
 
 
 class TestThroughTheDispatcher:

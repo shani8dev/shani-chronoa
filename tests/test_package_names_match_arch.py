@@ -129,6 +129,9 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         "upower", "fwupd", "gnome-shell", "power-profiles-daemon", "xdg-utils",
         "sox", "soundtouch", "rubberband", "espeak-ng", "zbar", "git",
         "flatpak", "pacman", "xorg-xrandr",
+        # Read out of chronoa-matrix.json's pacman data on 2026-10-07, for the
+        # matrix skills (distrobox, virsh, fc-list/fc-match, boltctl).
+        "distrobox", "libvirt", "fontconfig", "bolt",
     }
     for binary, hint in files._PACKAGE_HINTS.items():
         assert hint in real_packages, f"{binary} -> {hint!r} is not a known Arch package"
@@ -169,3 +172,36 @@ def test_control_the_trap_guard_rejects_a_reverted_table(monkeypatch):
     monkeypatch.undo()
     for binary, right in correct.items():
         assert files._PACKAGE_HINTS[binary] == right
+
+
+def test_tool_missing_consults_the_routes_table_too():
+    """Two tables, and the narrower one is the one that had been checked.
+
+    `routes.install_hint()` is the machine-readable half of `routes.ROUTES`, the
+    only authority in this tree with a package name per binary read out of a real
+    image's file database. `files._PACKAGE_HINTS` is the wider hand-kept table —
+    61 entries to `routes`' 15 — and `tool_missing` consulted only that one.
+
+    The result was ten binaries answered with "the package that provides it"
+    while `routes.ROUTES` had known the answer all along, and two of those ten
+    are the non-obvious names this file exists to protect: `magick` is in
+    `imagemagick`, `whisper-cli` is in `whisper-cpp`. Measured before the fix:
+    both produced the vague sentence.
+
+    Asserted per binary rather than as a count, so a table that loses an entry
+    fails here instead of silently going back to being vague.
+    """
+    from shani_chronoa import routes
+
+    checked = 0
+    for binary in sorted(routes.ROUTES):
+        hint = routes.install_hint(binary)
+        if not hint:
+            continue
+        checked += 1
+        out = files.tool_missing(binary, "do a thing")
+        assert "the package that provides it" not in out, (
+            f"{binary} is named as {hint!r} by routes but the sentence is vague:\n"
+            f"  {out}")
+        assert f"'{hint}'" in out, f"{binary} should name the {hint!r} package:\n  {out}"
+    assert checked >= 8, f"only {checked} routes carry a package name; this proves little"

@@ -23,6 +23,7 @@ a change that composes a beautiful prompt and never asks it fails.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -159,30 +160,66 @@ class TestStageTwoEnumeratesTheScope:
         `permits()` returning True means "this layer has no objection", which is
         what a fall-through reports - so it cannot distinguish "granted" from
         "no rule matched". `execute_tool` can.
+
+        `edit_file` rather than `delete_file`: a session grant on a
+        bypass-immune tool is ignored by design (T2.6), so a narrow-grant test
+        written on one would now prove the immunity instead of the scope, and
+        the scope would have no witness at all.
         """
-        granted = tmp_path / "notes.txt"
-        granted.write_text("x")
-        sibling = tmp_path / "other.txt"
-        sibling.write_text("x")
-        permissions.add_rule("delete_file", str(granted),
+        # Under $HOME, not `tmp_path`: `files` refuses a path outside the
+        # user's home, and a refusal for *that* reason proves nothing about
+        # which grant matched.
+        home = Path(os.environ["HOME"])
+        granted = home / "notes.txt"
+        granted.write_text("old")
+        sibling = home / "other.txt"
+        sibling.write_text("old")
+        permissions.add_rule("edit_file", str(granted),
                              permissions.Decision.ALLOW_SESSION, session_only=True)
-        assert permissions.evaluate("delete_file", str(granted)) == \
+        assert permissions.evaluate("edit_file", str(granted)) == \
             permissions.Decision.ALLOW_SESSION
-        assert permissions.evaluate("delete_file", str(sibling)) == \
+        assert permissions.evaluate("edit_file", str(sibling)) == \
             permissions.Decision.FALL_THROUGH, (
             "a grant naming one path matched a different path"
         )
-        assert "not found" not in execute_tool("delete_file", {"path": str(granted)}), \
-            "the granted path did not reach the skill"
-        assert not granted.exists(), "the granted file was not deleted"
-        refused = execute_tool("delete_file", {"path": str(sibling)})
+        # `ran`, not a substring of the prose: the old assertion here was
+        # `"not found" not in result`, and a *successful* edit's text
+        # ("... (unverified - this action reports success but nothing observed
+        # it)") contains "no" inside "nothing".
+        allowed = execute_tool_outcome(
+            "edit_file", {"path": str(granted), "old_string": "old",
+                          "new_string": "new"})
+        assert allowed.ran, f"the granted path did not reach the skill: {allowed.text}"
+        assert granted.read_text() == "new", "the granted file was not edited"
+        refused = execute_tool("edit_file", {"path": str(sibling),
+                                             "old_string": "old",
+                                             "new_string": "new"})
         assert "turned off" in refused or "not permitted" in refused.lower(), (
-            f"the sibling delete was not refused ({refused!r}); the grant "
+            f"the sibling edit was not refused ({refused!r}); the grant "
             f"leaked past its path"
         )
-        assert sibling.exists(), (
-            "the sibling file was deleted by a grant that named the other path"
+        assert sibling.read_text() == "old", (
+            "the sibling file was edited by a grant that named the other path"
         )
+
+    def test_a_narrow_grant_on_a_bypass_immune_tool_is_refused_not_honoured(self):
+        """The other half of the same property, and the newer one.
+
+        `delete_file` is bypass-immune: a standing grant naming one path is
+        written, reads back as `ALLOW_SESSION` through `evaluate()` - so the
+        layer above it looks satisfied - and is then refused at dispatch. An
+        assertion on `evaluate()` alone would call this granted.
+        """
+        target = Path(os.environ["HOME"]) / "notes.txt"
+        target.write_text("x")
+        permissions.add_rule("delete_file", str(target),
+                             permissions.Decision.ALLOW_SESSION, session_only=True)
+        assert permissions.is_bypass_immune("delete_file")
+        refused = execute_tool("delete_file", {"path": str(target)})
+        assert "turned off" in refused or "not permitted" in refused.lower(), (
+            f"a session grant was honoured for a bypass-immune tool ({refused!r})"
+        )
+        assert target.exists(), "the file was deleted by a grant that cannot apply"
 
     def test_a_session_grant_is_never_written_to_disk(self, tmp_path, monkeypatch):
         monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -353,11 +390,27 @@ class TestDeclineIsNotCancel:
 
 class TestTheOrderCarriesMeaning:
     def test_the_refusal_is_last_and_nothing_is_the_default(self):
-        ask = permissions.approval_request("delete_file", "/tmp/x",
-                                           "file-delete-enabled")
+        ask = permissions.approval_request("edit_file", "/tmp/x",
+                                           "file-edit-enabled")
         assert ask.options == [permissions.ALLOW_ONCE_CHOICE,
                                permissions.ALLOW_SESSION_CHOICE,
                                permissions.DENY_CHOICE]
+
+    def test_a_bypass_immune_tool_offers_no_session_option_it_cannot_keep(self):
+        """Two options, not three - and refusal still last.
+
+        Offering "Allow for this session" on a tool whose session grant is
+        ignored would be a promise the mechanism cannot make; a presenter that
+        picked it would record a rule that does nothing.
+        """
+        ask = permissions.approval_request("delete_file", "/tmp/x",
+                                           "file-delete-enabled")
+        assert permissions.is_bypass_immune("delete_file")
+        assert ask.options == [permissions.ALLOW_ONCE_CHOICE,
+                               permissions.DENY_CHOICE]
+        assert ask.options[-1] == permissions.DENY_CHOICE, (
+            "refusal must still be last, or it stops being the default"
+        )
 
     def test_allowing_once_still_means_once(self):
         ask_bridge.set_presenter(_presenter(permissions.ALLOW_ONCE_CHOICE))

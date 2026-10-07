@@ -114,6 +114,7 @@ confirmation would sit on disk forever. All three declare
 and `forget` return explicitly short-lived Percepts so that cannot happen.
 """
 
+import hashlib
 import json
 import logging
 import math
@@ -161,6 +162,124 @@ CONFIDENCE_EXTRACTED = 0.6
 _TRANSIENT_TTL = 120.0
 
 _OPERATIONS = ("remember", "recall", "forget", "link", "about", "history")
+
+# --- Capture gating (kilo's capture/plan.ts + capture/reject.ts) ------------
+#
+# Kilo gates memory capture with skip reasons - trivial, interval, no_work -
+# and rejects content that is self-referential, a personal preference (for
+# *project* memory), or quoted from the assistant. Chronoa's memory is *user*
+# memory, so the personal-preference rejection does not port: a preference is
+# exactly what this sense exists to store. The other three do, and they are
+# the difference between a store that fills with noise and one that fills with
+# facts.
+
+#: Minimum seconds between automatic turn-extract captures. Kilo uses 300s.
+#: Without it, three consecutive turns about the same subject write three
+#: near-identical facts, and the store's supersession key then silently
+#: replaces the user's actual earlier statement with the most recent phrasing.
+AUTO_CAPTURE_INTERVAL_SECONDS = 300.0
+
+#: A fact whose content is under this many content words is not a fact, it is
+#: a fragment - "my name is Jo" is three words and is kept; "yes" is not.
+TRIVIAL_MIN_WORDS = 3
+
+#: A fact that says the user already said this is not a new fact. Kilo's
+#: "already captured in memory" rejection.
+_SELF_REFERENTIAL_RE = re.compile(
+    r"\b(?:already told you|as i said|you already know|i already told you|"
+    r"mentioned before|as mentioned|like i said)\b", re.I)
+
+#: A fact that quotes the assistant is not a fact about the user. Kilo's
+#: provenance rejection (source markers): the span names the assistant as the
+#: source, so storing it would file the assistant's words under the user.
+_ASSISTANT_QUOTE_RE = re.compile(
+    r"\b(?:you said|you told me|the assistant said|chronoa said|"
+    r"you mentioned|you noted)\b", re.I)
+
+#: When a candidate fact's content overlaps an existing stored fact with the
+#: same key by at least this Dice coefficient, the new one is *covered* -
+#: storing it would be a duplicate the supersession key would then have to
+#: clean up. Kilo's covered-digest guard (32).
+COVERED_DICE = 0.6
+
+#: A fact must be at least this relevant before it is *ranked* at all
+#: (mem0's threshold-gate-before-combine, `utils/scoring.py:111-112`).
+#:
+#: mem0 gates the semantic score before folding in its other signals, so a
+#: candidate that failed the primary test cannot be rescued by the boosts. The
+#: same shape applies here, and the ordering is the whole point: the gate runs
+#: before the distinct-key reserve, so a bulk of weak near-misses cannot spend
+#: the reserved slots that were meant for genuinely relevant facts.
+#:
+#: The alternative is no gate at all, which is what this replaces - `shared` was
+#: only tested for being non-zero, so a fact sharing one low-IDF word with a
+#: long query scored near zero and still consumed a reserved slot ahead of a
+#: better answer. 0.0 keeps that behaviour exactly; it is a named threshold so
+#: the ranking test lives somewhere it can be measured from.
+RECALL_MIN_RELEVANCE = 0.0
+
+#: Reserved recall slots for distinct keys. Kilo's indexer reserves slices for
+#: facts/environment/decisions/constraints so a bulk of same-key facts cannot
+#: starve every other subject. Chronoa's keys are name/preference/place/
+#: attribute/imperative/rel:*, and the reserve is the top of the ranking.
+RESERVE_DISTINCT_KEYS = 3
+
+_last_auto_capture = 0.0
+
+
+def capture_plan(text: str) -> "tuple[Optional[Fact], str]":
+    """Decide whether a turn yields a durable fact, and if not, why.
+
+    Kilo's `capturePlan` returns skip reasons rather than a bare boolean,
+    because "nothing was captured" and "something was captured and rejected"
+    are different states the caller can report differently. The reasons here
+    are the ones that apply to *user* memory; see the gating block above for
+    the one kilo rejection that deliberately does not port.
+
+    Returns `(fact, "")` when the turn yields a storable fact, or
+    `(None, reason)` when it does not. `reason` is "" when nothing matched at
+    all - the common case, and the one that means "no fact here" rather than
+    "a fact was refused".
+    """
+    found = extract_fact(text)
+    if found is None:
+        return None, ""
+    # Check rejections against the FULL input text, not just the extracted
+    # span. The span is only the pattern match ("my name is Alice") and does
+    # not include the surrounding context ("As I already told you...").
+    if _SELF_REFERENTIAL_RE.search(text):
+        return None, "self-referential: the user is saying they already said this"
+    if _ASSISTANT_QUOTE_RE.search(text):
+        return None, "provenance: the span quotes the assistant, not the user"
+    words = _words(found.text)
+    if len(words) < TRIVIAL_MIN_WORDS:
+        return None, f"trivial: {len(words)} content word(s), need {TRIVIAL_MIN_WORDS}"
+    return found, ""
+
+
+def _covered_by(fact: Fact, store: PerceptStore) -> Optional[Percept]:
+    """The stored fact that already covers `fact`, or None.
+
+    Kilo's covered guard drops a digest whose topic is already in typed memory.
+    The analog here: a stored fact with the same supersession key whose
+    content is *identical* (case-insensitive). That is a true duplicate -
+    the same fact stored twice - and storing it again would write a
+    redundant history entry for a no-op. Near-duplicates (same key,
+    different value) are the supersession mechanism's job, not this guard's:
+    "my editor is vim" followed by "my editor is neovim" is an update, and
+    the Dice overlap of the two labels alone (0.667) would otherwise swallow
+    it, which is the false positive this exact-match rule exists to prevent.
+    """
+    wanted = " ".join(fact.text.split()).casefold()
+    if not wanted:
+        return None
+    for percept in store.durable():
+        if (percept.metadata or {}).get("key") != fact.key:
+            continue
+        held = " ".join(percept.content.split()).casefold()
+        if held == wanted:
+            return percept
+    return None
 
 # A relation names how two things the user mentioned stand to each other -
 # "Priya works_at the bike co-op". Short, lowercase, underscores: it is a
@@ -248,6 +367,14 @@ class Fact(NamedTuple):
     #: (subject, relation, object) when this fact is a link between two
     #: things, so `about` can walk from one to the other. None for a plain fact.
     relation: Optional[tuple] = None
+    #: Which surface this fact was captured on ("telegram", "phone", ...).
+    #: "" for the local session. Together with `private`, it is what stops a
+    #: fact captured on one channel quietly surfacing through another.
+    channel: str = ""
+    #: True hides the fact from reads whose caller's channel differs from
+    #: the one the fact was captured on; reads with no channel (the owner's
+    #: own view) always see it. Public by default.
+    private: bool = False
 
 
 _STORE: Optional[PerceptStore] = None
@@ -541,7 +668,9 @@ def _memory_percept(fact: Fact) -> Percept:
         source=fact.source,
         sensitivity=SENSITIVITY_PRIVATE,
         metadata={"key": fact.key, "keywords": sorted(_tokens(fact.span)),
-                  **({"relation": list(fact.relation)} if fact.relation else {})},
+                  **({"relation": list(fact.relation)} if fact.relation else {}),
+                    **({"channel": fact.channel} if fact.channel else {}),
+                    **({"private": True} if fact.private else {})},
         valid_until=fact.valid_until,
         confidence=fact.confidence,
     )
@@ -645,8 +774,27 @@ def store_fact(fact: Fact, store: Optional[PerceptStore] = None) -> Optional[Per
                 return True
             return False
         target.forget(same_key)
+    # md5 identical-fact dedup (mem0 `memory/main.py:1007-1026`): a fact
+    # already on disk under a *different* key but identical text is the same
+    # fact wearing a second label, and writing it again inflates recall with
+    # a duplicate row and a redundant history entry. Same-key writes are
+    # already handled by the supersession sweep above, so this catches the
+    # rest: a label/relabel that lands on identical content.
+    digest = hashlib.md5(" ".join(content.lower().split()).encode(
+        "utf-8", "replace")).hexdigest()
+    duplicate = next(
+        (p for p in target.durable()
+         if hashlib.md5(" ".join(p.content.lower().split()).encode(
+             "utf-8", "replace")).hexdigest() == digest),
+        None,
+    )
+    if duplicate is not None:
+        logger.info("Identical fact already stored; no duplicate write: %r",
+                    content[:60])
+        return duplicate
     percept = _memory_percept(
-        Fact(content, span, key, fact.source, fact.confidence, fact.valid_until, relation)
+        Fact(content, span, key, fact.source, fact.confidence, fact.valid_until, relation,
+             channel=fact.channel, private=fact.private)
     )
     target.add(percept)
     changed = [p for p in replaced if p.content != content]
@@ -793,7 +941,8 @@ def link_entities(
     return stored, "" if stored else (_consent_error() or "the write was refused")
 
 
-def about(entity: str, store: Optional[PerceptStore] = None) -> "tuple[list[Percept], list[Percept], list[str]]":
+def about(entity: str, store: Optional[PerceptStore] = None,
+          channel: str = "") -> "tuple[list[Percept], list[Percept], list[str]]":
     """Everything held about `entity`: its links, other facts naming it, and the things one link away.
 
     Returns (links, facts, neighbours). A fact "names" the entity when every
@@ -808,6 +957,8 @@ def about(entity: str, store: Optional[PerceptStore] = None) -> "tuple[list[Perc
     now = time.time()
     links, facts, neighbours = [], [], []
     for p in target.durable():
+        if not _visible_to(p, channel):
+            continue
         if p.is_expired(now):
             continue
         triple = (p.metadata or {}).get("relation")
@@ -830,6 +981,8 @@ def remember_fact(
     source: str = "user-stated",
     store: Optional[PerceptStore] = None,
     valid_until: Optional[float] = None,
+    channel: str = "",
+    private: bool = False,
 ) -> Optional[Percept]:
     """Persist `fact` verbatim, as asked. None if refused.
 
@@ -849,24 +1002,46 @@ def remember_fact(
     if not content:
         return None
     return store_fact(
-        Fact(content, content, content, source, CONFIDENCE_STATED, valid_until),
+        Fact(content, content, content, source, CONFIDENCE_STATED, valid_until,
+             channel=channel, private=private),
         store,
     )
 
 
-def remember_from_turn(text: str, store: Optional[PerceptStore] = None) -> Optional[Percept]:
+def remember_from_turn(text: str, store: Optional[PerceptStore] = None,
+                        force: bool = False, channel: str = "") -> "tuple[Optional[Percept], str]":
     """Pull a salient fact out of a completed turn and persist it.
 
     The entry point for automatic memory: durable memory is only useful if
     something writes to it, and this is that something. It stores at most
-    one fact per turn, and only when `_FACT_PATTERNS` matches. Returns None
-    when nothing matched, so the caller can tell "nothing worth keeping"
-    from "kept".
+    one fact per turn, and only when `_FACT_PATTERNS` matches. Returns
+    `(percept, "")` when something was kept, or `(None, reason)` when it was
+    not - `reason` is "" when nothing matched, and one of the capture-gating
+    reasons when a candidate was refused. See `capture_plan`.
+
+    `force` bypasses the interval throttle, for a caller that knows this turn
+    matters (a `remember` operation, or a fact with a `valid_until`). An
+    explicit remember still updates the throttle timer, so rapid explicit
+    remembers don't fill memory with near-duplicates.
     """
-    found = extract_fact(text)
+    global _last_auto_capture
+    found, reason = capture_plan(text)
     if found is None:
-        return None
-    return store_fact(found, store)
+        return None, reason
+    now = time.time()
+    if not force and now - _last_auto_capture < AUTO_CAPTURE_INTERVAL_SECONDS:
+        return None, (f"interval: last capture was "
+                      f"{now - _last_auto_capture:.0f}s ago, "
+                      f"throttled to {AUTO_CAPTURE_INTERVAL_SECONDS:.0f}s")
+    _last_auto_capture = now
+    target = _target(store)
+    covering = _covered_by(found, target)
+    if covering is not None:
+        return None, (f"covered: already stored as {covering.content!r}")
+    if channel and isinstance(found, Fact):
+        found = found._replace(channel=channel)
+    stored = store_fact(found, target)
+    return stored, ""
 
 
 class RecallReport(NamedTuple):
@@ -885,8 +1060,24 @@ class RecallReport(NamedTuple):
     expired: list[Percept]
 
 
+#: Per-source visibility, after crewAI's `MemoryRecord.private` + `source`
+#: (`crewAI/types.py`'s memory section). A fact captured on a channel is
+#: private: reads that name a *different* channel do not see it. Reads
+#: with no channel - which is the owner's own window - see everything,
+#: because the owner can hide a secret from the surfaces but not from
+#: themselves. Without the channel threaded through, this gate would have
+#: no writer and no live trigger - it would be a control wired to nothing.
+def _visible_to(percept: Percept, channel: str) -> bool:
+    if not (percept.metadata or {}).get("private"):
+        return True
+    if not channel:
+        return True
+    return (percept.metadata or {}).get("channel") == channel
+
+
 def recall_report(
-    query: str, store: Optional[PerceptStore] = None, limit: int = 5
+    query: str, store: Optional[PerceptStore] = None, limit: int = 5,
+    channel: str = "",
 ) -> RecallReport:
     """`recall()` plus the matching facts whose validity window has closed.
 
@@ -904,7 +1095,7 @@ def recall_report(
     if not wanted or limit <= 0:
         return RecallReport([], [])
     target = _target(store)
-    candidates = target.durable()
+    candidates = [p for p in target.durable() if _visible_to(p, channel)]
     if not candidates:
         return RecallReport([], [])
     vocabularies = [_keywords(percept) for percept in candidates]
@@ -927,7 +1118,7 @@ def recall_report(
 
     now = time.time()
     query_mass = sum(weight(token) for token in wanted)
-    scored, expired = [], []
+    scored, expired, gated = [], [], []
     for percept, vocabulary in zip(candidates, vocabularies):
         shared = sum(weight(token) for token in wanted if token in vocabulary)
         if not shared:
@@ -936,15 +1127,54 @@ def recall_report(
             expired.append(percept)
             continue
         document_mass = sum(weight(token) for token in vocabulary)
-        scored.append(
-            (_relevance(shared, query_mass, document_mass), percept)
-        )
+        relevance = _relevance(shared, query_mass, document_mass)
+        # The gate is here, above the reserve, rather than at the `limit` cut
+        # below: gating last would let a weak fact claim a reserved distinct-key
+        # slot and push out a strong one, which is the failure the reserve
+        # exists to prevent. See `RECALL_MIN_RELEVANCE`.
+        if relevance < RECALL_MIN_RELEVANCE:
+            gated.append(percept)
+            continue
+        scored.append((relevance, percept))
+    if gated:
+        logger.debug("Gated %d fact(s) below relevance %.3f",
+                     len(gated), RECALL_MIN_RELEVANCE)
     ranked = sorted(
         scored,
         key=lambda pair: (pair[0], pair[1].confidence, pair[1].created_at),
         reverse=True,
     )
-    found = [percept for _, percept in ranked[:limit]]
+    # Kilo's `RESERVE_DISTINCT_KEYS`: a bulk of same-key facts must not
+    # starve every other subject. `ranked` may put, say, 5 of the query's
+    # hits on one key (e.g. a question all about the user's name) and leave
+    # out everything else, so the first `RESERVE_DISTINCT_KEYS` slots go one
+    # per distinct key, in ranking order.
+    #
+    # Two passes, and the second one matters: keeping *one* fact per key
+    # silently threw away every other fact about the same subject. Two true
+    # facts about the user's coffee order are not a bulk of one key crowding
+    # out another subject, and
+    # `tests/test_percept_schema_extension.py::test_confidence_breaks_a_tie`
+    # had one dropped by exactly that. Only reorders what matched: nothing is
+    # added beyond the candidates and nothing is returned beyond `limit`.
+    found: list[Percept] = []
+    keys_seen: list[str] = []
+    for _, percept in ranked:
+        key = (percept.metadata or {}).get("key", "") or "other"
+        if key in keys_seen or len(keys_seen) >= RESERVE_DISTINCT_KEYS:
+            continue
+        keys_seen.append(key)
+        found.append(percept)
+        if len(found) >= limit:
+            break
+    if len(found) < limit:
+        taken = {id(percept) for percept in found}
+        for _, percept in ranked:
+            if id(percept) in taken:
+                continue
+            found.append(percept)
+            if len(found) >= limit:
+                break
     target.mark_accessed(found, now=now)
     return RecallReport(found, expired)
 
@@ -1092,6 +1322,8 @@ def _run(arguments: dict) -> Percept:
                 valid_until=(
                     None if minutes is None else time.time() + minutes * 60.0
                 ),
+                channel=str(arguments.get("channel") or ""),
+                private=bool(arguments.get("private") or False),
             )
             if stored is not None:
                 # The stored fact itself, not a transient acknowledgement of
@@ -1107,7 +1339,8 @@ def _run(arguments: dict) -> Percept:
             )
         case "recall":
             limit = arguments.get("limit")
-            report = recall_report(query, limit=int(limit) if limit else 5)
+            report = recall_report(query, limit=int(limit) if limit else 5,
+                                   channel=str(arguments.get("channel") or ""))
             return _note(
                 f"What is remembered about that:\n{_recall_body(report)}"
             )
@@ -1132,7 +1365,8 @@ def _run(arguments: dict) -> Percept:
             )
             return stored if stored is not None else _note(f"Did not link that: {why}.")
         case "about":
-            links, facts, neighbours = about(query)
+            links, facts, neighbours = about(
+                query, channel=str(arguments.get("channel") or ""))
             if not links and not facts:
                 return _note(f"Nothing stored about {query!r}." if query else "Say what to look up with query.")
             lines = [f"About {query}:"]
@@ -1217,6 +1451,24 @@ SENSES = [
                         "source": {
                             "type": "string",
                             "description": "Provenance for 'remember', e.g. 'user-stated'.",
+                        },
+                        "channel": {
+                            "type": "string",
+                            "description": (
+                                "Which surface this is about. For 'remember', "
+                                "the surface the fact came from; for 'recall' "
+                                "and 'about', the surface reading - facts "
+                                "marked private from a different surface are "
+                                "not returned to this reader."
+                            ),
+                        },
+                        "private": {
+                            "type": "boolean",
+                            "description": (
+                                "operation='remember' only. Hide this fact "
+                                "from readers whose channel differs from its "
+                                "own; the owner's window sees everything."
+                            ),
                         },
                         "subject": {"type": "string", "description": "operation='link': the first thing."},
                         "relation": {"type": "string", "description": "operation='link': e.g. works_at, sister_of, owns."},

@@ -172,7 +172,36 @@ def _arm_state(rule: Any) -> str:
     if getattr(rule, "parked", False):
         reason = getattr(rule, "parked_reason", "") or "stopped after repeated failures"
         return f"armed, parked ({reason})"
-    return "armed"
+    # An armed rule that has failed and is waiting out a backoff is in a third
+    # state, and "armed" hides it: the rule is not firing, is not parked, and
+    # will start again on its own without anything being re-armed. The delay is
+    # computed through the rule's own policy rather than restated here, so the
+    # number on screen is the number the engine will wait.
+    waiting = _backoff_wait(rule)
+    return f"armed, waiting {waiting}" if waiting else "armed"
+
+
+def _backoff_wait(rule: Any) -> str:
+    """How long an armed, unparked rule has left to wait, or "" for none.
+
+    Empty for a rule that has never failed, and for a percept rule rather than an
+    event rule - this engine has no backoff counters to wait out, which is why
+    `getattr` rather than an `isinstance` is the test.
+    """
+    attempt = getattr(rule, "attempt", 0)
+    retry_at = getattr(rule, "retry_at", None)
+    if not attempt or not retry_at:
+        return ""
+    delay_for = getattr(rule, "backoff_delay", None)
+    if not callable(delay_for):
+        return ""
+    try:
+        seconds = float(delay_for())
+    except Exception:  # noqa: BLE001 - a broken counter is no counter
+        return ""
+    if seconds <= 0:
+        return ""
+    return f"{seconds:.0f}s after {attempt} failure(s)"
 
 
 def _source_event(rule: Any) -> str:

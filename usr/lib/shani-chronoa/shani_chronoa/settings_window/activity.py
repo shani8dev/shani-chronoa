@@ -373,6 +373,7 @@ class ActivityPage:
         since every grant in this app belongs to a consent-key row above and a
         second path to one would be two switches disagreeing.
         """
+        self._section_family = "approvals"
         self._approvals_page = page
         group = self._group(
             page, "Approvals",
@@ -382,17 +383,28 @@ class ActivityPage:
         self._info_row(group, "What a question looks like",
                        self._example_request().question)
 
+        # Two questions, not one, and they have different answers. `can_ask()` is
+        # whether anybody is *there*; `allows_prompting()` is whether asking is a
+        # thing that may happen in the mode we are in right now. DONT_ASK refuses
+        # the question on the spot whether or not someone is watching, so reading
+        # only `can_ask()` said "Chronoa will ask before running a gated action"
+        # on a machine set to never ask anything - which is the panel describing
+        # a policy the app does not enforce.
         asking = permissions.can_ask()
-        self._info_row(
-            group, "Who can answer",
-            "Somebody is listening - Chronoa will ask before running a gated "
-            "action."
-            if asking else
-            "Nobody is listening. A gated action is refused rather than asked "
-            "about, and the refusal names the switch that would allow it. This "
-            "is the state a headless run and a trigger rule that fires "
-            "unprompted are always in.",
-        )
+        prompting = permissions.allows_prompting()
+        if not prompting:
+            who = ("No questions are asked in the current permission mode. A gated "
+                   "action is refused rather than asked about, whatever is on "
+                   "screen.")
+        elif asking:
+            who = ("Somebody is listening - Chronoa will ask before running a "
+                   "gated action.")
+        else:
+            who = ("Nobody is listening. A gated action is refused rather than "
+                   "asked about, and the refusal names the switch that would "
+                   "allow it. This is the state a headless run and a trigger "
+                   "rule that fires unprompted are always in.")
+        self._info_row(group, "Who can answer", who)
 
         self._info_row(
             group, "How long a question waits",
@@ -401,8 +413,15 @@ class ActivityPage:
         )
 
         for action, key in sorted(capabilities.GATED.items()):
-            self._info_row(group, capabilities.tool_title(action),
+            title = capabilities.tool_title(action)
+            self._info_row(group, title,
                            self._scope_sentence(action, key))
+            # A consent-key name ('hwmon-sense-enabled') in the subtitle would
+            # keep this row matching a sense search, which would leave the Ap
+            # page visible for searches like 'hwmon' that are meant to locate
+            # the physical switch, not a policy explanation. Use the row's title
+            # for search matching of these static explanatory rows.
+            group._needle_extra[-1] = (group._needle_extra[-1][0], title.lower())
 
         self._forget_group = self._group(
             page, "Answers given this session",
@@ -556,6 +575,7 @@ class ActivityPage:
         second kind of refusal that the window's own docstring says it has none
         of.
         """
+        self._section_family = "tool-activity"
         self._tool_group = self._group(
             page, "Tool activity",
             "Every action Chronoa has run, newest first, led by whether it took "

@@ -96,6 +96,7 @@ def _run(arguments: dict) -> str:
         return str(exc)
     try:
         files.refuse_catalogue(target, "delete")
+        files.refuse_sensitive(target, "delete")
     except files.PathProblem as exc:
         return str(exc)
     if not target.exists() and not target.is_symlink():

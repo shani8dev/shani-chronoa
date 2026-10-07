@@ -164,8 +164,18 @@ class QuickAskWindow(Gtk.Window):
     def ask_now(self, text: str) -> None:
         """Put a question in the field, show the window and ask it.
 
-        Used by `--ask=` and by anything else that already has a question in
-        hand and does not want it to become a conversation.
+        For a caller that already has a question in hand and does not want it to
+        become a conversation — the answer comes back through `on_ask` and is
+        dropped rather than recorded.
+
+        **This docstring used to claim `--ask=` called it, and it does not.**
+        `--ask=` goes through the main window's own `submit_text()`, so the
+        question and its answer *are* recorded in the transcript, which is the
+        right behaviour for a desktop custom shortcut ("say something to
+        Chronoa") and is what
+        `test_gateway_submitted_text_reaches_the_window_entry` pins. This
+        method answers a different question — one that should leave no trace —
+        and has no caller in the tree today.
         """
         self._entry.set_text(text)
         self.present()

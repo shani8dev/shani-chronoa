@@ -146,6 +146,7 @@ def _run(arguments: dict) -> str:
         return str(exc)
     try:
         files.refuse_catalogue(target, "edit")
+        files.refuse_sensitive(target, "edit")
     except files.PathProblem as exc:
         return str(exc)
     if target.is_dir():
@@ -185,6 +186,12 @@ def _run(arguments: dict) -> str:
         )
 
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    # Maze-AI agent/codecheck.py's rule applied to the modified whole file:
+    # refuse the edit whose result would not parse, before it is written.
+    problem = files.parse_problem(updated, target)
+    if problem:
+        return problem
+
     if arguments.get("preview"):
         # servers/filesystem `edit_file dryRun`: the diff, and nothing written.
         diff = "".join(difflib.unified_diff(

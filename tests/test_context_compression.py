@@ -534,3 +534,105 @@ class TestTheHardCapOnASingleEnormousResult:
             {"role": "user", "content": f"q{i}"} for i in range(8)]
         out = compression.compress(history)
         assert out[0]["content"] == message["content"]
+
+
+class TestPrune:
+    """Kilo's compaction prune: backward pass that clears old tool results in place.
+
+    Unlike elision (which keeps head+foot), prune replaces the entire tool
+    result content with a marker, freeing the wire budget while the transcript
+    keeps the original. It walks backwards from the oldest message until the
+    prunable budget is met.
+    """
+
+    def test_prune_replaces_old_tool_results_with_marker(self):
+        """Old tool results outside the protect window are pruned."""
+        history = [
+            _tool("x" * 100),
+            _tool("y" * 100),
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "a2"},
+        ]
+        # protect_chars=50: walking from end, y*100=100 >= 50 -> cutoff_index=1
+        # Prunable = range(1) = [0] (only x is prunable, y is protected)
+        out = compression.prune(history, protect_chars=50, minimum_chars=50)
+        assert out[0]["content"] == compression.PRUNE_MARKER
+        assert out[1]["content"] == "y" * 100
+        assert out[2]["content"] == "q1"
+
+    def test_prune_multiple_old_results(self):
+        """Multiple old tool results outside protect_chars are all pruned."""
+        history = [
+            _tool("x" * 100),
+            _tool("y" * 100),
+            _tool("z" * 100),
+            _tool("w" * 100),
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        # protect_chars=200: walking from end, w*100=100 < 200, continue
+        # z*100=200 >= 200 -> cutoff_index=2
+        # Prunable = range(2) = [0, 1] (only x and y are prunable)
+        out = compression.prune(history, protect_chars=200, minimum_chars=50)
+        assert out[0]["content"] == compression.PRUNE_MARKER
+        assert out[1]["content"] == compression.PRUNE_MARKER
+        assert out[2]["content"] == "z" * 100  # protected
+        assert out[3]["content"] == "w" * 100  # protected
+
+    def test_prune_respects_protect_chars(self):
+        """Messages within protect_chars of the end are never pruned."""
+        history = [
+            _tool("x" * 100),
+            _tool("y" * 100),
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        # protect_chars=50: y*100=100 >= 50 -> cutoff_index=1, x is prunable
+        out = compression.prune(history, protect_chars=50, minimum_chars=50)
+        assert out[0]["content"] == compression.PRUNE_MARKER
+        assert out[1]["content"] == "y" * 100
+
+    def test_prune_stops_at_minimum_chars(self):
+        """Pruning stops when remaining prunable content reaches minimum_chars."""
+        history = [
+            _tool("x" * 100),
+            _tool("y" * 100),
+            _tool("z" * 100),
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        # protect_chars=50: z*100=100 >= 50 -> cutoff_index=2
+        # Prunable = range(2) = [0, 1] (only x and y are prunable)
+        # minimum_chars=100: after pruning both x and y (remaining=66),
+        # remaining <= 100, so we stop. z is not prunable, untouched.
+        out = compression.prune(history, protect_chars=50, minimum_chars=100)
+        assert out[0]["content"] == compression.PRUNE_MARKER
+        assert out[1]["content"] == compression.PRUNE_MARKER
+        assert out[2]["content"] == "z" * 100
+
+    def test_prune_protects_skill_role(self):
+        """Role == 'skill' is protected from pruning."""
+        history = [
+            _tool("x" * 100),
+            {"role": "skill", "tool_call_id": "1", "content": "y" * 100},
+            _tool("z" * 100),
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+        ]
+        # protect_chars=50: z*100=100 >= 50 -> cutoff_index=1
+        # Prunable = range(1) = [0] (only x is prunable)
+        out = compression.prune(history, protect_chars=50, minimum_chars=50)
+        assert out[0]["content"] == compression.PRUNE_MARKER
+        assert out[1]["content"] == "y" * 100  # skill protected
+        assert out[2]["content"] == "z" * 100  # not prunable, untouched
+
+    def test_prune_empty_and_no_tool_messages(self):
+        """Empty list and non-tool messages are left alone."""
+        assert compression.prune([]) == []
+        history = [{"role": "user", "content": "hello"},
+                   {"role": "assistant", "content": "hi"}]
+        out = compression.prune(history)
+        assert out[0] is history[0]
+        assert out[1] is history[1]

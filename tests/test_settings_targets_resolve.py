@@ -84,22 +84,48 @@ def test_every_settings_target_resolves_to_a_page_that_exists():
 
 
 def _declared_settings_pages():
-    """The ids the settings window registers, read from its own source."""
+    """The ids the settings window registers, read from its own source.
+
+    **The module, and the table, not the class body.** The declaration moved out
+    of `SettingsWindow` into `_declare_families()` (still called at the bottom of
+    the module, so still at import time) and the call now passes
+    `list(_SECTION_FAMILIES)` rather than an inline list literal. Reading the
+    class found no `register` call at all and yielded **nothing**, so this
+    generator was empty and every assertion built on it passed for the wrong
+    reason - the twin of the same defect in
+    `tests/test_dead_ends_have_buttons.py`, which is fixed there with the
+    measurement. This resolves the module-level table and asserts the registry
+    call passes it, so an empty yield cannot look like a pass.
+    """
     import ast
     import inspect
 
-    from shani_chronoa.settings_window.window import SettingsWindow
+    from shani_chronoa.settings_window import window as settings_window
 
-    tree = ast.parse(inspect.getsource(SettingsWindow))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "register":
-            for arg in node.args:
-                if isinstance(arg, ast.List):
-                    for element in arg.elts:
-                        if isinstance(element, ast.Tuple) and element.elts:
-                            first = element.elts[0]
-                            if isinstance(first, ast.Constant):
-                                yield str(first.value)
+    tree = ast.parse(inspect.getsource(settings_window))
+    families = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if "_SECTION_FAMILIES" in names:
+                families = node.value
+    assert families is not None, (
+        "the settings module no longer declares _SECTION_FAMILIES, so this "
+        "helper would silently yield nothing")
+    found = set()
+    for element in getattr(families, "elts", []):
+        if isinstance(element, ast.Tuple) and element.elts:
+            first = element.elts[0]
+            if isinstance(first, ast.Constant):
+                found.add(str(first.value))
+    registered = any(
+        isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "register"
+        and any("_SECTION_FAMILIES" in ast.dump(arg) for arg in node.args)
+        for node in ast.walk(tree))
+    assert registered, (
+        "nothing registers _SECTION_FAMILIES with the page registry any more, "
+        "so every settings target below is dead however full the table is")
+    yield from sorted(found)
 
 
 def test_every_panel_named_in_the_table_is_a_real_panel():

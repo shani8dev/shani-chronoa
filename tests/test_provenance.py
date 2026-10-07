@@ -268,3 +268,21 @@ def test_every_llm_backend_redacts_its_send_path():
             f"{name} never sanitizes; a registered secret read back by a tool "
             f"would be sent to that provider in the clear"
         )
+
+
+def test_the_system_prompt_explains_the_fences_it_emits():
+    """A fence the model cannot interpret is decoration.
+
+    Every tool result is fenced on the way in, so a tool that reads a file or
+    fetches a page returns text shaped like an instruction marked as data - and
+    until this line the system prompt never mentioned the markers at all. The
+    markers were real, the protection was real, and the model had been told
+    nothing about what they were for.
+    """
+    from shani_chronoa.assistant import SYSTEM_PROMPT
+
+    assert "untrusted-content" in SYSTEM_PROMPT, (
+        "the prompt does not mention the markers the assistant emits")
+    assert provenance.describe_boundary() in SYSTEM_PROMPT, (
+        "the prompt must carry provenance's own sentence, so the two cannot "
+        "describe the boundary differently")

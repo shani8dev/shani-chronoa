@@ -60,7 +60,7 @@ def _run(_arguments: dict) -> str:
     # window has always had the toggle, but nothing here checked it, so the
     # switch changed the settings screen and not whether a capture happened.
     config = ChronoaConfig()
-    if not config.sense_allowed("vision"):
+    if not config.vision_sense_enabled:
         return (
             f"Screenshots are not permitted: "
             f"{config.sense_allowed_reason('vision')}."

@@ -369,7 +369,7 @@ def run(arguments: dict) -> "str | Percept":
     request is still audited with the same shape as a granted one.
     """
     config = ChronoaConfig()
-    if not config.sense_allowed("ocr"):
+    if not config.ocr_sense_enabled:
         return _refusal(config.sense_allowed_reason("ocr"))
 
     try:

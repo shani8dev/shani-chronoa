@@ -82,6 +82,14 @@ def _run(arguments: dict) -> str:
     if not rows:
         if needle:
             return f"No service unit's name contains {needle!r}."
+        if arguments.get("failed_only"):
+            # A machine with nothing in the failed state is a normal machine,
+            # and this branch used to say the opposite - "not expected on a
+            # running system" - for exactly the case where the filter worked.
+            # It is the same confidence a "no rows" answer invites: a user
+            # reading a failed-only query that calls the machine broken is
+            # told to go looking for a fault that is not there.
+            return "No service unit is in the failed state."
         return "systemctl returned no service units, which is not expected on a running system."
 
     # Anything running is what a person usually wants to see first.

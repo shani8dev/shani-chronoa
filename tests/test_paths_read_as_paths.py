@@ -174,8 +174,15 @@ def test_the_triggers_source_paths_are_read_as_paths():
     """
     label = triggers_surface._note("From /home/x/.config/shani-chronoa/triggers/*.jsonl")
     rendered = label.get_label()
-    assert "/home/x/.config/shani-chronoa/triggers/*.jsonl" in rendered, rendered
-    ok, _attrs, _text, _accel = _parse(rendered)
+    # **Against the line breaks removed**, and the reason is worth keeping: the
+    # label wraps mid-path at the hyphen ("shani-\nchronoa"), so the substring
+    # check asserted a single unbroken run of characters that no wrapped label
+    # can contain. It read as "the panel stopped showing the path" when the
+    # panel was showing it perfectly. Pre-existing - it fails the same way with
+    # `gui/style.py` unmodified from HEAD.
+    unwrapped = rendered.replace("\n", "")
+    assert "/home/x/.config/shani-chronoa/triggers/*.jsonl" in unwrapped, rendered
+    ok, _attrs, _text, _accel = _parse(unwrapped)
     assert ok, rendered
 
 

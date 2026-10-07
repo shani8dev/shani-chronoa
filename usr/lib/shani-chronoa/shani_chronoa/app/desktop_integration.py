@@ -171,11 +171,24 @@ class DesktopIntegrationMixin:
 
         Symlinks to the installed launcher .desktop file rather than
         copying it, so it stays in sync if that file's Exec/Icon ever
-        changes.
+        changes - unless hidden-at-login wants `--hidden`, in which case a
+        generated entry is written because a symlink has nowhere to put the flag.
         """
         want = self.config.auto_start
+        want_hidden = self.config.start_hidden_at_login
         exists = os.path.lexists(self._AUTOSTART_DESKTOP_FILE)
         if want:
+            if want_hidden:
+                self._write_hidden_autostart()
+                return
+            if exists and not os.path.islink(self._AUTOSTART_DESKTOP_FILE):
+                # A generated --hidden entry from a previous setting; the plain
+                # symlink belongs instead.
+                try:
+                    os.remove(self._AUTOSTART_DESKTOP_FILE)
+                    exists = False
+                except OSError as e:
+                    logger.error(f"Could not replace hidden autostart entry: {e}")
             if exists:
                 return
             if not os.path.exists(self._INSTALLED_DESKTOP_FILE):
@@ -196,6 +209,34 @@ class DesktopIntegrationMixin:
                 logger.info("Disabled autostart on login")
             except OSError as e:
                 logger.error(f"Failed to disable autostart: {e}")
+
+    def _write_hidden_autostart(self) -> None:
+        """Autostart entry for `--hidden`, because the installed file cannot carry the flag."""
+        try:
+            os.makedirs(self._AUTOSTART_DIR, exist_ok=True)
+            with open(self._AUTOSTART_DESKTOP_FILE, "w", encoding="utf-8") as fh:
+                fh.write(
+                    "[Desktop Entry]\n"
+                    "Type=Application\n"
+                    "Name=Shani Chronoa\n"
+                    "Exec=shani-chronoa --hidden\n"
+                    "Icon=shani-chronoa\n"
+                    "Terminal=false\n"
+                    "Categories=Utility;Accessibility;Office;GTK;\n"
+                    "X-GNOME-Uses-Privacy-Indicator=true\n"
+                    "X-GNOME-Single-Instance=true\n"
+                )
+            logger.info("Enabled autostart on login, hidden window")
+        except OSError as e:
+            logger.error(f"Failed to write hidden autostart entry: {e}")
+
+    def _toggle_start_hidden(self, _action: Gio.SimpleAction, _param: object) -> None:
+        """Toggle start-hidden-at-login and resync the XDG autostart entry immediately."""
+        new_value = not self.config.start_hidden_at_login
+        self.config.set("start-hidden-at-login", "true" if new_value else "false")
+        self._sync_autostart()
+        if self.window:
+            self.window.set_status(f"Start hidden at login: {'ON' if new_value else 'OFF'}")
 
     def _toggle_auto_start(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle autostart-on-login and sync the XDG autostart entry immediately."""

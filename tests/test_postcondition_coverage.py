@@ -20,12 +20,19 @@ fails **only if the set grows**.
 import sys
 from pathlib import Path
 
+#: `pytest` was never imported here while three tests call `pytest.skip(...)`
+#: (pyflakes: "undefined name 'pytest'"). They only fire when `set_privacy` is
+#: absent from the mutating set, so the file has read as green — and on the
+#: machine where the guard was meant to do something it would have raised
+#: `NameError` instead of skipping.
+import pytest  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
 
 from shani_chronoa import capabilities, verification  # noqa: E402
 from shani_chronoa.skills import discover_skills  # noqa: E402
 
-#: The 6 of 32 mutating skills with no post-condition.
+#: The 9 of 38 mutating skills with no post-condition.
 #:
 #: Two are deliberate. `ask_user` and `accessibility` are no-ops or pure
 #: queries: a check can only answer "I don't know", and one that returns
@@ -35,15 +42,27 @@ from shani_chronoa.skills import discover_skills  # noqa: E402
 #: (`media_control`: PulseAudio accepting a volume set does not mean a
 #: speaker got louder) or produce no artifact at all.
 #:
-#: 26 of 32 now verify themselves; this list is what is left. measured from the
+#: Three more arrived with the video/audio skills (`capture_video`,
+#: `create_video`, `edit_audio`), and their reason is structural rather than
+#: an oversight: each picks **the first free filename**
+#: (`camera-10s.mp4`, then `-1`, `-2`, ...), so the path a call wrote is not
+#: derivable from its arguments afterwards. A check would have to glob for
+#: "the newest match", which is the stale-file trap in its purest form - a
+#: refused second call finds the first call's file and reports success for
+#: work that never happened. Closing this honestly means the skill has to
+#: *return* or *accept* its output path, which is a change to those skills
+#: rather than to this list.
+#:
+#: 29 of 38 now verify themselves; this list is what is left. measured from the
 #: code rather than listed by hand - a hand-written list was wrong in both
 #: directions when this was first written, claiming skills that already had
 #: checks and missing others that did not. Listed rather than derived so that REMOVING a
 #: name is a deliberate, reviewable act: it means that skill gained the ability
 #: to confirm itself.
 MISSING = frozenset({
-    "accessibility", "ask_user", "bluetooth_devices", "find_emoji",
-    "generate_password", "media_control",
+    "accessibility", "ask_user", "bluetooth_devices", "capture_video",
+    "create_video", "edit_audio", "find_emoji", "generate_password",
+    "media_control",
 })
 
 

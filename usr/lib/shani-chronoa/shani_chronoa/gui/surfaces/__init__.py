@@ -110,6 +110,8 @@ SURFACE_IDS = (
     "triggers",
     "activity",
     "workbench",
+    "diff",
+    "artifact_store",
     # Desktop and system
     "privacy",
     "model",

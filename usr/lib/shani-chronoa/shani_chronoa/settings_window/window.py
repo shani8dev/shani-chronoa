@@ -65,20 +65,14 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         self.set_titlebar(header)
 
         page = Adw.PreferencesPage()
-        from shani_chronoa import pages as page_registry
-        page_registry.register(
-            "settings",
-            # Declared up front and deliberately: the ids a caller may use are a
-            # promise, and deriving them from the widgets that happen to be built
-            # would make the set depend on which sub-builder succeeded.
-            [("senses", "Senses"), ("privacy", "Privacy"),
-             ("approvals", "Approvals"), ("tool-activity", "Tool activity"),
-             ("voice", "Voice and speech"), ("models", "Models"),
-             ("system", "System")],
-            factory=lambda app, config=None: type(self)(app),
-            aliases={"model": "models", "tool": "tool-activity",
-                     "sense": "senses", "speech": "voice", "activity": "tool-activity"},
-        )
+        # `register()` happens at *import* time (bottom of this module), not
+        # here. It used to be here, which made `--show-page=settings:privacy`
+        # unreachable: `pages.show()` refuses an unregistered window id before
+        # it ever reaches the factory that could have built this one, so the
+        # only way to make a settings id exist was to have the window already
+        # open - and the one caller that wants to *open* it is the one that
+        # could not. The ids are a promise about what a caller may name, so
+        # they are declared where the promise is made.
         self._build_senses(page)
         self._build_privacy(page)
         self._build_approvals(page)
@@ -86,6 +80,7 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         self._build_voice(page)
         self._build_models(page)
         self._build_system(page)
+        self._section_family = ""
 
         scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scrolled.set_child(page)
@@ -114,6 +109,13 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         page.add(group)
         self._searchable.append((group, f"{title} {description}".lower()))
         group._needle_extra = []  # rows to reveal if only they match
+        # Which builder made this group, so `show_section("senses")` can reveal
+        # every sense group rather than only the first one to claim the id. One
+        # `Adw.PreferencesPage` holds 25 groups now; the registry's ids are the
+        # seven *sections*, so without this the family ids resolved to whichever
+        # single group happened to be registered under them - and `senses` and
+        # `privacy`, the two a caller is most likely to name, matched nothing.
+        group._section_family = getattr(self, "_section_family", "")
         # Ids are lower-cased titles with the punctuation a shell would mangle
         # removed, so `Tool activity` is `tool-activity` and a remembered id
         # keeps working when the title is reworded slightly.
@@ -136,6 +138,21 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         """Every section id, in the order they appear."""
         return [g._section_id for g, _ in self._searchable]
 
+    def family_ids(self) -> list:
+        """Every section *family* id, in the order the families first appear.
+
+        A group id addresses one group; a family id addresses the section a
+        person thinks of as a section - every sense group, every privacy group.
+        The seven ids the page registry promises are families, because that is
+        what they always meant: `settings:senses` is not one of the 25 groups.
+        """
+        seen = []
+        for group, _ in self._searchable:
+            family = getattr(group, "_section_family", "")
+            if family and family not in seen:
+                seen.append(family)
+        return seen
+
     def show_section(self, section_id: str) -> bool:
         """Show one section and hide the rest. False if the id is unknown.
 
@@ -145,14 +162,46 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         and there is one implementation of "what does 'Privacy' match" rather
         than two that can disagree.
         """
-        group = self._by_id.get(section_id)
-        if group is None:
-            return False
-        needle = (group.get_title() or section_id).lower()
-        self._search.set_text(needle)
-        self._search.grab_focus()
-        self.present()
-        return True
+        family = (section_id in self._family_ids())
+        group = None if family else self._by_id.get(section_id)
+        if group is not None:
+            self._search.set_text((group.get_title() or section_id).lower())
+            self._search.grab_focus()
+            self.present()
+            return True
+        if family:
+            # A family id names several groups, and the search box cannot hold
+            # "any of these eleven titles" - it filters on one needle. The
+            # needle is cleared so nothing is filtered away, and the visibility
+            # is applied directly, so there is one decision (which groups a
+            # person asked for) in one place rather than one per group title.
+            self._search.set_text("")
+            self._show_only_family(section_id)
+            self._search.grab_focus()
+            self.present()
+            return True
+        return False
+
+    def _restore_all(self) -> None:
+        """Show every group and every row again."""
+        for group, _haystack in self._searchable:
+            group.set_visible(True)
+            for row, _text in group._needle_extra:
+                row.set_visible(True)
+
+    def _family_ids(self) -> list:
+        """Memoised `family_ids()`, built once the builders have all run."""
+        cached = getattr(self, "_families", None)
+        if cached is None:
+            cached = self.family_ids()
+            self._families = cached
+        return cached
+
+    def _show_only_family(self, family: str) -> None:
+        for group, _haystack in self._searchable:
+            group.set_visible(getattr(group, "_section_family", "") == family)
+            for row, _text in group._needle_extra:
+                row.set_visible(True)
 
     def _action_button(self, group, title, subtitle, action_name,
                        sensitive=True, tooltip=""):
@@ -467,6 +516,7 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             report(f"  kept (a model is loaded from it): {name}")
 
     def _build_models(self, page) -> None:
+        self._section_family = "models"
         config = self.app.config
         group = self._group(
             page, "Models",
@@ -583,10 +633,22 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             effective._needle_extra[-1][0].set_tooltip_text(model_choice.explain(task, config=config))
 
     def _build_system(self, page) -> None:
+        self._section_family = "system"
         config = self.app.config
         group = self._group(page, "System")
         self._switch(group, "Start on login", "Launch Chronoa when you log in",
                      config.auto_start, lambda a: self._app_toggle("toggle-auto-start", a))
+        self._switch(group, "Start hidden at login", "No window on login - wake word and tray only",
+                     config.start_hidden_at_login, lambda a: self._app_toggle("toggle-start-hidden", a))
+        self._choice(
+            group,
+            "Reply style",
+            "How replies are paced. Applies to the next sentence; the facts "
+            "a tool reports are unchanged.",
+            ["ordinary", "brief", "explanatory"],
+            config.reply_style,
+            lambda value: config.set("reply-style", value),
+        )
         self._switch(group, "Debug logging", "Verbose logs, including tool calls",
                      config.debug_mode, lambda a: self._app_toggle("toggle-debug", a))
 
@@ -603,6 +665,7 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             "toggle-barge-in-vad": self.app.config.barge_in_vad_enabled,
             "toggle-model-download": self.app.config.model_download_enabled,
             "toggle-auto-start": self.app.config.auto_start,
+            "toggle-start-hidden": self.app.config.start_hidden_at_login,
             "toggle-debug": self.app.config.debug_mode,
         }.get(action)
         if current is not None and bool(current) != bool(active):
@@ -617,6 +680,14 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         hidden behind a heading that does not contain the needle.
         """
         needle = (entry.get_text() or "").strip().lower()
+        if not needle:
+            # Typing, then clearing, must restore the whole window. Without
+            # this, a person who searched and then emptied the box was left
+            # with the *searched* subset still on screen - and after
+            # `show_section("<family>")` they would be left with one section,
+            # which reads as a window that has lost most of itself.
+            self._restore_all()
+            return
         for group, haystack in self._searchable:
             group_matches = not needle or needle in haystack
             row_hits = [
@@ -628,3 +699,43 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
                 # A row is visible when the group matched outright, or when it
                 # is itself the hit.
                 row.set_visible(bool(group_matches) or bool(row_hits and (row, _text) in row_hits))
+
+
+
+
+#: The settings sections, as the registry names them. Read by the declaration
+#: below so the ids cannot drift from the list that was written down once.
+_SECTION_FAMILIES = (
+    ("senses", "Senses"), ("privacy", "Privacy"), ("approvals", "Approvals"),
+    ("tool-activity", "Tool activity"), ("voice", "Voice and speech"),
+    ("models", "Models"), ("system", "System"),
+)
+
+#: Retired ids, so a stored one opens whatever absorbed it.
+_SECTION_ALIASES = {"model": "models", "tool": "tool-activity",
+                    "sense": "senses", "speech": "voice", "activity": "tool-activity"}
+
+
+def _declare_families() -> None:
+    """Keep the registry's settings ids and the window's families in step.
+
+    The seven ids the page registry promises are *families* - sections a person
+    thinks of as a section, each several groups - while the window's groups are
+    many more and change whenever a builder is edited. Registering the two lists
+    from one place is what stops the promise going stale: `senses` and `privacy`
+    matched **no group at all** for as long as the ids were declared only by
+    hand and the groups were named after their own titles ("Getting started",
+    "Privacy and network"), so `--show-page=settings:senses` - the example in
+    `pages.py`'s own docstring - returned False on a window that had fourteen
+    sense rows open in front of it.
+    """
+    from shani_chronoa import pages as page_registry
+    page_registry.register(
+        "settings",
+        list(_SECTION_FAMILIES),
+        factory=lambda app, config=None: SettingsWindow(app),
+        aliases=dict(_SECTION_ALIASES),
+    )
+
+
+_declare_families()

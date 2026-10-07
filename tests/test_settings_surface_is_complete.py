@@ -67,6 +67,8 @@ CONTROLLED = {
     "gateways",
     "barge-in-vad-enabled",    # toggle-barge-in-vad
     "auto-start",              # toggle-auto-start
+    "start-hidden-at-login",   # toggle-start-hidden
+    "reply-style",             # the ComboRow in the System group
     "notification-enabled",    # written directly; gates the notify skill
     # the actuator consent gate, written directly
     "input-control-enabled",
@@ -101,6 +103,11 @@ CONTROLLED = {
     "trash-empty-enabled",
     "appearance-control-enabled",
     "timezone-control-enabled",
+    "default-apps-enabled",
+    "print-control-enabled",
+    "hostname-control-enabled",
+    "locale-control-enabled",
+    "speed-test-enabled",
     "idle-timeout-enabled",
     "sleep-inhibit-enabled",
     # `file-edit-enabled` backs two rows (edit_file, undo_last_change), so it

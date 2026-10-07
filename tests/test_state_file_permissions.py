@@ -124,12 +124,13 @@ def _site_timer(tmp_path, monkeypatch):
     """`skills/timer.py` - writes under `XDG_STATE_HOME`."""
     from shani_chronoa.skills import timer
 
-    monkeypatch.setattr(
-        timer, "_DATA", tmp_path / "state" / "shani-chronoa" / "timers.json"
-    )
+    store = tmp_path / "state" / "shani-chronoa" / "timers.json"
+    # `_data_path()` rather than the old `_DATA` constant: the store now
+    # resolves its path per call, so this is what a caller is redirected by.
+    monkeypatch.setattr(timer, "_data_path", lambda: store)
     timer._save([{"id": "abc", "label": "pasta"}])
-    return [("timer: timers.json", timer._DATA, "file"),
-            ("timer: state dir", timer._DATA.parent, "dir")]
+    return [("timer: timers.json", store, "file"),
+            ("timer: state dir", store.parent, "dir")]
 
 
 def _site_todo_list(tmp_path, monkeypatch):

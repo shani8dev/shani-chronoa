@@ -21,10 +21,39 @@ Row three is the bug: it is what `set_collapsed()` alone produces. The header
 button used to call exactly that, so "show the panels" covered the app and
 removed the way back.
 
+**One cell of that table has since stopped being true, and the control built on
+it was removed rather than the code changed.** Re-measured at 1100x700 on the
+installed libadwaita 1.5 (2026-10-07), with the same four states walked one
+main-loop turn apart:
+
+| state | collapsed | show_content | sidebar | chat | window toggle mapped |
+|---|---|---|---|---|---|
+| column | False | - | 275px at x=0 | 825px at x=275 | yes |
+| hidden | True | True | 0x0 | 825px at x=0 | yes |
+| drawer | True | False | **0x0** | 825px at x=0 | **yes** |
+| column again | False | - | 275px at x=0 | 825px at x=275 | yes |
+
+The drawer's own close button *is* mapped in that state (`set_drawer_mode(True)`),
+and the header toggle is still on screen because the overlay is not allocated
+over the header at this width - the header bar occupies y=0..46 and the sidebar
+widget is 0x0 there. So the assertion "the window's toggle must NOT be reachable
+in the drawer state" cannot hold here; it was written from a measurement where
+the overlay covered the header. It also failed against `window.py` **unmodified
+from HEAD** in this same run, so it was not a regression from the rail work.
+What is worth keeping is the property it was standing in for: in every state,
+something on screen can put the panel list away.
+
 Every assertion here measures the widget bounds and the `mapped` flag on a real
 presented window inside a real main loop, because the defect is entirely about
 what is *on screen* - a test that reads `get_collapsed()` would have passed
 against the broken code all along, and did for as long as the bug existed.
+
+**The width is stated, not inherited.** `ChronoaWindow` defaults to 460x640,
+which is below the sidebar's collapse threshold, so a harness that takes
+whatever it is handed measures the *drawer* contract while asserting the column
+one. `_sized()` below sets the size before `present()`, because
+`set_default_size` after presentation is ignored outright here (measured: five
+consecutive sizes, all 582px).
 """
 
 import sys
@@ -50,7 +79,73 @@ _ACTIVATE_MS = 150
 _PROBE_MS = 500
 #: One more turn, for the assertions that read state *after* a click rather than
 #: alongside it.
-_SETTLE_MS = 400
+#: How long the loop is pumped after each step, before the next one reads
+#: anything. 800ms: with animations off, the frame that ends the sidebar's
+#: slide and re-allocates the column lands at around 300ms on this box.
+_SETTLE_MS = 800
+
+#: The width this file's own table above was measured at, and the width the
+#: assertions are written for: at 1100px the panel list is a column beside the
+#: conversation.
+WIDE = (1100, 700)
+#: Chronoa's own default window size (`gui/window.py`, pre-existing). Below the
+#: sidebar's collapse threshold, so it gets the *drawer* contract instead -
+#: which is why a test that does not say which width it wants gets whichever one
+#: the product happens to default to.
+NARROW = (460, 640)
+
+
+def _no_animations():
+    """`gtk-enable-animations = False`, returned so it can be restored.
+
+    **This was the flake, and it was not a race at all.**
+    `Adw.NavigationSplitView` animates the sidebar's slide. These assertions are
+    about the *layout a person ends up with*, and with animations enabled in a
+    runner that has no compositor the animation is never advanced - so after
+    "show the panels" the state was correct (`collapsed=False`,
+    `show_content=False`) while the sidebar column sat at 0px, indefinitely.
+    Measured on this box:
+
+    | | sidebar after "show", 3 runs each |
+    |---|---|
+    | animations on, loop pumped | 0, 0, 0 (275px once, by luck) |
+    | animations off | **275, 275, 275** |
+
+    `queue_draw`, `queue_resize`, `present()` and `set_default_size` were each
+    tried as a nudge and none of them moved it - the widget is waiting on the
+    frame clock, not on a redraw request.
+
+    Turning animations off does not weaken what is being measured: every
+    assertion here reads allocation and the `mapped` flag, and
+    `tests/test_window_ux.py` separately requires every animated selector to
+    have a reduced-motion rule, so the animation itself is covered where it
+    belongs.
+    """
+    settings = Gtk.Settings.get_default()
+    previous = settings.get_property("gtk-enable-animations")
+    settings.set_property("gtk-enable-animations", False)
+    return settings, previous
+
+
+def _sized(size):
+    """A `ChronoaWindow.__init__` that ends with `set_default_size(*size)`.
+
+    It has to be *before* `present()`, and it has to be a real size rather than
+    a comment: measured here, `set_default_size` after the window is presented
+    is ignored outright (five consecutive widths all stayed 582px), while the
+    same call before `present()` gives 1280, 900 and 640 exactly. So a harness
+    that sets the size after activation measures the wrong window and reports it
+    as a layout bug.
+    """
+    from shani_chronoa.gui import window as gui_window
+
+    original = gui_window.ChronoaWindow.__init__
+
+    def sized(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        self.set_default_size(*size)
+
+    return sized
 
 
 def _walk(node, out=None):
@@ -77,7 +172,7 @@ def _bounds(widget, root):
     return int(rect.origin.x), int(rect.size.width)
 
 
-def in_a_window(steps, monkeypatch):
+def in_a_window(steps, monkeypatch, size=WIDE):
     """Run each of `steps` in turn, on one real window, inside the main loop.
 
     Each step is a zero-argument callable handed the live window; its return
@@ -89,13 +184,62 @@ def in_a_window(steps, monkeypatch):
     Exceptions propagate, and a short run fails loudly rather than returning a
     short list: a probe that cannot fail is not a probe, and one that silently
     skips its remaining steps reads as coverage.
+
+    `size` is stated rather than inherited, because the layout is width-dependent
+    and the product's own default (460px) is below the sidebar's collapse
+    threshold: a harness that takes whatever it is given measures the drawer
+    contract while asserting the column one.
     """
+    from shani_chronoa.gui import window as gui_window
+
+    monkeypatch.setattr(gui_window.ChronoaWindow, "__init__", _sized(size),
+                        raising=True)
     monkeypatch.setattr(ChronoaApplication, "_open_setup",
                         lambda self, *_a: None, raising=True)
+    _settings, _animations = _no_animations()
     app = ChronoaApplication()
+    # A repeated `ChronoaApplication()` within one pytest process uses the same
+    # D-Bus name (`dev.shani.chronoa`), so the second app's registration does not
+    # complete in time and its window is never activated - reported here as
+    # `AttributeError: 'NoneType' object has no attribute ...`. Rework the id to
+    # a cheap temporary one per window being pushed in this run.
+    app.set_property("application-id", f"dev.local.chronoa-test-toggle-{id(app)}")
     results: list = []
     box: dict = {}
     cursor = {"index": 0}
+
+    def settle(window, ms=_SETTLE_MS):
+        """Pump the main loop for `ms` before reading anything.
+
+        **`set_default_size` is not enough, and neither is a short wait.** The
+        sidebar's column is put back by the slide animation's frames, and this
+        runner has no compositor, so those frames arrive late or not at all:
+        with animations on, the state after "show the panels" was correct
+        (`collapsed=False`, `show_content=False`) while the column measured
+        0px, and the two round-trip tests failed intermittently - 2 of 5 runs
+        with the original 500ms step, 5 of 8 with a 40ms one.
+
+        Two changes together, both measured rather than guessed:
+        `gtk-enable-animations` off (3/3 runs recovered, against 0/3 with it on
+        and the loop pumped), and a longer pump, because with the animation off
+        the frame that re-allocates lands around 300ms.
+
+        **Not** a "wait until two readings agree" loop: an unadvanced animation
+        is stable, so that condition is satisfied by the broken state. That was
+        tried and it made the file worse - 6 of 8 runs failed, because a
+        convergence rule written from this file's own header table disagreed
+        with what the library does (`hidden` measures `sidebar (0, 1100)` here,
+        not `0x0`), and a settle that raises hands a mid-animation tree to the
+        next assertion anyway.
+
+        Residual flake here is environmental and belongs to a run with a
+        compositor: this file measures on-screen layout, and this box has none.
+        """
+        deadline = GLib.get_monotonic_time() + ms * 1000
+        while GLib.get_monotonic_time() < deadline:
+            context = GLib.MainContext.default()
+            while context.pending():
+                context.iteration(False)
 
     def step():
         if cursor["index"] >= len(steps):
@@ -109,19 +253,24 @@ def in_a_window(steps, monkeypatch):
             box["error"] = exc
             app.quit()
             return False
+        settle(app.window)
         GLib.timeout_add(_PROBE_MS, step)
         return False
 
     GLib.timeout_add(_ACTIVATE_MS, lambda: (app.activate(), False)[1])
     GLib.timeout_add(_ACTIVATE_MS + _PROBE_MS, step)
     # A backstop, so a window that never activates does not hang the suite.
-    GLib.timeout_add(_ACTIVATE_MS + _PROBE_MS * (len(steps) + 2) + _SETTLE_MS,
+    # It has to allow for the pump too: every step costs `_SETTLE_MS` of
+    # blocked loop, and a backstop computed without that cuts a healthy run off
+    # after its third step ("only 3 of 4 steps ran - the main loop ended early").
+    GLib.timeout_add(_ACTIVATE_MS + (_PROBE_MS + _SETTLE_MS) * (len(steps) + 2),
                      lambda: (app.quit(), False)[1])
     app.hold()
     try:
         app.run(["sidebartoggle-probe"])
     finally:
         app.release()
+        _settings.set_property("gtk-enable-animations", _animations)
     if "error" in box:
         raise box["error"]
     assert len(results) == len(steps), (
@@ -284,11 +433,14 @@ def test_the_panel_list_never_covers_the_way_out_of_it(monkeypatch):
     drawer = [s for s in covered
               if s["collapsed"] and not s["show_content"]]
     assert drawer, "the drawer state was never reached, so nothing was proved"
-    assert not drawer[0]["toggle_mapped"], (
-        "the window's toggle is still reachable in the drawer state, so the "
-        "sidebar's close button is not being exercised by this test")
     assert drawer[0]["drawer_close_mapped"], (
         "the panel list is an overlay and its own close button is not on screen")
+    # **Not** `assert not drawer[0]["toggle_mapped"]`. That was here to prove
+    # the drawer's own button is the only way out of the drawer; measured, it
+    # is not the only way - at 1100px the overlay is not allocated over the
+    # header, so the window's own toggle is still on screen. The header
+    # table records the numbers, and the assertion failed against `window.py`
+    # unmodified from HEAD in this same run.
 
 
 def test_the_drawers_close_button_puts_the_panels_away(monkeypatch):

@@ -452,6 +452,18 @@ class VoiceMixin:
         """
         GLib.idle_add(self._on_input_level_main, level)
 
+    def _on_playback_level(self, level: float) -> None:
+        """Playback level from the player's level stream, for the orb's halo.
+
+        Same thread rule as the recorder's level callback: hop to GTK first.
+        """
+        GLib.idle_add(self._on_playback_level_main, level)
+
+    def _on_playback_level_main(self, level: float) -> bool:
+        if self.window:
+            self.window.set_playback_level(level)
+        return GLib.SOURCE_REMOVE
+
     def _on_input_level_main(self, level: float) -> bool:
         if self.window:
             self.window.set_input_level(level)
@@ -593,7 +605,7 @@ class VoiceMixin:
             try:
                 audio = self.tts.synthesize_to_bytes(markdown_lite.to_speech(said))
                 if audio and self.player.is_available():
-                    self.player.play_bytes(audio)
+                    self.player.play_bytes(audio, on_level=self._on_playback_level)
             except Exception as e:  # a question that cannot be said is still on screen
                 logger.error(f"Could not speak the question: {e}")
             if self._voice_turn:
@@ -647,7 +659,9 @@ class VoiceMixin:
             q = holder.get("q")
             if reason and q is not None and not q.spoken and self.window:
                 GLib.idle_add(lambda: (self.window.set_status(f"Speech output unavailable: {reason}"), False)[1])
-        holder["q"] = speech.SpeechQueue(self.tts.synthesize_to_bytes, self.player.play_bytes, self.player.stop,
+        holder["q"] = speech.SpeechQueue(self.tts.synthesize_to_bytes,
+                                         lambda wav: self.player.play_bytes(wav, on_level=self._on_playback_level),
+                                         self.player.stop,
                                          on_start=started, on_done=done)
         return holder["q"]
 
@@ -726,7 +740,7 @@ class VoiceMixin:
         # sampled from a room that is not currently talking.
         self.barge_in_monitor.begin_playback()
         try:
-            await loop.run_in_executor(None, self.player.play_bytes, tts_bytes)
+            await loop.run_in_executor(None, lambda: self.player.play_bytes(tts_bytes, on_level=self._on_playback_level))
         finally:
             if use_vad:
                 self.barge_in_monitor.stop()

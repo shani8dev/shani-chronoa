@@ -115,5 +115,16 @@ def test_listening_on_request_needs_its_consent(monkeypatch):
     monkeypatch.setattr(sounds, "listen", lambda seconds: called.append(seconds) or [sounds.Heard("Dog", 0.7)])
     monkeypatch.setattr(sounds, "problem", lambda: "")
     assert "turned off" in recording._run({"action": "listen"}) and called == [], "the microphone is not touched"
-    ChronoaConfig().set("sound-sense-enabled", "true")
+    # `heard-sound-sense-enabled`, NOT `sound-sense-enabled`. Two keys for two
+    # things, on purpose: the heard-sound sense is *ask and it listens once*,
+    # while `sound-sense-enabled` is *an automatic rule may listen for a
+    # doorbell* - a person who allows the second has not agreed to the first.
+    # This test granted the wrong one, so the granted path was never reached.
+    ChronoaConfig().set("heard-sound-sense-enabled", "true")
     assert "dog (70%)" in recording._run({"action": "listen", "seconds": 3}) and called == [3.0]
+    # ...and the neighbouring key still buys nothing, which is the whole point
+    # of keeping them apart.
+    ChronoaConfig().set("heard-sound-sense-enabled", "false")
+    ChronoaConfig().set("sound-sense-enabled", "true")
+    assert "turned off" in recording._run({"action": "listen"}), \
+        "granting the sound-event key must not open the microphone"

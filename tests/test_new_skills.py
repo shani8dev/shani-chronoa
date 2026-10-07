@@ -28,7 +28,7 @@ from shani_chronoa.skills import calculate, power_profile, timer
 def state(tmp_path, monkeypatch):
     """An isolated timer store, with systemd faked as available."""
     store = tmp_path / "state" / "timers.json"
-    monkeypatch.setattr(timer, "_DATA", store)
+    monkeypatch.setattr(timer, "_data_path", lambda: store)
     monkeypatch.setattr(timer, "_systemd_available", lambda: True)
     scheduled = []
     monkeypatch.setattr(
@@ -55,7 +55,7 @@ class TestTimersSurviveTheAssistant:
         first version discarded its exit status, so this reported a timer set
         that would never fire and listed it as pending until it expired."""
         store = tmp_path / "timers.json"
-        monkeypatch.setattr(timer, "_DATA", store)
+        monkeypatch.setattr(timer, "_data_path", lambda: store)
         monkeypatch.setattr(timer, "_systemd_available", lambda: True)
         monkeypatch.setattr(
             timer, "_schedule", lambda *a: (False, "Unit name already exists."))
@@ -91,7 +91,7 @@ class TestTimerHonesty:
         """A timer recorded as pending that will never fire is the same class of
         lie as a camera reported as disabled when it is not."""
         store = tmp_path / "timers.json"
-        monkeypatch.setattr(timer, "_DATA", store)
+        monkeypatch.setattr(timer, "_data_path", lambda: store)
         monkeypatch.setattr(timer, "_systemd_available", lambda: False)
         result = timer.set_timer(60, "x")
         assert "NOT set" in result
@@ -116,7 +116,7 @@ class TestTimerHonesty:
     def test_a_corrupt_state_file_reads_as_empty_not_a_crash(self, tmp_path, monkeypatch):
         store = tmp_path / "timers.json"
         store.write_text("{not json")
-        monkeypatch.setattr(timer, "_DATA", store)
+        monkeypatch.setattr(timer, "_data_path", lambda: store)
         assert timer._load() == []
         assert timer.list_timers() == "No timers are pending."
 
@@ -370,14 +370,16 @@ class TestSystemdProbe:
 class TestTheTimerStoreCannotEscapeTheTestRun:
     """Guards the autouse `_isolate_timer_store` fixture in `conftest.py`.
 
-    Every other timer test in this file patches `timer._DATA` through the
-    `state` fixture, which is exactly why all of them were clean while a full
-    suite run still wrote fixture data into a real user's state directory.
-    These two deliberately do *not* patch it.
+    Every other timer test in this file patches the store through the `state`
+    fixture, which is exactly why all of them were clean while a full suite run
+    still wrote fixture data into a real user's state directory. These two
+    deliberately do *not* patch it.
 
-    `timer._DATA` is resolved at **import** time from `$XDG_STATE_HOME`, so the
-    per-test `HOME` isolation cannot reach it, and no fixture set
-    `XDG_STATE_HOME` at all. Observed leak: a real
+    The store used to be a module-level `_DATA`, resolved at **import** time
+    from `$XDG_STATE_HOME`, so the per-test `HOME` isolation could not reach it
+    and no fixture set `XDG_STATE_HOME` at all. It now resolves per call through
+    `_data_path()`, and the fixture redirects that function. Observed leak that
+    motivated all of it: a real
     `~/.local/state/shani-chronoa/timers.json` holding fixture data, including
     the `'; touch .../pwned; '` label from the shell-injection test in
     `test_skills.py`. Asserting against `Path.home()` here would be vacuous —
@@ -388,8 +390,9 @@ class TestTheTimerStoreCannotEscapeTheTestRun:
 
     def test_the_store_points_into_pytests_temp_dir(self, tmp_path_factory):
         base = Path(str(tmp_path_factory.getbasetemp())).resolve()
-        assert Path(timer._DATA).resolve().is_relative_to(base), (
-            f"timer._DATA is {timer._DATA}, which is outside pytest's base temp "
+        store = timer._data_path().resolve()
+        assert store.is_relative_to(base), (
+            f"the timer store is {store}, which is outside pytest's base temp "
             f"dir {base}; the _isolate_timer_store fixture is not being applied "
             f"and a test can write into the real ~/.local/state")
 
@@ -401,7 +404,7 @@ class TestTheTimerStoreCannotEscapeTheTestRun:
             timer, "_schedule", lambda ident, secs, label="timer": (True, ""))
         monkeypatch.setattr(timer, "_unschedule", lambda ident: None)
 
-        store = Path(timer._DATA)
+        store = timer._data_path()
         assert not store.exists(), "the isolated store should start empty"
         timer.set_timer(600, "hermeticity-probe")
         assert store.exists(), (

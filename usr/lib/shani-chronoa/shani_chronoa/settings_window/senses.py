@@ -329,6 +329,11 @@ class SensesPage:
         rows is a list that is wrong the moment a sense is added, and wrong
         silently - which is precisely what the previous version was.
         """
+        # The section id `--show-page=settings:senses` names. Set before the
+        # builders add groups, so every group they add carries it. Without it
+        # this builder's fourteen groups claimed no family at all, and the id
+        # resolved to nothing.
+        self._section_family = "senses"
         try:
             registry = discover_senses()
         except Exception as exc:  # noqa: BLE001 - one broken sense must not blank the window

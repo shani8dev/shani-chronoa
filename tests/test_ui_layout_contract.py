@@ -92,6 +92,60 @@ def test_there_are_surfaces_to_check(built):
     assert len(built) >= 15, f"only {len(built)} surfaces were measured"
 
 
+def test_every_surface_icon_exists_on_this_machine(built):
+    """A name the installed theme does not have renders as a blank gap the size
+    of an icon - and no assertion on the string can see that.
+
+    Existence is the weaker half of the problem and the only half that can be
+    checked without looking at pixels, so this is deliberately not the whole
+    answer. `phone-symbolic` **existed** on this machine and still rendered as
+    an empty rounded rectangle beside its title, which reads as a missing icon
+    rather than as a phone; that half is judged from a rendered sidebar, and
+    this file does not pretend a name check can stand in for it.
+
+    Two sources, because a surface's own `ICON` is not where the misses were.
+    The eight names this caught were four `ICON` attributes and four *inline*
+    names - a toolbar button's icon, a status icon looked up in a dict, a
+    category map - so a check that read only `ICON` would have passed with four
+    blanks still on screen. `diff.py` is the sharpest case: its own comment
+    recorded that `diff-symbolic` was not shipped and fixed `ICON` accordingly,
+    while a status lookup three hundred lines down still asked for it.
+    """
+    from gi.repository import Gdk  # noqa: E402
+    import shani_chronoa.gui as gui  # noqa: E402
+
+    display = Gdk.Display.get_default()
+    if display is None:
+        # Skipping on a machine with a live session is the failure mode
+        # documented in AGENTS.md: this returns None until GTK is initialised,
+        # so a guard that skipped on None skipped everywhere and passed.
+        pytest.skip("no display, so the installed icon theme cannot be asked")
+    theme = Gtk.IconTheme.get_for_display(display)
+
+    missing = sorted(
+        f"{name} -> ICON={module.ICON!r}"
+        for name, (module, _widget) in built.items()
+        if not theme.has_icon(module.ICON)
+    )
+
+    # Every `-symbolic` literal in the GUI package. 56 names today, all of which
+    # resolve, so this has no false positives to tolerate; a future string that
+    # ends in `-symbolic` without being an icon would be reported here, which is
+    # the cheaper mistake to make.
+    inline = sorted({
+        m
+        for source in Path(gui.__file__).parent.rglob("*.py")
+        for m in re.findall(r'["\']([a-z0-9][a-z0-9-]*-symbolic)["\']',
+                            source.read_text(encoding="utf-8"))
+        if not theme.has_icon(m)
+    })
+    missing.extend(f"{n} (inline literal)" for n in inline)
+
+    assert not missing, (
+        "icons this theme does not have, which render as a blank gap: "
+        + ", ".join(missing))
+
+
 @pytest.mark.parametrize("name", sorted(surfaces.SURFACE_IDS))
 def test_every_surface_can_scroll(name, built):
     """A panel taller than the window with no scroller has an unreachable bottom.
@@ -131,8 +185,16 @@ def test_long_labels_wrap_or_ellipsise(name, built):
             continue
         # A group title inside a preferences group is a heading, not a sentence,
         # and is allowed to be long only if the group clips it.
-        if any(isinstance(a, Gtk.PreferencesGroup) for a in _walk(widget)):
-            pass
+        #
+        # Two bugs on these lines, both invisible while the first one raised.
+        # `PreferencesGroup` is `Adw`, not `Gtk`, so this raised
+        # `AttributeError` on the first long label and every surface in this
+        # parametrization errored instead of reporting. And `pass` fell through
+        # to `offenders.append(...)`, so the exemption did nothing even once the
+        # name resolved - a check that cannot fail, in the file whose whole
+        # subject is checks that cannot fail.
+        if any(isinstance(a, Adw.PreferencesGroup) for a in _walk(widget)):
+            continue
         offenders.append(text[:44])
     assert not offenders, f"{name}: {offenders}"
 

@@ -97,7 +97,7 @@ from shani_chronoa.triggers.common import SIGNAL_OK  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Devices"
-ICON = "phone-symbolic"
+ICON = "network-wireless-symbolic"
 SECTION = "This machine"
 SUBTITLE = ("The phone and the devices paired with this machine, through the "
             "desktop's own phone link.")

@@ -202,6 +202,7 @@ def _run(arguments: dict) -> str:
     except PathProblem as exc:
         return str(exc)
     files.refuse_catalogue(dest, "unpack into")
+    files.refuse_sensitive(dest, "unpack into")
 
     overwrite = bool(arguments.get("overwrite"))
 

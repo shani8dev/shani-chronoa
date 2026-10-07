@@ -83,6 +83,35 @@ def _consume(entry: dict) -> bool:
     return False
 
 
+def recent_changes() -> "list[tuple[Path, str, str]]":
+    """The ring as `(path, before, after)`, newest last - a *preview* feed.
+
+    Exists because the Diff panel needs the same two texts this module already
+    stores, and the alternative was a second, weaker undo log that would drift
+    from this one. `after` is the file as it is on disk *now*, read fresh: a
+    ring entry with no file behind it (deleted, or moved) is skipped rather
+    than guessed at, because a preview that invents the "after" side is worse
+    than no preview.
+
+    Binary entries are skipped: they decode to base64 here, and a diff of two
+    base64 strings tells a person nothing.
+    """
+    out: "list[tuple[Path, str, str]]" = []
+    for entry in _load():
+        path = Path(str(entry.get("path") or ""))
+        before = entry.get("content")
+        if not isinstance(before, str) or not str(path):
+            continue
+        try:
+            after = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if after == before:
+            continue                       # undone already, or never changed
+        out.append((path, before, after))
+    return out
+
+
 def record_preimage(path: Path, content: bytes) -> str:
     """Store `content` as the pre-image of `path`. Returns a note for the user.
 
@@ -229,6 +258,7 @@ def _run(arguments: dict) -> str:
         return str(exc)
     try:
         files.refuse_catalogue(target, "restore")
+        files.refuse_sensitive(target, "restore")
     except files.PathProblem as exc:
         return str(exc)
 

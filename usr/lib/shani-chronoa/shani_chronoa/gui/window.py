@@ -33,6 +33,8 @@ from .asking import AskingMixin
 from .attaching import AttachingMixin
 from .conversations_menu import ConversationsMenuMixin
 from .sidebar import SidebarBreakpoint, SidebarPage
+from . import rail as rail_module
+from . import task_card as task_card
 from .organs import OrganPanel, OrganStrip, ORGAN_IDLE_CSS
 
 logger = logging.getLogger(__name__)
@@ -359,7 +361,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._surface_pages: dict = {}
         self._toasts = None
         self._setup_window()
+        self._holding = False
         self._setup_ui()
+        self.connect("close-request", lambda *_a: self._on_close_request())
         try:
             self._apply_organ_css()
         except Exception:                               # noqa: BLE001
@@ -499,7 +503,24 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._chat_page = Adw.NavigationPage(
             child=self._content_view, title="Conversation")
         self._split.set_content(self._chat_page)
-        SidebarBreakpoint.apply(self._split)
+        # Registered with the window, not merely constructed: an `Adw.Breakpoint`
+        # that no window knows about is never evaluated. Verified by rendering
+        # at 600px - before this, neither the sidebar nor the rail collapsed and
+        # the conversation was left in a 150px column.
+        self._sidebar_breakpoint = SidebarBreakpoint.apply(self._split)
+        self.add_breakpoint(self._sidebar_breakpoint)
+        #: Whether `_apply_narrow_layout` last found this window narrow. `None`
+        #: until it has run once, so the first evaluation is always a
+        #: transition - `False == False` would otherwise skip the very
+        #: correction a window opened narrow needs.
+        self._narrow_applied = None
+        # The width-driven half of the same behaviour; see
+        # `_apply_narrow_layout` for why the breakpoint alone was not enough.
+        self.connect("notify::default-width", lambda *_a: self._apply_narrow_layout())
+        self.connect("notify::maximum-width", lambda *_a: self._apply_narrow_layout())
+        # ...and once when the window is first shown, because a window opened
+        # already narrow emits no width change - it starts at that width.
+        self.connect("map", lambda *_a: GLib.idle_add(self._apply_narrow_layout))
         # A toolbar view with the header bar on top of the column, all of it
         # under a toast overlay - so a notice is a `Adw.Toast` that floats and
         # disappears rather than a line of text that permanently steals the room
@@ -640,7 +661,35 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # top-down), so the bar goes into the holder now. An `Adw.Bin` exists
         # exactly for this: one slot, fillable later, no re-parenting.
         header_bar_holder.set_child(header_bar)
-        self._toasts.set_child(main_box)
+
+        # The right rail: what it is doing, what it changed that can be taken
+        # back, and how it is currently armed. The conversation is a
+        # transcript - it grows downward and the useful part scrolls off - so
+        # these three answers had nowhere to live. `main_box` keeps every
+        # child it already had; the rail is a sibling, never a parent of it,
+        # so nothing in the conversation's own layout moved.
+        #
+        # The rail is built *after* the column is complete, because it reads
+        # state the column's own widgets report (the orb state, the live tool)
+        # and pointing it at half-built widgets would show "Idle" forever.
+        self._rail = None                      # built at the end of this method
+        self._rail_row = None
+        self._rail_toggle = Gtk.ToggleButton()
+        self._rail_toggle.set_icon_name("view-continuous-symbolic")
+        self._rail_toggle.add_css_class("flat")
+        self._rail_toggle.set_valign(Gtk.Align.CENTER)
+        self._rail_toggle.set_tooltip_text("Show or hide the Now rail (F10)")
+        self._rail_toggle.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Show or hide the Now rail"])
+        self._rail_toggle.set_active(True)
+        self._rail_toggle.connect("toggled", self._on_rail_toggled)
+        header_bar.pack_end(self._rail_toggle)
+
+        main_box.set_hexpand(True)
+        self._chat_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._chat_row.set_vexpand(True)
+        self._chat_row.append(main_box)
+        self._toasts.set_child(self._chat_row)
 
         self._orb = ChronoaOrbWidget()
         self._orb.set_halign(Gtk.Align.CENTER)
@@ -746,6 +795,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
         self._input_entry.connect("activate", self._on_input_activate)
+        # The command menu: cline has a `SlashCommandMenu`, kimi-cli a
+        # decorator registry, and here a list of names that each run something
+        # real. `_sync_command_menu` decides when it is up - only for a leading
+        # slash with no space yet.
+        self._input_entry.connect("changed", lambda _e: self._sync_command_menu())
+        self._command_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._command_menu = Gtk.Popover()
+        self._command_menu.set_child(self._command_list)
+        self._command_menu.set_position(Gtk.PositionType.BOTTOM)
+        GLib.idle_add(lambda: (self._command_menu.set_parent(self._input_entry), False)[1])
         # Typing must not imply "Enter submits" to everyone: it rules out
         # on-screen keyboards whose return key inserts a newline, and for a
         # motor-impaired user it is a gesture to get wrong repeatedly. The
@@ -800,6 +859,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # the camera is on cannot answer "is it on now", and an empty strip looks
         # exactly like a broken one.
         self._organ_strip = OrganStrip(self._config)
+        # Left-aligned in the column, which the render shows as 86px off the
+        # centre of the mode chips below it. **Two attempts to centre it are
+        # recorded here so they are not repeated, both measured to do nothing.**
+        # `set_halign(Gtk.Align.CENTER)` on the strip sets the property and
+        # changes no pixel: a vertical `Gtk.Box` hands its child the full
+        # cross-axis width whatever the child's alignment is (measured: the
+        # strip was allocated 680px of a 680px box with `halign=CENTER`).
+        # Wrapping it in a horizontal row with two expanding spacers is the
+        # usual trick and also did nothing, because there is no slack to
+        # distribute: the strip *fills* its container. The reason is a number
+        # nobody had looked at - `strip.measure(HORIZONTAL, -1)` reports a
+        # natural width of **834px** against a 680px chat column, so the flow
+        # box is always over-full and always takes the whole width. `Gtk.Center`
+        # and `Gtk.Alignment` are both gone in GTK4 and `Gtk.FlowBox` has no
+        # `justify`, so the next thing to measure is where those 834px come
+        # from: the `.organ-strip > flowboxchild { padding: 0 }` rule is worth
+        # 350px of it and its natural width suggests it is not matching.
         main_box.append(self._organ_strip)
         # The mode strip sits between the organ strip and the composer:
         # what Chronoa *is* (its modes) rather than what it is *doing*
@@ -812,6 +888,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # widgets that can disagree.
         self._mode_strip = _ModeStrip(self._app, self._config)
         main_box.append(self._mode_strip)
+
+        # The task card, above the composer: OpenHands and cline both keep the
+        # plan in the conversation rather than behind a panel, because a plan
+        # you have to go and look for is not a plan you are following. Hidden
+        # entirely when nothing is outstanding - an empty card is a permanent
+        # tax on attention for no information.
+        self._task_card = task_card.TaskCard()
+        main_box.append(self._task_card)
         main_box.append(input_row)
         # ...and re-read whenever the window comes back, because the Settings
         # window flips these same settings through the same actions. A strip
@@ -819,9 +903,82 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # mode that is on, which is the one thing an indicator must not do.
         self.connect("notify::is-active", self._on_window_activated)
 
+        # The rail, last, because it reads the column it sits beside: the state
+        # word comes from `_state_label` and the tool name from
+        # `_detail_label`. Built earlier it rendered "Idle" while the window
+        # said "Ready" - not because either was wrong, but because the label it
+        # reads did not exist yet. A rail that answers a question from
+        # half-built widgets is worse than one built a moment later.
+        self._rail = rail_module.NowRail(get_state=self._rail_state,
+                                         get_tool=self._rail_tool,
+                                         on_open=self._show_surface,
+                                         get_context=self._rail_context)
+        self._chat_row.append(self._rail)
+        # **Hidden, not shrunk, on a narrow window.** At a fraction of its width
+        # the rail wraps every label into two and three lines and reads as a
+        # column of broken words; the conversation is what the window is for.
+        # Same reasoning as `SidebarBreakpoint` on the left, and the toggle stays
+        # available either way, so nothing becomes unreachable.
+        self._rail_breakpoint = rail_module.RailBreakpoint.apply(self._rail, 1040)
+        self.add_breakpoint(self._rail_breakpoint)
+        # Two seconds, because that is the smallest number that makes a countdown
+        # read as a countdown rather than as a stuck label.
+        self._rail_ticket = GLib.timeout_add_seconds(2, self._on_rail_tick)
+
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
+
+    # -- narrow-window behaviour ------------------------------------------
+
+    #: Below this width the sidebar cannot stay a column, and becomes a drawer
+    #: behind the ☰ button instead.
+    SIDEBAR_COLLAPSE_WIDTH = 720
+
+    def _apply_narrow_layout(self) -> None:
+        """Collapse the sidebar by hand when the window is narrow.
+
+        **The breakpoint alone does not do it, and this is the measurement.**
+        With `SidebarBreakpoint` registered and firing, `split.collapsed` was
+        still `False` at 600px, while `split.set_collapsed(True)` called after
+        allocation returned `True` every time. The setter therefore runs before
+        the split view finishes setting itself up, and the split view then
+        overwrites it - and a breakpoint only re-applies when its *condition*
+        changes, so a window that never changes width is never corrected again.
+
+        So the condition is evaluated here as well, on every width change. It
+        goes through `_set_panels_visible`, not `set_collapsed` alone, because
+        collapsing *and* leaving the drawer open covers the whole window with
+        the panel list - measured at 640px: the render showed the panel list
+        filling the screen with the conversation nowhere in it, which is the
+        same failure `_set_panels_visible`'s own docstring records for F9. The
+        pair (`collapsed` for the layout, `show_content` for which pane is on
+        top) is the contract, and one half of it is a bug.
+
+        Widening back does not re-open the panels if the person had closed them:
+        it only stops the window from *forcing* them shut.
+
+        **Which is why this runs on a transition and not on every notification.**
+        The first version re-evaluated the condition every time the width
+        changed, and at a wide width its "widening" branch was
+        `if collapsed: set_collapsed(False)` - so *any* late width notification
+        re-opened panels the person had just closed with the toggle. Measured as
+        `tests/test_sidebar_toggle.py`'s two round-trip tests failing
+        intermittently (2 of 5 runs with this branch, 0 of 5 without it), which
+        is the shape of a race: the notification lands after the press about
+        half the time.
+        """
+        width = self.get_width()
+        if width <= 0:
+            return
+        narrow = width <= self.SIDEBAR_COLLAPSE_WIDTH
+        if narrow != self._narrow_applied:
+            self._narrow_applied = narrow
+            if narrow:
+                self._set_panels_visible(False)
+            elif self._split.get_collapsed():
+                self._split.set_collapsed(False)
+        self._sync_sidebar_toggle()
 
     def _on_window_activated(self, *_args) -> None:
         """The window came forward: re-read the modes from their owners.
@@ -833,11 +990,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         if self._mode_strip is not None:
             self._mode_strip.refresh()
+        if getattr(self, "_task_card", None) is not None:
+            self._task_card.refresh()
 
     def set_state(self, state: AssistantState) -> None:
         """Set the assistant state. The single entry point for it."""
         self._state = state
         self._sync_from_state()
+        # The rail answers "what is it doing" from the state line, so it is
+        # refreshed here as well as on its tick: a state change is the moment
+        # the rail's answer must not lag behind the orb.
+        if getattr(self, "_rail", None) is not None:
+            self._on_rail_tick()
         for observer in getattr(self, "state_observers", ()):
             try:
                 observer(state)
@@ -854,6 +1018,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         the orb and the status line to show different things.
         """
         self._orb.set_state(self._state)
+        # The halo pulses only while the mic is hot or the reply is being heard;
+        # the last level must not freeze on a thinking/idle halo.
+        if self._state not in (AssistantState.LISTENING, AssistantState.SPEAKING, AssistantState.INTERRUPTING):
+            self._orb.set_level(0.0)
         # `set_can_answer` wins over the state machine's own label, because "no
         # model" is true of every state at once while "Ready" is only true of
         # one - and on a machine with nothing installed the label was showing the
@@ -889,6 +1057,103 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         if self._state is AssistantState.LISTENING:
             self._orb.set_level(level)
+
+    def set_playback_level(self, level: float) -> None:
+        """Feed the playback level to the orb (sayri's orb-follows-playback).
+
+        Ignored unless speaking, so a level that arrives after the turn ended
+        cannot make the halo pulse at nothing.
+        """
+        if self._state is AssistantState.SPEAKING:
+            self._orb.set_level(level)
+
+    def _on_close_request(self) -> bool:
+        """A close with the wake word on hides, rather than quitting.
+
+        The wake word is the only way a user can reach Chronoa without this
+        window; quitting it over "close" would silence the hands-free path
+        the user explicitly turned on. With the wake word off there is no
+        hands-free path to keep alive, so the close proceeds normally and
+        quits the app. Hold/release keeps the application alive while
+        hidden; a real quit still ends it.
+        """
+        try:
+            enabled = self._config.wake_word_enabled
+        except Exception:            # noqa: BLE001 - never leave the user unable to close
+            enabled = False
+        if not enabled:
+            return False
+        self._app.hold()
+        self._holding = True
+        self.set_visible(False)
+        return True
+
+    def show(self) -> None:
+        """Bring the window back, releasing the hold the close-request took."""
+        self.present()
+        if getattr(self, "_holding", False):
+            self._app.release()
+            self._holding = False
+        release_hidden = getattr(self._app, "_release_hidden_hold", None)
+        if callable(release_hidden):
+            release_hidden()
+
+    # -- the right rail ----------------------------------------------------
+
+    def _rail_state(self) -> str:
+        """The live state word, read from the state line itself.
+
+        `_state_label` is the single place "what is Chronoa doing" is spelled
+        out - `set_state` derives it, and `set_can_answer` may override it for
+        the no-model case. Reading the widget rather than keeping a third copy
+        is the point: a rail that tracked state separately would be a second
+        answer to that question, free to disagree with the orb and the line
+        under it, which is the failure this window keeps finding in smaller
+        forms.
+        """
+        label = getattr(self, "_state_label", None)
+        return (label.get_label() if label is not None else "") or "Idle"
+
+    def _rail_context(self):
+        """The last request's context report, straight from the assistant.
+
+        Through the application object, because that is where the assistant
+        lives: `window.assistant` is the *window's* placeholder text helper in
+        some builds, and a meter wired to the wrong `assistant` reads zero
+        forever - which looks exactly like an assistant that uses no context.
+        """
+        app = getattr(self, "_app", None)
+        assistant = getattr(app, "assistant", None)
+        report = getattr(assistant, "context_report", None)
+        return report() if callable(report) else None
+
+    def _rail_tool(self) -> str:
+        """The tool currently running, as the status line reports it.
+
+        Read out of the detail label rather than kept separately: the detail
+        line is what a person is already looking at for this, and a second
+        record would drift.
+        """
+        label = getattr(self, "_detail_label", None)
+        text = label.get_label() if label is not None else ""
+        return text.strip()
+
+    def _on_rail_toggled(self, button: Gtk.ToggleButton) -> None:
+        if self._rail is not None:
+            self._rail.set_visible(button.get_active())
+
+    def _on_rail_tick(self) -> bool:
+        """Refresh on a two-second tick, so a countdown is a countdown."""
+        if self._rail is not None:
+            try:
+                self._rail.refresh()
+            except Exception as exc:  # noqa: BLE001 - the tick must never die
+                logger.warning("The Now rail failed to refresh: %s", exc)
+        return True
+
+    def toggle_rail(self) -> None:
+        if self._rail_toggle is not None:
+            self._rail_toggle.set_active(not self._rail_toggle.get_active())
 
     def set_orb_state(self, state: str) -> None:
         """Compatibility shim for the existing `app.py` call sites.
@@ -1403,6 +1668,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """Show a skill's call, its arguments and what it returned."""
         self._transcript.add_tool_call(name, arguments, result, ok)
 
+    def add_notice_row(self, sentence: str, kind: str = "compaction") -> None:
+        """A housekeeping note in the transcript - see the transcript's own
+        method for why these exist rather than being only a log line."""
+        self._transcript.add_notice_row(sentence, kind)
+
     def add_user_turn(self, text: str) -> None:
         """Show what the user said, so a spoken turn is visible too."""
         self._transcript.add_user_turn(text)
@@ -1430,6 +1700,92 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if self._regenerate is not None:
             self._regenerate()
 
+    def _run_command(self, text: str) -> bool:
+        """Run a `/command` if the text is one. True when it was handled.
+
+        The model is not consulted for these: on a small local model, asking it
+        to translate "clear this conversation" into the right tool call is a
+        coin flip. Everything still goes through the same permission layers -
+        `/undo` runs the real skill, so the same consent key applies.
+        """
+        from shani_chronoa.gui import commands as slash
+        command, argument = slash.lookup(text)
+        if command is None:
+            return False
+        try:
+            said = command.run(self, argument)
+        except Exception as exc:  # noqa: BLE001 - a command must not take the window
+            logger.error(f"Command /{command.name} failed: {exc}", exc_info=True)
+            self.set_status(f"/{command.name} did not work: {exc}")
+            return True
+        if said:
+            self.set_response(said)
+        else:
+            self.set_status(f"/{command.name} - {command.summary}")
+        if self._command_menu is not None:
+            self._command_menu.popdown()
+        return True
+
+    def _sync_command_menu(self) -> None:
+        """Show the command list while the field starts with a slash.
+
+        Only on a *leading* slash, and only while it is still just a slash or a
+        name: the menu is a discovery aid, and leaving it up while somebody
+        types an ordinary sentence would be a popover arguing with them.
+        """
+        text = self._input_entry.get_text()
+        showing = text.startswith("/") and " " not in text
+        if showing:
+            prefix = text[1:].lower()
+            self._fill_command_menu(prefix)
+        if self._command_menu is not None:
+            if showing and not self._command_menu.get_visible():
+                self._command_menu.popup()
+            elif not showing and self._command_menu.get_visible():
+                self._command_menu.popdown()
+
+    def _fill_command_menu(self, prefix: str) -> None:
+        from shani_chronoa.gui import commands as slash
+        child = self._command_list.get_first_child()
+        while child is not None:
+            following = child.get_next_sibling()
+            self._command_list.remove(child)
+            child = following
+        for name, command in sorted(slash.commands().items()):
+            if prefix and not name.startswith(prefix):
+                continue
+            row = Gtk.Button()
+            row.add_css_class("flat")
+            row.set_size_request(-1, -1)
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            label = Gtk.Label(label=f"/{name}")
+            box.append(label)
+            summary = Gtk.Label(label=command.summary)
+            summary.add_css_class("dim-label")
+            summary.set_xalign(1.0)
+            summary.set_hexpand(True)
+            # Right padding, because a summary that reaches the popover's edge
+            # is a sentence that looks cut in half. Found by rendering the open
+            # menu and looking at it: "/diff  Show what Chronoa changed, file by
+            # file" ran straight into the rounded corner, with nothing between
+            # the last letter and the border. Ten pixels is enough to read as
+            # padding and small enough not to widen the menu noticeably.
+            summary.set_margin_end(10)
+            box.append(summary)
+            row.set_child(box)
+            row.update_property([Gtk.AccessibleProperty.LABEL],
+                                [f"/{name}: {command.summary}"])
+            row.connect("clicked", lambda _b, n=name: self._complete_command(n))
+            self._command_list.append(row)
+
+    def _complete_command(self, name: str) -> None:
+        """Put `/name ` in the field and hand focus back to typing."""
+        self._input_entry.set_text(f"/{name} ")
+        self._input_entry.set_position(-1)
+        self._input_entry.grab_focus()
+        if self._command_menu is not None:
+            self._command_menu.popdown()
+
     def _on_input_activate(self, entry: Gtk.Entry) -> None:
         self._submit_input()
 
@@ -1448,6 +1804,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if not text:
             return
         self._input_entry.set_text("")
+        if self._run_command(text):
+            return
         if self._pending_question is not None:
             # Answering out loud or typing both land here, and both resolve the
             # question rather than opening a new turn - the turn is still blocked
@@ -1474,9 +1832,39 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def get_input_text(self) -> str:
         return self._input_entry.get_text()
 
+    def set_input_text(self, text: str) -> None:
+        """Put text in the composer without sending it.
+
+        Separate from `submit_text` because "show this in the box" and "send
+        this" are different acts, and a caller wanting the first used to have
+        neither: it could only reach `_input_entry` directly, which is how the
+        `?` argument of `/help` ended up nowhere.
+        """
+        self._input_entry.set_text(text or "")
+        self._input_entry.grab_focus()
+
     def clear_input(self) -> None:
         self._input_entry.set_text("")
 
     __gsignals__ = {
         "user-input": (GObject.SignalFlags.RUN_FIRST, str, (str,)),
     }
+
+
+# The main window's addressable pages, declared at import time so that
+# `shani-chronoa --show-page=main:quick-ask`, a notification, or a keybinding
+# can name one. `show_page` above has always understood these ids; the ids
+# themselves were never registered, so `pages.show("main:conversation")`
+# answered "no window called 'main'" - and the *main window* was the one
+# destination every caller is most likely to name.
+def _register_main_pages() -> None:
+    from shani_chronoa import pages as page_registry
+    page_registry.register(
+        "main",
+        [("conversation", "Conversation"), ("quick-ask", "Quick ask"),
+         ("conversations", "Saved conversations"), ("panels", "Panels")],
+        factory=lambda app, config=None: ChronoaWindow(app),
+    )
+
+
+_register_main_pages()

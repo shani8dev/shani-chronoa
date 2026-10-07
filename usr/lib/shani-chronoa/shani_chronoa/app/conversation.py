@@ -16,6 +16,7 @@ from gi.repository import Gio, GLib  # type: ignore
 from shani_chronoa import planmode, conversation_store, user_prompts, speech
 from shani_chronoa.assistant import Assistant
 from shani_chronoa.gui import AssistantState, ChronoaWindow
+from shani_chronoa.senses import memory
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,13 @@ class ConversationMixin:
             self.assistant.switch_session(conversation_store.active_path(conversation_store.session_dir()))
         if self.window:
             self.window.set_response("")
+            # The composer too, not just the transcript. Measured: with a
+            # half-typed question in the box, Ctrl+N cleared the transcript and
+            # left the text sitting in the composer - so the next Enter sent a
+            # question about the *previous* conversation into the new one, and
+            # nothing on screen said so. `clear_input()` existed for this and had
+            # no caller.
+            self.window.clear_input()
             self.window.set_status("New conversation")
 
     def _open_conversation(self, ref: str) -> None:
@@ -75,7 +83,13 @@ class ConversationMixin:
         self.assistant.switch_session(want)
         if self.window:
             self.window.show_conversation(self.assistant.visible_turns())
-            self.window.set_status("")
+            # A transcript that ends mid-turn is repaired for the model on every
+            # request (`build_messages` -> `history_repair.clean_history`), so
+            # without saying so here the person sees their own unanswered
+            # question and no reason for it. Cleared on the next turn, since the
+            # interruption happened once and is now history.
+            self.window.set_status(
+                getattr(self.assistant, "restored_interruption", "") or "")
 
     def _on_user_input(self, window: ChronoaWindow, text: str) -> None:
         """Handle typed user input: a /command is expanded and @mentions filled in first (user_prompts.py)."""
@@ -133,7 +147,8 @@ class ConversationMixin:
         # holding one would mean holding a second copy of a conversation that
         # the real one is still changing.
         spare = Assistant(llm, percept_store=assistant.percept_store,
-                          context_builder=assistant.context_builder, session_path=None)
+                          context_builder=assistant.context_builder, session_path=None,
+                          config=getattr(assistant, "config", None))
         return self._async.run(spare.handle(text), lambda result: done(
             result if isinstance(result, Exception) else str(result)))
 
@@ -191,8 +206,14 @@ class ConversationMixin:
         self._voice_turn = False
         self._submit(question)
 
-    def _submit(self, text: str) -> None:
-        """Send text through the assistant's tool-calling pipeline."""
+    def _submit(self, text: str, channel: str = "") -> None:
+        """Send text through the assistant's tool-calling pipeline.
+
+        `channel` says which surface asked. The typed window passes the
+        default; an inbound gateway message passes its registered name, which
+        is then recorded on that turn's captured facts so a private fact a
+        channel heard never leaks into another channel's recall.
+        """
         logger.info(f"User input: {text}")
 
         if not self.assistant or not self.llm or not self.llm.is_available():
@@ -213,10 +234,10 @@ class ConversationMixin:
         self._turn_speech = self._new_speech_queue()
         self._turn_buffer = speech.SentenceBuffer()
         self._turn_streamed = []
+        self._turn_channel = channel
         self._turn_future = self._async.run(
-            self.assistant.handle(text, on_tool_call=self._on_tool_call,
-                                  on_text=self._on_reply_text,
-                                  on_tool_result=self._on_tool_result),
+            self.assistant.handle(text, sink=self.event_sink(),
+                                  channel=channel),
             self._on_response_ready)
 
     def _maybe_title(self) -> None:
@@ -239,6 +260,69 @@ class ConversationMixin:
                 conversation_store.set_generated_title(path.parent, path.stem, result)
             return GLib.SOURCE_REMOVE
         self._async.run(llm.suggest_title(asked, answered), done)
+
+    def _capture_memory_from_turn(self, response: str) -> None:
+        """Attempt automatic memory capture from the completed turn.
+
+        Combines the user's question and the assistant's reply into one text
+        block, because a fact often spans both ("I work at X" in the reply
+        answers "where do you work" in the question). The memory sense's
+        `remember_from_turn` handles gating (interval, trivial, self-ref,
+        provenance, covered) and returns the reason when nothing was kept.
+        """
+        if not self.assistant:
+            return
+        turns = self.assistant.visible_turns()
+        asked = next((text for role, text in turns if role == "user"), "")
+        if not asked:
+            return
+        # The assistant's reply is the text we just produced. Combining both
+        # captures facts that only appear in the answer to a question the user
+        # asked. If there's no assistant reply yet (error path), skip.
+        combined = f"User: {asked}\nAssistant: {response}"
+        _, reason = memory.remember_from_turn(
+            combined, force=False, channel=getattr(self, "_turn_channel", ""))
+        if reason and reason != "":
+            logger.debug("Memory capture skipped: %s", reason)
+
+    def event_sink(self):
+        """The live event sink for the current turn.
+
+        It wires the same handlers the legacy `on_tool_call`/`on_tool_result`/
+        `on_text` slots used to be, so the window behaves exactly as it did
+        before - but the starting point for a parallel consumer is that a sink
+        is constructed here, once, not a fourth verb added to `handle()`'s
+        signature. An embedder subclassing the bridge overrides this to add a
+        second subscriber.
+        """
+        from shani_chronoa import events
+        return events.EventSink(
+            on_tool_start=self._on_tool_call,
+            on_tool_finish=self._on_tool_result,
+            on_text=self._on_reply_text,
+            on_compaction=self._on_compaction,
+            on_cloud_turn=self._on_cloud_turn,
+        )
+
+    def _on_compaction(self, sentence: str) -> None:
+        """A context notice in the transcript, where the conversation is.
+
+        cline renders this as a `CompactionRow` in the message list and
+        OpenHands emits a `CondensationEvent`. We compressed silently for the
+        life of the app, which is indistinguishable from having forgotten.
+        """
+        GLib.idle_add(self._add_notice_row, sentence, "compaction")
+
+    def _on_cloud_turn(self, provider: str) -> None:
+        """The one thing in this app that can send a sentence off the machine."""
+        GLib.idle_add(self._add_notice_row,
+                      f"This turn was answered by {provider}, not on this "
+                      f"machine.", "cloud")
+
+    def _add_notice_row(self, sentence: str, kind: str) -> bool:
+        if self.window is not None:
+            self.window.add_notice_row(sentence, kind)
+        return GLib.SOURCE_REMOVE
 
     def _on_tool_call(self, name: str, _arguments: dict) -> None:
         """Assistant callback - runs on AsyncBridge's background thread."""
@@ -292,6 +376,11 @@ class ConversationMixin:
         # A `conversations` call in this turn may have opened another one.
         self._follow_active_conversation()
         self._maybe_title()
+
+        # Turn complete: attempt automatic memory capture from the user's question
+        # and the assistant's reply. `force=False` respects the interval throttle
+        # so a rapid back-and-forth doesn't fill memory with near-duplicates.
+        self._capture_memory_from_turn(response)
 
         if speaking:
             # Streamed: speak what is left in the buffer. Not streamed (a cloud

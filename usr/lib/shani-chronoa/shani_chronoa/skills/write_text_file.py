@@ -105,6 +105,13 @@ def _run(arguments: dict) -> str:
         except OSError:
             note = " (no undo point: the old contents could not be read)"
     mode = "a" if append else "w"
+    if not append:
+        # A replacement must be valid on arrival: refuse the write that the
+        # tool itself would report as a success but the reader chokes on
+        # (Maze-AI agent/codecheck.py's \"before a file is saved\" rule).
+        problem = files.parse_problem(content, target)
+        if problem:
+            return problem
     try:
         with open(target, mode, encoding="utf-8") as handle:
             handle.write(content)

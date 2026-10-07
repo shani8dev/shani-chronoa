@@ -121,6 +121,11 @@ SHORTCUT_SECTIONS = (
             "The panel list: this machine, what Chronoa knows, what it did.",
         ),
         Shortcut(
+            "Show or hide the Now rail", "toggle-rail", "F10",
+            "The right-hand column: what Chronoa is doing, what it changed "
+            "that can be taken back, and how it is currently armed.",
+        ),
+        Shortcut(
             "Find in this conversation", "find-in-conversation", "<Ctrl>f",
             "Search the transcript. Escape closes it again.",
         ),

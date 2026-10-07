@@ -97,7 +97,7 @@ def run_turn():
     original_execute = assistant_mod.execute_tool
     calls: list = []
 
-    def _execute(name, args):
+    def _execute(name, args, origin=None):
         calls.append(name)
         if name == "ask_user":
             return ask_bridge.ask(args.get("question", ""),

@@ -118,9 +118,13 @@ def _run(arguments: dict) -> str:
         from shani_chronoa import sounds
         from shani_chronoa.config import ChronoaConfig
         config = ChronoaConfig()
-        if not config.get_bool("heard-sound-sense-enabled", False):
-            return ("Listening is turned off (enable 'Let Chronoa name a sound when you ask' in "
-                    "Settings -> Privacy).")
+        # `sense_allowed`, not a raw key read: the consent-key aliases and the
+        # privacy-mode refusal live inside it, and a skill that re-reads the key
+        # itself can disagree with the sense layer about the same microphone.
+        if not config.sense_allowed("heard-sound"):
+            return config.sense_allowed_reason("heard-sound") or (
+                "Listening is turned off (enable 'Let Chronoa name a sound when you ask' in "
+                "Settings -> Privacy).")
         problem = sounds.problem()
         if problem:
             return problem
