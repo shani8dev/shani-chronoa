@@ -264,3 +264,33 @@ class TestAgainstTheRealRegistry:
         tools, _ = discover_skills()
         for capability in find_capabilities(tools):
             assert capability.group in capabilities.GROUP_ORDER + (capabilities.OTHER,)
+
+
+def test_describe_names_broken_tools_and_their_workarounds():
+    """A broken tool must not hide in the "present" column, and its group is
+    the only place a workaround makes sense to look.
+
+    `Capabilities.broken` maps a command name to *why* it is not usable, and
+    `describe()` listed the present ones and the absent ones but never named a
+    broken one at all — so a machine where `ffmpeg` segfaults reported it as
+    "present" while every reply had to route around it. The two helpers that
+    could have said so — `has_command` and `alternatives_for` — had no caller.
+    """
+    from shani_chronoa.capability import Capabilities, describe
+
+    cap = Capabilities(commands={"ffmpeg": "/usr/bin/ffmpeg", "sox": "/usr/bin/sox"},
+                       broken={"ffmpeg": "returns exit 139 on every call"})
+    out = describe(cap)
+
+    assert "not usable" in out and "ffmpeg" in out, \
+        f"a broken tool does not appear in the inventory:\n{out}"
+    assert "returns exit 139" in out, f"the reason is not carried through:\n{out}"
+    assert "could be worked around with: sox" in out, \
+        f"the working sibling in the same group is not named:\n{out}"
+
+    # And the inventory's own building blocks must agree with each other:
+    # `has_command` is the one place to ask the question, and `alternatives_for`
+    # is the one place to ask it about every candidate at once.
+    assert cap.has_command("sox") is True
+    assert cap.has_command("vlc") is False
+    assert cap.alternatives_for("ffmpeg", ("ffmpeg", "sox", "vlc")) == ["sox"]

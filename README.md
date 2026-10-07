@@ -3,9 +3,10 @@
 Local-first voice/text AI assistant, integrated into the Shanios desktop.
 
 Chronoa listens for a wake-word, transcribes speech locally with
-[whisper.cpp](https://github.com/ggerganov/whisper.cpp), routes the text
-through an on-device LLM (Ollama) with tool-calling, and speaks the reply
-with [Piper TTS](https://github.com/rhasspy/piper). It runs as a single GTK4
+[whisper.cpp](https://github.com/ggerganov/whisper.cpp), routes the text through an on-device LLM — by default `llama.cpp`'s
+`llama-server`, with Ollama optional — with tool-calling, and speaks the reply
+with Piper TTS (or espeak-ng when no Piper voice is provisioned). It runs as a
+single GTK4
 process — no API keys, no telemetry, and no daemon behind it. Nothing leaves
 the machine unless you switch it twice on purpose.
 
@@ -17,15 +18,17 @@ the machine unless you switch it twice on purpose.
   utterance is discarded. Needs only what speech input needs (`whisper-cpp`
   and a model) - no wake-word engine and nothing to train.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
-- **On-device LLM** — Ollama integration with tool-calling, so Chronoa can
-  act on your machine rather than just chatting about it. **80 callable
+- **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
+  (the `ollama` package is also supported), so Chronoa can act on your machine
+  rather than just chatting about it. **181 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
-  no generic shell-exec tool and there is no calendar skill; the whitelist is
-  the design, not a starting point.
-- **Local text-to-speech** — Piper voices, gender/age configurable.
+  no generic shell-exec tool; the whitelist is the design, not a starting point.
+- **Local text-to-speech** — espeak-ng by default; a Piper voice is used
+  verbatim when one is provisioned — the voice directory, down to the voice
+  name, is configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
-- **Senses** — a perception layer beside `skills/`. **44 senses** deposit
-  *percepts* the assistant can reason about: **24 default on, 20 default
+- **Senses** — a perception layer beside `skills/`. **49 senses** deposit
+  *percepts* the assistant can reason about: **24 default on, 25 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
 - **Actuators** — the outbound side, as ordinary whitelisted skills:
@@ -172,8 +175,9 @@ you can state rather than one that grows with your session.
 
 **Consent is per-sense and fail-closed.** A missing key **denies**, so an
 older installed schema cannot silently switch a sense on. The schema carries
-**100 keys**: 44 `<sense>-sense-enabled`, 5 more for event triggers that are
-not senses, and the rest being non-consent settings. **Five retired sense
+**100+ keys**: 74 `<sense>-sense-enabled` (49 live senses, 24 on and 25 off;
+the rest are retired aliases kept honoured), the event triggers that are not
+senses, and the rest being non-consent settings. **Retired sense
 aliases are still honoured** — when a sense was merged away its old key keeps
 granting the successor, because a rename that silently revokes a grant is a
 permission revocation wearing a refactor's clothes.
@@ -285,12 +289,12 @@ optional:
                           │ assistant down with it
        ┌──────────────────┴──────────────────┐
                           ▼                  ▼
-           whisper.cpp        llama.cpp / Ollama     Piper TTS
+           whisper.cpp        llama-server / Ollama   Piper TTS
               (STT)              (LLM)                  (TTS)
 ```
 
 A turn is audio → whisper.cpp transcribes → the local LLM generates a response
-(possibly calling skills) → Piper speaks the reply. `llama.cpp` and Ollama are
+(possibly calling skills) → espeak-ng or Piper speaks the reply. `llama-server` and Ollama are
 interchangeable behind one `chat_message()` interface, and a cloud provider
 (Anthropic, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, and keyless
 gateways) is reachable behind the same interface **only** when privacy mode is
@@ -417,18 +421,25 @@ See [`PKGBUILD`](PKGBUILD) for the full dependency list.
   ships `espeak-ng` as a hard `depends` and offers `rhvoice-language-english`
   as an optdepend instead.
 
-> `[NEEDS VERIFYING: Piper TTS has no declared Arch dependency anywhere — not in the in-repo PKGBUILD, not in the shipping shani-pkgbuilds/shani-chronoa/PKGBUILD. Is that intentional (Piper is not packaged for Arch, so the Arch build is meant to run espeak-ng/rhvoice), or an oversight? The `piper-voice` gsetting exists regardless, so the choice of voice is only meaningful if a Piper binary exists.]`
+> Piper TTS (like sherpa-onnx/kokoro) is a pinned download provisioned by the
+> setup wizard, not a system package, so it is intentionally absent from both
+> packaging manifests: `espeak-ng` (and `rhvoice-language-english` on Arch) is
+> the always-present floor, and a chosen Piper voice layered on top of that
+> floor. The `piper-voice` gsetting holds the one we reach for, once a voice
+> has been provisioned; empty means "the default floor is enough".
 
-- `ollama` — local LLM runtime, optdepends on Arch and undeclared on the
-  Debian side, so it is a separate install either way. Default model is
-  Qwen3: `qwen3:4b` on capable hardware, `qwen3:1.7b` on the lowest tier.
+- `llama-server` (via the `local_llm` user unit, port 8765) — the default
+  local LLM runtime. `ollama` is also supported as an optdepend on Arch and
+  undeclared on the Debian side. Default model is Qwen3: `qwen3:4b` on capable
+  hardware, `qwen3:1.7b` on the lowest tier.
   `config.model` and `config.whisper_model` both default to `""`, which means
   auto-detect rather than pinning a name.
 - `python-mcp` — needed only to run `shani-chronoa-mcp`; the MCP server is an
   optional second entry point, not part of the assistant itself
-- a local Ollama **vision** model (for example `qwen3-vl:2b`) — the
-  `vision` sense. Chosen independently of the text model, because a text
-  model has no vision tower; see `chronoa-config set vision-model`.
+- a local **vision** model — a llama.cpp vision model with its projector,
+  served by `local_vision` on `127.0.0.1:8767`. Chosen independently of the
+  text model, because a text model has no vision tower; see
+  `chronoa-config set vision-model`.
 
 ## Installation
 

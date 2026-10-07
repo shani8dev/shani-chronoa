@@ -197,12 +197,27 @@ def describe(cap: Optional[Capabilities] = None) -> str:
         "virtualisation": ("podman", "docker", "qemu-system-x86_64", "virsh"),
     }
     for title, names in groups.items():
-        have = [n for n in names if n in cap.commands]
-        absent = [n for n in names if n not in cap.commands]
+        have = [n for n in names if cap.has_command(n)]
+        absent = [n for n in names if not cap.has_command(n)]
         line = f"  {title:<16} {', '.join(have) or 'none'}"
         if absent:
             line += f"   (no {', '.join(absent)})"
         lines.append(line)
+    # A broken tool is worse than no tool in a list: it looks usable and fails
+    # late. Name it, and which of its neighbours in the same group could do the
+    # job instead, because that is actionable where "broken" alone is not.
+    broken = [n for n in (m for g in groups.values() for m in g) if n in cap.broken]
+    for name in broken:
+        # Candidates are the *working* tools in the same group. `alternatives_for`
+        # already keeps only the ones present and not broken, so a broken sibling
+        # cannot be named as a workaround for another broken tool.
+        group = next((g for g in groups.values() if name in g), ())
+        alternatives = cap.alternatives_for(name, tuple(g for g in group if g != name))
+        lines.append(
+            f"  {name} is installed but not usable: {cap.broken[name]}")
+        if alternatives:
+            lines.append(
+                f"    could be worked around with: {', '.join(alternatives)}")
     present = [m for m, ok in cap.python.items() if ok]
     absent = [m for m, ok in cap.python.items() if not ok]
     lines.append("")

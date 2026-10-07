@@ -869,20 +869,9 @@ class PrivacyManager:
         self.config.set("privacy-mode", "false")
         logger.warning("Privacy mode disabled - external services may be used")
 
-    def get_network_policy(self) -> dict:
-        """Get network policy based on privacy mode."""
-        if self.is_local_only:
-            return {
-                "ollama_allowed": True,  # Local Ollama is OK
-                "external_api": False,
-                "telemetry": False,
-                "analytics": False,
-                "allowed_hosts": ["localhost"],
-            }
-        return {
-            "ollama_allowed": True,
-            "external_api": True,
-            "telemetry": True,
-            "analytics": True,
-            "allowed_hosts": ["*"],
-        }
+    # Deleted: the previous `get_network_policy` reported telemetry and
+    # analytics as *allowed* whenever privacy mode was off. Chronoa has never
+    # collected telemetry or analytics, so those could never have been allowed;
+    # a method that lies about what the switches mean was worse than silence.
+    # Privacy mode itself is the network policy: it is reported by the privacy
+    # surface and read as `is_local_only` by the brain.

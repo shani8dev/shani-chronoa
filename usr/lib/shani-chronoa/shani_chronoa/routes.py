@@ -150,7 +150,7 @@ def _available(need: str, cap) -> bool:
     """
     if need.startswith("python:"):
         return bool(cap.python.get(need[7:], False))
-    return need in cap.commands
+    return cap.has_command(need)
 
 
 def _route_is_viable(route: Route, missing: str, cap) -> bool:
