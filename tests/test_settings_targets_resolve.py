@@ -163,15 +163,20 @@ def test_the_gears_are_on_the_rows_that_need_them(sidebar):
 #:   `senses`-alike reports that only *read* the machine. Settings holds switches
 #:   for permissions, voices, models and the trigger gate; it has nothing to
 #:   offer someone looking at why a subsystem is not working.
-#: - `machine` - its readings come from the kernel, not from a setting.
-#: - `desktop` - the rows are what the desktop answered, and its own settings own
-#:   the switches behind them, not this app's.
+#: - `machine` and `desktop` were here and are not any more (2026-10-08), each on
+#:   evidence rather than taste: Desktop reports `global-shortcut-enabled` and
+#:   `document-search-enabled`, which are this app's keys with switches in
+#:   Settings > Privacy (the old note said the desktop's own settings owned them);
+#:   Machine's readings come from the kernel, but its refused rows - "not read,
+#:   permission is off" - are the Settings > Senses switches, as its own footer
+#:   says. A panel that names a switch it cannot reach is the dead end the gears
+#:   exist to remove.
 #: - `learning` - the model is fitted from the log; there is no switch.
 #: - `senses` is *not* in this list despite being a pure report, because the
 #:   eighteen consent switches it reports on live in Settings > Senses.
 NO_GEAR = (
-    "conversations", "desktop", "diagnostics", "export", "inventory",
-    "learning", "machine", "workbench",
+    "conversations", "diagnostics", "export", "inventory",
+    "learning", "workbench",
 )
 
 

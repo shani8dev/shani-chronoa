@@ -99,7 +99,11 @@ class PrivacyPage:
         self._switch(group, "Privacy mode (local only)", "Master switch for leaving this machine",
                      config.privacy_mode, lambda a: self._app_toggle("toggle-privacy", a))
         self._switch(
-            group, "Cloud fallback when Ollama is unavailable",
+            # Not "when Ollama is unavailable": the gate is the configured local
+            # brain answering (`self.llm.is_available()`), and that is llama.cpp
+            # by default now - so the old label named a program most installs
+            # never run.
+            group, "Cloud fallback when no local model answers",
             "Separate opt-in on purpose - this never turns on from one switch alone",
             config.cloud_fallback_enabled,
             lambda a: self._app_toggle("toggle-cloud-fallback", a))
@@ -438,6 +442,30 @@ class PrivacyPage:
         ):
             self._entry(byok, label, "", config.api_key_value(key),
                         lambda text, k=key: config.set_api_key(k, text.strip()), secret=True)
+
+        # **A model server of your own, which had no field anywhere.** The three
+        # keys are in the schema, `app/brain.py` puts the endpoint first in the
+        # cloud chain when it is set, and the "Answering now" panel displays it -
+        # but nothing in the UI could set it, so LM Studio, vLLM, llama-server on
+        # another machine or a company gateway were reachable only by
+        # `gsettings set` (found by auditing schema keys against UI code,
+        # 2026-10-08). Same gates as the rest of this page: privacy mode off and
+        # the cloud fallback on.
+        custom = self._group(
+            page, "Your own model server",
+            "Any OpenAI-compatible server - LM Studio, vLLM, llama-server on another "
+            "machine. Tried first when the cloud fallback is on.",
+        )
+        self._entry(custom, "Server address", "e.g. http://192.168.1.20:8080/v1",
+                    config.get("custom-llm-base-url", ""),
+                    lambda text: config.set("custom-llm-base-url", text.strip()))
+        self._entry(custom, "Model name", "as the server lists it",
+                    config.get("custom-llm-model", ""),
+                    lambda text: config.set("custom-llm-model", text.strip()))
+        self._entry(custom, "API key", "only if the server asks for one",
+                    config.api_key_value("custom-llm-api-key"),
+                    lambda text: config.set_api_key("custom-llm-api-key", text.strip()),
+                    secret=True)
 
         # **The inbound channel, which had no switch at all.** `gateway.py` is
         # complete, `_export_gateways()` runs at startup - and measured with an

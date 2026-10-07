@@ -173,7 +173,7 @@ class TestModuleContract:
     def test_it_exports_the_names_the_registry_reads(self):
         assert diagnostics.TITLE == "Diagnostics"
         assert diagnostics.ICON == "dialog-information-symbolic"
-        assert diagnostics.SECTION == "Desktop and system"
+        assert diagnostics.SECTION == "Health and trust"
         assert callable(diagnostics.build)
 
     def test_the_icon_is_a_real_icon_name_on_this_machine(self):
@@ -245,6 +245,7 @@ class TestModuleContract:
             "Screen capture", "Screenshot portal", "Global shortcut portal",
             "Search provider", "solve_math", "ffmpeg", "ImageMagick", "poppler",
             "at-spi", "vision server", "embed server", "imagine server",
+            "Conversation checkpoints",
         )
         for fragment in wanted:
             assert any(fragment in title for title in diagnostics.ROW_TITLES), fragment
@@ -582,3 +583,50 @@ class TestTwoMoreProbesThatExistedAndWereNotAsked:
             status, _detail = probe()
             assert status in surface.STATUS_WORDS, (
                 f"{probe.__name__} used {status!r}, which is not one of the three")
+
+def test_conversation_checkpoints_row():
+    """The checkpoint row reports count and session breakdown when files exist.
+
+    A real probe is used to enumerate the checkpoint files, so this test
+    validates that the probe works with the actual tooling. The session
+    directory is created under XDG_DATA_HOME, which the diagnostics panel
+    uses at import time. The test uses a temporary directory that is not
+    XDG_DATA_HOME to avoid interfering with the running diagnostics test
+    suite.
+    """
+    from pathlib import Path
+    import tempfile
+
+    # Create a temporary session directory with checkpoint files
+    with tempfile.TemporaryDirectory() as tmpdir:
+        sessions_dir = Path(tmpdir) / "sessions"
+        sessions_dir.mkdir()
+        # Create a couple of checkpoint files with valid session names
+        (sessions_dir / "session1.ckpt.1.jsonl").write_text("1\n2\n3\n")
+        (sessions_dir / "session2.ckpt.2.jsonl").write_text("10\n20\n30\n40\n")
+
+        # Load the diagnostics panel (this imports _checkpoint_count)
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        # The probe should report working status with a count and session breakdown
+        status, detail = diagnostics._checkpoint_count(sessions_dir)
+        assert status == diagnostics.STATUS_WORKING
+        assert "2 checkpoint file(s)" in detail
+        assert "in 1 conversation(s)" in detail
+        assert "sessions" in detail
+        assert "1, 2" in detail
+
+        # Negative control: an empty session directory is not a fault, it is
+        # "nothing done yet" - and must not be reported as a working subsystem
+        empty = Path(tmpdir) / "empty"
+        empty.mkdir()
+        status, detail = diagnostics._checkpoint_count(empty)
+        assert status == diagnostics.STATUS_NOT_WORKING
+        assert "no checkpoint files were found" in detail
+
+        # And a directory that does not exist at all is the same answer, not a
+        # probe failure: the store has simply never been used.
+        gone = Path(tmpdir) / "gone"
+        status, detail = diagnostics._checkpoint_count(gone)
+        assert status == diagnostics.STATUS_NOT_WORKING
+        assert "does not exist yet" in detail

@@ -131,7 +131,7 @@ def build(app) -> Gtk.Widget:
     try:
         privacy_on = bool(egress.privacy_mode_enabled())
         body.append(recorder.row(
-            common.STATUS_OK if privacy_on else common.STATUS_ATTENTION,
+            common.STATUS_OK if privacy_on else common.STATUS_OFF,
             "Privacy mode is on" if privacy_on else "Privacy mode is off",
             "nothing leaves this machine" if privacy_on
             else "Chronoa may use the network"))
@@ -239,7 +239,12 @@ def build(app) -> Gtk.Widget:
     for name in _sense_names():
         key = _SENSE_CONSENT_KEYS.get(name)
         granted = bool(key) and config.sense_allowed(name)
-        row = _switch_row(name, "granted" if granted else "not granted", granted)
+        # The person-facing title, with the sense's id as the subtitle - it was
+        # the bare module id ("cgroup", "rfsense") over a "granted" / "not
+        # granted" line that repeated what the switch beside it already shows.
+        row = _switch_row(common.sense_title(name), name if key else
+                          f"{name} - no consent key, so it cannot be granted here",
+                          granted)
         switch = _switch_of(row)
 
         def _make_toggle(sense_name, sense_key, switch_row, sense_switch):
@@ -249,8 +254,6 @@ def build(app) -> Gtk.Widget:
                 # Same write the settings window makes in _set_sense.
                 config.set(sense_key, "true" if sense_switch.get_active() else "false")
                 sense_switch.set_active(config.sense_allowed(sense_name))
-                switch_row.set_subtitle(
-                    "granted" if sense_switch.get_active() else "not granted")
 
             return _toggle
 

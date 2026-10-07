@@ -213,9 +213,9 @@ def _run(arguments: dict) -> str:
         return f"Edited {target} but could not check the result: {exc}"
 
     verb = "Replaced all" if replace_all else "Replaced"
-    detail = f"{count} occurrence(s) of" if replace_all else "the"
+    detail = f"{count} occurrence(s) of the" if replace_all else "the"
     return (
-        f"{verb} {detail} the text in {target} "
+        f"{verb} {detail} text in {target} "
         f"({files.human_size(len(raw))} -> {files.human_size(len(updated.encode('utf-8')))}). "
         f"undo_last_change can put it back.{note}"
     )

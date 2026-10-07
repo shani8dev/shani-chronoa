@@ -618,12 +618,23 @@ def _summary_label(recorder: "common.StatusRecorder",
             f"read once at {stamp}; a sense that could not answer would say so "
             "in its own row, and is never shown as one that did",
         )
-    silent = len(readings) - said
+    # Refused and absent are the two "not read on purpose" states the docstring
+    # above keeps distinct. Counting them as failures made this panel red on
+    # every machine with a sense left off, which is every machine by default.
+    by_design = [r for r in readings if r.state in (STATE_REFUSED, STATE_ABSENT)]
+    failing = len(readings) - said - len(by_design)
+    if not failing:
+        return recorder.row(
+            common.STATUS_OK,
+            f"{said} of {len(readings)} senses answered",
+            f"{len(by_design)} not read on purpose (switched off, or not in this "
+            f"build), read once at {stamp}; each row says which",
+        )
     return recorder.row(
         common.STATUS_ATTENTION,
         f"{said} of {len(readings)} senses answered",
-        f"{silent} are not showing a reading, read once at {stamp}; each row "
-        "names which and why",
+        f"{failing} could not answer and {len(by_design)} were not read on "
+        f"purpose, read once at {stamp}; each row names which and why",
     )
 
 
@@ -667,11 +678,15 @@ def build(app) -> Gtk.Widget:
     body.set_margin_start(12)
     body.set_margin_end(12)
 
-    unread = [reading for reading in readings if not reading.is_reading]
-    if unread:
+    # The banner is for senses that *could not* answer. One switched off, or
+    # not in this build, is the design working - bannering those put a bold
+    # alarm strip on every machine with default settings.
+    failing = [r for r in readings
+               if not r.is_reading and r.state not in (STATE_REFUSED, STATE_ABSENT)]
+    if failing:
         body.append(_revealed(common.banner(
-            f"{len(unread)} of {len(readings)} machine-state senses are not "
-            f"showing a reading. Each row names which and why."
+            f"{len(failing)} of {len(readings)} machine-state senses could not "
+            f"answer. Each row names which and why."
         )))
     recorder = common.StatusRecorder()
     body.append(_summary_label(recorder, readings))

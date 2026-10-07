@@ -260,7 +260,7 @@ class _ActivityView(Gtk.Box):
         common.clear(self._status_slot)
         if not self._records:
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_UNKNOWN,
+                common.STATUS_OK,
                 "No tool calls recorded",
                 "the log is empty, which is not the same as every call "
                 "having succeeded"))

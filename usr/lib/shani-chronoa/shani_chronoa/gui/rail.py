@@ -74,7 +74,7 @@ class _Section(Gtk.Box):
     def __init__(self, title: str) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("rail-section")
-        self.set_margin_top(14)
+        self.set_margin_top(10)
         heading = _label(title, "rail-heading")
         heading.add_css_class("heading")
         self.append(heading)
@@ -95,6 +95,21 @@ class _Section(Gtk.Box):
 
     def empty(self, text: str) -> None:
         self._body.append(_label(text, "dim-label"))
+
+    def meter(self, fraction: float, tooltip: str = "") -> None:
+        """A level bar under a row: a share of something is read faster as a
+        length than as a number, and the context headline was only a number."""
+        bar = Gtk.LevelBar(min_value=0.0, max_value=1.0)
+        bar.set_value(max(0.0, min(1.0, float(fraction))))
+        # Offsets named for the theme's own colours: under 75% normal, then
+        # high, then full - where "it forgot what I said" starts.
+        bar.add_offset_value("low", 0.75)
+        bar.add_offset_value("high", 0.9)
+        bar.add_offset_value("full", 1.0)
+        bar.add_css_class("rail-meter")
+        if tooltip:
+            bar.set_tooltip_text(tooltip)
+        self._body.append(bar)
 
     def link(self, text: str, detail: str, surface: str,
              on_open: Callable[[str], None]) -> None:
@@ -242,6 +257,9 @@ class NowRail(Gtk.Box):
             self._context.empty("Nothing measured yet")
             return
         self._context.row(report.headline())
+        if report.percent is not None:
+            self._context.meter(report.percent / 100.0,
+                                f"{report.percent:.0f}% of the model's window in use")
         for label, tokens, share in report.segment_rows()[:4]:
             self._context.row(label, f"{tokens:,} tokens ({share:.0f}%)")
         if report.elided:
@@ -351,6 +369,18 @@ class NowRail(Gtk.Box):
         self._posture.row(
             "Sandbox proven here" if proven
             else "Sandbox filter is per-child")
+        # The rules file is sent on every turn and appears nowhere in the
+        # transcript - so it changed every answer with nothing on screen saying
+        # it was there. One line, only when it is.
+        try:
+            from shani_chronoa import user_prompts
+            rules = user_prompts.rules_text()
+        except Exception:  # noqa: BLE001
+            rules = ""
+        if rules:
+            lines = len([ln for ln in rules.splitlines() if ln.strip()])
+            self._posture.row("Your rules apply to every answer",
+                              f"{lines} line(s) from rules.md")
 
     # -- refresh ----------------------------------------------------------
 

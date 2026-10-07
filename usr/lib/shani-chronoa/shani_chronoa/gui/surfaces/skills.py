@@ -432,16 +432,24 @@ class _SkillsSurface:
         # the second: an Adw row has one subtitle, and the state is the part that
         # decides whether the row is one a person can act on.
         lines = [description or "(no description)"]
+        # The person-facing title, from the same table the Help window uses;
+        # the tool's id leads the subtitle so it can still be told apart and
+        # searched for. Every row was titled with the id - `airplane_mode`,
+        # `analyze_table` - over a description written for the model.
+        # A drop-in skill with no entry keeps its name as its title.
+        title = capabilities.tool_title(name)
+        if title != name:
+            lines[0] = f"{name} - {lines[0]}"
         switch = None
         if gate_key is None:
             # No switch for a skill that declares no gate: there is nothing to
             # switch, and offering one would be a permission that does not exist.
             lines.append(ALWAYS_AVAILABLE)
-            widget = common.row(title=_plain(name), subtitle=_plain("\n".join(lines)))
+            widget = common.row(title=_plain(title), subtitle=_plain("\n".join(lines)))
         else:
             lines.append(f"{gate_name} - {state_text}")
             widget = common.switch_row(
-                title=_plain(name),
+                title=_plain(title),
                 subtitle=_plain("\n".join(lines)),
                 on_changed=lambda active, k=gate_key: self._on_toggled(active, k),
             )
@@ -465,7 +473,7 @@ class _SkillsSurface:
         _add(self._group, widget)
         return Row(widget=widget, title=_title_label(widget), name=name,
                    description=description, gate_key=gate_key, switch=switch,
-                   haystack=f"{name} {description}")
+                   haystack=f"{name} {title} {description}")
 
     def _gate_reading(self, key: Optional[str]) -> Tuple[str, bool]:
         """What this row says about its gate, and whether a switch may move.

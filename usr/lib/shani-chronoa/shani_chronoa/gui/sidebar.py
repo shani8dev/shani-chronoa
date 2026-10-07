@@ -43,13 +43,17 @@ logger = logging.getLogger(__name__)
 #: this row is the live chat - the thing on screen now - and that panel is the
 #: list of saved ones. With both in the sidebar, and a "Conversation" section
 #: heading above the panel as well, the word appeared three times and meant two
-#: different things. The section is gone and the panel has moved to "What
-#: Chronoa did", so the singular here now names exactly one row.
+#: different things. The section is gone and the panel has moved to
+#: "Remembering", so the singular here now names exactly one row.
 CHAT_TITLE = "Conversation"
 #: `chat-bubble-symbolic` does not exist on the installed theme (measured:
 #: `has_icon` False), so the conversation row rendered blank. `chat-symbolic` is
-#: checked to exist rather than assumed.
-CHAT_ICON = "chat-symbolic"
+#: checked to exist rather than assumed - **on Yaru**, which is the theme of the
+#: machine that checked it. Adwaita, the theme ShaniOS ships, has no
+#: `chat-symbolic`, so on the target desktop the row was blank again.
+#: `chat-message-new-symbolic` is in both; `test_sidebar_icons_exist_in_adwaita`
+#: checks Adwaita's own files so the installed theme cannot hide this a third time.
+CHAT_ICON = "chat-message-new-symbolic"
 
 #: One icon size for the whole sidebar - rows, the chat row and the gear.
 #:
@@ -160,7 +164,7 @@ class SidebarPage(Adw.NavigationPage):
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         stack.append(scroller)
-        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         body.set_margin_top(6)
         body.set_margin_bottom(18)
         body.set_margin_start(12)

@@ -420,7 +420,7 @@ GATE_NAMES: dict[str, str] = {
     # label that row actually carries, not a second wording: the Help window
     # tells the user to switch on this exact string, so a label Settings does
     # not also show sends them looking for a switch that is not there.
-    "notification-enabled": "Speak answers aloud",
+    "notification-enabled": "Spoken replies and notifications",
     "vision-sense-enabled": "Take and describe photos",
     "web-sense-enabled": "Web search",
     "location-sense-enabled": "Location",

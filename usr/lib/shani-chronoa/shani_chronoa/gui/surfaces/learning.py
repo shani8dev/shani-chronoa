@@ -54,7 +54,7 @@ TITLE = "What it has learned"
 #: for recall, and it is checked at test time rather than trusted: an icon name
 #: is a claim about the desktop's theme, and the theme is the user's.
 ICON = "weather-clear-night-symbolic"
-SECTION = "What Chronoa knows"
+SECTION = "Thinking"
 SUBTITLE = ("Facts, which tools actually worked, and the two models fitted from "
             "them - with what each one can and cannot do")
 
@@ -265,7 +265,7 @@ def _status_row(recorder: "common.StatusRecorder") -> Gtk.Widget:
     facts = _facts_sentence()
     if "none" in facts.lower() or "not" in facts.lower():
         return recorder.row(
-            common.STATUS_UNKNOWN,
+            common.STATUS_OK,
             "No learning data on this machine",
             facts)
     return recorder.row(
@@ -375,6 +375,7 @@ def build(app: Any) -> Gtk.Widget:
 
     body.append(train)
     body.append(status)
+    body.append(_background_passes())
     set_content(common.scrolled(body))
     # What this panel says about itself, for the sidebar's health dot. The same
     # recorder that built the row at the top of the panel, so the dot and the
@@ -616,6 +617,93 @@ def _import_sentence(result: Dict[str, Any]) -> str:
         bits.append("no trained model in the bundle")
     note = (result.get("note") or "").strip()
     return "; ".join(bits) + (f". {note}" if note else ".")
+
+
+# ---------------------------------------------------------------------------
+# background passes: three things that ran with no way to see them
+# ---------------------------------------------------------------------------
+
+def _dream_text() -> str:
+    from shani_chronoa import dream
+    return dream.dream()
+
+
+def _latest_dream() -> str:
+    """When the daemon last wrote a dream, or "" if it never has."""
+    try:
+        from shani_chronoa import dream
+        found = sorted(dream.LOG_FILE.parent.glob("dream-*.txt"),
+                       key=lambda p: p.stat().st_mtime)
+    except Exception:  # noqa: BLE001
+        return ""
+    if not found:
+        return ""
+    import time as _time
+    return _time.strftime("%Y-%m-%d %H:%M", _time.localtime(found[-1].stat().st_mtime))
+
+
+def _reflex_text() -> str:
+    from shani_chronoa import reflex
+    fired = reflex.evaluate()
+    lines = [f"{r.name}: {r.description} (threshold: {r.threshold_note})"
+             for r in reflex.REFLEXES]
+    said = ([f"NOW: {u.subject} - {u.detail}" for u in fired]
+            or ["Nothing urgent right now - every reflex is quiet."])
+    return "\n".join(said + [""] + lines)
+
+
+def _zoo_text() -> str:
+    from shani_chronoa import model_zoo
+    results = model_zoo.compare()
+    return model_zoo.render(results) + "\n\n" + model_zoo.recommend(results)
+
+
+def _background_passes() -> Gtk.Widget:
+    """Dream, reflexes and the predictor comparison, each run on demand.
+
+    All three worked and none could be seen. `dream` is the daemon's nightly
+    pass over the tool-call log; `reflex` speaks up about a flat battery or a
+    full disk without asking the model; `model_zoo` compares outcome predictors
+    and was imported by nothing at all. Each runs off the main loop here and
+    shows its whole answer, because a summary of a report is a second claim.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+    group = common.group(
+        "Background passes",
+        "Work Chronoa does on its own schedule. Run any of them now to see what "
+        "it would say; nothing here changes a setting.")
+    report = Gtk.Label(wrap=True, xalign=0, selectable=True)
+    report.add_css_class("monospace")
+    report.set_wrap_mode(2)  # Pango.WrapMode.WORD_CHAR
+    report.set_margin_start(12)
+    report.set_margin_end(12)
+
+    def runner(work):
+        def go(button: Gtk.Button) -> None:
+            def job(say):
+                text = work()
+                say(text or "(no output)")
+                GLib.idle_add(button.set_sensitive, True)
+            _run_async(button, job, report)
+        return go
+
+    last = _latest_dream()
+    _add_row(group, "Dream",
+             "Reads the day's tool calls and lists what keeps failing and why. "
+             + (f"The daemon last wrote one at {last}." if last
+                else "The daemon has not written one on this machine yet."),
+             suffix=_button("Dream now", runner(_dream_text)))
+    _add_row(group, "Reflexes",
+             "Five checks that warn without waking the model: battery, memory, "
+             "disk, temperature and the clock.",
+             suffix=_button("Check now", runner(_reflex_text)))
+    _add_row(group, "Compare predictors",
+             "Fits every available outcome predictor on your own log and says "
+             "which, if any, is worth using. Takes a while on a long log.",
+             suffix=_button("Compare", runner(_zoo_text)))
+    box.append(group)
+    box.append(common.scrolled(report, 360))
+    return box
 
 
 def _pair(*buttons: Gtk.Button) -> Gtk.Box:

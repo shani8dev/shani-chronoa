@@ -106,7 +106,10 @@ from shani_chronoa.opencv import runtime as opencv_runtime  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Model"
+# "Answering now", not "Model": it sat directly beside "Models" in the sidebar,
+# and the two are different questions - which backend is answering this
+# conversation, versus every model Chronoa could run.
+TITLE = "Answering now"
 ICON = "media-playback-start-symbolic"
 SUBTITLE = ("Local state only. The cloud row is read from configuration and is never contacted; "
             "the two local probes ask a service running on this computer.")

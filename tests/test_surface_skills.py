@@ -163,7 +163,12 @@ def test_more_than_sixty_skill_rows_from_the_live_registry():
 
     assert len(rows) > 60, f"only {len(rows)} rows - the whitelist is not being read"
     assert surface.registry_error is None
-    assert all(row.name and row.title.get_text() == row.name for row in rows)
+    # Titled for a person (`capabilities.tool_title`), with the id kept in the
+    # subtitle; a skill with no entry there is titled with its name.
+    from shani_chronoa import capabilities
+    assert all(row.name and row.title.get_text() == capabilities.tool_title(row.name)
+               for row in rows)
+    assert any(row.title.get_text() != row.name for row in rows), "no row got a human title"
     assert any(row.description for row in rows)
     assert all(row.switch is None or row.switch.get_tooltip_text() for row in rows)
 

@@ -247,7 +247,7 @@ class TestModuleContract:
     def test_it_exports_what_the_registry_reads(self):
         assert surface.TITLE == "Export"
         assert isinstance(surface.ICON, str) and surface.ICON
-        assert surface.SECTION == "What Chronoa did"
+        assert surface.SECTION == "Acting"
         assert callable(surface.build)
 
     def test_the_icon_is_a_real_icon_name_on_this_machine(self):

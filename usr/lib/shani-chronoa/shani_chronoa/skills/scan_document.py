@@ -85,9 +85,11 @@ def _scanner(arguments: dict) -> str:
     if not re.fullmatch(r"[A-Za-z0-9:._/\-=@\[\]]{1,200}", device):
         return f"'{device}' is not a scanner name."
     image = _out_path("scan")
+    from shani_chronoa import body
     try:
-        r = subprocess.run(["scanimage", "-d", device, "--format=png", "--resolution", "300",
-                            "-o", str(image)], capture_output=True, text=True, timeout=180)
+        with body.lit("eyes", "scanning a page", device, deadline=200.0):
+            r = subprocess.run(["scanimage", "-d", device, "--format=png", "--resolution", "300",
+                                "-o", str(image)], capture_output=True, text=True, timeout=180)
     except subprocess.TimeoutExpired:
         return "The scanner did not finish within three minutes."
     if r.returncode != 0 or not image.exists() or image.stat().st_size == 0:

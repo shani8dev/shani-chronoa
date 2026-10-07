@@ -26,7 +26,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, Gtk  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -40,7 +40,7 @@ TITLE = "Diff"
 #: bug rather than as a missing glyph. `document-edit-symbolic` is the theme's
 #: own name for "a document being changed".
 ICON = "document-edit-symbolic"
-SECTION = "What Chronoa did"
+SECTION = "Acting"
 
 SUBTITLE = (
     "What Chronoa changed on this machine, file by file, with line numbers. "
@@ -102,28 +102,40 @@ def diff_text(old: str, new: str) -> List[DiffLine]:
 
 
 def diff_files(file: DiffFile, lines: List[DiffLine]) -> List[DiffHunk]:
-    """Split a list of diff lines into hunks around unchanged runs."""
+    """Split a list of diff lines into hunks around unchanged runs.
+
+    Both sides are counted as the lines go by. This used to take the old-side
+    number from a removed line's `line_no`, which `diff_text` sets to -1, so
+    every header read like `@@ -1,2 +0,3 @@` - a new side starting at line 0.
+    """
     hunks: List[DiffHunk] = []
     cur: List[DiffLine] = []
-    old_no = 0
+    old_no = new_no = 0               # lines consumed so far on each side
+    starts = (1, 1)
     for line in lines:
         if line.tag == " ":
             if cur:
-                hunks.append(_close_hunk(file, cur, old_no))
+                hunks.append(_close_hunk(cur, *starts))
                 cur = []
             old_no += 1
-        else:
-            old_no = line.line_no if line.tag == "-" else old_no
-            cur.append(line)
+            new_no += 1
+            continue
+        if not cur:
+            starts = (old_no + 1, new_no + 1)
+        cur.append(line)
+        if line.tag == "-":
+            old_no += 1
+        elif line.tag == "+":
+            new_no += 1
     if cur:
-        hunks.append(_close_hunk(file, cur, old_no))
+        hunks.append(_close_hunk(cur, *starts))
     return hunks
 
 
-def _close_hunk(file: DiffFile, cur: List[DiffLine], old_no: int) -> DiffHunk:
-    new_no = cur[0].line_no if cur[0].tag != "-" else 0
-    return DiffHunk(old_start=max(1, old_no), old_count=sum(1 for l in cur if l.tag == "-"),
-                    new_start=new_no, new_count=sum(1 for l in cur if l.tag in ("+", " ")), lines=cur)
+def _close_hunk(cur: List[DiffLine], old_start: int, new_start: int) -> DiffHunk:
+    return DiffHunk(old_start=old_start, old_count=sum(1 for l in cur if l.tag == "-"),
+                    new_start=new_start, new_count=sum(1 for l in cur if l.tag == "+"),
+                    lines=cur)
 
 
 def compute_file_diff(path: Path, old: str, new: str) -> DiffFile:
@@ -188,8 +200,9 @@ class _DiffLineBox(Gtk.Box):
         self.append(divider)
 
         # Text
-        escaped = GLib.markup_escape_text(line.text)
-        label = Gtk.Label(label=escaped, xalign=0.0, wrap=True, selectable=selectable)
+        # Plain text into a plain label. It was markup-escaped first, and a
+        # `label=` is not parsed as markup, so `a & b` showed as `a &amp; b`.
+        label = Gtk.Label(label=line.text, xalign=0.0, wrap=True, selectable=selectable)
         if line.tag == "+":
             label.add_css_class("diff-line-add")
         elif line.tag == "-":
@@ -253,26 +266,30 @@ class _LineSelector(Gtk.Button):
 
 def _make_css():
     css = Gtk.CssProvider()
+    # Translucent tints, not fixed light colours: `#e6ffec` behind the theme's
+    # own (light) text on a dark desktop was white on near-white - every added
+    # line in the panel was unreadable, and so was the chat's inline diff, which
+    # used the same class name. A tint over whatever is behind works both ways.
     css.load_from_data(
         b"""
-        .diff-add { background-color: #e6ffec; }
-        .diff-remove { background-color: #ffebe9; }
-        .diff-change { background-color: #fff3cd; }
-        .diff-tag-add { color: #1a7f37; font-weight: bold; }
-        .diff-tag-remove { color: #cf222e; font-weight: bold; }
-        .diff-line-add { color: #1a7f37; }
-        .diff-line-remove { color: #cf222e; }
+        .diff-add { background-color: rgba(34,197,94,0.16); }
+        .diff-remove { background-color: rgba(239,68,68,0.16); }
+        .diff-change { background-color: rgba(245,158,11,0.16); }
+        .diff-tag-add { color: rgba(34,197,94,0.95); font-weight: bold; }
+        .diff-tag-remove { color: #ef4444; font-weight: bold; }
+        .diff-line-add { color: rgba(34,197,94,0.95); }
+        .diff-line-remove { color: #ef4444; }
         .diff-line-select { min-width: 4px; }
         .diff-line-select:selected { background-color: #888; }
-        .diff-hunk { border-bottom: 1px solid #ccc; padding: 4px 0; }
-        .diff-hunk-header { color: #656d76; font-size: 0.9em; margin-bottom: 2px; }
+        .diff-hunk { border-bottom: 1px solid alpha(currentColor, 0.15); padding: 4px 0; }
+        .diff-hunk-header { opacity: 0.65; font-size: 0.9em; margin-bottom: 2px; }
         .diff-file-item { padding: 4px 8px; }
-        .diff-file-item:selected { background-color: #e8f0fe; }
+        .diff-file-item:selected { background-color: alpha(@accent_bg_color, 0.2); }
         .diff-file-item.changed { border-left: 3px solid #0366d6; }
-        .diff-stats { color: #57606a; font-size: 0.85em; }
+        .diff-stats { opacity: 0.65; font-size: 0.85em; }
         .diff-accept { background-color: #1a7f37; color: white; border: none; border-radius: 4px; }
         .diff-reject { background-color: #cf222e; color: white; border: none; border-radius: 4px; }
-        .diff-toolbar { padding: 6px; border-bottom: 1px solid #ddd; }
+        .diff-toolbar { padding: 6px; border-bottom: 1px solid alpha(currentColor, 0.15); }
         """)
     return css
 
@@ -481,9 +498,13 @@ class _DiffView(Gtk.Box):
         # keeps `self._diff_box` and mutates that - and this was the odd one out.
         self._files_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._files_box.set_hexpand(False)
-        self._files_box.set_size_request(320, -1)
         self._files_scrolled = Gtk.ScrolledWindow()
-        self._files_scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        # The width is asked for on the scroller, not on the box inside it: a
+        # 320px box in a scroller that asked for nothing was clipped to a few
+        # characters - rendered, `groceries.md` read `gro`.
+        self._files_scrolled.set_min_content_width(220)
+        self._files_scrolled.set_vexpand(True)
+        self._files_scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._files_scrolled.set_child(self._files_box)
         self.append(self._files_scrolled)
 
@@ -497,11 +518,17 @@ class _DiffView(Gtk.Box):
         toolbar.add_css_class("diff-toolbar")
         self._count_label = Gtk.Label(label="0 files changed")
         toolbar.append(self._count_label)
-        self.append(toolbar)
+        # Into the right-hand column, above the diff. It was appended to this
+        # horizontal box, so it became a third column drawn between the file
+        # list and the diff, on top of the file name.
+        right.append(toolbar)
 
         # Diff content
         self._diff_scrolled = Gtk.ScrolledWindow()
         self._diff_scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        # Without this the scroller got its minimum height - about one line -
+        # and a five-line change showed its first line and nothing else.
+        self._diff_scrolled.set_vexpand(True)
         self._diff_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._diff_scrolled.set_child(self._diff_box)
         right.append(self._diff_scrolled)
@@ -543,6 +570,10 @@ class _DiffView(Gtk.Box):
             logger.info("Could not read the undo ring for a preview: %s", exc)
             return 0
         if not pairs:
+            # Cleared rather than left alone: an undo empties the ring, and a
+            # panel still listing the undone file would be describing the past.
+            if self._files:
+                self.set_diffs({}, applied=True)
             return 0
         self.set_diffs({path: (before, after) for path, before, after in pairs},
                        applied=True)
@@ -584,9 +615,18 @@ class _DiffView(Gtk.Box):
                             for f in changed)
         self._count_label.set_text(
             f"{len(changed)} file(s) changed - {total_added}+ {total_removed}-")
+        # With nothing changed the toolbar said "0 file(s) changed - 0+ 0-" under
+        # a status row saying the same, over a label saying "No changes." -
+        # three statements of one fact. The status row keeps it; the empty
+        # state says what will appear here.
+        self._count_label.get_parent().set_visible(bool(changed))
+        self._files_scrolled.set_visible(bool(changed))
 
         if not changed:
-            self._diff_box.append(Gtk.Label(label="No changes."))
+            self._diff_box.append(common.empty_state(
+                ICON, "No changes to show",
+                "When Chronoa edits or writes a file, the change appears here "
+                "line by line, and in the conversation under the step that made it."))
             return
 
         for path, f in self._files.items():
@@ -614,7 +654,7 @@ class _DiffView(Gtk.Box):
             child = following
         if not self._files:
             self._status_row_box.append(self.status_recorder.row(
-                common.STATUS_UNKNOWN, "Nothing to compare yet",
+                common.STATUS_OK, "Nothing to compare yet",
                 "Chronoa shows here the files it has changed and can still undo."))
         elif not changed:
             self._status_row_box.append(self.status_recorder.row(
@@ -670,6 +710,12 @@ def build(app: Any) -> Gtk.Widget:
     shell.append(view._status_row_box)
     shell.append(view)
     set_content(shell)
+    # Re-read on every showing. The window builds a panel once and keeps it, so
+    # a load at build time alone froze the panel at the first time it was
+    # opened: open Diff, let Chronoa write another file, open Diff again, and
+    # the new file was not there.
+    if hasattr(page, "connect") and common.adw_ready():
+        page.connect("showing", lambda *_a: view.load_recent_changes())
     page.view = view
     page.set_diffs = view.set_diffs
     #: The sidebar dot reads this; the panel's row is drawn from the same

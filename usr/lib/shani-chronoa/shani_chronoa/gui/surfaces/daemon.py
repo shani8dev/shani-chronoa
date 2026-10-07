@@ -70,7 +70,9 @@ from shani_chronoa.gui.surfaces import common
 logger = logging.getLogger(__name__)
 
 TITLE = "Background mode"
-ICON = "emblem-system-symbolic"
+# A repeat, for "keeps running". It was `emblem-system`: the same gear as the
+# header's Settings button, and beside Desktop's gear in the same section.
+ICON = "media-playlist-repeat-symbolic"
 
 #: The systemd *user* unit `usr/bin/shani-chronoa-daemon` runs. Named here
 #: rather than imported from the application class, because reading it must not
@@ -466,7 +468,7 @@ class _DaemonSurface:
                 "the unit is enabled, but it is not active, so "
                 "Chronoa is not running in the background")
         return row(
-            common.STATUS_ATTENTION,
+            common.STATUS_OFF,
             "Background mode is off",
             "the unit is neither active nor enabled, so Chronoa "
             "does not run in the background")

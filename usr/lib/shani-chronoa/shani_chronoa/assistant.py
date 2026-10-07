@@ -721,6 +721,14 @@ class Assistant:
         self._trim_history()
         self._channel = channel
         self._sink = sink
+        # Streamed text from the sink when no separate callback was given. The
+        # app moved every turn to `sink=` and stopped passing `on_text`, and
+        # nothing here ever read the sink's - so with a backend that streams,
+        # the window's reply handler was wired to a slot nothing called and every
+        # reply arrived whole (run: zero streamed pieces through `sink=`, two
+        # through `on_text=`, same fake model).
+        if on_text is None and sink is not None:
+            on_text = getattr(sink, "on_text", None)
         self._turn_cloud = ""
         self._last_elision_notice = ""
 

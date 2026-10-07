@@ -190,7 +190,7 @@ class TestModuleContract:
     def test_it_exports_the_names_the_registry_reads(self):
         assert desktop.TITLE == "Desktop"
         assert desktop.ICON == "applications-system-symbolic"
-        assert desktop.SECTION == "Desktop and system"
+        assert desktop.SECTION == "Health and trust"
         assert callable(desktop.build)
 
     def test_the_icon_is_a_real_icon_name_on_this_machine(self):
@@ -221,11 +221,16 @@ class TestModuleContract:
         a name listed twice is invisible there and shows up in the sidebar as two
         entries for one panel.
         """
-        source = REGISTRY_SOURCE.read_text(encoding="utf-8")
-        assert source.count('"desktop"') == 1, (
-            "gui/surfaces/__init__.py must name the 'desktop' surface exactly "
-            f"once; it has it {source.count(chr(34) + 'desktop' + chr(34))} times"
-        )
+        # Counted in `SURFACE_IDS` - where a duplicate becomes two sidebar rows -
+        # rather than across the whole file, which also counted the panel's
+        # legitimate `SETTINGS_TARGETS` entry (its Settings gear) as a duplicate.
+        import ast
+        tree = ast.parse(REGISTRY_SOURCE.read_text(encoding="utf-8"))
+        ids = next(ast.literal_eval(node.value) for node in tree.body
+                   if isinstance(node, ast.Assign)
+                   and any(getattr(t, "id", "") == "SURFACE_IDS" for t in node.targets))
+        assert ids.count("desktop") == 1, (
+            f"SURFACE_IDS must name 'desktop' exactly once; it has it {ids.count('desktop')} times")
 
     def test_the_names_it_exports_are_the_ones_the_registry_reads(self):
         for name in ("TITLE", "ICON", "build"):
@@ -806,3 +811,16 @@ class TestOpenWith:
             "the shipped entry's Exec= carries %U, which is what makes "
             "\"Open with\" hand a file to Chronoa at all"
         )
+
+
+def test_off_the_bus_is_fine_when_the_service_is_installed(monkeypatch):
+    """Not running between searches is normal; only a missing service file is red."""
+    from shani_chronoa.gui.surfaces import common, desktop
+    monkeypatch.setattr(desktop, "_service_fields", lambda: ({"Name": desktop.SEARCH_PROVIDER_NAME}, ""))
+    recorder = common.StatusRecorder()
+    desktop._status_row(recorder, ["org.freedesktop.DBus"], "")
+    assert recorder.status() == common.STATUS_OK
+    monkeypatch.setattr(desktop, "_service_fields", lambda: (None, "there is no service file"))
+    recorder = common.StatusRecorder()
+    desktop._status_row(recorder, ["org.freedesktop.DBus"], "")
+    assert recorder.status() == common.STATUS_ATTENTION

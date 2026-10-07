@@ -98,7 +98,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Devices"
 ICON = "network-wireless-symbolic"
-SECTION = "This machine"
+SECTION = "Sensing"
 SUBTITLE = ("The phone and the devices paired with this machine, through the "
             "desktop's own phone link.")
 
@@ -147,7 +147,7 @@ HEADLINE = {
 #: absent deliberately: it is not a gate, it is the absence of one, and the
 #: health of a panel that has devices to show comes from that count instead.
 HEALTH = {
-    STATE_REFUSED: common.STATUS_ATTENTION,
+    STATE_REFUSED: common.STATUS_OFF,
     STATE_NO_LINK: common.STATUS_UNKNOWN,
     STATE_LINK_DOWN: common.STATUS_UNKNOWN,
     STATE_NONE_PAIRED: common.STATUS_UNKNOWN,

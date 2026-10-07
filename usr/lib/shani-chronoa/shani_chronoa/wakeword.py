@@ -242,7 +242,7 @@ class WakeWordListener:
         self._stop.clear()
         self._generation += 1
         self._thread = threading.Thread(
-            target=self._listen_loop, args=(proc, on_detected, self._generation), daemon=True
+            target=self._listen_lit, args=(proc, on_detected, self._generation), daemon=True
         )
         self._thread.start()
         logger.info(
@@ -282,6 +282,23 @@ class WakeWordListener:
                 os.unlink(path)
             except OSError:
                 pass
+
+    #: How long "listening" may stay lit without the loop ending. The stream is
+    #: open for as long as the wake word is on, so this is a backstop, not a
+    #: timer: the light goes out when the loop returns.
+    LISTEN_LIGHT_SECONDS = 24 * 3600.0
+
+    def _listen_lit(self, proc, on_detected, generation: int = 0) -> None:
+        """`_listen_loop`, with "listening" lit for exactly as long as it runs.
+
+        The wake word keeps its own `pw-record`/`arecord` stream open - not the
+        `AudioRecorder` that lights "ears" - so the microphone was open the whole
+        time it was on while the strip's "listening" read idle.
+        """
+        from shani_chronoa import body
+        with body.lit("ears", "waiting for the wake phrase", self._backend or "",
+                      deadline=self.LISTEN_LIGHT_SECONDS):
+            self._listen_loop(proc, on_detected, generation)
 
     def _listen_loop(
         self, proc: subprocess.Popen, on_detected: Callable[[], None], generation: int = 0

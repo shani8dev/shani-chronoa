@@ -67,8 +67,14 @@ def _run(arguments: dict) -> str:
     argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
             "-f", "v4l2", "-i", device, "-t", str(seconds),
             "-c:v", "libx264", "-pix_fmt", "yuv420p", str(target)]
+    from shani_chronoa import body
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, timeout=int(seconds) + 60, check=False)
+        # "looking" for as long as the camera is open: this path drives ffmpeg
+        # on /dev/video directly, not through screengrab, so it lit only
+        # "acting" while the camera recorded.
+        with body.lit("eyes", "recording the camera", device, deadline=seconds + 60):
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=int(seconds) + 60, check=False)
     except subprocess.TimeoutExpired:
         target.unlink(missing_ok=True)
         return "Recording from the camera took too long, so I stopped it."

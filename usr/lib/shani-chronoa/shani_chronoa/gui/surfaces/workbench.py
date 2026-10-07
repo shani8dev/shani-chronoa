@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Workbench"
 ICON = "object-select-symbolic"
-SECTION = "What Chronoa did"
+SECTION = "Acting"
 
 SUBTITLE = "Turn a command into a skill of your own, and see what that joined."
 

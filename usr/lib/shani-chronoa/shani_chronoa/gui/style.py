@@ -60,17 +60,36 @@ class StyleMixin:
         /* Bubbles are a tint of the foreground rather than a fixed dark grey,
            so they read as raised on a light theme and on a dark one without a
            second rule. */
+        /* The person's own turn is tinted with the accent and the assistant's
+           with the foreground, so who said what is readable from the shape of
+           the transcript before any word of it is. Both were grey before - the
+           user's slightly lighter - which measured as two shades of one colour.
+           The tucked corner points at the speaker's side. */
         .transcript-user {
             color: @theme_fg_color;
-            background-color: alpha(@theme_fg_color, 0.08);
-            border-radius: 10px;
+            background-color: alpha(@accent_bg_color, 0.22);
+            border-radius: 14px 14px 4px 14px;
             padding: 8px 12px;
         }
         .transcript-assistant {
             color: @theme_fg_color;
-            background-color: alpha(@theme_fg_color, 0.14);
-            border-radius: 10px;
+            background-color: alpha(@theme_fg_color, 0.08);
+            border-radius: 14px 14px 14px 4px;
             padding: 8px 12px;
+        }
+        /* The settings window's section chips. Rounded and compact so eight of
+           them wrap into two short rows at the 560px default. */
+        .settings-chip {
+            border-radius: 999px;
+            padding: 2px 12px;
+            min-height: 26px;
+        }
+        /* A notice with a button - the box form of `common.banner()`. Tinted
+           and rounded so it reads as one notice holding one action, rather than
+           a stray sentence and a stray button on the page background. */
+        .surface-banner {
+            background-color: alpha(@accent_bg_color, 0.12);
+            border-radius: 10px;
         }
         .transcript-placeholder {
             color: alpha(@theme_fg_color, 0.5);
@@ -130,6 +149,18 @@ class StyleMixin:
         .tool-card.failed {
             border-left-color: #f59e0b;
         }
+        /* A file write's changed lines, shown in the chat under its card. */
+        .inline-diff { margin-top: 4px; }
+        .inline-diff-lines {
+            background-color: alpha(@theme_fg_color, 0.04);
+            border-radius: 6px;
+            padding: 4px 0;
+        }
+        .inline-diff-lines label { font-size: 12px; padding: 0 8px; }
+        .inline-diff-lines .inline-diff-add { background-color: rgba(34,197,94,0.16); }
+        .inline-diff-lines .inline-diff-del { background-color: rgba(239,68,68,0.16); }
+        .diff-count-add { color: rgba(34,197,94,0.95); font-weight: 600; }
+        .diff-count-del { color: #ef4444; font-weight: 600; }
         .tool-card-body {
             font-family: monospace;
             font-size: 12px;
@@ -323,6 +354,15 @@ class StyleMixin:
            that is styled like every other row.
            The accent left edge is the part that survives a long list: the row's
            own background is easy to miss when the panel has scrolled the list. */
+        /* Compact rows. libadwaita's 50px action row made the sidebar a card
+           list where 12 of 22 panels fit on a 900px screen; a navigation list
+           wants about 40px a row, as GNOME's own sidebars use. */
+        row.sidebar-row { min-height: 38px; }
+        row.sidebar-row > box.header {
+            min-height: 38px;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
         .sidebar-row.selected {
             background-color: alpha(@accent_bg_color, 0.16);
             box-shadow: inset 3px 0 0 0 @accent_bg_color;
@@ -357,6 +397,8 @@ class StyleMixin:
         .status-row.status-attention .status-word { color: #ef4444; }
         .status-row.status-unknown .status-dot,
         .status-row.status-unknown .status-word { color: rgba(245,158,11,0.95); }
+        .status-row.status-off .status-dot,
+        .status-row.status-off .status-word { color: rgba(140,140,150,0.95); }
 
         /* A sidebar row's health dot. The state class is applied to the dot
            itself rather than to a `.status-row` ancestor - a sidebar row is not
@@ -365,6 +407,7 @@ class StyleMixin:
         .status-dot.status-ok { color: rgba(34,197,94,0.9); }
         .status-dot.status-attention { color: #ef4444; }
         .status-dot.status-unknown { color: rgba(245,158,11,0.95); }
+        .status-dot.status-off { color: rgba(140,140,150,0.95); }
 
         /* The dot. A round swatch rather than a glyph, because a glyph has to
            come from the icon theme and an icon theme is free not to have it -
@@ -404,6 +447,12 @@ class StyleMixin:
            all**, which is why the dot looked wrong and nobody could say why:
            `add_css_class("sidebar-dot")` reads like a control and controlled
            nothing. They now do something. */
+        /* Faded until the row is pointed at or focused: one on nearly every
+           row read as a column of identical buttons competing with the panel
+           names. Still there, still focusable, still announced. */
+        .sidebar-gear { opacity: 0.35; }
+        row:hover .sidebar-gear, row:focus-within .sidebar-gear,
+        .sidebar-gear:hover, .sidebar-gear:focus { opacity: 1; }
         .sidebar-gear {
             padding: 0;
             margin-left: 4px;
@@ -451,9 +500,21 @@ class StyleMixin:
             font-size: 11px;
             font-weight: 700;
             /* Letterspaced small caps look like a section label rather than a
-               heading competing with the conversation's own. */
-            opacity: 0.75;
+               heading competing with the conversation's own. The comment said
+               so for a while before the rule did: there was no letter-spacing
+               and no transform, so the headings rendered as plain bold words. */
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            opacity: 0.7;
         }
+        /* Each section a quiet card, so the rail reads as a column of separate
+           facts rather than one run of text from "Now" to "Posture". */
+        .rail-section {
+            background-color: alpha(@theme_fg_color, 0.04);
+            border-radius: 10px;
+            padding: 8px 10px 10px 10px;
+        }
+        .rail-meter { min-height: 6px; margin-top: 2px; margin-bottom: 2px; }
         .rail-section label {
             font-size: 13px;
         }

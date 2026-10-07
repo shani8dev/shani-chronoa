@@ -34,12 +34,12 @@ from . import common
 
 TITLE = "Inventory"
 ICON = "applications-utilities-symbolic"
-SECTION = "What Chronoa knows"
+SECTION = "Health and trust"
 
 #: One icon per state, and its accessible name. A colour alone would fail
 #: anyone who cannot see it, and a grey box would fail anyone trying to skim.
 _STATE_ICON = {
-    organism.BUILT: ("emblem-ok-symbolic", "Built"),
+    organism.BUILT: ("object-select-symbolic", "Built"),
     organism.PART: ("dialog-warning-symbolic", "Partly built"),
     organism.ABSENT: ("view-conceal-symbolic", "Not built"),
 }

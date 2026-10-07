@@ -235,7 +235,7 @@ class TestModuleContract:
     def test_it_exports_what_the_registry_reads(self):
         assert devices.TITLE == "Devices"
         assert devices.ICON == "network-wireless-symbolic"
-        assert devices.SECTION == "This machine"
+        assert devices.SECTION == "Sensing"
         assert callable(devices.build)
 
     def test_the_icon_is_a_real_icon_name_on_this_machine(self):

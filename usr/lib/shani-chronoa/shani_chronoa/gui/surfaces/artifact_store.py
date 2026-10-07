@@ -47,8 +47,10 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Artifacts"
-ICON = "folder-download-symbolic"
-SECTION = "Desktop and system"
+# Not the download arrow: Export uses `document-save-symbolic`, which Adwaita
+# draws as the same arrow, so the two neighbouring rows had one glyph.
+ICON = "folder-documents-symbolic"
+SECTION = "Acting"
 
 SUBTITLE = (
     "Where models, voices, documents and exports are stored. "
@@ -358,14 +360,16 @@ class _ArtifactRow(Gtk.Box):
             size /= 1024.0
 
     def _on_path_clicked(self, button: Gtk.Button, path: Path) -> None:
-        """Open the artifact's directory in the file manager."""
+        """Open the artifact's directory in the file manager.
+
+        Through GIO, not `subprocess`. This module never imported `subprocess`,
+        so every press raised `NameError` - and the `except Exception` below
+        turned that into a log line, so the button silently did nothing on
+        every machine (found by pyflakes, 2026-10-08). GIO also returns at once
+        rather than blocking the window on `xdg-open`.
+        """
         try:
-            if sys.platform == "darwin":
-                subprocess.run(["open", "--", str(path.parent)], check=False)
-            elif sys.platform == "win32":
-                subprocess.run(["explorer", "/select:", str(path)], check=False)
-            else:  # Linux, BSD, etc.
-                subprocess.run(["xdg-open", str(path.parent)], check=False)
+            Gio.AppInfo.launch_default_for_uri(path.parent.as_uri(), None)
         except Exception as exc:
             logger.warning("Could not open file manager: %s", exc)
 
@@ -431,6 +435,7 @@ class _ArtifactStoreView(Gtk.Box):
         clear_btn.connect("clicked", self._on_clear_search)
         
         search_section.append(search_entry)
+        self._search_section = search_section
         search_section.append(clear_btn)
         self.append(search_section)
 
@@ -447,6 +452,7 @@ class _ArtifactStoreView(Gtk.Box):
         # Artifact list
         self._list_scrolled = Gtk.ScrolledWindow()
         self._list_scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        self._list_scrolled.set_vexpand(True)
         self._list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._list_scrolled.set_child(self._list_box)
         self.append(self._list_scrolled)
@@ -463,10 +469,17 @@ class _ArtifactStoreView(Gtk.Box):
         self._status_row_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._status_row_box.append(self.status_recorder.row(
             common.STATUS_UNKNOWN, "Looking for artifacts", "The home directory is being read."))
+        # First, as on every other panel: it was the last thing on the page,
+        # under the list it summarises, with "No artifacts found." above it and
+        # a stray "0 total artifacts" below - three lines in the wrong order.
         self.append(self._status_row_box)
+        self.reorder_child_after(self._status_row_box, None)
+        # The count belongs to the search it counts, so it sits in that row,
+        # before Clear.
         self._status_label = Gtk.Label(label="Loading...")
         self._status_label.add_css_class("dim-label")
-        self.append(self._status_label)
+        self._search_section.insert_child_after(
+            self._status_label, self._search_section.get_first_child())
 
         # Load artifacts
         self._load_artifacts()
@@ -544,12 +557,17 @@ class _ArtifactStoreView(Gtk.Box):
             child = next_child
 
         if not self._filtered:
-            empty = Gtk.Label(label="No artifacts found.")
-            empty.add_css_class("dim-label")
+            empty = common.empty_state(
+                ICON,
+                "No artifacts yet" if not self._artifacts else "Nothing matches",
+                "Models, voices, documents and exports Chronoa saves will be "
+                "listed here." if not self._artifacts else
+                "No artifact matches the category or the search. Clear them to see all.")
+            empty.set_vexpand(True)
             self._list_box.append(empty)
             self._status_label.set_text(f"{len(self._artifacts)} total artifacts")
             self._set_status(
-                common.STATUS_ATTENTION if not self._artifacts else common.STATUS_OK,
+                common.STATUS_OK,
                 ("Nothing in the home directory looks like an artifact" if not self._artifacts
                  else "No artifact matches the current filter"),
                 f"{len(self._artifacts)} artifact(s) found before filtering")

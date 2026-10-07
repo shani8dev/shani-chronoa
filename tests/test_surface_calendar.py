@@ -187,7 +187,7 @@ class TestModuleContract:
     def test_it_exports_what_the_registry_reads(self):
         assert surface.TITLE == "Calendar"
         assert surface.ICON
-        assert surface.SECTION == "This machine"
+        assert surface.SECTION == "Sensing"
         for name in ("TITLE", "ICON", "SECTION", "build"):
             assert hasattr(surface, name), name
 

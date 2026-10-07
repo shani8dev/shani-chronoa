@@ -83,7 +83,7 @@ ICON = "document-save-symbolic"
 #: `surfaces.sections()` reads this off the module and files the panel under it;
 #: it is deliberately its own sentence rather than "Desktop and system",
 #: because getting your data out is neither of those things.
-SECTION = "What Chronoa did"
+SECTION = "Acting"
 
 SUBTITLE = (
     "Chronoa keeps your conversation and your facts in your own data "

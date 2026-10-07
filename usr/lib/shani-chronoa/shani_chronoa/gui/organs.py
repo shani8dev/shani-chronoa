@@ -65,7 +65,7 @@ ORGAN_ICONS = {
     "mouth": ("audio-volume-high-symbolic", "speaking"),
     "skin": ("network-wireless-symbolic", "network"),
     "nose": ("weather-clear-symbolic", "sensing"),
-    "memory": ("emblem-documents-symbolic", "remembering"),
+    "memory": ("document-open-recent-symbolic", "remembering"),
     "hands": ("system-run-symbolic", "acting"),
     "brain": ("dialog-question-symbolic", "thinking"),
 }
@@ -134,9 +134,10 @@ class OrganStrip(Gtk.FlowBox):
         super().__init__()
         self.add_css_class("organ-strip")
         self.set_selection_mode(Gtk.SelectionMode.NONE)
-        # Centring was tried and reverted: `halign` is honoured by nothing
-        # between here and the window (see the note at the append site in
-        # `gui/window.py`, with the measurement).
+        # Centred. This failed twice while the flow box over-reported its
+        # natural width (see `do_measure` and the note at the append site);
+        # with the true width reported, `halign` has slack to work with.
+        self.set_halign(Gtk.Align.CENTER)
         # Not homogeneous: with equal-width cells the strip wrapped to two rows
         # even at 1280px (measured) because six wide cells plus two is a line
         # break, not because the words needed it. Cells size to their label, so
@@ -172,6 +173,34 @@ class OrganStrip(Gtk.FlowBox):
         self._unsubscribe = None
         self._build()
         self._unsubscribe = body_module.body.subscribe(lambda _b: self.refresh())
+
+    def do_measure(self, orientation, for_size):
+        """Report the width the lights actually need, so the strip can centre.
+
+        `Gtk.FlowBox` sizes a non-homogeneous box as if every child were as
+        wide as the widest: eight lights of 39-87px reported **815px** of
+        natural width for 440px of children and 42px of gaps (measured). Always
+        claiming more than the 740px column is why both centring attempts
+        recorded at the append site in `window.py` moved no pixel - there was
+        never any slack to centre in. The minimum is left to GTK, so a narrow
+        window still allocates less and the strip still wraps.
+        """
+        minimum, natural, min_base, nat_base = Gtk.FlowBox.do_measure(
+            self, orientation, for_size)
+        if orientation != Gtk.Orientation.HORIZONTAL:
+            return minimum, natural, min_base, nat_base
+        widths = []
+        child = self.get_first_child()
+        while child is not None:
+            if child.get_visible():
+                widths.append(child.measure(Gtk.Orientation.HORIZONTAL, -1)[1])
+            child = child.get_next_sibling()
+        # Baselines are vertical; a horizontal measure must report -1, or GTK
+        # warns "reported a horizontal baseline" on every layout.
+        if not widths:
+            return minimum, natural, -1, -1
+        needed = sum(widths) + self.get_column_spacing() * (len(widths) - 1)
+        return minimum, max(minimum, needed), -1, -1
 
     def _build(self) -> None:
         for organ in body_module.ORGANS:
