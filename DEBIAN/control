@@ -14,6 +14,6 @@ Suggests: soundtouch, rubberband (higher-quality pitch transposition for singing
 Maintainer: Shrinivas Vishnu Kumbhar <shrinivas.v.kumbhar@gmail.com>
 Description: Local AI assistant with privacy-first design, integrated into Shanios
  Shani Chronoa is a local-first AI assistant for the Shanios ecosystem.
- It provides speech-to-text via whisper.cpp, LLM inference through Ollama,
- and text-to-speech via Piper TTS, all with a GTK4 GUI interface.
+ It provides speech-to-text via whisper.cpp, on-device LLM inference (llama.cpp by default, Ollama supported),
+ and text-to-speech via Piper TTS / espeak-ng, all with a GTK4 GUI interface.
  All processing happens locally ensuring complete privacy and data sovereignty.
