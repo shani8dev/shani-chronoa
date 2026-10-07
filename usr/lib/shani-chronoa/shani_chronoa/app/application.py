@@ -294,6 +294,24 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         self._submit(text, channel=channel)
         return ""
 
+    #: The reply styles the schema allows, in the order a menu shows them.
+    REPLY_STYLES = ("ordinary", "brief", "explanatory")
+
+    def _on_reply_style(self, action, value) -> None:
+        """Write the chosen style, then set the action's state from config.
+
+        Read back rather than echoed: a value the schema refuses leaves the
+        setting where it was, and the menu must then show that, not the click.
+        """
+        style = value.get_string() if value is not None else ""
+        if style in self.REPLY_STYLES:
+            self.config.set("reply-style", style)
+        action.set_state(GLib.Variant("s", self.config.reply_style))
+        window = getattr(self, "window", None)
+        strip = getattr(window, "_mode_strip", None)
+        if strip is not None:
+            strip.refresh()
+
     def _on_show_page(self, _action, parameter) -> None:
         """`app.show-page('settings:privacy')`, over D-Bus as well as in-process.
 
@@ -718,6 +736,18 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         cloud_fallback_action = Gio.SimpleAction.new("toggle-cloud-fallback", None)
         cloud_fallback_action.connect("activate", self._toggle_cloud_fallback)
         self.add_action(cloud_fallback_action)
+
+        # How replies are written: ordinary, brief or explanatory. Stateful, so
+        # a menu bound to it draws radio items and reads the current style
+        # back from the action rather than from a copy of its own. The value is
+        # read from config on every turn (`assistant.reply_style_clause`), so a
+        # change applies to the next reply - which is what makes it a mode for
+        # the window and not only a setting.
+        reply_style_action = Gio.SimpleAction.new_stateful(
+            "reply-style", GLib.VariantType.new("s"),
+            GLib.Variant("s", self.config.reply_style))
+        reply_style_action.connect("change-state", self._on_reply_style)
+        self.add_action(reply_style_action)
 
         barge_in_vad_action = Gio.SimpleAction.new("toggle-barge-in-vad", None)
         barge_in_vad_action.connect("activate", self._toggle_barge_in_vad)

@@ -139,6 +139,11 @@ def surface(title: str, subtitle: str = "",
             note.add_css_class("dim-label")
             note.add_css_class("surface-subtitle")
             wrap_label(note)
+            # Left, on the same edge as the content under it. A capped label
+            # keeps GTK's default xalign of 0.5, so every panel opened with a
+            # narrow centred paragraph floating over left-aligned rows.
+            note.set_xalign(0.0)
+            note.set_halign(Gtk.Align.START)
             note.set_margin_top(4)
             note.set_margin_start(12)
             note.set_margin_end(12)
@@ -202,6 +207,42 @@ def surface(title: str, subtitle: str = "",
     return box, set_content
 
 
+#: What a person calls each built-in sense. The registry is keyed by module
+#: name, and those were the row titles: `cgroup`, `stale`, `rfsense`, `hwmon` -
+#: the same "module name shown to users" defect AGENTS.md records for `hwmon`
+#: and `thermalgrid` in 2026-09. The id stays reachable in each row's tooltip;
+#: a drop-in sense with no entry here falls back to its own name, capitalised.
+SENSE_TITLES = {
+    "accessibility": "Screen text (accessibility)", "audio": "Audio devices",
+    "bluetooth": "Bluetooth", "boots": "Boot history",
+    "capture": "Who is using the camera or mic", "cgroup": "Process limits",
+    "containers": "Containers", "coredumps": "Crashed programs",
+    "cpu": "Processor", "devices": "PCI and USB devices", "display": "Display",
+    "dnsresolvers": "Name resolution (DNS)", "faults": "Recent faults",
+    "filesystem": "Read a file you name", "filesystems": "Filesystems",
+    "firewall": "Firewall", "git": "Git working tree", "gpu": "Graphics card",
+    "hardware": "Hardware model", "heard-sound": "Sounds in the room",
+    "hearing": "Hearing", "hwmon": "Fans and temperatures", "idle": "Idle time",
+    "kernel": "Kernel", "labnetworks": "Lab networks", "listeners": "Open ports",
+    "location": "Location", "memory": "Remembered facts",
+    "modelfit": "Models this machine can run", "network": "Network",
+    "ocr": "Text in images", "power": "Battery and power",
+    "printing": "Printers and scanners", "privilege": "Process privileges",
+    "resources": "Resources running out", "rfsense": "Movement over Wi-Fi",
+    "security": "Security posture", "services": "System services",
+    "sessions": "Who is logged in", "snapshots": "Snapshots",
+    "stale": "Outdated running programs", "storage": "Disks",
+    "thermalgrid": "Infrared heat sensor", "timebase": "Clock accuracy",
+    "updates": "Package updates", "usb": "USB devices", "vision": "Vision",
+    "web": "Web pages", "wirelesslink": "Wi-Fi link quality",
+}
+
+
+def sense_title(name: str) -> str:
+    """The person-facing title for sense `name`."""
+    return SENSE_TITLES.get(name) or (name.replace("-", " ").replace("_", " ").capitalize())
+
+
 #: The three states a panel's own health can be in. The same closed vocabulary
 #: `diagnostics.py` uses for its rows, deliberately: a panel that says "could not
 #: determine" about its own summary and "working" about a subsystem is describing
@@ -209,6 +250,19 @@ def surface(title: str, subtitle: str = "",
 STATUS_OK = "ok"
 STATUS_ATTENTION = "attention"
 STATUS_UNKNOWN = "unknown"
+#: Switched off **by a choice**, not by a fault: a consent key left at its
+#: default, a background unit nobody enabled. Before this existed the only
+#: words were the three above, so every panel whose gate was shut said "Needs
+#: attention" in red - and the Devices panel printed "This is a setting on this
+#: machine, not a fault." directly under that red word. Five of the sidebar's
+#: rows were red on a healthy machine with default settings; red that is always
+#: on stops meaning anything, which costs the rows where it is true. Grey, not
+#: amber: amber already means "could not tell", and this panel could.
+STATUS_OFF = "off"
+#: And an empty store that was read without error is `STATUS_OK`, not
+#: `STATUS_UNKNOWN`: "no tool calls yet", "no rules armed" and "nothing to
+#: compare" are answers. Amber is for a panel that could not find out, and
+#: five panels wore it for "nothing here yet" (rendered, 2026-10-08).
 
 #: Words shown for each state, and the CSS class that colours the dot beside
 #: them. The class names match the diagnostics row classes on purpose - the same
@@ -218,12 +272,14 @@ STATUS_WORDS = {
     STATUS_OK: "Ready",
     STATUS_ATTENTION: "Needs attention",
     STATUS_UNKNOWN: "Could not determine",
+    STATUS_OFF: "Turned off",
 }
 
 STATUS_CLASSES = {
     STATUS_OK: "status-ok",
     STATUS_ATTENTION: "status-attention",
     STATUS_UNKNOWN: "status-unknown",
+    STATUS_OFF: "status-off",
 }
 
 #: Markers a test finds in the built tree, so an assertion reads what was built
@@ -735,14 +791,28 @@ def banner(text: str, button_label: str = "",
         return widget
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     box.add_css_class("toolbar-view")
+    # Rendered, the sentence sat centred in the middle of the row and the
+    # button was flush against the window's right edge with no margin at all,
+    # so the two read as unrelated and the button looked clipped. Sentence on
+    # the left, button on the right, both inset by the same 12px.
+    box.add_css_class("surface-banner")
+    box.set_margin_start(12)
+    box.set_margin_end(12)
+    box.set_margin_top(6)
+    box.set_margin_bottom(6)
     label = Gtk.Label(label=text)
     wrap_label(label)
+    label.set_xalign(0.0)
     label.set_hexpand(True)
     label.set_margin_start(12)
     label.set_margin_end(12)
     box.append(label)
     if button_label and on_button is not None:
         button = Gtk.Button(label=button_label)
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_margin_top(6)
+        button.set_margin_bottom(6)
+        button.set_margin_end(6)
         button.connect("clicked", lambda _b: on_button())
         # **Every banner button carries a tooltip and an accessible label**, and
         # both default to the banner's own sentence when the caller gives

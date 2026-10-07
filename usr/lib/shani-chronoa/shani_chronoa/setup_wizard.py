@@ -429,6 +429,12 @@ _SETUP_ALIASES = {"more": "extras", "code": "eyes", "picture": "imagine",
                   "download": "review", "keys": "cloud-keys", "tts": "voice"}
 
 
+#: Widest a wizard page's content column gets, in px. Wider than the 560px
+#: default window so the default is untouched; narrow enough that a row's title
+#: and its switch stay within one glance.
+WIZARD_MAX_WIDTH = 640
+
+
 def _register_setup_pages() -> None:
     """Declare the wizard's pages. Idempotent; called from `build_window` too."""
     from shani_chronoa import pages as page_registry
@@ -606,7 +612,14 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # natural width (a 900px child measured 900). It is left out rather than
         # left in with a comment claiming it works.
         scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        scroller.set_child(box)
+        # Clamped, because the window can be resized or maximised and nothing
+        # else bounds it: rendered at 1280px every row ran edge to edge, a
+        # 30-character subtitle sat 1,800px from its switch, and the Next button
+        # floated half a screen below the choice it confirms. The clamp only
+        # caps; at the 560px default it changes nothing.
+        clamp = Adw.Clamp(maximum_size=WIZARD_MAX_WIDTH, tightening_threshold=WIZARD_MAX_WIDTH)
+        clamp.set_child(box)
+        scroller.set_child(clamp)
 
         # **The action row is pinned below the scroller, not appended to the
         # content.** It used to be the last children of `box`, which put it at
@@ -1120,7 +1133,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         back.set_tooltip_text("Back" if len(_history) <= 2 else f"Back to {_history[-2]}")
         view.push_by_tag(tag)
 
-    def goto_back_to_list(box, close_label: bool = False) -> None:
+    def goto_back_to_list(box) -> None:
         """An extras page's way out: back to the list of everything chosen.
 
         Extras are optional one at a time, so each returns to the review rather
@@ -1131,10 +1144,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                        halign=Gtk.Align.CENTER)
         n.connect("clicked", lambda *_: goto("review"))
         page_footer(box).append(n)
-        skip = Gtk.Button(label="Close" if close_label else "Finish", css_classes=["flat"],
-                          halign=Gtk.Align.CENTER)
-        skip.connect("clicked", lambda *_: goto("review"))
-        page_footer(box).append(skip)
 
     def navigate(box, next_tag, skip_label: str = "") -> "Gtk.Button":
         """Just the way forward: a Next button and a way past the rest.
@@ -1277,7 +1286,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         entry.connect("changed", lambda e, pid=provider_id: entered.__setitem__(pid, e.get_text()))
         row = Adw.ActionRow(title=provider.name,
                             subtitle=("a key is already saved" if existing.get(provider_id)
-                                      else "required"))
+                                      else "needs a key"))
         row.add_suffix(entry)
         row.set_activatable_widget(entry)
         key_rows.add(row)
@@ -1288,7 +1297,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     box.append(free)
     key_status = wrapping("")
     box.append(key_status)
-    save_keys = Gtk.Button(label="Save these keys", css_classes=["suggested-action", "pill"],
+    # Not `suggested-action`: Next is the page's one primary action, and two
+    # orange pills stacked read as "press both" with no way to tell which
+    # moves on. Next saves what was typed as well (below), so this button is
+    # for someone who wants the confirmation sentence before moving on.
+    save_keys = Gtk.Button(label="Save these keys", css_classes=["pill"],
                            halign=Gtk.Align.CENTER)
 
     def save() -> None:
@@ -1313,7 +1326,10 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     # So "nothing to download" was literally true and practically misleading - it
     # was true because the wizard had stopped asking. The Ears page says what
     # listening actually costs, whichever way this branch got here.
-    navigate(box, "ears", skip_label="Skip for now")
+    keys_next = navigate(box, "ears", skip_label="Skip for now")
+    # A key typed and then left behind by pressing Next was silently dropped:
+    # only the Save button wrote it. Next is what people press.
+    keys_next.connect("clicked", lambda *_: save() if any(entered.values()) else None)
     view.add(keys_page)
 
     # ── where should Chronoa think? ─
@@ -1617,11 +1633,25 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         a way forward and neither can bring a button with it.
         """
         p, body = page(title, tag, subtitle)
-        # "Skip the rest" goes to the review, not to the next extra: it says
-        # "the rest", and taking a person to the *sixth* optional page after they
-        # said skip would be the same word doing a different job.
-        navigate(body, next_tag,
-                 skip_label="Close" if next_tag == "done" else "Skip the rest")
+        # **One footer, built here, and nowhere else.** This used to call
+        # `navigate()` here *and* `goto_back_to_list()` after each page's
+        # content, so six of the seven extras showed four stacked buttons, two of
+        # them primary: "Next: Photos and videos / Skip the rest / Back to the
+        # list / Finish". Rendered, not inferred. Worse, the halves went to
+        # different places - "Skip the rest" and the Languages page's "Next: Done"
+        # went to Done, past the Review page that is the only place anything is
+        # downloaded, so an extra picked on the way was silently never fetched;
+        # and "Finish" went to the Review, not to the finish.
+        #
+        # So: the primary action returns to the Review (where the choice is
+        # downloaded or removed), and the next extra is one flat button for
+        # someone browsing them in order. The last extra has no "next".
+        goto_back_to_list(body)
+        if next_tag not in ("done", "review"):
+            on = Gtk.Button(label=f"Next: {_titles.get(next_tag, next_tag)}",
+                            css_classes=["flat"], halign=Gtk.Align.CENTER)
+            on.connect("clicked", lambda *_: goto(next_tag))
+            page_footer(body).append(on)
         EXTRAS.append((title, tag, subtitle, next_tag))
         view.add(p)
         return body, p
@@ -1644,7 +1674,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                local_vision.MODELS[ey["active"]].size_bytes,
                lambda report: setup_eyes(chosen_eyes(), report, win.cancel, config),
                "already downloaded")
-        navigate(body, "review", skip_label="Back to the list")
     else:
         _record_when_shown(body_page, "eyes", f"Eyes - {chosen_eyes()}",
                            local_vision.MODELS[chosen_eyes()].size_bytes,
@@ -1667,7 +1696,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     _record_when_shown(body_page, "imagine", "Imagine - SD-Turbo", size * 1e9,
                        lambda report: setup_imagine(report, win.cancel, config),
                        "from a description")
-    goto_back_to_list(body)
 
     # --- Memory -----------------------------------------------------------
     body, body_page = extras_page(
@@ -1679,7 +1707,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                        local_embed.MODEL.size_bytes,
                        lambda report: setup_memory(report, win.cancel, config),
                        "by meaning, not by words")
-    goto_back_to_list(body)
 
     # --- Photos and videos ----------------------------------------------
     body, body_page = extras_page(
@@ -1691,7 +1718,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     _record_when_shown(body_page, "photos", "Photos and videos", cv_runtime.DOWNLOAD_BYTES,
                        lambda report: setup_photos(report, win.cancel, config),
                        "faces, objects, blur, straighten")
-    goto_back_to_list(body)
 
     # --- Sounds -----------------------------------------------------------
     body, body_page = extras_page(
@@ -1702,7 +1728,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     _record_when_shown(body_page, "sounds", "Sounds", sounds_mod.MODEL.size_bytes,
                        lambda report: setup_sounds(report, win.cancel, config),
                        "doorbell, dog, alarm")
-    goto_back_to_list(body)
 
     # --- Who said what ----------------------------------------------------
     body, body_page = extras_page(
@@ -1716,7 +1741,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                        + speakers_mod.EMBEDDING.size_bytes,
                        lambda report: setup_speakers(report, win.cancel, config),
                        "splits by speaker")
-    goto_back_to_list(body)
 
     # --- Languages --------------------------------------------------------
     la = s["languages"]
@@ -1753,7 +1777,6 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                    "only the ticked ones")
 
         body_page.connect("shown", record_languages)
-    goto_back_to_list(body, close_label=True)
 
     #: (title, tag, subtitle, already_ready) per optional extra, filled after
     #: every page is built because readiness is only known then.

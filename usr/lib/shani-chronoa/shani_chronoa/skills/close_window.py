@@ -20,6 +20,10 @@ import subprocess
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.skills.list_windows import session_problem
+from shani_chronoa.skills.window_atspi import (
+    close_window_atspi,
+    is_atspi_available,
+)
 
 _CONSENT_KEY = "window-close-enabled"
 _TIMEOUT = 15
@@ -31,7 +35,7 @@ SCHEMA = {
         "description": (
             "Ask a window to close, the way its close button would - the "
             "application still gets the chance to ask about unsaved work. "
-            "Requires the 'window-close-enabled' consent key. X11 only."
+            "Requires the 'window-close-enabled' consent key. X11 and Wayland."
         ),
         "parameters": {
             "type": "object",
@@ -63,6 +67,15 @@ def _run(arguments: dict) -> str:
     if not allowed:
         return f"Refusing to close the window: {reason}"
 
+    # AT-SPI Wayland backend (portable across GNOME, Plasma, COSMIC)
+    if is_atspi_available():
+        wid = (arguments.get("window_id") or "").strip()
+        needle = (arguments.get("title_contains") or "").strip()
+        if wid:
+            return f"AT-SPI does not support window_id; give a title_contains match instead"
+        return close_window_atspi(title_contains=needle if needle else None)
+
+    # X11 fallback via xdotool
     problem = session_problem()
     if problem:
         return f"Could not close a window: {problem}"

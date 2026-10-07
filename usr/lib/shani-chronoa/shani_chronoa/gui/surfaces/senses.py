@@ -158,6 +158,19 @@ def _schema_summary(sense: Any) -> str:
     return description.strip().split(". ", 1)[0].rstrip(".")
 
 
+def _unprefixed(summary: str) -> str:
+    """`summary` without the "Sense:" / "Display sense:" opener most modules use.
+
+    Every row on this page is a sense, so the word in front of each description
+    is the page's own title repeated forty times. Only a leading "...sense:" is
+    taken; a colon later in the sentence is part of what it says.
+    """
+    head, sep, rest = summary.partition(": ")
+    if sep and head.lower().endswith("sense") and len(head) <= 24 and rest:
+        return rest[:1].upper() + rest[1:]
+    return summary
+
+
 def _describe(sense: Any) -> str:
     """One line about `sense`, from the sense's own text rather than from here.
 
@@ -256,7 +269,11 @@ def _state_text(name: str, consent: _Consent, granted: bool) -> Tuple[str, str]:
             f"Consent switch for the {name} sense: unavailable, no consent key",
         )
     state = "granted" if granted else "not granted"
-    return state, f"Consent switch for the {name} sense: {state}"
+    # The visible state line is empty for a mapped sense: the switch beside the
+    # row already says on or off, and a third subtitle line reading "granted"
+    # under every switch that is on was the same fact twice. The accessible
+    # label keeps it, because a screen reader announces the label, not the knob.
+    return "", f"Consent switch for the {name} sense: {state}"
 
 
 def _sense_row(name: str, sense: Any, consent: _Consent) -> Gtk.Widget:
@@ -268,8 +285,8 @@ def _sense_row(name: str, sense: Any, consent: _Consent) -> Gtk.Widget:
 
     handler = _Toggle(consent)
     row = common.switch_row(
-        title=_plain(name),
-        subtitle=_plain(f"{summary}\n{state}"),
+        title=_plain(common.sense_title(name)),
+        subtitle=_plain(f"{_unprefixed(summary)}\n{state}" if state else _unprefixed(summary)),
         on_changed=handler,
     )
     row.add_css_class(ROW_CSS)
@@ -384,8 +401,11 @@ def _summary(granted: int, total: int) -> Gtk.Widget:
             f"All {total} senses have consent granted",
             "a sense with no permission is never invoked at all",
         )
+    # Most senses default off on purpose, so "some are off" is the shipped
+    # state and not something to fix. Only a registry with nothing granted at
+    # all is called off; neither case is red.
     return common.status_row(
-        common.STATUS_ATTENTION,
+        common.STATUS_OK if granted else common.STATUS_OFF,
         f"{granted} of {total} senses have consent granted",
         "rows with a granted permission are first; the rest are never invoked",
     )
@@ -429,8 +449,7 @@ def build(app) -> Gtk.Widget:
         granted = sum(1 for entry in entries if entry[0])
         body.append(_summary(granted, len(entries)))
         _status_state[0] = (
-            common.STATUS_OK if granted == len(entries) and entries
-            else common.STATUS_ATTENTION
+            common.STATUS_OK if granted else common.STATUS_OFF
         )
         group = common.group("Senses", "One switch per sense, granted first.")
         for _granted, name, sense, consent in entries:

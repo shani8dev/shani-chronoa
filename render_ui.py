@@ -33,7 +33,8 @@ error. See `AGENTS.md` for the full account:
   painted window. That is a real user action rather than a trick, and it is what
   `tool-activity` does.
 
-Usage: render_ui.py <settings|main|tool-activity|empty> <out.png> <width> <height> [theme]
+Usage: render_ui.py <settings|main|help|tool-activity|empty|panel:NAME|page:WINDOW:ID>
+                    <out.png> <width> <height> [theme]
 """
 
 import json
@@ -45,7 +46,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Gsk", "4.0")
-from gi.repository import Adw, GLib, Gdk, Graphene, Gsk, Gtk  # noqa: E402
+from gi.repository import Adw, Gio, GLib, Gdk, Graphene, Gsk, Gtk  # noqa: E402
 
 # Before the application exists, not inside `activate`.
 Adw.init()
@@ -103,7 +104,12 @@ class App(Gtk.Application):
     type is rejected outright."""
 
     def __init__(self):
-        super().__init__(application_id="test.chronoa.render")
+        # NON_UNIQUE: two renders running at once otherwise register the same
+        # name, and the second becomes a remote that forwards `activate` to the
+        # first and exits having written nothing - every render in a parallel
+        # batch but one came back empty for exactly that reason.
+        super().__init__(application_id="test.chronoa.render",
+                         flags=Gio.ApplicationFlags.NON_UNIQUE)
         self.config = ChronoaConfig()
         self.window = None
         self._wake_word_active = False
@@ -182,9 +188,31 @@ def on_activate(app):
         name = WHICH.split(":", 1)[1]
         from shani_chronoa.gui import ChronoaWindow
         window = ChronoaWindow(app)
+        window.set_default_size(WIDTH, HEIGHT)
         window.show_page("panels")
         window._show_surface(name)
         window.present()
+        GLib.timeout_add(1800, lambda: _render(window, WIDTH, HEIGHT, OUT))
+        GLib.timeout_add(3200, lambda: (app.quit(), False)[1])
+        return None
+    if WHICH.startswith("page:"):
+        # Any registered page of any window: `page:settings:privacy`,
+        # `page:setup:review`. Goes through `pages.show()` - the same entry point
+        # as `--show-page=` - so what is photographed is what that flag opens,
+        # and a page id that has drifted from its window fails here as "REFUSED"
+        # rather than producing a picture of whatever page was already up.
+        from shani_chronoa import pages
+        target = WHICH.split(":", 1)[1]
+        if not pages.show(target, app, app.config):
+            print(f"REFUSED {target}", flush=True)
+            app.quit()
+            return None
+        window = pages._WINDOWS[target.split(":", 1)[0]]
+        # `show()` has already presented it, at its own default size. Without
+        # an explicit size the snapshot below stretches a smaller window up to
+        # WIDTHxHEIGHT and every glyph comes out scaled - legible, and wrong.
+        window.set_default_size(WIDTH, HEIGHT)
+        window.set_size_request(WIDTH, HEIGHT)
         GLib.timeout_add(1800, lambda: _render(window, WIDTH, HEIGHT, OUT))
         GLib.timeout_add(3200, lambda: (app.quit(), False)[1])
         return None

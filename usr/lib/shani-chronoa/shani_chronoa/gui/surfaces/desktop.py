@@ -99,7 +99,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Desktop"
 ICON = "applications-system-symbolic"
-SECTION = "Desktop and system"
+SECTION = "Health and trust"
 
 SUBTITLE = (
     "Is Chronoa actually hooked into this desktop right now? Every row is read "
@@ -339,10 +339,22 @@ def _status_row(recorder: "common.StatusRecorder",
             common.STATUS_OK,
             "The desktop integration is answering",
             f"{SEARCH_PROVIDER_NAME} is on the session bus")
+    # Off the bus is the normal state between searches - D-Bus starts the
+    # provider on demand and it exits after two idle minutes, as this panel's
+    # own row says. Headlining that in red put "Needs attention" above a row
+    # explaining that it was not evidence of anything. The fault worth the red
+    # word is the one that stops D-Bus starting it at all: no service file.
+    fields, why = _service_fields()
+    if fields is not None:
+        return recorder.row(
+            common.STATUS_OK,
+            "The desktop integration is installed",
+            f"{SEARCH_PROVIDER_NAME} starts when the desktop searches, and is "
+            "not running right now")
     return recorder.row(
         common.STATUS_ATTENTION,
-        "The desktop integration is not answering",
-        f"{SEARCH_PROVIDER_NAME} is not on the session bus")
+        "The desktop search provider is not installed",
+        why or f"{SEARCH_PROVIDER_NAME} is not on the session bus")
 
 
 # -- row 1 and 2: the desktop search provider -------------------------------

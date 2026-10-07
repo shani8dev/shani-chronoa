@@ -70,8 +70,10 @@ from shani_chronoa.skills import calendar_events as skill_calendar  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Calendar"
-ICON = "office-calendar-symbolic"
-SECTION = "This machine"
+# `x-office-calendar`: Adwaita has no `office-calendar-symbolic`, so on GNOME
+# this row drew a blank box. Present in Adwaita and Yaru alike.
+ICON = "x-office-calendar-symbolic"
+SECTION = "Sensing"
 
 SUBTITLE = (
     "What is on your calendars, read from the same Evolution Data Server "
@@ -472,7 +474,7 @@ class _CalendarSurface:
             self._state = STATE_CONSENT
             self._message = detail
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_ATTENTION,
+                common.STATUS_OFF,
                 "Calendar is not granted",
                 detail))
             self._show_state(CONSENT_TITLE, detail)
@@ -507,7 +509,7 @@ class _CalendarSurface:
             except Exception:  # noqa: BLE001 - already reported, do not raise here
                 label = "window"
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_ATTENTION,
+                common.STATUS_OK,
                 "No events in range",
                 detail))
             self._show_state(EMPTY_TITLE.format(label=label), detail)

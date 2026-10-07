@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Diagnostics"
 ICON = "dialog-information-symbolic"
-SECTION = "Desktop and system"
+SECTION = "Health and trust"
 
 SUBTITLE = (
     "One question per row: is this part of Chronoa working right now, and if not, "
@@ -945,6 +945,53 @@ def _atspi_extra() -> Tuple[str, str]:
     )
 
 
+# -- the conversation history that is *not* memory ----------------------------
+
+def _checkpoint_count(root: Optional[Path] = None) -> Tuple[str, str]:
+    """Whether the session store has checkpoint files sitting beside its history.
+
+    `conversation_store.list_checkpoints` is the one place that knows how to
+    enumerate them; a probe should use it rather than reimplementing the glob,
+    so the answer never drifts from the tooling that reads the files. A missing
+    session directory is the normal "nothing done yet" state, not a fault, so
+    that reports nothing rather than a red dot.
+
+    `root` is optional and used primarily by tests; in production the default
+    `conversation_store.session_dir()` is used so the answer always follows the
+    same XDG resolution the rest of the app uses.
+    """
+    from shani_chronoa import conversation_store
+
+    if root is None:
+        root = conversation_store.session_dir()
+    if not root.exists():
+        return STATUS_NOT_WORKING, (
+            f"{root} does not exist yet - the history store is empty, "
+            f"so there is nothing to count"
+        )
+
+    total = 0
+    by_session: Dict[str, List[int]] = {}
+    for path in sorted(root.glob("*.ckpt.*.jsonl")):
+        try:
+            sid = path.parent.name
+            n = int(path.stem.split(".")[-1])
+            total += 1
+            by_session.setdefault(sid, []).append(n)
+        except (ValueError, IndexError):
+            continue
+
+    if total == 0:
+        return STATUS_NOT_WORKING, (
+            "no checkpoint files were found - the store has no saved turn states"
+        )
+
+    lines = [f"{total} checkpoint file(s), in {len(by_session)} conversation(s)"]
+    for sid, nums in sorted(by_session.items()):
+        lines.append(f"  {sid}: numbers {', '.join(str(n) for n in nums)}")
+    return STATUS_WORKING, "\n".join(lines)
+
+
 # -- probes: the model servers setup starts ----------------------------------
 
 def _model_server(instance: str) -> Probe:
@@ -995,6 +1042,14 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
             ("Local model server (llama.cpp)", _brain),
             ("Speech in (whisper.cpp)", _speech_in),
             ("Speech out (Piper / Kokoro / RHVoice / espeak-ng)", _speech_out),
+        ),
+    ),
+    (
+        "Conversations and checkpoints",
+        "The history files and their checkpoints. A missing session dir is not "
+        "an error - it means no conversations have been started yet.",
+        (
+            ("Conversation checkpoints", _checkpoint_count),
         ),
     ),
     (

@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Voice"
 ICON = "audio-volume-high-symbolic"
-SECTION = "What Chronoa knows"
+SECTION = "Sensing"
 SUBTITLE = ("Read from this computer: the engine that would speak the next reply, "
             "the voice it would use, and what else is installed to replace it. "
             "Nothing on this page downloads anything or changes a setting.")

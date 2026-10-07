@@ -192,7 +192,7 @@ class TestHelpWindow:
         buttons = [
             n for n in _walk(window, [])
             if isinstance(n, Gtk.Button)
-            and "help-about-symbolic" == n.get_icon_name()
+            and "help-browser-symbolic" == n.get_icon_name()
         ]
         assert buttons, "no help button in the header"
         buttons[0].emit("clicked")

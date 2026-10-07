@@ -93,10 +93,13 @@ class VoicePage:
         self._entry(group, "Wake phrase", "What you say to start listening, e.g. \"hey chronoa\"",
                     config.wake_phrase, self._set_wake_phrase)
         self._switch(
-            group, "Speak answers aloud",
-            "Read replies and timers back through Piper. The notify skill also "
-            "refuses while this is off, which is why it can look like a skill "
-            "that does nothing.",
+            # Named for both things the key does. It was "Speak answers aloud",
+            # and the same key also gates desktop notifications - so the Help
+            # window told people to turn on "Speak answers aloud" to send a
+            # notification, which reads as a wrong answer even though it is not.
+            group, "Spoken replies and notifications",
+            "Read replies and timers aloud, and let Chronoa show desktop "
+            "notifications. Off: replies are on screen only and timers are silent.",
             config.get_bool("notification-enabled", True),
             lambda a: self._set_bool("notification-enabled", a),
         )

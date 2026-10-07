@@ -46,6 +46,7 @@ the daemon's own surface can show the same thing later.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import threading
 import time
@@ -277,3 +278,27 @@ class Body:
 
 #: The one register this process uses.
 body = Body()
+
+@contextlib.contextmanager
+def lit(organ: str, what: str, detail: str = "", deadline: float = 0.0):
+    """Light `organ` for the duration of a `with` block, and always put it out.
+
+    For capture paths that hold a device open themselves rather than through
+    `screengrab` or `audio`: webcam recording, the scanner, the wake word's own
+    microphone stream. Each of those ran with its light dark - the camera
+    recording while "looking" read idle - which is the one failure an indicator
+    must not have. Never raises: a light that cannot be lit must not stop the
+    capture it describes, and a closed device must not stay lit.
+    """
+    activity = None
+    try:
+        activity = body.use(organ, what, detail[:80], deadline=deadline)
+    except Exception:                                   # noqa: BLE001
+        logger.debug("body.lit could not light %s", organ, exc_info=True)
+    try:
+        yield activity
+    finally:
+        try:
+            body.done(activity)
+        except Exception:                               # noqa: BLE001
+            logger.debug("body.lit could not put out %s", organ, exc_info=True)

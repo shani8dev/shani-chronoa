@@ -705,8 +705,11 @@ class TestWhatThePanelSays:
         )
         assert unread == 15, unread  # 14 names with no module here, plus hwmon
         said = _all_text(widget)
-        assert f"{unread} of 16 machine-state senses are not showing a reading" in said, said
+        # Only hwmon *failed*; the 14 with no module are absent by design and
+        # are not counted as failures (nor bannered as one).
+        assert "1 of 16 machine-state senses could not answer" in said, said
         assert "1 of 16 senses answered" in said, said
+        assert "1 could not answer and 14 were not read on purpose" in said, said
 
     def test_the_banner_is_revealed_not_merely_in_the_tree(self, monkeypatch):
         """`Adw.Banner` starts hidden, so a panel that appends one and stops puts

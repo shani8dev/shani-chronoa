@@ -9,7 +9,7 @@ gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 gi.require_version('Adw', '1')
 
-from gi.repository import Gtk, Gdk, GLib, GObject, Adw
+from gi.repository import Gtk, Gdk, Gio, GLib, GObject, Adw, Pango
 
 # libadwaita has to be initialised before a single Adw widget exists, and the
 # failure mode is silent: the widgets render nothing, no exception, no warning.
@@ -27,6 +27,7 @@ from .widgets import (  # noqa: F401
     HelpWindow,
     TranscriptView,
     _LEGACY_STATE_ALIASES,
+    reading_width,
 )
 from .style import StyleMixin
 from .asking import AskingMixin
@@ -165,6 +166,12 @@ class _ModeStrip(Gtk.Box):
          "toggle-plan-mode", "_read_plan_mode"),
         ("_wake_chip", "Wake word", "audio-input-microphone-symbolic",
          "toggle-wake-word", "_read_wake_word"),
+        # Talking over a reply. It existed only as a switch deep in Settings,
+        # yet it is the one mode a person flips mid-conversation: on with
+        # headphones, off on speakers, where with no echo cancellation Chronoa
+        # hears itself and stops.
+        ("_barge_chip", "Talk over", "media-playback-pause-symbolic",
+         "toggle-barge-in-vad", "_read_barge_in"),
     )
 
     def __init__(self, application, config=None) -> None:
@@ -193,6 +200,8 @@ class _ModeStrip(Gtk.Box):
             self._readers = getattr(self, "_readers", {})
             self._readers[attribute] = getattr(self, reader)
             self.append(chip)
+        self._style_chip = self._reply_style_chip()
+        self.append(self._style_chip)
         self.append(self._dictate_button())
         self.refresh()
 
@@ -221,6 +230,66 @@ class _ModeStrip(Gtk.Box):
         chip.update_property([Gtk.AccessibleProperty.LABEL],
                              [f"{label} mode, currently off"])
         return chip
+
+    #: style -> (chip word, menu line). Words a person picks by, not the keys.
+    _STYLES = (
+        # Under 30 characters each: the layout contract fails any label longer
+        # than that which can neither wrap nor ellipsise, and menu items do neither.
+        ("ordinary", "Ordinary", "Ordinary: the usual answer"),
+        ("brief", "Brief", "Brief: just the answer"),
+        ("explanatory", "Explanatory", "Explanatory: adds the why"),
+    )
+
+    def _reply_style_chip(self) -> Gtk.MenuButton:
+        """How replies are written, as a chip showing the current style.
+
+        Three values, so a menu rather than a toggle, bound to the stateful
+        `app.reply-style` action - GTK draws the menu's items as radio buttons
+        and marks the current one from the action's own state. The style was
+        reachable only in Settings although it changes the very next reply,
+        which is the definition of a mode this strip exists for.
+        """
+        button = Gtk.MenuButton()
+        button.add_css_class("mode-chip")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        image = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
+        image.set_pixel_size(13)
+        box.append(image)
+        self._style_label = Gtk.Label(label="Ordinary")
+        self._style_label.add_css_class("mode-chip-label")
+        box.append(self._style_label)
+        button.set_child(box)
+        menu = Gio.Menu()
+        for key, _word, line in self._STYLES:
+            menu.append(line, f"app.reply-style::{key}")
+        button.set_menu_model(menu)
+        return button
+
+    #: Below this window width the chips show icons only. Measured: with words
+    #: the strip needs 512px, the window can be 380px, and between the two the
+    #: strip was clipped at the right - losing Dictate first.
+    COMPACT_BELOW = 560
+
+    def set_compact(self, compact: bool) -> None:
+        """Icons only, or icons and words. Tooltips and accessible names are
+        unchanged either way, so nothing a screen reader says is lost."""
+        stack = [self]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, Gtk.Label) and "mode-chip-label" in node.get_css_classes():
+                node.set_visible(not compact)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+
+    def _read_reply_style(self) -> str:
+        try:
+            style = str(self._config.reply_style or "ordinary")
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the reply style", exc_info=True)
+            style = "ordinary"
+        return style if style in {k for k, _w, _l in self._STYLES} else "ordinary"
 
     def _dictate_button(self) -> Gtk.Button:
         """The long-turn control, which has no state to hold."""
@@ -272,6 +341,13 @@ class _ModeStrip(Gtk.Box):
             logger.warning("could not read the wake-word setting", exc_info=True)
             return False
 
+    def _read_barge_in(self) -> bool:
+        try:
+            return bool(self._config.barge_in_vad_enabled)
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the barge-in setting", exc_info=True)
+            return False
+
     # -- keeping the chips honest ---------------------------------------
 
     def refresh(self) -> None:
@@ -296,6 +372,21 @@ class _ModeStrip(Gtk.Box):
                 chip.update_property(
                     [Gtk.AccessibleProperty.LABEL],
                     [f"{label} mode, currently {'on' if on else 'off'}"])
+            style_chip = getattr(self, "_style_chip", None)
+            if style_chip is not None:
+                style = self._read_reply_style()
+                word = next(w for k, w, _l in self._STYLES if k == style)
+                self._style_label.set_text(word)
+                # Highlighted like an "on" chip when it is not the default, so a
+                # brief or explanatory setting is visible at a glance.
+                if style == "ordinary":
+                    style_chip.remove_css_class("mode-chip-on")
+                else:
+                    style_chip.add_css_class("mode-chip-on")
+                style_chip.set_tooltip_text(
+                    f"Reply style: {word}. Applies from the next reply.")
+                style_chip.update_property(
+                    [Gtk.AccessibleProperty.LABEL], [f"Reply style, currently {word}"])
         finally:
             self._syncing = False
 
@@ -542,8 +633,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # window had. It also means the sidebar toggle below has somewhere real
         # to live.
         header_bar = Adw.HeaderBar()
+        # No automatic back arrow. When the split view collapses it adds one that
+        # goes to the panel list - the same thing the sidebar toggle beside it
+        # does - so a narrow window showed two buttons for one action, and the
+        # arrow on the conversation's own page read as "back to somewhere".
+        header_bar.set_show_back_button(False)
         self._sidebar_toggle = Gtk.ToggleButton()
-        self._sidebar_toggle.set_icon_name("open-menu-symbolic")
+        # `sidebar-show`, not the hamburger: `open-menu` promises a menu, and
+        # this opens a column. The rail toggle is its mirror image on the right.
+        self._sidebar_toggle.set_icon_name("sidebar-show-symbolic")
         self._sidebar_toggle.add_css_class("flat")
         self._sidebar_toggle.set_tooltip_text("Show or hide the panels (F9)")
         self._sidebar_toggle.update_property(
@@ -561,6 +659,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header = Gtk.Label(label="Shani Chronoa")
         header.add_css_class("cajita-header")
+        # May shorten. Unellipsised, the title reserved its full width and the
+        # header bar as a whole needed 632px - wider than the 600px narrow
+        # layout - so every narrow window clipped the right of the chat.
+        header.set_ellipsize(Pango.EllipsizeMode.END)
         header.set_hexpand(True)
         header.set_halign(Gtk.Align.START)
 
@@ -576,7 +678,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # feature. Both are buttons for the same reason they are actions - the
         # actions are what a global shortcut and a second window reach.
         quick_button = Gtk.Button()
-        quick_button.set_icon_name("dialog-question-symbolic")
+        # Compose, not "?": with a question mark here and an "i" on Help, the
+        # header had Help and Quick Ask the wrong way round to every reader who
+        # has used a GNOME app. Every name below exists in Adwaita and Yaru.
+        quick_button.set_icon_name("mail-message-new-symbolic")
         quick_button.add_css_class("flat")
         quick_button.set_valign(Gtk.Align.CENTER)
         quick_button.set_tooltip_text("Ask one quick question (Ctrl+Shift+A)")
@@ -599,7 +704,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._browser_button.set_action_name("app.open-browser")
 
         help_button = Gtk.Button()
-        help_button.set_icon_name("help-about-symbolic")
+        help_button.set_icon_name("help-browser-symbolic")
         help_button.add_css_class("flat")
         help_button.set_valign(Gtk.Align.CENTER)
         help_button.set_tooltip_text("What can Chronoa do?")
@@ -625,7 +730,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # exists for the same reason as the other two: a feature nobody can
         # invoke is not a feature.
         setup_button = Gtk.Button()
-        setup_button.set_icon_name("system-run-symbolic")
+        # `system-run` draws a gear in Yaru - the same glyph as Settings beside
+        # it, so the header showed two identical gears. Setup installs things.
+        setup_button.set_icon_name("system-software-install-symbolic")
         setup_button.add_css_class("flat")
         setup_button.set_valign(Gtk.Align.CENTER)
         setup_button.set_tooltip_text("Set Chronoa up: the model, listening and the voice")
@@ -652,8 +759,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         header_bar.set_title_widget(header)
         header_bar.pack_start(self._conversations_button)
         header_bar.pack_start(self._mic_icon)
+        self._quick_button = quick_button
+        self._help_button = help_button
+        self._browser_available = True
+        self._overflow_button = self._build_header_overflow()
         for widget in (quick_button, self._browser_button, help_button,
-                       setup_button, settings_button):
+                       self._overflow_button, setup_button, settings_button):
             header_bar.pack_end(widget)
         self._header_row = header_row
         self._header_bar = header_bar
@@ -675,7 +786,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._rail = None                      # built at the end of this method
         self._rail_row = None
         self._rail_toggle = Gtk.ToggleButton()
-        self._rail_toggle.set_icon_name("view-continuous-symbolic")
+        self._rail_toggle.set_icon_name("sidebar-show-right-symbolic")
         self._rail_toggle.add_css_class("flat")
         self._rail_toggle.set_valign(Gtk.Align.CENTER)
         self._rail_toggle.set_tooltip_text("Show or hide the Now rail (F10)")
@@ -753,6 +864,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             # No regenerate control until the application attaches one: a button
             # that cannot re-ask anything is a dead control in every transcript.
             on_regenerate=None,
+            # A file write's card links straight to the Diff panel, which was
+            # otherwise reachable only from the rail or by typing /diff.
+            on_show_diff=lambda: self._show_surface("diff"),
         )
         # Search this conversation (Ctrl+F). A search *field* in the window, not
         # a skill and not the desktop search provider: the two things a person
@@ -859,9 +973,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # the camera is on cannot answer "is it on now", and an empty strip looks
         # exactly like a broken one.
         self._organ_strip = OrganStrip(self._config)
-        # Left-aligned in the column, which the render shows as 86px off the
-        # centre of the mode chips below it. **Two attempts to centre it are
-        # recorded here so they are not repeated, both measured to do nothing.**
+        # Centred now - `OrganStrip.do_measure` reports the width the lights
+        # need rather than FlowBox's widest-child-times-count. The history of
+        # why the two earlier attempts did nothing is kept below.
+        #
+        # It was left-aligned in the column, 86px off the centre of the mode
+        # chips below it. **Two attempts to centre it, both measured to do
+        # nothing:**
         # `set_halign(Gtk.Align.CENTER)` on the strip sets the property and
         # changes no pixel: a vertical `Gtk.Box` hands its child the full
         # cross-axis width whatever the child's alignment is (measured: the
@@ -896,7 +1014,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # tax on attention for no information.
         self._task_card = task_card.TaskCard()
         main_box.append(self._task_card)
-        main_box.append(input_row)
+        # Same reading width as the conversation above it, so the composer lines
+        # up with the turns instead of running the full width of the window.
+        main_box.append(reading_width(input_row))
         # ...and re-read whenever the window comes back, because the Settings
         # window flips these same settings through the same actions. A strip
         # that only refreshed on its own click would keep saying "off" for a
@@ -971,6 +1091,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         width = self.get_width()
         if width <= 0:
             return
+        if getattr(self, "_mode_strip", None) is not None:
+            self._mode_strip.set_compact(width < _ModeStrip.COMPACT_BELOW)
         narrow = width <= self.SIDEBAR_COLLAPSE_WIDTH
         if narrow != self._narrow_applied:
             self._narrow_applied = narrow
@@ -978,7 +1100,60 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 self._set_panels_visible(False)
             elif self._split.get_collapsed():
                 self._split.set_collapsed(False)
+            self._fold_header(narrow)
         self._sync_sidebar_toggle()
+
+    def _build_header_overflow(self) -> Gtk.MenuButton:
+        """A "More" button holding Quick ask, Browse and Help on a narrow window.
+
+        Setup and Settings stay in the bar at every width - an action reachable
+        only from a closed menu is the dead end `test_setup_button_is_reachable`
+        exists for. These three are the ones a narrow window can spare: each
+        also has a shortcut, and each opens a second window rather than acting
+        on this one. Labelled buttons, not a menu model, so each is a real
+        control with its own tooltip and accessible name.
+        """
+        button = Gtk.MenuButton()
+        button.set_icon_name("view-more-symbolic")
+        button.add_css_class("flat")
+        button.set_valign(Gtk.Align.CENTER)
+        button.set_tooltip_text("More")
+        button.update_property([Gtk.AccessibleProperty.LABEL], ["More actions"])
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        popover = Gtk.Popover()
+        popover.set_child(box)
+
+        def item(label, icon, action=None, handler=None):
+            entry = Gtk.Button()
+            entry.add_css_class("flat")
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            line.append(Gtk.Image.new_from_icon_name(icon))
+            line.append(Gtk.Label(label=label, xalign=0.0))
+            entry.set_child(line)
+            entry.update_property([Gtk.AccessibleProperty.LABEL], [label])
+            if action:
+                entry.set_action_name(action)
+            if handler:
+                entry.connect("clicked", handler)
+            entry.connect("clicked", lambda _b: popover.popdown())
+            box.append(entry)
+            return entry
+
+        item("Ask one quick question", "mail-message-new-symbolic", action="app.quick-ask")
+        self._overflow_browser = item("Browse the web", "web-browser-symbolic",
+                                      action="app.open-browser")
+        item("What can Chronoa do?", "help-browser-symbolic",
+             handler=lambda _b: self.open_help())
+        button.set_popover(popover)
+        button.set_visible(False)
+        return button
+
+    def _fold_header(self, narrow: bool) -> None:
+        """Move the three spare header buttons into "More", or back out."""
+        self._quick_button.set_visible(not narrow)
+        self._help_button.set_visible(not narrow)
+        self._browser_button.set_visible(self._browser_available and not narrow)
+        self._overflow_button.set_visible(narrow)
 
     def _on_window_activated(self, *_args) -> None:
         """The window came forward: re-read the modes from their owners.
@@ -1036,7 +1211,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         hot = self._state in (AssistantState.LISTENING, AssistantState.INTERRUPTING)
         self._mic_icon.set_visible(True)
         self._mic_icon.set_from_icon_name(
-            "audio-input-microphone-symbolic" if hot else "audio-input-microphone-muted-symbolic"
+            "audio-input-microphone-symbolic" if hot else "microphone-disabled-symbolic"
         )
         self._mic_icon.set_tooltip_text(
             "Microphone is in use" if hot else "Microphone idle"
@@ -1626,7 +1801,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         A control that opens nothing and explains why is worse than no control
         for someone who has not read the packaging notes.
         """
-        self._browser_button.set_visible(available)
+        self._browser_available = bool(available)
+        self._browser_button.set_visible(available and not self._narrow_applied)
+        if getattr(self, "_overflow_browser", None) is not None:
+            self._overflow_browser.set_visible(bool(available))
 
     def focus_input(self) -> None:
         """Put the caret in the message field.
@@ -1775,6 +1953,42 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             row.set_child(box)
             row.update_property([Gtk.AccessibleProperty.LABEL],
                                 [f"/{name}: {command.summary}"])
+            row.connect("clicked", lambda _b, n=name: self._complete_command(n))
+            self._command_list.append(row)
+        # The person's own commands (`~/.config/shani-chronoa/commands/*.md`,
+        # `user_prompts`). They worked when typed and were expanded on send, but
+        # this menu listed only the built-ins, so a command someone had written
+        # was reachable only by remembering its name. A built-in of the same
+        # name wins, as it does when the line is sent.
+        try:
+            from shani_chronoa import user_prompts
+            own = user_prompts.commands()
+        except Exception:  # noqa: BLE001 - a menu must not take the window
+            own = {}
+        builtin = set(slash.commands())
+        for name, path in sorted(own.items()):
+            if name in builtin or (prefix and not name.startswith(prefix)):
+                continue
+            summary_text = user_prompts.command_summary(path) or "your command"
+            row = Gtk.Button()
+            row.add_css_class("flat")
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            box.append(Gtk.Label(label=f"/{name}"))
+            mine = Gtk.Label(label="yours")
+            mine.add_css_class("dim-label")
+            mine.add_css_class("caption")
+            box.append(mine)
+            summary = Gtk.Label(label=summary_text)
+            summary.add_css_class("dim-label")
+            summary.set_xalign(1.0)
+            summary.set_hexpand(True)
+            summary.set_ellipsize(Pango.EllipsizeMode.END)
+            summary.set_margin_end(10)
+            box.append(summary)
+            row.set_child(box)
+            row.set_tooltip_text(str(path))
+            row.update_property([Gtk.AccessibleProperty.LABEL],
+                                [f"/{name}, your command: {summary_text}"])
             row.connect("clicked", lambda _b, n=name: self._complete_command(n))
             self._command_list.append(row)
 

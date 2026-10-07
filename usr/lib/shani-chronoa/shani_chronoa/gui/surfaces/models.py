@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Models"
 ICON = "preferences-desktop-font-symbolic"
-SECTION = "This machine"
+SECTION = "Thinking"
 SUBTITLE = ("Everything Chronoa can run, what each one costs, and which are "
             "already here")
 
@@ -308,8 +308,12 @@ def build(app: Any) -> Gtk.Widget:
                                  homogeneous=True, row_spacing=6, column_spacing=6)
     scroll_added = common.scrolled(flow_added)
     scroll_available = common.scrolled(flow_available)
-    stack.add_titled(scroll_added, "added", "On this machine")
-    stack.add_titled(scroll_available, "available", "Available to add")
+    # With icons: `add_titled` gives a page none, and the switcher then draws
+    # a placeholder box above each label - the two blank cards in the render.
+    stack.add_titled_with_icon(scroll_added, "added", "On this machine",
+                               "computer-symbolic")
+    stack.add_titled_with_icon(scroll_available, "available", "Available to add",
+                               "folder-download-symbolic")
 
     # **One switcher, not two.** Both an `Adw.ViewSwitcherBar` (revealed, at
     # the top) and a plain `Adw.ViewSwitcher` (at the bottom) were attached to

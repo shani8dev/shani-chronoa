@@ -135,7 +135,7 @@ def test_rows_are_newest_first_and_search_filters(store):
     surface = conversations.build(_StubApp())
     titles = []
     for row, open_btn, _d, _h in surface.rows():
-        label = open_btn.get_child().get_label()
+        label = open_btn._title.get_label()
         titles.append(label)
     assert "dinner ideas" in titles[0], titles
     assert "router" in titles[1], titles
@@ -143,7 +143,7 @@ def test_rows_are_newest_first_and_search_filters(store):
 
     _filter_by(surface, "router")
     assert surface.visible_row_count() == 1
-    assert _visible(surface)[0][1].get_child().get_label().startswith("my router")
+    assert _visible(surface)[0][1]._title.get_label().startswith("my router")
 
     _filter_by(surface, "")
     assert surface.visible_row_count() == 2
@@ -175,3 +175,59 @@ def test_no_matches_label_when_filter_excludes_everything(store):
     _filter_by(surface, "zzz-nothing-like-this")
     assert surface.visible_row_count() == 0
     assert surface.no_matches.get_visible() is True
+
+
+def test_row_dates_are_relative():
+    """`Today 14:02` reads at a glance; `(07 Oct 14:02)` had to be compared to a calendar."""
+    import time as _t
+    now = _t.mktime((2026, 10, 7, 15, 0, 0, 0, 0, -1))
+    at = lambda d, h: _t.mktime((2026, 10, d, h, 5, 0, 0, 0, -1))
+    assert conversations._when(at(7, 9), now) == "Today 09:05"
+    assert conversations._when(at(6, 23), now) == "Yesterday 23:05"
+    assert conversations._when(at(3, 8), now).endswith(" 08:05")
+    assert not conversations._when(at(3, 8), now).startswith(("Today", "Yesterday"))
+    assert conversations._when(_t.mktime((2026, 9, 2, 8, 0, 0, 0, 0, -1)), now) == "02 Sep"
+    assert conversations._when(_t.mktime((2025, 9, 2, 8, 0, 0, 0, 0, -1)), now) == "02 Sep 2025"
+
+
+def test_a_conversation_can_be_renamed_from_its_row(store):
+    """`conversation_store.rename` existed with no control anywhere."""
+    _seed([("user", "my router keeps dropping wifi"), ("assistant", "move it")])
+    surface = conversations.build(_StubApp())
+    row = surface.rows()[0][0]
+    renames = [n for n in _walk_all(row) if isinstance(n, Gtk.MenuButton)
+               and n.get_tooltip_text() == "Rename this conversation"]
+    assert renames, "no rename control on the row"
+    button = renames[0]
+    button._rename_entry.set_text("Wi-Fi troubleshooting")
+    button._rename_save.emit("clicked")
+    listed = conversation_store.list_sessions(conversation_store.session_dir())
+    assert listed[0]["title"] == "Wi-Fi troubleshooting"
+
+
+def _walk_all(node, out=None):
+    out = [] if out is None else out
+    out.append(node)
+    child = node.get_first_child()
+    while child is not None:
+        _walk_all(child, out)
+        child = child.get_next_sibling()
+    return out
+
+
+def test_branching_keeps_the_original_and_opens_a_copy(store):
+    """`conversation_store.fork` had no control; chat was the only way."""
+    _seed([("user", "plan a trip to Pune"), ("assistant", "two days is enough")])
+    opened = []
+    app = _StubApp()
+    app._open_conversation = opened.append
+    surface = conversations.build(app)
+    row = surface.rows()[0][0]
+    branch = next(n for n in _walk_all(row) if isinstance(n, Gtk.Button)
+                  and (n.get_tooltip_text() or "").startswith("Branch"))
+    before = conversation_store.list_sessions(conversation_store.session_dir())
+    branch.emit("clicked")
+    after = conversation_store.list_sessions(conversation_store.session_dir())
+    assert len(after) == len(before) + 1, "no copy was made"
+    assert opened and opened[0] != before[0]["id"], "the copy was not opened"
+    assert sum(1 for s in after if s["messages"] == 2) == 2, "the original lost its messages"

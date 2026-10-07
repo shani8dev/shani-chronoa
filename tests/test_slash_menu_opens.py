@@ -248,3 +248,35 @@ def test_the_menu_does_not_stay_up_for_an_ordinary_sentence(monkeypatch):
     results = _in_a_live_window([type_word, read], monkeypatch)
     up = results[-1]
     assert not up, "the command menu opened for a sentence that has no slash in it"
+
+def test_your_own_commands_are_in_the_menu(monkeypatch, tmp_path):
+    """A command file worked when typed but the menu listed only the built-ins,
+    so it was reachable only by remembering its name."""
+    import os
+    folder = Path(os.environ["HOME"]) / ".config" / "shani-chronoa" / "commands"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "standup.md").write_text("# Draft my standup\nSummarise $ARGUMENTS.\n")
+    (folder / "diff.md").write_text("shadowed by the built-in\n")
+
+    def look(window):
+        window._fill_command_menu("")
+        tips = []
+        row = window._command_list.get_first_child()
+        while row is not None:
+            tips.append(row.get_tooltip_text() or "")
+            row = row.get_next_sibling()
+        return _menu_labels(window), tips
+
+    def narrowed(window):
+        window._fill_command_menu("sta")
+        return _menu_labels(window)
+
+    (everything, tips), only_standup = _in_a_live_window([look, narrowed], monkeypatch)
+    said = " ".join(everything)
+    assert "/standup" in said, everything
+    assert any(t.endswith("standup.md") for t in tips), "the row does not name its file"
+    from shani_chronoa import user_prompts
+    assert user_prompts.command_summary(folder / "standup.md") == "Draft my standup"
+    assert said.count("/diff") == 1, "a built-in and a same-named file both listed"
+    assert "/standup" in " ".join(only_standup)
+    assert "/new" not in " ".join(only_standup)

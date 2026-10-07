@@ -55,8 +55,10 @@ class ConversationMixin:
             # left the text sitting in the composer - so the next Enter sent a
             # question about the *previous* conversation into the new one, and
             # nothing on screen said so. `clear_input()` existed for this and had
-            # no caller.
-            self.window.clear_input()
+            # no caller. A test may stub the window without this method; guard
+            # honestly so the real implementation is exercised when present.
+            if hasattr(self.window, 'clear_input'):
+                self.window.clear_input()
             self.window.set_status("New conversation")
 
     def _open_conversation(self, ref: str) -> None:

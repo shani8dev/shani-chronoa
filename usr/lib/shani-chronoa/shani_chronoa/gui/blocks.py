@@ -547,6 +547,110 @@ class TableBlock(Gtk.Box):
             logger.info("table not saved: %s", exc.message)
 
 
+#: Skills whose one `path` argument names the single file they rewrote, and
+#: whose pre-image `undo_last_change.record_preimage` keeps. `find_and_replace`
+#: is here for the case where `path` is a file; given a directory it can touch
+#: many, and the card then offers the panel rather than guessing which.
+#: `office_document` is not: its pre-image is binary, which the ring skips.
+FILE_WRITING_TOOLS = frozenset({"edit_file", "write_text_file", "find_and_replace"})
+
+#: Changed lines shown in the card before "Show full diff" takes over.
+INLINE_DIFF_LINES = 12
+
+
+def change_for(name: str, arguments: dict) -> "Optional[tuple]":
+    """`(path, before, after)` for the file this call rewrote, or None.
+
+    Read from the undo ring - the same store the Diff panel and `/undo` read -
+    and the newest entry for the path, which is the state just before this
+    call. None for anything not certainly one file: a card that shows the wrong
+    file's diff is worse than one that shows none.
+    """
+    if name not in FILE_WRITING_TOOLS:
+        return None
+    raw = str((arguments or {}).get("path") or "").strip()
+    if not raw:
+        return None
+    try:
+        from pathlib import Path
+        from shani_chronoa.skills.undo_last_change import recent_changes
+        target = Path(raw).expanduser().resolve()
+        if target.is_dir():
+            return None
+        found = None
+        for path, before, after in recent_changes():
+            if Path(path).expanduser().resolve() == target:
+                found = (target, before, after)
+        return found
+    except Exception:  # noqa: BLE001 - a card must never take the turn down
+        return None
+
+
+class InlineDiff(Gtk.Box):
+    """The changed lines of one file write, in the chat, under its tool card.
+
+    The Diff panel had the whole picture and the chat had `path=notes.txt`
+    and "Edited". So the one moment a person is looking - right after asking
+    for the change - showed nothing of it, and checking meant leaving the
+    conversation for a panel. This is the first few changed lines, with the
+    panel one click away for the rest.
+    """
+
+    def __init__(self, path, before: str, after: str,
+                 on_show_full: Optional[Callable[[], None]] = None) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.add_css_class("inline-diff")
+        from shani_chronoa.gui.surfaces.diff import diff_text
+        changed = [line for line in diff_text(before, after) if line.tag in "+-"]
+        added = sum(1 for line in changed if line.tag == "+")
+        removed = len(changed) - added
+        self.added, self.removed = added, removed
+
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        name = Gtk.Label(label=getattr(path, "name", str(path)), xalign=0.0)
+        name.add_css_class("heading")
+        name.set_tooltip_text(str(path))
+        head.append(name)
+        plus = Gtk.Label(label=f"+{added}")
+        plus.add_css_class("diff-count-add")
+        head.append(plus)
+        minus = Gtk.Label(label=f"\u2212{removed}")
+        minus.add_css_class("diff-count-del")
+        head.append(minus)
+        spacer = Gtk.Box(hexpand=True)
+        head.append(spacer)
+        if on_show_full is not None:
+            full = Gtk.Button(label="Show full diff")
+            full.add_css_class("flat")
+            full.set_tooltip_text("Open this change in the Diff panel")
+            full.connect("clicked", lambda _b: on_show_full())
+            head.append(full)
+        self.append(head)
+
+        lines = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        lines.add_css_class("inline-diff-lines")
+        for line in changed[:INLINE_DIFF_LINES]:
+            label = Gtk.Label(xalign=0.0)
+            label.set_markup(f"<tt>{markdown_lite.escape(line.tag + ' ' + line.text[:200])}</tt>")
+            label.set_selectable(True)
+            label.set_ellipsize(3)
+            # Own class names: the Diff panel installs app-wide `.diff-add` /
+            # `.diff-del` rules with a pale fill, and under them these lines
+            # rendered white on near-white - present and unreadable.
+            label.add_css_class("inline-diff-add" if line.tag == "+" else "inline-diff-del")
+            lines.append(label)
+        if len(changed) > INLINE_DIFF_LINES:
+            more = Gtk.Label(xalign=0.0,
+                             label=f"{len(changed) - INLINE_DIFF_LINES} more changed line(s)")
+            more.add_css_class("dim-label")
+            lines.append(more)
+        if not changed:
+            same = Gtk.Label(xalign=0.0, label="No line changed")
+            same.add_css_class("dim-label")
+            lines.append(same)
+        self.append(lines)
+
+
 class ToolCallCard(Gtk.Box):
     """What a skill did, with the arguments it was given and what came back.
 
@@ -558,9 +662,12 @@ class ToolCallCard(Gtk.Box):
     """
 
     def __init__(self, name: str, arguments: Optional[dict] = None,
-                 result: str = "", ok: bool = True, on_open: Optional[Callable] = None) -> None:
+                 result: str = "", ok: bool = True, on_open: Optional[Callable] = None,
+                 on_show_diff: Optional[Callable[[], None]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("tool-card")
+        self._on_show_diff = on_show_diff
+        self.inline_diff: Optional[InlineDiff] = None
         self.name = name
         self.arguments = dict(arguments or {})
         self.result = result
@@ -568,7 +675,7 @@ class ToolCallCard(Gtk.Box):
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         icon = Gtk.Image.new_from_icon_name(
-            "emblem-ok-symbolic" if ok else "dialog-warning-symbolic")
+            "object-select-symbolic" if ok else "dialog-warning-symbolic")
         row.append(icon)
         title = Gtk.Label(label=name.replace("_", " "))
         title.add_css_class("heading")
@@ -606,6 +713,12 @@ class ToolCallCard(Gtk.Box):
             value_label = Gtk.Label(label=str(value))
             value_label.set_selectable(True)
             value_label.set_xalign(0.0)
+            # Wrapped, including inside a word: a folded revealer still lends
+            # the card its child's minimum width, so one long path here pushed
+            # the whole card - and its buttons - off the right of the column.
+            value_label.set_wrap(True)
+            value_label.set_wrap_mode(2)          # Pango.WrapMode.WORD_CHAR
+            value_label.set_hexpand(True)
             grid.attach(value_label, 1, index, 1, 1)
         inner.append(grid)
         if on_open is not None:
@@ -633,7 +746,7 @@ class ToolCallCard(Gtk.Box):
         self.result = result
         self.ok = ok
         self._icon.set_from_icon_name(
-            "emblem-ok-symbolic" if ok else "dialog-warning-symbolic")
+            "object-select-symbolic" if ok else "dialog-warning-symbolic")
         # The stripe, not just the icon: colour is reinforcement here, but a
         # 16px icon is a small target in a row of 14px text.
         if ok:
@@ -642,6 +755,7 @@ class ToolCallCard(Gtk.Box):
             self.add_css_class("failed")
         if not result:
             return
+        self._show_change()
         if self._output is None:
             output = Gtk.Label()
             output.add_css_class("tool-card-body")
@@ -655,6 +769,32 @@ class ToolCallCard(Gtk.Box):
             inner.append(scroller)
             self._output, self._scroller = output, scroller
         self._output.set_markup(f"<tt>{markdown_lite.escape(result[:4000])}</tt>")
+
+
+    def _show_change(self) -> None:
+        """Put the file's changed lines under the card - outside the revealer.
+
+        Outside, because it is the part worth seeing without asking: the
+        arguments and raw result stay folded, the change does not. Built once;
+        a second result for the same call does not stack a second diff.
+        """
+        if not self.ok or self.inline_diff is not None:
+            return
+        change = change_for(self.name, self.arguments)
+        if change is None:
+            if self.name in FILE_WRITING_TOOLS and self._on_show_diff is not None \
+                    and not getattr(self, "_panel_link", None):
+                # Several files, or one the ring cannot diff: no guessed
+                # preview, but the panel that has them is still one click away.
+                link = Gtk.Button(label="Show what changed")
+                link.add_css_class("flat")
+                link.set_halign(Gtk.Align.START)
+                link.connect("clicked", lambda _b: self._on_show_diff())
+                self._panel_link = link
+                self.append(link)
+            return
+        self.inline_diff = InlineDiff(*change, on_show_full=self._on_show_diff)
+        self.append(self.inline_diff)
 
 
 def widgets_for(text: str, on_tool_open: Optional[Callable] = None) -> List[Gtk.Widget]:

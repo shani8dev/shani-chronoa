@@ -70,7 +70,9 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "Memory"
-ICON = "text-x-generic-symbolic"
+# A bookmark - facts it was asked to keep - rather than a generic page, which
+# in Adwaita is near-identical to the Artifacts glyph two rows away.
+ICON = "user-bookmarks-symbolic"
 
 SUBTITLE = (
     "What Chronoa believes it was told, read from the running assistant's own "
@@ -456,7 +458,7 @@ class _MemorySurface(Adw.NavigationPage):
                     error or "unknown error"))
             elif not percepts:
                 self._content.append(self.status_recorder.row(
-                    common.STATUS_ATTENTION,
+                    common.STATUS_OK,
                     "No facts remembered yet",
                     EMPTY_DETAIL))
             else:

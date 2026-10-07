@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any, List
 
 import gi
@@ -86,9 +87,12 @@ logger = logging.getLogger(__name__)
 TITLE = "Triggers"
 ICON = "preferences-system-time-symbolic"
 
+# Not "read-only" any more: the Arm a rule form below arms through the chat
+# skill. Nothing on this page *fires* a rule - firing is the engine's.
 SUBTITLE = (
     "The trigger rules this assistant could act on, read from the same two rule "
-    "files the engines fire from. Read-only: nothing here arms or fires anything."
+    "files the engines fire from. Arm or remove rules here; nothing on this page "
+    "fires one."
 )
 
 #: Markers a test can find in the built tree, so no assertion has to read a
@@ -382,8 +386,143 @@ class _TriggersSurface:
         self._gate_label = _note("")
         body.append(self._gate_label)
 
+        body.append(self._arm_form())
+
         set_content(common.scrolled(body))
         self._refresh()
+
+    # -- arming a rule --------------------------------------------------------
+
+    def _arm_form(self) -> Gtk.Widget:
+        """Arm a percept rule from the panel, through the same skill chat uses.
+
+        The panel could delete a rule and not make one: arming was only
+        possible by asking in chat (`manage_triggers`) or from the command line,
+        though `build_rule()` has full validation. This form calls
+        `tools.execute_tool("manage_triggers", action="add")` - not a copy of
+        it - so the consent key, the permission layers, the argument check
+        against the actuator's schema, the destructive-actuator refusal and the
+        honest "would it fire right now" sentence are all the chat path's own.
+        """
+        group = common.group(
+            "Arm a rule",
+            "When a sense reads something containing your text, run one "
+            "whitelisted skill. Checked exactly as if you had asked in chat.")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        for side in ("start", "end", "top", "bottom"):
+            getattr(box, f"set_margin_{side}")(10)
+
+        def field(label: str, widget: Gtk.Widget) -> Gtk.Widget:
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            text = Gtk.Label(label=label, xalign=0.0)
+            text.set_size_request(150, -1)
+            line.append(text)
+            widget.set_hexpand(True)
+            widget.update_property([Gtk.AccessibleProperty.LABEL], [label])
+            line.append(widget)
+            box.append(line)
+            return widget
+
+        self._form_name = field("Name", Gtk.Entry(placeholder_text="e.g. low-battery-note"))
+        # A sense reading, or one of the machine events an event rule polls.
+        # The form only handled sense rules, so the eighteen event types - a
+        # screen lock, a USB plug, a schedule - could be armed only from chat.
+        events = _event_types()
+        self._form_kinds = ["a sense"] + events
+        self._form_kind = field("Watch", Gtk.DropDown.new_from_strings(self._form_kinds))
+        senses = _sense_names()
+        self._form_sense = field("When this sense", Gtk.DropDown.new_from_strings(senses or ["(none)"]))
+        self._form_source = field("Event source", Gtk.Entry(
+            placeholder_text="locked, on-battery, daily 08:00, a path or a unit"))
+        self._form_text = field("reads text containing", Gtk.Entry(placeholder_text="e.g. Discharging"))
+        skills = _skill_names()
+        self._form_skill = field("run this skill", Gtk.DropDown.new_from_strings(skills or ["(none)"]))
+        self._form_args = field("with arguments (JSON)", Gtk.Entry(text="{}"))
+        self._form_cooldown = field("at most every (seconds)",
+                                    Gtk.SpinButton.new_with_range(30, 86400, 30))
+        self._form_senses, self._form_skills = senses, skills
+
+        def on_kind(*_a) -> None:
+            event = self._form_kind.get_selected() > 0
+            self._form_sense.get_parent().set_visible(not event)
+            self._form_source.get_parent().set_visible(event)
+
+        self._form_kind.connect("notify::selected", on_kind)
+        on_kind()
+
+        arm = Gtk.Button(label="Arm rule", halign=Gtk.Align.END)
+        arm.add_css_class("suggested-action")
+        arm.connect("clicked", self._on_arm)
+        box.append(arm)
+        self._form_result = _note("")
+        box.append(self._form_result)
+        self._form_arm = arm
+        common_add = getattr(group, "add", None)
+        (common_add or group.append)(box)
+        return group
+
+    def form_arguments(self) -> "dict | str":
+        """What the form would send, or the reason it cannot send anything."""
+        import json
+        try:
+            args = json.loads(self._form_args.get_text() or "{}")
+        except ValueError as exc:
+            return f"The arguments are not valid JSON ({exc.msg}). Nothing was armed."
+        if not isinstance(args, dict):
+            return "The arguments must be a JSON object, like {}. Nothing was armed."
+        sense_i, skill_i = self._form_sense.get_selected(), self._form_skill.get_selected()
+        if not self._form_senses or not self._form_skills:
+            return "No senses or skills are loaded, so nothing can be armed."
+        text = self._form_text.get_text()
+        kind = self._form_kind.get_selected()
+        if kind > 0:
+            return {
+                "action": "add",
+                "name": self._form_name.get_text().strip(),
+                "event_type": self._form_kinds[kind],
+                "source": self._form_source.get_text().strip(),
+                # An event with no text to match fires on every occurrence.
+                "match_mode": "substring" if text else "any",
+                "substring": text,
+                "actuator": self._form_skills[skill_i],
+                "arguments": args,
+                "cooldown_seconds": float(self._form_cooldown.get_value()),
+            }
+        return {
+            "action": "add",
+            "name": self._form_name.get_text().strip(),
+            "sense": self._form_senses[sense_i],
+            "match_mode": "substring",
+            "substring": text,
+            "actuator": self._form_skills[skill_i],
+            "arguments": args,
+            "cooldown_seconds": float(self._form_cooldown.get_value()),
+        }
+
+    def _on_arm(self, button: Gtk.Button) -> None:
+        payload = self.form_arguments()
+        if isinstance(payload, str):
+            self._form_result.set_text(payload)
+            return
+        button.set_sensitive(False)
+        self._form_result.set_text("Arming...")
+
+        def work() -> None:
+            try:
+                from shani_chronoa import tools
+                said = tools.execute_tool("manage_triggers", payload, origin=tools.ORIGIN_USER)
+            except Exception as exc:  # noqa: BLE001 - shown, not swallowed
+                said = f"{type(exc).__name__}: {exc}"
+
+            def show() -> bool:
+                self._form_result.set_text(str(said))
+                button.set_sensitive(True)
+                self._refresh()
+                return False
+
+            GLib.idle_add(show)
+
+        threading.Thread(target=work, daemon=True).start()
 
     # -- content ------------------------------------------------------------
 
@@ -457,7 +596,7 @@ class _TriggersSurface:
                 f"from {len(paths)} file(s)"))
         else:
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_UNKNOWN,
+                common.STATUS_OK,
                 "No rules armed",
                 "nothing here can act on its own"))
 
@@ -596,3 +735,27 @@ def build(app: Any) -> Gtk.Widget:
 
 
 __all__ = ["TITLE", "ICON", "build"]
+
+
+def _sense_names() -> List[str]:
+    try:
+        from shani_chronoa.senses import discover_senses
+        return sorted(discover_senses())
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _skill_names() -> List[str]:
+    try:
+        from shani_chronoa import tools
+        return sorted(t["function"]["name"] for t in tools.TOOLS)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _event_types() -> List[str]:
+    try:
+        from shani_chronoa.triggers.common import EVENT_TYPES
+        return sorted(EVENT_TYPES)
+    except Exception:  # noqa: BLE001
+        return []

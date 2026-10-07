@@ -35,6 +35,7 @@ is advice the page has to be able to act on.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import time
 from typing import Any, List, Optional
@@ -42,7 +43,8 @@ from typing import Any, List, Optional
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Pango
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk, Pango
 
 from shani_chronoa import conversation_store, history_repair, markdown_lite
 from shani_chronoa.gui.surfaces import common
@@ -67,6 +69,24 @@ UNREADABLE = "Could not read conversations"
 #: store with four hundred conversations should not push the filter off the top
 #: of the window to show the oldest of them.
 ROWS_MAX_HEIGHT = 520
+
+
+def _when(stamp: float, now: "Optional[float]" = None) -> str:
+    """`Today 14:02`, `Yesterday 09:10`, `Tuesday 18:30`, `02 Oct`, `02 Oct 2025`."""
+    now = time.time() if now is None else now
+    then, today = time.localtime(stamp), time.localtime(now)
+    days = (datetime.date(today.tm_year, today.tm_mon, today.tm_mday)
+            - datetime.date(then.tm_year, then.tm_mon, then.tm_mday)).days
+    clock = time.strftime("%H:%M", then)
+    if days <= 0:
+        return f"Today {clock}"
+    if days == 1:
+        return f"Yesterday {clock}"
+    if days < 7:
+        return time.strftime("%A ", then) + clock
+    if then.tm_year == today.tm_year:
+        return time.strftime("%d %b", then)
+    return time.strftime("%d %b %Y", then)
 
 
 def _matches(haystack: str, query: str) -> bool:
@@ -106,6 +126,10 @@ class _ConversationsView(Gtk.Box):
         self._app = app
         self._row_widgets: List[tuple] = []
         self._group = common.group()
+        # Same 12px inset as the filter row, so the list and the controls
+        # above it share one left edge.
+        self._group.set_margin_start(12)
+        self._group.set_margin_end(12)
         self._rows_area: Optional[Gtk.Widget] = None
         self.empty_state: Gtk.Widget
 
@@ -147,11 +171,16 @@ class _ConversationsView(Gtk.Box):
         someone types a phrase.
         """
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        # Inset like the rows under it. Rendered without margins, the filter ran
+        # into the window's left edge and the button into its right.
+        for side in ("start", "end", "top", "bottom"):
+            getattr(header, f"set_margin_{side}")(12 if side in ("start", "end") else 6)
         self.search = common.search_entry("Filter by title or text", self._on_search_changed)
         self.search.set_tooltip_text(
             "Filter conversations by title or message text")
         header.append(self.search)
         self.new_button = Gtk.Button(label="New conversation")
+        self.new_button.add_css_class("suggested-action")
         self.new_button.set_tooltip_text("Start a new conversation")
         _access(self.new_button, "Start a new conversation")
         self.new_button.connect("clicked", self._on_new)
@@ -181,7 +210,7 @@ class _ConversationsView(Gtk.Box):
                 str(error)))
         elif not listed:
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_UNKNOWN,
+                common.STATUS_OK,
                 "No conversations recorded",
                 "the store is empty, which is not the same as "
                 "every conversation having been deleted"))
@@ -239,19 +268,44 @@ class _ConversationsView(Gtk.Box):
         brings the focus ring, the hover state and the spacing, instead of those
         being written again here.
         """
-        when = time.strftime("%d %b %H:%M", time.localtime(item["updated"]))
+        # A list row, not a centred button label. It was `• title  (02 Oct
+        # 00:42)` in bold, centred in the row: a typed bullet for "current", the
+        # date in brackets, and nothing about how long the conversation was.
+        # Now: the title on the left, and one short line under it - when, how
+        # many messages, whether it is the open one. Short on purpose:
+        # libadwaita 1.5 does not wrap an `Adw.ActionRow` subtitle, so this is a
+        # plain label that ellipsises rather than one that can widen the page.
         open_btn = Gtk.Button()
-        open_label = _label(f"{'• ' if item['active'] else ''}{item['title']}  ({when})")
-        open_label.set_halign(Gtk.Align.START)
-        open_label.set_ellipsize(Pango.EllipsizeMode.END)
-        open_label.set_max_width_chars(40)
-        open_btn.set_child(open_label)
         open_btn.add_css_class("flat")
+        open_btn.add_css_class("conversation-open")
         open_btn.set_hexpand(True)
-        # A tooltip rather than a subtitle on purpose. `Adw.ActionRow` does not
-        # wrap its own subtitle on libadwaita 1.5 - a 130-character one measured
-        # 1,227px - and this surface is under the layout contract that fails on a
-        # horizontal scrollbar. A tooltip is text with no layout cost at all.
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        title = Gtk.Label(label=item["title"], xalign=0.0)
+        title.set_ellipsize(Pango.EllipsizeMode.END)
+        title.add_css_class("conversation-title")
+        text.append(title)
+        bits = [_when(item["updated"])]
+        count = int(item.get("messages") or 0)
+        bits.append(f"{count} message{'s' if count != 1 else ''}")
+        if item["active"]:
+            bits.append("Current")
+        meta = Gtk.Label(label=" \u00b7 ".join(bits), xalign=0.0)
+        meta.set_ellipsize(Pango.EllipsizeMode.END)
+        meta.add_css_class("dim-label")
+        meta.add_css_class("caption")
+        text.append(meta)
+        line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        if notice:
+            # An unfinished last turn used to be a tooltip only - nothing on
+            # the row said the conversation ended mid-answer.
+            mark = Gtk.Image.new_from_icon_name("dialog-warning-symbolic")
+            mark.set_tooltip_text(notice)
+            mark.update_property([Gtk.AccessibleProperty.LABEL], [notice])
+            line.append(mark)
+        line.append(text)
+        open_btn.set_child(line)
+        open_btn._title = title
+        open_btn._meta = meta
         open_btn.set_tooltip_text(
             f"{notice}\n\nOpen this conversation" if notice else "Open this conversation")
         _access(open_btn, f"Open conversation titled {item['title']}")
@@ -261,13 +315,92 @@ class _ConversationsView(Gtk.Box):
         delete.set_tooltip_text("Delete this conversation")
         _access(delete, f"Delete conversation titled {item['title']}")
         delete.connect("clicked", lambda _b: self._call("_delete_conversation", item["id"]))
+        delete.set_valign(Gtk.Align.CENTER)
+        rename = self._rename_button(item)
+        branch = self._branch_button(item)
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         actions.set_hexpand(True)
+        actions.set_margin_end(6)
         actions.append(open_btn)
+        actions.append(branch)
+        actions.append(rename)
         actions.append(delete)
-        row = common.row("", "", suffix=actions)
+        # `PreferencesRow` holding the line directly: an `ActionRow` suffix
+        # centres what it is given, which is what centred the title before.
+        if common.adw_ready():
+            row = Adw.PreferencesRow()
+            row.set_child(actions)
+        else:
+            row = common.row("", "", suffix=actions)
         self._group.add(row)
         self._row_widgets.append((row, open_btn, delete, haystack))
+
+    def _branch_button(self, item: dict) -> Gtk.Button:
+        """Continue from a copy, keeping the original as it was.
+
+        `conversation_store.fork()` was reachable only by asking in chat (the
+        `conversations` skill): there was no way to try a different direction
+        from an earlier conversation without losing the one you had.
+        """
+        button = Gtk.Button(icon_name="edit-copy-symbolic", valign=Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        button.set_tooltip_text("Branch: continue in a copy, keep this one as it is")
+        _access(button, f"Branch conversation titled {item['title']}")
+
+        def branch(_b: Gtk.Button) -> None:
+            try:
+                new = conversation_store.fork(conversation_store.session_dir(), item["id"])
+            except Exception as exc:  # noqa: BLE001 - a branch must not take the panel
+                logger.warning("could not branch %s: %s", item["id"], exc)
+                return
+            if new:
+                self._call("_open_conversation", new)
+            GLib.idle_add(lambda: (self._refresh(), False)[1])
+
+        button.connect("clicked", branch)
+        return button
+
+    def _rename_button(self, item: dict) -> Gtk.MenuButton:
+        """Rename a conversation in place.
+
+        `conversation_store.rename()` existed - and marks the title as chosen,
+        so the model never overwrites it - with no control anywhere: a title was
+        whatever the first message or the model made of it, for good.
+        """
+        button = Gtk.MenuButton(icon_name="document-edit-symbolic", valign=Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        button.set_tooltip_text("Rename this conversation")
+        _access(button, f"Rename conversation titled {item['title']}")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for side in ("start", "end", "top", "bottom"):
+            getattr(box, f"set_margin_{side}")(6)
+        entry = Gtk.Entry(text=item["title"], hexpand=True)
+        entry.set_width_chars(28)
+        _access(entry, "New title")
+        save = Gtk.Button(label="Rename")
+        save.add_css_class("suggested-action")
+        box.append(entry)
+        box.append(save)
+        popover = Gtk.Popover()
+        popover.set_child(box)
+        button.set_popover(popover)
+
+        def commit(*_a) -> None:
+            title = entry.get_text().strip()
+            if title and title != item["title"]:
+                try:
+                    conversation_store.rename(conversation_store.session_dir(), item["id"], title)
+                except Exception as exc:  # noqa: BLE001 - a rename must not take the panel
+                    logger.warning("could not rename %s: %s", item["id"], exc)
+            popover.popdown()
+            # After the popover has closed: refreshing rebuilds the rows, and
+            # this button with them.
+            GLib.idle_add(lambda: (self._refresh(), False)[1])
+
+        save.connect("clicked", commit)
+        entry.connect("activate", commit)
+        button._rename_entry, button._rename_save = entry, save
+        return button
 
     # -- the three answers ---------------------------------------------------
 

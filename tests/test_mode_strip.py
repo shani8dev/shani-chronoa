@@ -56,9 +56,12 @@ class _Config:
     beyond these two attributes, and a stub is how that stays true.
     """
 
-    def __init__(self, privacy: bool = False, wake: bool = False) -> None:
+    def __init__(self, privacy: bool = False, wake: bool = False,
+                 barge_in: bool = False) -> None:
         self.privacy_mode = privacy
         self.wake_word_enabled = wake
+        self.barge_in_vad_enabled = barge_in
+        self.reply_style = "ordinary"
 
 
 def _toggle_privacy(state, fired):
@@ -97,6 +100,8 @@ def gapp():
         lambda: planmode.set_enabled(not planmode.is_enabled()))
     add(app, "toggle-wake-word",
         lambda: setattr(config, "wake_word_enabled", not config.wake_word_enabled))
+    add(app, "toggle-barge-in-vad",
+        lambda: setattr(config, "barge_in_vad_enabled", not config.barge_in_vad_enabled))
     dictate = Gio.SimpleAction.new("dictate", None)
     dictate.connect("activate", lambda *_a: fired.append("dictate"))
     app.add_action(dictate)
@@ -155,6 +160,7 @@ def state(gapp):
     """
     gapp.config.privacy_mode = False
     gapp.config.wake_word_enabled = False
+    gapp.config.barge_in_vad_enabled = False
     planmode.set_enabled(False)
     gapp.fired.clear()
     yield gapp
@@ -416,7 +422,11 @@ def test_dictation_is_a_button_because_it_has_no_state(state):
     s = _ModeStrip(state, state.config)
     try:
         toggles, plain = _chips(s)
-        assert len(toggles) == 3, f"expected exactly three switches, got {len(toggles)}"
+        # One switch per row of the chip table - the claim here is that
+        # dictation is *not* among them, not how many modes there are.
+        assert len(toggles) == len(_ModeStrip._CHIPS), (
+            f"expected one switch per chip, got {len(toggles)}")
+        assert all(t.get_action_name() != "app.dictate" for t in toggles)
         assert len(plain) == 1, f"expected exactly one button, got {len(plain)}"
         assert plain[0].get_action_name() == "app.dictate"
         assert not isinstance(plain[0], Gtk.ToggleButton), (
@@ -506,7 +516,8 @@ def test_the_mode_css_defines_a_rule_for_every_class_the_strip_adds(strip):
     walking `get_css_classes()` cannot tell who added a class and asserting a
     rule for GTK's would be asserting something about GTK.
     """
-    gtk_own = {"toggle", "horizontal", "vertical"}
+    # `popup` is GtkMenuButton's own, on the reply-style chip.
+    gtk_own = {"toggle", "horizontal", "vertical", "popup"}
     ours = {"mode-strip"}
     for child in _chips_flat(strip):
         ours.update(set(child.get_css_classes()) - gtk_own)
@@ -571,3 +582,50 @@ def _chips_flat(box):
         child = child.get_next_sibling()
 
 
+
+
+def test_talk_over_is_a_chip_that_flips_the_real_setting(strip, state):
+    """Talking over a reply was only a switch deep in Settings, though it is the
+    one mode changed mid-conversation (on with headphones, off on speakers)."""
+    assert "Talk over" in strip._barge_chip.get_tooltip_text()
+    assert strip._barge_chip.get_active() is False
+    strip._barge_chip.set_active(True)
+    assert "toggle-barge-in-vad" in state.fired
+    assert state.config.barge_in_vad_enabled is True
+    assert strip._barge_chip.get_active() is True
+    strip._barge_chip.set_active(False)
+    assert state.config.barge_in_vad_enabled is False
+
+
+def test_the_reply_style_chip_shows_and_offers_the_three_styles(strip, state):
+    """Ordinary / brief / explanatory changes the very next reply, so it is a
+    mode; it was reachable only in Settings."""
+    chip = strip._style_chip
+    state.config.reply_style = "ordinary"
+    strip.refresh()
+    assert strip._style_label.get_text() == "Ordinary"
+    assert "mode-chip-on" not in chip.get_css_classes()
+    state.config.reply_style = "brief"
+    strip.refresh()
+    assert strip._style_label.get_text() == "Brief"
+    assert "mode-chip-on" in chip.get_css_classes(), "a non-default style is not highlighted"
+    menu = chip.get_menu_model()
+    targets = [menu.get_item_attribute_value(i, "target").get_string()
+               for i in range(menu.get_n_items())]
+    actions = {menu.get_item_attribute_value(i, "action").get_string()
+               for i in range(menu.get_n_items())}
+    assert targets == ["ordinary", "brief", "explanatory"]
+    assert actions == {"app.reply-style"}
+
+
+def test_the_strip_goes_icon_only_and_back(strip):
+    """Compact on a narrow window: the words go, the chips and their names stay."""
+    from gi.repository import Gtk as _Gtk
+    wide = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
+    strip.set_compact(True)
+    narrow = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
+    assert narrow < wide, (narrow, wide)
+    assert narrow <= 380, f"compact strip still needs {narrow}px"
+    assert strip._barge_chip.get_tooltip_text()
+    strip.set_compact(False)
+    assert strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0] == wide

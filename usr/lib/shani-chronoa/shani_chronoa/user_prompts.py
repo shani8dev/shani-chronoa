@@ -71,6 +71,23 @@ def commands() -> "dict[str, Path]":
         return {}
 
 
+def command_summary(path: Path, limit: int = 60) -> str:
+    """The first non-empty line of a command file, for a menu to show.
+
+    Headings and comment markers are stripped; an unreadable file reads as ""
+    rather than raising into a menu that is being drawn.
+    """
+    try:
+        with path.open(encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                line = line.strip().lstrip("#").strip()
+                if line:
+                    return line if len(line) <= limit else line[: limit - 1] + "\u2026"
+    except OSError:
+        pass
+    return ""
+
+
 def _read_bounded(path: Path) -> str:
     data = path.read_bytes()[: INSERT_MAX + 1]
     if b"\0" in data[:4096]:

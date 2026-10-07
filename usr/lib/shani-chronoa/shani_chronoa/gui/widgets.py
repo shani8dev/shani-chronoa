@@ -82,6 +82,42 @@ _LEGACY_STATE_ALIASES = {"processing": AssistantState.THINKING, "error": Assista
 # look like a waveform. Easing toward that target at ~60 Hz is what makes the orb
 # appear to follow the voice rather than jump between values.
 _TICK_MS = 16
+
+#: Widest the conversation and the composer get, in px. A maximised window put
+#: a reply in a ~950px line and the composer the same width - past the length
+#: a line can be read at. Wider than any window the narrow layout serves, so the
+#: clamp only ever bites on wide ones.
+READING_WIDTH_PX = 860
+
+
+def reading_width(child: Gtk.Widget) -> Gtk.Widget:
+    """`child` capped at `READING_WIDTH_PX` and centred, when libadwaita is here.
+
+    Without it the child is returned as it was; the window is usable either
+    way, only less comfortable on a very wide screen.
+    """
+    try:
+        gi.require_version("Adw", "1")
+        from gi.repository import Adw
+    except (ImportError, ValueError):
+        return child
+    clamp = Adw.Clamp(maximum_size=READING_WIDTH_PX, tightening_threshold=READING_WIDTH_PX)
+    clamp.set_child(child)
+    return clamp
+
+
+#: Marks a housekeeping notice inside a turn, so a new reply text keeps it.
+TURN_NOTICE_CSS = "turn-notice"
+
+
+def _keeps_across_replies(child) -> bool:
+    """A turn's child that is about the turn rather than the reply's text."""
+    return (isinstance(child, reply_blocks.ToolCallCard)
+            or TURN_NOTICE_CSS in child.get_css_classes())
+
+
+#: Widest a user's own message bubble wraps at, in characters.
+USER_TURN_MAX_CHARS = 56
 _EASE_FACTOR = 0.25
 
 # The halo starts just outside the 80px orb and grows to fill the 124px button.
@@ -312,23 +348,20 @@ class HelpWindow(Gtk.Window):
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_child(root)
 
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        header.set_margin_top(14)
-        header.set_margin_bottom(6)
-        header.set_margin_start(14)
-        header.set_margin_end(14)
-        title = Gtk.Label(label="What Shani Chronoa can do")
-        title.add_css_class("cajita-header")
-        title.set_hexpand(True)
-        title.set_halign(Gtk.Align.START)
-        close = Gtk.Button()
-        close.set_icon_name("window-close-symbolic")
-        close.add_css_class("flat")
-        close.set_tooltip_text("Close")
-        close.connect("clicked", lambda _b: self.close())
-        header.append(title)
-        header.append(close)
-        root.append(header)
+        # No title or close button of our own: the window's title bar already
+        # carries both, and rendered, the window showed "What Shani Chronoa can
+        # do" twice and two close buttons one above the other. That space holds
+        # a search instead, because the list is over a hundred rows long and
+        # scrolling it for "timer" was the only way to find the timer.
+        self._search = Gtk.SearchEntry()
+        self._search.set_placeholder_text("Find something Chronoa can do")
+        self._search.update_property(
+            [Gtk.AccessibleProperty.LABEL], ["Find something Chronoa can do"])
+        self._search.set_margin_top(12)
+        self._search.set_margin_start(14)
+        self._search.set_margin_end(14)
+        self._search.connect("search-changed", lambda e: self.filter(e.get_text()))
+        root.append(self._search)
 
         summary = Gtk.Label(
             label=f"{len(self._visible())} available"
@@ -337,14 +370,44 @@ class HelpWindow(Gtk.Window):
         summary.add_css_class("cajita-detail")
         summary.set_halign(Gtk.Align.START)
         summary.set_margin_start(14)
+        summary.set_margin_top(6)
         summary.set_margin_bottom(8)
         root.append(summary)
+        self._summary = summary
+
+        #: (group box, [(row, haystack)]) for `filter()`.
+        self._index: list = []
+        self._empty = Gtk.Label(label="Nothing matches. Try a shorter word.")
+        self._empty.add_css_class("dim-label")
+        self._empty.set_margin_top(24)
+        self._empty.set_visible(False)
 
         scroller = Gtk.ScrolledWindow()
         scroller.set_vexpand(True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        scroller.set_child(self._build_rows(config))
+        body = self._build_rows(config)
+        body.append(self._empty)
+        scroller.set_child(body)
         root.append(scroller)
+
+    def filter(self, needle: str) -> int:
+        """Show only the rows whose name, description or switch mentions `needle`.
+
+        Returns how many rows are left. A group with nothing left is hidden
+        with its heading, so a search never shows a heading over nothing.
+        """
+        words = (needle or "").lower().split()
+        shown = 0
+        for group_box, rows in self._index:
+            any_left = False
+            for row, haystack in rows:
+                hit = all(w in haystack for w in words)
+                row.set_visible(hit)
+                any_left = any_left or hit
+                shown += hit
+            group_box.set_visible(any_left)
+        self._empty.set_visible(shown == 0)
+        return shown
 
     def _visible(self) -> list:
         return [c for c in self._caps if not c.consent_key]
@@ -367,32 +430,34 @@ class HelpWindow(Gtk.Window):
             heading.add_css_class("help-group-heading")
             heading.set_halign(Gtk.Align.START)
             group_box.append(heading)
+            indexed = []
             for capability in [c for c in self._caps if c.group == group]:
-                group_box.append(self._build_row(capability, config))
+                row = self._build_row(capability, config)
+                group_box.append(row)
+                indexed.append((row, " ".join(filter(None, (
+                    capability.label, capability.description, group,
+                    capability.example or "",
+                    capabilities.GATE_NAMES.get(capability.consent_key or "", ""),
+                ))).lower()))
+            self._index.append((group_box, indexed))
             rows.append(group_box)
         return rows
 
     def _build_row(self, capability, config) -> Gtk.Box:
-        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        # Text in one column, Try beside the whole of it. Try used to sit in the
+        # title line, and a button is taller than a label, so every row with an
+        # example rendered with a gap under its name that the rows without one
+        # did not have - two rhythms in one list.
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         row.add_css_class("help-row")
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text.set_hexpand(True)
+        row.append(text)
 
-        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         name = Gtk.Label(label=capability.label)
         name.add_css_class("help-row-label")
-        name.set_hexpand(True)
         name.set_halign(Gtk.Align.START)
-        top.append(name)
-
-        if capability.example and self._on_try is not None:
-            try_button = Gtk.Button(label="Try")
-            try_button.add_css_class("flat")
-            try_button.add_css_class("circular")
-            try_button.set_valign(Gtk.Align.CENTER)
-            try_button.set_tooltip_text(f"Send: {capability.example}")
-            try_button.connect("clicked", self._on_try, capability.example)
-            top.append(try_button)
-
-        row.append(top)
+        text.append(name)
 
         if capability.description:
             detail = Gtk.Label(label=capability.description)
@@ -400,7 +465,7 @@ class HelpWindow(Gtk.Window):
             detail.set_wrap(True)
             detail.set_halign(Gtk.Align.START)
             detail.set_xalign(0.0)
-            row.append(detail)
+            text.append(detail)
 
         if capability.consent_key:
             open_now = capability.gate_is_open(config)
@@ -410,7 +475,16 @@ class HelpWindow(Gtk.Window):
             gate.set_wrap(True)
             gate.set_halign(Gtk.Align.START)
             gate.set_xalign(0.0)
-            row.append(gate)
+            text.append(gate)
+
+        if capability.example and self._on_try is not None:
+            try_button = Gtk.Button(label="Try")
+            try_button.add_css_class("flat")
+            try_button.add_css_class("circular")
+            try_button.set_valign(Gtk.Align.CENTER)
+            try_button.set_tooltip_text(f"Send: {capability.example}")
+            try_button.connect("clicked", self._on_try, capability.example)
+            row.append(try_button)
         return row
 
 
@@ -425,7 +499,8 @@ class TranscriptView(Gtk.ScrolledWindow):
     __gtype_name__ = 'TranscriptView'
 
     def __init__(self, config=None, caps=None, on_suggestion=None,
-                 reduce_motion: bool = False, on_regenerate=None) -> None:
+                 reduce_motion: bool = False, on_regenerate=None,
+                 on_show_diff=None) -> None:
         super().__init__()
         self.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         self.set_vexpand(True)
@@ -439,6 +514,8 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: None means the window offers no such control, rather than offering one
         #: that goes nowhere.
         self._on_regenerate = on_regenerate
+        #: Opens the Diff panel; given to every tool card that rewrote a file.
+        self._on_show_diff = on_show_diff
         self._rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self._rows.set_margin_top(10)
         self._rows.set_margin_bottom(10)
@@ -462,7 +539,7 @@ class TranscriptView(Gtk.ScrolledWindow):
         jump.connect("clicked", self._on_jump_clicked)
         self._jump_button = jump
         overlay = Gtk.Overlay()
-        overlay.set_child(self._rows)
+        overlay.set_child(reading_width(self._rows))
         overlay.add_overlay(jump)
         overlay.set_measure_overlay(jump, False)
         self.set_child(overlay)
@@ -580,7 +657,19 @@ class TranscriptView(Gtk.ScrolledWindow):
         label.set_wrap(True)
         label.set_selectable(True)
         label.set_text(text)
-        label.set_xalign(1.0)
+        if role == "user":
+            # Hug the text on the right rather than fill the row. With the
+            # default FILL the bubble spanned the whole transcript and the words
+            # sat at its far right edge - rendered, a 28-character question was a
+            # 660px grey bar. The text inside is left-aligned so a wrapped
+            # message reads as a paragraph, and the width cap plus the left
+            # margin keep a long message from becoming a wall again.
+            label.set_halign(Gtk.Align.END)
+            label.set_xalign(0.0)
+            label.set_max_width_chars(USER_TURN_MAX_CHARS)
+            label.set_margin_start(48)
+        else:
+            label.set_xalign(1.0)
         label.add_css_class("transcript-turn")
         label.add_css_class(f"transcript-{role}")
         # A screen reader should announce a finished turn, not every word of
@@ -804,10 +893,18 @@ class TranscriptView(Gtk.ScrolledWindow):
         if text == self._block_text:
             return
         self._note_position()
+        # **Only the reply's own widgets go.** This removed every child of the
+        # turn, and the turn also holds the tool cards and the housekeeping
+        # notices - which are added *before* the reply text arrives, because the
+        # skills run first. So every card was deleted the moment the answer
+        # landed: rendered, a turn that edited a file showed the reply and no
+        # trace of the edit, while the rail beside it listed the changed file.
+        # Tests built cards on their own and never followed one with a reply.
         child = self._blocks.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
-            self._blocks.remove(child)
+            if not _keeps_across_replies(child):
+                self._blocks.remove(child)
             child = following
         for widget in reply_blocks.widgets_for(text):
             self._blocks.append(widget)
@@ -835,7 +932,8 @@ class TranscriptView(Gtk.ScrolledWindow):
                 child.ok = ok
                 self._rebuild_card(child, result, ok)
                 return
-        card = reply_blocks.ToolCallCard(name, arguments, result, ok)
+        card = reply_blocks.ToolCallCard(name, arguments, result, ok,
+                                         on_show_diff=self._on_show_diff)
         # Above the reply, in the order the skills ran: that order *is* the
         # record, and reversing it to put the newest on top would make a
         # six-call turn unreadable as a sequence of decisions.
@@ -863,6 +961,7 @@ class TranscriptView(Gtk.ScrolledWindow):
         if self._blocks is None:
             self._current_assistant = self._append_turn("assistant", "")
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.add_css_class(TURN_NOTICE_CSS)
         # Neither `cloud-symbolic` nor `view-convert-symbolic` is a glyph this
         # theme ships - checked with `Gtk.IconTheme.has_icon`, which is what
         # `test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`

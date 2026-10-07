@@ -172,7 +172,7 @@ class TestTheContract:
         assert callable(workbench.build)
 
     def test_its_section_is_one_the_sidebar_knows_a_home_for(self):
-        assert workbench.SECTION == "What Chronoa did"
+        assert workbench.SECTION == "Acting"
         assert workbench.SECTION in registry.SECTION_ORDER
 
     def test_the_registry_already_names_this_surface(self):

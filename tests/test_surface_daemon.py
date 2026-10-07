@@ -175,7 +175,7 @@ def _switches(widget):
 class TestModuleContract:
     def test_it_exports_the_three_names_the_registry_reads(self):
         assert daemon.TITLE == "Background mode"
-        assert daemon.ICON == "emblem-system-symbolic"
+        assert daemon.ICON == "media-playlist-repeat-symbolic"
         assert callable(daemon.build)
 
     def test_the_icon_is_a_real_icon_name_on_this_machine(self):

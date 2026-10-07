@@ -3962,6 +3962,229 @@ verified by execution rather than by the feature existing:
    (`ToolCallCard` has a toggle + revealer); a test pins it so it is not
    "fixed" twice.
 
+## A full visual pass over every page, and what looking found (2026-10-07)
+
+Every page of all three windows (chat, 21 panels, 7 settings sections, 17 wizard
+pages, Help) was rendered at 1280x860 and read. `render_ui.py` gained
+`page:<window>:<id>` (any registered page, through `pages.show()`) and is now
+`NON_UNIQUE` - before that, a parallel batch registered one bus name and every
+render but the first exited as a remote having written nothing. `panel:` also
+never sized its window, so panel captures were a small window stretched up.
+Batch: `xargs -P4` over `render_ui.py`, ~35s for all 49. For the light scheme
+set `ADW_DEBUG_COLOR_SCHEME=prefer-light`: the `[theme]` argument sets
+`gtk-theme-name`, which libadwaita's style manager overrides, so a "light"
+render with it comes back dark.
+
+Defects found only by looking, all fixed and each pinned by a test that was run
+against the old code and failed:
+
+- **Red for a choice.** The health vocabulary had no word for "off on purpose",
+  so a shut consent key was "Needs attention": five sidebar rows red on a default
+  install, and Devices printed "This is a setting on this machine, not a fault."
+  under its own red word. `common.STATUS_OFF` ("Turned off", grey) now covers
+  consent-off (calendar, devices, privacy mode, background mode, no senses
+  granted); an empty calendar/memory/artifact list is `OK`; Machine counts only
+  senses that *failed* (refused/absent are by design) and banners only those.
+  `tests/test_status_off_is_not_attention.py`.
+- **Wizard extras had four buttons, two primary**, and the halves routed
+  differently: "Skip the rest" and Languages' "Next: Done" went past Review - the
+  only page that downloads - so an extra picked on the way was never fetched;
+  "Finish" went to Review. Each extra now has one primary "Back to the list" and
+  a flat "Next: <extra>". Cloud keys had two primaries; Next now also saves typed
+  keys. Pages are clamped to 640px. `tests/test_wizard_footer_one_primary.py`.
+- **Settings had no way to a section but typing.** Section chips call the
+  existing `_show_only_family`. `Gtk.SearchEntry` emits `search-changed` at once
+  for empty text and *delayed* for typed text, so type-and-clear can deliver only
+  the empty event; the chosen section is forgotten on `changed` instead.
+  `tests/test_settings_section_chips.py`.
+- **Help** drew a second title and close button under the title bar's; that
+  space is now a search (`HelpWindow.filter`). Its "switch on *Speak answers
+  aloud* to send a notification" was correct and read as wrong: the one key does
+  both, so the label is now "Spoken replies and notifications".
+  `tests/test_help_search.py`.
+- Smaller: the user's bubble filled the row with text pushed right (now hugs
+  right, accent-tinted); Setup's `system-run` icon is a gear in Yaru beside the
+  Settings gear (now `system-software-install`; Help/Quick Ask icons swapped to
+  the conventional ones; sidebar toggles use `sidebar-show[-right]`); panel
+  subtitles were a centred narrow block over left-aligned rows; a banner's button
+  sat flush on the window edge; Senses rows showed module ids (`cgroup`,
+  `rfsense`) - now `common.SENSE_TITLES`, id kept in the tooltip; "Cloud fallback
+  when Ollama is unavailable" now names the real condition (no local model
+  answers - llama.cpp by default).
+
+**Every tool card vanished from the chat when the reply arrived.**
+`TranscriptView._replace_blocks()` removed every child of the turn, and the turn
+also holds the tool cards and notice rows, which are added *before* the reply
+text because skills run first. Unit tests built cards alone and never followed
+one with a reply; a render of the real order showed the reply and no card while
+the rail listed the changed file. It now keeps `ToolCallCard`s and `.turn-notice`
+rows. On top of that, a single-file write (`edit_file`, `write_text_file`,
+`find_and_replace` on a file) shows its changed lines in the card
+(`blocks.InlineDiff`, from the undo ring) with "Show full diff" into the panel.
+The Diff panel itself, rendered with real content for the first time: it loaded
+only at build (panels are cached, so it went stale - now reloads on `showing`),
+its count toolbar was a third column over the file list, its diff scroller was
+one line tall, every hunk header was wrong (old side read from a removed line's
+`-1`), and its fills were light-theme hex colours (white on near-white on a dark
+desktop). All in `tests/test_inline_diff_in_chat.py`, driven through the real
+`edit_file` skill.
+
+**Layout, conversations and sidebar (same day, third pass).** Renders now run on
+a headless `gtk4-broadwayd :5` (`GDK_BACKEND=broadway BROADWAY_DISPLAY=:5`, unset
+`DISPLAY`/`WAYLAND_DISPLAY`): on the real display every render window takes focus
+and the person's typing lands in it (a filter field rendered holding "ho").
+Broadway caps windows at 1024x768 and scales anything larger, so measure widths
+with a probe, not a picture. Found and fixed:
+
+- **The header bar needed 632px** - wider than the 600px narrow layout - so every
+  narrow window clipped the chat's right side. Quick ask / Browse / Help fold into
+  a "More" button below the breakpoint (Setup and Settings stay visible, which
+  `test_setup_button_is_reachable` requires); the title ellipsises; the split
+  view's automatic back arrow (a duplicate of the sidebar toggle) is off. 443px
+  narrow, 483px wide.
+- **The organ strip could not centre** because `Gtk.FlowBox` reports natural
+  width as widest-child x count (815px for 482px of lights). `OrganStrip.do_measure`
+  reports the real sum; it now centres and still wraps.
+- Conversation and composer are clamped to 860px (`widgets.reading_width`).
+- **Conversations panel** rows were a centred bold `• title  (02 Oct 00:42)`;
+  now a title plus `Today 23:35 · 2 messages · Current`, a warning mark for an
+  unfinished last turn, and inset margins.
+- **Sidebar sections** follow the organ lights: Remembering, Acting, Sensing,
+  Thinking, Health and trust (the old four had Models under "This machine" and
+  Skills under "What Chronoa did"). Rows ~40px instead of 50. "Model" is now
+  "Answering now", so it no longer sits beside "Models" with no difference.
+- **Five icon names Adwaita does not have** - `chat-symbolic`,
+  `office-calendar-symbolic`, `emblem-documents-symbolic` (the "remembering"
+  light), `emblem-ok-symbolic` (the tool card's tick),
+  `audio-input-microphone-muted-symbolic`. The existing icon checks ask
+  `has_icon` on the *installed* theme, and this machine is Yaru, so all five
+  passed while drawing blank boxes on GNOME. `tests/test_sidebar_icons_exist_in_adwaita.py`
+  reads Adwaita's files. Also de-duplicated: Artifacts/Export (one arrow),
+  Background mode/Desktop/header Settings (three gears), Memory/Artifacts.
+- `test_sidebar_toggle.py::test_two_presses_return_exactly_where_it_started` is
+  **flaky on untouched HEAD** (4 of 12 runs), the narrow-layout race recorded
+  above - not caused by this pass (1 of 12 with it).
+
+- **Three capture paths left the organ strip dark.** `screengrab` lights
+  "looking" and `AudioRecorder` lights "listening"; `capture_video` (ffmpeg on
+  /dev/video directly), `scan_document`'s scanner, and the wake word's own
+  always-open mic stream lit nothing - the camera could record, or the mic stay
+  open all day, with the strip idle. `body.lit()` is a context manager that
+  lights an organ for a `with` block and always puts it out; all three use it.
+  `tests/test_capture_lights_the_strip.py` (fails on the old files, measured).
+- Also failing and **not from this pass**: `test_sidebar_toggle.py::test_the_panels_open_beside_the_chat_and_come_back`
+  fails 4/4 on untouched HEAD; `test_capabilities.py::...other_group` fails on
+  `skills/browse.py`, an untracked file from a concurrent session.
+
+**Fourth pass (2026-10-08): rail, panels, mode strip.**
+
+- Rail sections are quiet cards with real small-caps headings (the CSS comment
+  promised letterspacing and uppercase; neither was set), and Context has a
+  `Gtk.LevelBar` when the window size is known.
+- "Nothing here yet" is `STATUS_OK`, not `STATUS_UNKNOWN`: Activity, Diff,
+  Triggers, What it has learned and Conversations all showed amber "Could not
+  determine" for an empty store read without error. Diff's empty page said it
+  three times; it is now one empty state.
+- Desktop headlined red "not answering" for being off the bus - the normal state
+  between searches, as its own row says. Red now means the service file is
+  missing; off-the-bus with the file present is OK.
+- Privacy's sense-consent rows and Skills' rows used raw ids; now
+  `common.sense_title()` / `capabilities.tool_title()`, id kept in the subtitle.
+- Models' view-switcher tabs had no icons (`add_titled`), drawn as blank cards.
+- Artifacts: status row first, count beside the search, a real empty state - and
+  **its "open folder" button never worked**: `subprocess` was never imported and
+  a broad `except` hid the `NameError`. Now `Gio.AppInfo.launch_default_for_uri`.
+- Mode strip: **Talk over** (`toggle-barge-in-vad`) and a **reply-style** menu
+  chip on a new stateful `app.reply-style` action (Ordinary / Brief /
+  Explanatory; applies from the next reply, verified through the registered
+  app). Below 560px the chips go icon-only (`set_compact`) - with words the strip
+  needs 512px and the window can be 380px. Permission modes were left as they
+  are: Explore duplicates Plan mode by design, and Don't ask is for unattended
+  turns.
+- `OrganStrip.do_measure` must return -1 baselines for the horizontal axis, or
+  GTK warns "reported a horizontal baseline" on every layout.
+
+**What the backend can do that the UI did not show (audit, 2026-10-08).**
+Four layers checked by script, not by reading: backend modules with no GUI
+reference (33 of 101, mostly plumbing or reached through skills), schema keys no
+UI code names (55 of 161, nearly all sense keys the Senses panel builds by
+f-string), app actions with no control (none - `show-page` is for D-Bus), and
+binaries. Fixed:
+
+- **A custom model server had no field.** `custom-llm-base-url` / `-model` /
+  `-api-key` are read by `app/brain.py` (first in the cloud chain) and shown by
+  "Answering now", and nothing could set them. Settings -> Privacy now has
+  "Your own model server"; the key goes through `set_api_key` (keyring).
+- **Every text field in Settings was two fields.** `_entry` packed a `Gtk.Entry`
+  inside an `Adw.EntryRow`, which is itself a field (rendered: two boxes per
+  row), and the secret reveal toggle called `set_visible` - press 1 revealed
+  nothing, press 2 hid the field (run, not inferred). Now one `EntryRow` /
+  `PasswordEntryRow`. `tests/test_settings_text_fields.py`.
+- **Your own `/commands`** (`~/.config/shani-chronoa/commands/*.md`) worked when
+  typed but were missing from the `/` menu; they are listed now, marked "yours",
+  summarised by their first line. A **rules file** that is active now shows in
+  the rail's Posture card.
+
+Then wired, same day:
+
+- **Connections** panel (`gui/surfaces/connections.py`, section Acting, gear to
+  Settings -> Privacy): whether the MCP server can run here (it needs the `mcp`
+  package, absent on this machine - the panel says so), the exact `claude mcp
+  add` line and `mcpServers` JSON with Copy buttons; for Telegram/WhatsApp,
+  whether the `gateways` setting accepts each, which bridges are running (read
+  from /proc), and the command that starts one. It never asks for a token: the
+  bridge reads its own environment by design, so Chronoa never holds one.
+- **What it has learned -> Background passes**: Dream (the daemon's pass, run
+  now, with when it last wrote one), Reflexes (all five listed, "check now"),
+  Compare predictors (`model_zoo.compare/render/recommend`, previously imported
+  by nothing). Off the main loop; the whole report is shown.
+- `tests/test_surfaced_backends.py`: builds both panels and drives the real
+  backends, including a real process named like the bridge (killed by PID).
+
+Further gap layers checked the same day: every skill is in Help (182/182); no
+GUI button is wired to nothing (AST scan; the five flagged are wired by their
+callers); every app action has a control. Found and fixed:
+
+- **Replies never streamed.** `ConversationMixin` passes only `sink=` and puts
+  `_on_reply_text` (live text *and* sentence-by-sentence speech) on the sink;
+  `handle()` read only its own `on_text` parameter, so with a streaming backend
+  the reply arrived whole. Measured with one fake model: 0 pieces via `sink=`,
+  2 via `on_text=`. `handle` now takes the sink's. `on_state` is declared on
+  `EventSink` and neither fired nor subscribed - unused, not broken.
+  `tests/test_reply_streams_through_the_sink.py` (fails on HEAD's assistant).
+- **Conversations could not be renamed** although `conversation_store.rename`
+  exists (and protects the title from the model). Pencil button per row.
+- **Trigger rules could be deleted, not made**, outside chat. The Triggers panel
+  has an "Arm a rule" form that calls `tools.execute_tool("manage_triggers")` -
+  so consent, argument checks and the destructive refusal are the chat path's.
+  Probing it needs a settings backend a child process can read: skills run in a
+  sandboxed child, and `GSETTINGS_BACKEND=memory` is per-process, so a grant
+  made in the probe was invisible to the skill and read as "turned off".
+
+Third gap round (function level and reverse direction, same day):
+
+- The arm form also arms **event rules** (all 19 `EVENT_TYPES`: screen lock,
+  USB plug, schedule, ...) with a source field; a bad source gets the skill's
+  own list of what that type accepts.
+- **Branch a conversation** (`conversation_store.fork`, chat-only before): a
+  button per row that copies and opens the copy, leaving the original intact.
+- **Gears where a panel names a switch it could not reach**: Desktop ->
+  Privacy (global shortcut, document search), Machine -> Senses (its refused
+  rows), Activity -> Tool activity. `NO_GEAR` in
+  `tests/test_settings_targets_resolve.py` listed Desktop and Machine on
+  reasons the code contradicts; the note there now records the evidence.
+- Checked clean: no setting in the UI that nothing reads (the three hits are
+  read by the wizard and the organ strip); session grants are listed and
+  revocable in Settings > Approvals; the remaining store functions without UI
+  are plumbing, or `goals.py`, which is unwired on purpose (no producer yet).
+Pre-existing failures seen in this pass, all failing on untouched HEAD too:
+`test_config_gsettings.py::test_api_key_defaults_are_empty_not_quoted`,
+`test_slash_menu_opens.py::test_typing_a_slash_opens_the_menu...` (flaky, 1/2).
+
+Not changed, noted: Machine's readings are monospace blocks outside the row
+cards; the 8-word organ strip shows no state at rest; the Models switcher shows
+a red "blocked" glyph on both tabs.
+
 ## Twenty skills from the matrix shortlist (2026-10-07)
 
 Picked from `chronoa-matrix.json`'s `ideas` after checking each against the

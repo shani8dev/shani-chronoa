@@ -58,6 +58,11 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         self._search.update_property([Gtk.AccessibleProperty.LABEL],
                                      ["Search settings"])
         self._search.connect("search-changed", self._on_search)
+        # `changed`, not `search-changed`: the latter is delayed for a non-empty
+        # needle, so typing "camera" and clearing it inside that delay delivered
+        # only the empty one - and a section chosen beforehand came back instead
+        # of the whole window. Any typed text means "search everything".
+        self._search.connect("changed", lambda e: self._forget_section() if e.get_text() else None)
         header.pack_start(self._search)
         # Titlebar only. Adding it to `outer` as well is a second parent, and
         # GTK rejects that with "gtk_widget_get_parent (child) == NULL" - a
@@ -85,6 +90,8 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         scrolled = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scrolled.set_child(page)
         scrolled.set_vexpand(True)
+        self._scrolled = scrolled
+        outer.append(self._build_section_chips())
         outer.append(scrolled)
         self.set_child(outer)
 
@@ -165,6 +172,8 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         family = (section_id in self._family_ids())
         group = None if family else self._by_id.get(section_id)
         if group is not None:
+            self._active_family = ""
+            self._select_chip("")
             self._search.set_text((group.get_title() or section_id).lower())
             self._search.grab_focus()
             self.present()
@@ -175,12 +184,79 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             # needle is cleared so nothing is filtered away, and the visibility
             # is applied directly, so there is one decision (which groups a
             # person asked for) in one place rather than one per group title.
+            # Recorded before the text is cleared, so the empty-needle
+            # `search-changed` that clearing emits keeps this section.
+            self._active_family = section_id
+            self._select_chip(section_id)
             self._search.set_text("")
             self._show_only_family(section_id)
             self._search.grab_focus()
             self.present()
             return True
         return False
+
+    def _build_section_chips(self) -> Gtk.Widget:
+        """One chip per section, plus All, so a section is one click away.
+
+        Seven sections lived in one ~9,000px scroll, and the only way to land on
+        one was to know its title and type it into the search. `show_section()`
+        already did the filtering for the page registry; nothing a person could
+        see called it. A `FlowBox` so the row wraps at the 560px default rather
+        than widening the window.
+        """
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
+                           max_children_per_line=8, column_spacing=6, row_spacing=6,
+                           homogeneous=False, halign=Gtk.Align.CENTER,
+                           margin_top=8, margin_bottom=4,
+                           margin_start=12, margin_end=12)
+        self._chips = {}
+        self._active_family = ""
+        self._chip_sync = False
+        first = None
+        for fid, title in (("", "All"),) + tuple(_SECTION_FAMILIES):
+            chip = Gtk.ToggleButton(label=title)
+            chip.add_css_class("settings-chip")
+            chip.update_property([Gtk.AccessibleProperty.LABEL],
+                                 [f"Show {title.lower()} settings" if fid else "Show all settings"])
+            if first is None:
+                first = chip
+                chip.set_active(True)
+            else:
+                chip.set_group(first)
+            chip.connect("toggled", self._on_chip, fid)
+            self._chips[fid] = chip
+            flow.append(chip)
+        return flow
+
+    def _on_chip(self, chip: Gtk.ToggleButton, family: str) -> None:
+        if self._chip_sync or not chip.get_active():
+            return
+        self._active_family = family
+        if self._search.get_text():
+            # `search-changed` fires at once for an empty needle, and
+            # `_on_search` keeps `_active_family` for it.
+            self._search.set_text("")
+        if family:
+            self._show_only_family(family)
+        else:
+            self._restore_all()
+        self._scrolled.get_vadjustment().set_value(0)
+
+    def _forget_section(self) -> None:
+        """A search runs over every section, so the chips say All while it does."""
+        self._active_family = ""
+        self._select_chip("")
+
+    def _select_chip(self, family: str) -> None:
+        """Show `family` as the active chip without re-running its filter."""
+        chip = getattr(self, "_chips", {}).get(family)
+        if chip is None:
+            return
+        self._chip_sync = True
+        try:
+            chip.set_active(True)
+        finally:
+            self._chip_sync = False
 
     def _restore_all(self) -> None:
         """Show every group and every row again."""
@@ -249,20 +325,22 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         return row
 
     def _entry(self, group, title, subtitle, value, on_changed, secret=False):
-        row = Adw.EntryRow(title=title)
+        """A text setting: the row *is* the field.
+
+        It was an `Adw.EntryRow` - itself an editable field - with a second
+        `Gtk.Entry` packed in as a suffix, so every text setting showed two
+        fields and only the inner one was connected: text typed into the row's
+        own field went nowhere. The secret variant's "reveal" button called
+        `entry.set_visible(active)`, which on its second press hid the field
+        instead of showing the key. `Adw.PasswordEntryRow` has a working reveal
+        of its own. The value is set before `changed` is connected, so opening
+        Settings writes nothing.
+        """
+        row = (Adw.PasswordEntryRow if secret else Adw.EntryRow)(title=title)
+        row.set_text(str(value or ""))
         if subtitle:
             row.set_tooltip_text(subtitle)
-        entry = Gtk.Entry(text=str(value or ""), hexpand=True)
-        if secret:
-            entry.set_visibility(False)
-        entry.connect("changed", lambda e: on_changed(e.get_text()))
-        row.add_suffix(entry)
-        if secret:
-            reveal = Gtk.ToggleButton(icon_name="view-reveal-symbolic", valign=Gtk.Align.CENTER)
-            reveal.add_css_class("flat")
-            reveal.set_tooltip_text("Show this key")
-            reveal.connect("toggled", lambda b: entry.set_visible(b.get_active()))
-            row.add_suffix(reveal)
+        row.connect("changed", lambda r: on_changed(r.get_text()))
         group.add(row)
         group._needle_extra.append((row, f"{title}".lower()))
         return row
@@ -685,9 +763,16 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
             # this, a person who searched and then emptied the box was left
             # with the *searched* subset still on screen - and after
             # `show_section("<family>")` they would be left with one section,
-            # which reads as a window that has lost most of itself.
-            self._restore_all()
+            # which reads as a window that has lost most of itself. The one
+            # exception is a section chosen on purpose, which an empty box is
+            # not a reason to forget.
+            family = getattr(self, "_active_family", "")
+            if family:
+                self._show_only_family(family)
+            else:
+                self._restore_all()
             return
+        self._forget_section()
         for group, haystack in self._searchable:
             group_matches = not needle or needle in haystack
             row_hits = [

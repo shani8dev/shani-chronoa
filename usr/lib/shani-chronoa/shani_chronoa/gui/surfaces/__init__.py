@@ -50,6 +50,16 @@ SETTINGS_TARGETS = {
     "model": "models",
     "models": "models",
     "privacy": "privacy",
+    # The `gateways` setting that decides which chat channels are accepted.
+    "connections": "privacy",
+    # Panels that named a setting they had no route to (found 2026-10-08 by
+    # matching each gearless panel's `*-enabled` mentions against Settings):
+    # Desktop reports the global-shortcut and document-search switches, which
+    # live in Privacy; Machine's refused rows are the Senses switches; Activity
+    # is the log whose settings are Tool activity.
+    "desktop": "privacy",
+    "machine": "senses",
+    "activity": "tool-activity",
 }
 
 
@@ -112,6 +122,9 @@ SURFACE_IDS = (
     "workbench",
     "diff",
     "artifact_store",
+    # Other apps and chat channels: the MCP server and the channel bridge,
+    # both complete and both with no UI until 2026-10-08.
+    "connections",
     # Desktop and system
     "privacy",
     "model",
@@ -123,36 +136,41 @@ SURFACE_IDS = (
     "export",
 )
 
-#: The order the sidebar groups its sections in. Fixed rather than alphabetical
-#: because these are four questions a person asks in this order: what were we
-#: saying, what is this machine, what does it think I told it, what has it done.
+#: The order the sidebar groups its sections in, named for the organism's own
+#: organs - the same words the organ lights above the composer use (remembering,
+#: acting, sensing, thinking), so the sidebar and the strip describe one thing.
+#:
+#: The old headings - "This machine", "What Chronoa knows", "What Chronoa did",
+#: "Desktop and system" - had stopped meaning anything by the time 22 panels were
+#: filed under them: Models sat under "This machine", Voice under "What Chronoa
+#: knows", Skills under "What Chronoa did", Diagnostics beside Artifacts. Each
+#: heading now answers one question, in the order a person asks them: what were
+#: we saying and what does it keep, what has it done and can do, what does it
+#: perceive, what is it thinking with, and is it healthy and trustworthy.
 #:
 #: There is no "Conversation" section, and there never should be: the sidebar
-#: already opens with an untitled "Conversation" row for the live chat, so a
-#: heading by that name directly above a "Conversations" panel gave the sidebar
-#: two things called Conversation - a heading and a row - and a reader could not
-#: tell that the row was the chat and the panel was the saved list. The saved
-#: list belongs with what Chronoa has done, which is what a past conversation
-#: is; that section was already carrying Memory, Triggers and Activity.
-SECTION_ORDER = ("This machine", "What Chronoa knows",
-                 "What Chronoa did", "Desktop and system", "Everything else")
+#: opens with an untitled "Conversation" row for the live chat, and a heading by
+#: that name above a "Conversations" panel would give it two things called
+#: Conversation. The saved list leads "Remembering" instead.
+SECTION_ORDER = ("Remembering", "Acting", "Sensing", "Thinking",
+                 "Health and trust", "Everything else")
 
 
 #: Where a panel that declares no `SECTION` of its own belongs. A table rather
-#: than a guess: the ten panels that predate sections would otherwise all land in
+#: than a guess: the panels that predate sections would otherwise all land in
 #: "Everything else", which is what happened the first time - and a sidebar
 #: showing three of fourteen panels looks like a sidebar with three panels.
 DEFAULT_SECTION = {
-    "conversations": "What Chronoa did",
-    "senses": "This machine",
-    "machine": "This machine",
-    "memory": "What Chronoa did",
-    "skills": "What Chronoa did",
-    "triggers": "What Chronoa did",
-    "activity": "What Chronoa did",
-    "privacy": "Desktop and system",
-    "model": "Desktop and system",
-    "daemon": "Desktop and system",
+    "conversations": "Remembering",
+    "memory": "Remembering",
+    "activity": "Remembering",
+    "skills": "Acting",
+    "triggers": "Acting",
+    "senses": "Sensing",
+    "machine": "Sensing",
+    "model": "Thinking",
+    "privacy": "Health and trust",
+    "daemon": "Health and trust",
 }
 
 

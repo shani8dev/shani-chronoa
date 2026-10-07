@@ -219,3 +219,19 @@ def test_the_footer_sits_below_the_scroller_not_above_it(wizard):
     assert "ScrolledWindow" in kinds and "Box" in kinds, kinds
     assert kinds.index("ScrolledWindow") < len(kinds) - 1, (
         f"the action row is not the last child: {kinds}")
+
+
+def test_the_open_folder_button_launches_the_file_manager(monkeypatch, tmp_path):
+    """It raised NameError (no `subprocess` import) inside a broad except, so
+    every press did nothing. The launch is stubbed; the call is what is checked."""
+    from shani_chronoa.gui.surfaces import artifact_store
+    launched = []
+    monkeypatch.setattr(artifact_store.Gio.AppInfo, "launch_default_for_uri",
+                        lambda uri, ctx: launched.append(uri) or True)
+    target = tmp_path / "models" / "a.gguf"
+    target.parent.mkdir()
+    target.write_bytes(b"x")
+    view_cls = next(c for c in vars(artifact_store).values()
+                    if isinstance(c, type) and hasattr(c, "_on_path_clicked"))
+    view_cls._on_path_clicked(None, None, target)
+    assert launched == [target.parent.as_uri()]
