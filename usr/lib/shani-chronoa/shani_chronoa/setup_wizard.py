@@ -41,6 +41,8 @@ import shutil
 import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
+from shani_chronoa.config import ChronoaConfig  # noqa: E402  (the factory above needs the real class)
+
 logger = logging.getLogger(__name__)
 
 
@@ -407,6 +409,59 @@ def sample_sentence() -> str:
 # --------------------------------------------------------------------------
 
 
+#: The wizard's page ids, declared at import so that `--show-page=setup:review`
+#: can name one **before the wizard has ever been built**. Registering from
+#: inside `build_window` meant the only ids that existed were the ones a wizard
+#: that was already open had created, so the one caller whose job is to *open*
+#: it was the one that could not ask.
+_SETUP_PAGES = [
+    ("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud keys"),
+    ("brain", "Brain"), ("model-picker", "Model"), ("ears", "Ears"),
+    ("voice", "Voice"), ("review", "Review"), ("extras", "Optional extras"),
+    ("eyes", "Eyes"), ("imagine", "Imagine"), ("memory", "Memory"),
+    ("photos", "Photos and videos"), ("sounds", "Sounds"),
+    ("speakers", "Who said what"), ("languages", "Languages"),
+    ("done", "Done"),
+]
+
+#: Retired ids, kept so a stored one opens whatever absorbed it.
+_SETUP_ALIASES = {"more": "extras", "code": "eyes", "picture": "imagine",
+                  "download": "review", "keys": "cloud-keys", "tts": "voice"}
+
+
+def _register_setup_pages() -> None:
+    """Declare the wizard's pages. Idempotent; called from `build_window` too."""
+    from shani_chronoa import pages as page_registry
+    page_registry.register(
+        "setup", _SETUP_PAGES,
+        factory=lambda app, config=None: build_window(app, config or ChronoaConfig()),
+        aliases=dict(_SETUP_ALIASES),
+    )
+
+
+_register_setup_pages()
+
+
+def _wizard_show_page(win, view, page_id: str, goto) -> bool:
+    """Show one setup page by id, from anywhere.
+
+    Every page here is also reachable through `goto`, but only from inside the
+    builder that builds them - so `shani-chronoa --show-page=setup:review` could
+    not have worked, and neither could a notification saying "finish the
+    download step".
+
+    The ids are checked against the registry rather than against the view's own
+    tags, so a page that failed to build is a page that refuses rather than one
+    that pushes nothing and reports success.
+    """
+    from shani_chronoa import pages as page_registry
+    if page_id not in page_registry.page_ids("setup"):
+        return False
+    win.present()
+    goto(page_id)
+    return True
+
+
 def build_window(application, config=None, on_finished: Optional[Callable[[], None]] = None):
     """The setup window (created lazily so importing this module never needs a display)."""
     import gi
@@ -552,12 +607,47 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # left in with a comment claiming it works.
         scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.set_child(box)
+
+        # **The action row is pinned below the scroller, not appended to the
+        # content.** It used to be the last children of `box`, which put it at
+        # the bottom of the *scrolling content* - so it scrolled away with it.
+        # Measured against the 620px window, five of the sixteen pages have more
+        # content than that (`languages` 1137px, `review` 1029px, `voice` 897px,
+        # `welcome` 849px, `cloud-keys` 672px), which means on the **first screen
+        # a new person sees** the only forward action - "Start" - was 849px down
+        # and out of sight. On the other eleven pages it looked fine, which is
+        # why it survived: the defect is invisible until the page is tall.
+        #
+        # `[ScrolledWindow(content), footer]` is the ordinary libadwaita shape,
+        # and it is the only structure that keeps a button on screen.
+        footer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12,
+                         halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=18,
+                         margin_start=18, margin_end=18)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.append(scroller)
+        outer.append(footer)
+
         p = Adw.NavigationPage(title=title, tag=tag)
-        p.set_child(scroller)
+        p.set_child(outer)
+        # Keyed by `id(box)` for the same reason `_choice_rows` below is: content
+        # and actions were one box, so the callers still holding `box` need a way
+        # to reach the footer that now belongs to it.
+        _footers[id(box)] = footer
         return p, box
 
     #: The check buttons of every `choice_group`, keyed by the group widget.
     _choice_rows: Dict[int, Dict[str, Gtk.CheckButton]] = {}
+
+    #: The pinned action row of every page, keyed by that page's content box.
+    _footers: Dict[int, Gtk.Box] = {}
+
+    def page_footer(box) -> Gtk.Box:
+        """Where a page's buttons belong: the row pinned under its scroller.
+
+        Falls back to `box` itself so a caller handed some other box still puts
+        its widgets somewhere visible rather than nowhere.
+        """
+        return _footers.get(id(box), box)
 
     def choice_group(title: str, items, selected: str):
         group = Adw.PreferencesGroup(title=title)
@@ -613,7 +703,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             nxt.connect("clicked", lambda *_: goto(next_tag))
             widgets += [nxt, skip]
         for w in widgets:
-            box.append(w)
+            page_footer(box).append(w)
         if done_label:
             status.set_label(done_label)
 
@@ -750,7 +840,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     box.append(optional)
     start_btn = Gtk.Button(label="Start", css_classes=["suggested-action", "pill"], halign=Gtk.Align.CENTER)
     start_btn.connect("clicked", lambda *_: goto("mode"))
-    box.append(start_btn)
+    page_footer(box).append(start_btn)
     view.add(welcome)
 
     def already_there(done_label: str, next_tag: str, reason: str = "") -> None:
@@ -770,7 +860,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                        css_classes=["suggested-action", "pill"],
                        halign=Gtk.Align.CENTER)
         n.connect("clicked", lambda *_: goto(next_tag))
-        box.append(n)
+        page_footer(box).append(n)
 
     def consent_row(box, size_mb: float, what: str, config,
                     on_change: Optional[Callable[[bool], None]] = None) -> "Adw.SwitchRow":
@@ -1040,11 +1130,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         n = Gtk.Button(label="Back to the list", css_classes=["suggested-action", "pill"],
                        halign=Gtk.Align.CENTER)
         n.connect("clicked", lambda *_: goto("review"))
-        box.append(n)
+        page_footer(box).append(n)
         skip = Gtk.Button(label="Close" if close_label else "Finish", css_classes=["flat"],
                           halign=Gtk.Align.CENTER)
         skip.connect("clicked", lambda *_: goto("review"))
-        box.append(skip)
+        page_footer(box).append(skip)
 
     def navigate(box, next_tag, skip_label: str = "") -> "Gtk.Button":
         """Just the way forward: a Next button and a way past the rest.
@@ -1077,13 +1167,13 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         nxt = Gtk.Button(label="Next", css_classes=["suggested-action", "pill"],
                          halign=Gtk.Align.CENTER)
         nxt.connect("clicked", lambda *_: goto(resolve()))
-        box.append(nxt)
+        page_footer(box).append(nxt)
         retitle(nxt)
         if skip_label:
             skip = Gtk.Button(label=skip_label, css_classes=["flat"], halign=Gtk.Align.CENTER)
             skip.connect("clicked", lambda *_: goto(
                 "done" if resolve() != "done" else resolve()))
-            box.append(skip)
+            page_footer(box).append(skip)
         return nxt
 
     def pick_another(label: str) -> Gtk.Button:
@@ -1211,7 +1301,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         _consent_given(config, True)          # asking a cloud model is consent
 
     save_keys.connect("clicked", lambda *_: save())
-    box.append(save_keys)
+    page_footer(box).append(save_keys)
     # **On to the Ears, not to Done.** This used to be `navigate(box, "done")`,
     # and it was the single worst routing in the wizard: the cloud branch is the
     # one branch where nothing was downloaded, so routing straight to the end
@@ -1252,11 +1342,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                    css_classes=["suggested-action", "pill"],
                    halign=Gtk.Align.CENTER)
     n.connect("clicked", lambda *_: goto("ears"))
-    box.append(n)
+    page_footer(box).append(n)
     local_button = Gtk.Button(label="Use a model on this computer",
                               css_classes=["flat"], halign=Gtk.Align.CENTER)
     local_button.connect("clicked", lambda *_: goto("model-picker"))
-    box.append(local_button)
+    page_footer(box).append(local_button)
     view.add(brain)
 
     picker, box = page("Model", "model-picker", "The language model is what understands you. " + hw)
@@ -1393,10 +1483,15 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             "does not replace any of these."))
     piper_mb = voices._PIPER.size_bytes / 1e6
     kokoro_mb = (sherpa.RELEASE.size_bytes + voices._KOKORO_MODEL.size_bytes) / 1e6
-    items = [(k, f"{x.label.split(' - ')[0]} (Piper)",
-              x.label.split(" - ")[1] + (" - downloaded" if voices.voice_installed(k)
-                                         else f" - {x.onnx_size / 1e6:.0f} MB, plus {piper_mb:.0f} MB for Piper once"))
-             for k, x in voices.VOICES.items() if x.language == "en"]
+    # `voices_for("en")` rather than filtering `VOICES` here: which voices may be
+    # offered is a fact about the catalogue, and the wizard was the one place
+    # that re-derived it, so a catalogue change that added a language would show
+    # up in one list and not the other.
+    items = [(k, f"{voices.VOICES[k].label.split(' - ')[0]} (Piper)",
+              voices.VOICES[k].label.split(" - ")[1] +
+              (" - downloaded" if voices.voice_installed(k)
+               else f" - {voices.VOICES[k].onnx_size / 1e6:.0f} MB, plus {piper_mb:.0f} MB for Piper once"))
+             for k in voices.voices_for("en")]
     items += [(k, f"{x.label.split(' - ')[0]} (Kokoro)",
                x.label.split(" - ")[1] + (" - downloaded" if voices.kokoro_installed(k)
                                           else f" - {kokoro_mb:.0f} MB once, for all six Kokoro voices"))
@@ -1475,7 +1570,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             GLib.idle_add(listen.set_sensitive, True)
         threading.Thread(target=speak, daemon=True).start()
     listen.connect("clicked", on_listen)
-    box.append(listen)
+    page_footer(box).append(listen)
     # The voice page's own way forward, into the extras index. Its `worker_area`
     # skip already targets "more", which is now `extras` - see `worker_area`'s
     # `next_tag` above - so this is the path a user takes after picking a voice.
@@ -1488,7 +1583,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                            css_classes=["suggested-action", "pill"],
                            halign=Gtk.Align.CENTER)
     to_review.connect("clicked", lambda *_: goto("review"))
-    box.append(to_review)
+    page_footer(box).append(to_review)
     view.add(voice_page)
 
     # 5. the optional extras, **one page each**.
@@ -1682,35 +1777,17 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             on_finished()
         win.close()
     finish.connect("clicked", on_finish)
-    box.append(finish)
+    page_footer(box).append(finish)
     view.add(done)
-    from shani_chronoa import pages as page_registry
-    page_registry.register(
-        "setup",
-        [("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud keys"),
-         ("brain", "Brain"), ("model-picker", "Model"), ("ears", "Ears"),
-         ("voice", "Voice"), ("review", "Review"), ("extras", "Optional extras"),
-         ("eyes", "Eyes"), ("imagine", "Imagine"), ("memory", "Memory"),
-         ("photos", "Photos and videos"), ("sounds", "Sounds"),
-         ("speakers", "Who said what"), ("languages", "Languages"),
-         ("done", "Done")],
-        factory=lambda app, config=None: build_window(app, config or ChronoaConfig()),
-        aliases={"more": "extras", "code": "eyes", "picture": "imagine",
-                 "download": "review", "keys": "cloud-keys", "tts": "voice"},
-    )
-    def show_page(page_id: str) -> bool:
-        """Show one setup page by id, from anywhere.
-
-        Every page here is also reachable through `goto`, but only from inside
-        this function - so `shani-chronoa --show-page=setup:review` could not
-        have worked, and neither could a notification saying "finish the
-        download step".
-        """
-        if page_id not in page_registry.page_ids("setup"):
-            return False
-        win.present()
-        goto(page_id)
-        return True
+    _register_setup_pages()
+    # Attached to the window, not just defined. `pages.show()` looks for
+    # `window.show_page` and logs "cannot show a page" when there is none - which
+    # is what happened: this function existed, was correct, and answered
+    # `setup:review` for nobody, because the only thing that ever held a
+    # reference to it was the local scope that was about to end. Measured
+    # before the fix, on a real wizard: `pages.show("setup:review")` logged
+    # "setup cannot show a page" while the Review page sat there fully built.
+    win.show_page = lambda page_id: _wizard_show_page(win, view, page_id, goto)
 
     view.replace_with_tags(["welcome"])
     return win

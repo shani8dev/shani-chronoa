@@ -35,7 +35,7 @@ from shani_chronoa.reaction import ReactionLayer, destructive_tools
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
 from shani_chronoa.skills import discover_skills
 from shani_chronoa.tool_tracking import ToolTracker, ORIGIN_USER
-from typing import NamedTuple
+from typing import Dict, NamedTuple, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,9 @@ logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FN
 #: Tools whose real work takes longer than the usual 30 s, named here rather
 #: than guessed. The per-origin profile still caps each (300 s when a person
 #: asked, 15 s for an unattended rule), so this can only lengthen up to that.
-_SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300}
+_SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300,
+               # 100 MB at a slow link; a long PDF merge; a polkit password prompt left open.
+               "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90}
 
 
 def _get_sandbox_config(tool_name: str) -> SandboxConfig:
@@ -141,6 +143,15 @@ class DispatchResult(NamedTuple):
         return not self.ran
 
 
+from shani_chronoa.toolfailure import ToolFailure
+
+
+def _tool_failure_result(message: str) -> "DispatchResult":
+    return DispatchResult(
+        f"ERROR (ran, but failed): {message}",
+        verification.Verdict.FAILED, True, evidence="tool_failure")
+
+
 
 #: Which argument names the resource a skill would touch, so a permission rule
 #: can be written against a path or a unit rather than against the tool alone.
@@ -168,6 +179,10 @@ _RESOURCE_ARGUMENT = {
     "directory_tree": "path",
     "find_recently_modified": "path",
     "git_inspect": "path",
+    "photo_metadata": "path",
+    # pdf_pages' merge takes `paths` (a list) and its output is a new file; only
+    # the single-source actions name one path, so that is the one scoped here.
+    "pdf_pages": "path",
     # `compare_files` is deliberately absent: it takes `path_a` AND `path_b`,
     # and this maps one skill to one argument. Registering either would let a
     # scoped rule match on half the files the call actually reads, which is
@@ -209,6 +224,94 @@ def _consent_key_for(name: str) -> "str | None":
     return None
 
 
+#: Tool -> the other tools that would plausibly have answered the same request.
+#:
+#: **Intentionally empty, and that is the honest state rather than a missing
+#: definition.** `_advise()` used to read a name that existed nowhere in the tree,
+#: so the whole branch raised `NameError` and was swallowed - see the comment at
+#: the call site. The table that would fill it is a judgement about which tools
+#: are rivals ("`web search` and `internet` are both ways to ask the web"), and
+#: `tool_select._SYNONYMS` is a *word* -> tool map, not a tool -> tool one. It can
+#: be made to yield families by prefix ("media", "media player", "media next"),
+#: which is a defensible heuristic and is **not** the same claim as the table this
+#: was written for - so it is left to whoever finishes the feature rather than
+#: guessed at here, where a wrong guess would read as a working feature.
+#:
+#: Until it is filled, `known` is legitimately empty and the advice falls back to
+#: "A dry run would cost nothing and say more."
+ALTERNATIVES: Dict[str, Tuple[str, ...]] = {}
+
+
+def _failure_hint(exc: Exception) -> str:
+    """The recovery instruction for a skill that raised, by exception kind.
+
+    assistd's `io_error_nav` (`assistd/crates/assistd-tools/src/command.rs:57-102`)
+    maps an `ErrorKind` to a hint plus a runnable recovery. The map here is
+    deliberately short: only kinds with an obvious next move get a hint, and
+    anything unmapped says only what happened, because an invented recovery
+    instruction is worse than none.
+    """
+    if isinstance(exc, FileNotFoundError):
+        return ("Hint: the target file does not exist; call "
+                "list_directory or search_file_contents to see what is there.")
+    if isinstance(exc, PermissionError):
+        return ("Hint: permission denied; the sandbox profile for this skill "
+                "does not cover that path - try a path under the user's home.")
+    if isinstance(exc, IsADirectoryError):
+        return "Hint: that path is a directory; list_directory it instead."
+    if isinstance(exc, ValueError):
+        return "Hint: the arguments were malformed; re-call with valid JSON."
+    if isinstance(exc, TimeoutError):
+        return "Hint: the skill timed out; retry once, or narrow the request."
+    return ""
+
+
+#: How feedback the user typed is marked in a tool result. It has to be marked:
+#: joined to the output with a bare " - ", the model cannot tell the person's
+#: instruction from the skill's report, and a small local model will frequently
+#: read it as part of what the tool said - which is the one outcome this
+#: feature exists to prevent. Quoted, attributed and on its own line, it reads
+#: as what it is.
+_FEEDBACK_PREFIX = "The user allowed this call and added guidance: \"{}\"\n"
+
+
+def _with_feedback(message: str, feedback: "str | None") -> str:
+    """`message` with the user's typed guidance in front of it, if any.
+
+    Feedback leads rather than trails because it is about the call the model
+    just made, and the tool's own output is what the model should act on. It is
+    also the only text here that came from a person, which is why it is quoted
+    and attributed: a small model asked to summarise this output will otherwise
+    report the instruction as a finding.
+    """
+    stripped = (feedback or "").strip()
+    if not stripped:
+        return message
+    return _FEEDBACK_PREFIX.format(stripped) + message
+
+
+#: Middleware hooks (AgentScope's onion base, `middleware/_base.py:13-66`,
+#: reduced to the two edges Chronoa's monolithic dispatch actually needs).
+#: A hook that returns a DispatchResult from `pre` short-circuits the call;
+#: a hook may rewrite the result in `post`. Hooks compose onion-style: the
+#: first registered pre runs outermost. Registration is explicit, so the
+#: running set is inspectable (`hooks()`) rather than implicit in edits to
+#: `_dispatch`.
+_HOOKS_PRE: "list" = []
+_HOOKS_POST: "list" = []
+
+
+def register_hook(pre=None, post=None) -> None:
+    if pre is not None:
+        _HOOKS_PRE.append(pre)
+    if post is not None:
+        _HOOKS_POST.append(post)
+
+
+def hooks() -> "tuple[tuple, tuple]":
+    return (tuple(_HOOKS_PRE), tuple(_HOOKS_POST))
+
+
 def _dispatch(name: str, arguments: dict, by_reference: bool = False,
               origin: str = ORIGIN_USER) -> DispatchResult:
     """Every actuator, with the hands light on for the duration.
@@ -219,6 +322,17 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
     permanently-lit "acting", which is the failure the body's deadlines exist to
     cover but which should not be *relied* on.
     """
+    # Middleware pre-hooks run before any policy layer: a hook may refuse
+    # (short-circuit) or stay silent. First registered, outermost.
+    for pre in _HOOKS_PRE:
+        try:
+            short = pre(name, arguments, origin)
+        except Exception as e:  # noqa: BLE001 - a broken hook must not kill calls
+            logger.warning("pre-hook raised: %s", e)
+            continue
+        if short is not None:
+            return short
+
     # The reaction layer sees the call BEFORE it acts, and can only turn an
     # allowed call into one that needs a person - never the reverse. It is here
     # rather than inside `_dispatch_inner` so a pattern that has grown needs a
@@ -262,6 +376,16 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
             result.text = (f"{note}\n\n{advice}" if note else advice)
         except Exception:  # noqa: BLE001 - a read-only result is fine
             pass
+    # Middleware post-hooks run on the finished result, outermost last so the
+    # onion ordering mirrors `pre`. A hook returns the result it wants kept.
+    for post in reversed(_HOOKS_POST):
+        try:
+            kept = post(name, arguments, result)
+        except Exception as e:  # noqa: BLE001 - a broken hook must not kill calls
+            logger.warning("post-hook raised: %s", e)
+            continue
+        if kept is not None:
+            result = kept
     return result
 
 
@@ -318,11 +442,20 @@ def _advise(name, arguments, origin):
         try:
             from shani_chronoa.learning import Bandit
             live = Bandit().arms()
-            rivals = list(_ALTERNATIVES.get(name, ()))
+            rivals = list(ALTERNATIVES.get(name, ()))
             known = [(a, live[a].wins / live[a].pulls) for a in rivals
                      if a in live and live[a].pulls >= 3]
             known = [k for k in known if k[1] > (probs.get(best) or 0.0)]
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - advice must never block a tool
+            # Logged, where this used to be a bare `pass`. The reason it matters:
+            # this line read `_ALTERNATIVES`, a name defined nowhere in the tree,
+            # so it raised `NameError` on **every** call and the bare handler
+            # turned it into `known = []`. The result - never suggesting a rival
+            # tool that has worked better here - looked exactly like the feature
+            # being off, and nothing anywhere said otherwise. A swallowed
+            # exception that reproduces a disabled feature is the one shape of
+            # this bug that cannot be diagnosed from the outside.
+            logger.debug("Rival-tool advice unavailable for %s: %s", name, exc)
             known = []
         if best == "failed" and (probs.get("failed") or 0) > 0.5:
             suggestion = (
@@ -480,13 +613,13 @@ def _guardrail_refuses(name: str, arguments):
         reason = guardrail.check(name, arguments if isinstance(arguments, dict) else {}, schema or {})
     except Exception:  # noqa: BLE001
         return None
-    if not reason:
+    if reason.should_run:
         return None
     # `ran=False` again carries the meaning: the tool never executed. UNVERIFIED
     # rather than FAILED for the same reason as the reaction layer above - the
     # call did not run and break, it never ran at all.
     return DispatchResult(
-        text=("Not run. " + reason),
+        text=("Not run. " + reason.message),
         verdict=verification.Verdict.UNVERIFIED,
         ran=False,
     )
@@ -568,6 +701,13 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     if refusal:
         return DispatchResult(refusal, verification.Verdict.UNVERIFIED, False)
 
+    # EXPLORE mode is the same fact from the permission layer: a mutating call
+    # is refused before any consent question is asked, so a read-only session
+    # cannot be talked out of read-only.
+    explore_refusal = permissions.explore_refuses(name)
+    if explore_refusal:
+        return DispatchResult(explore_refusal, verification.Verdict.UNVERIFIED, False)
+
     # Scoped deny rules are a pre-filter here, for the same reason: a rule the
     # user set for this session should hold even if the skill forgets to look.
     # Only *deny* is enforced centrally. An allow is deliberately not - granting
@@ -579,8 +719,8 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # a traceback inside a subprocess - which tells the model nothing it can
     # act on, where the reason here names the argument and what was expected.
     malformed = guardrail.check(name, arguments, _schema_for(name) or {})
-    if malformed:
-        return DispatchResult(malformed, verification.Verdict.UNVERIFIED, False)
+    if not malformed.should_run:
+        return DispatchResult(malformed.message, verification.Verdict.UNVERIFIED, False)
 
     scoped_resource = _resource_for(name, arguments)
     if scoped_resource is not None:
@@ -606,6 +746,9 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # scoped resource never reaches a branch that would assign it.
     granted_key = None
     grant_target = scoped_resource if scoped_resource is not None else "*"
+    # Feedback typed against the "Provide feedback" answer, carried to whichever
+    # result this call produces. None on every path that never asked.
+    _feedback_for_dispatch = None
     if permissions.session_grant(name, grant_target):
         granted_key = _consent_key_for(name)
     else:
@@ -645,6 +788,10 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
             # to ship silently. `session_grant` deletes a one-shot and leaves a
             # session grant standing, so one call covers both cases.
             permissions.session_grant(name, grant_target)
+            # T1.9: the user answered "Provide feedback" instead of yes/no, so
+            # text they typed comes back with the result. Consumed here, so it
+            # rides this one call rather than prefixing every later one.
+            _feedback_for_dispatch = permissions.consume_feedback(name, grant_target)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
@@ -653,7 +800,28 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # Named, not inferred: this list runs unsandboxed, which is a privilege,
     # and a heuristic deciding it would widen without anyone reviewing it.
     if name in _LOCAL_TOOLS:
-        return DispatchResult(handler(arguments), verification.Verdict.UNVERIFIED, True)
+        # Both failure shapes below route through `_tool_failure_result`, so the
+        # feedback is attached to whichever message is built *before* that
+        # point rather than after it. Feedback has already been consumed by the
+        # time a tool runs, so a result that drops it loses the user's guidance
+        # permanently - and the guidance is most worth hearing when the thing
+        # they were steering went wrong.
+        try:
+            local_msg = handler(arguments)
+        except ToolFailure as exc:
+            return _tool_failure_result(
+                _with_feedback(str(exc), _feedback_for_dispatch))
+        # **The marker check must stay ahead of the feedback prefix.** It is a
+        # `startswith`, so a prefix written in front of the message makes it
+        # miss, and a skill that *did* fail would then be reported as a plain
+        # successful result - the marker exists to say "it ran and its effect
+        # did not hold", and losing it inverts the one claim that matters.
+        # Prefixing after the branch is chosen costs nothing and cannot.
+        if isinstance(local_msg, str) and local_msg.startswith(ToolFailure.MARKER):
+            return _tool_failure_result(_with_feedback(
+                local_msg[len(ToolFailure.MARKER):], _feedback_for_dispatch))
+        return DispatchResult(_with_feedback(local_msg, _feedback_for_dispatch),
+                              verification.Verdict.UNVERIFIED, True)
 
     # A skill may opt into the by-reference transport for its own oversized
     # arguments (see `skills/speak.py:wants_by_reference`). Ask the module
@@ -703,9 +871,13 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         # dict, and `repr` renders every one of those as valid Python source.
         args_literal = repr(_json_safe(arguments))
         program = (
-            f"from {handler_module} import {handler_func}; "
-            f"import sys; "
-            f"result = {handler_func}({args_literal}); "
+            f"from {handler_module} import {handler_func}\n"
+            f"import sys\n"
+            f"from shani_chronoa.toolfailure import ToolFailure\n"
+            f"try:\n"
+            f"    result = {handler_func}({args_literal})\n"
+            f"except ToolFailure as _tf:\n"
+            f"    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\n"
             f"sys.stdout.write(str(result))"
         )
         argv = ["python3", "-c", program]
@@ -723,13 +895,22 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         if exit_code != 0:
             _TRACKER.record_call(name, arguments, result, duration_ms, origin=origin)
             logger.error(f"Tool '{name}' exited with code {exit_code}: {output}")
-            return DispatchResult(output or f"Tool '{name}' failed with exit code {exit_code}",
-                               verification.Verdict.UNVERIFIED, False)
+            msg = output or f"Tool '{name}' failed with exit code {exit_code}"
+            msg = _with_feedback(msg, _feedback_for_dispatch)
+            return DispatchResult(msg, verification.Verdict.UNVERIFIED, False)
         # The skill's own string is its account of what it did, not evidence
         # that it happened. A module that declares POST_CONDITION gets that
         # checked against real state here, and an action with no post-condition
         # says so rather than letting the caller infer success. See
         # verification.py for why this is not optional politeness.
+        if isinstance(result, str) and result.startswith(ToolFailure.MARKER):
+            # The child reported a ToolFailure: it ran, the effect did not
+            # hold. Feed the same FAILED verdict the in-process path produces,
+            # so a remote and a local failure read identically downstream.
+            failure = _tool_failure_result(result[len(ToolFailure.MARKER):])
+            _TRACKER.record_call(name, arguments, failure.text, duration_ms,
+                                 origin=origin, verdict=failure.verdict.value)
+            return failure
         try:
             checked = verification.verify(handler_module, arguments, tool=name)
         except Exception as e:  # noqa: BLE001 - verification must never kill the action
@@ -755,12 +936,29 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         from shani_chronoa.capabilities import READ_ONLY_TOOLS
         suffix = "" if (name in READ_ONLY_TOOLS and checked.verdict is verification.Verdict.UNVERIFIED) \
             else checked.suffix
-        return DispatchResult(output + suffix, checked.verdict, True,
+        msg = output + suffix
+        msg = _with_feedback(msg, _feedback_for_dispatch)
+        return DispatchResult(msg, checked.verdict, True,
                              checked.evidence)
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
         _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0, origin=origin)
-        return DispatchResult(f"Tool '{name}' failed: {e}", verification.Verdict.UNVERIFIED, False)
+        # Hint-bearing error line, after assistd's
+        # `error_line("[error] {cmd}: {what}. {hint}: {recovery}")`
+        # (`assistd/crates/assistd-tools/src/command.rs:10-52`):
+        # every error tells the model its next move, because a
+        # bare traceback tells a small local model nothing it
+        # can act on, and the turn then spends its rounds
+        # re-calling the same failing skill. The exception's
+        # own text stays - it is the `what` - and a recovery
+        # is appended for the kinds that have one.
+        message = f"Tool '{name}' failed: {e}."
+        hint = _failure_hint(e)
+        if hint:
+            message = f"{message} {hint}"
+        msg = message
+        msg = _with_feedback(msg, _feedback_for_dispatch)
+        return DispatchResult(msg, verification.Verdict.UNVERIFIED, False)
     finally:
         # The payload files hold the argument values themselves, so they go
         # away whatever the child did. cleanup() is idempotent, so this also

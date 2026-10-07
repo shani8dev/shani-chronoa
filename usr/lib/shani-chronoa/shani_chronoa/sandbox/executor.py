@@ -26,8 +26,12 @@ from .commands import (
     _program,
     _name_matches,
     _blocked_binary,
+    _destructive_pattern,
     _shell_script,
     _unresolvable_script,
+    _risky_builtin,
+    _sensitive_pattern,
+    _risky_builtin_name,
 )
 from .child import (
     _EXPECTED_PARENT,
@@ -285,6 +289,17 @@ class SandboxExecutor:
                 0.0,
             )
 
+        # 2.5 Block self-management binaries except at Level 4 (host root)
+        # This prevents skills from calling shani-deploy, shani-install-media, etc.
+        if _name_matches(program, _INTERNAL_BINARIES) \
+                and config.level != SandboxLevel.LEVEL_4_HOST_ROOT:
+            return (
+                126,
+                f"Security error: Self-management tool '{os.path.basename(program)}' blocked. "
+                f"The sandbox level '{config.level.value}' does not allow system management operations.",
+                0.0,
+            )
+
         # 3. Block internal manager binaries in isolated sandboxes
         is_isolated = config.level in (SandboxLevel.LEVEL_1_READONLY, SandboxLevel.LEVEL_2_ISOLATED_DEV)
         if is_isolated:
@@ -314,6 +329,30 @@ class SandboxExecutor:
                 0.0,
             )
 
+        # 5.5 Destructive argument shapes. A blocklist names
+        # programs; it cannot see that an allowed program was
+        # told to do something destructive, so the argv (and
+        # any explicit shell script below) is matched against
+        # high-confidence destructive patterns before anything
+        # runs. Deterministic, like the blocklist: nothing
+        # between this check and the exec can be talked out
+        # of it.
+        destructive = _destructive_pattern(" ".join(argv))
+        if destructive is not None:
+            return (
+                126,
+                f"Security error: refused - this command would {destructive}.",
+                0.0,
+            )
+        sensitive = _sensitive_pattern(" ".join(argv))
+        if sensitive is not None:
+            return (
+                126,
+                f"Security error: refused - this command points at {sensitive!r}, which holds "
+                "credentials or private keys.",
+                0.0,
+            )
+
         # 6. The explicit shell opt-in. Guard #5 above read argv[0], which for
         # `sh -c "..."` is just `sh` - so without this the opt-in would undo the
         # whole migration: `sh -c "mkfs.ext4 /dev/sda"` names the binary in plain
@@ -338,6 +377,48 @@ class SandboxExecutor:
                         f"explicit shell script is blocked by the sandbox policy.",
                         0.0,
                     )
+            destructive = _destructive_pattern(script)
+            if destructive is not None:
+                return (
+                    126,
+                    f"Security error: refused - this script would {destructive}.",
+                    0.0,
+                )
+            sensitive = _sensitive_pattern(script)
+            if sensitive is not None:
+                return (
+                    126,
+                    f"Security error: refused - this script points at {sensitive!r}, "
+                    "which holds credentials or private keys.",
+                    0.0,
+                )
+            # assistd `policy/review.rs:10-112`'s RISKY_BUILTINS, applied to the
+            # one shape a builtin can arrive in: `sh -c '...'`. A builtin is not
+            # a binary on disk, so the name blocklists above cannot see it, and an
+            # eval/source inside a script is the same ask in a trench coat. Only
+            # word positions where a command starts are considered, so the word
+            # `set` inside `echo set` is prose, not a builtin call.
+            for i, word in enumerate(script.split()):
+                starts_command = i == 0 or script.split()[i - 1] in (";", "&&", "||", "|")
+                if starts_command and _risky_builtin_name(word) is not None:
+                    return (
+                        126,
+                        f"Security error: the shell builtin '{os.path.basename(word)}' "
+                        "is not a program this sandbox will run inside a script.",
+                        0.0,
+                    )
+
+        # 5.7 The same question, for a direct argv. A bare `eval` as argv[0] is
+        # not a binary that exists, but refusing it with a reason beats failing
+        # with ENOENT and leaves no ambiguity about intent.
+        risky = _risky_builtin(argv)
+        if risky is not None:
+            return (
+                126,
+                f"Security error: the shell builtin '{risky}' is not a program this "
+                "sandbox will run. Ask for what it was trying to do by name.",
+                0.0,
+            )
 
         # A level that promises isolation must never degrade to plain host
         # execution. Landlock counts: it is unprivileged and needs no user

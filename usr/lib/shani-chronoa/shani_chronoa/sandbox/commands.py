@@ -13,6 +13,46 @@ _ENV_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: Programs whose meaning depends on a script string this module cannot resolve.
 _SHELL_PROGRAMS = ("sh", "bash", "dash", "zsh", "ksh")
 
+#: Shell builtins that are safe and always allowed, regardless of blocklist.
+#: Only add builtins that do nothing unsafe by themselves; destructiveness is
+#: policed by the _destructive_pattern() check.
+_SAFE_BUILTINS = frozenset({
+    ":",       # true, no-op
+    "true",    # no-op
+    "false",   # no-op
+    "echo",    # prints args to stdout, useful for logs; argument safety checked by destructive_pattern
+})
+
+
+#: Shell builtins that can mutate the shell itself rather than the system:
+#: a call that reaches for one of these is asking the same question the blocklist
+#: asks, so it gets the blocklist's answer even though the name is a builtin.
+#: assistd keeps the same table (`policy/review.rs:10-112`): denylist the
+#: builtins that rewire the shell, because a name-only binary check cannot see
+#: them.
+_RISKY_BUILTINS = frozenset({
+    "bind", "compgen", "complete", "enable", "fc", "mapfile", "readarray",
+    "source", ".", "alias", "unalias", "set", "trap", "eval", "exec",
+})
+
+
+def _risky_builtin(argv: "list[str]") -> "str | None":
+    """The risky builtin this argv invokes, if it does.
+
+    Only meaningful when `_program` resolved the argv to a shell builtin name;
+    executors ask it instead of re-deriving the set.
+    """
+    if not argv:
+        return None
+    name = os.path.basename(argv[0])
+    return name if name in _RISKY_BUILTINS else None
+
+
+def _risky_builtin_name(word: str) -> "str | None":
+    """The risky builtin a bare word in a shell script names, if any."""
+    name = os.path.basename(word)
+    return name if name in _RISKY_BUILTINS else None
+
 #: `env` options that take no value. From `env --help` on this machine (GNU
 #: coreutils 9.4), including `-` - which env documents as "a mere - implies -i",
 #: i.e. an option and emphatically not a terminator.
@@ -229,6 +269,88 @@ def _name_matches(name: str, blocked_names) -> bool:
     return any(base == blocked or base.startswith(blocked + ".") for blocked in blocked_names)
 
 
+def _safe_builtin(name: str) -> bool:
+    """Whether `name` is a shell builtin safe to allow outright.
+
+    A shell builtin is not a path on disk, so a blocklist of binary names
+    cannot reach it: `type -a dd` lists `dd` before the builtin, but `type -a
+    echo` lists the builtin only. Before this check a call whose argv[0] was
+    `echo` was named by `_program()` and compared against the blocklist, which
+    holds real binaries - so it was never refused, which is correct. The
+    question this exists to answer is the reverse one, about a name that is
+    *both* a builtin and a binary: `false` is a builtin in every shell and
+    `/usr/bin/false` is a real file, so a blocklist that wants to stop
+    `false` cannot tell the two apart by name alone, and a name-only check
+    would refuse a builtin or allow a binary depending on which it found
+    first. This says which one is actually going to run.
+    """
+    return os.path.basename(name) in _SAFE_BUILTINS
+
+
+#: Destructive *argument shapes* on otherwise-allowed binaries.
+#:
+#: The name blocklists (`_blocked_binary`, `DANGEROUS_BINARIES`)
+#: police *which program* runs; nothing polices *what it is told
+#: to do*. So `rm` (allowed) with `-rf /` or `git` (allowed)
+#: with `reset --hard` reached the real system - the exact
+#: class qwen-code's `destructive-commands.ts:24-46` closes
+#: with a deterministic pre-filter that runs *before* any
+#: classifier, because a classifier failure cannot bypass a
+#: regex. These are high-confidence, whole-argv patterns only:
+#: anything narrower would start refusing legitimate commands
+#: (`rm -rf build/` is fine; `rm -rf /` is not), and a
+#: pattern that needs to understand shell semantics belongs in
+#: the shell-script path, which is checked too.
+_DESTRUCTIVE_PATTERNS: "tuple[tuple[re.Pattern, str], ...]" = (
+    # `rm -r[f]` on a filesystem root or the home directory,
+    # including the `--no-preserve-root` escape hatch.
+    (re.compile(r"(^|\s)rm\s+[^\n]*(-[a-z]*r[a-z]*f|-f[a-z]*r|--recursive"
+                r"|--no-preserve-root)[^\n]*(\s/(\s|$)|~|/home\b)"),
+     "recursive force-delete of a filesystem root"),
+    (re.compile(r"(^|\s)rm\b[^\n]*\s/\s*$"), "delete of `/`"),
+    # `dd` straight onto a raw block device.
+    (re.compile(r"(^|\s)dd\s+[^\n]*\bof=/dev/"), "dd write to a raw device"),
+    # History-destroying git.
+    (re.compile(r"(^|\s)git\s+reset\s+--hard\b"), "git reset --hard"),
+    (re.compile(r"(^|\s)git\s+clean\s+-[a-z]*f"), "git clean -f"),
+    # World-writable-everything.
+    (re.compile(r"(^|\s)chmod\s+-R\s+[0-7]*777\s+(/|~|/home\b)"),
+     "recursive chmod 777 on a root directory"),
+    # Fork bomb.
+    (re.compile(r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}"), "fork bomb"),
+    # Raw device redirection.
+    (re.compile(r">\s*/dev/(sd|hd|nvme|vd|loop)"),
+     "redirection onto a raw block device"),
+)
+
+
+def _destructive_pattern(text: str) -> "str | None":
+    """The destructive argument shape in `text`, if it has one.
+
+    `text` is an argv joined with spaces (or a shell script's
+    source). Returns a human-readable description of the pattern
+    matched, for the refusal message, or None.
+    """
+    for pattern, description in _DESTRUCTIVE_PATTERNS:
+        if pattern.search(text):
+            return description
+    return None
+
+
+def _sensitive_pattern(text: str) -> "str | None":
+    """The credential/key material this command line would touch, if any.
+
+    Same shape as `_destructive_pattern`, sourced from
+    `files.touches_sensitive_path` so the file skills and the shell path
+    agree on one list. Returns the matched fragment for the refusal
+    message, or None.
+    """
+    from .. import files as _files
+
+    found = _files.touches_sensitive_path(text)
+    return found or None
+
+
 def _blocked_binary(argv: "list[str]", blocked_names) -> "str | None":
     r"""The blocklisted program this argv would run, if any.
 
@@ -251,6 +373,8 @@ def _blocked_binary(argv: "list[str]", blocked_names) -> "str | None":
     sentence claimed there was no such spelling at all, which was false.
     """
     program = _program(argv)
+    if program and _safe_builtin(program):
+        return None
     if program and _name_matches(program, blocked_names):
         return os.path.basename(program)
     return None

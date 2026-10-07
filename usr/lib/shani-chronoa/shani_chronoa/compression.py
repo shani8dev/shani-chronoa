@@ -78,6 +78,7 @@ import hashlib
 import os
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 import logging
 
@@ -156,6 +157,27 @@ MAX_LINE_CHARS = 16 * 1024
 #: agno-style choice-of-two-fields is not available and this is the nearest
 #: equivalent that makes a compressed result self-describing.
 COMPRESSION_FIELD = "chronoa_compression"
+
+#: Whether the model has a delegation tool (a subagent it can hand a task to).
+#: Kilo's `truncate.ts` changes its hint when one exists - "delegate to save
+#: context" beats "call the tool again", because a subagent spends *its*
+#: context, not this conversation's. Chronoa has no subagent tool today, so
+#: the default is False and the note is byte-identical to what it was; the
+#: parameter is what keeps the default honest rather than a silent behaviour
+#: change.
+HAS_DELEGATION_TOOL = False
+
+#: Prune constants (kilo's compaction.ts prune) — a backward pass that clears
+#: old tool results in place, replacing their content with a marker, until the
+#: prunable budget is met. This is distinct from elision (which keeps head+foot);
+#: prune removes the content entirely from the wire, while the transcript keeps
+#: the original.
+PRUNE_PROTECT_CHARS = 40000   # never prune within this many chars of the end
+PRUNE_MINIMUM_CHARS = 20000   # stop pruning when remaining drops to this
+PRUNE_MARKER = "[Old tool result content cleared]"
+# Skills are protected from pruning - their output may contain state the model
+# needs to continue. See kilo's `protectedTools: ["skill"]`.
+PROTECTED_TOOL_ROLES = frozenset(["skill"])
 
 #: Subdirectory of the app's state directory that receives spilled tool output.
 SPILL_SUBDIR = "tool-output"
@@ -328,7 +350,8 @@ def _describe(kind: str, original: str, *, spill: "str | None" = None,
     return {COMPRESSION_FIELD: record}
 
 
-def _elide(content: str, deep: bool = False, spill: "str | None" = None) -> str:
+def _elide(content: str, deep: bool = False, spill: "str | None" = None,
+           has_delegation_tool: bool = False) -> str:
     """A deterministic, honest stand-in for a long tool result.
 
     Says what was removed and how much, because a model reasoning from this
@@ -346,6 +369,12 @@ def _elide(content: str, deep: bool = False, spill: "str | None" = None) -> str:
     `spill` is the path goose prints. Without it the advice is "call the tool
     again", which cannot work for a deterministic result.
 
+    `has_delegation_tool` changes the advice the way kilo's `hasTaskTool`
+    does: when the model can hand the re-read to a subagent, the note says
+    so, because a subagent spends its own context and not this conversation's.
+    With it False (Chronoa today) the advice is the original sentence, so the
+    default output is byte-identical.
+
     `deep=True` keeps the note and nothing else. Head and foot are the parts a
     model reads first and last, so they are the last thing to go - but the
     aggregate floor cannot always be met with them intact, and a floor that
@@ -355,8 +384,8 @@ def _elide(content: str, deep: bool = False, spill: "str | None" = None) -> str:
         total = _original_size(content)
         return (
             f"[{total} characters of this result elided in full; it is kept in "
-            f"the conversation transcript{_spill_clause(spill)}. Call the tool "
-            f"again, with a narrower request, if you need it.]"
+            f"the conversation transcript{_spill_clause(spill)}. "
+            f"{_readvice(spill, has_delegation_tool)}]"
         )
     total = len(content)
     dropped = total - HEAD_CHARS - FOOT_CHARS
@@ -370,11 +399,30 @@ def _elide(content: str, deep: bool = False, spill: "str | None" = None) -> str:
     return (
         f"[{dropped} of {total} characters elided from the middle of this "
         f"{lines}-line result; {omitted} line{plural} not shown in full"
-        f"{_spill_clause(spill)}. If you need the elided part, read that file "
-        f"or call the tool again with a narrower request.]\n"
+        f"{_spill_clause(spill)}. {_readvice(spill, has_delegation_tool)}]\n"
         f"{head}\n"
         f"[... {dropped} characters elided ...]\n"
         f"{foot}"
+    )
+
+
+def _readvice(spill: "str | None", has_delegation_tool: bool) -> str:
+    """The sentence telling the model how to get the elided part back.
+
+    Adapts to what the model can actually do, which is the whole of kilo's
+    `hasTaskTool` change: the advice is only useful if it names a tool the
+    model has. A delegation tool means the re-read costs the subagent's
+    context, not this conversation's, so it is the better advice; without one
+    the original two options stand.
+    """
+    if has_delegation_tool:
+        return (
+            "If you need the elided part, delegate this to a subagent to save "
+            "context, or read the spilled file."
+        )
+    return (
+        "If you need the elided part, read that file or call the tool again "
+        "with a narrower request."
     )
 
 
@@ -384,7 +432,7 @@ def _spill_clause(spill: "str | None") -> str:
 
 
 def _reduce(message: dict, content: str, *, deep: bool = False,
-            summarizer=None) -> dict:
+            summarizer=None, has_delegation_tool: bool = False) -> dict:
     """The one place a tool result is reduced. Summary if asked, else elision.
 
     Every reduction carries `COMPRESSION_FIELD`, and every reduction spills the
@@ -399,7 +447,8 @@ def _reduce(message: dict, content: str, *, deep: bool = False,
             return {**message, "content": summary,
                     **_describe("summary", content, spill=spill, summary=summary)}
     spill = _spill(content)
-    elided = _elide(content, deep=deep, spill=spill)
+    elided = _elide(content, deep=deep, spill=spill,
+                    has_delegation_tool=has_delegation_tool)
     omitted = _omitted_line_count(content, *(_cap_lines(content[:HEAD_CHARS]),
                                             _cap_lines(content[-FOOT_CHARS:])))
     return {**message, "content": elided,
@@ -712,7 +761,54 @@ def _summarize_all(messages: list[dict], summarizer) -> list[dict]:
     return out
 
 
-def compress(messages: list[dict], summarizer=None) -> list[dict]:
+#: What the last `compress()` call changed, for the UI to be able to say so.
+class Elision(NamedTuple):
+    """How many messages were shortened, and by how much. `dropped` counts whole
+    turns left out of the request by `local_llm.fit_to_context`, which is a
+    different and larger loss - the model did not shorten them, it never saw
+    them."""
+
+    messages: int = 0
+    chars: int = 0
+    dropped: int = 0
+
+    @property
+    def anything(self) -> bool:
+        return bool(self.messages or self.dropped)
+
+    def sentence(self) -> str:
+        """One honest line, or empty when nothing was cut."""
+        bits = []
+        if self.messages:
+            bits.append(f"{self.messages} older tool result(s) shortened by "
+                        f"about {self.chars:,} characters")
+        if self.dropped:
+            bits.append(f"{self.dropped} earlier message(s) left out of this "
+                        f"request entirely")
+        if not bits:
+            return ""
+        return "; ".join(bits) + " to fit the context window"
+
+
+#: Reset at the top of every `compress()` call, so a request that compressed
+#: nothing reports nothing rather than repeating the previous turn's news.
+_LAST_ELISION = Elision()
+
+
+def _record_elision(messages: int = 0, chars: int = 0, dropped: int = 0) -> None:
+    global _LAST_ELISION
+    _LAST_ELISION = Elision(messages=messages, chars=chars, dropped=dropped)
+
+
+def last_elision() -> Elision:
+    """What the most recent `compress()` call shortened. `NamedTuple`, so an
+    empty answer is `Elision()` rather than `None` - a caller that forgets to
+    check for `None` gets zeros, which is the safe reading."""
+    return _LAST_ELISION
+
+
+def compress(messages: list[dict], summarizer=None,
+             has_delegation_tool: bool = HAS_DELEGATION_TOOL) -> list[dict]:
     """Return `messages` with old, oversized tool results elided.
 
     Never mutates the input. Returns the input unchanged - the same list object
@@ -724,13 +820,22 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
     reduce to head-and-foot is summarised instead, using
     `SUMMARIZE_PROMPT`. `assistant.py:185` calls this with no summarizer, so the
     default path is byte-identical to the deterministic one.
+
+    **What it cut is recorded, for a person to see.** `last_elision()` reports
+    the messages shortened, the characters saved and the whole turns dropped.
+    Compressing silently is how an assistant looks like it has forgotten
+    something: the loss is real, it is deliberate, and until now the only trace
+    of it was a `logger.info` line nobody reads.
     """
+    _record_elision()          # a request that compresses nothing says nothing
     if not messages:
         return []
 
     cutoff = max(0, len(messages) - KEEP_RECENT_MESSAGES)
     out: list[dict] = []
     changed = False
+    saved = 0
+    shortened = 0
 
     for index, message in enumerate(messages):
         content = message.get("content")
@@ -755,8 +860,11 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
                 and isinstance(content, str)
                 and len(content) > COMPRESS_THRESHOLD_CHARS):
             if index < cutoff:
-                out.append(_reduce(message, content, summarizer=summarizer))
+                out.append(_reduce(message, content, summarizer=summarizer,
+                                 has_delegation_tool=has_delegation_tool))
                 changed = True
+                shortened += 1
+                saved += len(content) - len(out[-1].get("content") or "")
                 continue
             # Inside the protected window, and still elided when it is orders of
             # magnitude over budget. A model cannot reason from a 200,000-character
@@ -773,13 +881,17 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
             # this stays an escape hatch for the pathological case and does not
             # quietly narrow the pinned window decision above.
             if len(content) > HARD_CAP_CHARS:
-                out.append(_reduce(message, content, summarizer=summarizer))
+                out.append(_reduce(message, content, summarizer=summarizer,
+                                 has_delegation_tool=has_delegation_tool))
                 changed = True
+                shortened += 1
+                saved += len(content) - len(out[-1].get("content") or "")
                 continue
         out.append(message)
 
     if changed:
         logger.info("Elided oversized tool output from %d earlier message(s)", cutoff)
+        _record_elision(shortened, saved)
         return out
 
     # The aggregate floor. Nothing was individually oversized, so the loop above
@@ -806,7 +918,8 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
         content = message.get("content")
         if not isinstance(content, str) or not content:
             continue
-        out[index] = _reduce(message, content)
+        out[index] = _reduce(message, content,
+                                        has_delegation_tool=has_delegation_tool)
         elided = out[index]["content"]
         # Credit what was actually *removed*, not the original size. Subtracting
         # the original stopped the loop as soon as the running total of original
@@ -839,7 +952,8 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
             # equivalence would stop holding.
             if not isinstance(content, str) or not content or _is_deeply_elided(content):
                 continue
-            out[index] = _reduce(message, content, deep=True)
+            out[index] = _reduce(message, content, deep=True,
+                                            has_delegation_tool=has_delegation_tool)
             deepened += 1
         reduced += deepened
 
@@ -857,6 +971,73 @@ def compress(messages: list[dict], summarizer=None) -> list[dict]:
         "%d result(s), leaving %d", budget, TOTAL_TOOL_BUDGET_CHARS, reduced,
         remaining,
     )
+    _record_elision(reduced, saved)
+    return out
+
+
+def prune(messages: list[dict], *,
+          protect_chars: int = PRUNE_PROTECT_CHARS,
+          minimum_chars: int = PRUNE_MINIMUM_CHARS) -> list[dict]:
+    """Kilo's compaction prune: backward pass clearing old tool results in place.
+
+    Walks backwards from the oldest prunable message toward the protected
+    window, replacing each tool result's content with `PRUNE_MARKER` until
+    the remaining prunable characters are <= `minimum_chars`. The full text
+    remains in `_history` and the transcript - this only frees the wire.
+
+    `protect_chars` is the tool-result character budget from the end that is
+    never touched (equivalent to kilo's `PRUNE_PROTECT`). A tool result
+    within this many characters of the end is immune. `minimum_chars` is the
+    floor - pruning stops when the prunable portion reaches this (equivalent
+    to kilo's `PRUNE_MINIMUM`).
+
+    Skills (role == "skill") are protected from pruning because their output
+    may contain state the model needs to continue.
+    """
+    if not messages:
+        return []
+
+    # Find the prunable window: tool results before the last `protect_chars`
+    # characters of tool results.
+    total_tool_chars = 0
+    cutoff_index = 0
+    for index in range(len(messages) - 1, -1, -1):
+        if (messages[index].get("role") == "tool"
+                and isinstance(messages[index].get("content"), str)):
+            total_tool_chars += len(messages[index]["content"])
+        if total_tool_chars >= protect_chars:
+            cutoff_index = index
+            break
+
+    # Prunable messages are tool results before cutoff_index
+    prunable_indices = [i for i in range(cutoff_index)
+                        if messages[i].get("role") == "tool"
+                        and isinstance(messages[i].get("content"), str)
+                        and messages[i].get("content")
+                        and messages[i].get("role") not in PROTECTED_TOOL_ROLES]
+
+    if not prunable_indices:
+        return list(messages)
+
+    out = list(messages)
+    pruned = 0
+    remaining = sum(len(out[i].get("content", "")) for i in prunable_indices)
+
+    # Walk backwards (oldest first) through prunable tool results
+    for index in prunable_indices:
+        if remaining <= minimum_chars:
+            break
+        message = out[index]
+        content = message.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        out[index] = {**message, "content": PRUNE_MARKER}
+        remaining -= len(content) - len(PRUNE_MARKER)
+        pruned += 1
+
+    if pruned:
+        logger.info("Pruned %d old tool result(s); prunable chars %d -> %d",
+                    pruned, total_tool_chars, remaining)
     return out
 
 

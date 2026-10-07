@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-from shani_chronoa import files
+from shani_chronoa import ctxfit, files
 from shani_chronoa.stt_provision import ModelSpec, _install
 
 logger = logging.getLogger(__name__)
@@ -819,11 +819,40 @@ def gpu_devices() -> "list[str]":
     return out
 
 
+def _context_arg() -> str:
+    """The `-c` size for llama-server, chosen for this machine's actual build.
+
+    A GPU takes the fit computed by `ctxfit` (weights on disk, the model's own
+    KV cost per token from its GGUF header, total GPU memory); anything that
+    cannot be measured (no model installed, unparseable header, unknown VRAM)
+    keeps the historical 8192 rather than guessing. A CPU-only machine keeps
+    8192: llama.cpp's KV pages are allocated on load, and 8k of weights+cache
+    already fits where a smaller CPU tier picked this package.
+    """
+    try:
+        info = ctxfit.gguf_model_info(current_link())
+        weights = os.path.getsize(current_link()) if current_link().exists() else 0
+        total = ctxfit.total_vram_bytes()
+        if info and weights and total:
+            per_token = ctxfit.kv_bytes_per_token(info) or None
+            chosen = ctxfit.context_that_fits(
+                weights, total_bytes=total, per_token=per_token)
+            logger.info(
+                "llama-server context: %d (weights %0.1f GiB, vram %0.1f GiB, kv/token %s)",
+                chosen, weights / 1024**3, total / 1024**3,
+                per_token if per_token is not None else "unknown",
+            )
+            return str(chosen)
+    except OSError:
+        pass
+    return "8192"
+
+
 def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     """The llama-server command line for this machine: GPU offload only when a GPU is listed."""
     devices = gpu_devices() if devices is None else devices
     args = ["-m", str(current_link()), "--host", HOST, "--port", str(PORT), "--jinja",
-            "-c", "8192", "--no-webui"]
+            "-c", _context_arg() if devices else "8192", "--no-webui"]
     args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(max(1, (os.cpu_count() or 2) - 1))]
     return args
 

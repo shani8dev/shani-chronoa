@@ -522,23 +522,17 @@ class TestInlinePathUnchanged:
 
     @pytest.mark.parametrize("name,args,expected_program", [
         ("get_datetime", {},
-         "from shani_chronoa.skills.clock import _run; import sys; "
-         "result = _run({}); sys.stdout.write(str(result))"),
+         'from shani_chronoa.skills.clock import _run\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run({})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))'),
         ("get_battery_status", {},
-         "from shani_chronoa.skills.battery import _run; import sys; "
-         "result = _run({}); sys.stdout.write(str(result))"),
+         'from shani_chronoa.skills.battery import _run\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run({})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))'),
         ("get_volume", {},
-         "from shani_chronoa.skills.volume import _run_get_volume; import sys; "
-         "result = _run_get_volume({}); sys.stdout.write(str(result))"),
+         'from shani_chronoa.skills.volume import _run_get_volume\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run_get_volume({})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))'),
         ("set_volume", {'percent': 42},
-         "from shani_chronoa.skills.volume import _run_set_volume; import sys; "
-         "result = _run_set_volume({'percent': 42}); sys.stdout.write(str(result))"),
+         "from shani_chronoa.skills.volume import _run_set_volume\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run_set_volume({'percent': 42})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))"),
         ("set_mute", {'mute': True},
-         "from shani_chronoa.skills.volume import _run_set_mute; import sys; "
-         "result = _run_set_mute({'mute': True}); sys.stdout.write(str(result))"),
+         "from shani_chronoa.skills.volume import _run_set_mute\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run_set_mute({'mute': True})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))"),
         ("set_timer", {'seconds': 90, 'label': 'pasta'},
-         "from shani_chronoa.skills.timer import _run; import sys; "
-         "result = _run({'seconds': 90, 'label': 'pasta'}); sys.stdout.write(str(result))"),
+         "from shani_chronoa.skills.timer import _run\nimport sys\nfrom shani_chronoa.toolfailure import ToolFailure\ntry:\n    result = _run({'seconds': 90, 'label': 'pasta'})\nexcept ToolFailure as _tf:\n    sys.stdout.write(ToolFailure.MARKER + str(_tf)); sys.exit(0)\nsys.stdout.write(str(result))"),
     ])
     def test_the_argv_is_unchanged(self, monkeypatch, name, args, expected_program):
         import shani_chronoa.tools as tools_mod

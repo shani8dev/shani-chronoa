@@ -108,6 +108,7 @@ the live API. Re-verify with a real key before fully trusting it.
 import asyncio
 import json
 import logging
+import random
 from typing import NamedTuple, Optional
 from urllib.parse import urlsplit
 
@@ -223,13 +224,74 @@ _ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 _ANTHROPIC_MAX_TOKENS = 1024
 _ANTHROPIC_API_VERSION = "2023-06-01"
 
+#: Error classes for `CloudLLMError.error_class`.
+ERROR_RATE_LIMIT = "rate_limit"
+ERROR_CONTEXT_OVERFLOW = "context_overflow"
+ERROR_OTHER = "other"
+
+#: Substrings that mark a 400-class body as "this history does not
+#: fit" rather than a bad request. Matched case-insensitively against
+#: the provider's error text; kept narrow on purpose so an ordinary
+#: 400 (a malformed tool schema, a bad parameter) is not mistaken
+#: for an overflow.
+_OVERFLOW_MARKERS = (
+    "context length", "context_length", "maximum context",
+    "context window", "context_window", "too long",
+    "input is too long", "prompt is too long",
+    "maximum context length", "token limit",
+)
+
+#: Backoff settings for transient transport failures, after
+#: openai-agents-python's `ModelRetryBackoffSettings`
+#: (`src/agents/retry.py:16`): `initial * multiplier**(attempt-1)`,
+#: capped at `max`, then ±`jitter` fraction of the result. A
+#: llama-server that is restarting or a gateway that timed out fails
+#: the same way a dead one does, so "wait a beat" has to exist
+#: before "give up" - and the wait must be jittered so a burst of
+#: turns does not re-hit the provider in lockstep.
+_RETRY_INITIAL_DELAY = 1.0
+_RETRY_MAX_DELAY = 15.0
+_RETRY_MULTIPLIER = 2.0
+_RETRY_JITTER = 0.125
+_RETRY_MAX_ATTEMPTS = 2  # one original try plus two backoff retries
+
 
 class CloudLLMError(Exception):
     """Raised when a single provider's request fails or returns an error body."""
 
-    def __init__(self, message: str, retry_after: Optional[float] = None) -> None:
+    def __init__(self, message: str, retry_after: Optional[float] = None,
+                 error_class: str = ERROR_OTHER) -> None:
         super().__init__(message)
         self.retry_after = retry_after
+        #: Which class of failure this is (`ERROR_RATE_LIMIT`,
+        #: `ERROR_CONTEXT_OVERFLOW` or `ERROR_OTHER`). The chain routes
+        #: on it: a rate limit is worth waiting for, a context
+        #: overflow is not worth retrying at all (every provider
+        #: overflows the same history), and everything else falls
+        #: straight through to the next provider.
+        self.error_class = error_class
+
+
+def _classify_error(status: "int | None", detail_text: str) -> str:
+    """The `error_class` of a failed request, from its status and body."""
+    if status == 429:
+        return ERROR_RATE_LIMIT
+    lowered = detail_text.lower()
+    if any(marker in lowered for marker in _OVERFLOW_MARKERS):
+        return ERROR_CONTEXT_OVERFLOW
+    return ERROR_OTHER
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with jitter for transport retries.
+
+    `attempt` is 1 for the first retry. The base is capped before
+    jitter is applied so a capped wait never becomes an uncapped one
+    by jittering upward past the cap.
+    """
+    base = min(_RETRY_INITIAL_DELAY * (_RETRY_MULTIPLIER ** (attempt - 1)),
+               _RETRY_MAX_DELAY)
+    return base * (1.0 + _RETRY_JITTER * (2.0 * random.random() - 1.0))
 
 
 def _valid_tools(tools: Optional[list]) -> list:
@@ -321,10 +383,26 @@ class OpenAICompatibleLLM:
 
         status = None
         try:
-            response = await client.post("/chat/completions", json=payload)
-            status = response.status_code
-        except httpx.RequestError as e:
-            raise CloudLLMError(f"{self.provider.name}: request failed: {type(e).__name__}: {e}") from e
+            for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+                try:
+                    response = await client.post("/chat/completions", json=payload)
+                    status = response.status_code
+                    break
+                except httpx.RequestError as e:
+                    # Transport-level failure: the provider never
+                    # answered. Retried with backoff - a llama-server
+                    # mid-restart or a gateway timeout is transient in a
+                    # way a 4xx is not (an HTTP error status is a real
+                    # answer and is not retried here).
+                    if attempt == _RETRY_MAX_ATTEMPTS:
+                        raise CloudLLMError(
+                            f"{self.provider.name}: request failed: "
+                            f"{type(e).__name__}: {e}") from e
+                    delay = _backoff_delay(attempt)
+                    logger.warning(
+                        "%s request failed (%s); retrying in %.2fs",
+                        self.provider.name, type(e).__name__, delay)
+                    await asyncio.sleep(delay)
         finally:
             # Metadata only - never the payload. This is one of only two paths
             # that deliberately send a conversation off the machine, so it is
@@ -359,7 +437,10 @@ class OpenAICompatibleLLM:
             # falling through to the next provider, since the whole point
             # of the chain is to prefer "wait a beat" over "give up".
             retry_after = detail.get("retry_after") if isinstance(detail, dict) else None
-            raise CloudLLMError(f"{self.provider.name}: {detail}", retry_after=retry_after)
+            raise CloudLLMError(f"{self.provider.name}: {detail}",
+                                retry_after=retry_after,
+                                error_class=_classify_error(response.status_code,
+                                                            str(detail)))
 
         choices = data.get("choices") or []
         if not choices:
@@ -679,6 +760,12 @@ class CloudLLMChain:
         #: every cloud-fallback turn reports zero tokens - indistinguishable from
         #: a provider that sent no `usage` block at all.
         self.last_usage: "usage_mod.Usage | None" = None
+        #: Which provider answered the last call, by display name, or "" when the
+        #: local model answered. The UI says "this turn went to <provider>" when
+        #: it is set: a cloud fallback is the one thing in this app that can send
+        #: what a person said off the machine, and it has to be visible rather
+        #: than inferable from a settings key.
+        self.last_provider: str = ""
 
     _MAX_RETRY_WAIT = 10.0  # cap how long we'll wait on a provider's own retry_after hint
 
@@ -688,6 +775,7 @@ class CloudLLMChain:
             for msg in messages
         ]
         last_error: Optional[Exception] = None
+        self.last_provider = ""
         for backend in self._backends:
             for attempt in range(2):  # one retry after a provider's own retry_after hint, then move on
                 try:
@@ -696,10 +784,25 @@ class CloudLLMChain:
                     # no usage block must clear the previous call's numbers rather
                     # than let the assistant count them twice.
                     self.last_usage = getattr(backend, "last_usage", None)
+                    self.last_provider = backend.provider.name
                     logger.info(f"Cloud LLM fallback answered via {backend.provider.name} ({backend.model})")
                     return message
                 except CloudLLMError as e:
                     last_error = e
+                    # A context overflow is not worth the
+                    # provider's own retry hint or the next
+                    # provider: every backend here sees the same
+                    # history, so waiting burns the rate budget
+                    # and switching providers overflows again.
+                    # The assistant's `fit_to_context` is the
+                    # real fix and has already run; surfacing
+                    # the class lets a caller tell the
+                    # difference between "full" and "broken".
+                    if e.error_class == ERROR_CONTEXT_OVERFLOW:
+                        logger.warning(
+                            "Cloud LLM context overflow at %s, not retrying: %s",
+                            backend.provider.name, e)
+                        break
                     if attempt == 0 and e.retry_after:
                         wait = min(float(e.retry_after), self._MAX_RETRY_WAIT)
                         logger.warning(f"{backend.provider.name} rate-limited, retrying in {wait:.0f}s: {e}")

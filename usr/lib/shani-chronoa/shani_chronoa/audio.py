@@ -642,8 +642,12 @@ class AudioPlayer:
             return ["pw-play", "--target", self._target, path]
         return [self._backend, path]
 
-    def play_file(self, path: str) -> bool:  # noqa: D401
+    def play_file(self, path: str, on_level: Optional[Callable[[float], None]] = None) -> bool:  # noqa: D401
         """Play a WAV file, blocking until playback finishes or is stopped.
+
+        `on_level`, when given, receives the playback level (0.0-1.0) as the
+        reply is heard - sayri's orb-follows-playback (`tts.py:113`) - and a
+        final 0.0 when playback ends.
 
         Returns False when this playback did not get to finish on its own -
         interrupted by `stop()`, or superseded by a newer `play_bytes`. The
@@ -697,6 +701,15 @@ class AudioPlayer:
             _put_organ(superseded_organ)
             self._terminate(superseded)
 
+        level_thread = None
+        if on_level is not None:
+            level_thread = threading.Thread(
+                target=AudioPlayer._stream_levels,
+                args=(self, path, on_level, proc, generation),
+                daemon=True,
+            )
+            level_thread.start()
+
         finished_on_its_own = False
         try:
             proc.wait(timeout=120)
@@ -728,7 +741,40 @@ class AudioPlayer:
             # they never heard. Left tracked, so the status survives the caller moving on.
             if getattr(proc, _SIGNALLED, False) or (proc.returncode or 0) <= 0:
                 _SUPERVISOR.forget_child(_PLAYBACK_CHILD)
+            if level_thread is not None:
+                # The file loop ends on its own once `proc` exits; give it a
+                # bounded moment so the final 0.0 lands before the caller moves on.
+                level_thread.join(timeout=1.0)
         return finished_on_its_own
+
+    @staticmethod
+    def _stream_levels(player: "AudioPlayer", path: str, on_level, proc, generation: int) -> None:
+        """Feed `on_level` a playback level as `proc` plays `path` (sayri's `tts.py:113`).
+
+        Reads the WAV being played rather than tapping the speaker stream -
+        there is no portable way to tap it, and these are the same bytes about
+        one frame late. A level belonging to a superseded playback is dropped
+        by the generation check, the same rule the capture side applies.
+        Always ends with a 0.0 so the halo settles even when the WAV was
+        undecodable.
+        """
+        try:
+            with wave.open(path, "rb") as wf:
+                framerate = wf.getframerate() or 16000
+                chunk_frames = max(1, int(framerate * 0.05))
+                while proc.poll() is None and player._generation == generation:
+                    data = wf.readframes(chunk_frames)
+                    if not data:
+                        break
+                    on_level(normalize_level(rms(data)))
+                    time.sleep(0.048)
+        except Exception:
+            logger.debug("playback level stream stopped", exc_info=True)
+        finally:
+            try:
+                on_level(0.0)
+            except Exception:
+                pass
 
     def playback_status(self) -> Optional[HeartbeatStatus]:
         """The outstanding playback's supervised state, or None if there is none.
@@ -777,7 +823,7 @@ class AudioPlayer:
             return
         self._terminate(proc)
 
-    def play_bytes(self, data: bytes) -> bool:
+    def play_bytes(self, data: bytes, on_level: Optional[Callable[[float], None]] = None) -> bool:
         """Play in-memory WAV bytes, blocking until playback finishes."""
         if not data:
             return False
@@ -785,7 +831,7 @@ class AudioPlayer:
             tmp.write(data)
             path = tmp.name
         try:
-            return self.play_file(path)
+            return self.play_file(path, on_level=on_level)
         finally:
             os.unlink(path)
 

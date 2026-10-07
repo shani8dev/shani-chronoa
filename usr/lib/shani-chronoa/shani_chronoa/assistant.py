@@ -31,9 +31,11 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
+from shani_chronoa.tool_tracking import ORIGIN_USER, ORIGIN_UNATTENDED
 from shani_chronoa.ollama_llm import OllamaLLM
 from shani_chronoa.loops import LOOP_THRESHOLD, LoopDetector
-from shani_chronoa import compression, history_repair, conversation_store, user_prompts
+from shani_chronoa import (compression, context_meter, history_repair,
+                           conversation_store, user_prompts)
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
 from shani_chronoa.tool_select import select_tools
@@ -44,15 +46,65 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, keeps the runtime import ou
 
 logger = logging.getLogger(__name__)
 
+#: The identity and skill contract, plus **the provenance boundary**.
+#:
+#: Every tool result is fenced on the way in (`provenance.fence`), and until this
+#: line the model was told nothing about what those markers meant - a fence the
+#: model cannot interpret is decoration. `provenance.describe_boundary()` is the
+#: module's own sentence for exactly this, stated as a fact about where the
+#: boundary is rather than as an order, which is how the rest of that module
+#: avoids instructions.
 SYSTEM_PROMPT = (
     "You are Chronoa, a privacy-first local voice assistant running on Shanios. "
     "When the user asks you to do something you have a tool for - opening an "
     "app, adjusting volume, setting a timer, checking the battery, searching "
     "the web - call the tool instead of just describing what to do. "
-    "Keep spoken replies short and conversational."
+    "Keep spoken replies short and conversational. "
+    + provenance.describe_boundary()
 )
 
 MAX_TOOL_ROUNDS = 4
+
+#: One config key, one appended clause on every request. The identity
+#: statement and skill contract stay in SYSTEM_PROMPT; the user's "brief"
+#: preference shortens the phrasing only - never the fact a tool call asserts.
+_REPLY_STYLE_CLAUSE = {
+    "brief": (
+        "Be brief: answer the question, then stop. No extra context unless asked."
+    ),
+    "explanatory": (
+        "Be explanatory: one sentence of mechanism pointing at the answer, "
+        "then the answer plainly."
+    ),
+}
+
+
+def reply_style_clause(config) -> str:
+    """The style clause for the current settings, or "" for the default."""
+    if config is None:
+        return ""
+    try:
+        style = getattr(config, "reply_style", "ordinary")
+    except Exception:  # noqa: BLE001 - a missing config must not blank replies
+        return ""
+    return _REPLY_STYLE_CLAUSE.get(style, "")
+
+#: Round budget per origin (autogen `max_tool_iterations` posture,
+#: `_assistant_agent.py:85`, plus semantic-kernel's named cap). A person at
+#: the keyboard gets the full budget; a turn fired by an armed trigger gets
+#: one round, because an unattended turn that keeps calling tools is a turn
+#: nobody can see well enough to stop. Defaults are a named map rather than
+#: scattering literals so the posture is visible in one place.
+TOOL_ROUNDS_BY_ORIGIN = {
+    ORIGIN_USER: MAX_TOOL_ROUNDS,
+    ORIGIN_UNATTENDED: 1,
+}
+
+
+def _rounds_for_origin(origin: str) -> int:
+    # An origin with no named budget is treated as unattended, not trusted:
+    # `profile_for_origin` fails closed the same way (`sandbox/profiles.py:405`).
+    return TOOL_ROUNDS_BY_ORIGIN.get(origin, 1)
 
 #: How many times one tool may be called **in a single round**, by name.
 #:
@@ -84,6 +136,12 @@ MAX_TOOL_ROUNDS = 4
 #: explain it, and the general one (same tool, rephrased) is caught by this.
 DEFAULT_TOOL_ATTEMPTS_PER_ROUND = LOOP_THRESHOLD
 
+#: Ceiling on consecutive malformed calls in one turn. mini-swe-agent's
+#: `max_consecutive_format_errors` (`agents/default.py:96-124`) is the same
+#: shape: a turn whose only tool output is refusal, repeated, is a circle no
+#: further answer will break.
+MAX_VALIDATION_MISSES = 3
+
 #: Per-tool overrides for `DEFAULT_TOOL_ATTEMPTS_PER_ROUND`, by tool name.
 #:
 #: Empty on purpose. A skill that is legitimately called several times in one
@@ -92,6 +150,16 @@ DEFAULT_TOOL_ATTEMPTS_PER_ROUND = LOOP_THRESHOLD
 #: whoever writes the skill, not a guess made here. The dictionary exists so
 #: adding one is a one-line change rather than an edit to the loop.
 TOOL_ATTEMPT_OVERRIDES: dict[str, int] = {}
+
+#: Two distinct failure part types for tool-call limits, fed back in-band
+#: as synthesized tool results rather than raised exceptions. This is
+#: pydantic-ai's pattern: every backend already knows how to accept a
+#: tool_result, so the turn stays valid and the model reads the refusal.
+TOOL_FAILURE_TYPES = ("limit", "error")
+
+#: Per-tool failure part type overrides. A tool that should never hit "error"
+#: (e.g. a pure read-only skill) can declare it here. The default is both.
+TOOL_FAILURE_TYPE_OVERRIDES: dict[str, tuple[str, ...]] = {}
 
 #: Wall-clock ceiling for one turn. `MAX_TOOL_ROUNDS` bounds how many times the
 #: model may act, not how long any of those may take - four rounds against a
@@ -141,8 +209,10 @@ class Assistant:
         percept_store: "Optional[PerceptStore]" = None,
         context_builder: Optional[ContextBuilder] = None,
         session_path: "Optional[Path]" = None,
+        config=None,
     ) -> None:
         self.llm = llm
+        self.config = config
         self._history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
         # Public, not underscore-private: a caller (app.py, a test, a future
         # sense producer inside the GUI) needs to be able to add a percept to
@@ -161,9 +231,11 @@ class Assistant:
         self._saved = self._history[:1]
         restored = ([m for m in conversation_store.load(session_path)
                      if m.get("role") != "system"] if session_path else [])
+        self.restored_interruption = ""
         if restored:
             self._history = self._saved + restored
             logger.info("Restored %d message(s) from the saved conversation", len(restored))
+            self._note_unfinished_turn(restored)
 
     @property
     def session_path(self) -> "Optional[Path]":
@@ -178,7 +250,32 @@ class Assistant:
         self._session_path = path
         restored = ([m for m in conversation_store.load(path) if m.get("role") != "system"] if path else [])
         self._history = self._saved + restored
+        self.restored_interruption = ""
+        self._note_unfinished_turn(restored)
         return len(restored)
+
+    def _note_unfinished_turn(self, restored: "list[dict]") -> None:
+        """Record, for the window to show, that this transcript ends mid-turn.
+
+        `history_repair.clean_history()` already guarantees the *provider* never
+        sees the dangling call - `build_messages()` repairs it on every request -
+        so without this the repair is invisible: the question is on screen, the
+        answer is not, and nothing says the machine is why.
+
+        The repair being silent is correct for the model and wrong for the
+        person. The synthesized result tells the model "this never ran", which is
+        exactly what it needs; it cannot tell the user their turn was lost, and
+        on a layout where `/var` is tmpfs and a reboot kills the app, that is the
+        normal way a turn ends, not an edge case.
+
+        Held as an attribute rather than returned, because `switch_session()`'s
+        return value is the restored count and two meanings in one int is how a
+        caller ends up reporting the wrong one.
+        """
+        notice = history_repair.unfinished_notice(restored)
+        self.restored_interruption = notice
+        if notice:
+            logger.info("Restored conversation ends mid-turn: %s", notice)
 
     def visible_turns(self) -> "list[tuple[str, str]]":
         """(role, text) for the user and assistant messages, to redraw a window after a switch."""
@@ -327,6 +424,13 @@ class Assistant:
         messages = self.context_builder.build_messages(
             self._history, self.active_percepts()) if self.percept_store is not None \
             else list(self._history)
+        clause = reply_style_clause(self.config)
+        if clause and messages and messages[0].get("role") == "system":
+            # dict(messages[0]) copies: the percept-insertion path built
+            # messages[0] as a reference to the same dict _history holds, and a
+            # style change must not rewrite the stored conversation.
+            messages[0] = dict(messages[0])
+            messages[0]["content"] = messages[0]["content"] + " " + clause
         messages = history_repair.clean_history(messages)
 
         # A turn that did not answer all of its tool calls explains itself here,
@@ -434,6 +538,47 @@ class Assistant:
             f"MAX_TURN_SECONDS in the source if this was not a stuck turn."
         )
 
+    def _note_elision(self, report, dropped: int) -> None:
+        """Tell the UI that this request was made smaller, and by how much.
+
+        cline renders a `CompactionRow` when its history is condensed
+        (`CompactionRow.tsx`) and OpenHands emits a `CondensationEvent`; we
+        compressed silently until now, which is indistinguishable from the
+        assistant having forgotten. One sentence, once, when it happens.
+        """
+        said = report.elided_messages or dropped
+        if not said:
+            return
+        self._last_elision_notice = (
+            f"Older context was shortened to fit: {said} tool result(s) "
+            f"condensed, about {report.elided_chars:,} characters removed."
+            if report.elided_messages else
+            f"Older context was left out of this request: {dropped} "
+            f"earlier message(s) did not fit the window.")
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            sink.fire("on_compaction", self._last_elision_notice)
+
+    def _note_cloud_turn(self) -> None:
+        """Say, once per turn, when a provider other than this machine answered.
+
+        The cloud fallback is the only path in this app that can put what a
+        person said onto someone else's hardware. `privacy mode` and the egress
+        audit exist for that, but neither *tells* the person their sentence left
+        - they have to know they had enabled a fallback at all. opencode shows
+        the provider in its session header for the same reason.
+        """
+        provider = str(getattr(self.llm, "last_provider", "") or "")
+        if not provider:
+            self._turn_cloud = ""
+            return
+        if provider == getattr(self, "_turn_cloud", ""):
+            return                      # one notice per turn, not per model call
+        self._turn_cloud = provider
+        sink = getattr(self, "_sink", None)
+        if sink is not None:
+            sink.fire("on_cloud_turn", provider)
+
     def _note_model_call(self, seconds: float) -> None:
         """Record a model call's duration and running totals for the turn.
 
@@ -448,6 +593,7 @@ class Assistant:
         # Token counts, if the backend reported any. `Usage.__add__` is what
         # keeps this honest: a sum of a priced and an unpriced call comes back
         # unpriced rather than quietly reporting only the part that was known.
+        self._note_cloud_turn()
         reported = getattr(self.llm, "last_usage", None)
         if reported is not None:
             self._usage = getattr(self, "_usage", None)
@@ -489,13 +635,54 @@ class Assistant:
 
     async def _ask(self, messages, tools, on_text):
         """One model call: streamed when the backend can and a caller wants the words as they come."""
+        self._measure_context(messages, tools)
         if on_text is not None and getattr(self.llm, "stream_supported", False):
             return await self.llm.chat_message_stream(messages, tools=tools, on_text=on_text)
         return await self.llm.chat_message(messages, tools=tools)
 
+    def _measure_context(self, messages, tools) -> None:
+        """Record what this request actually costs, for the UI to show.
+
+        opencode puts a context meter with a per-segment breakdown in its
+        session header; cline prints the numbers on its compaction row. We had
+        every number and showed none of them - `context_meter.measure()` now
+        takes the exact list that is about to go out, so the meter and the
+        thing that actually drops messages (`local_llm.fit_to_context`) are
+        reading the same history rather than two guesses at it.
+
+        Never raises: a meter that can break a turn is not a meter.
+        """
+        try:
+            limit = None
+            reserve = 0
+            if getattr(self.llm, "local", False):
+                from shani_chronoa import local_llm
+                limit = local_llm.context_tokens()
+                reserve = local_llm.REPLY_RESERVE
+            real = None
+            reported = getattr(self.llm, "last_usage", None)
+            if reported is not None and getattr(reported, "total", None):
+                real = int(reported.total)
+            report = context_meter.measure(
+                messages, tools, limit=limit, real_tokens=real,
+                elision=compression.last_elision(), reply_reserve=reserve)
+            self._context_report = report
+            dropped = compression.last_elision().dropped
+            if report.elided:
+                self._note_elision(report, dropped)
+        except Exception as exc:  # noqa: BLE001 - measurement is never load-bearing
+            logger.debug("context measurement failed: %s", exc)
+
+    def context_report(self):
+        """The last request's `context_meter.Report`, or None before the first."""
+        return getattr(self, "_context_report", None)
+
     async def handle(self, text: str, on_tool_call: Optional[Callable[[str, dict], None]] = None,
                      on_text: Optional[Callable[[str], None]] = None,
-                     on_tool_result: Optional[Callable[[str, dict, str, bool], None]] = None) -> str:
+                     on_tool_result: Optional[Callable[[str, dict, str, bool], None]] = None,
+                     origin: str = ORIGIN_USER,
+                     sink: "Optional[object]" = None,
+                     channel: str = "") -> str:
         """Process one user utterance, executing tool calls, return the reply text.
 
         `on_tool_call(name, arguments)`, if given, fires just before each
@@ -525,8 +712,17 @@ class Assistant:
         cancellation make an interrupted turn ordinary rather than exotic, and an
         unrepaired one is not confined to the turn it damaged.
         """
+        # The interruption notice described a turn that is now superseded, so it
+        # is cleared here rather than at the next restore: a caller that reads it
+        # between turns must not be told about a turn that has already been
+        # answered.
+        self.restored_interruption = ""
         self._record({"role": "user", "content": text})
         self._trim_history()
+        self._channel = channel
+        self._sink = sink
+        self._turn_cloud = ""
+        self._last_elision_notice = ""
 
         # The clock starts here, not at process start: a turn's budget is about
         # how long *this* turn may take, and an idle assistant is not late.
@@ -539,14 +735,13 @@ class Assistant:
         # `DEFAULT_TOOL_ATTEMPTS_PER_ROUND` for why not per turn: the tests of
         # record pin sixteen legitimate `ask_user` calls in one turn.
         attempts: dict[str, int] = {}
-        # One detector per turn. Not carried across turns: a conversation may legitimately
-        # make the same call at the start of one turn and the start of the next, and only a
-        # run *within* a turn means the turn is failing to make progress.
         loop = LoopDetector()
 
         try:
             return await self._run_turn(
-                text, on_tool_call, deadline, loop, attempts, on_text, on_tool_result)
+                text, on_tool_call, deadline, loop, attempts, on_text,
+                on_tool_result, max_rounds=_rounds_for_origin(origin),
+                sink=sink, origin=origin)
         except BaseException:
             # One guard for the whole turn, and it is here rather than at each
             # site because the sites are easy to forget: a model call that
@@ -578,6 +773,9 @@ class Assistant:
         attempts: "dict[str, int]",
         on_text: "Optional[Callable[[str], None]]" = None,
         on_tool_result: "Optional[Callable[[str, dict, str, bool], None]]" = None,
+        max_rounds: int = MAX_TOOL_ROUNDS,
+        sink: "Optional[object]" = None,
+        origin: str = ORIGIN_USER,
     ) -> str:
         """The tool loop itself. `handle()` owns the budget, the detectors and
         the repair-on-exit; this is the part that would otherwise be a 90-line
@@ -587,7 +785,12 @@ class Assistant:
         # already called this turn stay, so a follow-up round keeps them.
         in_use: set = set()
         named, self.forced_tool = self.forced_tool, ""  # this turn only
-        for _ in range(MAX_TOOL_ROUNDS):
+        # Consecutive calls the dispatcher refused as never-run (bad JSON,
+        # non-dict args, guardrail refusal). Reset by any real execution.
+        # pydantic-ai's split `AgentRetries` budget, applied here to the
+        # shape-validation edge: see MAX_VALIDATION_MISSES.
+        validation_misses = 0
+        for _ in range(max_rounds):
             over = self._over_budget(deadline)
             if over:
                 self.close_interrupted_turn("budget")
@@ -635,13 +838,19 @@ class Assistant:
                         # give: running it with {} did whatever the defaults
                         # do (sayri hands a small model its own error back
                         # instead). The model sees why, with the call's id.
+                        validation_misses += 1
                         self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
                                       f"ERROR: the arguments for {name} were not valid JSON ({exc.msg} at "
                                       f"position {exc.pos}); nothing ran. Call it again with valid JSON."})
+                        if validation_misses >= MAX_VALIDATION_MISSES:
+                            return self._malformed_stop(validation_misses)
                         continue
                 if not isinstance(arguments, dict):
+                    validation_misses += 1
                     self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
                                   f"ERROR: the arguments for {name} must be a JSON object; nothing ran."})
+                    if validation_misses >= MAX_VALIDATION_MISSES:
+                        return self._malformed_stop(validation_misses)
                     continue
                 logger.info(f"Tool call: {name}({arguments})")
                 # Counted *after* the call is dispatched below, so the number in the
@@ -654,6 +863,8 @@ class Assistant:
                         on_tool_call(name, arguments)
                     except Exception as e:
                         logger.error(f"on_tool_call callback failed: {e}")
+                if sink is not None:
+                    sink.fire("on_tool_start", name, arguments)
 
                 # One tool's budget is its own. Refused in-band with the call's
                 # own `tool_call_id` rather than by raising or by ending the
@@ -668,7 +879,12 @@ class Assistant:
                 # that is still valid.
                 budget = TOOL_ATTEMPT_OVERRIDES.get(
                     name, DEFAULT_TOOL_ATTEMPTS_PER_ROUND)
-                if attempts.get(name, 0) >= budget:
+                # Determine the failure part type for this tool
+                failure_types = TOOL_FAILURE_TYPE_OVERRIDES.get(
+                    name, TOOL_FAILURE_TYPES)
+                # Only the failure types that are in the allowed set apply
+                allowed_types = {ft for ft in failure_types if ft in TOOL_FAILURE_TYPES}
+                if attempts.get(name, 0) >= budget and "limit" in allowed_types:
                     logger.info(
                         "Refusing %s: already called %d time(s) this turn, and its "
                         "budget is %d", name, attempts[name], budget)
@@ -677,7 +893,18 @@ class Assistant:
                     continue
 
                 attempts[name] = attempts.get(name, 0) + 1
-                result = execute_tool(name, arguments)
+                result = execute_tool(name, arguments, origin=origin)
+                # A result that begins with these is a call the dispatcher
+                # refused before execution (ill-formed arguments, a schema
+                # mismatch). Three of those in a row is not a turn making
+                # progress; an honest stop beats four identical refusals.
+                head = str(result).lstrip()
+                if head.startswith(("ERROR:", "Not run. ", "Refused:", "ERROR(exit=")):
+                    validation_misses += 1
+                    if validation_misses >= MAX_VALIDATION_MISSES:
+                        return self._malformed_stop(validation_misses)
+                else:
+                    validation_misses = 0
                 if on_tool_result:
                     # `ok` is decided here rather than left to the callback to
                     # guess: a card that says "done" over a failed skill is
@@ -689,6 +916,10 @@ class Assistant:
                         on_tool_result(name, arguments, str(result), ok)
                     except Exception as e:
                         logger.error(f"on_tool_result callback failed: {e}")
+                if sink is not None:
+                    head = str(result).lstrip().lower()
+                    sink.fire("on_tool_finish", name, arguments, str(result),
+                              not head.startswith(("error", "refused")))
                 # tool_call_id correlates this result back to the specific
                 # tool_calls entry that requested it - required by the
                 # actual OpenAI spec (tolerated without it by the free
@@ -733,3 +964,16 @@ class Assistant:
         self._record(message)
         self._turn_deadline = None
         return message.get("content", "")
+
+    def _malformed_stop(self, misses: int) -> str:
+        """The turn that cannot form a well-formed call ends honestly.
+
+        mini-swe-agent refuses the same way (`agents/default.py:96-124`):
+        one malformed call is a mistake the model gets to correct; three in
+        a row is a format mismatch more rounds will not fix, and the user
+        deserves the truth rather than silence.
+        """
+        logger.info("turn stopped: %d calls refused as malformed in a row", misses)
+        self.close_interrupted_turn("validation")
+        return (f"I could not form a valid call after {misses} attempts - "
+                "the tool call is not fitting together. Nothing further ran.")

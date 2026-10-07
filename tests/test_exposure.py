@@ -160,7 +160,10 @@ def test_a_gateway_turn_goes_through_the_windows_own_submit():
     """
     from shani_chronoa.app import application
     source = Path(application.__file__).read_text(encoding="utf-8")
-    assert "self._submit(text)" in source, (
+    # The pin is `_submit(`, not the exact one-argument call: the call now
+    # carries the channel name (`self._submit(text, channel=channel)`), and a
+    # gateway that dropped the channel could not attribute what it remembered.
+    assert "self._submit(text" in source, (
         "a gateway submission must go through the same _submit the window uses")
     assert "_submit_gateway_text" in source
 

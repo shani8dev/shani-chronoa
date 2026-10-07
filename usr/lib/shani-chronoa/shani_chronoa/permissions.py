@@ -63,6 +63,7 @@ class Decision:
     DENY_ONCE = "deny_once"
     DENY_SESSION = "deny_session"
     CANCEL = "cancel"
+    FEEDBACK = "feedback"
     #: No rule matched. Defer to whatever already decides - the consent keys.
     FALL_THROUGH = "fall_through"
 
@@ -72,6 +73,88 @@ class Decision:
 _SESSION_SCOPED = frozenset({Decision.ALLOW_SESSION, Decision.DENY_SESSION})
 
 _lock = threading.Lock()
+
+
+class Mode:
+    """A named posture for the whole dispatch layer (AgentScope's modes,
+    `permission/_types.py:18-85`).
+
+    `DEFAULT` is today's behaviour. `DONT_ASK` is the unattended posture:
+    every question that would be asked is instead an automatic *no* - the
+    safe default for a turn fired by a trigger rule rather than a person.
+    `EXPLORE` is the read-only posture: a call that changes something is
+    refused on arrival, no matter what the consent keys or session grants
+    say. `planmode` already refuses the consent-keyed set; EXPLORE is the
+    permission-layer spelling of the same idea, so the two answers agree
+    instead of drifting apart.
+    """
+
+    DEFAULT = "default"
+    DONT_ASK = "dont_ask"
+    EXPLORE = "explore"
+
+
+_mode = Mode.DEFAULT
+
+
+def set_mode(mode: str) -> None:
+    """Set the dispatch posture. Anything unrecognised is refused, because a
+    typo in a safety mode must never silently mean "the permissive one"."""
+    global _mode
+    if mode not in (Mode.DEFAULT, Mode.DONT_ASK, Mode.EXPLORE):
+        raise ValueError(f"unknown permission mode: {mode!r}")
+    _mode = mode
+
+
+def get_mode() -> str:
+    return _mode
+
+
+def allows_prompting() -> bool:
+    """Whether asking a person is a thing that may happen right now."""
+    return _mode != Mode.DONT_ASK
+
+
+def allows_grants() -> bool:
+    """Whether a session grant may widen what a consent key allows.
+
+    In DONT_ASK a grant recorded before the mode was set must not keep
+    opening doors, because the whole point of the mode is that nothing
+    widens while nobody is watching.
+    """
+    return _mode != Mode.DONT_ASK
+
+
+def explore_refuses(tool_name: str) -> "Optional[str]":
+    """The refusal a mutating tool gets in EXPLORE mode, else None.
+
+    Read-only means read-only: only tools already declared read-only in
+    `capabilities.READ_ONLY_TOOLS` may run, so the allow/deny answer is one
+    maintained list rather than a second hand-kept one.
+    """
+    if _mode != Mode.EXPLORE:
+        return None
+    from shani_chronoa.capabilities import READ_ONLY_TOOLS
+    if tool_name in READ_ONLY_TOOLS:
+        return None
+    return (f"Refused: read-only (explore) mode is on, and {tool_name} is not "
+            "a read-only tool. Nothing ran. Leave explore mode to change "
+            "anything.")
+
+
+#: Tools whose grants must never be delegated to a standing session rule.
+#: For these, every call is a fresh question: a destructive skill the user
+#: allowed once is not thereby allowed for the rest of the session. See
+#: AgentScope's `PermissionDecision.bypass_immune`
+#: (`permission/_decision.py:33-60`).
+_BYPASS_IMMUNE = frozenset({
+    "delete_file", "remove_file", "trash_file", "empty_trash",
+    "kill_process", "control_service",
+})
+
+
+def is_bypass_immune(tool_name: str) -> bool:
+    return tool_name in _BYPASS_IMMUNE
 #: Standing rules, narrowest last. Empty in practice until a caller registers
 #: one; the point is that the mechanism exists and is exercised.
 _standing: List[Tuple[str, str, str]] = []
@@ -129,6 +212,11 @@ def clear(session_only: bool = False) -> None:
             _standing.clear()
             _grants.clear()
         _reasons.clear()
+        # Feedback rides with the answer it was given to, so it goes when the
+        # answer does. Left behind it would survive a session reset and be
+        # prepended to a call made hours later, which is advice about a
+        # decision the user has not made again.
+        _feedback.clear()
 
 
 def reasons() -> dict:
@@ -204,7 +292,15 @@ def session_grant(action: str, resource: str) -> Optional[str]:
 
     A one-shot grant is consumed by being returned, so "yes, this once" means
     once: the next identical call finds nothing and asks again.
+
+    A bypass-immune tool never answers from a standing grant: the grant can
+    exist (the user really did allow it once), but it must not stretch into
+    a standing permission for that tool.
     """
+    if not allows_grants():
+        # DONT_ASK: nothing widens while nobody is watching, not even a grant
+        # recorded before the mode was set.
+        return None
     with _lock:
         decision = Decision.FALL_THROUGH
         index = -1
@@ -215,6 +311,10 @@ def session_grant(action: str, resource: str) -> Optional[str]:
                 continue
             decision, index = rule_decision, i
         if decision not in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
+            return None
+        if is_bypass_immune(action) and decision == Decision.ALLOW_SESSION:
+            # Grants that outlive one call must never stretch into standing
+            # permission for a bypass-immune tool.
             return None
         if decision == Decision.ALLOW_ONCE:
             # Drop it now, not after the call returns, so a concurrent second
@@ -234,6 +334,13 @@ DENY_CHOICE = "No, don't allow"
 #: ends the turn. `cancel_requested()` tells them apart afterwards, and without
 #: this answer nothing can ever write a `Decision.CANCEL`.
 CANCEL_CHOICE = "No, and stop this turn"
+
+#: The human feedback outcome. Selecting it *also* allows the call to proceed
+#: (the tool runs as if Allow this once) but records free-form text the user
+#: typed, which is carried back to the model as a third outcome in `decide()`.
+#: It answers AutoGPT-classic's `UserFeedbackProvided` - a refusal that still
+#: carries guidance, not just a denial.
+FEEDBACK_CHOICE = "Provide feedback"
 
 #: How long to wait for the user's answer before treating it as a refusal.
 DECISION_TIMEOUT_SECONDS = 120.0
@@ -298,6 +405,8 @@ def parse_reply(answer: str) -> Reply:
         return Reply(Decision.ALLOW_SESSION, message)
     if head == CANCEL_CHOICE:
         return Reply(Decision.CANCEL, message)
+    if head == FEEDBACK_CHOICE:
+        return Reply(Decision.FEEDBACK, message)
     # DENY_CHOICE and every non-answer land here together, on purpose.
     return Reply(Decision.DENY_SESSION, message)
 
@@ -387,13 +496,40 @@ class ApprovalRequest:
     def options(self) -> List[str]:
         """The three answers, refusal last - ordering carries meaning, and a
         value matching none of them is a refusal, so nothing is granted by
-        default."""
-        return [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE]
+        default.
+
+        For a bypass-immune action the session option is not offered: it is a
+        promise the mechanism cannot keep, because the standing grant would
+        be ignored anyway.
+        """
+        base = [ALLOW_ONCE_CHOICE, DENY_CHOICE]
+        if not is_bypass_immune(self.action):
+            base.insert(1, ALLOW_SESSION_CHOICE)
+        return base
 
     def options_with_cancel(self) -> List[str]:
-        """The three plus codex's Cancel, for a presenter offering the split."""
-        return [ALLOW_ONCE_CHOICE, ALLOW_SESSION_CHOICE, DENY_CHOICE,
-                CANCEL_CHOICE]
+        """The three plus codex's Cancel, for a presenter offering the split.
+
+        **"Provide feedback" is offered only when somebody can receive it.**
+        `ask_bridge.set_text_presenter()` had no caller in the whole tree, so
+        `_text_presenter` was always `None` and `ask_for_text()` always returned
+        `""` - a person who picked it got silence, and the call was then refused
+        as though they had said nothing. Measured before this line: the option
+        was in the question and the free-form path behind it was unreachable.
+
+        So the option is gated on `ask_bridge.has_text_presenter()`, which is the
+        question "is there anything on screen that takes a sentence". A control
+        that leads nowhere is worse than no control, because it looks like the
+        refusal was heard.
+        """
+        from shani_chronoa import ask_bridge
+
+        base = [ALLOW_ONCE_CHOICE, DENY_CHOICE, CANCEL_CHOICE]
+        if ask_bridge.has_text_presenter():
+            base.append(FEEDBACK_CHOICE)
+        if not is_bypass_immune(self.action):
+            base.insert(1, ALLOW_SESSION_CHOICE)
+        return base
 
     @property
     def stages(self) -> List[Tuple[str, str]]:
@@ -436,6 +572,34 @@ def approval_request(action: str, resource: Optional[str], consent_key: str,
 #: belongs to, so a reason cannot outlive the refusal that produced it.
 _reasons: dict = {}
 
+#: The user's free-form text feedback for permission requests, keyed by
+#: (action, pattern). Used when the user selects "Provide feedback" - this
+#: is a separate outcome from denial that still carries guidance back to
+#: the model.
+_feedback: dict = {}
+
+
+def consume_feedback(action: str, resource: str) -> Optional[str]:
+    """Take the feedback the user typed for one call, or None if there was none.
+
+    **Consuming, not a read.** The feedback is advice about *this* call -
+    "delete it into the bin, not permanently" - and it is already spent the
+    moment that call's result goes back to the model. A plain read would leave
+    it on the books, so every later call to the same tool on the same path
+    would be prefixed with it for the rest of the session: the model told the
+    same thing over and over about a call the user was no longer being asked
+    about. That is the "allow this once meant twice" bug this module already
+    had once, in the opposite direction, and it is why the permission path
+    consumes the grant through `session_grant()` rather than reading it.
+
+    Keyed exactly as the rule was, so what the user typed against the prompt
+    they answered is what the dispatcher looks up - the pattern, not the raw
+    resource, because a prompt is filed under the wildcard and a read against
+    the concrete path would silently miss it.
+    """
+    with _lock:
+        return _feedback.pop((action, resource or "*"), None)
+
 
 def can_ask() -> bool:
     """Whether there is anybody available to answer a permission question.
@@ -474,6 +638,13 @@ def decide(action: str, resource: "str | None", consent_key: str,
     """
     from shani_chronoa import ask_bridge
 
+    # DONT_ASK is the unattended posture: the question that would be asked is
+    # answered no on the spot, so nothing widens while nobody is watching.
+    if get_mode() == Mode.DONT_ASK:
+        logger.info("Permission for %s %s refused: dont_ask mode is on",
+                    action, resource)
+        return None
+
     # An answer already on record settles it. Without this the denial written
     # at the end of this function is never read, so the same question is put
     # again on the next attempt - and, because the tool loop retries, up to
@@ -502,7 +673,7 @@ def decide(action: str, resource: "str | None", consent_key: str,
     # `ALLOW_ONCE` is deliberately **not** in this set: "this once" means once,
     # so the next call must ask again. That is the whole difference between the
     # two options, and it is only meaningful because the other one now works.
-    if on_record == Decision.ALLOW_SESSION:
+    if on_record == Decision.ALLOW_SESSION and not is_bypass_immune(action):
         logger.info("Permission for %s %s already granted this session",
                     action, resource)
         return Decision.ALLOW_SESSION
@@ -522,6 +693,36 @@ def decide(action: str, resource: "str | None", consent_key: str,
     if reply.reply in (Decision.ALLOW_ONCE, Decision.ALLOW_SESSION):
         add_rule(action, resource or "*", reply.reply, session_only=True)
         return reply.reply
+
+    if reply.reply == Decision.FEEDBACK:
+        # Ask for free-form text feedback, store it, and allow the call to proceed
+        feedback_text = ask_bridge.ask_for_text(
+            f"Provide feedback for: {action}" +
+            (f" '{resource}'" if resource else ""),
+            placeholder="Type your feedback...",
+            timeout=DECISION_TIMEOUT_SECONDS,
+        )
+        pattern = resource or "*"
+        # Whitespace is not guidance. Left as-is it would be stored, and
+        # `_with_feedback` would then emit `guidance: ""` - a confident claim
+        # that the user said something, attached to a call they said nothing
+        # about. Treating it as no answer keeps it on the refusal path, which is
+        # what "I hit space and dismissed it" actually meant.
+        feedback_text = feedback_text.strip()
+        if feedback_text:
+            with _lock:
+                _feedback[(action, pattern)] = feedback_text
+            # Store an ALLOW_ONCE so the tool runs on this one call
+            add_rule(action, pattern, Decision.ALLOW_ONCE, session_only=True)
+            logger.info("Permission for %s %s granted with feedback: %s",
+                        action, resource, feedback_text[:50] + "..." if len(feedback_text) > 50 else feedback_text)
+            return Decision.ALLOW_ONCE
+        else:
+            # User dismissed or timed out - treat as a denial
+            add_rule(action, pattern, Decision.DENY_SESSION, session_only=True)
+            logger.info("Permission for %s %s refused (feedback dismissed)",
+                        action, resource)
+            return None
 
     pattern = resource or "*"
     if reply.reply == Decision.CANCEL:

@@ -46,6 +46,12 @@ class GatewayError(Exception):
     """A message the gateway refused, or the bus could not deliver."""
 
 
+#: The webhook listens on loopback by default. Meta calls *in*, so this is
+#: the one adapter with a port - but a port on this machine is not a port on
+#: the internet, and the default keeps it that way.
+DEFAULT_HOST = "127.0.0.1"
+
+
 def submit(gateway: str, text: str, *,
            connection: Optional[Gio.DBusConnection] = None,
            timeout_ms: int = 130_000) -> str:
@@ -318,9 +324,6 @@ class WhatsAppAdapter:
 #: The webhook listens on loopback by default. Meta calls *in*, so this is
 #: the one adapter with a port - but a port on this machine is not a port on
 #: the internet, and the default keeps it that way.
-DEFAULT_HOST = "127.0.0.1"
-
-
 def _env(name: str) -> str:
     return os.environ.get(name, "").strip()
 

@@ -779,3 +779,37 @@ class TestTheGrantIsEnforcedAndFailsClosed:
         assert not errors
         line = describe(entries)
         assert "whatsapp (ask)" in line and "telegram (execute)" in line, line
+
+
+class TestTheChannelNameIsNotDropped:
+    """`Registry` attributes a submitted text to the name that registered.
+
+    This is the answer to the recorded audit-trail gap: every call used to
+    be a "typed at the keyboard" call because the channel was let go at the
+    `Gateway._dispatch` seam.
+    """
+
+    def test_a_submittable_that_accepts_a_source_gets_the_channel_name(self, monkeypatch):
+        from shani_chronoa import gateway as gw, permissions
+        monkeypatch.setattr(permissions, "can_ask", lambda: True)
+        monkeypatch.setattr(permissions, "decide", lambda *a, **k: permissions.Decision.ALLOW_ONCE)
+
+        seen = []
+
+        registry = gw.Registry(lambda text, source: seen.append((text, source)))
+        registry.register("telegram", "execute")
+        registry.register("phone", "execute")
+        registry.submit("telegram", "hello")
+        registry.submit("phone", "ping")
+        assert seen == [("hello", "telegram"), ("ping", "phone")]
+
+    def test_a_one_argument_submitable_keeps_the_old_contract(self, monkeypatch):
+        from shani_chronoa import gateway as gw, permissions
+        monkeypatch.setattr(permissions, "can_ask", lambda: True)
+        monkeypatch.setattr(permissions, "decide", lambda *a, **k: permissions.Decision.ALLOW_ONCE)
+
+        seen = []
+        registry = gw.Registry(lambda text: seen.append(text))
+        registry.register("telegram", "execute")
+        registry.submit("telegram", "hello")
+        assert seen == ["hello"]

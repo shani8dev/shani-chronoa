@@ -63,6 +63,21 @@ _pending_lock = threading.Lock()
 
 _presenter: Optional[Presenter] = None
 
+#: (prompt, placeholder) -> entered text, or "" if the user dismissed it.
+#: Installed by the application. Absent means nobody is listening.
+TextPresenter = Callable[[str, str], "threading.Event"]
+_text_presenter: Optional[TextPresenter] = None
+
+
+def set_text_presenter(fn: Optional[TextPresenter]) -> None:
+    """Install (or clear) the text-input presenter for free-form feedback."""
+    global _text_presenter
+    _text_presenter = fn
+
+
+def has_text_presenter() -> bool:
+    return _text_presenter is not None
+
 
 def pending_count() -> int:
     """How many questions are on screen right now."""
@@ -134,3 +149,27 @@ def make_event() -> "tuple[threading.Event, Callable[[str], None]]":
         done.set()
 
     return done, resolve
+
+
+def ask_for_text(prompt: str, placeholder: str = "",
+                 timeout: float = DEFAULT_TIMEOUT_SECONDS) -> str:
+    """Put `prompt` to the user and return the entered text.
+
+    Returns "" when there is nobody to answer, when the user dismisses the
+    prompt, or when the wait times out - all three mean no answer was given.
+    """
+    if _text_presenter is None:
+        return ""
+    try:
+        done = _text_presenter(prompt, placeholder)
+    except Exception as exc:  # noqa: BLE001 - a broken presenter is not a choice
+        logger.error("ask_for_text presenter failed: %s", exc)
+        return ""
+    if not isinstance(done, threading.Event):
+        logger.error("ask_for_text presenter returned %s, not an event; "
+                     "treating it as no answer", type(done).__name__)
+        return ""
+    if not done.wait(timeout):
+        logger.warning("ask_for_text timed out after %.0fs with no answer", timeout)
+        return ""
+    return getattr(done, "chronoa_answer", "") or ""

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -34,6 +35,114 @@ PROTECTED_ROOTS = (Path("/"), Path.home())
 
 class PathProblem(Exception):
     """A path that must not be acted on, with the reason to tell the user."""
+
+
+# ── Credential and key material ──────────────────────────────────────────────
+# Adapted from Maze-AI's `maze_ai/agent/safety.py` (`_SENSITIVE_PATTERNS`) to
+# Chronoa: credential stores and Chronoa's own key material are refused before
+# any read or shell call runs. Persistence files in Maze's list (.bashrc,
+# autostart, systemd/user) are deliberately NOT here: Chronoa's consent flow
+# already interrupts a destructive edit with a real ask, and a hard refusal
+# would break legitimate "edit my shell rc" use. What is kept is the part
+# where the honest answer is always no - nobody's notes live in ~/.ssh.
+_SENSITIVE_PATTERNS = [
+    r"(^|/)\.ssh(/|$)",
+    r"(^|/)\.gnupg(/|$)",
+    r"(^|/)\.aws(/|$)",
+    r"(^|/)\.azure(/|$)",
+    r"(^|/)\.kube(/|$)",
+    r"(^|/)\.docker/config\.json$",
+    r"(^|/)\.netrc$",
+    r"(^|/)\.pgpass$",
+    r"(^|/)\.npmrc$",
+    r"(^|/)\.pypirc$",
+    r"(^|/)\.git-credentials$",
+    r"(^|/)\.local/share/keyrings(/|$)",
+    r"(^|/)\.mozilla/.*(cookies|logins|key\d)",
+    r"(^|/)\.config/(google-chrome|chromium|BraveSoftware)/.*(Login Data|Cookies)",
+    r"(^|/)\.password-store(/|$)",
+    r"(^|/)id_(rsa|dsa|ecdsa|ed25519)",
+    r"(^|/)\.(bash|zsh|python|mysql|psql)_history$",
+    r"(^|/)\.env(\.[\w.-]+)?$",
+    r"/etc/(shadow|gshadow|sudoers)",
+    r"(^|/)\.config/dconf(/|$)",
+    r"\.(pem|p12|pfx|jks|keystore)$",
+    r"(secret|credential|passwd|password|api[_-]?key|token)s?\.(json|ya?ml|txt|ini|conf|env)$",
+]
+_SENSITIVE_RE = re.compile("|".join(_SENSITIVE_PATTERNS), re.IGNORECASE)
+
+
+def is_sensitive_path(path) -> bool:
+    """True if the path looks like it holds credentials, keys or private data."""
+    text = str(path or "")
+    if not text:
+        return False
+    expanded = os.path.expandvars(os.path.expanduser(text))
+    return bool(_SENSITIVE_RE.search(expanded) or _SENSITIVE_RE.search(text))
+
+
+def touches_sensitive_path(command: str) -> str:
+    """Return the sensitive fragment a command references, or "" if none.
+
+    Works on the raw command line (rather than parsed arguments) so it also
+    catches paths hidden inside pipelines, quotes and globs.
+    """
+    text = str(command or "")
+    if not text:
+        return ""
+    expanded = os.path.expandvars(os.path.expanduser(text))
+    match = _SENSITIVE_RE.search(expanded) or _SENSITIVE_RE.search(text)
+    return match.group(0) if match else ""
+
+
+def refuse_sensitive(path, verb: str) -> None:
+    """Raise `PathProblem` if `path` is credential/key material, like `refuse_catalogue`."""
+    if is_sensitive_path(path):
+        raise PathProblem(
+            f"Not going to {verb} {path!r}: it holds credentials or private keys, "
+            "and a tool call is never the right way in."
+        )
+
+
+def parse_problem(text: str, path) -> str:
+    """A syntax check for the text a file write wants to leave behind.
+
+    A skill that claims "wrote it" on over a syntactically invalid config or a
+    truncated Python file has done nothing but move a plausible-looking mistake
+    onto disk, and the *next* thing that reads the file is the one that pays for
+    it. Same rule as `refuse_catalogue`: the failure is reported, not carried.
+
+    Only the formats with a parser that never executes anything and never leaves
+    the process are checked: Python (`compile()`), JSON, and TOML (`tomllib`).
+    Parse-only shell grammar would need a subprocess per write, and nothing
+    forcibly depends on a specific install, so it is deliberately not here.
+    Returns "" when there is nothing to say; the suffix decides whether the
+    text is checked at all.
+    """
+    suffix = Path(str(path)).suffix.lower()
+    if suffix == ".py":
+        try:
+            compile(text, str(path), "exec")
+        except SyntaxError as exc:
+            return f"{path}: not valid Python (line {exc.lineno}: {exc.msg}) - nothing written."
+    elif suffix == ".json":
+        import json
+
+        try:
+            json.loads(text)
+        except ValueError as exc:
+            return f"{path}: not valid JSON ({exc}) - nothing written."
+    elif suffix == ".toml":
+        try:
+            import tomllib
+        except ImportError:  # Python < 3.11 has no tomllib
+            return ""
+
+        try:
+            tomllib.loads(text)
+        except ValueError as exc:
+            return f"{path}: not valid TOML ({exc}) - nothing written."
+    return ""
 
 
 def resolve(raw: str) -> Path:
@@ -329,8 +438,29 @@ def tool_missing(binary: str, purpose: str) -> str:
     reply says what could not be answered rather than what went wrong
     internally. A skill that gets `None` back from `shutil.which` and carries on
     anyway is the bug shape this repo has shipped before.
+
+    **Two sources, and the order matters.** `routes.install_hint()` is the
+    authoritative one - `routes.ROUTES` carries the routes a machine can take,
+    and it is the only authority in the tree with a machine-readable package
+    name per binary (`install_hint` parses it out of the route's own action
+    text, so the two cannot disagree). `_PACKAGE_HINTS` is the wider hand-kept
+    table, 61 entries to `routes`' 15, and it is the fallback for the binaries
+    that have no route. Consulted in that order because the narrower source is
+    the one that has been checked against a real image's file database; the
+    wider one was hand-written.
+
+    Worth noting what this fixes: `magick` and `whisper-cli` were answered
+    "the package that provides it" by `_PACKAGE_HINTS` alone while
+    `routes.ROUTES` had known `imagemagick` and `whisper-cpp` all along - the
+    two-tables-one-answer case, and the reason a user was told to go looking for
+    a package called `magick`.
     """
-    hint = _PACKAGE_HINTS.get(binary, "the package that provides it")
+    from shani_chronoa import routes
+    try:
+        hint = routes.install_hint(binary)
+    except Exception:  # noqa: BLE001 - a routes table that cannot load is no hint
+        hint = None
+    hint = hint or _PACKAGE_HINTS.get(binary, "the package that provides it")
     # The sentence has to name a *package*, not just the name of one. The
     # fallback says "the package that provides it" and reads correctly, but with
     # a real hint substituted it became "On Arch it comes from coreutils" -
@@ -420,6 +550,20 @@ _PACKAGE_HINTS = {
     "pw-record": "pipewire-audio",
     "pw-cat": "pipewire-audio",
     "xrandr": "xorg-xrandr",
+    # The 2026-10-07 matrix skills, read from the matrix's own pacman data.
+    "distrobox": "distrobox",
+    "virsh": "libvirt",
+    "fc-list": "fontconfig",
+    "fc-match": "fontconfig",
+    "boltctl": "bolt",
+    "pdfunite": "poppler",
+    "pdfseparate": "poppler",
+    "pdfinfo": "poppler",
+    "cancel": "cups",
+    "hostnamectl": "systemd",
+    "systemd-analyze": "systemd",
+    "xdg-settings": "xdg-utils",
+    "last": "util-linux",
 }
 
 

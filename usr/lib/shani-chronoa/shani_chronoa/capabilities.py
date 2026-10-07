@@ -103,6 +103,31 @@ GATED: dict[str, str] = {
     "git_inspect": "git-sense-enabled",
     "todo_list": "todo-list-enabled",
     "manage_triggers": "trigger-control-enabled",
+    # The 2026-10-07 matrix skills. Each changing one has its own key; reading
+    # the same setting needs none (the gate is checked on the 'set'/'cancel'
+    # path only, as set_timezone does).
+    "default_apps": "default-apps-enabled",
+    "print_queue": "print-control-enabled",
+    "set_hostname": "hostname-control-enabled",
+    "set_locale": "locale-control-enabled",
+    "speed_test": "speed-test-enabled",
+    # The `sessions` sense's own key, not a new one: login history is other
+    # people's presence, the same agreement whether volunteered or asked for.
+    "login_history": "sessions-sense-enabled",
+    # The sense-backed matrix skills share their sense's key, as git_inspect
+    # does (see sense_reading.py). Where a skill also reads something no sense
+    # covers (shani-deploy, systemd-analyze, lsblk, boltctl, distrobox), only
+    # the sense half follows the switch. security_status's firewall half
+    # follows `firewall-sense-enabled`; one key per tool here, so the primary
+    # one is named.
+    "snapshot_status": "snapshots-sense-enabled",
+    "security_status": "security-sense-enabled",
+    "list_containers": "containers-sense-enabled",
+    "boot_report": "boots-sense-enabled",
+    "disk_health": "storage-sense-enabled",
+    "temperatures": "hwmon-sense-enabled",
+    "usb_devices": "usb-sense-enabled",
+    "crash_report": "coredumps-sense-enabled",
 }
 
 # The per-event-type trigger gates are *not* in `GATED` above, and deliberately
@@ -331,6 +356,27 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "ui_elements": ("Pointer and keyboard", "Press buttons, fill fields and open menus in other apps"),
     "android_device": ("Devices", "Battery, screenshot, apps and files of a phone connected with adb"),
     "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
+    # The 2026-10-07 matrix skills.
+    "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
+    "security_status": ("System", "Secure Boot, TPM and firewall status"),
+    "list_containers": ("Apps", "Distroboxes and containers"),
+    "list_vms": ("Apps", "Virtual machines"),
+    "boot_report": ("System", "Why booting is slow, and whether it shut down cleanly"),
+    "disk_health": ("Devices", "Drive health and disk encryption"),
+    "temperatures": ("Devices", "Temperatures and fan speeds"),
+    "usb_devices": ("Devices", "What is plugged in, and Thunderbolt docks"),
+    "driver_info": ("Devices", "Which driver each device uses"),
+    "list_fonts": ("Appearance", "Installed fonts, and which one is used"),
+    "photo_metadata": ("Photos and video", "When, where and with what camera a photo was taken"),
+    "crash_report": ("Services and logs", "What crashed recently"),
+    "login_history": ("System", "Who logged in recently"),
+    "audio_output": ("Sound", "Switch speakers, headphones and microphones"),
+    "default_apps": ("Apps", "Which app opens a kind of file, and the default browser"),
+    "pdf_pages": ("Files", "Merge, split or take pages out of PDFs"),
+    "print_queue": ("Devices", "The print queue, and cancelling a job"),
+    "set_hostname": ("System", "This computer's name"),
+    "set_locale": ("Appearance", "System language and date, number and money formats"),
+    "speed_test": ("Web", "Internet speed"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -407,6 +453,21 @@ GATE_NAMES: dict[str, str] = {
     "sleep-inhibit-enabled": "Let Chronoa hold the machine awake",
     "file-edit-enabled": "Let Chronoa edit your files",
     "git-sense-enabled": "Git working trees",
+    "sessions-sense-enabled": "Who is on this machine",
+    # The Settings sense rows' own titles, so Help sends people to a row that exists.
+    "snapshots-sense-enabled": "Rollback points",
+    "security-sense-enabled": "Firmware security",
+    "containers-sense-enabled": "Containers",
+    "boots-sense-enabled": "Boot history",
+    "storage-sense-enabled": "Disks",
+    "hwmon-sense-enabled": "Temperatures, fans and power",
+    "usb-sense-enabled": "USB devices",
+    "coredumps-sense-enabled": "Crashes",
+    "default-apps-enabled": "Let Chronoa change which apps open files",
+    "print-control-enabled": "Let Chronoa cancel print jobs",
+    "hostname-control-enabled": "Let Chronoa rename this computer",
+    "locale-control-enabled": "Let Chronoa change the language and formats",
+    "speed-test-enabled": "Let Chronoa run speed tests",
     "todo-list-enabled": "Let Chronoa keep a task list",
     "trigger-control-enabled": "Let Chronoa arm automatic rules",
     # The five trigger event types. Phrased as the thing the user is agreeing
@@ -703,6 +764,13 @@ READ_ONLY_TOOLS = frozenset({
     # this computer wants; a whois query can return the person who registered
     # the domain. Neither changes anything here.
     "dns_lookup", "whois_lookup",
+    # The 2026-10-07 matrix skills that only read. Eight are backed by a sense
+    # and share its switch (they are in GATED too, like `calendar_events`, so
+    # `tool_annotations` takes the gated branch and never claims read-only for
+    # them); the rest read the kernel, a config file or a read-only command.
+    "snapshot_status", "security_status", "list_containers", "list_vms",
+    "boot_report", "disk_health", "temperatures", "usb_devices",
+    "driver_info", "list_fonts", "photo_metadata", "crash_report",
 })
 
 #: Tools that change the machine but need no consent key.
@@ -741,6 +809,9 @@ MUTATING_TOOLS = frozenset({
     # was withheld, and the post-condition column was never computed for it -
     # the inventory disagreed with the code by one entry.
     "sing",
+    # Switching the default speaker is set_volume's kind of change; pdf_pages
+    # writes only new files, as convert_document does.
+    "audio_output", "pdf_pages",
 })
 
 #: Tools that reach outside this machine.
@@ -749,6 +820,7 @@ OPEN_WORLD_TOOLS = frozenset({
     "translate_text", "print_file",
     "get_weather", "get_location", "convert_currency", "lookup_wikipedia",
     "define_word", "get_world_time",
+    "speed_test",
 })
 
 

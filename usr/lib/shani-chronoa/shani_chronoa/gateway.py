@@ -229,13 +229,23 @@ class Registry:
         self._submit = submit
         self._gateways: Dict[str, Gateway] = {}
         self.rejected = 0
+        #: Whether `submit` also accepts a channel name. Bridges that care
+        #: (the real one) declare two parameters; one-parameter lambdas in
+        #: tests and the legacy wiring keep the old contract. Probed once, at
+        #: construction, rather than guessed per call.
+        import inspect as _inspect
+        try:
+            self._accepts_source = len(
+                _inspect.signature(submit).parameters) >= 2
+        except (TypeError, ValueError):  # some C callables have no signature
+            self._accepts_source = False
 
     def register(self, name: str, grant: str = ASK_ONLY) -> Gateway:
         if not name or "/" in name or "." in name:
             raise ValueError(
                 f"gateway name {name!r} cannot contain '/' or '.', because it "
                 "becomes part of a D-Bus method name")
-        gateway = Gateway(name, self._dispatch, grant)
+        gateway = Gateway(name, self._make_dispatch(name), grant)
         self._gateways[name] = gateway
         logger.info("gateway %r registered (%s)", name, grant)
         return gateway
@@ -246,8 +256,12 @@ class Registry:
     def names(self) -> List[str]:
         return sorted(self._gateways)
 
-    def _dispatch(self, text: str) -> str:
-        return self._submit(text)
+    def _make_dispatch(self, name: str):
+        def _dispatch(text: str) -> str:
+            if self._accepts_source:
+                return self._submit(text, name)
+            return self._submit(text)
+        return _dispatch
 
     def submit(self, gateway: str, text: str) -> str:
         entry = self._gateways.get(gateway)

@@ -112,6 +112,17 @@ def append(message: dict, path: Path) -> bool:
 
     Never raises: a transcript that cannot be written is a lost convenience, and
     losing it must not take the conversation with it.
+
+    **No `fsync`, unlike `rewrite()` and `checkpoint()`, and that is the
+    intended asymmetry** rather than an oversight - stated here because two
+    functions that differ only in that line read as a bug. A rewrite replaces
+    the file, so a power cut mid-write would lose everything; an append adds one
+    line, and the page cache outlives the crash that actually happens to an
+    assistant (the app dying, a reboot, a slot switch). `O_APPEND` plus a single
+    `write()` also keeps the line atomic against a concurrent reader, which is
+    what "the transcript is written as the turn happens" needs. If this ever
+    gains an `fsync`, it costs one flush per message to protect against the one
+    failure mode that does not lose the conversation.
     """
     if not isinstance(message, dict) or message.get("role") not in _KNOWN_ROLES:
         return False
@@ -401,8 +412,80 @@ def set_generated_title(root: Path, sid: str, title: str) -> bool:
     return True
 
 
+def checkpoint(root: Path, sid: str) -> bool:
+    """Save the current transcript of session `sid` to a checkpoint file.
+
+    A checkpoint is a copy of the conversation at a point the user wants to
+    come back to - "before I edited that file" - rather than a reset.
+    Checkpoints live beside the session in `<sid>.ckpt.<n>.jsonl`, with
+    `n` increasing, so the newest is always the highest number.
+    """
+    root = Path(root)
+    source = root / f"{sid}.jsonl"
+    if not source.exists():
+        return False
+    try:
+        messages = load(source)
+        existing = sorted(root.glob(f"{sid}.ckpt.*.jsonl"),
+                          key=lambda p: int(p.stem.split(".")[-1]) if len(p.stem.split(".")) > 2 else 0)
+        n = (int(existing[-1].stem.split(".")[-1]) + 1) if existing else 1
+        target = root / f"{sid}.ckpt.{n}.jsonl"
+        tmp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        body = "".join(json.dumps(m, ensure_ascii=False) + "\n" for m in messages)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, body.encode("utf-8"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, target)
+        return True
+    except (OSError, TypeError, ValueError) as exc:
+        logger.debug("Could not checkpoint %s: %s", sid, exc)
+        return False
+
+
+def revert(root: Path, sid: str, to_n: Optional[int] = None) -> bool:
+    """Revert session `sid` to its checkpoint number `to_n` (newest if None).
+
+    The current transcript is rewritten, not deleted: the checkpoint stays,
+    so the same point can be returned to again, or a different one chosen
+    if the first revert was not the right one.
+    """
+    root = Path(root)
+    if to_n is None:
+        candidates = sorted(root.glob(f"{sid}.ckpt.*.jsonl"),
+                            key=lambda p: int(p.stem.split(".")[-1])
+                            if len(p.stem.split(".")) > 2 else 0)
+        if not candidates:
+            return False
+        target = candidates[-1]
+    else:
+        target = root / f"{sid}.ckpt.{to_n}.jsonl"
+    if not target.exists():
+        return False
+    try:
+        messages = load(target)
+        return rewrite(messages, root / f"{sid}.jsonl")
+    except (OSError, ValueError):
+        return False
+
+
+def list_checkpoints(root: Path, sid: str) -> List[int]:
+    """Checkpoint numbers held for `sid`, oldest first."""
+    root = Path(root)
+    candidates = root.glob(f"{sid}.ckpt.*.jsonl")
+    out = []
+    for p in candidates:
+        try:
+            n = int(p.stem.split(".")[-1])
+            out.append(n)
+        except (ValueError, IndexError):
+            continue
+    return sorted(out)
+
+
 def delete(root: Path, ref: str) -> str:
-    """Delete one conversation's file and entry; the open one moves to the newest left (or none)."""
     root = Path(root)
     with _locked(root):
         data = _read_index(root)
@@ -452,7 +535,17 @@ def fork(root: Path, ref: str, keep_user_turns: Optional[int] = None) -> str:
 
 
 def note_activity(path: Path, message: dict) -> None:
-    """Keep the index's `updated` and auto-title current; a no-op outside an indexed directory."""
+    """Keep the index's `updated` and auto-title current; a no-op outside an indexed directory.
+
+    **This reads and rewrites the whole index on every single message**, so it is
+    O(conversations) per turn rather than O(1). That is free at this scale - the
+    index is a few kilobytes for any number of conversations a person actually
+    has - and the record is here so nobody carries the pattern somewhere it stops
+    being free. The obvious fix when it ever matters is to stop writing `updated`
+    per message and derive it from the transcript's own mtime, which `append()`
+    already touches; that is a change to when the field is computed, not to this
+    function's contract.
+    """
     path = Path(path)
     root = path.parent
     if not (root / INDEX).exists() or not valid_id(path.stem):
@@ -493,6 +586,25 @@ def _text_of(message: dict) -> str:
 SEARCH_DB = "search.sqlite"
 
 
+def _set_sqlite_permissions(path: Path) -> None:
+    """Set 0o600 permissions on SQLite database file and any WAL/SHM sidecars.
+    
+    SQLite in WAL mode creates -wal and -shm sidecar files that need the same
+    protection as the main database file.
+    """
+    try:
+        os.chmod(path, 0o600)
+        # Handle WAL mode sidecar files if they exist
+        wal_file = path.with_suffix(path.suffix + "-wal")
+        shm_file = path.with_suffix(path.suffix + "-shm")
+        if wal_file.exists():
+            os.chmod(wal_file, 0o600)
+        if shm_file.exists():
+            os.chmod(shm_file, 0o600)
+    except OSError:
+        pass
+
+
 def _purge_from_search(root: Path, sid: str) -> None:
     import sqlite3
     path = Path(root) / SEARCH_DB
@@ -508,6 +620,7 @@ def _purge_from_search(root: Path, sid: str) -> None:
                 pass
     except sqlite3.Error as exc:
         logger.warning("Could not remove a deleted conversation from the search index: %s", exc)
+    _set_sqlite_permissions(path)
 
 
 def _search_db(root: Path):
@@ -535,6 +648,7 @@ def _search_db(root: Path):
         os.chmod(path, 0o600)
     except OSError:
         pass
+    _set_sqlite_permissions(path)
     live = {p.stem for p in Path(root).glob("*.jsonl") if valid_id(p.stem)}
     for (sid,) in db.execute("SELECT sid FROM seen").fetchall():
         if sid not in live:
@@ -633,11 +747,20 @@ def search(root: Path, query: str, limit: int = 10, exclude: str = "", embed=Non
             by_meaning = _by_meaning(db, query, exclude, limit * 2, embed)
             fused: "dict[int, float]" = {}
             how: "dict[int, set]" = {}
+            # Adaptive divisor: each method's weight is inversely proportional
+            # to its result count, so a method that finds many hits contributes
+            # less per-hit than one that finds few — the scarce signal is
+            # amplified. This is the mem0 pattern (adaptive divisor), clamped
+            # so no single method dominates.
+            word_count = len(by_words) or 1
+            mean_count = len(by_meaning) or 1
+            word_divisor = max(60, 60 * (word_count / max(mean_count, 1)))
+            mean_divisor = max(60, 60 * (mean_count / max(word_count, 1)))
             for rank, (rid,) in enumerate(by_words):
-                fused[rid] = fused.get(rid, 0.0) + 1.0 / (60 + rank)
+                fused[rid] = fused.get(rid, 0.0) + 1.0 / (word_divisor + rank)
                 how.setdefault(rid, set()).add("words")
             for rank, (rid, _score) in enumerate(by_meaning):
-                fused[rid] = fused.get(rid, 0.0) + 1.0 / (60 + rank)
+                fused[rid] = fused.get(rid, 0.0) + 1.0 / (mean_divisor + rank)
                 how.setdefault(rid, set()).add("meaning")
             hits = []
             for rid in sorted(fused, key=lambda r: -fused[r])[:limit]:

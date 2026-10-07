@@ -50,6 +50,32 @@ class Verdict(Enum):
     VERIFIED = "verified"
     FAILED = "failed"
     UNVERIFIED = "unverified"
+    #: The action could not have been attempted as asked, and the skill says
+    #: so with a reason. AgentScope's pipeline calls this a terminal
+    #: `impossible` goal - it is not a failure of execution, it is a
+    #: statement that the requested effect is not reachable from here.
+    #:
+    #: It is the third shape of negative news and it has to be a verdict
+    #: rather than prose, because the other two are the only things the
+    #: outcome model and the bandit can see. A skill that answers "I can't
+    #: do that, ffmpeg is not installed" writes that into a result string
+    #: and the string is what the model reads - which is right for the
+    #: model - but the *learning* layer then sees only "the tool ran and
+    #: said something", which is `unverified`, and a refusal starts to look
+    #: indistinguishable from a success that nobody checked. The bandit's
+    #: whole point is to stop pulling an arm that does not pay, and an arm
+    #: that cannot pay for a class of request is the most useful thing it
+    #: could be told.
+    IMPOSSIBLE = "impossible"
+
+
+#: The singleton a post-condition returns to declare impossibility. It is
+#: not a bool, so it cannot be returned by accident: a check that returns
+#: `True`/`False` is a yes/no about an effect, and `IMPOSSIBLE` is a
+#: different question entirely ("this was never going to work"). Keeping
+#: them separate in the return type is what stops a check that can only
+#: answer yes/no from being read as one that can.
+IMPOSSIBLE = "chronoa-impossible"
 
 
 class Result(NamedTuple):
@@ -63,10 +89,13 @@ class Result(NamedTuple):
             return ""
         if self.verdict is Verdict.FAILED:
             return f" (VERIFICATION FAILED: {self.evidence})"
+        if self.verdict is Verdict.IMPOSSIBLE:
+            return f" (impossible: {self.evidence})"
         return " (unverified - this action reports success but nothing observed it)"
 
 
 FAILED_MARKER = "VERIFICATION FAILED"
+IMPOSSIBLE_MARKER = "impossible:"
 
 
 def verdict_from_text(text: str) -> Verdict:
@@ -89,6 +118,8 @@ def verdict_from_text(text: str) -> Verdict:
     """
     if FAILED_MARKER in (text or ""):
         return Verdict.FAILED
+    if IMPOSSIBLE_MARKER in (text or ""):
+        return Verdict.IMPOSSIBLE
     return Verdict.UNVERIFIED
 
 
@@ -148,6 +179,10 @@ def verify(handler_module: str, arguments: Optional[dict] = None, tool: Optional
     A callable post-condition may return None: "this call changed nothing I can
     check" (a status query, a dry run). That is UNVERIFIED, never FAILED -
     reporting a read as a failed write is a confident wrong answer.
+
+    A callable post-condition may return the IMPOSSIBLE sentinel: "this action
+    could not have been attempted as asked". That is IMPOSSIBLE, never FAILED -
+    reporting an impossible action as a failure is a confident wrong answer.
     """
     declared = post_condition_for(handler_module)
     if declared is None:
@@ -160,6 +195,8 @@ def verify(handler_module: str, arguments: Optional[dict] = None, tool: Optional
             return Result(Verdict.UNVERIFIED, f"post-condition raised: {type(exc).__name__}: {exc}")
         if outcome is None:
             return Result(Verdict.UNVERIFIED, "nothing this call changed can be checked")
+        if outcome is IMPOSSIBLE:
+            return Result(Verdict.IMPOSSIBLE, "action impossible as asked")
         if isinstance(outcome, tuple) and len(outcome) == 2:
             ok, evidence = bool(outcome[0]), str(outcome[1])
         else:

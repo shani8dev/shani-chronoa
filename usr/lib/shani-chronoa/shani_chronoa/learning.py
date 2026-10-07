@@ -1239,7 +1239,7 @@ class memory:
         rather than implied.
         """
 
-        VERDICT_WEIGHT = {"verified": 1.0, "failed": -0.5}
+        VERDICT_WEIGHT = {"verified": 1.0, "failed": -0.5, "impossible": -0.5}
 
         @classmethod
         def weight(cls, verdicts: Iterable[str]) -> float:

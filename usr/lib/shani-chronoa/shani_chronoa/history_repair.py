@@ -120,7 +120,83 @@ _REASON_PHRASE = {
         "simply stopped retrying it. Answer with what you already have, or ask "
         "the user what they would like next."
     ),
+    "error": (
+        "not executed: the tool ran but returned an error, so its output was "
+        "not recorded for the turn. Do not call it again in this turn, and do "
+        "not assume it succeeded - answer with what you already have, or ask "
+        "the user what they would like next."
+    ),
 }
+
+
+#: What a restored transcript says about the turn it ended on. "" is the only
+#: value that means "nothing to report", so a caller can test it directly.
+#:
+#: These are deliberately *derived*, not recorded. A marker written at turn
+#: start and deleted at turn end is state that can survive the thing it describes
+#: - a half-written marker, a marker left by a crash between the two writes, a
+#: marker that disagrees with the transcript beside it. Reading the transcript's
+#: own tail cannot get out of step with it, which on an immutable layout where
+#: `/var` is tmpfs and the app is killed by a reboot is the whole requirement.
+UNFINISHED_AWAITING_ANSWER = "awaiting-answer"
+UNFINISHED_MID_TOOLS = "mid-tools"
+
+#: Said to the *person*, not to the model. `CONTINUE_PROMPT` (below) is what the
+#: next request is told; this is what the user is shown, and it is deliberately
+#: plainer than either, because "unexecuted: the turn was interrupted" is a
+#: sentence about a tool result and this is a sentence about their conversation.
+UNFINISHED_NOTICE = {
+    UNFINISHED_AWAITING_ANSWER: (
+        "Your last message was never answered - this machine stopped before the "
+        "reply was written."
+    ),
+    UNFINISHED_MID_TOOLS: (
+        "Your last question was still running tools when this machine stopped, "
+        "so it never got an answer."
+    ),
+}
+
+
+def unfinished_turn(messages: "list[dict]") -> str:
+    """Which kind of turn `messages` ends on, or "" if it ended cleanly.
+
+    **A restored transcript is the only place this question arises**, and it is
+    worth being precise about which endings mean what:
+
+    - ends on `user` - the message was written, the model never replied. The
+      process died between recording the question and the first answer.
+    - ends on an `assistant` carrying `tool_calls` - the model *did* answer, by
+      asking for tools, and the process died before any result was recorded.
+    - ends on a `tool` - `Assistant.close_interrupted_turn()` synthesized that
+      result and persisted it (`assistant.py`, "Both results are recorded, not
+      just returned"). That is a turn that ended *deliberately* - cancelled,
+      out of budget, or malformed - and the person knows they did it. Reporting
+      it as a crash would be the confident wrong answer this module exists to
+      avoid.
+    - ends on an `assistant` with no `tool_calls` - the reply itself. Done.
+
+    So the two unfinished shapes are distinguishable from a deliberate stop with
+    no extra bookkeeping at all, which is the property that makes this worth
+    having: it cannot disagree with the file it is reading.
+
+    Pure, like everything else here - no clock, no file, no mutation - so it is
+    safe to call on every restore and costs nothing when there is nothing to say.
+    """
+    for message in reversed(messages or []):
+        role = message.get("role") if isinstance(message, dict) else None
+        if role not in ("user", "assistant", "tool"):
+            continue  # a system prompt is not a turn; keep looking back
+        if role == "user":
+            return UNFINISHED_AWAITING_ANSWER
+        if role == "assistant" and message.get("tool_calls"):
+            return UNFINISHED_MID_TOOLS
+        return ""
+    return ""
+
+
+def unfinished_notice(messages: "list[dict]") -> str:
+    """The sentence to show the person, or "" when the transcript ended cleanly."""
+    return UNFINISHED_NOTICE.get(unfinished_turn(messages), "")
 
 
 def _reason_phrase(reason: str) -> str:

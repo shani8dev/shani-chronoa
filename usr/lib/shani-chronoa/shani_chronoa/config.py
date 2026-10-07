@@ -718,6 +718,17 @@ class ChronoaConfig:
         return self.get_bool("auto-start", False)
 
     @property
+    def start_hidden_at_login(self) -> bool:
+        """Get start-hidden-at-login status."""
+        return self.get_bool("start-hidden-at-login", False)
+
+    @property
+    def reply_style(self) -> str:
+        """The named reply-style preset, or 'ordinary' for no styling."""
+        got = (self.get("reply-style", "ordinary") or "ordinary").strip().lower()
+        return got if got in ("ordinary", "brief", "explanatory") else "ordinary"
+
+    @property
     def notification_enabled(self) -> bool:
         """Get notification status."""
         return self.get_bool("notification-enabled", True)

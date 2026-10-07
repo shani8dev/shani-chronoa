@@ -51,6 +51,62 @@ _TYPE_MAP: dict[str, tuple[type, ...]] = {
 }
 
 
+class GuardrailResult:
+    """A five-way verdict on a tool call, mirroring pydantic-ai's shape.
+
+    The five verdicts cover every decision the dispatch path needs to make
+    about a single tool call:
+
+    - `valid` — the call is well-formed; run it.
+    - `invalid` — the call is malformed; do not run, report the reason.
+    - `retry` — the call is well-formed but should be retried with a template
+      message (e.g. a JSON-arg parse error: "call it again with valid JSON").
+    - `reask` — the model should be asked again; the reason is a question for
+      the model, not a human (unlike HITL `ask`, which goes to the user).
+    - `stop` — the call must never run; a hard stop with a reason.
+
+    This unifies what the consent gates, sandbox verdicts, and schema checks
+    each answer separately, so the dispatch layer sees one consistent shape
+    instead of three different return types.
+    """
+
+    VALID = "valid"
+    INVALID = "invalid"
+    RETRY = "retry"
+    REASK = "reask"
+    STOP = "stop"
+
+    def __init__(self, verdict: str, message: str = "", template: str = "") -> None:
+        if verdict not in (self.VALID, self.INVALID, self.RETRY, self.REASK, self.STOP):
+            raise ValueError(
+                f"unknown GuardrailResult verdict {verdict!r}; expected one of "
+                f"valid, invalid, retry, reask, stop"
+            )
+        self.verdict = verdict
+        self.message = message
+        self.template = template
+
+    @property
+    def should_run(self) -> bool:
+        """Whether the call should proceed."""
+        return self.verdict == self.VALID
+
+    @property
+    def should_retry(self) -> bool:
+        """Whether the call should be retried with a template message."""
+        return self.verdict == self.RETRY
+
+    @property
+    def should_reask(self) -> bool:
+        """Whether the model should be asked again (model-initiated re-ask)."""
+        return self.verdict == self.REASK
+
+    @property
+    def should_stop(self) -> bool:
+        """Whether the call must never run (hard stop)."""
+        return self.verdict == self.STOP
+
+
 def _type_of(schema: dict) -> "tuple[type, ...] | None":
     """The Python types acceptable for a JSON Schema node, or None if unknown."""
     declared = schema.get("type")
@@ -70,28 +126,40 @@ def _describe(path: str) -> str:
     return path or "the arguments"
 
 
-def check(name: str, arguments: dict, schema: dict) -> "Optional[str]":
-    """Why this call should not run, or None if it is well-formed.
+def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
+    """Verdict on whether this call is well-formed enough to run.
 
-    A returned string is a reason to halt, written so the model can act on it -
+    Returns a `GuardrailResult` with one of five verdicts:
+    - `valid`: the call is well-formed; run it.
+    - `invalid`: the call is malformed; do not run, report the reason.
+    - `retry`: the call is well-formed but should be retried with a template
+      (e.g. a JSON-arg parse error: "call it again with valid JSON").
+    - `reask`: the model should be asked again; the reason is a question for
+      the model, not a human.
+    - `stop`: the call must never run; a hard stop with a reason.
+
+    A returned `GuardrailResult` is the decision the dispatch layer acts on -
     naming the argument, what was wrong, and what was expected. A traceback
     three frames down in a subprocess tells the model nothing it can use.
     """
     if not isinstance(schema, dict) or not schema:
-        return None
+        return GuardrailResult(GuardrailResult.VALID)
 
     properties = schema.get("properties") or {}
     if not isinstance(properties, dict):
-        return None
+        return GuardrailResult(GuardrailResult.VALID)
 
     # A missing required argument is the common case, and the one most likely to
     # be a hallucinated call rather than a real request.
     for required in schema.get("required") or []:
         if required not in arguments:
             known = ", ".join(sorted(properties)) or "none declared"
-            return (
-                f"{name} was called without the required argument "
-                f"'{required}'. It accepts: {known}."
+            return GuardrailResult(
+                GuardrailResult.INVALID,
+                message=(
+                    f"{name} was called without the required argument "
+                    f"'{required}'. It accepts: {known}."
+                ),
             )
 
     # Types, checked per property. Nested objects and arrays are not descended
@@ -105,9 +173,12 @@ def check(name: str, arguments: dict, schema: dict) -> "Optional[str]":
             # an extra field is not thereby unsafe.
             if schema.get("additionalProperties") is False:
                 known = ", ".join(sorted(properties)) or "none"
-                return (
-                    f"{name} was called with '{key}', which it does not "
-                    f"accept. It accepts: {known}."
+                return GuardrailResult(
+                    GuardrailResult.INVALID,
+                    message=(
+                        f"{name} was called with '{key}', which it does not "
+                        f"accept. It accepts: {known}."
+                    ),
                 )
             continue
         wanted = declared.get("type") if isinstance(declared, dict) else None
@@ -116,13 +187,32 @@ def check(name: str, arguments: dict, schema: dict) -> "Optional[str]":
         # below waves it through - the first version of this had the bool
         # branch after the `continue`, where it could never run.
         if wanted == "integer" and isinstance(value, bool):
-            return f"{name} was called with a boolean for '{key}', which wants a number."
+            return GuardrailResult(
+                GuardrailResult.INVALID,
+                message=f"{name} was called with a boolean for '{key}', which wants a number.",
+            )
         expected = _type_of(declared)
         if expected is None or isinstance(value, expected):
             continue
-        return (
-            f"{name} was called with {_describe(key)} of the wrong type "
-            f"({type(value).__name__}); it wants {wanted}."
+        return GuardrailResult(
+            GuardrailResult.INVALID,
+            message=(
+                f"{name} was called with {_describe(key)} of the wrong type "
+                f"({type(value).__name__}); it wants {wanted}."
+            ),
         )
 
-    return None
+    # Retry: a well-formed call that the model should retry with a template.
+    # This is the "call it again with valid JSON" shape - the arguments
+    # parsed fine but the model should be asked to produce a cleaner call.
+    # Triggered when a string argument looks like a JSON parse error message.
+    for key, value in arguments.items():
+        if isinstance(value, str) and value.startswith("ERROR:"):
+            return GuardrailResult(
+                GuardrailResult.RETRY,
+                message=value,
+                template=f"Retry {name}: the previous call failed with a parsing error. "
+                f"Please provide valid arguments for {name}.",
+            )
+
+    return GuardrailResult(GuardrailResult.VALID)
