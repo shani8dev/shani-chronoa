@@ -257,7 +257,7 @@ def capture_plan(text: str) -> "tuple[Optional[Fact], str]":
     return found, ""
 
 
-def _covered_by(fact: Fact, store: PerceptStore) -> Optional[Percept]:
+def _covered_by(fact: "Fact", store: PerceptStore) -> Optional[Percept]:
     """The stored fact that already covers `fact`, or None.
 
     Kilo's covered guard drops a digest whose topic is already in typed memory.
