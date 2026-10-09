@@ -110,8 +110,24 @@ def _build_tool_function(schema: dict):
     properties = params_schema.get("properties", {}) or {}
     required = set(params_schema.get("required", []) or [])
 
+    # **Required parameters are built first, whatever order the schema lists
+    # them in.** `inspect.Signature` refuses a non-default argument that
+    # follows a defaulted one (`ValueError: non-default argument follows
+    # default argument`), so a schema whose `required` names a property after
+    # an optional one used to raise here - and `build_server` calls this for
+    # every tool, so one badly-ordered schema took the whole server down
+    # rather than that one tool. `default_apps` hit it once and was reordered
+    # by hand, which is a workaround the next skill author cannot be expected
+    # to repeat. Sorting is the fix this module's own docstring has asked for
+    # since that happened.
+    #
+    # `sorted` is stable, so within each group the schema's own order
+    # survives: only the groups swap, and the signature still reads the way
+    # the author wrote it.
+    ordered = sorted(properties.items(), key=lambda item: item[0] not in required)
+
     parameters = []
-    for prop_name, prop_schema in properties.items():
+    for prop_name, prop_schema in ordered:
         py_type = _JSON_TYPE_MAP.get(prop_schema.get("type"), str)
         if prop_name in required:
             default = inspect.Parameter.empty
@@ -122,6 +138,17 @@ def _build_tool_function(schema: dict):
             inspect.Parameter(prop_name, inspect.Parameter.POSITIONAL_OR_KEYWORD, default=default, annotation=py_type)
         )
 
+    try:
+        signature = inspect.Signature(parameters)
+    except (TypeError, ValueError) as exc:
+        # The docstring promises a malformed schema is skipped rather than
+        # crashing the server; `is_valid_schema` catches the structural
+        # cases, and this catches what it cannot see. One tool lost is a
+        # missing capability; the whole server down is 199 of them.
+        logger.warning("Skipping tool %r: its schema makes no valid signature (%s)",
+                       name, exc)
+        return None
+
     def _wrapper(**kwargs) -> str:
         # Drop unfilled optional args rather than passing literal Nones
         # through to the skill's own default handling.
@@ -130,7 +157,7 @@ def _build_tool_function(schema: dict):
 
     _wrapper.__name__ = name
     _wrapper.__doc__ = function_schema.get("description", "")
-    _wrapper.__signature__ = inspect.Signature(parameters)
+    _wrapper.__signature__ = signature
     return _wrapper
 
 
