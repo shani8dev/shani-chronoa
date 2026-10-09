@@ -3836,6 +3836,41 @@ contradicts it (at 1100px the overlay is not allocated over the header: header
 y=0..46, sidebar 0x0, toggle mapped) — it also failed against `window.py`
 unmodified.
 
+**`test_at_1280_both_columns_are_back` was not flaky — it tested a path no
+headless display can reach (2026-10-09).** It failed 5 of 5, and also with the
+whole session's work `git stash`ed, so it was pre-existing and unexplained.
+Measured rather than diagnosed:
+
+| display | allocated | rail | result |
+|---|---|---|---|
+| `broadway :96` | **1024x768** | hidden | fails |
+| the real X11 (`:0`) | 1280 | visible | **18 passed** |
+
+**Broadway caps windows at 1024x768 and the rail appears above 1040px**, so the
+wide-rail path sits sixteen pixels above what any broadway display can be — and
+at the 1024px actually achieved the rail *correctly* hides. The product was
+right on both; only the harness was wrong. `tests/test_now_rail.py` now picks the
+backend **before** `gi.repository.Gtk` is imported, because GDK chooses one at
+GTK init and no fixture can change it afterwards. With no wide display it
+**fails and names the number** — never a skip, since a green skip would leave
+the rail's entire wide path unasserted on every headless machine, which is where
+it is least exercised. It is `pytest.fail`, the same "a skip reads as coverage
+and is not" rule the sidebar test above turned on itself.
+
+**The rail's threshold was not lowered to 900 to make broadway satisfy it.**
+Measured: with `RailBreakpoint.apply`'s `max_width` at 900 the test *still*
+fails on broadway, because the allocation cap is what binds — so the wrong fix
+would have bought a failing test *and* a worse product constant.
+
+**My own probe was wrong first, and the failure looked like the product's.** The
+first version read `xdpyinfo`'s `dimensions: 1920x1080 pixels` as
+`int(line.split()[1])` — the whole token `1920x1080` — so `int()` raised, the
+`except` swallowed it, and the probe answered *"no display on this machine"*
+about a 1920px screen while taking **15.1 s**. Fixed to split on the `x`; the
+same probe returns `:0` in **0.1 s**. A probe that is always False is the same
+defect as a test that always skips, and here it read as a confident verdict
+about the product.
+
 Its settling step is a **fixed pump, deliberately not a convergence loop**:
 with animations on and no compositor the state after "show the panels" is
 correct while the column measures 0px, and that state is *stable* — so "wait

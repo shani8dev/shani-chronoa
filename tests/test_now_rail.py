@@ -4,11 +4,33 @@ Every section is asserted against a store written through the *real* writer -
 `timer.set_timer`, `undo_last_change.record_preimage`, a `todos.json` written
 the way the skill writes it - because a rail fed by hand-built JSON proves the
 renderer and not the wiring, and the wiring is where this can be wrong.
+
+**The display is chosen before GTK is imported, and that is load-bearing.**
+`TestTheWindowIsUsableWhenItIsNarrow` asks for a 1280px window, because the rail
+appears above 1040px (`rail.RailBreakpoint`). **Broadway caps windows at
+1024x768**, sixteen pixels under that threshold, so on a broadway display the
+wide-rail path is unreachable and `test_at_1280_both_columns_are_back` fails
+while the product is behaving correctly: at the 1024px actually achieved the
+rail *should* be hidden, and it is. Measured both ways on this machine:
+
+    broadway :96  -> allocated 1024x768, rail hidden  -> the test fails
+    the real X11  -> allocated 1280,    rail visible -> 18 passed
+
+GDK picks its backend the first time GTK initialises, so this cannot be switched
+inside a test - it has to be decided before `gi.repository.Gtk` is imported.
+Hence the block below rather than a fixture: a fixture runs after collection,
+which is already too late.
+
+The threshold was **not** lowered to fit a headless display's cap. A product
+constant changed to satisfy a harness is the same defect as a test changed to
+pass, and 1040 is what the rail's own docstring measures.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,6 +39,63 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
+
+
+def _wide_enough_x_display() -> str | None:
+    """An X display at least as wide as the rail's threshold, or None.
+
+    Asked of `xdpyinfo` - the display's own answer - rather than assuming
+    `DISPLAY` is set and usable. "The variable is set" and "the server can give
+    this window the width" are different questions, which is the mistake
+    `test_sense_idle.py`'s `DISPLAY=:0` guard made and paid for.
+    """
+    if os.environ.get("GDK_BACKEND") == "broadway":
+        return None
+    for number in range(4):
+        if not os.path.exists(f"/tmp/.X11-unix/X{number}"):
+            continue
+        display = f":{number}"
+        try:
+            out = subprocess.run(["xdpyinfo"], capture_output=True, text=True,
+                                 env={**os.environ, "DISPLAY": display},
+                                 timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode != 0:
+            continue
+        for line in out.stdout.splitlines():
+            if "dimensions:" not in line:
+                continue
+            # `xdpyinfo` prints `dimensions:    1920x1080 pixels`, so the token
+            # is the whole "1920x1080" - `int(line.split()[1])` raises and the
+            # probe silently answered "no display", which is how the first
+            # version of this reported a false negative on a 1920px screen and
+            # took 30 s doing it. Split on the separator, not the whitespace.
+            parts = line.split()
+            if len(parts) < 2:
+                break
+            raw = parts[1].split("x")[0]
+            try:
+                width = int(raw)
+            except ValueError:
+                break
+            # The rail's threshold is 1040; 1100 leaves room for the window
+            # manager's own idea of the usable area.
+            if width >= 1100:
+                return display
+            break
+    return None
+
+
+#: Decided **before** any `gi.repository.Gtk` import in this process. A
+#: module-scoped fixture would be too late - GDK has already chosen by then,
+#: which is why this looks like a global when it is really a one-time decision.
+_CHOSEN = _wide_enough_x_display()
+if _CHOSEN:
+    os.environ["DISPLAY"] = _CHOSEN
+    os.environ.pop("BROADWAY_DISPLAY", None)
+    os.environ.pop("GDK_BACKEND", None)
+    os.environ.pop("WAYLAND_DISPLAY", None)
 
 
 def _labels(widget) -> "list[str]":
@@ -257,7 +336,32 @@ class TestTheWindowIsUsableWhenItIsNarrow:
             pass
 
     def test_at_1280_both_columns_are_back(self):
+        """The wide layout, which is the one a headless display cannot reach.
+
+        A **failure** when no display here is 1040px wide, never a skip: a
+        green skip would leave the rail's entire wide path unasserted on every
+        headless machine, which is exactly where it is least exercised, and a
+        reader would have no way to tell it from coverage. The message names the
+        threshold so the cause is obvious from the failure line alone.
+
+        (`broadway` is 1024x768 and hard-capped there, so a headless run needs
+        an X server or a real display to test this. `Xvfb` is not installed on
+        this box, so it runs against the live X11 session.)
+        """
+        if not _wide_enough_x_display():
+            pytest.fail(
+                "no display on this machine is wide enough for the rail "
+                "(it appears above 1040px), so this asserts nothing. "
+                "broadway is capped at 1024x768 and cannot be widened; run this "
+                "against an X display, or install Xvfb. Failing rather than "
+                "skipping on purpose: a green skip here would leave the wide "
+                "layout untested everywhere that runs headless.")
         window = self._window("dev.shani.ChronoaWide", 1280)
+        achieved = window.get_width()
+        assert achieved >= 1100, (
+            f"asked for a 1280px window and the display gave {achieved}px - "
+            f"the rail cannot appear below 1040px, so this would pass for the "
+            f"wrong reason or fail for the wrong one")
         assert window._split.get_collapsed() is False
         assert window._rail.get_visible() is True
 
