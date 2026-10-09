@@ -72,6 +72,22 @@ def a_screen_capture_tool(tmp_path, monkeypatch):
     tool.write_text(f"#!/bin/sh\nexec cat '{bin_dir / 'image.png'}'\n")
     tool.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ.get('PATH', '')}")
+    # **And a display, because the tool is never reached without one.**
+    # `screengrab.capture_screen` calls `display_environment()` first and
+    # raises "there is no display to capture" when neither `WAYLAND_DISPLAY`
+    # nor `DISPLAY` is set - so on a headless runner the fake `grim` above is
+    # never executed and the two allow tests fail with *"no display"*, which
+    # is about the machine and not about permissions at all.
+    #
+    # This is why they were on the environmental list as *"no Wayland
+    # screen-capture tool"* when the actual cause was one level earlier and
+    # fixable here: supplying the *tool* does not supply the *display*.
+    #
+    # `WAYLAND_DISPLAY` first, because `display_environment()` prefers it -
+    # setting only `DISPLAY` on a Wayland desktop would make the code capture
+    # the XWayland root, which is the mistake that function's own docstring
+    # warns about, and it would do it in this test.
+    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-test")
 
 
 @pytest.fixture(autouse=True)
