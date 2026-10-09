@@ -2,7 +2,7 @@
 
 Local-first voice/text AI assistant, integrated into the Shanios desktop.
 
-> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 204
+> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 205
 > skills, grouped by what they are for, with each one's consent switch and
 > whether the assistant asks before running it. Generated from the same table
 > the Help window renders, so it cannot claim something the build does not have.
@@ -25,7 +25,7 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **204 callable
+  rather than just chatting about it. **205 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
@@ -340,7 +340,7 @@ A turn is audio → whisper.cpp transcribes → the local LLM generates a respon
 (possibly calling skills) → espeak-ng or Piper speaks the reply.
 
 **The tool loop is what the small model depends on, and it is measured.** All
-204 schemas sent with every request is ~35,000 tokens (~47,000 at
+205 schemas sent with every request is ~36,000 tokens (~48,000 at
 `local_llm.CHARS_PER_TOKEN`, the 3 the tree actually uses) — past the window of
 every hardware tier, so the request is rejected before the model reads a word.
 `tool_select` narrows the offer to what a request could plausibly use. Measured

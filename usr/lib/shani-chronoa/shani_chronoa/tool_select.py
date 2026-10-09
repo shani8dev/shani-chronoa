@@ -45,6 +45,17 @@ hey hi hello ok okay chronoa tell show give get let make want need like know""".
 
 #: Everyday words for what a tool does, where its own text uses others.
 _SYNONYMS: Dict[str, str] = {
+    # Keyboard shortcuts. The words people actually use for this are not the
+    # words the schema uses ("action"/"keys"), and without these the router
+    # answered `list_shortcuts` for "what does Super+Tab do" while routing
+    # "which keys are bound" and "what are my keyboard shortcuts" to
+    # `get_datetime` - the skill existing and unreachable for the plainest
+    # phrasing of its own question. Measured over six phrasings: 2 before.
+    "shortcut": "keyboard shortcuts", "shortcuts": "keyboard shortcuts",
+    "keybinding": "keyboard shortcuts", "keybindings": "keyboard shortcuts",
+    "hotkey": "keyboard shortcuts", "hotkeys": "keyboard shortcuts",
+    "bound to": "keyboard shortcuts", "what key": "keyboard shortcuts",
+    "which key": "keyboard shortcuts", "what does this key": "keyboard shortcuts",
     "weather": "weather", "forecast": "weather", "temperature": "weather",
     "rain": "weather", "umbrella": "weather", "hot": "weather", "cold": "weather",
     "where am i": "location", "where is this": "location", "gps": "location",

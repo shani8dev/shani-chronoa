@@ -357,6 +357,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "bluetooth_call": ("Devices", "Call through a paired phone, on this computer's speakers"),
     "set_mic_mute": ("Sound", "Mute or unmute the microphone input"),
     "set_keyboard_layout": ("Pointer and keyboard", "Change the keyboard layout"),
+    # Reads GNOME's two keybinding schemas rather than a copy of them, and says
+    # the scheme does not apply on a desktop that does not use it. A read, so
+    # ungated on the precedent of `list_windows` and `skill_machine`.
+    # Where this entry sits in the table does not affect CAPABILITIES.md: the
+    # generator sorts sections by descending skill count, then by name
+    # (`gen_capabilities.py:220`), not by the order groups are first named here.
+    # Adding the sixth entry does move "Pointer and keyboard" above "Imagine" in
+    # that file, and that is the sort doing its job rather than a stray row.
+    "list_shortcuts": ("Pointer and keyboard",
+                       "What the keyboard shortcuts on this machine are"),
     "lock_screen": ("Power and screen", "Lock this session"),
     "empty_trash": ("Files", "Permanently empty the desktop trash"),
     "search_documents": ("Files", "Search inside your files with the desktop's own index"),
@@ -953,6 +963,10 @@ READ_ONLY_TOOLS = frozenset({
     "list_apps", "list_directory", "find_files", "search_file_contents",
     "read_text_file", "open_file", "disk_usage", "system_info",
     "list_processes", "list_windows", "focus_window", "list_wifi_networks",
+    # Reads two GSettings schemas and writes nothing, so without this it ends
+    # every answer with "(unverified - this action reports success but nothing
+    # observed it)" - a hedge about a tool that cannot report success at all.
+    "list_shortcuts",
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**204 skills in 24 groups.** Each is a named, schema-typed module; the model
+**205 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**81 of 204 are consent-gated and 16 are destructive.**
+**81 of 205 are consent-gated and 16 are destructive.**
 
 ## Files
 
@@ -295,6 +295,19 @@ Launch, list and find applications.
 | `list_vms` | Virtual machines | — |
 | `open_application` | Open an app | — |
 
+## Pointer and keyboard
+
+Drive the desktop without the keyboard.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `click_pointer` | Click | needs `input-control-enabled` |
+| `list_shortcuts` | What the keyboard shortcuts on this machine are | — |
+| `move_pointer` | Move the pointer | needs `input-control-enabled` |
+| `set_keyboard_layout` | Change the keyboard layout | — |
+| `type_text` | Type text | needs `input-control-enabled` |
+| `ui_elements` | Press buttons, fill fields and open menus in other apps | needs `input-control-enabled` |
+
 ## Imagine
 
 Generate images, and change one by description.
@@ -306,18 +319,6 @@ Generate images, and change one by description.
 | `edit_image` | Resize, compress or edit a picture | — |
 | `edit_video` | Trim, resize, rotate, or mute a video | — |
 | `generate_image` | Make a new picture from a description, on this computer | — |
-
-## Pointer and keyboard
-
-Drive the desktop without the keyboard.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `click_pointer` | Click | needs `input-control-enabled` |
-| `move_pointer` | Move the pointer | needs `input-control-enabled` |
-| `set_keyboard_layout` | Change the keyboard layout | — |
-| `type_text` | Type text | needs `input-control-enabled` |
-| `ui_elements` | Press buttons, fill fields and open menus in other apps | needs `input-control-enabled` |
 
 ## Services and logs
 

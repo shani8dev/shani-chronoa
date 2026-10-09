@@ -2494,12 +2494,25 @@
           "tool": "whois_lookup"
         }
       ]
+    },
+    {
+      "id": "generated-list-shortcuts",
+      "say": "What does Super+Tab do on this machine?",
+      "note": "hand-worded over the generated case, which read as a capability label rather than something anyone would type. The *argument stays the generator's presence-only \"*\": a benchmark case that can only fail on an argument value measures the wording, not the routing",
+      "expect": [
+        {
+          "tool": "list_shortcuts",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 217,
-    "skills_asserted": 204,
-    "skills_total": 204,
+    "cases": 218,
+    "skills_asserted": 205,
+    "skills_total": 205,
     "note": "partial so far; not a claim that the other skills are unreachable",
     "gated_unguarded": 56
   }
