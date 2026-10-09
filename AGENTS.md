@@ -6356,3 +6356,39 @@ should not leave the file green.
 75 passed across the lab-network, netprovision, capabilities, gate,
 handler-importability, tool-outcome and labnetworks-sense suites; 35 more
 across packaging and package names.
+
+**`cli_matrix_v2.py` — deleted rather than merged (2026-10-09).** Asked to merge the
+two matrix scripts. `tools/cli_matrix_v2.py` (891 lines, added 2026-10-07 in the
+harvest2 commit and never referenced since) turned out not to be a version of
+`cli_matrix.py` but an abandoned fork with its own incompatible CLI, so there was
+nothing to merge *into* v1. Measured, not read:
+
+| question | answer |
+|---|---|
+| callers anywhere in the repo | **zero** — no test, no doc, no harness, no `shani-testbed` slot-test |
+| can it run today | **no** — its `main` requires `chronoa-matrix/chronoa-matrix.json` to already exist and prints *"No matrix JSON found"*; that directory only exists on a slot |
+| does it read Chronoa's registries | **no** — `SKILLS_DIR` is defined and never used; `discover_skills`/`ast.parse` appear 0 times against v1's 2 |
+| its own headline feature | `enhanced_intent_detection` is called **nowhere**, not even by its own `main` |
+| what v1 has that it lacks | `--check`, `--diff`, `--audit-packaging`, `--suggest`, `--scaffold`, `--enrich`, `--resolve-files`, `--package-report`; and it reads the real skill schemas, so its `open_surfaces` measures *calls* |
+
+**Five claims in its own docstring, and the two most interesting are false.** It
+advertises "cross-profile analysis to identify consistent missing functionality" —
+implemented nowhere in the file, while v1 has a real `audit_packaging` across the
+image profiles. And "more comprehensive intent classification" names a function with
+no caller.
+
+**Its regexes are corrupted, which is how this was found.** `INTENTS` and
+`CATEGORIES` have every alternative repeated two or three times — one 33-way
+alternation contains 22 duplicates (11 unique terms), e.g.
+`\bsearch\b|\blookfor\b|\bfind\b|...` with each word three times over. **`search`
+appears twice in `INTENTS`**, so the first entry can never match anything. That is
+not a stylistic complaint; a classifier whose first rule is unreachable and whose
+rules are triple-counted produces a confident coverage number derived from nothing,
+which is the exact failure this file's `--suggest` section warns about when it says
+`open_surfaces` measures calls, not answers.
+
+Removed with `git rm`. A fork nobody runs, that cannot start, that reads no
+registry, and whose only distinctive function is unreachable, is not a merge
+candidate — merging it would have put a second CLI and a second classifier into
+`tools/` for a reader to choose between, with no way to tell from the code which
+one produced a given number.
