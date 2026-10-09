@@ -474,11 +474,24 @@ class AudioRecorder:
         stdout = proc.stdout
         chunks: list = []
         detector: Optional[SilenceDetector] = None
+        #: Whether the child's pipe closed on us. Declared before the `try`,
+        #: because the calibration loop below can also see EOF - a child that
+        #: dies before it has produced four frames never reaches the `while`,
+        #: and the `finally` reads this. Initialising it inside the `try` (as
+        #: the first draft of this fix did) left that path raising `NameError`
+        #: in a `finally`, which replaces the real fault with a confusing one
+        #: and still reports the wrong verdict.
+        pipe_closed = False
         try:
             calib_frames = []
             for _ in range(_CALIBRATION_FRAMES):
                 chunk = stdout.read(_FRAME_BYTES) if stdout else b""
                 if not chunk:
+                    # A child that dies during calibration is the same fault as
+                    # one that dies mid-turn, and it is *more* likely to be the
+                    # cause rather than the effect: nothing about a four-frame
+                    # calibration takes long enough to lose a healthy pipe.
+                    pipe_closed = True
                     break
                 _SUPERVISOR.update_heartbeat(_CAPTURE_CHILD)
                 calib_frames.append(chunk)
@@ -507,6 +520,18 @@ class AudioRecorder:
                 if self._stop_epoch != boundary:
                     break
                 if not chunk:
+                    # **EOF is a fact about the child, so it is recorded before
+                    # the loop's own conditions get a chance to explain the end
+                    # away.** The `while` condition is re-checked *before* this
+                    # read, so a read that overshoots the deadline - which a
+                    # loaded machine makes ordinary - exits on the deadline and
+                    # the closed pipe is never seen at all. That is how a dead
+                    # `pw-record` came to be reported as a turn that "ended the
+                    # way it was meant to": the child was forgotten and its exit
+                    # status, the only evidence there was, went with it. Measured
+                    # on this machine as `tests/test_child_supervisor_live.py`
+                    # passing on an idle box and failing 4 of 5 runs under load.
+                    pipe_closed = True
                     break
                 # A frame arrived, so the child is demonstrably alive and streaming. This
                 # is the heartbeat the watchdog measures silence against, and it can only
@@ -539,7 +564,17 @@ class AudioRecorder:
             # erase the exit status at the same moment it becomes the only evidence,
             # and `pw-record` dying mid-turn is indistinguishable from a quiet room for
             # every other line of this module (`on_done(None)` either way).
-            if proc.poll() is None:
+            #
+            # **Decided by `pipe_closed`, not by `proc.poll()`.** `poll()` answers a
+            # different question - "has the child exited *by now*" - and on a loaded
+            # machine the loop's own `terminate()` a few lines below has usually not
+            # run yet when this is reached, so a dead child reads as alive and is
+            # forgotten, or a live one reads as dead and is kept forever. Both were
+            # reachable; the second turned every normal turn into a fault. What is
+            # actually being asked is "did the pipe close on us", which is what
+            # `pipe_closed` records, and it is recorded at the only moment the
+            # question can be answered.
+            if not pipe_closed:
                 _SUPERVISOR.forget_child(_CAPTURE_CHILD)
             if self._watchdog_stop is not None:
                 self._watchdog_stop.set()

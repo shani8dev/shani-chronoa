@@ -5779,6 +5779,24 @@ how a real defect sits for months in a suite nobody reads to the end. Measured: 
 `highpass(4, 300)` reported 1.6e-06 where the test asked for > 0.95, and the
 order-8 impulse response peaked at **8529** against a bound of 1000.
 
+**How live this was: not at all, and that is worth stating before the severity.**
+`grep` for callers first, as the Boundaries section says: `fmdsp.highpass()` and
+`butter_sos(..., "high")` have **no caller in `usr/`**. The only product consumer
+of this module is `skills/fm_radio.py`, and it uses exactly four of it —
+`dc_block`, `lowpass`, `measure_tone`, `resample` — all of which were already
+correct and still are. So nothing on a user's machine was receiving a silent
+audio output; what was broken was a **latent** filter, correct in shape but wrong
+in every number, sitting one call away from being used.
+
+The exception is the point. `dc_block`'s own docstring says it **replaced** a
+highpass Butterworth at the same cutoff for numerical reasons, so this was not
+shipped audio that happened to sound bad — it was a filter that had already been
+demoted, and the test kept pinning the mathematics. Had the caller count been
+checked first, the honest write-up is "fixed and unreachable", not "fixed a live
+defect". Recorded here because the repo's rule is the reverse of what I did: this
+pass found a 5-failure test file and reached for the loudest true statement about
+it before establishing whether anything depended on it.
+
 The cause was a comment:
 
 > *"The first version marked extra zeros with a (1 - z^-1)^2 numerator. That is
@@ -6019,3 +6037,74 @@ fixture says why.
   the same as looking at it, and this repo has two recorded instances of a width
   test passing against a row nobody could read.
 
+
+## `audio.py` mistook a dead microphone for a silent room — and only under load (2026-10-09)
+
+`test_child_supervisor_live.py` passed in isolation and **failed 4 of 5 runs**
+during the 330-file sweep. The instinctive reading is "a flaky timing test, make
+the timeout longer". It was not: it was a real defect, and the flake was the only
+thing that ever showed it.
+
+**The invariant.** A capture that ended the way it was meant to — silence, the
+deadline, the user pressing stop — terminates its own child, so it is not a fault
+and the child is forgotten. A child that **died on its own** is the fault and
+stays tracked, because forgetting it erases the exit status at the moment it is
+the only evidence there is: `pw-record` dying mid-turn is otherwise
+indistinguishable from a quiet room (`on_done(None)` either way).
+
+**The defect.** The `finally` decided this with `if proc.poll() is None`. Two
+things are wrong with that:
+
+- **The question is the wrong one.** `poll()` asks "has the child exited *by
+  now*", not "did it die, or did we stop it". What is needed is "did the pipe
+  close on us", which is only knowable at the instant the pipe closes.
+- **It is racy in the main loop.** The `while` condition is re-checked *before*
+  the blocking `stdout.read()`, so a read that overshoots the deadline — which a
+  loaded machine makes ordinary — exits on the deadline and the closed pipe is
+  never observed at all. The child is then classified as "ended the way it was
+  meant to", forgotten, and its exit status goes with it.
+
+`pipe_closed` now records it at the only moment the question can be answered, at
+**both** EOF sites, and the `finally` reads that. It is declared **before** the
+`try`, because the calibration loop can also see EOF — a child that dies before
+producing four frames never reaches the main loop — and initialising it inside the
+`try` (as the first attempt did) raised `NameError` inside a `finally`, replacing
+the real fault with a confusing one and still reporting the wrong verdict.
+
+**Four defects of my own here, and the two that mattered were both "fix the wrong
+thing":**
+
+- **My first fix moved the release to just after the callback**, reasoning that a
+  caller asking `capture_status()` from its callback must find the child tracked.
+  That is backwards for the clean-stop test, which asserts the opposite, and it
+  *also* could not work: `_release()` tests `proc.poll() is None` and the
+  `finally`'s `proc.terminate()` runs first, so it could never fire. Reverted; the
+  real fix was in the **reason**, not the **position**.
+- **That "fix" broke a second previously-passing test**, and the honest reading of
+  the conflict is that the two tests were describing a genuine ambiguity — not
+  that one of them should be edited to agree with me.
+- **A new test I wrote failed**, and the fault was the fixture: 40 silent frames
+  at 0.01 s is 0.4 s, more than the 0.16 s `silence_seconds`, so the *detector*
+  fired first and my "child dies mid-turn" test was the clean-stop test wearing a
+  different name. It now feeds loud frames only, so there is no silence to detect.
+- **The mutation that proved the fix was ambiguous.** Both EOF sites are the same
+  two lines of text, so the first attempt hit `anchor=2` and reported nothing —
+  the recorded "`str.replace` was a silent no-op" trap. Mutating by line number
+  found that **the mid-turn site is load-bearing and the calibration site is
+  not**, which turned out to be the real finding: printing `proc.poll()` at
+  calibration EOF shows **`None`**, because the child has closed its pipe but has
+  not been reaped, so the old check reached the same verdict *by coincidence of
+  scheduling*. One green test was covering a correct mechanism and hiding a
+  defective one in the other path — the same shape as the other four cases in this
+  file. Both sites are now pinned by their own test, and the calibration one is
+  documented as an **equivalent mutant** rather than left looking load-bearing.
+
+**Wall-clock budgets scale with load** (`_contention_scale()`, from
+`/proc/loadavg`, 1.0 idle and capped at 2.5×). This is about **false negatives
+only**: every use is a deadline on a wait that must *reach* a state before the
+assertions run, so a longer budget lets a slow machine finish and cannot make a
+real fault pass. Verified under **26× load on 8 cores**: 20 passed, where the
+file failed 4 of 5 before.
+
+224 passed, 14 skipped across the audio, capture, singing, DSP and packaging
+suites.

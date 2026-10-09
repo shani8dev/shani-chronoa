@@ -121,6 +121,33 @@ def _child(
     ]
 
 
+def _contention_scale() -> float:
+    """How much longer a wall-clock budget should be allowed to take, by load.
+
+    Read from `/proc/loadavg` where it exists and 1.0 where it does not, because
+    a missing file must not be the reason a live test starts failing. The scale
+    is deliberately bounded: an idle machine is unaffected, and a busy one gets
+    more room rather than an unbounded wait.
+
+    This is about **false negatives only**. Every use is a deadline on a wait
+    that has to reach a state before the assertions run, so a longer budget can
+    only let a genuinely slow machine finish — it cannot make a real fault pass,
+    because the state still has to be reached and the assertions after it are
+    unchanged.
+    """
+    try:
+        one_minute = os.getloadavg()[0]
+    except (OSError, AttributeError):
+        return 1.0
+    cores = os.cpu_count() or 1
+    per_core = one_minute / cores
+    # 1.0 at idle, ~2.5x at one runnable task per core, capped there.
+    return max(1.0, min(2.5, per_core))
+
+
+_CONTENTION_SCALE = _contention_scale()
+
+
 def _sleep(seconds: int = 60) -> subprocess.Popen:
     return _track(subprocess.Popen(["sleep", str(seconds)], stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL))
@@ -128,7 +155,7 @@ def _sleep(seconds: int = 60) -> subprocess.Popen:
 
 def _await(predicate, limit: float = 20.0) -> bool:
     """Wait for a background thread to reach a point, without asserting inside a spin."""
-    deadline = time.monotonic() + limit
+    deadline = time.monotonic() + limit * _CONTENTION_SCALE
     while time.monotonic() < deadline:
         if predicate():
             return True
@@ -150,7 +177,23 @@ def _await_state(probe, expected: ChildState, limit: float = 20.0):
     Returning the last status seen rather than a bool is deliberate: a timed-out wait
     has to be able to say what the state *was*, or the failure reads as "timed out"
     instead of "it stayed healthy the whole time", which are opposite problems.
+
+    **`limit` is wall-clock, so it is contention-sensitive, and it is scaled here.**
+    The budget this waits for is `stall_after=0.3` seconds of a *real* sleeping
+    child, but the wait itself burns real time on a machine that may be busy. That
+    is not hypothetical: measured on this machine, this file passed 9 runs in a row
+    on an idle box and failed 4 of 5 while a 330-file test sweep was saturating all
+    8 cores - the 20 s was consumed by scheduling delay rather than by the
+    behaviour under test, and the failure then reads as "the supervisor did not
+    notice a hung child", which is the opposite of what happened.
+
+    The scaling is on load, so a loaded machine gets proportionally longer and an
+    idle one is not made slower than it needs to be. It does not weaken the
+    assertion: `hung` must still *reach* `DISCONNECTED` (the loop below keeps
+    polling, so a longer budget only removes false negatives), and the age and
+    exit-status assertions after it are unaffected.
     """
+    limit *= _CONTENTION_SCALE
     deadline = time.monotonic() + limit
     seen = None
     while time.monotonic() < deadline:
@@ -366,6 +409,105 @@ class TestACaptureChildIsSupervised:
             "a capture that heard nothing must finalise as None; anything else would be "
             "a transcript of a dead pipe"
         )
+
+    def test_a_child_that_dies_mid_turn_keeps_its_exit_status(self, streaming):
+        """The **main-loop** EOF site, which nothing else reaches.
+
+        The two tests either side of this one cover the two ends of the
+        invariant, and between them they cover only one EOF site each:
+
+        - `test_a_capture_child_that_dies_is_reported_with_its_real_status` feeds
+          **three** silent frames, fewer than the four `_CALIBRATION_FRAMES`
+          needs, so it breaks out of the *calibration* loop;
+        - `test_a_capture_that_ends_the_way_it_should_is_not_reported_as_a_fault`
+          feeds eight, so it calibrates and then stops on *silence* in the main
+          loop - never seeing a pipe close.
+
+        So the main loop's own EOF branch had no test, and mutating it away left
+        the file green (measured, both sites: 3 passed). That branch is the one
+        a real `pw-record` dying mid-turn takes, so this feeds enough frames to
+        calibrate and then closes the pipe - which is the one scenario where a
+        dead child is indistinguishable from a silent room by every other signal
+        in the module, and the reason `pipe_closed` is recorded rather than
+        inferred from `proc.poll()`.
+
+        The control is the assertion that it is this site and not the calibration
+        one: 60 loud frames is well past `_CALIBRATION_FRAMES`, so the loop below
+        is running when the pipe closes. `assert delivered` additionally rules
+        out the deadline (`max_seconds=20.0` against a 0.6 s child).
+
+        **Why the two EOF sites are not symmetric, measured rather than argued.**
+        Mutating the calibration site's `pipe_closed` leaves this file green; the
+        mid-turn one above fails. The reason is visible only by printing: at
+        calibration EOF `proc.poll()` is still **`None`**, because the child has
+        closed its pipe but not yet been reaped, whereas after the main loop has
+        been reading frames the child has usually exited and `poll()` reports it.
+        So the old `proc.poll()` check was accidentally correct at calibration and
+        racy in the main loop - one green test hid a real defect behind a
+        coincidence of scheduling, which is the same shape as the four other cases
+        in this file where a correct mechanism was never exercised.
+        """
+        recorder, queue = streaming
+        delivered: list = []
+        # Loud frames only, and enough of them to clear calibration and set
+        # `heard_speech`, with **no** trailing silence. Silence is the trap here:
+        # the first version appended 40 silent frames, which is 0.4 s at a 0.01 s
+        # interval and therefore more than the 0.16 s `silence_seconds`, so the
+        # detector fired first and this was the clean-stop test again with a
+        # different name. For the pipe to close before silence does, there has to
+        # be no silence to detect - the child just stops, mid-speech.
+        queue.append(_child(amplitudes=",".join(["9000"] * 60), interval=0.01,
+                            ending="exit", status=9))
+        assert recorder.start_auto_stop(delivered.append, max_seconds=20.0,
+                                        silence_seconds=0.16)
+        assert _await(lambda: delivered), "the capture never finished"
+        status = recorder.capture_status()
+        assert status is not None and status.exit_status == 9, (
+            "a child that died after calibration was treated as a turn that ended "
+            f"the way it was meant to, so the only evidence - its exit status - "
+            f"was discarded; capture_status() is {status}")
+
+    def test_a_child_that_dies_during_calibration_keeps_its_exit_status(self,
+                                                                         streaming):
+        """The **calibration** EOF site, pinned on its own.
+
+        Recorded separately because it was independently unprotected: with only
+        the mid-turn test above, mutating the calibration site's `pipe_closed`
+        left the file green (measured - 4 passed). The reason is that this is the
+        *only* scenario that reaches it - a child with fewer than
+        `_CALIBRATION_FRAMES` frames never enters the main loop - so nothing else
+        can witness it.
+
+        Fewer frames than calibration needs, and loud ones, so the failure cannot
+        be mistaken for a silent room: a dead child during calibration is the same
+        fault as one dying mid-turn and is *more* likely to be its cause, since
+        nothing about reading four frames takes long enough to lose a healthy
+        pipe.
+
+        **An equivalent mutant, recorded rather than chased.** Dropping *this*
+        site's `pipe_closed` leaves the file green, and that is not a gap in the
+        fix: at calibration EOF `proc.poll()` is still `None` (the child has closed
+        its pipe but has not been reaped yet), so the old `proc.poll()` check
+        reached the same verdict by coincidence of scheduling. The mid-turn test
+        above is the one that has to fail, and it does. Kept because if the
+        reaping order ever changes - `poll()` reporting non-`None` here - this is
+        the test that notices.
+        """
+        recorder, queue = streaming
+        delivered: list = []
+        frames = audio_mod._CALIBRATION_FRAMES - 1
+        assert frames < audio_mod._CALIBRATION_FRAMES, (
+            "the fixture must be short of calibration, or this is not the "
+            "calibration path")
+        queue.append(_child(amplitudes=",".join(["9000"] * frames), interval=0.01,
+                            ending="exit", status=4))
+        assert recorder.start_auto_stop(delivered.append, max_seconds=20.0,
+                                        silence_seconds=0.16)
+        assert _await(lambda: delivered), "the capture never finished"
+        status = recorder.capture_status()
+        assert status is not None and status.exit_status == 4, (
+            "a child that died before the noise floor could be calibrated was "
+            f"reported as a turn that ended cleanly; capture_status() is {status}")
 
     def test_a_capture_that_ends_the_way_it_should_is_not_reported_as_a_fault(self, streaming):
         recorder, queue = streaming
