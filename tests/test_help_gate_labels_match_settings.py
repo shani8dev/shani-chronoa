@@ -23,12 +23,12 @@ table loses an entry, so neither a missing row nor a reworded label passes.
 """
 
 import os
+import pytest
 import pathlib
 import subprocess
 import sys
 import textwrap
 
-import pytest
 
 _HARNESS = textwrap.dedent(
     """
@@ -67,6 +67,28 @@ _HARNESS = textwrap.dedent(
     print("RESULT" + json.dumps(out))
     """
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _a_window_needs_a_window():
+    """Skip before `row_titles` builds one, not after it raised.
+
+    `tests/conftest.py` guards this file two ways: an autouse function fixture
+    and a `pytest_ignore_collect` hook. **The hook does not fire for a file named
+    directly on the pytest command line** - verified, and it is why three
+    `ERROR at setup of test_...` remained after the hook was added. An error at
+    setup is the same absence reported as a failure, which is what all of this
+    was for: the harness could not open a display, said nothing, and three tests
+    were blamed on the product.
+
+    Module-scoped because it has to be: `row_titles` is module-scoped, so a
+    function-scoped guard is set up *after* it has already raised.
+    """
+    from tests.conftest import _has_display_backend
+
+    if not _has_display_backend():
+        pytest.skip("no display backend, so the Help window this file checks "
+                    "against the settings window cannot be built")
 
 
 @pytest.fixture(scope="module")
