@@ -535,6 +535,11 @@ _PACKAGE_HINTS = {
     "lsblk": "util-linux",
     "rfkill": "util-linux",
     "gsettings": "glib2",
+    # From the matrix's own `commands[].package`, i.e. pacman's file database.
+    # Without it `tool_missing` prints the literal "it comes from the 'the
+    # package that provides it' package" - a sentence that helps nobody install
+    # anything, and this skill's whole refusal path goes through it.
+    "fprintd-list": "fprintd", "fprintd-verify": "fprintd",
     "gdbus": "glib2",
     "notify-send": "libnotify",
     "upower": "upower",

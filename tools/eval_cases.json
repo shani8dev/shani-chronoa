@@ -2517,12 +2517,22 @@
           "tool": "scheduled_tasks"
         }
       ]
+    },
+    {
+      "id": "generated-fingerprint-status",
+      "say": "Is fingerprint login set up on this machine?",
+      "note": "hand-worded over the generated case, which read as a capability label; the argument stays presence-only so the case can only fail on routing",
+      "expect": [
+        {
+          "tool": "fingerprint_status"
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 219,
-    "skills_asserted": 206,
-    "skills_total": 206,
+    "cases": 220,
+    "skills_asserted": 207,
+    "skills_total": 207,
     "note": "partial so far; not a claim that the other skills are unreachable",
     "gated_unguarded": 56
   }

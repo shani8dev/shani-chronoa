@@ -371,6 +371,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # because a machine can have any one and none of the others.
     "scheduled_tasks": ("System",
                         "What is scheduled to run: cron jobs and systemd timers"),
+    # Reads fprintd's database and nothing else: `fprintd-enroll` and
+    # `fprintd-delete` are in the same package and deliberately not reachable.
+    "fingerprint_status": ("Privacy controls",
+                           "Whether fingerprint login is set up, and which fingers"),
     "lock_screen": ("Power and screen", "Lock this session"),
     "empty_trash": ("Files", "Permanently empty the desktop trash"),
     "search_documents": ("Files", "Search inside your files with the desktop's own index"),
@@ -976,6 +980,9 @@ READ_ONLY_TOOLS = frozenset({
     # versa, so the three sources are reported separately rather than merged
     # into one number that would be wrong half the time.
     "scheduled_tasks",
+    # Reads the enrolled-fingerprint list; enrolls and deletes nothing, so it
+    # has no post-condition to verify and no reason to withhold the answer.
+    "fingerprint_status",
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",

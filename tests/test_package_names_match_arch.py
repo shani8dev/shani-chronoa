@@ -133,6 +133,10 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # matrix skills (distrobox, virsh, fc-list/fc-match, boltctl).
         "distrobox", "libvirt", "fontconfig", "bolt",
         "libnfc",
+        # Read out of the matrix's `commands[].package` on the GNOME image,
+        # which is pacman's own file database rather than a guess: fprintd ships
+        # /usr/bin/fprintd-{list,verify,enroll,delete}.
+        "fprintd",
         # Verified 2026-10-08 against the Arch package API: `rtl-sdr 2.0.3-1`,
         # `extra`, and its file list has `usr/bin/rtl_fm`.
         "rtl-sdr",

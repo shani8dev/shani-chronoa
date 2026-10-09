@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**206 skills in 24 groups.** Each is a named, schema-typed module; the model
+**207 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**81 of 206 are consent-gated and 16 are destructive.**
+**81 of 207 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -379,6 +379,15 @@ Choose, measure and rebuild the local models.
 | `install_model` | Download a model | — |
 | `recommend_model` | What model fits this machine | — |
 
+## Privacy controls
+
+Turn the disclosure switches.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `fingerprint_status` | Whether fingerprint login is set up, and which fingers | — |
+| `set_privacy` | Mute the microphone, disable a camera, or blank the screen | — |
+
 ## Languages
 
 Translate, spell and read text.
@@ -386,14 +395,6 @@ Translate, spell and read text.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `translate_text` | Translate text | — |
-
-## Privacy controls
-
-Turn the disclosure switches.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `set_privacy` | Mute the microphone, disable a camera, or blank the screen | — |
 
 ## Screen
 
