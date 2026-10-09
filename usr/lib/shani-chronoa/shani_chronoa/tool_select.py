@@ -425,26 +425,56 @@ _SMALL_TALK = re.compile(r"\b(?:tell|say|write|make up|give)\b[^.?!]{0,20}\b(?:j
 #: amount of description trimming reaches them, because the tools were sent at
 #: all. The answer is fewer tools, and on these turns the smallest honest set:
 #: ask back, and nothing else to press.
+#: Arithmetic, kept out of `CONVERSATIONAL` because it is a task even when it is
+#: phrased as a question: "what is two plus two" sent only `ask_user`, so
+#: `calculate` was never on offer.
+#:
+#: **A bare number word is not arithmetic.** An earlier version listed `two` on
+#: its own, so "explain what a black hole is in two sentences" was read as a sum,
+#: offered `web_search`, and the one remaining miss in the 68-case eval was a
+#: *length instruction*. A number word only means arithmetic beside an operator
+#: ("in two sentences", "in three bullet points" and "give me five ideas" are all
+#: requests to be answered in prose), so each shape below names its operator.
+#:
+#: It is a separate compiled pattern rather than more concatenated fragments
+#: because hand-balancing parentheses across string literals is exactly how the
+#: first attempt at this arrived as an `unbalanced parenthesis` at import - a
+#: module that cannot be imported at all, which no caller would report as
+#: "arithmetic is mis-detected".
+_NUMBERS = r"(?:two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million)"
+_OPERATORS = r"(?:plus|minus|times|divided|multiplied|over|by)"
+#: A fraction has no operator at all ("two thirds of six"), so it needs its own.
+_FRACTIONS = r"(?:thirds?|quarters?|halves|halfs?|eighths?|sixths?|twelfths?)"
+
+ARITHMETIC = re.compile(
+    rf"\d\s*(?:[-+*/x×÷%]|\b(?:plus|minus|times|divided|multiplied|over)\b)\s*\d"
+    rf"|\b{_NUMBERS}\s+\b{_OPERATORS}\b"
+    rf"|\b(?:two|three|four|five|six|seven|eight|nine|ten)\s+{_FRACTIONS}\b"
+    rf"|\b(?:plus|minus|times|divided|multiplied|percent|squared|cubed|root|"
+    rf"factorial)\b"
+    rf"|\d",
+    re.I)
+
 CONVERSATIONAL = re.compile(
     r"^\s*(?:thanks?|thank you|cheers|ok(?:ay)?|cool|nice|great|perfect|got it|"
     r"understood|hi|hey|hello|good (?:morning|afternoon|evening|night)|bye|goodbye|"
     r"yes|no|sure)\b[\s!.?]*$"
     r"|^\s*(?:what can you do|who are you|what are you|help)\s*\??\s*$"
     r"|^\s*(?:explain|describe|what is|what are|how does|why (?:is|do|does))\s+"
-    r"(?:a |an |the )?(?!.*\b(?:file|folder|window|app|setting|image|photo|pdf|"
+    r"(?:a |an |the )?"
+    # A request naming one of these is about the machine, not a question to
+    # answer in words.
+    r"(?!.*\b(?:file|folder|window|app|setting|image|photo|pdf|"
     r"document|this computer|my |weather|forecast|temperature|time|clock|"
     r"timer|alarm|date|calendar|volume|battery|network|wifi|bluetooth|"
-    r"music|note|song|call|message|email)\b)"
-    # Arithmetic is a task even when it is phrased as a question: "what is two
-    # plus two" sent only `ask_user`, so `calculate` was never on offer.
-    r"(?!.*(?:\d|\b(?:plus|minus|times|divided|multiplied|percent|squared|cubed|"
-    r"root|factorial|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million)\b))",
+    r"music|note|song|call|message|email)\b)",
     re.I)
 
 
 def wants_a_conversation(request: str) -> bool:
     """Is this a turn to reply to rather than a task to call a tool for?"""
-    return bool(CONVERSATIONAL.search(request or ""))
+    text = request or ""
+    return bool(CONVERSATIONAL.search(text)) and not ARITHMETIC.search(text)
 
 
 def wants_a_browser(request: str) -> bool:

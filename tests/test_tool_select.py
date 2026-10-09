@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from shani_chronoa.tool_select import CORE, select_tools
+from shani_chronoa.tool_select import ARITHMETIC, CORE, select_tools, wants_a_conversation
 from shani_chronoa.tools import TOOLS
 
 
@@ -64,3 +64,50 @@ def test_a_tool_used_this_turn_stays_sent():
 
 def test_selection_never_invents_a_tool():
     assert _names(select_tools("anything at all", TOOLS)) <= _names(TOOLS)
+
+
+# --- a turn to answer versus a task to call a tool for ------------------------
+#
+# Both halves are here because each was measured wrong at least once.
+# `chat-explain` was the last miss in the 68-case eval (tools/task_eval.py
+# --configs select, 67/68), and it was not the model: the request never got
+# the chance to be a chat turn, because "in TWO SENTENCES" read as a sum.
+
+
+@pytest.mark.parametrize("request_", [
+    "explain what a black hole is in two sentences",
+    "explain gravity",
+    "describe a black hole",
+    "what is a black hole",
+    "why is the sky blue",
+    "explain it in three bullet points",
+])
+def test_a_question_is_answered_rather_than_looked_up(request_):
+    assert wants_a_conversation(request_), request_
+
+
+@pytest.mark.parametrize("request_", [
+    # a number word beside an operator, or in a fraction, is arithmetic
+    "what is two plus two",
+    "what is 17 times 23",
+    "what is 15% of 2400",
+    "what is two thirds of six",
+    "what is three quarters of 12",
+    # and a machine noun is a task even though it is phrased as a question
+    "what is the time",
+    "what is the weather in mumbai",
+    "set a timer for 5 minutes",
+])
+def test_arithmetic_and_machine_questions_are_tasks(request_):
+    assert not wants_a_conversation(request_), request_
+
+
+def test_a_bare_number_word_is_a_length_instruction_not_a_sum():
+    """The specific defect, so the operator-less form cannot come back.
+
+    Asserted as the pair rather than one case: a test that only says "two
+    sentences is not arithmetic" passes just as happily if the matcher has
+    stopped recognising arithmetic at all.
+    """
+    assert not ARITHMETIC.search("explain it in two sentences")
+    assert ARITHMETIC.search("what is two plus two")
