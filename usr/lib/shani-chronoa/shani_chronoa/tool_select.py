@@ -27,8 +27,15 @@ from typing import Dict, Iterable, List, Optional, Set
 #: How many scored tools to send, besides the core and the ones in use.
 DEFAULT_LIMIT = 8
 
-#: Always sent: asking back, the time, the web, and "what can you do".
-CORE = ("ask_user", "get_datetime", "web_search", "list_capabilities")
+#: Always sent: asking back, the time, and the web.
+#:
+#: `list_capabilities` used to be in here too, and the tool-selection eval
+#: (2026-10-09, Qwen3-1.7B, 67 cases) showed exactly what an unconditional floor
+#: costs: on "thanks!" the model called it. A small model handed a tool list
+#: treats every turn as an instruction to use one, so each unconditional member
+#: is a tool it may reach for when the right answer is to just reply. It is a
+#: fine tool and it ranks on merit - it just must not be free.
+CORE = ("ask_user", "get_datetime", "web_search")
 
 _STOP = set("""a an the is are was were be been am i me my you your it its this that these those
 to of in on at for from by with and or but if then so as do does did can could would should
@@ -68,6 +75,9 @@ _SYNONYMS: Dict[str, str] = {
     "password": "password", "passphrase": "password", "ip address": "ip address", "my ip": "ip address",
     "do not disturb": "do not disturb notifications", "silence notifications": "do not disturb",
     "pdf": "read document pdf", "read this": "read document", "convert to": "convert media",
+    # folder <-> directory: measured 2026-10-08, "what's in my Downloads folder?"
+    # matched nothing real, and twelve noise tools were offered instead.
+    "folder": "directory list", "folders": "directory list",
     "mp3": "convert media", "video": "convert media video", "gif": "convert media",
     "shut down": "power shutdown", "shutdown": "power shutdown", "restart": "power restart",
     "reboot": "power restart", "sleep": "power suspend", "suspend": "power suspend",
@@ -81,7 +91,11 @@ _SYNONYMS: Dict[str, str] = {
     "rgb": "colour", "emoji": "emoji", "symbol": "emoji symbol", "calendar": "calendar month",
     "stopwatch": "stopwatch", "lap": "stopwatch", "clean up": "cleanup", "free space": "cleanup",
     "free up": "cleanup", "headphones": "bluetooth devices connect", "earbuds": "bluetooth devices connect",
-    "speaker": "bluetooth devices", "vpn": "vpn", "tailscale": "tailscale", "install": "install app",
+    "speaker": "bluetooth devices", "find my watch": "find device", "where is my watch": "find device",
+    "find my band": "find device", "lost my watch": "find device",
+    "steps": "watch", "how far did i walk": "watch", "sleep last night": "watch", "how did i sleep": "watch",
+    "spo2": "watch measure", "blood oxygen": "watch measure", "blood pressure": "watch measure",
+    "stress": "watch", "workout": "watch", "my watch": "watch", "vpn": "vpn", "tailscale": "tailscale", "install": "install app",
     "uninstall": "install app remove", "flathub": "install app",
     "sunset": "weather", "sunrise": "weather", "humid": "weather", "wind": "weather",
     "route": "web search", "train": "web search", "flight": "web search",
@@ -153,6 +167,20 @@ def _tool_text(tool: dict) -> "tuple[List[str], List[str]]":
         if isinstance(prop, dict):
             body += " " + str(prop.get("description", ""))
     return name, _words(body)
+
+
+def _tool_options(tool: dict) -> "set":
+    """The words of a tool's enum values: `subtitles`, `blur_faces` -> blur, faces.
+
+    The most precise words a request can contain - "make subtitles", "blur the
+    faces" - are often a tool's literal option values, and they were not read at
+    all: the small model picked `read_video` and `edit_image` instead (2026-10-08).
+    """
+    words = set()
+    for prop in (tool.get("function", {}).get("parameters", {}).get("properties", {}) or {}).values():
+        for value in (prop.get("enum") or []) if isinstance(prop, dict) else []:
+            words.update(_words(str(value)))
+    return words
 
 
 def _name(tool: dict) -> str:
@@ -253,7 +281,19 @@ def ranked(request: str, tools: Iterable[dict],
     query = set(_query_words(request))
     if not query:
         return []
+    # Option values count only when the person said the word: a synonym's
+    # expansion ("travel" -> "web search") hit `search`, an option of three
+    # unrelated tools, and inflated a travel question by 550 tokens.
+    said = set(_words(request or ""))
     texts = [_tool_text(t) for t in tools]
+    options = [_tool_options(t) for t in tools]
+    # Only distinctive option words count: "subtitles" is one tool's option,
+    # "from" or "press" are many tools' - those pulled 874-token `browse` into
+    # "press the enter key" and photos/install_app into a travel question.
+    option_df: Dict[str, int] = {}
+    for opts in options:
+        for w in opts:
+            option_df[w] = option_df.get(w, 0) + 1
     # rarer words say more: idf over the tools' own text
     df: Dict[str, int] = {}
     for name, body in texts:
@@ -261,13 +301,15 @@ def ranked(request: str, tools: Iterable[dict],
             df[w] = df.get(w, 0) + 1
     n = len(tools)
     scored = []
-    for tool, (name, body) in zip(tools, texts):
+    for tool, (name, body), opts in zip(tools, texts, options):
         score, name_hits = 0.0, 0
         for w in query:
             idf = math.log(1 + n / (1 + df.get(w, 0)))
             if w in name:
                 score += 3 * idf
                 name_hits += 1
+            elif w in opts and w in said and option_df.get(w, 0) <= 3:
+                score += 2 * idf
             elif w in body:
                 score += idf
         if score > 0:
@@ -290,6 +332,12 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     """The schemas to send for `request`, in the order `tools` lists them."""
     tools = list(tools)
     keep: Set[str] = set(CORE) | set(in_use or ())
+    # A turn that is conversation gets the smallest honest set: there is nothing
+    # to call, and sending eight tools to "thanks!" is what produced two of the
+    # five eval misses (2026-10-09). `in_use` still wins, so a turn mid-task is
+    # never starved of the tool it is already using.
+    if wants_a_conversation(request):
+        return [t for t in tools if _name(t) in {"ask_user"} | set(in_use or ())]
     scored = ranked(request, tools)
     # a tool matching only a generic word ("set", "file") beside a strong
     # match is noise that costs tokens
@@ -301,7 +349,114 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # that is not already in `tools`, so this widens what is *sent*, never what
     # may be *run* - which is the guarantee this function already makes.
     keep |= set(distilled(request, tools))
+    held = set(in_use or ())
+    lowered = (request or "").lower()
+    keep -= {name for name, cue in _CUES.items() if name not in held and not cue.search(lowered)}
+    # `browse` is ~850 tokens; it comes in through `wants_a_browser` below, never
+    # through a stray verb that happens to be one of its actions.
+    if "browse" not in held:
+        keep.discard("browse")
+    if _SMALL_TALK.search(lowered):
+        keep -= {"web_search"} - held
+    # "the file manager" is an app, not a file: at temperature 0 Qwen3-1.7B
+    # opened an invented path with `open_file` every time (2026-10-08).
+    if _FILES_APP.search(lowered):
+        keep -= {"open_file"} - held
+    if wants_a_browser(request):
+        keep.add("browse")
+        if not _FILE_OR_APP.search(request or ""):
+            keep -= _DISPLACED_BY_A_SITE - set(in_use or ())
     return [t for t in tools if _name(t) in keep]
+
+
+_TLDS = r"(?:com|org|net|io|dev|in|co|ai|app|uk|de|edu|gov)"
+#: A website, written or SAID: "blazedemo.com", and "blaze demo dot com" (what a
+#: transcript of speech gives), or a plain "website" / "web page" / "online".
+_SITE = re.compile(r"https?://|\bwww\.|\b[a-z0-9-]+\." + _TLDS + r"\b|\bdot " + _TLDS + r"\b"
+                   r"|\bweb ?sites?\b|\bweb ?pages?\b|\bonline\b", re.I)
+#: Tools that a website request drew in only through a generic verb ("open the
+#: site", "find the cheapest flight") - each a wrong first move a small model
+#: can make. Measured 2026-10-08: offered all of these and not `browse`,
+#: Qwen3-1.7B opened the desktop browser with `open_application`.
+_DISPLACED_BY_A_SITE = frozenset({
+    "open_application", "open_file", "find_files", "find_and_replace", "find_recently_modified",
+    "search_file_contents", "search_documents", "directory_tree", "json_query", "find_emoji"})
+#: Words that mean the request really is about files or an app, so nothing is displaced.
+_FILE_OR_APP = re.compile(r"\b(file|files|folder|folders|directory|document|documents|pdf|download(?:s|ed)?|"
+                          r"desktop|app|application|program)\b|~/|/home/", re.I)
+_ACT_ON_A_PAGE = re.compile(r"\b(book|booking|fill (?:in|out)|sign (?:in|up)|log ?in|checkout|check out|"
+                            r"add to cart|order|purchase|buy|submit|click|reserve)\b", re.I)
+
+
+#: Tools offered only when the request carries their cue. Each one was offered
+#: on a generic word and taken by a small model when it should not have been
+#: (measured 2026-10-08, Qwen3-1.7B): `default_apps` for "open firefox" (which
+#: would have changed the default browser), `get_world_time` with an invented
+#: city for "what time is it?", `explain_command` for "explain what a black hole
+#: is", `android_device` for "what's in my Downloads folder?". The rest were
+#: offered as noise in the same runs.
+_CUES = {name: re.compile(cue) for name, cue in {
+    "default_apps": r"\bdefault",
+    "get_world_time": r"\btime\b.*\b(?:in|at|for)\s+[a-z]{3,}|\b(?:in|at)\s+[a-z]{3,}\b.*\btime\b|time ?zones?"
+                      r"|\bworld (?:time|clock)",
+    "explain_command": r"`|\bcommand|\bshell\b|\bterminal\b|\bflags?\b|(?:^|\s)-{1,2}[a-z]|\b(?:sudo|ls|grep|awk|sed|chmod|"
+                       r"chown|tar|curl|wget|git|ssh|rsync|systemctl|journalctl|pacman|apt|dd|ps|kill|df|du|mount)\b",
+    "set_scaling": r"\bscal|\btext size|\bfont size|\bzoom|\bbigger|\bsmaller|\bhidpi|\bresolution",
+    "android_device": r"\bandroid\b|\badb\b|\bphone\b|\bmobile\b|\btablet\b",
+    "install_model": r"\bmodels?\b|\bllm\b|\bqwen|\bllama|\bai\b",
+    "recommend_model": r"\bmodels?\b|\bllm\b|\bqwen|\bllama|\bai\b",
+    "speed_test": r"\bspeed|\bbandwidth|\bslow|\bfast|\bmbps|\binternet",
+    "compute_hash": r"\bhash|\bchecksum|\bsha|\bmd5|\bverif|\bintegrity",
+    "undo_last_change": r"\bundo|\brevert|\bput (?:it )?back|\brestore",
+}.items()}
+
+_FILES_APP = re.compile(r"\bfiles? (?:manager|browser|explorer|app)\b|\bnautilus\b|\bdolphin\b")
+
+#: Asking for a joke, a story or a poem is a request for words, not a search.
+#: `web_search` is otherwise offered on every turn, and a small model called it
+#: for "tell me a joke" (2026-10-08). Factual questions keep it.
+_SMALL_TALK = re.compile(r"\b(?:tell|say|write|make up|give)\b[^.?!]{0,20}\b(?:joke|story|poem|haiku|riddle|"
+                         r"limerick|pun|bedtime story)s?\b")
+
+
+#: Turns that are conversation, not a task: greetings, thanks, and "explain X"
+#: where X is general knowledge. Both eval misses were this shape - "thanks!"
+#: called `list_capabilities`, "explain gravity" called `web_search` - and no
+#: amount of description trimming reaches them, because the tools were sent at
+#: all. The answer is fewer tools, and on these turns the smallest honest set:
+#: ask back, and nothing else to press.
+CONVERSATIONAL = re.compile(
+    r"^\s*(?:thanks?|thank you|cheers|ok(?:ay)?|cool|nice|great|perfect|got it|"
+    r"understood|hi|hey|hello|good (?:morning|afternoon|evening|night)|bye|goodbye|"
+    r"yes|no|sure)\b[\s!.?]*$"
+    r"|^\s*(?:what can you do|who are you|what are you|help)\s*\??\s*$"
+    r"|^\s*(?:explain|describe|what is|what are|how does|why (?:is|do|does))\s+"
+    r"(?:a |an |the )?(?!.*\b(?:file|folder|window|app|setting|image|photo|pdf|"
+    r"document|this computer|my |weather|forecast|temperature|time|clock|"
+    r"timer|alarm|date|calendar|volume|battery|network|wifi|bluetooth|"
+    r"music|note|song|call|message|email)\b)"
+    # Arithmetic is a task even when it is phrased as a question: "what is two
+    # plus two" sent only `ask_user`, so `calculate` was never on offer.
+    r"(?!.*(?:\d|\b(?:plus|minus|times|divided|multiplied|percent|squared|cubed|"
+    r"root|factorial|two|three|four|five|six|seven|eight|nine|ten|hundred|thousand|million)\b))",
+    re.I)
+
+
+def wants_a_conversation(request: str) -> bool:
+    """Is this a turn to reply to rather than a task to call a tool for?"""
+    return bool(CONVERSATIONAL.search(request or ""))
+
+
+def wants_a_browser(request: str) -> bool:
+    """Whether the request names a website or asks for something done on one.
+
+    The word matcher scores tools by shared words, and "book the cheapest flight
+    on blazedemo.com" shares none with `browse` - measured 2026-10-08 in the real
+    app, the model was never offered it and tried to book with `web_search`,
+    which can only fetch a page. A site and an action on a page are the signal.
+    """
+    text = request or ""
+    return bool(_SITE.search(text) or _ACT_ON_A_PAGE.search(text))
 
 
 def confident(request: str, tools: Iterable[dict], top: int = 3) -> List[str]:

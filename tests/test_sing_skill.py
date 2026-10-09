@@ -48,11 +48,10 @@ import struct
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa import singing, skills, voice_style  # noqa: E402
+from shani_chronoa import skills, voice_style  # noqa: E402
 from shani_chronoa.skills import sing  # noqa: E402
 
 LINE = "Twinkle twinkle little star"
@@ -159,6 +158,15 @@ def _environment(monkeypatch, tmp_path, *, sox="copy", shifter=True):
     if sox != "none":
         _install("sox", bodies[sox])
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+    if sox == "none":
+        # "Missing" has to mean missing even on a machine that has SoX in
+        # /usr/bin: leaving the stub out only shadowed nothing, so the real SoX
+        # was found once it was installed (2026-10-08).
+        import shutil as _shutil
+        real_which = _shutil.which
+        monkeypatch.setattr(_shutil, "which",
+                            lambda name, *a, **k: None if os.path.basename(str(name)) == "sox"
+                            else real_which(name, *a, **k))
 
     tts, player = _StubTTS(), _StubPlayer()
     monkeypatch.setattr(sing, "PiperTTS", lambda: tts)

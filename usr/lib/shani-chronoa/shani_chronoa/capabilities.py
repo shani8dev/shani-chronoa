@@ -102,6 +102,7 @@ GATED: dict[str, str] = {
     # ship one open and the other shut.
     "git_inspect": "git-sense-enabled",
     "todo_list": "todo-list-enabled",
+    "manage_goals": "goals-enabled",
     "manage_triggers": "trigger-control-enabled",
     # The 2026-10-07 matrix skills. Each changing one has its own key; reading
     # the same setting needs none (the gate is checked on the 'set'/'cancel'
@@ -128,6 +129,44 @@ GATED: dict[str, str] = {
     "temperatures": "hwmon-sense-enabled",
     "usb_devices": "usb-sense-enabled",
     "crash_report": "coredumps-sense-enabled",
+    # The `web` sense's own key, not a new one: driving a browser is
+    # the same agreement web_search asks for when it reads a page -
+    # reaching the web - so one switch covers both.
+    "browse": "web-sense-enabled",
+    # The Siri/Google parity skills (2026-10-08). Each entry names the key the
+    # skill's own description names, because `GATED` is documentation of what the
+    # skills already consult - not a place to invent a policy. `news` and `maps`
+    # share the `web` sense's key with `get_weather`, which they are read as.
+    # `toggle_wifi` shares `airplane_mode`'s radio key: same agreement, one
+    # switch, so a machine cannot permit turning one radio off while refusing
+    # the other.
+    "news": "web-sense-enabled",
+    "maps": "web-sense-enabled",
+    "take_photo": "vision-sense-enabled",
+    "toggle_wifi": "radio-control-enabled",
+    # Reading and writing a calendar are two agreements, so two switches -
+    # `calendar_events` above is the read half and this is the write half. The
+    # skill also requires the read key to move or cancel an event, because
+    # finding the event to change it is the reading half.
+    "calendar_edit": "calendar-write-enabled",
+    # Reading a wearable's characteristics reads facts about the person wearing
+    # it, so it is its own switch rather than the `bluetooth-control-enabled`
+    # one. That key is about being willing to have a device disconnected;
+    # noticing that a device is paired and asking a watch for its battery are
+    # different agreements, and on a heart-rate strap they are not close.
+    "bluetooth_gatt": "bluetooth-gatt-enabled",
+    # Making a paired wearable buzz: the same switch, because it reaches the same
+    # device over the same link, and it sends only fixed, known-safe commands.
+    "find_device": "bluetooth-gatt-enabled",
+    # The MoYoung watch itself: health data, measurements, settings, messages.
+    "watch": "bluetooth-gatt-enabled",
+    "phone_remote": "phone-remote-enabled",
+    "nfc": "nfc-enabled",
+    "fm_radio": "fm-radio-enabled",
+    # Placing and answering calls. Its own switch because a call rings *someone
+    # else* - the same reason `phone-messages-send-enabled` exists, and the same
+    # reason the skill confirms before dialling.
+    "bluetooth_call": "bluetooth-call-enabled",
 }
 
 # The per-event-type trigger gates are *not* in `GATED` above, and deliberately
@@ -156,11 +195,13 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "list_windows": ("Processes and windows", "Open windows"),
     "focus_window": ("Processes and windows", "Focus a window"),
     "close_window": ("Processes and windows", "Close a window"),
+    "arrange_window": ("Processes and windows", "Minimize, maximize, move or resize a window"),
     "press_key": ("Processes and windows", "Press a key"),
     "list_wifi_networks": ("System", "WiFi networks"),
     "connect_wifi": ("System", "Join a WiFi network"),
     "print_file": ("System", "Print a file"),
     "reminders": ("Time and reminders", "Add, list, complete, and remove reminders"),
+    "notes": ("Files", "Keep your own notes: add, list, search and remove"),
     "list_services": ("Services and logs", "System services"),
     "control_service": ("Services and logs", "Start or stop a service"),
     "read_logs": ("Services and logs", "Read the system log"),
@@ -171,8 +212,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "manage_mount": ("Files", "Mount or unmount"),
     "get_battery_status": ("Power and screen", "Battery status"),
     "set_brightness": ("Power and screen", "Screen brightness"),
-    "get_volume": ("Sound", "Output volume"),
-    "set_volume": ("Sound", "Output volume"),
+    "get_volume": ("Sound", "Check the volume"),
+    "set_volume": ("Sound", "Change the volume"),
     "media_control": ("Sound", "Play, pause and skip media"),
     "set_mute": ("Sound", "Mute and unmute"),
     "speak": ("Sound", "Speak a reply aloud"),
@@ -188,6 +229,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "screenshot": ("Screen", "Screenshot"),
     "open_application": ("Apps", "Open an app"),
     "web_search": ("Web", "Look something up"),
+    "browse": ("Web", "Use a web page: click, type and read it"),
     "get_weather": ("Web", "Weather"),
     "get_location": ("Web", "Where this computer is"),
     "convert_currency": ("Web", "Currency"),
@@ -283,6 +325,17 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "system_info": ("System", "Describe this machine"),
     "scan_network": ("System", "Find other devices on the local network"),
     "toggle_bluetooth": ("Devices", "Turn the Bluetooth adapter on or off"),
+    # Reading what a device says about itself, one layer under `bluetooth_devices`
+    # which lists and connects them. Its own switch: on a wearable the values are
+    # about the person wearing it.
+    "bluetooth_gatt": ("Devices", "Read a watch or band's battery, sensors and firmware"),
+    "find_device": ("Devices", "Make a lost watch or band buzz so you can find it"),
+    "watch": ("Devices", "Steps, sleep, stress, heart rate, SpO2 and settings on your watch"),
+    "phone_remote": ("Devices", "Press the phone camera shutter, media keys, or type on the phone"),
+    "nfc": ("Devices", "Read an NFC tag, or write a link to a sticker"),
+    "fm_radio": ("Devices", "Listen to FM radio through a USB receiver"),
+    # PipeWire's `org.pipewire.Telephony`, which is where ofono's role ended up.
+    "bluetooth_call": ("Devices", "Call through a paired phone, on this computer's speakers"),
     "set_mic_mute": ("Sound", "Mute or unmute the microphone input"),
     "set_keyboard_layout": ("Pointer and keyboard", "Change the keyboard layout"),
     "lock_screen": ("Power and screen", "Lock this session"),
@@ -307,6 +360,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "git_inspect": ("Code and git", "What changed in a git repository"),
     "project_outline": ("Code and git", "Outline a code project: files, classes and functions"),
     "todo_list": ("Code and git", "Keep a list of tasks to do"),
+    "manage_goals": ("Code and git", "Save a multi-step goal to run later"),
     "compare_files": ("Files", "Compare two files"),
     "get_file_info": ("Files", "File size, age and permissions"),
     "directory_tree": ("Files", "Show a folder's shape"),
@@ -377,6 +431,29 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "set_hostname": ("System", "This computer's name"),
     "set_locale": ("Appearance", "System language and date, number and money formats"),
     "speed_test": ("Web", "Internet speed"),
+    # `browse` is deliberately NOT repeated here. It appeared twice in this
+    # table - once as "Use a web page: click, type and read it" and once as
+    # "Drive a web browser" - and a duplicate dict key is silently resolved to
+    # the last one, so the better label had been dead with no error anywhere.
+    # pyflakes reports it; nothing in the suite did. The label that survives is
+    # the first one, at the top of this table.
+    # The Siri and Google Assistant parity skills (2026-10-08). Grouped beside
+    # the closest sibling that already had a heading, rather than by where the
+    # feature came from: an alarm is a timer with a time of day, weather is
+    # already filed under Web, and a Wi-Fi switch sits with the other radios.
+    "alarm": ("Time and reminders", "Set, change, snooze or delete an alarm"),
+    "calendar_edit": ("Time and reminders", "Add, move or cancel a calendar event"),
+    # `read` half is calendar_events, which is already in this group; this is
+    # the half that changes someone's day.
+    "routines": ("Everyday tools", "Save a phrase that runs a whole request"),
+    "maps": ("Web", "Find a place, get directions, or look up what is nearby"),
+    "news": ("Web", "Today's headlines, on a topic or in general"),
+    "take_photo": ("Photos and video", "Take a photo or selfie with the webcam"),
+    # The Wi-Fi radio alone. airplane_mode switches every radio at once and
+    # connect_wifi joins a network; neither is "turn the Wi-Fi off", which is
+    # what this is and what the voice asks for most often of the three.
+    "toggle_wifi": ("Devices", "Turn the Wi-Fi radio on or off"),
+    "open_settings": ("System", "Open the system Settings at a page"),
 }
 
 # The order groups appear in the help window. Deliberately the order a new user
@@ -469,6 +546,7 @@ GATE_NAMES: dict[str, str] = {
     "locale-control-enabled": "Let Chronoa change the language and formats",
     "speed-test-enabled": "Let Chronoa run speed tests",
     "todo-list-enabled": "Let Chronoa keep a task list",
+    "goals-enabled": "Let Chronoa keep multi-step goals",
     "trigger-control-enabled": "Let Chronoa arm automatic rules",
     # The five trigger event types. Phrased as the thing the user is agreeing
     # to rather than as the event type, because a refusal from `triggers.py`
@@ -682,6 +760,119 @@ def startup_suggestions(capabilities: list[Capability]) -> list[str]:
     return ordered
 
 
+@dataclass(frozen=True)
+class EverydayTask:
+    """A job a person wants done, and the skills Chronoa does it with.
+
+    The help window used to answer "what can you do?" with 184 tool names,
+    which tells nobody how Chronoa helps with their day. These are the jobs,
+    each a request you can send as it stands. Every skill named here must exist
+    (`test_everyday_tasks.py` fails otherwise), so a card cannot promise a tool
+    Chronoa does not have.
+    """
+
+    title: str
+    how: str
+    prompt: str
+    skills: tuple
+
+
+EVERYDAY_TASKS: tuple = (
+    EverydayTask(
+        "Plan a trip",
+        "Finds the flight on the site itself, checks the weather, works out the "
+        "cost in your currency, writes the itinerary and reminds you to check in.",
+        "Find the cheapest flight from Boston to London on blazedemo.com, check "
+        "London's weather, tell me the price in rupees, write me an itinerary and "
+        "remind me tomorrow at 9 to check in.",
+        ("browse", "get_weather", "convert_currency", "create_document", "reminders")),
+    EverydayTask(
+        "Get on with the day",
+        "Your calendar, the weather and the things you must not forget, in one answer.",
+        "What's on my calendar today, what's the weather like, and remind me at 5 "
+        "to call Mum.",
+        ("calendar_events", "get_weather", "reminders")),
+    EverydayTask(
+        "Do it on a website",
+        "Opens the page in its own browser window where you can watch, fills in "
+        "forms and clicks through - and asks you before anything that pays.",
+        "Go to wikipedia.org, search for Shaniwar Wada and tell me the three "
+        "most interesting facts.",
+        ("browse",)),
+    EverydayTask(
+        "Find and tidy your files",
+        "Finds what you downloaded or changed, moves it where it belongs, and can "
+        "undo the last change.",
+        "Find the PDFs I downloaded this week and move them into Documents/Receipts.",
+        ("find_recently_modified", "find_files", "move_or_copy_file", "undo_last_change")),
+    EverydayTask(
+        "Read it for me",
+        "Reads PDFs, documents and pictures of text, then summarises or "
+        "translates what matters.",
+        "Summarise the newest PDF in my Downloads and translate the summary into Hindi.",
+        ("read_document", "pdf_pages", "translate_text", "find_recently_modified")),
+    EverydayTask(
+        "Write it up",
+        "Turns notes into a tidy document, a converted file or an archive to send.",
+        "Write a one-page packing list for a week in London and save it as a document.",
+        ("create_document", "convert_document", "create_archive")),
+    EverydayTask(
+        "Fix the internet",
+        "Checks the connection, Wi-Fi, speed and name lookups, and says what is "
+        "actually wrong.",
+        "My internet feels slow - find out why.",
+        ("check_internet", "list_wifi_networks", "speed_test", "dns_lookup", "ping_host")),
+    EverydayTask(
+        "Keep the computer healthy",
+        "Disk space, updates, battery, temperature and what is filling the disk.",
+        "Is my laptop healthy? Check disk space, updates, battery and temperature.",
+        ("disk_usage", "cleanup_report", "check_updates", "get_battery_status", "temperatures")),
+    EverydayTask(
+        "Arrange your screen",
+        "Puts windows side by side, maximises, minimises or moves them to another "
+        "workspace.",
+        "Put my browser and my text editor side by side.",
+        ("list_windows", "arrange_window", "focus_window")),
+    EverydayTask(
+        "Hands busy? Just say it",
+        "Press the microphone and talk: timers, conversions and answers spoken "
+        "back while you cook or work.",
+        "Set a timer for 12 minutes and tell me when the pasta is done.",
+        ("set_timer", "speak", "convert_units")),
+    EverydayTask(
+        "Do it every time",
+        "Rules that act on their own - when a drive is plugged in, the battery "
+        "gets low or a service fails.",
+        "Every time my battery drops below 20%, switch to power saver and tell me.",
+        ("manage_triggers", "set_power_profile", "notify")),
+    EverydayTask(
+        "Fix up photos",
+        "Crops, resizes, converts and brightens pictures, or makes a short video "
+        "from them.",
+        "Shrink the photos in Pictures/Trip so each is under 1 MB.",
+        ("edit_image", "convert_media", "photos")),
+    EverydayTask(
+        "Help with code",
+        "Explains a project, what changed in git and what is left to do.",
+        "Explain this project's layout and what changed in git this week.",
+        ("project_outline", "git_inspect", "todo_list")),
+)
+
+
+def task_needs(task: "EverydayTask", config) -> list:
+    """The switches still off for `task`, by their Settings names ([] = ready)."""
+    keys = sorted({GATED[s] for s in task.skills if s in GATED})
+    shut = []
+    for key in keys:
+        try:
+            on = bool(config.get_bool(key, False)) if config is not None else False
+        except Exception:  # noqa: BLE001 - fails closed, like Capability.gate_is_open
+            on = False
+        if not on:
+            shut.append(GATE_NAMES.get(key, key))
+    return shut
+
+
 def help_prompt() -> str:
     """The prompt that opens the capability list rather than answering in text."""
     return _HELP_SUGGESTION
@@ -722,6 +913,9 @@ READ_ONLY_TOOLS = frozenset({
     "charger_info", "firmware_updates",
     "project_outline",
     "calendar_events",
+    # Gated like calendar_events, and only reads: the one write a wearable can be
+    # sent (the buzz) is its own tool, `find_device`, so it is not in this set.
+    "bluetooth_gatt",
     "search_documents",
     "get_datetime", "get_volume", "get_battery_status", "get_clipboard",
     "list_apps", "list_directory", "find_files", "search_file_contents",
@@ -739,6 +933,12 @@ READ_ONLY_TOOLS = frozenset({
     # permission to do any of it.
     "get_file_info", "directory_tree", "compare_files",
     "find_recently_modified", "list_capabilities",
+    # The parity reads: they report and change nothing on this machine, so
+    # `EXPLORE` mode (which refuses anything outside this set) can still use
+    # them. `news` and `maps` are also in OPEN_WORLD_TOOLS - the two are not in
+    # conflict, they answer different questions - and both consult the web sense,
+    # which is what stops them in privacy mode.
+    "news", "maps",
     # Both read a file or the kernel's own tables and change nothing, which is
     # why they are here and not behind a gate: a user must be able to ask what
     # is listening, and what a file says, without first being granted
@@ -812,6 +1012,29 @@ MUTATING_TOOLS = frozenset({
     # Switching the default speaker is set_volume's kind of change; pdf_pages
     # writes only new files, as convert_document does.
     "audio_output", "pdf_pages",
+    # The Siri/Google parity skills (2026-10-08), and the reason a gate test
+    # had to be added rather than the set left as it was. `calendar_edit`
+    # creates, moves and deletes events and was in neither this set nor
+    # READ_ONLY_TOOLS, so `cli_matrix` classified it as neither actuator nor
+    # reader, the MCP read-only hint was not withheld from an MCP client, and
+    # the post-condition column was never computed for it - the inventory
+    # disagreed with the code, which is the `sing` entry's defect reached from
+    # the other direction.
+    # NOTE: `calendar_edit`, `toggle_wifi` and `take_photo` are deliberately NOT
+    # here, and adding them is a mistake worth naming because it is the
+    # obvious-looking move. All three are consent-gated, and the invariant above
+    # says gated tools do not belong in this set: `tool_annotations` has a
+    # separate gated branch that already answers `read_only_hint: False`, and the
+    # two branches disagree about `idempotent_hint`. A gated tool in both sets
+    # reaches both at once, and `test_a_known_actuator_may_say_it_is_not_read_only`
+    # fails. So "it acts" is not the test for membership - "it acts and nothing
+    # else already says so" is.
+    #
+    # `alarm` and `routines` are ungated, so they belong here: neither is
+    # described by a consent key, and without this entry `cli_matrix` classified
+    # `alarm` as read-only even though it creates a systemd unit.
+    "alarm",
+    "routines",
 })
 
 #: Tools that reach outside this machine.
@@ -821,6 +1044,12 @@ OPEN_WORLD_TOOLS = frozenset({
     "get_weather", "get_location", "convert_currency", "lookup_wikipedia",
     "define_word", "get_world_time",
     "speed_test",
+    # The parity skills that reach the network, with `browse` and `speed_test`.
+    # `news` fetches publisher RSS and `maps` queries OpenStreetMap and
+    # Overpass: both are reads that leave this machine, so both are refused in
+    # privacy mode for the same reason `get_weather` is - which is also the
+    # gate each of them consults.
+    "news", "maps",
 })
 
 

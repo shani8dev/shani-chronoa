@@ -9,12 +9,9 @@ host's X11+XTEST backend is proven separately by running the skill directly
 rule), not by this hermetic suite.
 """
 
-import os
 import shutil
 import subprocess
-import textwrap
 
-import pytest
 
 
 # --- helpers ---------------------------------------------------------------
@@ -221,9 +218,17 @@ class TestInputControlBackendDetection:
     """The skill must detect whichever backend is actually present, and refuse
     honestly when none is."""
 
-    def test_detects_xdotool_on_x11_host(self):
-        # Given: this host has DISPLAY set and xdotool on PATH (verified by
-        # the manual probe in AGENTS.md)
+    def test_detects_xdotool_on_x11_host(self, monkeypatch, tmp_path):
+        # Given: an X11 session with xdotool on PATH. Set up here rather than
+        # assumed: the test read "this host" and so failed on every Wayland
+        # desktop, where the portal is (rightly) chosen instead.
+        tool = tmp_path / "xdotool"
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
         from shani_chronoa.skills.input_control import _detect_backend
 
         backend = _detect_backend()

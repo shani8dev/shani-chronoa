@@ -2152,9 +2152,22 @@ def train_and_save(path: Optional[Path] = None,
     # report computed on the split the model was fitted on measures nothing at
     # all. `report` is therefore a pooled 5-fold CV, and the model that gets
     # written is fitted on everything.
-    report = cross_validate(examples, folds=5)
+    oof = out_of_fold_logits(examples, folds=5)
+    confusion: Dict[str, Counter] = defaultdict(Counter)
+    for z, y, _group in oof:
+        confusion[VERDICTS[y]][VERDICTS[max(range(len(z)), key=lambda c: z[c])]] += 1
+    report = _report_from_confusion(sum(sum(c.values()) for c in confusion.values()),
+                                    confusion)
     if seed is None:
         model = OutcomeModel().fit(examples, epochs=epochs)
+    # Calibrate on those same out-of-fold logits (never on the fit's own), and
+    # score the calibrator by cross-fitting so its before/after is honest too.
+    calibration = cross_fit_calibration([z for z, _y, _g in oof], [y for _z, y, _g in oof],
+                                        [g for _z, _y, g in oof]) if oof else {}
+    if calibration.get("fitted"):
+        model.temperature = float(calibration["temperature"])
+        model.shift = [float(v) for v in calibration["shift"]]
+        model.calibration = {k: calibration[k] for k in ("before", "after", "evaluation")}
 
     unknown_count, unknown_names = unknown_tool_examples(_entries(path))
     label_counts = Counter(e.y for e in train)
@@ -2189,6 +2202,14 @@ def train_and_save(path: Optional[Path] = None,
         "detected": report.best_detection()[0],
         "recall_lift": {name: round(report.detection(name), 3) for name in VERDICTS},
         "precision_lift": {name: round(report.precision_lift(name), 3) for name in VERDICTS},
+        # The probabilities, scored as probabilities: raw softmax against the
+        # calibrated one, both on held-out data. `ece` is the confidence/
+        # accuracy gap; lower NLL and Brier mean more honest numbers.
+        "calibration": ({"temperature": round(model.temperature, 4),
+                         "shift": [round(v, 4) for v in model.shift],
+                         "before": {k: round(v, 4) for k, v in calibration["before"].items()},
+                         "after": {k: round(v, 4) for k, v in calibration["after"].items()}}
+                        if calibration.get("fitted") else {"fitted": False}),
     }
 
     destination = Path(path) if path else model_path_for_space(name)
@@ -2955,6 +2976,171 @@ def _exp(values: Sequence[float]) -> List[float]:
     total = sum(out) or 1.0
     return [v / total for v in out]
 
+
+# --- calibration -------------------------------------------------------------
+#
+# A probability is only worth showing if "80%" comes true about 80% of the time.
+# Nothing here checked that, and two things made it certain to be wrong: the
+# class-balanced fit inflates the rare verdicts on purpose (that is what lets it
+# learn them at all), and nothing ever measured the result as a probability -
+# only as an argmax. Measured on this machine's log the argmax of the balanced
+# model scored 85.1% against a 89.0% majority baseline, which is the inflated
+# prior showing through rather than a lack of signal.
+#
+# The fix is the standard post-hoc one (temperature scaling, Guo et al. 2017,
+# with a per-class bias added for the prior shift): softmax(z / T + s), with T
+# and s fitted by negative log-likelihood on logits the model did NOT train on.
+# It never changes what the model knows - only how loudly it says it - so it
+# cannot overfit the way refitting weights can, and two numbers per verdict are
+# all it stores.
+
+#: Bounds for the fitted temperature. Outside these the fit is chasing a
+#: degenerate optimum (T -> 0 on separable data, T -> inf on noise).
+_T_RANGE = (0.05, 20.0)
+#: Bound on a prior-shift term, in logits (e^8 ~ 3000x).
+_SHIFT_MAX = 8.0
+#: Fewer held-out examples than this and a fit is noise; identity is returned.
+_MIN_CALIBRATION = 30
+
+
+def calibrated(logits: Sequence[float], temperature: float = 1.0,
+               shift: Optional[Sequence[float]] = None) -> List[float]:
+    """softmax(logits / temperature + shift)."""
+    t = temperature or 1.0
+    s = shift or [0.0] * len(logits)
+    return _exp([z / t + b for z, b in zip(logits, s)])
+
+
+def calibration_metrics(probs: Sequence[Sequence[float]], labels: Sequence[int],
+                        weights: Optional[Sequence[float]] = None,
+                        bins: int = 10) -> Dict[str, float]:
+    """accuracy, NLL, Brier and expected calibration error (top-label, equal width).
+
+    ECE is the gap between how confident the top answer was and how often it
+    was right, averaged over confidence bins - 0 is perfectly calibrated. NLL and
+    Brier are the proper scores: they reward being right *and* honest, so a
+    calibration fit that wins on accuracy but loses on NLL has made things worse.
+    """
+    w = list(weights) if weights is not None else [1.0] * len(labels)
+    total = sum(w)
+    if not total:
+        return {"n": 0, "accuracy": 0.0, "nll": 0.0, "brier": 0.0, "ece": 0.0}
+    nll = brier = hits = 0.0
+    bin_conf = [0.0] * bins
+    bin_hit = [0.0] * bins
+    bin_w = [0.0] * bins
+    for p, y, weight in zip(probs, labels, w):
+        top = max(range(len(p)), key=lambda c: p[c])
+        right = 1.0 if top == y else 0.0
+        hits += weight * right
+        nll -= weight * math.log(max(p[y], 1e-12))
+        brier += weight * sum((p[c] - (1.0 if c == y else 0.0)) ** 2 for c in range(len(p)))
+        b = min(bins - 1, int(p[top] * bins))
+        bin_conf[b] += weight * p[top]
+        bin_hit[b] += weight * right
+        bin_w[b] += weight
+    ece = sum(abs(bin_hit[b] - bin_conf[b]) for b in range(bins) if bin_w[b]) / total
+    return {"n": round(total), "accuracy": hits / total, "nll": nll / total,
+            "brier": brier / total, "ece": ece}
+
+
+def _calibration_nll(logits, labels, weights, temperature, shift) -> float:
+    total = sum(weights) or 1.0
+    loss = 0.0
+    for z, y, w in zip(logits, labels, weights):
+        loss -= w * math.log(max(calibrated(z, temperature, shift)[y], 1e-12))
+    return loss / total
+
+
+def fit_calibration(logits: Sequence[Sequence[float]], labels: Sequence[int],
+                    weights: Optional[Sequence[float]] = None,
+                    prior_shift: bool = True, rounds: int = 3) -> Dict[str, object]:
+    """Fit (temperature, shift) by NLL on held-out logits. Identity when it cannot.
+
+    Alternates two convex-ish one-at-a-time fits: a golden-section search over
+    log T (one dimension, bounded, no step size to tune) and gradient descent on
+    the shift (NLL is convex in it, gradient = mean(p - onehot)). The shift is
+    centred because softmax ignores a constant. It is kept only if it lowers
+    NLL, so a fit can never make the held-out score worse than identity.
+    """
+    k = len(logits[0]) if logits else 0
+    identity = {"temperature": 1.0, "shift": [0.0] * k, "fitted": False}
+    w = list(weights) if weights is not None else [1.0] * len(labels)
+    if not logits or sum(w) < _MIN_CALIBRATION or len(set(labels)) < 2:
+        return identity
+    # Identical (logits, label) rows are one row with a weight: this log has
+    # ~18,000 calls but a few hundred distinct vectors, so the fit runs on those.
+    merged: Dict[Tuple, float] = defaultdict(float)
+    for z, y, weight in zip(logits, labels, w):
+        merged[(tuple(z), y)] += weight
+    logits = [list(key[0]) for key in merged]
+    labels = [key[1] for key in merged]
+    w = list(merged.values())
+    total = sum(w)
+    t, s = 1.0, [0.0] * k
+    lo, hi = math.log(_T_RANGE[0]), math.log(_T_RANGE[1])
+    phi = (math.sqrt(5) - 1) / 2
+    for _ in range(rounds):
+        a, b = lo, hi
+        for _ in range(40):
+            c, d = b - phi * (b - a), a + phi * (b - a)
+            if _calibration_nll(logits, labels, w, math.exp(c), s) \
+                    < _calibration_nll(logits, labels, w, math.exp(d), s):
+                b = d
+            else:
+                a = c
+        t = math.exp((a + b) / 2)
+        if not prior_shift:
+            break
+        for _ in range(200):
+            grad = [0.0] * k
+            for z, y, weight in zip(logits, labels, w):
+                p = calibrated(z, t, s)
+                for cls in range(k):
+                    grad[cls] += weight * (p[cls] - (1.0 if cls == y else 0.0))
+            s = [max(-_SHIFT_MAX, min(_SHIFT_MAX, s[cls] - 2.0 * grad[cls] / total))
+                 for cls in range(k)]
+            mean = sum(s) / k
+            s = [v - mean for v in s]
+    before = _calibration_nll(logits, labels, w, 1.0, None)
+    after = _calibration_nll(logits, labels, w, t, s)
+    if after >= before:
+        return identity
+    return {"temperature": t, "shift": s, "fitted": True,
+            "nll_before": before, "nll_after": after}
+
+
+def cross_fit_calibration(logits: Sequence[Sequence[float]], labels: Sequence[int],
+                          groups: Sequence[object],
+                          weights: Optional[Sequence[float]] = None) -> Dict[str, object]:
+    """Honest before/after metrics: fit on half the groups, score the other half.
+
+    Fitting the calibrator and scoring it on the same logits flatters it, the
+    same way scoring a model on its training set does. So the groups (feature
+    vectors) are split in two, each half is calibrated by the other, and only
+    those out-of-half probabilities are scored. The parameters returned for use
+    are then fitted on everything.
+    """
+    w = list(weights) if weights is not None else [1.0] * len(labels)
+    order = sorted(set(groups), key=repr)
+    random.Random(0).shuffle(order)
+    half = {g: i % 2 for i, g in enumerate(order)}
+    side = [half[g] for g in groups]
+    out: List[Optional[List[float]]] = [None] * len(labels)
+    for h in (0, 1):
+        idx_fit = [i for i in range(len(labels)) if side[i] != h]
+        params = fit_calibration([logits[i] for i in idx_fit], [labels[i] for i in idx_fit],
+                                 [w[i] for i in idx_fit])
+        for i in range(len(labels)):
+            if side[i] == h:
+                out[i] = calibrated(logits[i], params["temperature"], params["shift"])
+    final = fit_calibration(logits, labels, w)
+    raw = [calibrated(z) for z in logits]
+    return {**final,
+            "before": calibration_metrics(raw, labels, w),
+            "after": calibration_metrics(out, labels, w),
+            "evaluation": "2-way cross-fit over feature vectors"}
+
 class Example(NamedTuple):
     """One training record: a label and a hashed feature vector, held SPARSE.
 
@@ -3157,6 +3343,11 @@ class OutcomeModel:
         #: True when `w` is a dense array rather than a sparse index map, so the
         #: serialiser and both inference paths agree on the shape.
         self._dense = False
+        #: Post-hoc calibration (`fit_calibration`): identity until one is fitted
+        #: on held-out logits. Applied by `predict_proba` and `predict_class`.
+        self.temperature = 1.0
+        self.shift: List[float] = [0.0] * len(VERDICTS)
+        self.calibration: dict = {}
 
     # --- training ------------------------------------------------------------
 
@@ -3300,7 +3491,7 @@ class OutcomeModel:
         scores = [self.b[c] + sum(v * self.w.get(i, _ZERO)[c]
                                   for i, v in _active(vector))
                   for c in range(len(VERDICTS))]
-        probs = _exp(scores)
+        probs = calibrated(scores, self.temperature, self.shift)
         return {name: float(probs[i]) for i, name in enumerate(VERDICTS)}
 
     #: Tools that need a command, so a prediction of failure can be turned into
@@ -3394,6 +3585,13 @@ class OutcomeModel:
                         for index, row in sorted(self.w.items())},
             "bias": [float(v) for v in self.b],
             "touched_features": len(self.w),
+            # How the raw scores become probabilities: softmax(z / T + shift),
+            # fitted on cross-validated logits. Identity when absent, so a file
+            # written before calibration existed loads unchanged.
+            "calibration": {"temperature": float(self.temperature),
+                            "shift": [float(v) for v in self.shift],
+                            **{k: v for k, v in (self.calibration or {}).items()
+                               if k not in ("temperature", "shift")}},
             "feature_space": _feature_space_id(),
             # What this model is NOT allowed to do, stated in the file it is
             # carried in. It may advise; it can never authorise. A schema that
@@ -3422,6 +3620,13 @@ class OutcomeModel:
         else:
             model.w = {i: list(row) for i, row in enumerate(raw)}
         model.b = [float(v) for v in data["bias"]]
+        cal = data.get("calibration") or {}
+        t = float(cal.get("temperature") or 1.0)
+        shift = [float(v) for v in (cal.get("shift") or [])]
+        if _T_RANGE[0] <= t <= _T_RANGE[1] and len(shift) == len(VERDICTS) \
+                and all(abs(v) <= _SHIFT_MAX + 1e-9 for v in shift):
+            model.temperature, model.shift = t, shift
+            model.calibration = dict(cal)
         return model
 
 class Report(NamedTuple):
@@ -3552,9 +3757,12 @@ def predict_class(model, example: "Example") -> int:
                    key=lambda c: model.b[c]
                    + sum(v * row[c][i] for i, v in active))
     weights = model.w
+    t = getattr(model, "temperature", 1.0) or 1.0
+    shift = getattr(model, "shift", None) or [0.0] * len(VERDICTS)
     return max(range(len(VERDICTS)),
-               key=lambda c: model.b[c]
-               + sum(v * weights.get(i, _ZERO)[c] for i, v in active))
+               key=lambda c: (model.b[c]
+                              + sum(v * weights.get(i, _ZERO)[c] for i, v in active)) / t
+               + shift[c])
 
 def _report_from_confusion(n: int, confusion: Dict[str, Counter]) -> Report:
     """A `Report` from already-counted predictions, so CV and a single split
@@ -3604,31 +3812,52 @@ def cross_validate(examples: Sequence[Example], folds: int = 5,
     it has not seen" when the answer is concentrated in three shapes. A fitted
     model is discarded per fold; only the counts are pooled.
     """
+    oof = out_of_fold_logits(examples, folds=folds, seed=seed)
+    confusion: Dict[str, Counter] = defaultdict(Counter)
+    for z, y, _group in oof:
+        confusion[VERDICTS[y]][VERDICTS[max(range(len(z)), key=lambda c: z[c])]] += 1
+    return _report_from_confusion(sum(sum(c.values()) for c in confusion.values()),
+                                  confusion)
+
+
+def logits_of(model, example: "Example") -> List[float]:
+    """The built-in model's raw scores for one example, before any softmax."""
+    active = example.active or _sparse(example)
+    weights = model.w
+    return [model.b[c] + sum(v * weights.get(i, _ZERO)[c] for i, v in active)
+            for c in range(len(VERDICTS))]
+
+
+def out_of_fold_logits(examples: Sequence[Example], folds: int = 5,
+                       seed: int = 0) -> List[Tuple[List[float], int, Tuple]]:
+    """(logits, label, feature vector) for every example, each from a model that
+    never saw that example's vector - the folds `cross_validate` scores, kept as
+    numbers rather than counted, so a calibrator can be fitted on them."""
     groups: Dict[Tuple, List[Example]] = {}
     for example in examples:
         groups.setdefault(example.active, []).append(example)
     keys = sorted(groups)
     if len(keys) < 2:
-        return _report_from_confusion(0, defaultdict(Counter))
-    import random as _random
+        return []
     order = list(keys)
-    _random.Random(seed).shuffle(order)
+    random.Random(seed).shuffle(order)
     assignment = {key: index % folds for index, key in enumerate(order)}
-    confusion: Dict[str, Counter] = defaultdict(Counter)
+    out: List[Tuple[List[float], int, Tuple]] = []
     for fold in range(folds):
         train = [e for key in keys if assignment[key] != fold for e in groups[key]]
-        test = [e for key in keys if assignment[key] == fold for e in groups[key]]
-        if not train or not test:
+        test_keys = [key for key in keys if assignment[key] == fold]
+        if not train or not test_keys:
             continue
         try:
             model = OutcomeModel().fit(train)
         except Exception as exc:  # noqa: BLE001 - one bad fold is not the whole CV
             logger.warning("outcome model: fold %d did not fit (%s)", fold, exc)
             continue
-        for example in test:
-            confusion[VERDICTS[example.y]][VERDICTS[predict_class(model, example)]] += 1
-    return _report_from_confusion(sum(sum(c.values()) for c in confusion.values()),
-                                  confusion)
+        for key in test_keys:
+            # every example in a group shares its vector, so one score serves all
+            z = logits_of(model, groups[key][0])
+            out.extend((z, e.y, key) for e in groups[key])
+    return out
 
 
 def evaluate(model, examples: Sequence[Example]) -> Report:
@@ -3824,6 +4053,30 @@ class Prediction(NamedTuple):
     posture: str
     epoch: float
 
+#: A call logged this long *before* its prediction can still be its call (the
+#: log's timestamp and the prediction's epoch are taken at different moments).
+_PAIR_SLACK = 2.0
+#: A call more than this long after a prediction is not the call it predicted.
+_PAIR_WINDOW = 600.0
+
+
+def _entry_epoch(entry: dict) -> Optional[float]:
+    """The tool log's ISO `timestamp` as epoch seconds, or None."""
+    stamp = entry.get("timestamp")
+    if isinstance(stamp, (int, float)):
+        return float(stamp)
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    from datetime import datetime, timezone
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
 def predictions_path() -> Path:
     from shani_chronoa import files
     return files.data_home() / "shani-chronoa" / "logs" / "outcome-predictions.jsonl"
@@ -3882,11 +4135,20 @@ def score_predictions(path: Optional[Path] = None,
                       log: Optional[Path] = None) -> str:
     """Close the loop: pair each prediction with the call that followed it.
 
-    A prediction is matched to the **next recorded call of the same tool**, which
-    is as much causality as an append-only log can support - there is no call
-    id to join on. Two predictions for one call, or a prediction with no
-    following call, are reported rather than silently dropped, because a store
-    that quietly loses half its pairs measures nothing.
+    A prediction is matched to the **next recorded call of the same tool at or
+    after the prediction's own time**, and each call can answer one prediction
+    only - which is as much causality as two append-only logs can support,
+    since there is no call id to join on. A prediction with no following call
+    is reported rather than silently dropped, because a store that quietly
+    loses half its pairs measures nothing.
+
+    **This used to pair every prediction with the first call of its tool ever
+    logged** - the calls were "sorted" with a constant key and never consumed -
+    so a month of predictions were all scored against one call from September.
+
+    The recorded probabilities are also scored *as probabilities* (NLL, Brier,
+    ECE), which is the live check that calibration holds on calls the model
+    had not seen when it was fitted.
     """
     predictions = read_predictions(path)
     if not predictions:
@@ -3895,28 +4157,47 @@ def score_predictions(path: Optional[Path] = None,
                 "there is no ground truth to compare against.")
 
     calls = _entries(log or _log_path())
-    calls_by_tool: Dict[str, List[dict]] = defaultdict(list)
-    for entry in sorted(calls, key=lambda e: 0):
-        calls_by_tool[str(entry.get("tool_name"))].append(entry)
+    calls_by_tool: Dict[str, List[Tuple[float, dict]]] = defaultdict(list)
+    for entry in calls:
+        when = _entry_epoch(entry)
+        if when is not None:
+            calls_by_tool[str(entry.get("tool_name"))].append((when, entry))
+    for timeline in calls_by_tool.values():
+        timeline.sort(key=lambda pair: pair[0])
+    cursor: Dict[str, int] = defaultdict(int)
 
     scored = 0
     correct = 0
     predicted_hist: Counter = Counter()
     actual_hist: Counter = Counter()
     unmatched = 0
-    for index, prediction in enumerate(predictions):
+    scored_probs: List[List[float]] = []
+    scored_labels: List[int] = []
+    ordered = sorted(predictions, key=lambda p: float(p.get("epoch") or 0.0))
+    for prediction in ordered:
         tool = str(prediction.get("tool"))
-        later = calls_by_tool.get(tool, [])
-        # A prediction precedes its call, so only calls at or after the
-        # prediction's position in the log can belong to it. Without a shared
-        # clock this is an approximation and is labelled as one below.
-        actual = later[0] if later else None
-        if actual is None:
+        timeline = calls_by_tool.get(tool, [])
+        epoch = float(prediction.get("epoch") or 0.0)
+        # Skip calls that happened before this prediction (they answered an
+        # earlier one, or none); then take the next one and consume it.
+        i = cursor[tool]
+        while i < len(timeline) and timeline[i][0] < epoch - _PAIR_SLACK:
+            i += 1
+        if i >= len(timeline) or timeline[i][0] - epoch > _PAIR_WINDOW:
+            cursor[tool] = i
             unmatched += 1
             continue
-        expected = max((prediction.get("probabilities") or {}).items(),
-                       key=lambda kv: kv[1])[0]
+        actual = timeline[i][1]
+        cursor[tool] = i + 1
+        probabilities = prediction.get("probabilities") or {}
+        if not probabilities:
+            unmatched += 1
+            continue
+        expected = max(probabilities.items(), key=lambda kv: kv[1])[0]
         verdict = str(actual.get("verdict") or "unverified").lower()
+        if verdict in VERDICTS and all(name in probabilities for name in VERDICTS):
+            scored_probs.append([float(probabilities[name]) for name in VERDICTS])
+            scored_labels.append(VERDICTS.index(verdict))
         scored += 1
         predicted_hist[expected] += 1
         actual_hist[verdict] += 1
@@ -3935,10 +4216,14 @@ def score_predictions(path: Optional[Path] = None,
             f"{k} {v}" for k, v in predicted_hist.most_common()))
         lines.append("  actual    : " + ", ".join(
             f"{k} {v}" for k, v in actual_hist.most_common()))
+        if scored_probs:
+            m = calibration_metrics(scored_probs, scored_labels)
+            lines.append(f"  as probabilities: NLL {m['nll']:.3f}, Brier {m['brier']:.3f}, "
+                         f"calibration error {m['ece']:.3f} (0 = says 80% and is right 80%)")
         lines.append("")
         lines.append("  ** Pairing is approximate. The two logs share no call id, "
-                     "so a prediction is matched to the next recorded call of "
-                     "the same tool. If two calls of one tool overlap, the "
+                     "so a prediction is matched to the next unanswered call of "
+                     "the same tool after it. If two calls of one tool overlap, the "
                      "attribution can be wrong, and this number should be read "
                      "as a rough signal rather than a score.")
     if unmatched:

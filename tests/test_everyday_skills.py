@@ -52,7 +52,6 @@ from shani_chronoa.skills import (  # noqa: E402
     kill_process,
     list_directory,
     list_processes,
-    list_wifi_networks,
     list_windows,
     move_or_copy_file,
     open_file,
@@ -354,30 +353,40 @@ class TestTheDesktopSkillsRefuseWhenTheyCannotWork:
     """No partial lists, and no guessing which window."""
 
     def test_window_control_refuses_under_wayland(self, monkeypatch, granted):
-        """The *control* skills still refuse. Listing no longer does.
+        """Under Wayland with no window control reachable, control refuses with why.
 
-        `list_windows` gained an AT-SPI fallback, so under Wayland it now
-        answers with titled windows from the accessibility bus - and labels
-        them as a different, incomplete observation. That is the point: a
-        partial list honestly labelled beats a refusal when a real alternative
-        exists, and the two xdotool cannot provide.
-
-        Focusing and closing have no such alternative. AT-SPI exposes no
-        `WindowAction` interface on any window inspected on this machine, so
-        there is no portable way to raise or close one, and these must keep
-        refusing rather than half-work.
+        Control now goes through `shani_chronoa.windows` (KWin, the GNOME
+        extension, the accessibility bus). When `detect` finds none of them,
+        both control skills must refuse with its reason - never fall into the
+        xdotool path, which under Wayland sees only X11 clients.
         """
+        from shani_chronoa import windows
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+        monkeypatch.setattr(windows, "detect", lambda: (None, "no window control on this test desktop"))
         close_window.ChronoaConfig = lambda: granted
         try:
             for out in (focus_window._run({"title_contains": "x"}),
                         close_window._run({"window_id": "1"})):
-                assert "Wayland" in out, (
-                    f"a control skill offered a partial result: {out[:80]}"
-                )
+                assert out.startswith("Could not") and "no window control on this test desktop" in out, out
         finally:
             close_window.ChronoaConfig = ChronoaConfig
+
+    def test_focus_through_the_accessibility_bus_names_the_extension(self, monkeypatch):
+        """The bus cannot focus (measured), so focus refuses and says what would.
+
+        Driven with a one-window bus so it does not depend on the host desktop.
+        """
+        from shani_chronoa import windows
+        from shani_chronoa.skills import list_windows as LW
+        from shani_chronoa.windows.atspi import AtspiBackend
+        monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
+        backend = AtspiBackend("enable chronoa-windows@shani.dev for focusing")
+        monkeypatch.setattr(backend, "list", lambda: [windows.Window(id="a11y:1:0:0", title="Notes")])
+        monkeypatch.setattr(LW, "control_backend", lambda: (backend, ""))
+        out = focus_window._run({"title_contains": "notes"})
+        assert out.startswith("Could not focus") and "chronoa-windows@shani.dev" in out, out
 
     def test_listing_under_wayland_never_returns_an_unlabelled_partial(self,
                                                                      monkeypatch):
@@ -424,11 +433,29 @@ class TestTheDesktopSkillsRefuseWhenTheyCannotWork:
             "the refusal disclosed the session type, which it has no reason to "
             "tell someone whose consent was refused")
 
-    def test_focus_needs_something_to_match(self):
+    @staticmethod
+    def _an_x11_session(monkeypatch, tmp_path):
+        """X11 with xdotool on PATH, set up here rather than read off the host.
+
+        These two check argument validation, which sits behind the session
+        check - so on a Wayland desktop they met the Wayland refusal first and
+        failed for a reason that is not what they test.
+        """
+        tool = tmp_path / "xdotool"
+        tool.write_text("#!/bin/sh\nexit 0\n")
+        tool.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+        monkeypatch.setenv("XDG_SESSION_TYPE", "x11")
+        monkeypatch.setenv("DISPLAY", ":0")
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    def test_focus_needs_something_to_match(self, monkeypatch, tmp_path):
+        self._an_x11_session(monkeypatch, tmp_path)
         out = focus_window._run({})
         assert "window_id" in out
 
-    def test_close_needs_something_to_close(self, granted):
+    def test_close_needs_something_to_close(self, granted, monkeypatch, tmp_path):
+        self._an_x11_session(monkeypatch, tmp_path)
         close_window.ChronoaConfig = lambda: granted
         try:
             out = close_window._run({})
@@ -589,6 +616,7 @@ class TestConnectWifiDoesNotGuessTheInterface:
             out = connect_wifi._run({})
         finally:
             connect_wifi.ChronoaConfig = ChronoaConfig
+        assert seen, "nmcli was never asked, so the failure path was not reached"
         assert "nothing to leave" not in out, (
             f"an nmcli failure was reported as 'not connected': {out}")
         assert "Could not read" in out

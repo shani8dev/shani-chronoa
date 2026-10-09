@@ -163,18 +163,87 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         from shani_chronoa.gui.questions import make_text_presenter
         ask_bridge.set_text_presenter(make_text_presenter(lambda: self.window))
 
+        # The `browse` skill drives the in-app browser while this window runs,
+        # so the person watches it; with no provider (MCP, a headless run) it
+        # keeps its headless Chromium. `is_available` is asked per call, so a
+        # machine without WebKitGTK simply has no provider.
+        from shani_chronoa import browser_bridge
+        from shani_chronoa.gui.browser import is_available as _browser_available
+        browser_bridge.set_provider(self.browser_for_model, available=_browser_available)
+
         # Initialize components based on hardware and config
         self._init_components()
 
         # Create actions
         self._create_actions()
 
+        # A call ringing on the paired phone, shown with Answer / Decline.
+        from shani_chronoa.incoming_call import IncomingCallWatcher
+        self.incoming_calls = IncomingCallWatcher(self.config)
+        self.incoming_calls.start()
+        # Files a phone shares to this computer over Bluetooth, asked about one by one.
+        from shani_chronoa.obex_receive import ObexReceiver
+        self.obex_receiver = ObexReceiver(self.config)
+        self.obex_receiver.start()
+        # A MoYoung watch kept connected, when its own switch is on.
+        from shani_chronoa.watch_companion import WatchCompanion
+        self.watch_companion = WatchCompanion(self.config, on_voice=self._watch_voice)
+        self.watch_companion.start()
+        # This computer as "Chronoa Remote", a Bluetooth keyboard for the phone, when its switch is on.
+        from shani_chronoa.ble_peripheral import RemoteService
+        self.phone_remote = RemoteService(self.config)
+        self.phone_remote.start()
+        # New texts on the paired phone, announced as they arrive (MAP notifications).
+        from shani_chronoa.map_notify import MessageWatcher
+        self.message_watcher = MessageWatcher(self.config)
+        self.message_watcher.start()
+        # This computer's music, for Bluetooth remotes (AVRCP target), when its switch is on.
+        self.avrcp_target = None
+        if self.config.get_bool("bluetooth-media-remote-enabled", False):
+            from shani_chronoa.avrcp_target import AvrcpTarget
+            self.avrcp_target = AvrcpTarget()
+            self.avrcp_target.start()
+
         logger.info("Shani Chronoa startup complete")
+
+    def _watch_voice(self, start: bool) -> None:
+        """The watch's AI-voice button: start Chronoa listening, or end the turn.
+
+        Called from the companion's thread, so handed to the GTK loop.
+
+        **This listens on this computer's microphone, not the watch's.** The
+        watch cannot be used as a microphone: it advertises Handsfree/Audio
+        Sink/A2DP in SDP but bluez exposes only `MediaControl1` (AVRCP) for it
+        and never creates an audio card, so no watch audio reaches this machine
+        - measured 2026-10-08, three connect attempts and three `ConnectProfile`
+        attempts, all with `/proc/asound/cards` unchanged. Da Fit's own manual
+        describes the button as waking the AI voice *on the phone*, so this
+        matches its behaviour rather than substituting for a missing feature.
+        `watch_companion.py` carries the same finding and its evidence.
+
+        The window is told, because a button on the wrist starting a microphone
+        on the desk should not look like the watch is listening.
+        """
+        def act():
+            if start and not self._listening:
+                self._begin_listening()
+                if self.window:
+                    self.window.set_status("Listening on this computer's microphone "
+                                            "(the watch cannot be one)")
+            elif not start and self._listening:
+                self.recorder.cancel_auto_stop()
+            return False
+        GLib.idle_add(act)
 
     def do_shutdown(self) -> None:
         """Release background mic/playback resources before the app exits."""
         logger.info("Shani Chronoa shutting down...")
         self._stop_global_shortcut()
+        for name in ("incoming_calls", "obex_receiver", "watch_companion", "phone_remote",
+                     "message_watcher", "avrcp_target"):
+            service = getattr(self, name, None)
+            if service is not None:
+                service.stop()
         # Answer a prompt that is still on screen. The window is about to be
         # destroyed, so nobody is ever going to click it, and the tool loop is
         # blocked on that answer - `AsyncBridge.shutdown()` below joins its

@@ -36,7 +36,8 @@ SCHEMA = {
     "function": {
         "name": "photo_video",
         "description": (
-            "Work on a photo or video by what is in it, on this computer. identify: find faces and "
+            "Blur or pixelate faces, blur or remove the background, or find people and objects in a photo or video. "
+            "Works by what is in it, on this computer. identify: find faces and "
             "everyday objects (people, cars, dogs, cups...); effect: blur_faces, pixelate_faces, "
             "blur_background or remove_background, saved as a new file (videos keep their sound); "
             "keyframes: save the moments a video changes; describe: say what happens in a video. For a "

@@ -35,7 +35,7 @@ _SCHEMA = {
     "type": "function",
     "function": {
         "name": "edit_image",
-        "description": "Edit a picture and save the result as a new file next to it: resize (width "
+        "description": "Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width "
                        "and/or height, or percent), compress (quality, or to under a size in KB), crop, "
                        "upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip "
                        "metadata (location/camera), or convert format. Several edits can be combined in one "

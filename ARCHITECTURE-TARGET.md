@@ -733,9 +733,20 @@ any of them.
 | Memory: **Qdrant, LanceDB, Chroma** | one SQLite file | A vector server is a new daemon to keep alive for a personal-scale index; SQLite with FTS5 (and vectors) covers it |
 | Touch: **libinput / evdev** | 🚫 no raw input capture | Reading every keystroke is a keylogger whatever the intent; `idle` reads only the time since the last input |
 | Safety: **AppArmor / udev rules** | OS layer, owned by `shani-settings` | Chronoa ships no system policy; minimal hardening, and things must work first |
-| Ears and Eyes: **ONNX-based** models (Silero, openWakeWord, RapidOCR, Kokoro) | not until onnxruntime is packaged | It is not in Arch's official repos; both images build from them |
 | Creation: **video, 3D, audio generation** | out of scope on this hardware | No GPU on the development machine; CPU generation takes minutes per item |
 | Affect, Curiosity, Dream acting by themselves | everything unattended goes through consent and approvals | Unattended capability is the riskiest origin (`sandbox/profiles.py`); any new background behaviour is off by default and asks first |
+
+**Removed 2026-10-08 - "ONNX-based models: not until onnxruntime is packaged".**
+The blocker had already been routed around: Piper voices are `.onnx` run by
+Piper's self-contained release (its own onnxruntime), Kokoro runs through the
+sherpa-onnx release, and the sounds, speaker and u2net models load the same
+way. Each ONNX model ships with its own runtime, so a system onnxruntime is no
+longer a precondition for any of them.
+
+**Generation is hardware-dependent, not a rule.** "Out of scope on this
+hardware" holds on a machine without a compute GPU; the Inventory panel reads
+the GPU (`organism.compute_gpu`) and, on an NVIDIA or AMD one, shows generation
+as possible here and not built yet rather than as refused.
 
 ## Part 3: the anatomy, and which of it you can see
 

@@ -73,7 +73,29 @@ CONTROLLED = {
     # the actuator consent gate, written directly
     "input-control-enabled",
     "document-search-enabled", "calendar-read-enabled", "calendar-sense-enabled",
+    # The write half of the calendar, beside the read half above. It has its own
+    # row in privacy.py; before that row landed the key existed in the schema and
+    # nowhere else, so `calendar_edit` refused every call with an instruction to
+    # enable a switch the window did not have.
+    "calendar-write-enabled",
     "phone-control-enabled", "phone-sense-enabled", "global-shortcut-enabled", "radio-control-enabled",
+    # The two halves of talking to a phone, each its own row in privacy.py.
+    # They were named in `phone`'s own description and checked by the skill
+    # before this existed in the schema, so reading and sending refused every
+    # call with an instruction to enable a switch that was not there.
+    "phone-messages-read-enabled", "phone-messages-send-enabled",
+    # Reading a device's own attributes - a watch battery, a heart-rate reading.
+    # Added to the schema, this row and the skill in one go, after two other
+    # skills in the same batch shipped naming switches that did not exist.
+    "bluetooth-gatt-enabled",
+    # The two pushes the watch companion makes on its own initiative, each its
+    # own row beside `watch-companion-enabled` in privacy.py. They were
+    # unconditional before, and they are the only traffic the companion sends
+    # that the watch did not ask for - now-playing being two writes every five
+    # seconds for as long as the watch is held.
+    "watch-nowplaying-enabled", "watch-weather-enabled",
+    "nfc-enabled", "fm-radio-enabled", "watch-companion-enabled", "home-place", "phone-remote-enabled", "bluetooth-media-remote-enabled",
+    "bluetooth-call-enabled",
     "background-mode-enabled",
     "global-shortcut",  # the trigger string; changed in the desktop's own keyboard settings
     # the six desktop/device trigger gates, each a row in the automatic-rules group
@@ -114,6 +136,7 @@ CONTROLLED = {
     # is one key listed once - not a duplicate to prune.
     "file-edit-enabled",
     "todo-list-enabled",
+    "goals-enabled",           # Privacy switch beside the task list (manage_goals)
     "trigger-control-enabled",
     # entry rows
     "model", "vision-model", "whisper-model", "language", "wake-phrase",

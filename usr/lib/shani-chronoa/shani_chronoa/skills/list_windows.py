@@ -21,10 +21,15 @@ desktop that mirrors a window can report it twice. Measured here, the two paths
 disagree - 23 windows by xdotool against 11 titled windows on the bus - which is
 exactly why neither is presented as the other.
 
-**The control half is still X11 only.** `focus_window` and `close_window` have no
-fallback: AT-SPI exposes no `WindowAction` interface on any window inspected on
-this machine, so there is no portable way to raise or close one. Those skills
-continue to refuse rather than pretend.
+**Control on Wayland goes through `shani_chronoa.windows`** (measured
+2026-10-08). On Plasma that is KWin's scripting API, the full set. On GNOME it is
+Chronoa's own Shell extension when the person has enabled it - GNOME offers other
+programs nothing else - and otherwise the accessibility bus, which turned out to
+do part of it: GTK4 frames expose `window.close`, `window.minimize` and
+`window.toggle-maximized` as actions, and pressing them works. It cannot focus
+or move anything (GTK4: `atspi_error (1)`; GTK3: True with nothing raised, and
+no WindowAction-style verbs at all), so those still refuse, saying what would
+make them work.
 """
 
 from __future__ import annotations
@@ -68,14 +73,12 @@ SCHEMA = {
 
 
 def session_problem() -> str:
-    """Why window control cannot work here, or '' when it can."""
+    """Why the xdotool path cannot work here, or '' when it can."""
     session = os.environ.get("XDG_SESSION_TYPE", "").strip().lower()
     if session == "wayland" or os.environ.get("WAYLAND_DISPLAY"):
         return (
-            "Window control is X11-only here, and this is a Wayland session. "
-            "There is no verified way to enumerate windows across GNOME, Plasma "
-            "and COSMIC, so nothing is listed rather than a partial list. "
-            "Chronoa does not drive the compositor directly."
+            "this is a Wayland session, where xdotool sees only X11 clients, so "
+            "the desktop's own window control is used instead"
         )
     if not os.environ.get("DISPLAY"):
         return (
@@ -85,6 +88,66 @@ def session_problem() -> str:
     if shutil.which("xdotool") is None:
         return files.tool_missing("xdotool", "list or control windows")
     return ""
+
+
+def control_backend():
+    """(backend, "") for window control off the xdotool path, or (None, why).
+
+    The accessibility-bus backend reads the same bus the accessibility sense
+    does, so it is behind the same switch.
+    """
+    from shani_chronoa import windows
+    from shani_chronoa.windows.atspi import AtspiBackend
+    backend, why = windows.detect()
+    if isinstance(backend, AtspiBackend):
+        from shani_chronoa.config import ChronoaConfig
+        if not ChronoaConfig().sense_allowed("accessibility"):
+            return None, ("the accessibility bus is the route for windows here, and it is "
+                          "turned off. Enable the 'accessibility-sense-enabled' sense"
+                          + (f". {backend.note}" if backend.note else ""))
+    return backend, why
+
+
+def act(verb: str, arguments: dict, call) -> str:
+    """Find one window from `window_id`/`title_contains` and run `call(backend, w)`.
+
+    The shared off-xdotool path for every control skill: one backend, one
+    window (an ambiguous title is refused with the candidates), and the
+    backend's own sentence when it cannot do the verb.
+    """
+    from shani_chronoa import windows
+    backend, why = control_backend()
+    if backend is None:
+        return f"Could not {verb}: {why}."
+    try:
+        target = windows.find(backend.list(), window_id=_text_argument(arguments, "window_id").strip(),
+                              title_contains=_text_argument(arguments, "title_contains"))
+        said = call(backend, target)
+    except windows.WindowError as exc:
+        return f"Could not {verb}: {exc}"
+    label = f"window {target.id}" + (f" ({target.title[:60]})" if target.title else "")
+    return said.format(label=label, backend=backend.name)
+
+
+def _via_backend(backend, arguments: dict) -> str:
+    """The window list from the desktop's own window control, with usable ids."""
+    from shani_chronoa import windows
+    try:
+        found = backend.list()
+    except windows.WindowError as exc:
+        return f"Could not list windows: {exc}"
+    needle = _text_argument(arguments, "title_contains")
+    shown = [w for w in found if w.matches(needle)]
+    if needle and not shown:
+        return (f"No window's title or application contains {needle!r}. {len(found)} "
+                f"window(s) are open - call list_windows with no filter to see them all.")
+    if not found:
+        return f"{backend.name} reports no open windows."
+    kept, withheld = files.cap_list([windows.describe(w) for w in shown], _MAX_WINDOWS)
+    note = files.withheld_note("window", withheld, widen="narrow it with title_contains")
+    return (f"{len(found)} window(s) from {backend.name}; showing {len(shown)}:\n"
+            + "\n".join(f"  {row}" for row in kept) + f"\n{note}"
+            + "  Use the id with focus_window, close_window or arrange_window.")
 
 
 def _text_argument(arguments: dict, name: str) -> str:
@@ -191,10 +254,18 @@ def _via_accessibility(arguments: dict | None = None) -> str:
 def _run(arguments: dict) -> str:
     problem = session_problem()
     if problem:
-        # Listing is read-only, so there is a real alternative on a Wayland or
-        # headless session. Saying "could not" and stopping would be accurate
-        # but wasteful when a different mechanism can answer the same question.
-        return _via_accessibility(arguments)
+        # A desktop with real window control (KWin, the GNOME extension) gives
+        # the full list with ids. Otherwise the accessibility bus answers - a
+        # different, partial observation, labelled as one.
+        from shani_chronoa.windows.atspi import AtspiBackend
+        backend, _why = control_backend()
+        if backend is not None and not isinstance(backend, AtspiBackend):
+            return _via_backend(backend, arguments)
+        out = _via_accessibility(arguments)
+        if isinstance(backend, AtspiBackend) and "window(s) reported a title" in out:
+            out += ("  Here close_window and arrange_window (minimize, maximize) work by "
+                    "title on GTK4 apps." + (f" {backend.note}." if backend.note else ""))
+        return out
     try:
         proc = subprocess.run(
             ["xdotool", "search", "--onlyvisible", "--name", ""],

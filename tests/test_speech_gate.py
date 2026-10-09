@@ -12,9 +12,9 @@ how long four seconds is.
 """
 
 import sys
+import time
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
 
@@ -158,3 +158,36 @@ def test_a_window_that_cannot_answer_is_treated_as_idle():
     busy = speech_gate.window_busy(_Broken())
     assert busy() is False, (
         "a probe that cannot answer must not become a reason to lose a transcript")
+
+class TestTheVoicePathAsksAboutTheModelNotTheOrb:
+    """Measured 2026-10-08: every spoken request waited 4 s at the gate.
+
+    The voice path sets the orb to THINKING right before transcribing, and the
+    gate's probe read the orb - so it waited behind the state it had just set,
+    with no model running. The probe now asks whether a model turn is in flight.
+    """
+
+    def test_no_turn_running_is_not_busy(self):
+        from concurrent.futures import Future
+        from shani_chronoa.app import voice
+        mixin = voice.VoiceMixin
+        import types
+        done = Future(); done.set_result("answer")
+        for future in (None, done):
+            ns = types.SimpleNamespace(_turn_future=future)
+            assert mixin._model_turn_in_flight(ns) is False
+
+    def test_a_turn_in_flight_is_busy_and_the_gate_waits_for_it(self):
+        from concurrent.futures import Future
+        import types
+        from shani_chronoa.app import voice
+        mixin = voice.VoiceMixin
+        running = Future()
+        ns = types.SimpleNamespace(_turn_future=running)
+        assert mixin._model_turn_in_flight(ns) is True
+        gate = speech_gate.Gate(lambda: mixin._model_turn_in_flight(ns), timeout=0.3)
+        start = time.monotonic()
+        assert gate.run() is True and time.monotonic() - start >= 0.25
+        running.set_result("done")
+        start = time.monotonic()
+        assert gate.run() is False and time.monotonic() - start < 0.2

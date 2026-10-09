@@ -646,7 +646,7 @@ class TestTimerNotifications:
         assert "NOT set" in result
         assert "no session" in result
 
-    @pytest.mark.parametrize("seconds", [600, "600"])
+    @pytest.mark.parametrize("seconds", [60.0, 600, "600"])
     def test_a_whole_number_of_seconds_is_accepted(
         self, monkeypatch, tmp_path, seconds
     ):
@@ -669,7 +669,10 @@ class TestTimerNotifications:
         from shani_chronoa.skills.timer import _run
         assert "Timer set for" in _run({"seconds": seconds})
 
-    @pytest.mark.parametrize("bad", [True, False, 60.0, "60.5", "soon", [], {}])
+    # 60.0 is not here: it *is* a whole number, and a model that writes a JSON
+    # number as 60.0 meant a minute (accepted since the `_seconds_arg` refactor,
+    # see the accepted list above). 60.5 is the float that is not.
+    @pytest.mark.parametrize("bad", [True, False, 60.5, "60.5", "soon", [], {}])
     def test_a_duration_that_is_not_a_whole_number_is_refused(
         self, chronoa_config, mock_notify_send, monkeypatch, tmp_path, bad
     ):

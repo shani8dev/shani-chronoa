@@ -429,3 +429,50 @@ class TestTheInventoryNowSaysSo:
         assert organ is not None
         assert organ.state in (organism.BUILT, organism.PART)
         assert "learning.py" in organ.code
+
+def test_a_conversational_turn_is_sent_no_tools_to_call():
+    """The eval's two no-tool misses (2026-10-09, Qwen3-1.7B, 67 cases).
+
+    "thanks!" called `list_capabilities` and "explain gravity" called
+    `web_search`. Both were tools that `select_tools` sends unconditionally, so
+    the fix is fewer tools on those turns - not better descriptions, which
+    cannot help a model that was handed the tool in the first place.
+    """
+    from shani_chronoa import tools
+    from shani_chronoa.tool_select import select_tools
+
+    def names(request):
+        return [t.get("name") or t.get("function", {}).get("name")
+                for t in select_tools(request, tools.TOOLS)]
+
+    for request in ("thanks!", "hello", "what can you do", "explain gravity"):
+        assert names(request) == ["ask_user"], f"{request!r} still offers tools: {names(request)}"
+
+
+def test_a_task_is_not_mistaken_for_conversation():
+    """The negative control. Each of these matches a word the pattern looks for
+    and must still get the tool it needs."""
+    from shani_chronoa import tools
+    from shani_chronoa.tool_select import select_tools
+
+    def names(request):
+        return [t.get("name") or t.get("function", {}).get("name")
+                for t in select_tools(request, tools.TOOLS)]
+
+    for request, wanted in (("what is the weather in Sangli", "get_weather"),
+                            ("what time is it", "get_datetime"),
+                            ("set a 5 minute timer", "set_timer"),
+                            ("explain what is in this file", "edit_file"),
+                            ("list my notes", "notes")):
+        assert wanted in names(request), f"{request!r} lost {wanted}: {names(request)}"
+
+
+def test_list_capabilities_is_no_longer_sent_for_free():
+    """It ranks on merit now. An unconditional floor member is a tool a small
+    model reaches for on a turn that needed none."""
+    from shani_chronoa import tools
+    from shani_chronoa.tool_select import select_tools
+
+    names = [t.get("name") or t.get("function", {}).get("name")
+             for t in select_tools("set a 5 minute timer", tools.TOOLS)]
+    assert "list_capabilities" not in names, names

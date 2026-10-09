@@ -42,6 +42,7 @@ SETTINGS_TARGETS = {
     # calendar's, the phone's, memory's and the trigger gate all live there.
     "calendar": "privacy",
     "devices": "privacy",
+    "phone": "privacy",
     "daemon": "privacy",
     "memory": "privacy",
     "triggers": "tool-activity",
@@ -58,6 +59,8 @@ SETTINGS_TARGETS = {
     # live in Privacy; Machine's refused rows are the Senses switches; Activity
     # is the log whose settings are Tool activity.
     "desktop": "privacy",
+    # The goals-enabled switch that lets Chronoa save a goal.
+    "goals": "privacy",
     "machine": "senses",
     "activity": "tool-activity",
 }
@@ -118,6 +121,9 @@ SURFACE_IDS = (
     # What Chronoa did
     "skills",
     "triggers",
+    # Saved multi-step plans and the controls that run them (2026-10-08): the
+    # goal queue had no producer or consumer until manage_goals and this.
+    "goals",
     "activity",
     "workbench",
     "diff",
@@ -131,6 +137,7 @@ SURFACE_IDS = (
     "daemon",
     "calendar",
     "devices",
+    "phone",
     "desktop",
     "diagnostics",
     "export",

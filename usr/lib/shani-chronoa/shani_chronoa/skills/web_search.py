@@ -52,9 +52,11 @@ _SCHEMA = {
     "function": {
         "name": "web_search",
         "description": (
-            "Look something up on the web and return what the page actually "
-            "says. Give a search query, a specific URL, or both. Requires "
-            "the web sense to be enabled and privacy mode to be off."
+            "Look something up on the web and return what the pages actually "
+            "say: facts, prices, how-tos, anything no more specific tool covers. "
+            "Give a search query, a specific URL, or both. For news headlines "
+            "use news; to click, fill in or book something on a site use browse. "
+            "Requires the web sense to be enabled and privacy mode to be off."
         ),
         "parameters": {
             "type": "object",

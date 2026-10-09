@@ -201,6 +201,11 @@ class SpeechQueue:
             pass
 
     @property
+    def stopped(self) -> bool:
+        """`stop()` was called: nothing more will be spoken, and `on_done` has fired or will."""
+        return self._stopped.is_set()
+
+    @property
     def active(self) -> bool:
         return any(t.is_alive() for t in self._threads)
 

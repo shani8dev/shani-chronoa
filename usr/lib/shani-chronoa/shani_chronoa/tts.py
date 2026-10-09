@@ -308,7 +308,11 @@ class PiperTTS:
         cmd = [voices.kokoro_binary()]
         cmd += [f"{option}={path}" for option, path in voices.kokoro_files().items()]
         cmd += [f"--sid={voices.KOKORO_VOICES[self.kokoro_voice()].sid}",
-                f"--kokoro-length-scale={1.0 / self.rate:.3f}", "--num-threads=2",
+                f"--kokoro-length-scale={1.0 / self.rate:.3f}",
+                # Up to 4 threads. Measured 2026-10-08 on an 8-thread laptop CPU:
+                # 2 -> 4 cut a call from 10.9 s to 9.7 s (load 5.5 s -> 3.4 s);
+                # 8 was slower again (11.3 s), the extra threads being hyperthreads.
+                f"--num-threads={min(4, os.cpu_count() or 2)}",
                 f"--output-filename={output_file}",
                 # the text is the one positional argument; a leading '-' would be read as an option
                 text.lstrip("- ") or "."]

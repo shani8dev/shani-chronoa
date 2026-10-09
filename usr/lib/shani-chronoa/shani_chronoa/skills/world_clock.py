@@ -30,8 +30,8 @@ _SCHEMA = {
     "type": "function",
     "function": {
         "name": "get_world_time",
-        "description": "The current time and date in another city, country or time zone, "
-                       "e.g. 'what time is it in Tokyo'.",
+        "description": "The current time and date in ANOTHER city, country or time zone, "
+                       "e.g. 'what time is it in Tokyo'. For the time here, use get_datetime.",
         "parameters": {"type": "object", "properties": {
             "place": {"type": "string", "description": "A city, country or IANA time zone, e.g. 'Tokyo' or 'Europe/Paris'."},
         }, "required": ["place"]},

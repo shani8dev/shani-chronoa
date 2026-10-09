@@ -92,10 +92,11 @@ _LOAD_FINISHED = 3
 #: window can see, and the first two are code rather than prose.
 VISIBLE_TEXT_JS = "document.body ? document.body.innerText : ''"
 
-#: GIR namespace versions accepted for WebKit. webkit2gtk-4.1 is packaged as
-#: `WebKit-6.0` on Arch and as `WebKit-4.1` on Debian, so pinning one version
-#: would make the browser present on one of the two distros this repo packages
-#: for and absent on the other.
+#: GIR namespace versions accepted for WebKit. `WebKit-6.0` is the GTK 4 build
+#: (Arch `webkitgtk-6.0`, Debian/Ubuntu `gir1.2-webkit-6.0`) and the one that
+#: loads here. `4.1` is the GTK 3 build: it stays listed so a machine with only
+#: that installed is reported as "no WebKit" by the version check below rather
+#: than by a crash, since it cannot load beside GTK 4.
 _WEBKIT_NAMESPACES = ("6.0", "5.0", "4.1")
 
 _WEBKIT = None
@@ -153,8 +154,9 @@ def unavailable_reason() -> str:
     return (
         "The in-app browser needs WebKitGTK, which is not installed "
         f"(looked for the WebKit {found} namespaces). On Arch that is the "
-        "'webkit2gtk-4.1' package, on Debian 'gir1.2-webkit2-4.1'. Every other "
-        "part of Chronoa works without it."
+        "'webkitgtk-6.0' package, on Debian and Ubuntu 'gir1.2-webkit-6.0' - the "
+        "GTK 4 builds; 'webkit2gtk-4.1' is the GTK 3 one and cannot load into "
+        "this window. Every other part of Chronoa works without it."
     )
 
 
@@ -320,6 +322,10 @@ class BrowserWindow(Gtk.Window):
         self._search_url = search_url
         self._home_url = home_url
         self._webview = None
+        #: Set by `gui/browser_driver.py` only while the model is driving this
+        #: window: a callable `url -> reason` ("" to allow). The person's own
+        #: typing and clicking are never gated - see the module docstring.
+        self.navigation_guard = None
         self._build_ui()
         self.connect("notify::visible", self._on_shown)
         self.load_url(home_url)
@@ -387,6 +393,30 @@ class BrowserWindow(Gtk.Window):
         self._status.set_margin_bottom(4)
         self._status.set_visible(False)
         root.append(self._status)
+
+        # What Chronoa is doing in this window, while it is doing it. The model
+        # drives this browser in front of the person, so every action it takes
+        # is named here as it happens - and a refusal is named too, in red.
+        self._activity = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+        strip = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        strip.add_css_class("chronoa-activity")
+        for side in ("start", "end"):
+            getattr(strip, f"set_margin_{side}")(10)
+        strip.set_margin_bottom(4)
+        self._activity_spinner = Gtk.Spinner(spinning=True)
+        self._activity_label = Gtk.Label(xalign=0.0, hexpand=True, wrap=True)
+        strip.append(self._activity_spinner)
+        strip.append(self._activity_label)
+        self._activity.set_child(strip)
+        self._activity_hide = 0
+        root.append(self._activity)
+        provider = Gtk.CssProvider()
+        provider.load_from_string(
+            ".chronoa-activity { background: alpha(@accent_bg_color, 0.14); border-radius: 8px;"
+            " padding: 6px 10px; font-weight: 600; }"
+            ".chronoa-activity.refused { background: alpha(@error_bg_color, 0.16); color: @error_color; }")
+        Gtk.StyleContext.add_provider_for_display(
+            self.get_display(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         self._webview = self._build_webview()
         scroller = Gtk.ScrolledWindow()
@@ -457,6 +487,7 @@ class BrowserWindow(Gtk.Window):
         view.connect("load-failed", self._on_load_failed)
         view.connect("notify::title", self._on_view_title)
         view.connect("create", self._on_create)
+        view.connect("decide-policy", self._on_decide_policy)
         return view
 
     def _run_menu_action(self, action) -> None:
@@ -587,6 +618,26 @@ class BrowserWindow(Gtk.Window):
             self.load_url(uri)
         return None
 
+    def _on_decide_policy(self, _webview, decision, decision_type) -> bool:
+        """Hold a model-driven navigation to the egress policy.
+
+        Only while `navigation_guard` is set, which is only while a `browse`
+        call is in flight. That covers what the model asked for directly and
+        what it caused - a clicked link, a submitted form, a server redirect -
+        because each of those reaches WebKit as a navigation decision here.
+        """
+        guard = self.navigation_guard
+        if guard is None:
+            return False
+        kinds = self._webkit_ns.PolicyDecisionType
+        if decision_type not in (kinds.NAVIGATION_ACTION, kinds.NEW_WINDOW_ACTION):
+            return False
+        uri = decision.get_navigation_action().get_request().get_uri() or ""
+        if guard(uri):
+            decision.ignore()
+            return True
+        return False
+
     def _update_navigation_state(self) -> None:
         """Read back/forward sensitivity from the view, not from a guess.
 
@@ -688,6 +739,26 @@ class BrowserWindow(Gtk.Window):
         self._set_status(f"Attached {url}")
 
     # -- chrome ------------------------------------------------------------
+
+    def show_activity(self, text: str, refused: bool = False) -> None:
+        """Name what Chronoa is doing in this window; hides after a quiet spell."""
+        strip = self._activity.get_child()
+        (strip.add_css_class if refused else strip.remove_css_class)("refused")
+        self._activity_spinner.set_visible(not refused)
+        self._activity_label.set_label(f"Chronoa: {text}")
+        self._activity.set_reveal_child(True)
+        if self._activity_hide:
+            GLib.source_remove(self._activity_hide)
+        self._activity_hide = GLib.timeout_add(4000 if refused else 2500, self._hide_activity)
+
+    def _hide_activity(self) -> bool:
+        self._activity_hide = 0
+        self._activity.set_reveal_child(False)
+        return False
+
+    def activity_text(self) -> str:
+        """What the strip says now, '' when hidden - for tests and the status."""
+        return self._activity_label.get_label() if self._activity.get_reveal_child() else ""
 
     def _set_status(self, text: str, error: bool = False) -> None:
         """The one line under the toolbar: notices and failures both.

@@ -132,6 +132,18 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # Read out of chronoa-matrix.json's pacman data on 2026-10-07, for the
         # matrix skills (distrobox, virsh, fc-list/fc-match, boltctl).
         "distrobox", "libvirt", "fontconfig", "bolt",
+        "libnfc",
+        # Verified 2026-10-08 against the Arch package API: `rtl-sdr 2.0.3-1`,
+        # `extra`, and its file list has `usr/bin/rtl_fm`.
+        "rtl-sdr",
+        # Verified 2026-10-08: `bluez-obex` in `extra` ships usr/lib/bluetooth/obexd and
+        # obex.service (Arch splits it out of bluez and bluez-utils).
+        "bluez-obex",
+        # The NFC tool set. Verified against the Arch package API rather than
+        # assumed: `libnfc 1.8.0-3`, repo `extra`, `arch=(x86_64)`,
+        # depends=(libusb-compat pcsclite). Its ten `nfc-*` binaries all come
+        # from that one package, because upstream's `BUILD_UTILS` defaults ON and
+        # the Arch PKGBUILD never disables it.
     }
     for binary, hint in files._PACKAGE_HINTS.items():
         assert hint in real_packages, f"{binary} -> {hint!r} is not a known Arch package"

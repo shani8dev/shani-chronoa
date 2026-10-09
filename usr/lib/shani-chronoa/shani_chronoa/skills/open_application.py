@@ -13,7 +13,8 @@ _SCHEMA = {
     "function": {
         "name": "open_application",
         "description": ("Open or launch an installed application by name or by kind, e.g. 'firefox', "
-                        "'files', 'settings', 'music player', 'text editor'."),
+                        "'files', 'settings', 'music player', 'text editor'. Not for websites: "
+                        "use browse to open a site and work on it."),
         "parameters": {
             "type": "object",
             "properties": {

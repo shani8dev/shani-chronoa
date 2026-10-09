@@ -62,8 +62,15 @@ def test_everything_is_listed_before_a_search(window):
     assert sorted(_visible_labels(window)) == ["Date and time", "Send a notification", "Timer"]
 
 
+def _tasks_matching(word):
+    from shani_chronoa import capabilities
+    return sum(1 for t in capabilities.EVERYDAY_TASKS
+               if word in " ".join((t.title, t.how, t.prompt)).lower())
+
+
 def test_a_search_keeps_only_matching_rows(window):
-    assert window.filter("timer") == 1
+    # The search covers the "Get things done" cards too (one mentions a timer).
+    assert window.filter("timer") == 1 + _tasks_matching("timer")
     assert _visible_labels(window) == ["Timer"]
 
 
@@ -82,8 +89,9 @@ def test_no_match_hides_every_row_and_says_so(window):
 
 
 def test_clearing_the_search_restores_the_list(window):
+    from shani_chronoa import capabilities
     window.filter("timer")
-    assert window.filter("") == 3
+    assert window.filter("") == 3 + len(capabilities.EVERYDAY_TASKS)
     assert len(_visible_labels(window)) == 3
     assert not window._empty.get_visible()
 

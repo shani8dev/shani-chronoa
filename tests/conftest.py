@@ -26,7 +26,6 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import types
 from pathlib import Path
 
 # Disable bytecode generation BEFORE any shani_chronoa import — pytest
@@ -454,3 +453,20 @@ def pytest_configure(config):
         "markers",
         "holds_organs: this test leaves a body activity open on purpose - it is "
         "the subject of the test, not a leak")
+
+
+@pytest.fixture(autouse=True)
+def _no_question_presenter_outlives_its_test():
+    """Remove any `ask_bridge` presenter a test installed, once it is done.
+
+    Building a `ChronoaApplication` (or anything else that registers one)
+    installs a presenter, and nothing ever removed it. Every later test that
+    relied on there being nobody to ask then got "the question went
+    unanswered" or "the user did not allow ...", depending on order - three
+    tests failed only inside the full suite (2026-10-08). A test that needs a
+    presenter sets one itself.
+    """
+    yield
+    from shani_chronoa import ask_bridge
+    ask_bridge._presenter = None
+    ask_bridge._text_presenter = None

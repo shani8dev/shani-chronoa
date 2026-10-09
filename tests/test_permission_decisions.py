@@ -43,6 +43,38 @@ def _presenter(choice: str, seen: list | None = None):
 
 
 @pytest.fixture(autouse=True)
+def a_screen_capture_tool(tmp_path, monkeypatch):
+    """A `grim` that writes a real 2x2 PNG to stdout, first on PATH.
+
+    These tests are about the approval flow, and they use `screenshot` as the
+    gated tool. Without a capture tool on the host, "allow once" correctly ran
+    the tool and the tool correctly said "no Wayland screen capture tool is
+    installed" - so the two allow tests failed on any machine without grim or
+    gnome-screenshot, for a reason that has nothing to do with permissions.
+    An executable rather than a monkeypatch, because the skill runs in a
+    sandboxed child that inherits PATH and not this process's patches.
+    """
+    import struct
+    import zlib
+
+    def chunk(kind, data):
+        return (struct.pack(">I", len(data)) + kind + data
+                + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
+
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", 2, 2, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(b"\x00" + b"\xff\x00\x00" * 2 + b"\x00" + b"\x00\xff\x00" * 2))
+           + chunk(b"IEND", b""))
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "image.png").write_bytes(png)
+    tool = bin_dir / "grim"
+    tool.write_text(f"#!/bin/sh\nexec cat '{bin_dir / 'image.png'}'\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{__import__('os').environ.get('PATH', '')}")
+
+
+@pytest.fixture(autouse=True)
 def clean_state():
     permissions.clear()
     ask_bridge.set_presenter(None)

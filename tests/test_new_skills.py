@@ -14,7 +14,6 @@ and false, which is the failure this codebase cares about most:
 
 import json
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -35,7 +34,10 @@ def state(tmp_path, monkeypatch):
         timer, "_schedule",
         lambda ident, secs, label="timer": (scheduled.append((ident, secs, label)), (True, ""))[1])
     unscheduled = []
-    monkeypatch.setattr(timer, "_unschedule", lambda ident: unscheduled.append(ident))
+    # `_unschedule` now reports whether systemd stopped the unit (pause must
+    # not record a timer as paused that is still armed), so the fake says yes.
+    monkeypatch.setattr(timer, "_unschedule",
+                        lambda ident: (unscheduled.append(ident), (True, ""))[1])
     return store, scheduled, unscheduled
 
 
@@ -135,9 +137,10 @@ class TestTimerHonesty:
     def test_a_week_long_timer_is_refused(self, state):
         assert "reminder, not a timer" in timer.set_timer(86400 * 8, "x")
 
-    def test_the_schema_advertises_all_three_actions(self):
+    def test_the_schema_advertises_every_action(self):
         actions = timer.SCHEMA["function"]["parameters"]["properties"]["action"]
-        assert set(actions["enum"]) == {"set", "list", "cancel"}
+        assert set(actions["enum"]) == {"set", "list", "cancel", "add", "pause",
+                                        "resume", "remaining", "reset"}
 
 
 # --- power profiles -------------------------------------------------------

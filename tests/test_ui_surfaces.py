@@ -21,8 +21,7 @@ gi.require_version('Gtk', '4.0')
 pytest.importorskip("gi")
 from gi.repository import Gtk, GLib  # noqa: E402
 
-from shani_chronoa import capabilities  # noqa: E402
-from shani_chronoa.gui import ChronoaWindow, HelpWindow, SuggestionBar  # noqa: E402
+from shani_chronoa.gui import ChronoaWindow, SuggestionBar  # noqa: E402
 
 
 def _tool(name, description=""):
@@ -289,3 +288,20 @@ class TestAgainstTheRealRegistry:
         window = ChronoaWindow(app, config=_Closed())
         assert len(window._caps) > 10
         assert len(_chips(window)) >= 4
+
+
+class TestCommandMenuBeforeTheFirstIdle:
+    def test_typing_a_slash_before_the_idle_parents_the_menu_first(self, app, monkeypatch):
+        """`popup()` realizes the popover, and realizing one with no parent
+        segfaults in GTK. The parent was attached only in an idle callback, so a
+        "/" typed before that callback ran crashed the app - reproduced under
+        CPU load. Checked at the moment of the call, with no loop turn run."""
+        window = ChronoaWindow(app, config=_Closed())
+        menu = window._command_menu
+        assert menu.get_parent() is None, "control: the idle has already run"
+        parents = []
+        monkeypatch.setattr(menu, "popup", lambda: parents.append(menu.get_parent()))
+        window._input_entry.set_text("/")
+        window._sync_command_menu()
+        assert parents and parents[0] is window._input_entry, (
+            "popup() ran on a popover with no parent")

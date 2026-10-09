@@ -7,7 +7,6 @@ by nothing). Found by listing every backend module the GUI never names
 """
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -93,6 +92,22 @@ def test_each_pass_returns_its_own_report(name):
     from shani_chronoa.gui.surfaces import learning
     text = getattr(learning, name)()
     assert isinstance(text, str) and text.strip(), name
+
+
+@pytest.fixture(autouse=True)
+def _nobody_to_ask(monkeypatch):
+    """No permission presenter, so a refusal is the skill's own sentence.
+
+    An earlier test that started `ChronoaApplication` leaves its spoken
+    presenter registered in `ask_bridge` (application.py, at startup), and a
+    consent-off call then asks it and waits for an answer nobody gives -
+    reproduced by running `test_slash_menu_opens.py` first: "Arming..." after
+    30 s and the hands organ still lit at teardown. In the app that question is the right
+    behaviour; this file asserts what the skill says when nobody can be asked.
+    """
+    from shani_chronoa import ask_bridge
+    monkeypatch.setattr(ask_bridge, "_presenter", None)
+    monkeypatch.setattr(ask_bridge, "_text_presenter", None, raising=False)
 
 
 def _arm(view, timeout=30):

@@ -193,6 +193,13 @@ class ReactionLayer:
         by the caller on the next call, so the count lives here."""
         key = (_origin_key(origin), tool, pattern)
         self._confirmed[key] = self._confirmed.get(key, 0) + 1
+        # An approval covers the next stretch of the same work: the count starts
+        # again, so the person is asked after another `_REPEAT_LIMIT` calls, not on
+        # every call after the first question (which made a long browser task ask
+        # per click). Approving five times still changes the question - see
+        # `_REPEAT_ESCALATION` in `check`.
+        for stale in [k for k in self._calls if k[0] == key[0] and k[1] == tool]:
+            del self._calls[stale]
 
     def _record(self, origin: str, tool: str, target: str) -> None:
         key = (_origin_key(origin), tool, target)

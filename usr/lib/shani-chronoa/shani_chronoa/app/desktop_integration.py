@@ -101,20 +101,51 @@ class DesktopIntegrationMixin:
         reads a page, decides it is the answer to a question they have not typed
         yet, and attaches it.
         """
-        from shani_chronoa.gui.browser import BrowserUnavailable, BrowserWindow, is_available
+        from shani_chronoa.gui.browser import BrowserUnavailable, is_available
         if not is_available():
             if self.window:
                 self.window.set_status(
-                    "The browser needs webkit2gtk (Arch: pacman -S webkit2gtk-4.1)")
+                    "The browser needs WebKitGTK for GTK 4 (Arch: pacman -S webkitgtk-6.0)")
             return
-        if getattr(self, "_browser_window", None) is None:
-            try:
-                self._browser_window = BrowserWindow(application=self, on_attach=self._browser_attach)
-            except BrowserUnavailable as exc:
-                if self.window:
-                    self.window.set_status(str(exc))
-                return
+        try:
+            self._ensure_browser_window()
+        except BrowserUnavailable as exc:
+            if self.window:
+                self.window.set_status(str(exc))
+            return
         self._browser_window.present()
+
+    def _ensure_browser_window(self, home_url=None):
+        """The browser window, built on first use. Main thread only.
+
+        Forgotten when the person closes it: `close-request` tears the window
+        and its web process down, and handing that dead window back out - to
+        the menu or to the model - presented nothing.
+        """
+        from shani_chronoa.gui.browser import BrowserWindow
+        if getattr(self, "_browser_window", None) is None:
+            kwargs = {} if home_url is None else {"home_url": home_url}
+            window = BrowserWindow(application=self, on_attach=self._browser_attach, **kwargs)
+            window.connect("close-request", self._on_browser_closed)
+            self._browser_window = window
+        return self._browser_window
+
+    def _on_browser_closed(self, _window) -> bool:
+        self._browser_window = None
+        return False
+
+    def browser_for_model(self):
+        """The browser window for the `browse` skill (`browser_bridge`'s provider).
+
+        Built blank (`about:blank`, no fetch the person did not ask for) and
+        presented when first needed, so the person sees the model's browsing
+        happen in a window they can watch, stop or close.
+        """
+        fresh = getattr(self, "_browser_window", None) is None
+        window = self._ensure_browser_window(home_url="about:blank")
+        if fresh:
+            window.present()
+        return window
 
     def _browser_attach(self, title: str, url: str, text: str) -> None:
         """A page the user chose: it becomes the next question, with the answer

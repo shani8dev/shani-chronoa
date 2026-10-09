@@ -58,8 +58,14 @@ SCHEMA = {
 
 
 def parse_status(stdout: str) -> "dict[str, list[dict]]":
-    """{'Sinks': [...], 'Sources': [...]} from the Audio section of `wpctl status`."""
-    out = {"Sinks": [], "Sources": []}
+    """{'Devices': [...], 'Sinks': [...], 'Sources': [...]} from `wpctl status`.
+
+    `Devices` was added for `bluetooth_call`, which needs the *cards* - the
+    Bluetooth ones carry the `Profile 0: hfp_hf` lines that decide where a
+    call's voice goes, and no sink or source line has one. The section state
+    machine below already walked past them.
+    """
+    out = {"Devices": [], "Sinks": [], "Sources": []}
     in_audio, section = False, None
     for raw in stdout.splitlines():
         if raw and not raw[0].isspace() and raw[0] not in "│├└":

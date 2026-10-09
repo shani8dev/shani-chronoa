@@ -36,7 +36,8 @@ SCHEMA = {
         "description": (
             "Find files and folders by name under a directory, using a "
             "wildcard pattern such as '*.log' or 'report*'. Matches on the name "
-            "only and never opens the files."
+            "only and never opens the files. To see what is in one folder, use "
+            "list_directory."
         ),
         "parameters": {
             "type": "object",

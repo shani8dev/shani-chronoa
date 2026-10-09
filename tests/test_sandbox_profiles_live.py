@@ -21,7 +21,6 @@ running the *same program* under both origins and showing different outcomes.
 from __future__ import annotations
 
 import logging
-import os
 import resource
 import subprocess
 import sys
@@ -83,7 +82,7 @@ def _allocate(mib: int) -> "list[str]":
     is written against.
     """
     return [sys.executable, "-c",
-            f"x = bytearray({mib} * 1024 * 1024); print('ALLOCATED-OK', len(x))"]
+            f"x = bytearray({mib} * 1024 * 1024); print('ALLOCATED' + '-OK', len(x))"]
 
 
 def _report_limits() -> "list[str]":
@@ -145,7 +144,7 @@ class TestTheMemoryCeilingIsEnforcedInTheChild:
         possibility that the skill import itself is what fails.
         """
         program = ("from shani_chronoa.skills.clock import _run; "
-                   "x = bytearray(900 * 1024 * 1024); print('ALLOCATED-OK')")
+                   "x = bytearray(900 * 1024 * 1024); print('ALLOCATED' + '-OK')")
         code, out, _ = executor.execute(
             [sys.executable, "-c", program], _level_3())
         assert code != 0, f"a real skill-shaped child ran 900MB under 512MB: {out!r}"

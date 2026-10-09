@@ -39,7 +39,8 @@
     {"id": "disk", "say": "how much disk space is free?", "expect": [{"tool": "disk_usage"}, {"tool": "system_info"}]},
     {"id": "processes", "say": "what's using the most CPU right now?", "expect": [{"tool": "list_processes"}]},
     {"id": "updates", "say": "are there any system updates?", "expect": [{"tool": "check_updates"}]},
-    {"id": "search-web", "say": "search the web for the latest news about ISRO", "expect": [{"tool": "web_search", "args": {"query": "~isro"}}]},
+    {"id": "search-web", "say": "search the web for the latest news about ISRO", "expect": [{"tool": "web_search", "args": {"query": "~isro"}}, {"tool": "news", "args": {"topic": "~isro"}}], "note": "'latest news about' makes news a correct answer too; search-web-fact is the case that requires web_search"},
+    {"id": "search-web-fact", "say": "search the web for how much the Chandrayaan-3 mission cost", "expect": [{"tool": "web_search", "args": {"query": "~chandrayaan"}}]},
     {"id": "wiki", "say": "who was APJ Abdul Kalam?", "expect": [{"tool": "lookup_wikipedia", "args": {"topic": "~kalam"}}, {"tool": "web_search", "args": {"query": "~kalam"}}]},
     {"id": "define", "say": "what does ephemeral mean?", "expect": [{"tool": "define_word", "args": {"word": "~ephemeral"}}]},
     {"id": "translate", "say": "translate 'good morning' to Hindi", "expect": [{"tool": "translate_text", "args": {"text": "~good morning", "to_language": ["hi", "hindi"]}}]},
@@ -62,6 +63,11 @@
     {"id": "chat-thanks", "say": "thanks, that's all", "none": true},
     {"id": "chat-explain", "say": "explain what a black hole is in two sentences", "none": true},
     {"id": "chat-hello", "say": "hello Chronoa!", "none": true},
-    {"id": "vague-delete", "say": "delete it", "none": true, "ask": true}
+    {"id": "vague-delete", "say": "delete it", "none": true, "ask": true},
+    {"id": "web-task-blazedemo", "say": "Open blaze demo dot com and find the cheapest flight from Boston to London.", "expect": [{"tool": "browse", "args": {"url": ["~blazedemo", "~blaze"]}}]},
+    {"id": "web-fill-form", "say": "Go to example.org and fill in the contact form with my name, Asha.", "expect": [{"tool": "browse", "args": {"url": "~example.org"}}]},
+    {"id": "web-wiki-search", "say": "Go to wikipedia.org and search for Shaniwar Wada.", "expect": [{"tool": "browse"}, {"tool": "lookup_wikipedia", "args": {"topic": "~shaniwar"}}]},
+    {"id": "reminder-at-nine", "say": "Remind me tomorrow at 9 to pack my bags.", "expect": [{"tool": "reminders", "args": {"text": "~pack", "due": ["~9", "~nine"]}}]},
+    {"id": "browse-run-together", "say": "Openblaze demo.com and find the cheapest flight from Boston to London.", "note": "whisper's actual transcript of the spoken request in the 2026-10-09 local voice demo; the model chose web_search", "expect": [{"tool": "browse"}]}
   ]
 }

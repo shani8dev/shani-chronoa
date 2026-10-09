@@ -62,10 +62,10 @@ def _run(arguments: dict) -> str:
     else:
         import html as _html
         content = (f"<!DOCTYPE html>\n<html>\n<head><meta charset='utf-8'>"
-                   f"<title>{_html.escape(title)}</title></head>\n<body>\n"
-                   f"<h1>{_html.escape(title)}</h1>\n"
-                   + "\n".join(f"<p>{_html.escape(p)}</p>" for p in body.split("\n\n") if p.strip())
-                   + "\n</body>\n</html>\n")
+                   f"<title>{_html.escape(title)}</title>"
+                   "<style>body{font:16px/1.5 system-ui,sans-serif;max-width:46em;margin:2em auto;padding:0 1em}"
+                   "h1{font-size:1.8em}h2{font-size:1.3em;margin-top:1.4em}</style></head>\n<body>\n"
+                   f"<h1>{_html.escape(title)}</h1>\n" + markdown_to_html(body) + "\n</body>\n</html>\n")
     try:
         target.write_text(content, encoding="utf-8")
     except OSError as e:
@@ -74,5 +74,53 @@ def _run(arguments: dict) -> str:
 
 
 POST_CONDITION = None
+
+def markdown_to_html(body: str) -> str:
+    """The small markdown a model writes - headings, lists, bold, paragraphs - as HTML.
+
+    Every piece is escaped before any tag is added, so text from a web page or
+    a model cannot become markup. Anything else stays literal text. The HTML
+    format used to put the body in <p> blocks as-is, so an itinerary showed
+    "## Flight - Boston..." as one run-on paragraph (seen in a recorded demo).
+    """
+    import html as _html
+    import re as _re
+
+    def inline(text: str) -> str:
+        out = _html.escape(text)
+        out = _re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+        return _re.sub(r"(?<![*\w])\*(?!\s)(.+?)(?<!\s)\*(?!\w)", r"<em>\1</em>", out)
+
+    parts, para, items = [], [], []
+
+    def flush():
+        if para:
+            parts.append(f"<p>{inline(' '.join(para))}</p>")
+            para.clear()
+        if items:
+            parts.append("<ul>" + "".join(f"<li>{inline(i)}</li>" for i in items) + "</ul>")
+            items.clear()
+
+    for line in body.splitlines():
+        stripped = line.strip()
+        heading = _re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        bullet = _re.match(r"^[-*+]\s+(.*)$", stripped)
+        if not stripped:
+            flush()
+        elif heading:
+            flush()
+            level = max(2, len(heading.group(1)))  # the title is the only <h1>
+            parts.append(f"<h{level}>{inline(heading.group(2))}</h{level}>")
+        elif bullet:
+            if para:
+                flush()
+            items.append(bullet.group(1))
+        else:
+            if items:
+                flush()
+            para.append(stripped)
+    flush()
+    return "\n".join(parts)
+
 
 SKILLS = [Skill(name="create_document", schema=_SCHEMA, run=_run)]

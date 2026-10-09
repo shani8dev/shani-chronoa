@@ -1284,9 +1284,12 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         entry.update_property([Gtk.AccessibleProperty.LABEL],
                               [f"{provider.name} API key"])
         entry.connect("changed", lambda e, pid=provider_id: entered.__setitem__(pid, e.get_text()))
+        from shani_chronoa import cloud_voice as _cv
+        # What this key unlocks, so someone choosing the cloud can see which
+        # provider will also hear and speak - not only which one can chat.
         row = Adw.ActionRow(title=provider.name,
                             subtitle=("a key is already saved" if existing.get(provider_id)
-                                      else "needs a key"))
+                                      else "needs a key") + " - " + ", ".join(_cv.abilities(provider_id)))
         row.add_suffix(entry)
         row.set_activatable_widget(entry)
         key_rows.add(row)
@@ -1295,6 +1298,9 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         description=", ".join(cloud_llm.PROVIDERS[p].name
                               for p in cloud_llm.DEFAULT_PROVIDER_ORDER if p in cloud_llm.PROVIDERS))
     box.append(free)
+    # A label of its own, not part of the description above: appended there it
+    # widened the page to 590px of 560 and gave it a sideways scrollbar.
+    box.append(wrapping("Those are chat only: no provider listens or speaks without a key."))
     key_status = wrapping("")
     box.append(key_status)
     # Not `suggested-action`: Next is the page's one primary action, and two
@@ -1409,6 +1415,26 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             navigate(box, "ears", skip_label="Skip for now")
     view.add(picker)
 
+    def _cloud_speech_switch(title: str, key: str, route, what: str) -> Gtk.Widget:
+        """A switch for cloud listening or speaking, naming who can do it.
+
+        Shown on the cloud path's Ears and Voice pages, which used to say only
+        that cloud speech "needs a switch in Settings and an API key" without
+        naming the providers or offering the switch.
+        """
+        from shani_chronoa import cloud_voice as _cv
+        names = ", ".join(_cv.provider_names(route))
+        keyed = [p for p in route if config.cloud_llm_api_keys().get(p)]
+        group = Adw.PreferencesGroup()
+        row = Adw.SwitchRow(title=title, subtitle=(
+            f"{what}. Can do it: {names}. "
+            + ("You have a key for one of them." if keyed else
+               "Needs a key for one of them - add it on the Cloud keys page.")))
+        row.set_active(config.get_bool(key, False))
+        row.connect("notify::active", lambda r, _p: config.set(key, "true" if r.get_active() else "false"))
+        group.add(row)
+        return group
+
     # 3. ears
     e = s["ears"]
     ears, box = page("Ears", "ears", "To understand what you say, Chronoa needs to hear you.")
@@ -1440,7 +1466,10 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                 "to be heard on this computer, which needs a model downloaded - "
                 "the choices and their sizes are below. No provider accepts an "
                 "anonymous recording, so a cloud alternative needs both a switch "
-                "in Settings and an API key."))
+                "and an API key."))
+        box.append(_cloud_speech_switch(
+            "Listen in the cloud", _cloud_voice.STT_SWITCH, _cloud_voice.STT_ROUTES,
+            "Your recordings are uploaded to be transcribed"))
     items = [(k, f"{k.split('-')[0].title()}" + (" - recommended" if k == e["recommended"] else ""),
               f"{spec.size_bytes / 1e6:.0f} MB - {spec.note}") for k, spec in stt_provision.MODELS.items()]
     group, chosen_stt = choice_group("Choose how well it listens", items, e["recommended"])
@@ -1497,6 +1526,10 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             "Cloud speech synthesis is on, and it is the last resort - it is "
             "used only if none of the local engines can speak, so turning it on "
             "does not replace any of these."))
+    if _mode() == "cloud":
+        box.append(_cloud_speech_switch(
+            "Speak from the cloud", _cloud_voice_tts.TTS_SWITCH, _cloud_voice_tts.TTS_ROUTES,
+            "Replies are sent to be spoken, only when no voice on this computer can"))
     piper_mb = voices._PIPER.size_bytes / 1e6
     kokoro_mb = (sherpa.RELEASE.size_bytes + voices._KOKORO_MODEL.size_bytes) / 1e6
     # `voices_for("en")` rather than filtering `VOICES` here: which voices may be

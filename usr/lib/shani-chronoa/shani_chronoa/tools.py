@@ -47,10 +47,28 @@ TOOLS, _HANDLER_FNS = discover_skills()
 #: what they do cannot cross that boundary. `ask_user` has to put a question in
 #: the window the user is looking at and block until they answer.
 #:
+#: `browse` is here so it can drive the in-app browser window the person is
+#: watching, which lives on this process's GTK main thread and cannot be reached
+#: from a sandbox child. It is not a shell: its in-app path is a fixed set of
+#: page actions (`gui/browser_driver.py`), holds every navigation it causes to
+#: the egress policy and runs no arbitrary script. And it is local *only while
+#: that window can exist* - see `_runs_locally` - so with no GUI (the MCP
+#: server, a headless run) its headless Chromium stays in the sandbox.
+#:
 #: This is a privilege list. Anything named here is unsandboxed, so it stays a
 #: short explicit set rather than anything derived - a rule that decided this
 #: automatically would widen the exemption without anyone reviewing it.
-_LOCAL_TOOLS = frozenset({"ask_user"})
+_LOCAL_TOOLS = frozenset({"ask_user", "browse"})
+
+
+def _runs_locally(name: str) -> bool:
+    """Whether `name` runs in this process right now (see `_LOCAL_TOOLS`)."""
+    if name not in _LOCAL_TOOLS:
+        return False
+    if name == "browse":
+        from shani_chronoa import browser_bridge
+        return browser_bridge.has_provider()
+    return True
 
 
 # Module-level sandbox executor singleton
@@ -68,7 +86,10 @@ logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FN
 #: asked, 15 s for an unattended rule), so this can only lengthen up to that.
 _SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, "recording": 300, "photos": 300,
                # 100 MB at a slow link; a long PDF merge; a polkit password prompt left open.
-               "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90}
+               "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90,
+               # A wrist measurement takes up to a minute after a ~5 s connect, and
+               # `listen` accepts up to 60 s: both were killed at the 30 s default.
+               "watch": 150, "bluetooth_gatt": 100, "find_device": 60}
 
 
 def _get_sandbox_config(tool_name: str) -> SandboxConfig:
@@ -625,6 +646,15 @@ def _guardrail_refuses(name: str, arguments):
     )
 
 
+def _person_allows(question: str) -> bool:
+    """Put a reaction-layer question to the person; True only on a clear yes."""
+    import threading
+    from shani_chronoa import ask_bridge
+    if threading.current_thread() is threading.main_thread() or not ask_bridge.has_presenter():
+        return False
+    return ask_bridge.ask(f"{question}\n\nLet it continue?", ["Let it continue", "Stop"]) == "Let it continue"
+
+
 def _reaction_refuses(name: str, arguments, origin: str):
     """Ask the reaction layer about this call. Returns a DispatchResult to
     return instead, or None to proceed.
@@ -644,6 +674,19 @@ def _reaction_refuses(name: str, arguments, origin: str):
     except Exception:  # noqa: BLE001
         return None
     if not decision.confirm:
+        return None
+    # The layer decides that a person is needed; this is where the person is
+    # asked. It used to stop here and return "Not run" - so "needs a person"
+    # never reached one, and a long task the person was watching just died
+    # (measured 2026-10-08: a booking stopped at its Purchase click after 25
+    # browse calls). Only a person's own request is asked about, never an
+    # unattended turn, and never from the GTK main thread, which would block
+    # the very dialog that has to answer.
+    if origin == ORIGIN_USER and _person_allows(decision.confirm):
+        try:
+            _REACTIONS.confirmed(name, origin, decision.signals[0].name if decision.signals else "repeat")
+        except Exception:  # noqa: BLE001
+            pass
         return None
     # `ran=False` is the load-bearing field: it is what tells a caller the
     # tool never executed, rather than leaving that to be inferred from wording.
@@ -799,7 +842,7 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
 
     # Named, not inferred: this list runs unsandboxed, which is a privilege,
     # and a heuristic deciding it would widen without anyone reviewing it.
-    if name in _LOCAL_TOOLS:
+    if _runs_locally(name):
         # Both failure shapes below route through `_tool_failure_result`, so the
         # feedback is attached to whichever message is built *before* that
         # point rather than after it. Feedback has already been consumed by the

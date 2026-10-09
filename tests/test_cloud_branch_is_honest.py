@@ -321,3 +321,38 @@ def test_turning_on_cloud_recognition_removes_the_ears_download(cloud_config):
     assert not any("Listening - whisper.cpp" in line for line in cloud_on), (
         "enabling cloud speech recognition still charges for a 60 MB local "
         f"whisper model. The Review page said: {cloud_on}")
+
+def test_the_cloud_path_names_who_can_listen_and_speak(cloud_config):
+    """The pages said cloud speech "needs a switch in Settings and an API key"
+    without naming a provider or offering the switch (2026-10-08)."""
+    def after(window, done):
+        pages = {tag: _page_report(window, tag)["text"] for tag in ("cloud-keys", "ears", "voice")}
+        GLib.timeout_add(1200, lambda: done(pages))
+
+    pages = _open(cloud_config, after)
+    keys, ears, voice = pages["cloud-keys"], pages["ears"], pages["voice"]
+    assert "chat, listening, speaking" in keys, keys[:400]            # e.g. OpenAI
+    assert "needs a key - chat" in keys or "saved - chat" in keys      # a chat-only one
+    assert "chat only" in keys, "the free gateways are not said to be chat only"
+    assert "Listen in the cloud" in ears and "Groq" in ears and "OpenAI" in ears, ears[-500:]
+    assert "Speak from the cloud" in voice and "OpenRouter" in voice, voice[-500:]
+
+
+def test_the_listen_switch_on_the_ears_page_writes_the_setting(cloud_config):
+    def after(window, done):
+        view = _view(window)
+        view.push_by_tag("ears")
+        rows = [w for w in _walk(view.get_visible_page())
+                if isinstance(w, Adw.SwitchRow) and w.get_title() == "Listen in the cloud"]
+        assert rows, "no Listen in the cloud switch"
+        rows[0].set_active(True)
+        GLib.timeout_add(300, lambda: done(cloud_config.get_bool(cloud_voice.STT_SWITCH, False)))
+
+    assert _open(cloud_config, after) is True
+
+
+def test_abilities_follow_the_measured_routes():
+    assert cloud_voice.abilities("openai") == ["chat", "listening", "speaking"]
+    assert cloud_voice.abilities("anthropic") == ["chat"]
+    assert "Kilo" in " ".join(cloud_voice.provider_names(cloud_voice.STT_ROUTES)) or \
+        "kilo" in " ".join(cloud_voice.provider_names(cloud_voice.STT_ROUTES)).lower()

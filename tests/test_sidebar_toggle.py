@@ -83,6 +83,8 @@ _PROBE_MS = 500
 #: anything. 800ms: with animations off, the frame that ends the sidebar's
 #: slide and re-allocates the column lands at around 300ms on this box.
 _SETTLE_MS = 800
+#: Longest the first step waits for the window to have a real size.
+_READY_MS = 10000
 
 #: The width this file's own table above was measured at, and the width the
 #: assertions are written for: at 1100px the panel list is a column beside the
@@ -257,13 +259,41 @@ def in_a_window(steps, monkeypatch, size=WIDE):
         GLib.timeout_add(_PROBE_MS, step)
         return False
 
+    # **The first step waits for a laid-out window, not for a fixed time.**
+    # Reproduced under CPU load (one busy loop per core, 4 of 6 runs): the
+    # first snapshot read `sidebar (0, 0), chat (0, 0)` - the window existed
+    # but had not been allocated - while every later snapshot was right, so
+    # "two presses return to the opening state" failed against an opening
+    # state that was never real. This is not the convergence loop the
+    # `settle` docstring rules out: a 0-wide window cannot pass it, and one
+    # that never gets a width fails here, loudly, instead of being measured.
+    ready_deadline = {"at": None}
+
+    def first_step():
+        window = app.window
+        if ready_deadline["at"] is None:
+            ready_deadline["at"] = GLib.get_monotonic_time() + _READY_MS * 1000
+        if window is not None and window.get_mapped() and window.get_width() > 0:
+            settle(window)
+            return step()
+        if GLib.get_monotonic_time() > ready_deadline["at"]:
+            box["error"] = AssertionError(
+                f"the window was never laid out within {_READY_MS}ms, so nothing "
+                "here could have been measured")
+            app.quit()
+            return False
+        GLib.timeout_add(50, first_step)
+        return False
+
     GLib.timeout_add(_ACTIVATE_MS, lambda: (app.activate(), False)[1])
-    GLib.timeout_add(_ACTIVATE_MS + _PROBE_MS, step)
+    GLib.timeout_add(_ACTIVATE_MS + _PROBE_MS, first_step)
     # A backstop, so a window that never activates does not hang the suite.
     # It has to allow for the pump too: every step costs `_SETTLE_MS` of
     # blocked loop, and a backstop computed without that cuts a healthy run off
     # after its third step ("only 3 of 4 steps ran - the main loop ended early").
-    GLib.timeout_add(_ACTIVATE_MS + (_PROBE_MS + _SETTLE_MS) * (len(steps) + 2),
+    # Plus the readiness wait above.
+    GLib.timeout_add(_ACTIVATE_MS + _READY_MS + _SETTLE_MS
+                     + (_PROBE_MS + _SETTLE_MS) * (len(steps) + 2),
                      lambda: (app.quit(), False)[1])
     app.hold()
     try:

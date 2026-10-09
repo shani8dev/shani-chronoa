@@ -434,6 +434,11 @@
       <summary>Let Chronoa sample the WiFi link and notice movement</summary>
       <description>When true, Chronoa may sample each wireless interface's link quality from /proc/net/wireless and track how much the signal is varying, which is a real and long-established indication that something in the room is moving. Off by default. This is RSSI-only, which is the coarser half of radio sensing: it notices movement, not who or what, it gives no position, and it cannot distinguish a person from a pet, a curtain or a rotating fan. It reports the machine's sensing ceiling honestly rather than implying a capability it does not have. No frames, no image, no camera.</description>
     </key>
+    <key name="home-place" type="s">
+      <default>''</default>
+      <summary>Home place, for weather when this computer cannot locate itself</summary>
+      <description>A town or city name, e.g. "Pune". Used for weather (asked, or sent to a paired watch) only when the location sense has nothing to give - no GPS and no GeoClue, or location not permitted. Looked up by name with Open-Meteo's geocoding, which sends the name, never this computer's position.</description>
+    </key>
     <key name="location-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa find where this computer is</summary>
@@ -508,6 +513,51 @@
       <default>false</default>
       <summary>Let Chronoa switch the Bluetooth adapter</summary>
       <description>Off: Chronoa can report which Bluetooth devices are paired and whether the adapter is on, but cannot turn it off. Separate from the bluetooth sense's own permission, because noticing a headset and being willing to have it disconnected mid-call are different agreements.</description>
+    </key>
+    <key name="bluetooth-call-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa make and answer calls on your paired phone</summary>
+      <description>When true, Chronoa may place, answer and end calls on a phone connected to this computer over Bluetooth, and hear the call through this computer's speakers and microphone. Off by default, and its own switch: reading a device's battery and dialling someone's phone are not the same agreement, and the phone stays the radio in both cases. Chronoa asks you to confirm before it places a call, because a call rings another person. The phone must be connected over Bluetooth, not merely paired - a paired-but-disconnected phone has nothing to call through, and that is reported as such.</description>
+    </key>
+    <key name="bluetooth-gatt-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read your Bluetooth devices</summary>
+      <description>When true, Chronoa may ask a paired Bluetooth device what it says about itself - a watch's or headset's battery level, a heart-rate strap's reading, which services a fitness band offers - and make a paired watch or band buzz so it can be found (fixed, known-safe commands only). Off by default. This is separate from switching the adapter on and off, and from noticing that a device is paired: on a wearable, the values it exposes describe the person wearing it, and that is not the same agreement as being willing to have a headset disconnected. A device that cannot be read is reported as unreadable, never as having nothing to report.</description>
+    </key>
+    <key name="bluetooth-media-remote-enabled" type="b">
+      <default>false</default>
+      <summary>Let Bluetooth remotes control music on this computer</summary>
+      <description>When true, this computer offers its music player over Bluetooth (AVRCP), so the play, pause and skip buttons of a paired headset, speaker, watch or car control what is playing here. Only paired devices can use it.</description>
+    </key>
+    <key name="phone-remote-enabled" type="b">
+      <default>false</default>
+      <summary>Let my phone pair this computer as a Bluetooth keyboard</summary>
+      <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time. Off by default because it makes this computer discoverable to every phone nearby.</description>
+    </key>
+    <key name="watch-companion-enabled" type="b">
+      <default>false</default>
+      <summary>Keep my watch connected to this computer</summary>
+      <description>When true (and reaching the watch is allowed), Chronoa keeps a MoYoung/Da Fit watch connected so its own buttons work with this computer: find-my-phone rings here, its music buttons control the player, its camera button takes a photo, and what is playing shows on the watch. Off by default because the watch takes one connection: while this holds it, the Da Fit app on a phone cannot reach it.</description>
+    </key>
+    <key name="watch-nowplaying-enabled" type="b">
+      <default>false</default>
+      <summary>Show what this computer is playing on my watch</summary>
+      <description>When true, Chronoa pushes the current track to the watch every five seconds so it appears on the watch's music screen. Off by default: this is two writes every five seconds for as long as the watch is held, which is a great deal of traffic for a screen nobody asked for, and the watch's own music buttons still work with this computer without it. Turning this off does not stop the watch's buttons reaching the player.</description>
+    </key>
+    <key name="watch-weather-enabled" type="b">
+      <default>false</default>
+      <summary>Send this computer's weather to my watch</summary>
+      <description>When true, Chronoa answers the watch's request for the weather with the forecast for its home place, including the week ahead. Off by default: it reads a location and reaches a weather service, and the watch asks for it on every connection: sending these packets is reproducibly associated with the watch restarting, though no single packet has been shown to be responsible. The watch's own weather screen is unaffected while this is off - it just stays empty.</description>
+    </key>
+    <key name="fm-radio-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa tune an FM radio receiver</summary>
+      <description>When true, Chronoa may tune a USB radio receiver (an RTL-SDR dongle) plugged into this computer, scan the FM band and play a station. Off by default. A laptop has no FM radio of its own, so without a dongle this is reported as having no receiver rather than as failing. No station names are invented: a scan reports frequencies.</description>
+    </key>
+    <key name="nfc-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read and write NFC tags</summary>
+      <description>When true, Chronoa may read an NFC tag that is tapped against a reader on this computer, and write a link to an NFC Forum sticker. Off by default. Tags sit in public places and carry whatever somebody chose to put on them, often other people's links, so reading one is reading a stranger's message rather than this machine's own data. Writing is narrower still and is limited to Ultralight/NTAG stickers: rewriting the sectors of a bank card, a transit pass or a hotel key is irreversible and can leave the card unusable. Separately, most laptops have no NFC reader at all, and a machine without one is reported as having none rather than as failing.</description>
     </key>
     <key name="mic-control-enabled" type="b">
       <default>false</default>
@@ -714,6 +764,11 @@
       <summary>Let Chronoa read your calendar</summary>
       <description>When true, Chronoa may list the events on your calendars - the ones in GNOME Calendar and your online accounts - when you ask what is on today or this week. Off by default: who you meet, and where, is yours. A calendar that cannot be read is reported as unreadable, never as empty.</description>
     </key>
+    <key name="calendar-write-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa change your calendar</summary>
+      <description>When true, Chronoa may add an event, move an existing one to another time, or cancel one, when you ask. Off by default, and a separate switch from reading: who you meet is yours to share or withhold, but a calendar somebody else can add to and delete from is the one that needs its own agreement. Moving and cancelling also need the reading switch, because finding the event to change it is the reading half. A calendar that cannot be changed is reported as refusing, never as having changed it.</description>
+    </key>
     <key name="calendar-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa act before calendar events</summary>
@@ -723,6 +778,16 @@
       <default>false</default>
       <summary>Let Chronoa use your paired phone</summary>
       <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. Off by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
+    </key>
+    <key name="phone-messages-read-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa read your phone's text messages</summary>
+      <description>When true, Chronoa may read text messages from your paired phone when you ask - the latest, those from a contact, or the unread ones. Off by default, and separate from letting Chronoa use the phone at all: seeing that a phone is paired and can be rung is nothing like reading what your family said to you. A phone that cannot be read is reported as refusing, never as having no messages.</description>
+    </key>
+    <key name="phone-messages-send-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa send text messages and place calls from your phone</summary>
+      <description>When true, Chronoa may send a text message from your paired phone, and open its dialer to place a call, when you ask. Off by default, and separate from reading: a message leaves this machine and appears on the other end, so it needs its own agreement. Chronoa drafts the text and asks you before anything is sent, and reports a refusal rather than sending something you did not confirm.</description>
     </key>
     <key name="phone-sense-enabled" type="b">
       <default>false</default>
@@ -818,6 +883,11 @@
       <default>false</default>
       <summary>Let Chronoa keep a task list</summary>
       <description>When true, Chronoa may add to, change and remove entries in a task list it keeps between turns and across restarts. Off by default: this writes something that outlives the conversation, which is a different kind of record from the session transcript. Reading files and listing folders needs no such permission. The list is a plain local file under this account's state directory, bounded in both item count and item length.</description>
+    </key>
+    <key name="goals-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa keep multi-step goals</summary>
+      <description>When true, Chronoa may save a goal as a plan of tool steps that outlives the conversation, and answer or remove saved goals. Saving runs nothing: steps are run from the Goals panel, each through the same consent keys and approval questions as a chat request. Off by default because a saved plan is a record that persists.</description>
     </key>
     <key name="trigger-control-enabled" type="b">
       <default>false</default>

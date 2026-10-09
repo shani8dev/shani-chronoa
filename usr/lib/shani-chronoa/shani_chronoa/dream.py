@@ -52,18 +52,23 @@ from __future__ import annotations
 import json
 import logging
 import re
-import os
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
-#: Where the log this reads lives. Same place `ToolTracker` writes.
-LOG_FILE = Path(
-    os.environ.get("XDG_DATA_HOME",
-                   Path.home() / ".local/share")
-) / "shani-chronoa" / "logs" / "tool_calls.log"
+def __getattr__(name: str) -> Path:
+    """`dream.LOG_FILE`: where `ToolTracker` writes, resolved now rather than at
+    import (an import-time path ignored a test's `XDG_DATA_HOME`)."""
+    if name == "LOG_FILE":
+        from shani_chronoa import tool_tracking
+        return tool_tracking.log_dir() / "tool_calls.log"
+    raise AttributeError(name)
+
+
+def _log_file(path: Optional[Path]) -> Path:
+    return path if path is not None else __getattr__("LOG_FILE")
 
 #: Findings worth a person's attention. A dream that produces forty notes is a
 #: dream nobody reads, which is the same as no dream.
@@ -93,13 +98,14 @@ class Finding(NamedTuple):
 SEV_HIGH, SEV_MEDIUM, SEV_LOW = "high", "medium", "low"
 
 
-def read_log(path: Path = LOG_FILE, limit_bytes: int = 32 * 1024 * 1024) -> Reading:
+def read_log(path: Optional[Path] = None, limit_bytes: int = 32 * 1024 * 1024) -> Reading:
     """Read the log, newest-last, reporting how much was unusable.
 
     A tail is read rather than the whole file: a year of calls is tens of
     megabytes and a consolidation pass should not need it. `limit_bytes` bounds
     the read so a pathological log cannot exhaust memory.
     """
+    path = _log_file(path)
     try:
         size = path.stat().st_size
     except OSError:
@@ -292,7 +298,7 @@ def _mask(text: str) -> str:
     return _SECRETISH.sub(_mask_one, text)
 
 
-def render(reading: Reading, findings: Sequence[Finding], path: Path = LOG_FILE) -> str:
+def render(reading: Reading, findings: Sequence[Finding], path: Optional[Path] = None) -> str:
     """A minute's read. Plain text, no jargon, and honest about its own gaps."""
     out = [f"What the last {reading.records} recorded tool call(s) look like.", ""]
     if reading.records == 0:
@@ -325,8 +331,9 @@ def render(reading: Reading, findings: Sequence[Finding], path: Path = LOG_FILE)
     return "\n".join(out)
 
 
-def dream(path: Path = LOG_FILE) -> str:
+def dream(path: Optional[Path] = None) -> str:
     """The whole pass: read, analyse, render. Safe to run at any time."""
+    path = _log_file(path)
     reading = read_log(path)
     entries = _entries(path)
     if reading.records and len(entries) != reading.records:
@@ -335,7 +342,7 @@ def dream(path: Path = LOG_FILE) -> str:
     return render(reading, analyse(entries), path)
 
 
-def write_dream(path: Path = LOG_FILE, out_dir: Optional[Path] = None,
+def write_dream(path: Optional[Path] = None, out_dir: Optional[Path] = None,
                 when: Optional[str] = None) -> Optional[Path]:
     """Run the pass and keep the result, so it can be read later.
 
@@ -344,8 +351,9 @@ def write_dream(path: Path = LOG_FILE, out_dir: Optional[Path] = None,
     less sensitive than the day.
     """
     from shani_chronoa import files
+    path = _log_file(path)
     text = dream(path)
-    target_dir = out_dir or LOG_FILE.parent
+    target_dir = out_dir or path.parent
     try:
         files.ensure_private_dir(target_dir)
         stamp = when or "latest"
