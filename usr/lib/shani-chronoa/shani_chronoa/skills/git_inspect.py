@@ -80,7 +80,121 @@ _CONSENT_KEY = "git-sense-enabled"
 _TIMEOUT = 20
 _MAX_DIFF_LINES = 300
 _MAX_LOG = 30
-_SUBCOMMANDS = ("status", "diff", "log", "branch")
+_SUBCOMMANDS = ("status", "diff", "log", "branch", "upstream", "stash", "reflog")
+
+
+def _upstream_block(target: Path) -> "tuple[list[str], list[str]]":
+    """Where this repository points, and how far ahead or behind it is.
+
+    `lines` is what was read; `unknown` is what could not be, and is reported
+    separately rather than folded into the answer. **The three states are kept
+    apart because "0 behind" is only true when there is something to be behind**:
+    a repository with no remote, a branch with no upstream, and a branch that is
+    level with its upstream all print a number, and only the last one means the
+    number.
+
+    `rev-list --left-right --count <upstream>...HEAD` is used rather than
+    `status -sb`'s `[ahead 1, behind 2]`, because the count is the answer and
+    parsing a human-facing summary out of porcelain is a second parser.
+    """
+    lines: list[str] = []
+    unknown: list[str] = []
+
+    remotes = _git(target, "remote", "-v")
+    if remotes is None:
+        unknown.append("git did not answer for `remote -v`")
+    elif not remotes.stdout.strip():
+        lines.append("  remotes: none configured - this repository is not "
+                     "connected to anything, so 'behind' has no meaning here")
+    else:
+        seen: dict[str, str] = {}
+        for row in remotes.stdout.splitlines():
+            parts = row.split()
+            if len(parts) >= 2:
+                seen.setdefault(parts[0], parts[1])
+        for name, url in sorted(seen.items()):
+            lines.append(f"  remote {name}: {url}")
+
+    branch = read_branch(target) or ""
+    upstream = _git(target, "rev-parse", "--abbrev-ref", "--symbolic-full-name",
+                    "@{u}")
+    if upstream is None:
+        unknown.append("git did not answer for the upstream lookup")
+    elif upstream.returncode != 0 or not upstream.stdout.strip():
+        lines.append(f"  branch {branch or '(detached HEAD)'}: no upstream set, "
+                     "so there is nothing to compare it against")
+    else:
+        name = upstream.stdout.strip()
+        lines.append(f"  branch {branch}: tracks {name}")
+        counts = _git(target, "rev-list", "--left-right", "--count",
+                      f"{name}...HEAD")
+        if counts is None:
+            unknown.append(f"git did not answer for the ahead/behind count "
+                           f"against {name}")
+        elif counts.returncode != 0:
+            unknown.append(f"could not compare against {name} - the upstream "
+                           "may not have been fetched")
+        else:
+            parts = counts.stdout.split()
+            if len(parts) == 2 and all(p.isdigit() for p in parts):
+                behind, ahead = int(parts[0]), int(parts[1])
+                if behind == 0 and ahead == 0:
+                    lines.append(f"  level with {name} - nothing to pull or push")
+                else:
+                    lines.append(f"  {behind} commit(s) behind {name}, "
+                                 f"{ahead} commit(s) ahead of it")
+                    if behind:
+                        lines.append("    so a pull would bring in changes you "
+                                     "do not have locally")
+                    if ahead:
+                        lines.append("    so a push would send commits that are "
+                                     "not on the remote yet")
+    return lines, unknown
+
+
+def _stash_block(target: Path) -> "tuple[list[str], list[str]]":
+    """Stashed work, if any.
+
+    An empty list here is a real answer - "nothing is stashed" - and it is the
+    one people most want confirmed, because a stash left behind by an aborted
+    rebase is work that exists nowhere else.
+    """
+    result = _git(target, "stash", "list", "--date=iso")
+    if result is None:
+        return [], ["git did not answer for `stash list`"]
+    rows = [r for r in result.stdout.splitlines() if r.strip()]
+    if not rows:
+        return ["  no stashed work in this repository"], []
+    lines = [f"  {len(rows)} stash(es), newest first:"]
+    for row in rows[:20]:
+        lines.append(f"    {row.strip()}")
+    if len(rows) > 20:
+        lines.append(f"    ... and {len(rows) - 20} more")
+    return lines, []
+
+
+def _reflog_block(target: Path) -> "tuple[list[str], list[str]]":
+    """Where HEAD has been, which survives rebases and amends.
+
+    `git log` cannot answer "what did I commit yesterday" once a rebase has
+    rewritten the branch - the commits are unreachable from it, and the reflog
+    is the only record that they happened.
+    """
+    result = _git(target, "reflog", "--date=iso", "--format=%gd %cd %gs", "-n", "25")
+    if result is None:
+        return [], ["git did not answer for `reflog`"]
+    rows = [r.strip() for r in result.stdout.splitlines() if r.strip()]
+    if not rows:
+        return ["  this repository has no reflog entries yet - it is either new "
+                "or has never had a commit"], []
+    lines = [f"  the last {len(rows)} thing(s) HEAD did, newest first:"]
+    for row in rows:
+        lines.append(f"    {row}")
+    return lines, []
+
+
+_NEW_BLOCKS = {"upstream": _upstream_block, "stash": _stash_block,
+               "reflog": _reflog_block}
 
 SCHEMA = {
     "type": "function",
@@ -289,6 +403,14 @@ def _run(arguments: dict) -> str:
     if subcommand == "branch":
         lines, _ = _branch_block(target)
         return "\n".join([f"Repository at {target}:", *lines])
+
+    if subcommand in _NEW_BLOCKS:
+        lines, unknown = _NEW_BLOCKS[subcommand](target)
+        out = [f"Repository at {target}:", *lines]
+        if unknown:
+            out += ["", "Not determined: " + "; ".join(unknown) +
+                    ". Nothing was guessed about it."]
+        return "\n".join(out)
 
     if subcommand == "status":
         status = read_status(target)

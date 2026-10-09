@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**207 skills in 24 groups.** Each is a named, schema-typed module; the model
+**208 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**81 of 207 are consent-gated and 16 are destructive.**
+**82 of 208 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -208,6 +208,22 @@ Search, fetch and act on a page.
 | `speed_test` | Internet speed | needs `speed-test-enabled` |
 | `web_search` | Look something up | — |
 
+## Code and git
+
+Inspect repositories and work through files.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `git_branch` | Create or switch branch | needs `git-write-enabled` |
+| `git_commit` | Commit the files you name | needs `git-write-enabled` |
+| `git_inspect` | What changed in a git repository | needs `git-sense-enabled` |
+| `git_push` | Push a branch to a named remote | **asks first, always** · needs `git-push-enabled` |
+| `manage_goals` | Save a multi-step goal to run later | needs `goals-enabled` |
+| `manage_triggers` | Arm an automatic rule | **asks first, always** · needs `trigger-control-enabled` |
+| `project_outline` | Outline a code project: files, classes and functions | — |
+| `resolve_conflict` | What is conflicting in a git repository, and resolve it | needs `git-sense-enabled` |
+| `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
+
 ## Power and screen
 
 Brightness, theme, power state, night light.
@@ -238,21 +254,6 @@ Theme, wallpaper, scaling and the screen's own look.
 | `set_theme` | Switch the desktop between light and dark | needs `appearance-control-enabled` |
 | `set_wallpaper` | Change the desktop wallpaper | needs `appearance-control-enabled` |
 | `toggle_night_light` | Turn the blue-light filter on or off | needs `appearance-control-enabled` |
-
-## Code and git
-
-Inspect repositories and work through files.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `git_branch` | Create or switch branch | needs `git-write-enabled` |
-| `git_commit` | Commit the files you name | needs `git-write-enabled` |
-| `git_inspect` | What changed in a git repository | needs `git-sense-enabled` |
-| `git_push` | Push a branch to a named remote | **asks first, always** · needs `git-push-enabled` |
-| `manage_goals` | Save a multi-step goal to run later | needs `goals-enabled` |
-| `manage_triggers` | Arm an automatic rule | **asks first, always** · needs `trigger-control-enabled` |
-| `project_outline` | Outline a code project: files, classes and functions | — |
-| `todo_list` | Keep a list of tasks to do | needs `todo-list-enabled` |
 
 ## Sound
 

@@ -67,6 +67,10 @@ _IMPL = {
     "git_commit": "shani_chronoa.skills.git_write",
     "git_branch": "shani_chronoa.skills.git_write",
     "git_push": "shani_chronoa.skills.git_push",
+    # Declares `git-sense-enabled` in GATED and escalates to `git-write-enabled`
+    # in its own code for the actions that touch the working tree, so the gate
+    # check has to see the module rather than skip it.
+    "resolve_conflict": "shani_chronoa.skills.resolve_conflict",
     "move_pointer": "shani_chronoa.skills.input_control",
     "nfc": "shani_chronoa.skills.nfc",
     "fm_radio": "shani_chronoa.skills.fm_radio",

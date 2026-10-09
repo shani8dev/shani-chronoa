@@ -110,6 +110,12 @@ GATED: dict[str, str] = {
     # skill report the same facts, and separate keys would let a fresh install
     # ship one open and the other shut.
     "git_inspect": "git-sense-enabled",
+    # The **read** key. This skill has two: reading a conflict needs this, and
+    # taking a side or aborting also needs `git-write-enabled`, which the
+    # module checks itself. `GATED` maps one tool to one key, so the stricter
+    # of the two belongs here and the escalation has to live in the code - a
+    # tuple in this dict is not a second key, it is a broken entry.
+    "resolve_conflict": "git-sense-enabled",
     # Recording a change is gated, not asked every time: a commit is undone
     # with `git reset --soft HEAD~1` and the working tree is untouched by it.
     "git_commit": "git-write-enabled",
@@ -395,6 +401,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
                            "Hold the machine awake for a bounded time"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
     "git_inspect": ("Code and git", "What changed in a git repository"),
+    # Reads all three sides git holds for a conflicted file - base, yours,
+    # theirs - and can take one whole side or abandon the operation. No
+    # automatic merge: that judgement belongs to the person.
+    "resolve_conflict": ("Code and git",
+                         "What is conflicting in a git repository, and resolve it"),
     "git_commit": ("Code and git", "Commit the files you name"),
     "git_branch": ("Code and git", "Create or switch branch"),
     "git_push": ("Code and git", "Push a branch to a named remote"),

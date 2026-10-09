@@ -2527,12 +2527,25 @@
           "tool": "fingerprint_status"
         }
       ]
+    },
+    {
+      "id": "generated-resolve-conflict",
+      "say": "What is conflicting in a git repository, and resolve it.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "resolve_conflict",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 220,
-    "skills_asserted": 207,
-    "skills_total": 207,
+    "cases": 221,
+    "skills_asserted": 208,
+    "skills_total": 208,
     "note": "partial so far; not a claim that the other skills are unreachable",
     "gated_unguarded": 56
   }
