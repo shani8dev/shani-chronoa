@@ -131,6 +131,22 @@ def _render_and_read(path, first, last) -> str:
             body = re.sub(r"[ \t]+\n", "\n", text or "").strip()
             if body:
                 out.append(body)
+            elif code != 0:
+                # **A non-zero exit is not a blank page.** Measured on the
+                # Plasma image, where `tesseract --list-langs` answers
+                # `afr osd` and `-l eng` gives exit 1, empty stdout and
+                # "Failed loading language 'eng'": treating that as "no text
+                # on the page" would report a document full of words as blank,
+                # which is the confident wrong answer this whole path exists to
+                # stop. The cause is almost always a missing language pack -
+                # tesseract depends on the *virtual* `tessdata`, ~128 packages
+                # provide it, and an image that pins none resolves to whichever
+                # provider comes first (Afrikaans, on Plasma).
+                return (f"Could not read {path.name} as a picture: tesseract "
+                        f"failed (exit {code}). The usual cause is a missing "
+                        f"language pack - tesseract needs one, and this "
+                        f"machine may not have English installed. Nothing was "
+                        f"guessed from the page.")
         if not out:
             return (f"{path.name} has no text layer, and reading page "
                     f"{shown_numbers[0]} as a picture found no text either. It "

@@ -258,3 +258,32 @@ def test_the_image_branch_goes_through_the_shared_argv_builder(scan, tools_on,
     (scan / "pic.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     rd._run({"path": str(scan / "pic.png")})
     assert seen.get("argv") == sentinel, seen.get("argv")
+
+
+def test_a_tesseract_failure_is_not_reported_as_a_blank_page(scan, tools_on,
+                                                             monkeypatch):
+    """A non-zero exit is a failure, not a page with nothing written on it.
+
+    Measured on the Plasma image: `tesseract --list-langs` answers `afr osd`
+    (no English), and `-l eng` then exits **1** with empty stdout and
+    "Failed loading language 'eng'". Reporting that as "no text on the page"
+    describes a document full of words as blank - and it is the failure this
+    whole path exists to avoid, reintroduced one line above where the page loop
+    appended nothing and fell through to the empty result.
+    """
+    real_run = rd.subprocess.run
+
+    def _run(cmd, **k):
+        if cmd and cmd[0] == "tesseract":
+            return type("R", (), {
+                "returncode": 1, "stdout": "",
+                "stderr": ("Error opening data file /usr/share/tessdata/eng."
+                           "traineddata Failed loading language 'eng' "
+                           "Tesseract couldn't load any languages!\n")})()
+        return real_run(cmd, **k)
+
+    monkeypatch.setattr(rd.subprocess, "run", _run)
+    out = rd._run({"path": str(scan / "scan.pdf")})
+    assert "tesseract failed" in out, out
+    assert "missing language pack" in out, out
+    assert "found no text" not in out, out
