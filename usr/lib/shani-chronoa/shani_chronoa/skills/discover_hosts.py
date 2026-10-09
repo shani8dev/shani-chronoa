@@ -29,6 +29,15 @@ consent question attached.
 **No packet contents are read.** This reads addresses that are already on the
 wire in the clear as part of normal ARP, and nothing else - not a payload, not
 a hostname it did not already resolve.
+
+**mDNS answers the question a sweep cannot.** ARP finds *addresses*; mDNS
+(`avahi-browse`) is the other discovery path entirely, and the two are disjoint
+- a printer, a Chromecast or a phone announces `_ipp._tcp.local` /
+`_googlecast._tcp.local` and answers nothing else, so a silent address in a
+sweep is exactly the device that has a name over mDNS. `avahi-browse` is not
+installed on the dev box this was written on, so the output is reduced to what
+a wrong parse cannot fake - a count and the service *types* - and a slot run
+with the binary present is the outstanding verification.
 """
 
 from __future__ import annotations
@@ -146,6 +155,72 @@ def _resolve_target(arguments: dict) -> Tuple[Optional[str], Optional[str]]:
     return str(best), None
 
 
+def _mdns_lines(device: str) -> List[str]:
+    """`avahi-browse`: devices that announce themselves *by name*.
+
+    **Why this is not the same as a sweep.** The sweep above finds
+    *addresses*: a host that answered ARP. mDNS/DNS-SD is the other discovery
+    path entirely and the two are disjoint - a printer, a Chromecast, a phone
+    or a TV advertises `_ipp._tcp.local` / `_googlecast._tcp.local` and nothing
+    else, so a sweep sees a silent address and this sees the name of the thing
+    in the room. "What is on my network" on a home network is usually this
+    question and not the other one.
+
+    **What is reported and what is not.** `avahi-browse` escapes non-printable
+    characters in service names as `\\ddd` and its long format is `;`-separated
+    with a documented-but-easily-misread field order, and this module's
+    standing rule is that a shape which cannot be verified must not be
+    asserted (see the `pdffonts` fixed-width lesson in `read_document.py`).
+    `avahi-browse` is **not installed on the dev box this was written on**, so
+    the output here is reduced to what a wrong parse cannot fake: a count of
+    announced services and the service *types* seen (`_ipp._tcp`,
+    `_googlecast._tcp`, ...). Every name is reported verbatim rather than
+    unescaped, because unescaping is exactly where a plausible wrong answer
+    would come from.
+
+    A run that cannot answer (binary absent, non-zero exit, timeout) says so
+    and is never read as "nothing is on the network".
+    """
+    if shutil.which("avahi-browse") is None:
+        return ["mDNS: could not be checked - avahi-browse is not installed "
+                "(the avahi and nss-mdns packages). A device that announces "
+                "itself by name - a printer, a Chromecast, a phone - is "
+                "invisible to the sweep above without it."]
+    argv = ["avahi-browse", "--all", "--terminate", "--resolve"]
+    if device:
+        argv.insert(1, device)
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=30, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [f"mDNS: could not be checked ({exc})."]
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        return ["mDNS: avahi-browse did not complete"
+                + (f" ({detail[-1][:140]})" if detail else f" (exit {proc.returncode})")
+                + ", so which devices announce themselves by name is UNKNOWN."]
+    types = {}
+    for line in (proc.stdout or "").splitlines():
+        # Status lines (+/-/=) are progress, not findings, and the banner of
+        # explanatory prose avahi prints before them is not either. A finding
+        # is a line containing a service type token - `_ipp._tcp.local` and
+        # friends - which is the one field that cannot be a word in prose.
+        for token in line.split():
+            if token.startswith("_") and "._" in token and "." in token[1:]:
+                types[token] = types.get(token, 0) + 1
+                break
+    if not types:
+        return ["mDNS: nothing on this network announced a service, as far as "
+                "this machine's own resolver was asked. (A device that is "
+                "powered off, or one whose announcements this network blocks, "
+                "looks the same as nothing.)"]
+    listed = ", ".join(f"{t} x{n}" for t, n in sorted(types.items(), key=lambda kv: (-kv[1], kv[0])))
+    return [f"mDNS: {sum(types.values())} announced service(s) - {listed}. "
+            "Names are reported verbatim: avahi escapes special characters, "
+            "and unescaping a name this code has not seen risks inventing "
+            "one."]
+
+
 def _run(arguments: dict) -> str:
     # The target is resolved and validated FIRST. A refusal has to be a refusal
     # whether or not the tool happens to be installed - otherwise "arp-scan is
@@ -167,7 +242,7 @@ def _run(arguments: dict) -> str:
                 f"'.', '_', ':', '-' or '@' up to 15 characters, not {iface!r}.")
     device = iface.strip() if isinstance(iface, str) else ""
 
-    argv = [_ARP_SCAN, "--retry=2", f"--timeout=800"]
+    argv = [_ARP_SCAN, "--retry=2", "--timeout=800"]
     if device:
         argv += ["-I", device]
     argv.append(network)
@@ -205,10 +280,15 @@ def _run(arguments: dict) -> str:
         if "0 hosts" in lowered or "no replies" in lowered:
             note = (" Every address in this range was probed and none "
                     "answered.")
-        return (f"No devices answered on {network}.{note} That is a "
-                f"measurement of this segment, not of the Internet, and a "
-                f"host that is powered off looks exactly like one that does "
-                f"not exist.")
+        # **mDNS runs when ARP finds nothing, which is where it earns its
+        # place.** A printer or a Chromecast does not answer a sweep; it
+        # announces itself. Without this, "no devices answered" is the end of
+        # the answer on exactly the machines where it is least true.
+        return "\n".join(
+            [f"No devices answered on {network}.{note} That is a "
+             f"measurement of this segment, not of the Internet, and a "
+             f"host that is powered off looks exactly like one that does "
+             f"not exist.", "", *_mdns_lines(device)])
 
     seen = {}
     for address, hardware in rows:
@@ -223,6 +303,9 @@ def _run(arguments: dict) -> str:
            "  " + "-" * 40]
     for address, hardware in sorted(rows, key=lambda r: ipaddress.ip_address(r[0])):
         out.append(f"  {address:<16} {hardware}")
+
+    out.append("")
+    out.extend(_mdns_lines(device))
 
     lines_each = sorted(hardware for _addr, hardware in rows
                         if len(seen[hardware]) > 1)
