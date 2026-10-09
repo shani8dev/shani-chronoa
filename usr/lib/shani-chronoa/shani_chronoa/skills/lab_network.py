@@ -56,7 +56,7 @@ from shani_chronoa import files
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.netprovision import Rejected, build_plan, build_teardown
 from shani_chronoa.netprovision import load_record, make_plan, parse_request
-from shani_chronoa.netprovision import render_plan, write_envelope
+from shani_chronoa.netprovision import record_path, render_plan, write_envelope
 from shani_chronoa.skills import Skill
 
 #: A new switch, because this is its own kind of thing: it changes the machine's
@@ -248,7 +248,21 @@ def _lab_network_create(arguments: dict) -> str:
 
 def _lab_network_destroy(arguments: dict) -> str:
     allowed, reason = _consent(ChronoaConfig())
-    blocked = (reason if not allowed else _refuse("")) or _root_paths("")
+    if not allowed:
+        return reason
+    # **This used to be one line, and it refused every call.**
+    # `blocked = (reason if not allowed else _refuse("")) or _root_paths("")`:
+    # with consent *granted*, `reason` is "" and the `or` moved on to
+    # `_refuse("")`, which returns a truthy string - so `destroy` returned
+    # "needs you to allow it first" to a person who had just allowed it, and
+    # never reached the name check, the record lookup or the teardown at all.
+    #
+    # The undefined `_root_paths` behind it hid the real fault: the truthy
+    # `_refuse("")` short-circuited the `or` every time, so pyflakes' report of
+    # an undefined name here was true and unreachable at the same moment. It is
+    # `_root_precondition()` - the helper this module already defines and
+    # `create` does not need because the helper refuses for itself.
+    blocked = _root_precondition()
     if blocked:
         return blocked
     name = str(arguments.get("name") or "").strip()
@@ -344,7 +358,15 @@ def describe_actual(name: str, entry: dict) -> str:
 
 
 def _state_path() -> str:
-    return str(state_dir())
+    """Where this module's record lives.
+
+    It called a bare `state_dir()`, which is never imported here - a
+    `NameError` on every call. Nothing calls this function today, so the
+    fault was invisible; it is fixed rather than deleted because the record's
+    location is `netprovision`'s business and duplicating the path is how the
+    two drifted apart in the first place.
+    """
+    return str(record_path())
 
 
 SCHEMAS = [

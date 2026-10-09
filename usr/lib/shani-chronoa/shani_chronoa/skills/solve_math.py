@@ -823,8 +823,15 @@ def _matrix_op(op: str, raw: str, arguments: dict) -> str:
                     "'x, y'.")
         symbols = se.Matrix([[parse(v)] for v in str(other).split(",") if v.strip()])
         try:
-            return f"Jacobian of {row[0]} w.r.t. {other} =\n" \
-                   f"{se.Matrix([row[0]]).jacobian(symbols)}"
+            # `row` was never assigned in this branch - it is the loop variable
+            # of the inverse/lu code further up. The matrix and its label were
+            # built 80 lines above and are what `matrix_power` uses two branches
+            # down, so this reads them rather than a name that does not exist.
+            # It raised `NameError` inside the `try`, which the broad `except`
+            # turned into "Could not build that Jacobian: NameError." - so
+            # `matrix_jacobian` could never return a Jacobian on a machine that
+            # has symengine, and said nothing useful about why.
+            return f"Jacobian of {label} w.r.t. {other} =\n{matrix.jacobian(symbols)}"
         except Exception as exc:  # noqa: BLE001
             return f"Could not build that Jacobian: {type(exc).__name__}."
     if op == "matrix_lu":

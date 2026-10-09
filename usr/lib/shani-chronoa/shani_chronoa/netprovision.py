@@ -798,7 +798,7 @@ def make_plan(network: LabNetwork, action: str, steps: List[Step]) -> dict:
     }
 
 
-def revalidate(plan: dict) -> Tuple[str, Vpc, List[Step]]:
+def revalidate(plan: dict) -> Tuple[str, LabNetwork, List[Step]]:
     """Rebuild the expected plan from a loaded file and insist they match.
 
     This is the check that makes an edited plan file harmless. The request is

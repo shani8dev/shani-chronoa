@@ -76,6 +76,34 @@ def _run_step(argv, optional: bool, timeout: int = STEP_TIMEOUT):
         f" - {detail[-1]}" if detail else "")
 
 
+def _rollback(network) -> bool:
+    """Undo a create that failed partway, using this module's own teardown plan.
+
+    `cmd_apply` called `_rollback(network)` when a create failed, and no such
+    function existed anywhere in the file - so the exact path meant to leave
+    nothing half-built raised `NameError` instead, leaving the partial network
+    in place and reporting a crash rather than what happened.
+
+    `build_teardown` is the removal plan the module already owns and
+    `np.revalidate` already checks, so the rollback is the same argv the
+    helper would have run for a deliberate destroy. Returns whether it
+    completed; a rollback that itself fails is reported, never raised,
+    because the caller is already on an error path.
+    """
+    try:
+        steps = np.build_teardown(network)
+    except Exception as exc:                      # noqa: BLE001 - error path
+        print(f"  rollback: no teardown plan could be built ({exc})")
+        return False
+    print("\nRolling back what was already built:")
+    for number, step in enumerate(steps, start=1):
+        ok, detail = _run_step(step.argv, step.optional)
+        print(f"  {number:>3}/{len(steps)} {'ok' if ok else 'skipped' if step.optional else 'FAILED':<8} {step.note}")
+        if not ok:
+            print(f"        {detail}")
+    return True
+
+
 def _namespaces_on_host() -> list:
     try:
         proc = subprocess.run(["ip", "netns", "list"], capture_output=True,
