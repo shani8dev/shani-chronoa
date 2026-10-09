@@ -11,3 +11,10 @@ pkg/
 # A stray WAV from a mistyped redirect (`cmd > -q`); it is a build artefact
 # with no name, and nothing references it.
 -q
+
+# Downloaded voice and speech models kept between runs (tests/demos link to
+# them instead of downloading again). Never committed: hundreds of MB.
+cache/
+
+# Android build output (APKs, classes, dex) - rebuilt by build.sh
+android/*/build/

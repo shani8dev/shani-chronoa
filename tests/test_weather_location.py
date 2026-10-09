@@ -179,3 +179,26 @@ def test_media_pauses_the_playing_one_by_its_own_name(monkeypatch):
     monkeypatch.setattr(mc, "_gdbus", gdbus)
     assert mc._run({"action": "pause"}) == "Done: pause in Spotify."
     assert any("org.mpris.MediaPlayer2.Player.Pause" in a for a in calls[-1])
+
+
+def test_a_home_place_stands_in_when_this_computer_cannot_locate_itself(monkeypatch):
+    """Measured on the dev box: no gpsd, no GeoClue, so weather had no place at all."""
+    from shani_chronoa.skills import weather
+    from shani_chronoa.senses import location
+
+    class Cfg:
+        def sense_allowed(self, sense):
+            return True
+
+        def get(self, key, default=""):
+            return "Pune" if key == "home-place" else default
+    monkeypatch.setattr(weather, "ChronoaConfig", Cfg)
+    monkeypatch.setattr(location, "locate", lambda: (None, "GeoClue is not installed"))
+    monkeypatch.setattr(weather, "_place", lambda name: (18.52, 73.86, f"{name}, Maharashtra, India"))
+    assert weather._here() == (18.52, 73.86, "Pune, Maharashtra, India")
+
+    class NoHome(Cfg):
+        def get(self, key, default=""):
+            return default
+    monkeypatch.setattr(weather, "ChronoaConfig", NoHome)
+    assert "Set a home place" in weather._here()
