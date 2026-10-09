@@ -139,12 +139,20 @@ class TestNothingElseChanged:
             f"{len(skipped)} of {len(schemas)} shipped skills were skipped: "
             f"{skipped[:8]}")
 
-    def test_the_sort_reorders_nothing_that_was_already_valid(self):
-        """Stable sort: the author's order survives inside each group.
+    def test_every_shipped_schema_lists_required_first(self):
+        """A convention, so the sort is a no-op rather than a silent reorder.
 
-        Asserted on every shipped skill rather than one, because this is the
-        claim that makes the fix safe - a signature whose parameters changed
-        position is a signature whose calls could land differently.
+        `sorted` is stable, so the sort only moves a parameter when a schema
+        lists an optional one before a required one. That is why this test
+        caught three skills of mine the day they were added: `git_commit` and
+        `git_branch` listed the optional `path` first. The sort rescued them,
+        so nothing was broken - which is precisely why it needed catching, since
+        "the sort rescued it" and "the parameter order a client sees changed"
+        look identical from the outside.
+
+        So the claim is not that the sort is harmless - it is that no shipped
+        schema needs it. Every tool's parameters keep the order their author
+        wrote.
         """
         schemas, _ = tools.discover_skills()
         reordered = []

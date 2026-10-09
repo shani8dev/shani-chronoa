@@ -245,7 +245,11 @@ def _commit_schema() -> dict:
         "tree. Requires the 'git-write-enabled' consent key. Pushing is a "
         "separate skill: that publishes.",
         {
-            "path": _PATH,
+            # **Required first.** `mcp.py` builds a Python signature from this
+            # order and sorts required-first itself, so a schema listed the
+            # other way still works - but every other skill in the tree lists it
+            # this way, and being the exception is exactly what
+            # `test_mcp_signature_order.py` flagged when these three landed.
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -255,6 +259,7 @@ def _commit_schema() -> dict:
                                 "a bounded request into an unbounded one."),
             },
             "message": {"type": "string", "description": "The commit message."},
+            "path": _PATH,
         },
         ["files", "message"],
     )
@@ -267,11 +272,11 @@ def _branch_schema() -> dict:
         "Create a branch in a git repository and switch to it, or switch to a "
         "branch that already exists. Requires the 'git-write-enabled' consent key.",
         {
-            "path": _PATH,
             "name": {
                 "type": "string",
                 "description": "The branch to create and switch to.",
             },
+            "path": _PATH,
         },
         ["name"],
     )

@@ -52,10 +52,7 @@ _SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "The repository. Defaults to the working directory.",
-                },
+                # Required first - see the note in `git_write.py`.
                 "remote": {
                     "type": "string",
                     "description": "The remote to push to, exactly as the repository names it.",
@@ -68,6 +65,10 @@ _SCHEMA = {
                 "set_upstream": {
                     "type": "boolean",
                     "description": "Also set this branch to track the remote one.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "The repository. Defaults to the working directory.",
                 },
             },
             "required": ["remote"],
