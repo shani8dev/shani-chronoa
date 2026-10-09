@@ -54,10 +54,6 @@ _TIMEOUT = 12
 _MAX_NAMES = 12
 
 
-class Cert(NamedTuple := object):  # placeholder replaced below
-    pass
-
-
 SCHEMA = {
     "type": "function",
     "function": {
@@ -148,10 +144,11 @@ def _handshake_error(host: str, port: int) -> str:
     try:
         context = ssl.create_default_context()
         with socket.create_connection((host, port), timeout=_TIMEOUT) as raw:
-            with context.wrap_socket(raw, server_hostname=host) as tls:
-                # A handshake that succeeds but whose chain does not verify
-                # raises here, so reaching this point means the chain verified.
-                peer = tls.getpeercert()
+            # The chain verified. `getpeercert()` is deliberately not called:
+            # the caller re-opens the connection to read the certificate, and
+            # discarding it here was pyflakes' one complaint in this module.
+            with context.wrap_socket(raw, server_hostname=host):
+                pass
         return ""
     except _ssl.SSLCertVerificationError as exc:
         return (
