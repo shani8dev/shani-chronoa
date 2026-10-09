@@ -726,6 +726,47 @@ def _stub_host() -> str:
     return f"http://127.0.0.1:{_OllamaStub.port}"
 
 
+def _real_capture_works() -> bool:
+    """Can this machine actually be photographed? Asked by trying.
+
+    **The previous guard read `screengrab.display_environment()`, and that is a
+    statement about environment variables rather than about the screen.** On this
+    machine `display_environment()` answers `"wayland"`, so the guard was
+    satisfied and the test then failed after the **90-second** capture timeout —
+    a 1.5-minute test for a property that is not there.
+
+    Measured: `gnome-screenshot -f FILE` prints *"Unable to use GNOME Shell's
+    builtin screenshot interface, resorting to fallback X11"*, then
+    `Gdk-CRITICAL: gdk_pixbuf_get_from_surface: assertion 'width > 0 && height > 0'
+    failed`, then **exits 0 having written no file at all**. That is precisely
+    the confident-wrong-answer shape this repository keeps recording, and it is
+    why the probe below asks the module to do the work rather than reading a
+    variable: a display can be advertised and still have nothing behind it.
+
+    One real capture, with a short timeout, and it is skipped rather than
+    failed if the capture itself is merely slow — the point is to establish that
+    a screen exists, not to re-test the timeout the sense already owns.
+    """
+    if screengrab.display_environment() == "none":
+        return False
+    try:
+        capture = screengrab.capture_screen(timeout=8.0)
+    except Exception:  # noqa: BLE001 - any failure means "cannot photograph this"
+        return False
+    try:
+        return bool(capture.width > 0 and capture.height > 0 and capture.data)
+    finally:
+        path = getattr(capture, "path", None)
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+_REAL_CAPTURE_WORKS = _real_capture_works()
+
+
 class TestTheRealPath:
     """Real capture, real child interpreter, real HTTP, real bytes."""
 
@@ -781,8 +822,10 @@ class TestTheRealPath:
         assert command.count("envelope.json") == 1
 
     @pytest.mark.skipif(
-        screengrab.display_environment() == "none",
-        reason="no display on this machine, so a real screenshot cannot be taken",
+        not _REAL_CAPTURE_WORKS,
+        reason="a display environment is advertised here, but a real capture does "
+               "not work: gnome-screenshot falls back to X11 and gets a zero-sized "
+               "surface, so there is no screen to photograph",
     )
     def test_a_real_screenshot_of_this_desktop_is_decoded_and_described(
         self, vision_enabled, ollama_stub

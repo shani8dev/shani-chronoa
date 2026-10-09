@@ -19,7 +19,6 @@ not evidence the clock is stuck.
 from __future__ import annotations
 
 import ctypes.util
-import os
 import sys
 import time
 from pathlib import Path
@@ -120,8 +119,37 @@ class TestTheMessage:
             assert text and text != "None"
 
 
-@pytest.mark.skipif(not __import__("os").environ.get("DISPLAY"),
-                    reason="no X display in this environment")
+#: Whether the real idle clock can be read here at all, asked of the **sense**
+#: rather than of the environment.
+#:
+#: The previous guard was `not os.environ.get("DISPLAY")`, which answers "is the
+#: variable set" where the question is "does the X server offer the Screen Saver
+#: extension". Measured on this machine: `DISPLAY=:0` **is** set and the extension
+#: is **not** present, so the guard did not apply and three tests failed with
+#: `MIT-SCREEN-SAVER missing on display ":0"` - which is the sense refusing
+#: correctly and the test calling the refusal a defect.
+#:
+#: Asking `idle.py` is the right probe for the same reason every other
+#: availability check in this repository is: the answer has to come from the
+#: component that does the work, or the two answers can drift and one of them
+#: will be wrong in the direction that produces a confident result.
+def _idle_clock_readable() -> bool:
+    try:
+        I.read_idle_seconds()
+    except I._Unavailable:
+        return False
+    except Exception:  # noqa: BLE001 - any other failure is also "not readable here"
+        return False
+    return True
+
+
+_IDLE_CLOCK_READABLE = _idle_clock_readable()
+
+
+@pytest.mark.skipif(not _IDLE_CLOCK_READABLE,
+                    reason="the X server here does not offer MIT-SCREEN-SAVER, "
+                           "so idle.read_idle_seconds() raises _Unavailable and "
+                           "there is no real clock to measure")
 class TestAgainstTheRealClock:
     def test_it_reads_a_plausible_idle_time(self):
         seconds = I.read_idle_seconds()
@@ -264,8 +292,9 @@ class TestTheXResourcesAreReleased:
         assert x11.XCloseDisplay.argtypes == [ctypes.c_void_p]
         assert x11.XFree.argtypes == [ctypes.c_void_p]
 
-    @pytest.mark.skipif(not os.environ.get("DISPLAY"),
-                        reason="no X display; the real-clock tests in this file need one")
+    @pytest.mark.skipif(not _IDLE_CLOCK_READABLE,
+                        reason="the X server here does not offer MIT-SCREEN-SAVER, "
+                               "so there is no real clock whose descriptors could leak")
     def test_the_real_read_leaks_no_descriptors(self, monkeypatch):
         # The unit test above proves the calls are made. This proves the calls
         # are what actually release the connection, which a mock cannot.

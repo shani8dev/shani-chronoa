@@ -6108,3 +6108,45 @@ file failed 4 of 5 before.
 
 224 passed, 14 skipped across the audio, capture, singing, DSP and packaging
 suites.
+
+### Three "environmental" failures that were two wrong guards and one honest refusal
+
+The sweep's last failures are on this file's environmental list. Two of them were
+**test guards answering the wrong question**, and each cost real time to
+diagnose — the environment list says "environmental" and stops there, which is
+exactly the "a skip reads as coverage" shape in reverse.
+
+- **`test_sense_idle.py` (3): the guard asked whether a variable was set.**
+  `skipif(not os.environ.get("DISPLAY"))` — and on this machine `DISPLAY=:0`
+  **is** set while the X server has no `MIT-SCREEN-SAVER` at all, so the guard did
+  not apply and three tests failed with the sense's own honest refusal,
+  `MIT-SCREEN-SAVER missing on display ":0"`. The product was right and the test
+  called the refusal a defect. It now asks `idle.read_idle_seconds()` — **the
+  sense**, not the environment — for exactly the reason every other availability
+  check here is asked of the component that does the work. The `os` import went
+  with it; pyflakes was the thing that noticed it was now unused.
+- **`test_vision_sense.py` (1): the guard read `display_environment()`, which is
+  a fact about variables, and the test then burned the full 90-second capture
+  timeout.** Measured here: `gnome-screenshot -f FILE` prints *"Unable to use
+  GNOME Shell's builtin screenshot interface, resorting to fallback X11"*, then
+  `Gdk-CRITICAL: gdk_pixbuf_get_from_surface: assertion 'width > 0 && height > 0'
+  failed`, then **exits 0 having written no file** — the confident-wrong-answer
+  shape this file keeps recording, in a real binary. The guard now attempts one
+  real capture at a short timeout and asks whether it produced a sized image.
+  That is 94 s → **11.5 s**, and the skip reason names the actual cause.
+  **Checked that the new guard can answer True**, since a probe that is always
+  False is the same defect as a skip: on a real `Capture` the predicate returns
+  True for 1920x1080-with-bytes and False for the zero-sized and empty-data
+  cases, so it discriminates.
+- **`test_sandbox_seccomp.py` (2): left alone deliberately, and it is the
+  example of the rule.** AppArmor restricts unprivileged user namespaces here
+  (`kernel.apparmor_restrict_unprivileged_userns = 1`), so seccomp cannot be
+  reached at all. The tests do not fail by asserting the filter works — they fail
+  in their **own control**: *"the control did not escape, so the refusal below
+  would prove nothing"* (`PermissionError: [Errno 13] Permission denied`).
+  A check that refuses to certify itself when its premise is absent is the
+  correct behaviour, and "make it green" here would mean deleting the control.
+  It needs a kernel with Landlock reachable — `slot-test ... repo-pytest` on a
+  real image, which is what AGENTS.md already says.
+
+150 passed, 4 skipped across the vision, idle, sense-manifest and sandbox suites.
