@@ -5763,3 +5763,144 @@ All verified live on the acer ZX and the FB BGS002 unless marked.
   context: `GLib.timeout_add_seconds` attaches to the *global* default context, so
   the poll never ran (a test caught it) and the per-file decline timeout ran on
   the GTK thread.
+
+## Two gaps from `digital-travel-agent`, one of them a control (2026-10-09)
+
+`harness-study/digital-travel-agent` (LangGraph, 15.4k LOC, pointed at a live
+airline) studied for the first time; the write-up with every `path:line` is
+`../harness-study/HARVEST-DTA.md`. Its headline mechanism turned out to be one
+Chronoa already has and is further along with — the approval gate is
+`permissions.decide()` inside `tools.py:_dispatch_inner`, central for all 190
+skills, where the gate there is one `frozenset` beside the tools. Seven such
+"already here" rows are in that document; **do not re-propose them.** Two things
+were genuinely open, and the harness worked the same way it always has: the
+first version of each was wrong, and running it is what said so.
+
+### `rules.md` was a standing system-message injection with no content check
+
+`user_prompts.rules_message()` put `~/.config/shani-chronoa/rules.md` in the
+**system** role on every request, under the preamble *"follow them unless they
+conflict with safety"* — and the safety half of that was the model's. On the
+tool side Chronoa has a control; on the prompt side it had a prompt, which is
+`digital-travel-agent`'s `graph.py:12-18` arriving from the other direction.
+
+`provenance.py` fences content by **where its text came from**, and a rules file
+is the user's own words, so it is unwrapped by design — correct, and it left
+this uncovered. `commands/*.md` are safe for a different reason: the person typed
+`/name` this turn, and `forced_tool()` refuses to fire on a user command of the
+same name.
+
+A rules file that reaches for tool behaviour or a gate is now **refused** — not
+loaded, and the refusal replaces the file rather than sitting under it, because
+two voices in the system role is the shape that loses. That is not theory
+either: that project's recorded test is that appending a contradicting note
+*below* an instruction left both present and the model still took the wrong one.
+
+**Four false positives, all found by running the first regex, not reading it.**
+A bare `do not ask` refused *"Do not ask me for the time; use my timezone"*, and
+a bare `bypass` refused *"Bypass the corporate proxy for local addresses"* —
+ordinary standing rules. Both now require their **object**; the word alone is
+never the signal. Then the derived term list turned out to hold **nine gated
+tool names that are simply English words** — `phone`, `watch`, `news`, `maps`,
+`browse`, `notify`, `screenshot`, `temperatures`, `conversations` — and refused
+*"My phone is called edit."* A term now qualifies only if it carries a `_` or a
+`-`, which every consent key does and which 11 of the 12 destructive tools do.
+The twelfth is `conversations`, carried by the phrase patterns, and that ceiling
+is written down rather than patched with a hand-kept exception list.
+
+**The term list is derived, never typed**, from `capabilities.GATED` and
+`DESTRUCTIVE_CONSENT_KEYS`, so a newly registered destructive tool is covered
+the day it is registered. `tests/test_user_prompts.py` asserts that as a
+property of the module's **AST** — collection literals only — because a raw
+substring search refuses its own test: the first version of it failed because a
+*comment* explaining the derivation named `delete_file`, which is prose about
+the list rather than the list.
+
+**The refusal is visible in two places that cannot disagree.** `rules_verdict()`
+is the single answer; `assistant.py` sends what it returns and `gui/rail.py`
+describes what it returns. The rail says *which phrase* tripped it, because a
+refusal nobody can locate is a refusal nobody will fix — and a refused file
+showing **no** row would be indistinguishable from "you have no rules".
+
+**Its ceiling is a soft check and cannot be a jail**, stated in the module
+docstring for the reason `persona.py` states it: the refusal text and the system
+prompt are plain text read by the same model. It catches the obvious case and
+refuses it loudly. It is **not** applied to `commands/*.md`, because refusing
+those is `provenance.py`'s documented mistake run backwards.
+
+### A duplicate action is born at the approval
+
+Two of the three ways a person can say yes are reachable **without the window
+focused** — `approvals.py`'s `notify-send --action`, and the gateway's
+worker-thread call — so a notification pressed twice, or a client reconnecting
+and replaying after a timeout that actually succeeded, ran the same call twice.
+`grep -rn idempot usr/ tests/` found nothing: only `idempotent_hint` on the MCP
+descriptions, which is a claim to a client and not a control.
+
+`tools.py` now keeps a bounded, TTL'd receipt for a completed gated call
+(`REPLAY_TTL_SECONDS = 60`, `REPLAY_CAPACITY = 64`, `time.monotonic()` like every
+other TTL here). The check sits **after** `permissions.decide`, so the question
+is asked again every time and only the second *action* is skipped — hoisting it
+would quietly undo both "allow once means once" and `is_bypass_immune`.
+
+**The first version cached `ran=True, UNVERIFIED` and was wrong, and running the
+real skill is what showed it.** In Chronoa that cell is where a skill's *own*
+consent refusal lands — `DispatchResult`'s docstring says so — so a refused call
+was stored as a completed one, and a retry after the permission was granted came
+back with the stale refusal and could never run. **`VERIFIED` is now the whole
+rule**, because it is the only verdict that means the effect held.
+
+**What that costs, measured: 12 of the 62 gated tools** have a post-condition and
+can reach `VERIFIED` — `airplane_mode`, `control_service`, `default_apps`,
+`delete_file`, `desktop_setting`, `kill_process`, `office_document`,
+`print_queue`, `set_hostname`, `set_locale`, `take_photo`, `toggle_wifi` — of
+which four are also classified destructive. The other 50 are **not**
+replay-protected, and `install_app`, `power_action`, `move_pointer`,
+`click_pointer`, `type_text` and `connect_wifi` are among them. Widening it needs
+a refusal marker in the child, as a sibling to `ToolFailure.MARKER` — a change
+across the skill set, so it is noted rather than faked, which is the same trade
+`DispatchResult` made. `tests/test_tool_replay.py::test_the_tools_named_as_covered_still_have_post_conditions`
+fails if that list rots.
+
+**Driving these for real needs a keyfile gsettings backend, not a stub.**
+`GSETTINGS_BACKEND=memory` is per-process, so a grant made in the probe is
+invisible to the sandboxed child that runs the skill and the refusal reads as
+"turned off" however the parent was configured. The group is `[org.shani.chronoa]`
+— the schema id — because `[org/shani/chronoa]` is silently ignored and every
+gate stays shut. With that, `delete_file` really deletes and really verifies.
+
+**Three of my own mistakes, all caught by running, all recorded because the shape
+recurs.** The replay's own note was stored instead of the clean receipt, so a
+*third* call came back with the note twice — the note now leads the text and
+`_dispatch` skips re-recording anything that starts with it. The ordering test
+scanned with `ast.walk`, which is **breadth-first**: it reported `replay` before
+`decide` for a function where the opposite is true, until the calls were sorted
+by line number. And `test_tool_replay.py` left `_REACTIONS` tripped and
+`ask_bridge._presenter` clobbered, so `test_tool_outcome_structure.py` failed
+four files later with *"has now touched 12 different targets"* — which read as
+that file's bug and was this one's. Both globals are now restored, and the
+fixture says why.
+
+### Not done, and why
+
+- **Capture-once-then-reuse for an approved argument.** The right shape is
+  real — `digital-travel-agent`'s `payment_mandate.py:47-50` captures the exact
+  passenger data shown on the checkout page so the later booking reuses it
+  *verbatim instead of trusting the model to retype it several turns later* —
+  and Chronoa already has both halves of the store (`undo_last_change.py`'s
+  pre-image ring, and the Diff panel and rail that read it). What is missing is
+  that `_resource_for()` builds the scoped resource from **the model's argument**,
+  so a drifted path means the gate asks about the wrong file. **Not built:** which
+  file a person *meant* is a design question about the selection UX, not a
+  mechanical wiring, and shipping the wrong answer would make the gate describe
+  the wrong resource with total confidence.
+- **"Everything a tool says must have a spoken sentence."** `TurnEnvelope`'s rule
+  that `text` is always complete is the most transferable idea in that repo, and
+  Chronoa has three renderers of one turn — transcript, MCP result, and
+  `speech.SpeechQueue`, which has no card to fall back on, so a result that
+  exists only as a card is a turn that did not happen for a voice user. **Not
+  asserted:** no claim is made that the gap exists. Checking it needs a
+  `shani-testbed` `slot-test`/`app` action, because constructing a widget is not
+  the same as looking at it, and this repo has two recorded instances of a width
+  test passing against a row nobody could read.
+

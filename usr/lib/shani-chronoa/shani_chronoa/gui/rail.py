@@ -395,12 +395,22 @@ class NowRail(Gtk.Box):
         # The rules file is sent on every turn and appears nowhere in the
         # transcript - so it changed every answer with nothing on screen saying
         # it was there. One line, only when it is.
+        #
+        # A **refused** file gets its own row rather than no row. It is the same
+        # question either way - "are my rules in force?" - and silence reads as
+        # "yes, and there happen to be none", which is the one answer that is
+        # wrong in both directions at once. The row names the phrase, because a
+        # refusal the person cannot locate is a refusal they will not fix.
         try:
             from shani_chronoa import user_prompts
-            rules = user_prompts.rules_text()
+            rules, refusal = user_prompts.rules_verdict()
         except Exception:  # noqa: BLE001
-            rules = ""
-        if rules:
+            rules, refusal = "", None
+        if refusal:
+            self._posture.row(
+                "Your rules file was refused",
+                f"not sent - {refusal!r} reads like changing the safety rules")
+        elif rules:
             lines = len([ln for ln in rules.splitlines() if ln.strip()])
             self._posture.row("Your rules apply to every answer",
                               f"{lines} line(s) from rules.md")

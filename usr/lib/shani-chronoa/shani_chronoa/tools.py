@@ -26,7 +26,11 @@ against real subprocesses, not assumed).
 """
 
 import importlib
+import json
 import logging
+import threading
+import time
+from collections import OrderedDict
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
                        guardrail, permissions, planmode, verification)
@@ -245,6 +249,164 @@ def _consent_key_for(name: str) -> "str | None":
     return None
 
 
+# ---------------------------------------------------------------------------
+# Replay at the approval boundary.
+#
+# Approval is exactly where a duplicate comes from. Two of the three ways a
+# person can say yes in Chronoa are reachable without the window focused -
+# `approvals.py`'s `notify-send --action`, and the gateway's worker-thread call -
+# so a notification pressed twice, or a client that reconnects and replays its
+# last action after a timeout that actually succeeded, runs the same call twice.
+#
+# This is the mechanism `harness-study/digital-travel-agent` uses at its own
+# `confirm_booking`: derive a key from *what makes the action the same action*
+# and answer a replay with the receipt rather than creating a second thing.
+# `grep -rn idempot usr/ tests/` found no such thing here before this - only
+# `idempotent_hint` on the MCP tool descriptions, which is a claim to a client
+# and not a control.
+#
+# **Placed after the consent decision, not before it.** The person is asked
+# again, every time, which is what `permissions.is_bypass_immune` promises for
+# a destructive tool; what is skipped is the *second action*, not the second
+# question. A replay that skipped the prompt would quietly undo two properties
+# at once - that "allow once" means once, and that a session grant never answers
+# for `delete_file`.
+# ---------------------------------------------------------------------------
+
+#: How long a completed approval stays replayable. A double-click, a retried
+#: request or a reconnecting client all land within seconds; a minute later,
+#: somebody asking again means it again. Deliberately short and written down as a
+#: number, because a window nobody chose is a window nobody can reason about.
+REPLAY_TTL_SECONDS = 60.0
+
+#: Bounded on purpose. An unbounded map of completed actions is a leak that only
+#: shows up on a long-lived background-mode daemon.
+REPLAY_CAPACITY = 64
+
+#: Only `VERIFIED` is replayable, and that is a much narrower rule than it
+#: looks. `DispatchResult` cannot distinguish a skill that *ran and succeeded*
+#: from one that *ran and refused* - both are `ran=True, UNVERIFIED`, and its own
+#: docstring says so: "A consent refusal still lands in row two, because the
+#: refusal happens inside the skill and the dispatch only sees exit 0 - making
+#: that structural means changing all 69 skills, so it is noted rather than
+#: faked."
+#:
+#: Caching the ambiguous cell would mean a retry after a refused call - after the
+#: person grants the permission, or a transient condition clears - comes back
+#: with the stale refusal instead of running. **A stale refusal is worse than no
+#: replay protection at all**, so `VERIFIED` is the whole rule.
+#:
+#: What that costs, measured on this tree: **12 of the 62 gated tools** have a
+#: post-condition and can therefore reach `VERIFIED` -
+#: `airplane_mode`, `control_service`, `default_apps`, `delete_file`,
+#: `desktop_setting`, `kill_process`, `office_document`, `print_queue`,
+#: `set_hostname`, `set_locale`, `take_photo`, `toggle_wifi` - of which four are
+#: also classified destructive. The other 50 are not replay-protected, and
+#: `install_app`, `power_action`, `move_pointer`, `click_pointer`, `type_text`
+#: and `connect_wifi` are among them. That is the honest coverage, recorded here
+#: rather than implied by the feature's presence.
+#:
+#: What would widen it, not built here: a refusal marker in the child, as a
+#: sibling to `ToolFailure.MARKER`. That is a change across the skill set, and
+#: this file's own rule is that a boundary is noted rather than faked.
+_REPLAYABLE_VERDICTS = (verification.Verdict.VERIFIED,)
+
+#: Marks a result that came from the cache rather than from a run. Leading, and
+#: `startswith`, so the one place that must not re-record a replay can recognise
+#: it structurally. See the return in `_dispatch_inner`.
+_REPLAY_NOTE_PREFIX = "[Not run again: "
+
+_REPLAYS: "OrderedDict[tuple, tuple]" = OrderedDict()
+_REPLAY_LOCK = threading.Lock()
+
+
+def _replay_key(name: str, arguments, origin: str):
+    """What makes two calls the same call, or None if this one is not a candidate.
+
+    Four things are in the key and each earns its place:
+
+    - **the tool name**, or `delete_file` and `trash_file` collide;
+    - **the arguments**, canonicalised with sorted keys so `{"a":1,"b":2}` and
+      `{"b":2,"a":1}` are one call rather than two. `repr` is the fallback for a
+      value json cannot serialise, so an exotic argument makes the key
+      conservative instead of raising - a check that raised here would be a check
+      that had stopped the tool it exists to protect;
+    - **the origin**, because a trigger-driven turn and a typed one reaching the
+      same arguments are two different decisions. The gateway's grant is keyed on
+      channel for the same reason;
+    - **the consent key's state right now.** Found by running, not by reasoning:
+      `tests/test_matrix_skills.py::test_set_locale_refuses_ungenerated_and_ungranted`
+      failed against this feature, because an earlier test in the same file ran
+      the *same* `set_locale` call with the key granted and verified, and the
+      refusal test was then answered with that receipt - a test asserting "this
+      is refused" reading "this is done". It is the same defect in the product
+      that it is in the test: **the permission changed between the two calls**, so
+      they are not the same call. A receipt must not survive the state that
+      authorised it, and the state that produced it is the key's value.
+
+    Not a candidate unless the tool is consent-gated, for two reasons. The
+    finding this answers is about approval; and an ungated read answered from
+    the cache would be a stale value wearing a fresh timestamp - `get_datetime`
+    replayed a minute later reporting last minute's time.
+
+    Whether the result is *cacheable* is a separate question, answered by
+    `_REPLAYABLE_VERDICTS` above, and it is not this function's business. A
+    config read that cannot happen yields `None`, which makes the key unique per
+    call - the conservative direction, since a key nobody can reproduce is a
+    replay nobody can be served.
+    """
+    consent_key = _consent_key_for(name)
+    if consent_key is None:
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    try:
+        canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"),
+                               default=repr)
+        permitted = bool(config_mod.ChronoaConfig().get_bool(consent_key, False))
+    except Exception:  # noqa: BLE001 - a key we cannot build is a call we let run
+        return None
+    return (name, canonical, origin, consent_key, permitted)
+
+
+def _replay_get(key: tuple):
+    """The receipt for a key, or None when there is none or it has expired."""
+    with _REPLAY_LOCK:
+        entry = _REPLAYS.get(key)
+        if entry is None:
+            return None
+        stamped, result = entry
+        # `time.monotonic()`, never the wall clock: a clock adjustment must not
+        # silently extend or shorten how long an approval stays replayable. The
+        # same reasoning as every other TTL in this tree.
+        if time.monotonic() - stamped > REPLAY_TTL_SECONDS:
+            del _REPLAYS[key]
+            return None
+        return result
+
+
+def _replay_put(key: tuple, result: "DispatchResult") -> None:
+    """Remember a completed, *verified* action. Never raises.
+
+    A refusal, a failure and an impossible request are all deliberately left
+    uncached - see `_REPLAYABLE_VERDICTS` for why the ambiguous
+    `ran=True/UNVERIFIED` cell is not among them, which is the same reasoning
+    that makes a probe returning nothing read as unknown rather than as a pass.
+    """
+    if not result.ran or result.verdict not in _REPLAYABLE_VERDICTS:
+        return
+    with _REPLAY_LOCK:
+        _REPLAYS[key] = (time.monotonic(), result)
+        while len(_REPLAYS) > REPLAY_CAPACITY:
+            _REPLAYS.popitem(last=False)
+
+
+def clear_replays() -> None:
+    """Forget every replayable action. For tests, and for a deliberate reset."""
+    with _REPLAY_LOCK:
+        _REPLAYS.clear()
+
+
 #: Tool -> the other tools that would plausibly have answered the same request.
 #:
 #: **Intentionally empty, and that is the honest state rather than a missing
@@ -407,6 +569,21 @@ def _dispatch(name: str, arguments: dict, by_reference: bool = False,
             continue
         if kept is not None:
             result = kept
+    # Recorded last, on exactly what the caller is about to receive, so a replay
+    # is answered with the same text the original produced rather than with
+    # whatever the body happened to return before a post-hook rewrote it.
+    #
+    # A replayed result is skipped: storing its annotated text would mean the
+    # *third* identical call came back with the note twice, and the fourth with
+    # it three times. That is not hypothetical - it is what this did before the
+    # check below was added, which is why the note leads its text rather than
+    # trailing it.
+    key = _replay_key(name, arguments, origin)
+    if key is not None and not result.text.startswith(_REPLAY_NOTE_PREFIX):
+        try:
+            _replay_put(key, result)
+        except Exception:  # noqa: BLE001 - remembering must never fail a call
+            pass
     return result
 
 
@@ -835,6 +1012,28 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
             # text they typed comes back with the result. Consumed here, so it
             # rides this one call rather than prefixing every later one.
             _feedback_for_dispatch = permissions.consume_feedback(name, grant_target)
+
+    # The approval above stands; the *action* may already be done. Deliberately
+    # here rather than at the top of `_dispatch`: the question was asked and
+    # answered again like any other time, and this is only the second execution
+    # that is skipped.
+    _replay = _replay_key(name, arguments, origin)
+    if _replay is not None:
+        already = _replay_get(_replay)
+        if already is not None:
+            # Said out loud rather than returned silently, and the note leads.
+            # A result that appears without the action happening is
+            # indistinguishable, to the model and to the person, from the tool
+            # simply being fast - and the whole point of `ToolFailure` is that
+            # "it ran and its effect held" is a different fact from "it did not
+            # run this time". Leading also gives `_dispatch` a structural way to
+            # recognise this result and *not* re-record it, which a trailing note
+            # cannot: storing the annotated text would stack the note again on
+            # every further replay.
+            return DispatchResult(
+                f"{_REPLAY_NOTE_PREFIX}this exact {name} call was approved and "
+                f"completed moments ago. Its result when it ran:]\n{already.text}",
+                already.verdict, already.ran)
 
     config = _get_sandbox_config(name)
     handler_module = handler.__module__
