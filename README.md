@@ -2,7 +2,7 @@
 
 Local-first voice/text AI assistant, integrated into the Shanios desktop.
 
-> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 200
+> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 201
 > skills, grouped by what they are for, with each one's consent switch and
 > whether the assistant asks before running it. Generated from the same table
 > the Help window renders, so it cannot claim something the build does not have.
@@ -25,12 +25,12 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **200 callable
+  rather than just chatting about it. **201 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
   what they are for, each with the consent switch it needs and whether the
-  assistant asks before running it — 75 are consent-gated and 14 are
+  assistant asks before running it — 78 are consent-gated and 15 are
   destructive. That file is generated from `capabilities._GROUPS`, the same
   table the Help window renders, so it cannot drift from what the build does;
   `tests/check_capabilities_doc.py` fails if it does.
@@ -340,7 +340,7 @@ A turn is audio → whisper.cpp transcribes → the local LLM generates a respon
 (possibly calling skills) → espeak-ng or Piper speaks the reply.
 
 **The tool loop is what the small model depends on, and it is measured.** All
-200 schemas sent with every request is ~35,000 tokens (~47,000 at
+201 schemas sent with every request is ~35,000 tokens (~47,000 at
 `local_llm.CHARS_PER_TOKEN`, the 3 the tree actually uses) — past the window of
 every hardware tier, so the request is rejected before the model reads a word.
 `tool_select` narrows the offer to what a request could plausibly use. Measured

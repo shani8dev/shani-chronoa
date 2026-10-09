@@ -63,6 +63,7 @@ _CONSENT_NAMES = (
 # tool -> module that implements it
 _IMPL = {
     "screenshot": "shani_chronoa.skills.screenshot",
+    "cleanup_apply": "shani_chronoa.skills.cleanup_apply",
     "move_pointer": "shani_chronoa.skills.input_control",
     "nfc": "shani_chronoa.skills.nfc",
     "fm_radio": "shani_chronoa.skills.fm_radio",

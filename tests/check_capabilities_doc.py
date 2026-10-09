@@ -84,8 +84,13 @@ def main() -> int:
     gated_rows = {r for r in re.findall(r"^\| `([a-z0-9_]+)` \|[^|]*\|[^|]*needs `", on_disk, re.M)}
     import gen_capabilities as G
     own = dict(G._tools_with_own_consent_key())
+    # A skill that gates only *part* of itself still needs a `needs \`key\``
+    # mark, so it is read from the same helper the generator reads - the
+    # alternative is a second list here, which is how this file's own subject
+    # (a hand-kept table drifting from the tree) happens in the first place.
+    partial = G._tools_with_partial_gate()
     # a destructive row must also carry its switch, not only the "asks" mark
-    should_be_gated = set(C.GATED) | set(own)
+    should_be_gated = set(C.GATED) | set(own) | set(partial)
     if gated_rows != should_be_gated:
         wrong = sorted(should_be_gated - gated_rows)
         extra_marks = sorted(gated_rows - should_be_gated)

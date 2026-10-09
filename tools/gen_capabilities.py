@@ -94,6 +94,49 @@ def _tools_with_own_consent_key() -> set[str]:
     return out
 
 
+def _tools_with_partial_gate() -> dict:
+    """Tools that gate only *some* of their actions, with the wording to say so.
+
+    `write_text_file` writes new files with no permission at all - the
+    precedent `convert_document` and `audio_output` follow - but replacing
+    what a file already says is `edit_file`'s act, so that branch needs
+    `file-edit-enabled`. The column had two states and neither was true: "—"
+    claims nothing gates it, and naming the key claims the whole skill is
+    shut, which would be a different falsehood. A gate that half applies is
+    a third thing and is rendered as one.
+
+    Declared by the skill as `_PARTIAL_CONSENT_KEY = (key, note)`, read from
+    the module like `_CONSENT_KEY` is, because a hand-kept list of partially
+    gated skills here would drift from the skills themselves.
+    """
+    import importlib
+    import pkgutil
+    from shani_chronoa import skills as skills_pkg
+
+    out = {}
+    for mod in pkgutil.iter_modules(skills_pkg.__path__):
+        if mod.name.startswith("_"):
+            continue
+        try:
+            m = importlib.import_module(f"shani_chronoa.skills.{mod.name}")
+        except Exception:
+            continue
+        declared = getattr(m, "_PARTIAL_CONSENT_KEY", None)
+        if not declared:
+            continue
+        try:
+            key, note = declared
+        except (TypeError, ValueError):
+            print(f"error: {mod.name} declares a malformed "
+                  f"_PARTIAL_CONSENT_KEY: {declared!r}", file=sys.stderr)
+            continue
+        for entry in getattr(m, "SKILLS", ()) or ():
+            name = getattr(entry, "name", None)
+            if name:
+                out[name] = (str(key), str(note))
+    return out
+
+
 HEADER = """# What Chronoa can do
 
 Every capability in one place, generated from the same table the Help window
@@ -119,6 +162,11 @@ The **Before it runs** column is the honest part:
   Privacy, and the refusal names the key, so a shut gate is never mistaken for a
   missing feature. Every one starts off: nothing that discloses or changes is
   available until you turn it on.
+- **needs `<key>` to *do one thing*** — the skill gates one of its actions and
+  not the rest. `write_text_file` creates a file with no permission (writing
+  something new is not an edit) and needs the switch to replace one that already
+  has content. It is written out because both of the shorter claims are false:
+  "—" would say nothing gates it, and a bare key would say the whole skill is shut.
 - **asks first, always** — the assistant asks before running it, and a standing
   "yes, for this session" grant does **not** cover it. This is on top of any
   switch, so a destructive skill is both gated and asked about.
@@ -153,6 +201,7 @@ def main() -> int:
     # these two drift apart.
     own_gate = dict(_tools_with_own_consent_key())
     own_gate_names = set(own_gate)
+    partial_gate = _tools_with_partial_gate()
     missing_gate = own_gate_names - set(C.GATED)
     if missing_gate:
         # Not an error: a skill may gate itself with a *sense* key, which the
@@ -164,7 +213,7 @@ def main() -> int:
               f"through GATED: {sorted(missing_gate)}", file=sys.stderr)
 
     out = [HEADER.format(n=len(known), g=len(groups))]
-    gated_names = set(C.GATED) | own_gate_names
+    gated_names = set(C.GATED) | own_gate_names | set(partial_gate)
     destructive = _destructive(own_gate)
     out.append(f"**{len(gated_names)} of {len(known)} are consent-gated and "
                f"{len(destructive)} are destructive.**\n")
@@ -181,8 +230,11 @@ def main() -> int:
             key = C.GATED.get(tool) or own_gate.get(tool)
             if tool in destructive:
                 marks.append("**asks first, always**")
+            partial = partial_gate.get(tool)
             if key:
                 marks.append(f"needs `{key}`")
+            elif partial:
+                marks.append(f"needs `{partial[0]}` {partial[1]}")
             out.append(f"| `{tool}` | {label} | {' · '.join(marks) or '—'} |")
         out.append("")
 

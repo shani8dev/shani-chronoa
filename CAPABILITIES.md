@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**200 skills in 24 groups.** Each is a named, schema-typed module; the model
+**201 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -23,6 +23,11 @@ The **Before it runs** column is the honest part:
   Privacy, and the refusal names the key, so a shut gate is never mistaken for a
   missing feature. Every one starts off: nothing that discloses or changes is
   available until you turn it on.
+- **needs `<key>` to *do one thing*** — the skill gates one of its actions and
+  not the rest. `write_text_file` creates a file with no permission (writing
+  something new is not an edit) and needs the switch to replace one that already
+  has content. It is written out because both of the shorter claims are false:
+  "—" would say nothing gates it, and a bare key would say the whole skill is shut.
 - **asks first, always** — the assistant asks before running it, and a standing
   "yes, for this session" grant does **not** cover it. This is on top of any
   switch, so a destructive skill is both gated and asked about.
@@ -30,7 +35,51 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**75 of 200 are consent-gated and 14 are destructive.**
+**78 of 201 are consent-gated and 15 are destructive.**
+
+## Files
+
+Read, write, move, archive and undo files.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `analyze_table` | Ask questions of a spreadsheet or CSV, and chart it | — |
+| `cleanup_apply` | Clear caches and unused Flatpak runtimes | **asks first, always** · needs `cleanup-enabled` |
+| `cleanup_report` | What could be cleaned up | — |
+| `compare_files` | Compare two files | — |
+| `compute_hash` | Checksum a file | — |
+| `convert_document` | Convert a document between md, txt, and html | — |
+| `convert_media` | Convert audio, video and pictures | — |
+| `create_archive` | Make or extract an archive | — |
+| `create_directory` | Create a folder | — |
+| `create_document` | Create a markdown, text, or HTML document | — |
+| `delete_file` | Delete | **asks first, always** · needs `file-delete-enabled` |
+| `directory_tree` | Show a folder's shape | — |
+| `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
+| `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
+| `extract_archive` | Unpack a tar or zip archive | — |
+| `find_and_replace` | Find and replace | **asks first, always** · needs `bulk-edit-enabled` |
+| `find_files` | Find files by name | — |
+| `find_recently_modified` | What changed today | — |
+| `get_file_info` | File size, age and permissions | — |
+| `json_query` | Ask what a JSON document contains | — |
+| `list_directory` | List a folder | — |
+| `manage_mount` | Mount or unmount | **asks first, always** · needs `mount-control-enabled` |
+| `move_or_copy_file` | Move or copy | — |
+| `notes` | Keep your own notes: add, list, search and remove | — |
+| `office_document` | Read, create or edit Word, Excel and PowerPoint files | **asks first, always** · needs `file-edit-enabled` |
+| `open_file` | Open a file | — |
+| `pdf_pages` | Merge, split or take pages out of PDFs | — |
+| `read_audio` | Read an audio file's length, format, and bitrate | — |
+| `read_document` | Read a PDF or picture | — |
+| `read_image` | Read a picture's dimensions, format, and colour | — |
+| `read_text_file` | Read a text file | — |
+| `read_video` | Read a video's length, size, and format | — |
+| `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
+| `search_file_contents` | Search inside files | — |
+| `trash_file` | Move a file or folder to the trash, recoverably | **asks first, always** · needs `file-delete-enabled` |
+| `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
+| `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
 
 ## System
 
@@ -75,49 +124,6 @@ Processes, packages, updates, containers, vms, disks, network.
 | `trace_route` | Trace the network path to a host | — |
 | `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
 | `whois_lookup` | Look up who a domain or address is registered to | — |
-
-## Files
-
-Read, write, move, archive and undo files.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `analyze_table` | Ask questions of a spreadsheet or CSV, and chart it | — |
-| `cleanup_report` | What could be cleaned up | — |
-| `compare_files` | Compare two files | — |
-| `compute_hash` | Checksum a file | — |
-| `convert_document` | Convert a document between md, txt, and html | — |
-| `convert_media` | Convert audio, video and pictures | — |
-| `create_archive` | Make or extract an archive | — |
-| `create_directory` | Create a folder | — |
-| `create_document` | Create a markdown, text, or HTML document | — |
-| `delete_file` | Delete | **asks first, always** · needs `file-delete-enabled` |
-| `directory_tree` | Show a folder's shape | — |
-| `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
-| `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
-| `extract_archive` | Unpack a tar or zip archive | — |
-| `find_and_replace` | Find and replace | **asks first, always** · needs `bulk-edit-enabled` |
-| `find_files` | Find files by name | — |
-| `find_recently_modified` | What changed today | — |
-| `get_file_info` | File size, age and permissions | — |
-| `json_query` | Ask what a JSON document contains | — |
-| `list_directory` | List a folder | — |
-| `manage_mount` | Mount or unmount | **asks first, always** · needs `mount-control-enabled` |
-| `move_or_copy_file` | Move or copy | — |
-| `notes` | Keep your own notes: add, list, search and remove | — |
-| `office_document` | Read, create or edit Word, Excel and PowerPoint files | **asks first, always** · needs `file-edit-enabled` |
-| `open_file` | Open a file | — |
-| `pdf_pages` | Merge, split or take pages out of PDFs | — |
-| `read_audio` | Read an audio file's length, format, and bitrate | — |
-| `read_document` | Read a PDF or picture | — |
-| `read_image` | Read a picture's dimensions, format, and colour | — |
-| `read_text_file` | Read a text file | — |
-| `read_video` | Read a video's length, size, and format | — |
-| `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
-| `search_file_contents` | Search inside files | — |
-| `trash_file` | Move a file or folder to the trash, recoverably | **asks first, always** · needs `file-delete-enabled` |
-| `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
-| `write_text_file` | Write a text file | — |
 
 ## Devices
 
@@ -259,7 +265,7 @@ Find, move and close what is open.
 | `kill_process` | Stop a process | **asks first, always** · needs `process-kill-enabled` |
 | `list_processes` | Running processes | — |
 | `list_windows` | Open windows | — |
-| `press_key` | Press a key | — |
+| `press_key` | Press a key | needs `input-control-enabled` |
 
 ## Apps
 

@@ -370,6 +370,14 @@ class PrivacyPage:
              "Off: find-and-replace runs as a dry run and only lists what it "
              "would change. Writing one named file still works without this.",
              "find_and_replace refuses to write while this is off"),
+            ("Let Chronoa clear caches and unused Flatpak runtimes", "cleanup-enabled",
+             "Off: Chronoa still reports what is taking the space and the safe "
+             "way to free it, but you clear it yourself. Turning this on lets it "
+             "empty your cache folder - apps rebuild what they need, so do it "
+             "with them closed - and remove Flatpak runtimes no app uses. It "
+             "cannot trim the system log: that needs administrator rights, which "
+             "Chronoa does not ask for from inside a tool call.",
+             "cleanup_apply refuses to remove anything while this is off"),
             ("Let Chronoa change WiFi", "wifi-connect-enabled",
              "Off: Chronoa can list nearby networks but cannot join or leave "
              "one. Changing the connection changes what this machine can reach.",

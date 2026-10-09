@@ -262,7 +262,15 @@ class TestWriteRefusesToClobber:
         assert "Refusing" in out
         assert target.read_text() == "original"
 
-    def test_overwrite_replaces_and_reports_the_size(self, tmp_path):
+    def test_overwrite_replaces_and_reports_the_size(self, tmp_path, monkeypatch):
+        # Replacing a file's contents now needs `file-edit-enabled` - it is
+        # `edit_file`'s act, and the narrow skill being gated while the general
+        # one was not is what `tests/test_write_text_file_edit_gate.py` is
+        # about. This test is about the *replacement* (the reported size and
+        # the new bytes), so it grants the switch and leaves the gate itself to
+        # that file, which also asserts the gate opens.
+        monkeypatch.setattr(ChronoaConfig, "get_bool",
+                            lambda self, key, default=False: key == "file-edit-enabled")
         target = tmp_path / "f.txt"
         target.write_text("original")
         out = write_text_file._run({"path": str(target), "content": "new",

@@ -66,6 +66,15 @@ GATED: dict[str, str] = {
     "office_document": "file-edit-enabled",
     # Reading and using another app's controls is input control, like typing into it.
     "ui_elements": "input-control-enabled",
+    # Pressing a key is the same act, and `press_key` already enforced it - but
+    # through `config.input_control_enabled` with no `_CONSENT_KEY`, so neither
+    # this table nor the module scan could see it. It was the one skill of the
+    # five input controls that the generated capability list reported as "runs
+    # when asked, with no switch and no prompt", which is the opposite of what
+    # it does: it refuses unless this key is on. The doc reads this table, so a
+    # gate that lives only in a property is a gate nobody can see - including
+    # the test that checks every gated skill consults its gate.
+    "press_key": "input-control-enabled",
     "android_device": "phone-control-enabled",
     "kill_process": "process-kill-enabled",
     "close_window": "window-close-enabled",
@@ -301,6 +310,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "calendar_month": ("Time and reminders", "Month calendar"),
     "stopwatch": ("Time and reminders", "Stopwatch"),
     "cleanup_report": ("Files", "What could be cleaned up"),
+    # The action half, gated separately and destructively: `cleanup_report`
+    # only ever reads, and a report you cannot act on is the gap this closes.
+    "cleanup_apply": ("Files", "Clear caches and unused Flatpak runtimes"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
     "vpn_control": ("System", "VPN connections"),
     # Packet-level work, beside the interface counters and the neighbour table
@@ -904,6 +916,12 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
     # and a client warning on it would be warning on the safe half.
     "file-edit-enabled",
     "trigger-control-enabled",
+    # Clearing a cache directory is a recursive `rm -rf` of the user's own files
+    # with no undo ring and no trash - `trash-empty-enabled` is in this set for
+    # the same reason, so this is too. Not `file-delete-enabled`: widening an
+    # existing switch to cover something its prompt never named is exactly the
+    # defect that made a session grant cover six other tools.
+    "cleanup-enabled",
 })
 
 #: Tools that only observe. Kept as an allowlist rather than "anything ungated",

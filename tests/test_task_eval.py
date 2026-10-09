@@ -63,3 +63,44 @@ def test_every_case_names_real_tools_and_real_arguments():
             unknown = set(want.get("args", {})) - params[want["tool"]]
             assert not unknown, f"{c['id']}: {want['tool']} has no argument {unknown}"
         assert c.get("none") or c.get("expect"), c["id"]
+
+
+def test_the_recorded_coverage_is_still_the_coverage():
+    """`eval_cases.json` states how much of the skill set it asserts.
+
+    It is a *partial* instrument - 55 of 200 skills - and nothing else in the
+    tree could tell you that: the suite proves every skill is reachable and
+    that every skill dispatches, and neither of those asks whether the model
+    picks the right one. So the gap was silent, and a silent gap in the
+    instrument that measures the stated goal ("the harness should be good
+    enough that the smallest model beats bigger ones") is the kind that gets
+    forgotten.
+
+    The numbers are asserted against the file rather than trusted, so adding
+    cases updates the claim and forgetting to update it fails here.
+    """
+    from shani_chronoa.tools import TOOLS
+
+    data = json.loads((ROOT / "tools" / "eval_cases.json").read_text())
+    stated = data.get("coverage")
+    assert stated, (
+        "eval_cases.json records no coverage. The scorer only checks the "
+        "cases it has, so without a stated scope nobody can tell how much of "
+        "the skill set is measured - and 'no test' reads as 'nothing left to "
+        "do'.")
+
+    skills = {t["function"]["name"] for t in TOOLS}
+    asserted = {want["tool"] for c in data["cases"] for want in c.get("expect", [])}
+    asserted &= skills
+    assert stated["cases"] == len(data["cases"]), (
+        f"coverage.cases says {stated['cases']}, the file has {len(data['cases'])}")
+    assert stated["skills_total"] == len(skills), (
+        f"coverage.skills_total says {stated['skills_total']}, the tree has "
+        f"{len(skills)} skills - a new skill makes this stale")
+    assert stated["skills_asserted"] == len(asserted), (
+        f"coverage.skills_asserted says {stated['skills_asserted']} but the "
+        f"cases assert {len(asserted)}: {sorted(asserted)}")
+    # And the claim is stated as partial, which is the part worth keeping true.
+    assert "PARTIAL" in data["about"], (
+        "the about text must say the coverage is partial, or the number reads "
+        "as a claim that these are the only skills that matter")

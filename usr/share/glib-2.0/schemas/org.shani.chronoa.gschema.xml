@@ -584,6 +584,11 @@
       <summary>Let Chronoa edit many files at once</summary>
       <description>When true, Chronoa may replace a string across every file matching a pattern. Off by default, and separate from writing one named file: a pattern that matches in forty files rewrites forty files, and that blast radius is not knowable in advance. Without this, find_and_replace still runs as a dry run and lists what it would change.</description>
     </key>
+    <key name="cleanup-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa clear caches and unused Flatpak runtimes</summary>
+      <description>When true, Chronoa may empty your cache folder and remove Flatpak runtimes no installed app uses - the two things cleanup_report can measure and you would otherwise have to clear by hand. Off: cleanup_report still reports both with their sizes. Separate from deleting files because it is a recursive delete with no undo point and no trash, and it will only touch those two things; the system log needs administrator rights Chronoa does not ask for from inside a tool call.</description>
+    </key>
     <key name="usb-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa read the USB devices attached to this machine</summary>

@@ -171,17 +171,54 @@ def explore_refuses(tool_name: str) -> "Optional[str]":
 def _bypass_immune_set() -> frozenset:
     from shani_chronoa import capabilities
 
-    by_key = {
-        tool for tool, key in capabilities.GATED.items()
+    # Both sources, because thirteen skills gate themselves with their own
+    # `_CONSENT_KEY` rather than through `GATED` (`trash_file`, `set_theme`,
+    # `lock_screen` and the rest). Reading only `GATED` missed every one of
+    # them, so a self-gating destructive skill - which is what `cleanup_apply`
+    # is - was answerable from a standing grant it had never been asked about.
+    # The four names this used to hardcode are in that scan already, and a
+    # hand-kept list beside the table is how `files._PACKAGE_HINTS` and the
+    # four-way TTS cascade went stale.
+    keys: dict = dict(capabilities.GATED)
+    for tool, key in _self_declared_gates().items():
+        keys.setdefault(tool, key)
+    return frozenset(
+        tool for tool, key in keys.items()
         if key in capabilities.DESTRUCTIVE_CONSENT_KEYS
-    }
-    # `trash_file`/`empty_trash`/`remove_file` gate themselves with their own
-    # `_CONSENT_KEY` rather than through GATED, so they are added by name -
-    # they are destructive regardless of which table lists them.
-    return frozenset(by_key | {
-        "delete_file", "remove_file", "trash_file", "empty_trash",
-        "kill_process", "control_service",
-    })
+    )
+
+
+def _self_declared_gates() -> dict:
+    """Every skill that names its own consent key, read from its module.
+
+    `tool -> key`, from `_CONSENT_KEY`. The same walk
+    `gen_capabilities._tools_with_own_consent_key()` does, and for the same
+    reason: a gate the doc reads but the permission layer does not is a gate
+    that reads as covered and is not.
+    """
+    import importlib
+    import pkgutil
+
+    from shani_chronoa import skills as skills_pkg
+
+    out: dict = {}
+    for mod in pkgutil.iter_modules(skills_pkg.__path__):
+        if mod.name.startswith("_"):
+            continue
+        try:
+            module = importlib.import_module(f"shani_chronoa.skills.{mod.name}")
+        except Exception:  # noqa: BLE001 - a module that will not import is not a gate
+            continue
+        key = getattr(module, "_CONSENT_KEY", None)
+        if not key:
+            continue
+        # The tool name is whatever `SKILLS` declares, which is not always the
+        # module's basename (`calendar_edit` is module `calendar`).
+        for entry in getattr(module, "SKILLS", ()) or ():
+            name = getattr(entry, "name", None)
+            if name:
+                out.setdefault(name, key)
+    return out
 
 
 _BYPASS_IMMUNE = _bypass_immune_set()

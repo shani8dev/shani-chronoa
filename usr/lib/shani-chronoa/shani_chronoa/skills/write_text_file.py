@@ -19,8 +19,20 @@ from __future__ import annotations
 
 
 from shani_chronoa import files
+from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 from shani_chronoa.skills.undo_last_change import record_preimage
+
+#: The gate `edit_file` wears, borrowed for the one act here that is the same
+#: act. Writing a file that does not exist needs no permission - that is the
+#: documented precedent `convert_document` and `audio_output` follow - but
+#: *replacing* what is already there is what `file-edit-enabled` says no to.
+_EDIT_KEY = "file-edit-enabled"
+
+#: This skill gates only *part* of itself, which the generated capability list
+#: reads to say so rather than reporting the skill as wholly ungated (which it
+#: is not) or wholly shut (which it is not either). See `gen_capabilities.py`.
+_PARTIAL_CONSENT_KEY = (_EDIT_KEY, "to replace a file that already has content")
 
 _MAX_BYTES = 5 * 1024 * 1024
 
@@ -79,6 +91,25 @@ def _run(arguments: dict) -> str:
         return "Give either append or overwrite, not both."
 
     existed = target.exists()
+    if existed and overwrite and not append:
+        # **Replacing a file's content is `edit_file`'s act, so it wears
+        # `edit_file`'s gate.** The narrow skill was gated and the general one
+        # was not, which meant "change one line in this file" needed a switch
+        # and "replace this file wholesale" needed nothing - and the schema
+        # invites exactly that argument, since `overwrite` reads as a detail
+        # of the same request.
+        #
+        # Only this branch, deliberately. `file-edit-enabled` means "let
+        # Chronoa edit your files", and a person who wants new files written
+        # but no existing file changed can have precisely that: `append` and a
+        # first write are untouched below.
+        if not ChronoaConfig().get_bool(_EDIT_KEY, False):
+            return (
+                f"Refusing to replace {target}: replacing what a file already "
+                f"says is an edit, and editing your files is turned off (enable "
+                f"'{_EDIT_KEY}' in Settings). Writing a *new* file, and adding to "
+                f"the end of one, need no such permission. Nothing was written."
+            )
     if existed and not append and not overwrite:
         try:
             current = target.read_bytes()
