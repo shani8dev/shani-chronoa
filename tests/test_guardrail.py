@@ -135,3 +135,50 @@ class TestThroughTheDispatcher:
         outcomes = [execute_tool_outcome("get_datetime", {}).text
                     for _ in range(5)]
         assert not any("Stopping" in o for o in outcomes)
+
+
+class TestARetryTellsTheModelHowToAskAgain:
+    """The RETRY verdict's payload is its template, and it was being dropped.
+
+    `guardrail.check` marks a call whose string argument starts with "ERROR:"
+    as RETRY and fills `template` with the instruction to ask again. The
+    dispatcher read only `message` - which is the model's own error text - so
+    the turn echoed the failure back at it and spent a round of the loop on a
+    call the template would have fixed.
+
+    Two copies of the check existed and the fix landed in the unreachable one
+    first, which is the same defect this file's docstring records from the
+    other side: `_dispatch` runs `_guardrail_refuses` before `_dispatch_inner`
+    is ever called, so the inline `guardrail.check` there could not fire. The
+    test drives the public entry point, so it asserts the reachable path.
+    """
+
+    def test_the_template_reaches_the_turn_not_the_models_own_error_text(self):
+        r = execute_tool_outcome("speak", {"text": "ERROR: Unterminated string"})
+        assert "Retry speak" in r.text, (
+            f"the model was handed its own error text instead of the retry "
+            f"instruction: {r.text!r}")
+        assert "Unterminated string" not in r.text, (
+            "the raw error text is still what reached the model")
+
+    def test_the_call_did_not_run(self):
+        """A refused malformed call is not a completed action.
+
+        `ran=False` is what keeps this out of the replay cache's receipts and
+        out of the outcome model's "the tool worked" class.
+        """
+        r = execute_tool_outcome("speak", {"text": "ERROR: Unterminated string"})
+        assert r.ran is False
+
+    def test_an_invalid_call_still_gets_its_reason(self):
+        """The template is not a substitute for the INVALID reason.
+
+        `template or message` must not become `template or nothing`: a
+        wrong-typed argument has no template and its reason is the only
+        thing worth saying.
+        """
+        r = execute_tool_outcome("speak", {"text": {"not": "a string"}})
+        assert r.ran is False
+        assert "Not run" in r.text or "Refused" in r.text, r.text
+        assert "Retry speak" not in r.text, (
+            "an invalid call was answered with a retry it did not earn")

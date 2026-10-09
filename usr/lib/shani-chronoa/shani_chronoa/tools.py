@@ -33,7 +33,7 @@ import time
 from collections import OrderedDict
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
-                       guardrail, permissions, planmode, verification)
+                       permissions, planmode, verification)
 from shani_chronoa import outcome_model
 from shani_chronoa.reaction import ReactionLayer, destructive_tools
 from shani_chronoa.sandbox import SandboxConfig, SandboxExecutor, SandboxLevel
@@ -813,18 +813,38 @@ def _guardrail_refuses(name: str, arguments):
     try:
         from shani_chronoa import guardrail
 
-        schema = next((t["function"] for t in TOOLS
-                       if t.get("function", {}).get("name") == name), None)
-        reason = guardrail.check(name, arguments if isinstance(arguments, dict) else {}, schema or {})
+        # **The parameters schema, not the whole function entry.**
+        # `guardrail.check` compares arguments against `properties` and
+        # `required`, so it wants what `_schema_for` returns. This used to pass
+        # `t["function"]` - the object carrying `name`, `description` and
+        # `parameters` - so `properties` was simply absent and every
+        # type/required check passed vacuously. The only thing this path ever
+        # caught was the "ERROR:" prefix, which needs no schema at all.
+        #
+        # It survived because the unreachable duplicate inside
+        # `_dispatch_inner` passed the correct schema and still fired: one
+        # broken copy ran first, said nothing, and the working copy caught the
+        # malformed call. The guardrail was wired on 2026-10-05 as the layer
+        # that answers "is this call even well-formed", and on the path every
+        # caller reaches it answered that only for one specific string shape.
+        reason = guardrail.check(name, arguments if isinstance(arguments, dict) else {},
+                                 _schema_for(name) or {})
     except Exception:  # noqa: BLE001
         return None
     if reason.should_run:
         return None
+    # A RETRY verdict's whole payload is its `template`: it tells the model
+    # how to ask again, where `message` is the model's own error text.
+    # Returning the message echoes the failure straight back and burns a
+    # round of the loop on a call the template would have fixed - so the
+    # template leads, and `message` is the fallback for the verdicts that
+    # carry only a reason (INVALID).
+    said = reason.template or reason.message
     # `ran=False` again carries the meaning: the tool never executed. UNVERIFIED
     # rather than FAILED for the same reason as the reaction layer above - the
     # call did not run and break, it never ran at all.
     return DispatchResult(
-        text=("Not run. " + reason.message),
+        text=("Not run. " + said),
         verdict=verification.Verdict.UNVERIFIED,
         ran=False,
     )
@@ -945,9 +965,19 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # permission problem, and letting one through means the failure surfaces as
     # a traceback inside a subprocess - which tells the model nothing it can
     # act on, where the reason here names the argument and what was expected.
-    malformed = guardrail.check(name, arguments, _schema_for(name) or {})
-    if not malformed.should_run:
-        return DispatchResult(malformed.message, verification.Verdict.UNVERIFIED, False)
+    #
+    # **The check itself is `_guardrail_refuses`'s, called above in `_dispatch`.**
+    # This used to run `guardrail.check` a second time, with the same schema
+    # lookup, and was unreachable from the moment that was added: every public
+    # entry point goes through `_dispatch`, which refuses the malformed call
+    # before `_dispatch_inner` is ever called. A second implementation of one
+    # check is how the two drift - and it is how the template fix landed in the
+    # copy nothing reaches on the first attempt, which is the whole argument for
+    # deleting this one rather than keeping both in step. The guardrail still
+    # stops a call before any policy question is asked.
+    malformed = _guardrail_refuses(name, arguments)
+    if malformed is not None:
+        return malformed
 
     scoped_resource = _resource_for(name, arguments)
     if scoped_resource is not None:
