@@ -1176,7 +1176,29 @@ def calibration(rows: list) -> dict:
             "changes_accuracy": (round(by_truth["changes"][0] / sum(by_truth["changes"]), 3)
                                  if sum(by_truth["changes"]) else None),
             "sense_recall": round(sum("sense" in r["fits"] for r in sensed) / len(sensed), 3) if sensed else None,
-            "sense_missed": [r["command"] for r in sensed if "sense" not in r["fits"]][:25],
+            # **Was `sense_missed`, and that name made it read as a list of
+            # capabilities Chronoa lacks.** It is the opposite: every entry is a
+            # command a Chronoa sense *does* run, where this file's own
+            # heuristic failed to say "sense". I read it as a gap list, checked
+            # all six against the tree, and found every one already covered -
+            # `iptables`/`nft`/`ufw`/`firewall-cmd` by the `firewall` sense,
+            # `link` by `wirelesslink`, `card` by `gpu`, `pkexec` by
+            # `thermalgrid`. An instrument that reports its own blind spot under
+            # a name that says "missed" will be believed over the tree.
+            #
+            # **So it carries the sense that runs each one**, which is what makes
+            # it checkable in a second instead of by hand.
+            "sense_classifier_disagreements": [
+                {"command": r["command"],
+                 "run_by": sorted(set(r.get("chronoa_skills") or [])),
+                 # `.get`, not `r[...]`: `calibration()` is handed rows by its
+                 # callers and by the tests, and it must not require fields it
+                 # does not own. It raised `KeyError: 'category'` on a fixture
+                 # that is perfectly valid for everything else this function
+                 # reads.
+                 "classified_as": "/".join(
+                     str(r.get(k, "")) for k in ("category", "intent")).strip("/")}
+                for r in sensed if "sense" not in r["fits"]][:25],
             # Recall alone rewards calling everything a sense; the share of all
             # commands so classified is what shows a loosened rule doing that.
             "sense_fit_share": round(sum("sense" in r["fits"] for r in rows) / len(rows), 3) if rows else None}
@@ -2306,8 +2328,20 @@ def write_markdown(path: str, data: dict) -> None:
             L += ["| Command | Chronoa uses it to | Matrix says | Man summary |", "|---|---|---|---|"]
             L += [f"| `{w['command']}` | {w['truth']} | {w['guess']} | {_md_cell(w['summary'], 80)} |"
                   for w in cal["safety_wrong"]]
-        if cal.get("sense_missed"):
-            L += ["", "Run by a sense but not classified as one: " + ", ".join(f"`{c}`" for c in cal["sense_missed"])]
+        if cal.get("sense_classifier_disagreements"):
+            L += ["", "**Where this file's own heuristic is wrong, not where Chronoa is "
+                  "short.** Each of these is run by a Chronoa sense already; the "
+                  "classifier did not say \"sense\", so it is listed here as a "
+                  "disagreement to be fixed in the heuristics rather than as a "
+                  "capability to be built:", ""]
+            L += [f"- `{d['command']}` — run by "
+                  + (", ".join(f"`{m}`" for m in d["run_by"]) if d["run_by"] else "a sense")
+                  + f", classified {d['classified_as']}"
+                  for d in cal["sense_classifier_disagreements"]]
+            L += ["", "Read that list the other way round before acting on it: every entry "
+                  "is already covered, and each was checked against the tree rather than "
+                  "taken from here. This section exists so the heuristic's blind spot is "
+                  "visible, not so it can be mistaken for a work list."]
         L.append("")
 
     # ---- surface matrix

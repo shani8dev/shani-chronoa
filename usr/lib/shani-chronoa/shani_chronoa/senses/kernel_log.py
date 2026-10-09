@@ -203,7 +203,15 @@ SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "kernel_log",
+            # **Must equal the sense name.** `_register` refuses a sense whose
+            # schema's function name differs from `sense.name`, and it refuses
+            # with a log line rather than an exception - so the rename from
+            # `kernel_log` to `kernellog` (for the gschema `_` rule) left the
+            # sense silently out of the registry at 49 instead of 50, with the
+            # only evidence a startup warning. This is the same shape as the
+            # `SKILLS`/`SENSES` trap one rename earlier: a finished sense,
+            # invisible, and nothing in the suite counting senses.
+            "name": "kernellog",
             "description": (
                 "Report what the kernel itself has logged - hardware faults, "
                 "USB denials, out-of-memory kills - from the kernel ring buffer "

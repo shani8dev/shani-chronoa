@@ -290,7 +290,18 @@ def test_calibration_counts_mixed_as_honest():
     c = cm.calibration(rows)
     assert (c["safety_agree"], c["safety_disagree"]) == (2, 1)
     assert c["safety_wrong"][0]["command"] == "rm"
-    assert c["sense_recall"] == 0.5 and c["sense_missed"] == ["lsblk"]
+    # The key was `sense_missed`, which read as "senses Chronoa lacks". It is the
+    # opposite: a command a sense already runs where the heuristic did not say
+    # "sense". Renamed because I read it as a gap list, checked all six entries
+    # against the tree, and found every one already covered.
+    assert c["sense_recall"] == 0.5
+    disagree = c["sense_classifier_disagreements"]
+    assert [d["command"] for d in disagree] == ["lsblk"], disagree
+    # ...and it carries who runs it, so it can be checked in a second.
+    assert "run_by" in disagree[0] and "classified_as" in disagree[0], disagree
+    assert "sense_missed" not in c, (
+        "the old key is back, and a reader will take it for a list of "
+        "capabilities Chronoa lacks rather than a list of heuristic blind spots")
 
 
 def test_a_guard_in_an_imported_helper_counts(tmp_path, monkeypatch):

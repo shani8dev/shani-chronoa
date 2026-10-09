@@ -123,6 +123,21 @@ _SENSE_CONSENT_KEYS = {
     "resources": "resources-sense-enabled",
     "updates": "updates-sense-enabled",
     "faults": "faults-sense-enabled",
+    # The kernel ring buffer, which is a different record from `faults`':
+    # hardware faults and OOM kills that no service has touched, including the
+    # ones from before journald was running. Off by default (not in
+    # `_SENSE_DEFAULT_ENABLED`) because reading it usually needs root or a
+    # group membership, and it is the machine's hardware detail rather than a
+    # service's own account of itself.
+    #
+    # **This table is hand-kept, and a sense missing from it is permanently
+    # ungrantable** - `_default_on` resolves through `key in
+    # frozenset(_SENSE_CONSENT_KEYS.values())`, so an unlisted sense's key falls
+    # to the *event* defaults and `ChronoaConfig.set()` writes to a key nothing
+    # reads. That is the `heard-sound` defect, and `tests/test_sense_manifest.py`
+    # is what catches it: it writes the key through the real config and asks
+    # whether a fresh one honours it.
+    "kernellog": "kernellog-sense-enabled",
     "sessions": "sessions-sense-enabled",
     "snapshots": "snapshots-sense-enabled",
     "coredumps": "coredumps-sense-enabled",
