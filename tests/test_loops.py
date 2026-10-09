@@ -269,8 +269,11 @@ class TestThroughTheAssistant:
 
     def test_a_normal_turn_is_untouched(self, counted_tools):
         out = _turn(_StuckLLM(per_round=1, different_after=1))
-        # Every call is to a different point in the sequence, so no single call repeats.
-        assert max(counted_tools.count(n) for n in set(counted_tools)) == 1, \
+        # Every call differs from the one before it, so there is no run of identical
+        # calls. (This counted any repeat at all while MAX_TOOL_ROUNDS was 4, below the
+        # fake model's cycle of five; with 24 rounds the cycle comes round again, which
+        # is not a run.)
+        assert all(a != b for a, b in zip(counted_tools, counted_tools[1:])), \
             f"a run of identical calls appeared in a normal turn: {counted_tools}"
         assert "identical arguments" not in out
 
@@ -295,10 +298,11 @@ class TestThroughTheAssistant:
             "a tool ran without its result being recorded"
 
     def test_the_round_limit_still_bounds_the_slow_loop(self, counted_tools):
-        # Recorded so the relationship between the two bounds stays explicit: one
-        # identical call per round is capped by MAX_TOOL_ROUNDS at 4, which is below the
-        # loop threshold, so that path is the rounds limit's job and not this module's.
+        # Recorded so the relationship between the bounds stays explicit. With
+        # MAX_TOOL_ROUNDS at 4 the rounds limit ended this before the loop threshold;
+        # at 24 (raised 2026-10-08 so multi-step tasks can finish) the detector's
+        # threshold is reached first. Either way the turn is bounded.
         llm = _StuckLLM(per_round=1)
-        out = _turn(llm)
+        _turn(llm)
         assert len(counted_tools) <= MAX_TOOL_ROUNDS
         assert llm.rounds <= MAX_TOOL_ROUNDS + 1

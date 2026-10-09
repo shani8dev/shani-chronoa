@@ -271,6 +271,65 @@ class PrivacyPage:
             ("Let Chronoa use your paired phone", "phone-control-enabled",
              "Off: Chronoa cannot see, ring or send anything to your phone.",
              "phone refuses while this is off"),
+            ("Let Chronoa read your phone's text messages", "phone-messages-read-enabled",
+             "Off: Chronoa can still see, ring and ping your phone, but not read what anyone said to you. "
+             "This is a separate permission on purpose - knowing a phone is paired and can be rung is "
+             "nothing like reading your messages.",
+             "reading messages is refused while this is off"),
+            ("Let Chronoa send texts and place calls from your phone", "phone-messages-send-enabled",
+             "Off: Chronoa can read your messages but cannot send anything or open the dialler. A message "
+             "leaves this machine and appears on the other end, so it needs its own agreement. Chronoa "
+             "drafts the text and asks you before anything goes.",
+             "sending a message or calling is refused while this is off"),
+            ("Let Chronoa call through your paired phone", "bluetooth-call-enabled",
+             "Off: Chronoa cannot place, answer or end calls, and cannot hear a call through this "
+             "computer. Your phone stays the radio either way - this is about who can start a call. "
+             "Chronoa asks you to confirm before it places one.",
+             "placing, answering or ending a call is refused while this is off"),
+            ("Let Chronoa read your Bluetooth devices", "bluetooth-gatt-enabled",
+             "Off: Chronoa can still list your paired devices and connect to them, but cannot ask "
+             "one what it says about itself - no watch battery, no heart-rate reading, no firmware "
+             "version. Its own switch because on a wearable those are facts about whoever is wearing "
+             "it, which is not the same agreement as being willing to have a headset disconnected.",
+             "reading a device is refused while this is off"),
+            ("Let Bluetooth remotes control music here", "bluetooth-media-remote-enabled",
+             "Off: a headset's or watch's play and skip buttons do nothing on this computer. On: "
+             "paired devices control whatever is playing here.",
+             "Bluetooth media control is off while this is off"),
+            ("Let my phone pair this computer as a Bluetooth keyboard", "phone-remote-enabled",
+             "Off: this computer is not discoverable as a keyboard. On: it advertises as 'Chronoa "
+             "Remote'; pair it from the phone once, and Chronoa can press the phone's camera shutter, "
+             "media and volume keys and type text on it. Nearby phones can see it while this is on.",
+             "the phone remote is refused while this is off"),
+            ("Keep my watch connected to this computer", "watch-companion-enabled",
+             "Off: the watch is reached only when you ask something of it. On: Chronoa keeps it "
+             "connected so find-my-phone rings here, its music and camera buttons work with this "
+             "computer and the song playing shows on it. The watch takes one connection, so while "
+             "this is on the Da Fit app on your phone cannot reach it.",
+             "the watch companion stays off while this is off"),
+            ("Show what this computer is playing on my watch", "watch-nowplaying-enabled",
+             "Off (the default): nothing is pushed to the watch. On: the current track is sent every "
+             "five seconds so it appears on the watch's music screen. Only while the companion above "
+             "is on, and it does not affect the watch's music buttons, which keep working either way.",
+             "what is playing is not pushed to the watch while this is off"),
+            ("Send this computer's weather to my watch", "watch-weather-enabled",
+             "Off (the default): the watch's weather request is not answered. On: the forecast for your "
+             "home place is sent, including the week ahead. This reads a location and reaches a weather "
+             "service; the watch asks on every connection, so it is off until you want it.",
+             "the watch's weather request is not answered while this is off"),
+            ("Let Chronoa tune an FM radio", "fm-radio-enabled",
+             "Off: Chronoa cannot tune a USB radio receiver (an RTL-SDR dongle), scan the FM band or "
+             "play a station. A laptop has no FM radio of its own; without a dongle this is reported "
+             "as having no receiver.",
+             "tuning the FM radio is refused while this is off"),
+            ("Let Chronoa read and write NFC tags", "nfc-enabled",
+             "Off: Chronoa cannot read a tag tapped against a reader here, nor put a link on a "
+             "sticker. Its own switch because an NFC tag carries whatever somebody chose to "
+             "write on it - and tags sit in public places, so reading one is often reading a "
+             "stranger's link. Writing is narrower still: only NFC Forum Ultralight stickers, "
+             "never a bank card or a transit pass, which rewriting would break. Most laptops have "
+             "no NFC reader at all, and that is reported as having none.",
+             "reading or writing an NFC tag is refused while this is off"),
             ("Let Chronoa act on your phone connecting", "phone-sense-enabled",
              "Off: an automatic rule cannot trigger on your phone connecting or running low.",
              "a phone trigger is refused while this is off"),
@@ -285,6 +344,11 @@ class PrivacyPage:
             ("Let Chronoa read your calendar", "calendar-read-enabled",
              "Off: Chronoa cannot tell you what is on your calendar.",
              "calendar_events refuses while this is off"),
+            ("Let Chronoa change your calendar", "calendar-write-enabled",
+             "Off: Chronoa can read your calendar but cannot add, move or cancel anything. "
+             "Moving and cancelling also need the switch above, because finding the event to "
+             "change it is the reading half.",
+             "calendar_edit refuses while this is off"),
             ("Let Chronoa act before calendar events", "calendar-sense-enabled",
              "Off: an automatic rule cannot trigger before a calendar event starts.",
              "a calendar trigger is refused while this is off"),
@@ -351,6 +415,10 @@ class PrivacyPage:
             ("Let Chronoa keep a task list", "todo-list-enabled",
              "Off: Chronoa cannot keep a to-do list between turns.",
              "todo_list refuses while this is off"),
+            ("Let Chronoa keep multi-step goals", "goals-enabled",
+             "Off: Chronoa cannot save a plan to run later. Saving runs nothing; "
+             "each step asks when it is run from the Goals panel.",
+             "manage_goals refuses while this is off"),
             ("Let Chronoa arm automatic rules", "trigger-control-enabled",
              "Off: Chronoa cannot create rules that act on their own, such as "
              "running something when a file changes.",
@@ -466,6 +534,14 @@ class PrivacyPage:
                     config.api_key_value("custom-llm-api-key"),
                     lambda text: config.set_api_key("custom-llm-api-key", text.strip()),
                     secret=True)
+
+        # Weather needs a place. Without GPS or GeoClue (measured on the dev box:
+        # neither installed) "what's the weather" and the watch's weather screen
+        # had nothing to look up, so a named place stands in.
+        home = self._group(page, "Home place",
+                           "Used for weather when this computer cannot locate itself.")
+        self._entry(home, "Town or city", "e.g. Pune", config.get("home-place", ""),
+                    lambda text: config.set("home-place", text.strip()))
 
         # **The inbound channel, which had no switch at all.** `gateway.py` is
         # complete, `_export_gateways()` runs at startup - and measured with an

@@ -105,5 +105,38 @@ def describe(rule_name: str, actuator: str, arguments: dict, summary: str) -> "t
             f"{summary}\n\nIt would run {actuator}({args}). Allow once?")
 
 
+#: How long a skill waits for a person to answer `confirm`. Kept under the
+#: sandbox's default 30-second budget for a skill call (tools._SLOW_TOOLS), so
+#: an unanswered question ends as "not confirmed" rather than as a killed child.
+CONFIRM_SECONDS = 20
+
+
+def confirm(title: str, body: str, seconds: int = CONFIRM_SECONDS) -> "tuple[bool, str]":
+    """Ask a person to confirm one action from inside a skill: (confirmed, why not).
+
+    The in-window question (`ask_bridge`) when this process has one - an
+    in-process call - and otherwise the desktop notification with Allow once /
+    Deny, which is what a sandboxed skill child can reach. Only an explicit yes
+    is a yes; nobody there, a dismissal and a timeout are all "not confirmed",
+    with the reason, so the caller can say why nothing changed.
+    """
+    try:
+        from shani_chronoa import ask_bridge
+        if ask_bridge.has_presenter():
+            answer = ask_bridge.ask(f"{title}\n{body}", ["Yes", "No"], timeout=seconds)
+            if answer == "Yes":
+                return True, ""
+            return False, "you said no" if answer == "No" else "no answer was given"
+    except Exception as exc:  # noqa: BLE001 - a broken presenter is not a yes
+        logger.warning("confirm via ask_bridge failed: %s", exc)
+    answer = ask(title, body, seconds)
+    if answer == ALLOW:
+        return True, ""
+    return False, {DENY: "you said no",
+                   TIMEOUT: f"no answer came within {seconds} seconds",
+                   UNAVAILABLE: "there is no way to ask you on this desktop (no notification service)",
+                   }.get(answer, "no answer was given")
+
+
 __all__ = ["APPROVAL_SECONDS", "ALLOW", "DENY", "TIMEOUT", "UNAVAILABLE", "ask", "describe",
-           "NotifyApprover"]
+           "NotifyApprover", "CONFIRM_SECONDS", "confirm"]

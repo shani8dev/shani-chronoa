@@ -78,6 +78,106 @@ _RELATIVE = re.compile(
     r"^in\s+(\d+)\s+(second|minute|hour|day|week)s?$", re.IGNORECASE)
 
 
+_CLOCK = re.compile(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", re.I)
+
+
+_NAMED_CLOCKS = {"noon": (12, 0), "midday": (12, 0), "midnight": (0, 0)}
+
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def _weekday(word: str) -> "int | None":
+    """0-6 for 'friday', 'fri', 'Fri,'; None for anything else."""
+    w = word.strip().lower().rstrip(",.")
+    if len(w) < 3:
+        return None
+    for index, name in enumerate(_WEEKDAYS):
+        if name.startswith(w) and (len(w) >= 3):
+            return index
+    return None
+
+
+def _split_day_clock(text: str, today) -> "tuple[object, tuple[int, int] | None, bool]":
+    """Split 'friday 5 pm', 'tomorrow at 3pm', 'next tue', '2026-10-09 14:00', '5pm'
+    into (date or None, (hour, minute) or None, understood).
+
+    The day is never moved to make a time land in the future - that is the
+    caller's decision, because "my 5 PM call" (find it) and "remind me at 5"
+    (it must be ahead) want different answers. A weekday means its next
+    occurrence counting today; "next friday" means the one after today.
+    """
+    words = text.strip().replace(",", " ").split()
+    words = [w for w in words if w.lower() not in ("on", "at", "this")]
+    if not words:
+        return None, None, True
+    day = None
+    first = words[0].lower()
+    if first == "today":
+        day, words = today, words[1:]
+    elif first == "tomorrow":
+        day, words = today + timedelta(days=1), words[1:]
+    elif first == "next" and len(words) > 1 and _weekday(words[1]) is not None:
+        ahead = (_weekday(words[1]) - today.weekday()) % 7 or 7
+        day, words = today + timedelta(days=ahead), words[2:]
+    elif _weekday(first) is not None:
+        day, words = today + timedelta(days=(_weekday(first) - today.weekday()) % 7), words[1:]
+    else:
+        try:
+            day, words = datetime.strptime(first, "%Y-%m-%d").date(), words[1:]
+        except ValueError:
+            pass
+    rest = " ".join(words).strip()
+    if not rest:
+        return day, None, True
+    clock = _clock(rest)
+    return day, clock, clock is not None
+
+
+_DURATION_PART = re.compile(
+    r"(\d+(?:\.\d+)?|an?|half(?:\s+an?)?)\s*(h|hrs?|hours?|m|mins?|minutes?)\b", re.I)
+
+
+def _parse_duration(text: str) -> "int | None":
+    """Seconds for '1 hour', 'an hour', '90 minutes', '1.5 hours', 'half an hour',
+    '1h30m', 'an hour and a half'; None when it is not clearly a duration."""
+    raw = (text or "").strip().lower()
+    if not raw:
+        return None
+    total, consumed = 0.0, raw
+    for amount, unit in _DURATION_PART.findall(raw):
+        value = 0.5 if amount.startswith("half") else 1.0 if amount in ("a", "an") else float(amount)
+        total += value * (3600 if unit.startswith("h") else 60)
+    consumed = _DURATION_PART.sub("", consumed)
+    if re.search(r"\band a half\b", consumed):
+        total += 1800
+        consumed = consumed.replace("and a half", "")
+    match = re.fullmatch(r"\s*(\d+)\s*", consumed.replace("and", ""))
+    if match and total and re.search(r"\d+\s*h", raw):  # '1h30' - the trailing minutes
+        total += int(match.group(1)) * 60
+        consumed = ""
+    if re.sub(r"\band\b", "", consumed).strip() or total <= 0:
+        return None
+    return int(total)
+
+
+def _clock(text: str) -> "tuple[int, int] | None":
+    """(hour, minute) for '9am', '9:30 pm', '21:00', '7'; None when it is not a clock time."""
+    named = _NAMED_CLOCKS.get(text.strip().lower())
+    if named:
+        return named
+    match = _CLOCK.match(text.strip().replace(".", ""))
+    if not match:
+        return None
+    hour, minute, half = int(match.group(1)), int(match.group(2) or 0), (match.group(3) or "").lower()
+    if half:
+        if not 1 <= hour <= 12:
+            return None
+        hour = hour % 12 + (12 if half == "pm" else 0)
+    if hour > 23 or minute > 59:
+        return None
+    return hour, minute
+
+
 def _parse_due(raw: str) -> tuple[datetime | None, str]:
     """Return (due, problem). Never guesses: an unclear time is a refusal."""
     text = raw.strip()
@@ -99,16 +199,40 @@ def _parse_due(raw: str) -> tuple[datetime | None, str]:
             if parsed <= now:
                 parsed += timedelta(days=1)
         return parsed, ""
-    if text.lower().startswith("tomorrow"):
-        rest = text[len("tomorrow"):].strip() or "09:00"
-        try:
-            when = datetime.strptime(now.strftime("%Y-%m-%d") + " " + rest, "%Y-%m-%d %H:%M")
-        except ValueError:
+    lowered = text.lower()
+    if lowered.startswith("tomorrow") or lowered.startswith("today"):
+        word = "tomorrow" if lowered.startswith("tomorrow") else "today"
+        rest = text[len(word):].strip()
+        rest = rest[3:].strip() if rest.lower().startswith("at ") else rest
+        clock = _clock(rest) if rest else (9, 0)
+        if clock is None:
             return None, (
                 f"Could not read {raw!r} as a time. Use 'in 2 hours', "
                 f"'tomorrow 9am', or 'YYYY-MM-DD HH:MM'."
             )
+        # The day is the point of the word. This branch used to build the time
+        # on *today's* date, so "tomorrow 09:00" landed this morning - in the
+        # past - and "tomorrow 9am", the schema's own example, did not parse.
+        day = now.date() + timedelta(days=1 if word == "tomorrow" else 0)
+        when = datetime(day.year, day.month, day.day, clock[0], clock[1])
+        if when <= now:
+            return None, f"{raw!r} has already passed today, so no reminder time was set."
         return when, ""
+    clock = _clock(text)
+    if clock is not None:
+        when = now.replace(hour=clock[0], minute=clock[1], second=0, microsecond=0)
+        return (when if when > now else when + timedelta(days=1)), ""
+    # "friday 5pm", "next tue at 9:30": the weekday's next occurrence, and a
+    # week on if that time has already gone today.
+    first = lowered.replace(",", " ").split()[0]
+    if _weekday(first) is not None or (first == "next" and len(lowered.split()) > 1):
+        day, clock, understood = _split_day_clock(text, now.date())
+        if understood and day is not None:
+            hour, minute = clock if clock is not None else (9, 0)
+            when = datetime(day.year, day.month, day.day, hour, minute)
+            if when <= now:
+                when += timedelta(days=7)
+            return when, ""
     return None, (
         f"Could not read {raw!r} as a time, so the reminder was written with no "
         f"due date rather than a guessed one. Use 'in 2 hours', 'tomorrow 9am', "

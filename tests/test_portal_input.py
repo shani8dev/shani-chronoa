@@ -26,7 +26,21 @@ HERE = Path(__file__).resolve().parent
 @pytest.fixture
 def bus(tmp_path, monkeypatch):
     """A private session bus (never the user's) with the fake portal on it."""
-    daemon = subprocess.Popen(["dbus-daemon", "--session", "--print-address", "--nofork"],
+    # Its own config, with no <servicedir>. `--session` loads the standard
+    # session config, whose service directories let the bus *activate* the
+    # host's real xdg-desktop-portal on first contact - so on a GNOME machine
+    # "no portal" was answered by the real one ("ended CreateSession without
+    # an answer (code 2)") and `test_no_portal_is_said_plainly` failed. A bus
+    # that can only reach what this file starts is what "private" means.
+    config = tmp_path / "bus.conf"
+    config.write_text(
+        "<!DOCTYPE busconfig PUBLIC '-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN' "
+        "'http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd'>\n"
+        "<busconfig><type>session</type>"
+        f"<listen>unix:tmpdir={tmp_path}</listen>"
+        "<policy context='default'><allow send_destination='*' eavesdrop='true'/>"
+        "<allow eavesdrop='true'/><allow own='*'/></policy></busconfig>\n")
+    daemon = subprocess.Popen(["dbus-daemon", f"--config-file={config}", "--print-address", "--nofork"],
                               stdout=subprocess.PIPE, text=True)
     address = daemon.stdout.readline().strip()
     log = tmp_path / "portal.log"
@@ -114,7 +128,6 @@ def test_a_global_shortcut_press_reaches_the_callback(bus):
     c = portal.bind_global_shortcut("talk", "Talk to Chronoa", "CTRL+ALT+space", lambda: pressed.append(1),
                                     client=_client())
     assert [x["method"] for x in calls()][:2] == ["CreateSession", "BindShortcuts"]
-    import gi
     from gi.repository import GLib
     c.bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
                     "dev.shani.test.FakePortal", "TriggerShortcut", GLib.Variant("(s)", ("talk",)), None, 0, 2000, None)
@@ -150,7 +163,6 @@ def test_the_app_binds_the_shortcut_and_a_press_toggles_listening(bus):
             return "CTRL+ALT+space"
 
     app = SimpleNamespace(config=Config(), activate_action=lambda name, arg: toggled.append(name))
-    import gi
     from gi.repository import Gio
     private = Gio.DBusConnection.new_for_address_sync(
         os.environ["DBUS_SESSION_BUS_ADDRESS"],
@@ -194,7 +206,6 @@ def test_hold_to_talk_release_reaches_its_own_callback(bus):
     pressed, released = [], []
     c = portal.bind_global_shortcut("talk", "Talk", "CTRL+ALT+space", lambda: pressed.append(1),
                                     client=_client(), on_deactivated=lambda: released.append(1))
-    import gi
     from gi.repository import GLib
     for method in ("TriggerShortcut", "ReleaseShortcut"):
         c.bus.call_sync("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",

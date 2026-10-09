@@ -19,11 +19,7 @@ import subprocess
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
-from shani_chronoa.skills.list_windows import session_problem
-from shani_chronoa.skills.window_atspi import (
-    close_window_atspi,
-    is_atspi_available,
-)
+from shani_chronoa.skills.list_windows import act, session_problem
 
 _CONSENT_KEY = "window-close-enabled"
 _TIMEOUT = 15
@@ -35,7 +31,8 @@ SCHEMA = {
         "description": (
             "Ask a window to close, the way its close button would - the "
             "application still gets the chance to ask about unsaved work. "
-            "Requires the 'window-close-enabled' consent key. X11 and Wayland."
+            "Requires the 'window-close-enabled' consent key. Works on X11, Plasma and "
+            "GNOME (GTK4 apps, or any app with Chronoa's window control extension)."
         ),
         "parameters": {
             "type": "object",
@@ -67,18 +64,14 @@ def _run(arguments: dict) -> str:
     if not allowed:
         return f"Refusing to close the window: {reason}"
 
-    # AT-SPI Wayland backend (portable across GNOME, Plasma, COSMIC)
-    if is_atspi_available():
-        wid = (arguments.get("window_id") or "").strip()
-        needle = (arguments.get("title_contains") or "").strip()
-        if wid:
-            return f"AT-SPI does not support window_id; give a title_contains match instead"
-        return close_window_atspi(title_contains=needle if needle else None)
-
-    # X11 fallback via xdotool
     problem = session_problem()
     if problem:
-        return f"Could not close a window: {problem}"
+        # Wayland: KWin, the GNOME extension, or - without it - the accessibility
+        # bus, which closes GTK4 windows through their own `window.close` action
+        # (measured). Every route asks the app, so unsaved work still prompts.
+        return act("close a window", arguments, lambda b, w: (b.close(w.id), (
+            "Asked {label} to close through {backend}. This is a request, not a "
+            "guarantee: the application may still ask about unsaved work, and may refuse."))[1])
 
     wid = (arguments.get("window_id") or "").strip()
     needle = (arguments.get("title_contains") or "").strip()

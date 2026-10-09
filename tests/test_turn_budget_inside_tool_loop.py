@@ -48,7 +48,21 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import ask_bridge  # noqa: E402
 from shani_chronoa import assistant as assistant_mod  # noqa: E402
-from shani_chronoa.assistant import MAX_TOOL_ROUNDS, Assistant  # noqa: E402
+from shani_chronoa.assistant import Assistant  # noqa: E402
+
+
+#: These tests check that the round cap *applies*, not what it is. The shipped
+#: cap (`MAX_TOOL_ROUNDS`, 40 since 2026-10-08) is above the loop detector's
+#: threshold, so a fake model repeating one identical call would be stopped by
+#: the detector first and the cap would never be observed. Pinning a small cap
+#: here keeps the cap itself under test, whatever its shipped value.
+_ROUNDS = 4
+
+
+@pytest.fixture(autouse=True)
+def _a_small_round_cap(monkeypatch):
+    monkeypatch.setattr(assistant_mod, "TOOL_ROUNDS_BY_ORIGIN",
+                        {**assistant_mod.TOOL_ROUNDS_BY_ORIGIN, assistant_mod.ORIGIN_USER: _ROUNDS})
 
 #: Short enough that four rounds of four asking calls cost 32s rather than 48 minutes.
 _ASK_SECONDS = 2.0
@@ -148,7 +162,7 @@ class TestTheBudgetAppliesInsideTheToolLoop:
             f"flight, then the budget stops it before the next")
         assert len(unbounded) == 16, (
             f"the unbounded turn ran {len(unbounded)} calls, expected all "
-            f"{MAX_TOOL_ROUNDS} rounds of 4")
+            f"{_ROUNDS} rounds of 4")
 
     def test_an_in_flight_call_is_not_abandoned(self, absent_user, run_turn):
         # A 1s budget with a 2s ask: the turn must let that ask finish rather than
@@ -174,8 +188,8 @@ class TestTheBudgetAppliesInsideTheToolLoop:
         assert answer == "done"
         assert calls and set(calls) == {"get_datetime"}, (
             f"expected only get_datetime calls, got {calls}")
-        assert len(calls) == MAX_TOOL_ROUNDS, (
-            f"the fast turn ran {len(calls)} rounds, expected all {MAX_TOOL_ROUNDS}")
+        assert len(calls) == _ROUNDS, (
+            f"the fast turn ran {len(calls)} rounds, expected all {_ROUNDS}")
 
 
 class TestTheMagnitudeThisFixes:
@@ -184,9 +198,12 @@ class TestTheMagnitudeThisFixes:
         # either is ever raised. Not a runtime test.
         ask_timeout = ask_bridge.DEFAULT_TIMEOUT_SECONDS
         assert ask_timeout >= 60, "the ask timeout is no longer minutes-scale"
-        assert MAX_TOOL_ROUNDS * 4 * ask_timeout > 1800, (
+        assert assistant_mod.MAX_TOOL_ROUNDS * 4 * ask_timeout > 1800, (
             "the unbounded figure is no longer half an hour; re-measure before "
             "assuming this still matters")
-        assert ask_timeout > assistant_mod.MAX_TURN_SECONDS / 2, (
-            "a single ask can no longer exceed half the turn budget, so the inner "
+        # Was "one ask exceeds half the turn budget" (180s against 300s). The turn
+        # budget is 600s since rounds went to 40; what keeps the inner check
+        # necessary is that the asks alone can still outlast the whole turn.
+        assert assistant_mod.MAX_TOOL_ROUNDS * ask_timeout > assistant_mod.MAX_TURN_SECONDS, (
+            "the asks a turn may make can no longer outlast its budget, so the inner "
             "check matters less than when this was written")

@@ -20,7 +20,7 @@ _SCHEMA = {
     "function": {
         "name": "read_video",
         "description": (
-            "Read a video's basics out loud: how long it is, its resolution, "
+            "Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, "
             "its video codec, whether it has audio, and its bitrate. Add "
             "keyframes=true to also save the moments the image changes. The "
             "original is never modified."

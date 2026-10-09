@@ -29,7 +29,8 @@ SCHEMA = {
     "function": {
         "name": "recording",
         "description": (
-            "Work with the sound of an audio or video file, on this computer. text: what was said; subtitles: "
+            "Make subtitles or a transcript of a video or audio file, tell speakers apart, or remove background noise. "
+            "Works on the sound, on this computer. text: what was said; subtitles: "
             "save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background "
             "noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be "
             "heard around the computer right now (the microphone, a few seconds; needs the sound consent)."

@@ -57,6 +57,13 @@ def _fake_config(monkeypatch, hearing_mod, *, allowed, reason=""):
         def sense_allowed_reason(self, sense):
             return reason
 
+        # The sense reads this property (config.py: `sense_allowed("hearing")`)
+        # since b655563; the stub predated it, so all twelve tests stopped at an
+        # AttributeError before reaching what each one checks.
+        @property
+        def hearing_sense_enabled(self):
+            return self.sense_allowed("hearing")
+
     monkeypatch.setattr(hearing_mod, "ChronoaConfig", _Config)
 
 

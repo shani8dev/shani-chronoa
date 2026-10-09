@@ -428,7 +428,11 @@ def selected_style(config) -> Optional[VoiceStyle]:
     restart - the property `tts.timbre` is careful about.
     """
     try:
-        name = str(config.get_string(_STYLE_KEY, NEUTRAL) or NEUTRAL).strip()
+        # `ChronoaConfig.get`, not `get_string`: ChronoaConfig has no
+        # `get_string`, so this raised, was caught below as "unstyled", and no
+        # named style was ever applied (measured 2026-10-08: every style
+        # reported "effects: none" with SoX installed).
+        name = str(config.get(_STYLE_KEY, NEUTRAL) or NEUTRAL).strip()
     except Exception:
         return None
     if not name or name == NEUTRAL:

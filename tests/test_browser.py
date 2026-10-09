@@ -211,7 +211,9 @@ def test_a_missing_webkit_is_a_message_not_a_traceback(monkeypatch):
     assert browser.is_available() is False
     reason = browser.unavailable_reason()
     assert "WebKitGTK" in reason
-    assert "webkit2gtk-4.1" in reason, (
+    # The GTK 4 package: webkit2gtk-4.1 is the GTK 3 build, which cannot load
+    # into this GTK 4 process, so naming it sent people to the wrong install.
+    assert "webkitgtk-6.0" in reason, (
         "the message names no installable package, so a user who hit it has "
         f"nothing to act on: {reason!r}"
     )

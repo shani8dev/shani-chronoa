@@ -368,7 +368,10 @@ class ConversationMixin:
         response = str(result)
         self._mark("reply")
         queue = getattr(self, "_turn_speech", None)
-        speaking = queue is not None
+        # A queue that was stopped mid-turn has already reported "done", so
+        # nothing would ever clear SPEAKING: the orb sat on "speaking" in
+        # silence for minutes (measured 2026-10-08, after a spoken answer).
+        speaking = queue is not None and not getattr(queue, "stopped", False)
         if not speaking:
             self._log_latency()
         if self.window:

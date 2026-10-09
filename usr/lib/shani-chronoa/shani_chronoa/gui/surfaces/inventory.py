@@ -215,6 +215,36 @@ def build(_app=None) -> Gtk.Widget:
             _add(group, _organ_row(organ))
         column.append(group)
 
+    # What will not be built, beside what has been. Part 4 of
+    # ARCHITECTURE-TARGET.md lived only in that document, so the app could not
+    # tell a person "not yet" from "not ever" - and a request it refuses by
+    # design read like a feature that was missing.
+    decided = common.group(
+        "Deliberately not built",
+        "Decisions, not gaps. Each stays as it is until a person decides otherwise.")
+    gpu, drivers = organism.compute_gpu()
+    for term, what, decision, why in organism.STANDING_DECISIONS:
+        icon = "action-unavailable-symbolic"
+        subtitle = f"{decision} - {why}"
+        if term in organism.HARDWARE_GATED:
+            # About this machine, not about Chronoa: a refusal here and only a
+            # gap on a machine with a compute GPU.
+            if gpu:
+                icon = "dialog-information-symbolic"
+                subtitle = (f"possible on this machine ({gpu} GPU) - not built yet; "
+                            "without such a GPU one item takes minutes on the processor")
+            else:
+                found = ", ".join(drivers) if drivers else "no GPU"
+                subtitle = (f"out of scope on this hardware - {why} "
+                            f"(found: {found}; an NVIDIA or AMD GPU would change this)")
+        mark = Gtk.Image.new_from_icon_name(icon)
+        mark.set_valign(Gtk.Align.CENTER)
+        row = common.row(what, subtitle, suffix=mark)
+        row.set_tooltip_text(f"{what}: {subtitle}.")
+        row.add_css_class("standing-decision")
+        _add(decided, row)
+    column.append(decided)
+
     # **In a scroller, like every other surface.** This one was the only panel
     # whose content went straight into the toolbar's content slot, so a window
     # shorter than its twenty-odd rows could not reach the bottom of them - the

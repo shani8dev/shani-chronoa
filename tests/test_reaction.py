@@ -131,7 +131,8 @@ def test_repeated_confirmation_changes_the_question(clock):
     and saying so is more useful than asking a sixth time."""
     layer = ReactionLayer(clock=lambda: clock["now"])
     escalated = None
-    for index in range(reaction._REPEAT_LIMIT + 20):
+    # An approval starts the count again, so five approvals take five windows.
+    for index in range((reaction._REPEAT_LIMIT + 1) * (reaction._REPEAT_ESCALATION + 1)):
         decision = layer.check("read_text_file", {"path": "/same"})
         if decision.confirm is None:
             continue
@@ -260,3 +261,37 @@ def test_control_removing_origin_separation_merges_the_windows(clock):
     assert merged.check("read_text_file", {"path": "/y"},
                         origin=ORIGIN_USER).confirm is None
     assert reaction._origin_key(ORIGIN_USER) != reaction._origin_key(ORIGIN_UNATTENDED)
+
+# --------------------------------------------------------------- it asks
+
+def test_the_question_reaches_a_person_and_a_yes_lets_work_continue(clock, monkeypatch):
+    """`tools._reaction_refuses` asks; it used to return "Not run" without asking.
+
+    Measured 2026-10-08: a booking in the real app stopped at its Purchase click
+    after 25 browse calls, with the question never shown to anyone.
+    """
+    import threading
+    from shani_chronoa import ask_bridge, tools
+    monkeypatch.setattr(tools, "_REACTIONS", ReactionLayer(clock=lambda: clock["now"]))
+    asked = []
+    monkeypatch.setattr(ask_bridge, "has_presenter", lambda: True)
+    monkeypatch.setattr(ask_bridge, "ask", lambda q, opts, **kw: (asked.append(q), "Let it continue")[1])
+    results = []
+    worker = threading.Thread(target=lambda: results.extend(
+        tools._reaction_refuses("browse", {"url": "https://x.test/"}, ORIGIN_USER)
+        for _ in range(reaction._REPEAT_LIMIT * 2)))
+    worker.start(); worker.join()
+    assert all(r is None for r in results), "a call was refused after the person said continue"
+    assert len(asked) == 1, f"asked {len(asked)} times; one yes should cover the next stretch"
+
+
+def test_with_nobody_to_ask_the_call_is_still_not_run(clock, monkeypatch):
+    import threading
+    from shani_chronoa import ask_bridge, tools
+    monkeypatch.setattr(tools, "_REACTIONS", ReactionLayer(clock=lambda: clock["now"]))
+    monkeypatch.setattr(ask_bridge, "has_presenter", lambda: False)
+    results = []
+    worker = threading.Thread(target=lambda: results.extend(
+        tools._reaction_refuses("browse", {}, ORIGIN_USER) for _ in range(reaction._REPEAT_LIMIT + 1)))
+    worker.start(); worker.join()
+    assert results[-1] is not None and results[-1].ran is False

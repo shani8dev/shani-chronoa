@@ -1,4 +1,16 @@
-"""Skill: drive a real Chromium over the DevTools protocol.
+"""Skill: drive a web browser - the in-app one when Chronoa's window is open.
+
+**Two browsers, chosen per call.** While Chronoa's window is running,
+`browser_bridge` has a provider and every action goes to the in-app WebKit
+browser (`gui/browser_driver.py`), so the person watches the model browse and
+can close the window to stop it. That path runs in Chronoa's own process
+(`browse` is on `tools._LOCAL_TOOLS`, but only while a provider exists), holds
+every navigation it causes to http(s) and `egress.check_destination`, and runs
+no arbitrary JavaScript, because that window carries the person's sign-ins.
+With no window - the MCP server, a headless run - it falls back to the
+headless Chromium below, in the sandbox as before.
+
+The Chromium path:
 
 Uses the same CDP infrastructure as shani-testbed's web_client.py:
 launches headless Chromium with --remote-debugging-pipe, attaches to
@@ -235,10 +247,18 @@ class Browser:
 
         self.cdp = CDP(argv, self.timeout)
         # Page/Runtime/Network commands are page-domain commands: they
-        # need an attached target, not the browser endpoint.
-        target = self.cdp.send("Target.createTarget", {"url": "about:blank"},
-                               session=False)["targetId"]
-        self.switch_tab(target)
+        # need an attached target, not the browser endpoint. The browser
+        # already opens one page tab (the about:blank argument above);
+        # attach to that rather than creating a second one, so a fresh
+        # browser has exactly one tab.
+        initial = self.tabs()
+        if initial:
+            self.switch_tab(initial[0]["id"])
+        else:
+            target = self.cdp.send("Target.createTarget",
+                                   {"url": "about:blank"},
+                                   session=False)["targetId"]
+            self.switch_tab(target)
 
     # -- tabs ------------------------------------------------------------
 
@@ -281,17 +301,22 @@ class Browser:
         target_id = target_id or self._target_id
         if not target_id:
             raise RuntimeError("no tab is open")
+        if target_id not in [t["id"] for t in self.tabs()]:
+            raise RuntimeError(f"no such tab: {target_id}")
+        # Target.closeTarget answers {success: bool}.
         result = self.cdp.send("Target.closeTarget", {"targetId": target_id},
                                session=False)
-        if not result.get("result"):
-            raise RuntimeError(f"no such tab: {target_id}")
+        if not result.get("success"):
+            raise RuntimeError(f"could not close tab: {target_id}")
         self.cdp.pump(0.3)
         if target_id == self._target_id:
+            # The session was bound to the closed target and died with
+            # it, so always re-establish one - on a remaining tab if
+            # any is left, else a fresh tab.
             remaining = [t for t in self.tabs() if t["id"] != target_id]
             if remaining:
                 self.switch_tab(remaining[0]["id"])
             else:
-                self._target_id = None
                 self.new_tab()
 
     # -- input -----------------------------------------------------------
@@ -382,7 +407,7 @@ class Browser:
         return self.page.navigate(url, settle)
 
     def go(self, method):
-        """goBack/goForward/reload: a navigation, so wait for its load."""
+        """reload: a navigation, so wait for its load."""
         self.cdp.send(method)
         self.page.wait_for_load()
 
@@ -529,6 +554,26 @@ def _box_script(selector):
     )
 
 
+def _offset_script(selector):
+    # The scroll offset an element is sitting at, as
+    # [scrollLeft, scrollTop] - the baseline and the
+    # post-condition a wheel scroll is measured against.
+    return (
+        "(() => {\n"
+        f"  const element = document.querySelector({json.dumps(selector)});\n"
+        "  if (!element) throw new Error('Element not found');\n"
+        "  return [element.scrollLeft, element.scrollTop];\n"
+        "})()"
+    )
+
+
+def _num(value):
+    # 400.0 as 400, so a scrolled amount reads like one.
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def _focus_script(selector):
     # Focus before Input.insertText: insertText goes to whatever
     # element has focus, and a direct .value assignment would fire no
@@ -567,12 +612,14 @@ SCHEMA = {
     "function": {
         "name": "browse",
         "description": (
-            "Drive a real headless Chromium over the DevTools protocol: "
-            "navigate, click, type, press keys, scroll, hover, drag, "
-            "select options, upload files, move through history and tabs, "
-            "evaluate JavaScript, take screenshots and wait for conditions. "
-            "Uses a persistent browser session. Requires the web sense to "
-            "be enabled and privacy mode to be off."
+            "Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), "
+            "click, type, select options, scroll, move through history, take "
+            "screenshots and wait for conditions. While Chronoa's window is "
+            "open this is the in-app browser the user can watch: there it "
+            "opens only http(s) pages the egress policy allows, and key, "
+            "hover, drag, upload_file, tabs and evaluate are not available. "
+            "Otherwise it is a headless Chromium with all actions. Requires "
+            "the web sense to be enabled and privacy mode to be off."
         ),
         "parameters": {
             "type": "object",
@@ -584,7 +631,7 @@ SCHEMA = {
                         "drag", "select", "upload_file", "back", "forward",
                         "reload", "stop", "new_tab", "close_tab", "switch_tab",
                         "list_tabs", "evaluate", "screenshot", "get_title",
-                        "get_url", "wait", "wait_text",
+                        "get_url", "get_text", "wait", "wait_text",
                     ],
                     "description": "The action to perform.",
                 },
@@ -680,12 +727,52 @@ SCHEMA = {
 }
 
 
+def _consent(config) -> "tuple[bool, str]":
+    """(allowed, reason) - the `web` sense's gate, the same one web_search uses.
+
+    A named helper rather than only an inline check, so the gate sweep in
+    `tests/test_question_presenter.py` can confirm that with nobody to ask the
+    refusal names the key a person would turn on.
+    """
+    if config.sense_allowed("web"):
+        return True, ""
+    reason = config.sense_allowed_reason("web") or ""
+    if "web-sense-enabled" not in reason:
+        reason = f"{reason} (enable 'web-sense-enabled' in Settings)".strip()
+    return False, reason
+
+
 def _run(arguments: dict) -> str:
+    """`_act`, with its error sentences raised as a failure rather than returned.
+
+    Every failed action came back as a plain "Error performing ..." string, so
+    the dispatcher filed it as UNVERIFIED and appended "this action reports
+    success but nothing observed it" - a failed navigation described as a
+    success (seen driving the skill through `execute_tool`, 2026-10-08).
+    `ToolFailure` is the in-band "it ran and did not work" the dispatcher knows.
+    """
+    allowed, reason = _consent(ChronoaConfig())
+    if not allowed:
+        return f"Web browsing is not permitted: {reason}."
+    from shani_chronoa import browser_bridge
+    if browser_bridge.has_provider():
+        from shani_chronoa.gui import browser_driver
+        said = browser_driver.act(arguments)
+    else:
+        said = _act(arguments)
+    if isinstance(said, str) and said.startswith("Error"):
+        from shani_chronoa.toolfailure import ToolFailure
+        raise ToolFailure(said)
+    return said
+
+
+def _act(arguments: dict) -> str:
     global _current_browser
 
     config = ChronoaConfig()
-    if not config.sense_allowed("web"):
-        return f"Web browsing is not permitted: {config.sense_allowed_reason('web')}."
+    allowed, reason = _consent(config)
+    if not allowed:
+        return f"Web browsing is not permitted: {reason}."
 
     action = arguments.get("action", "navigate").lower()
 
@@ -767,17 +854,51 @@ def _run(arguments: dict) -> str:
             x = arguments.get("x")
             y = arguments.get("y")
             if selector:
+                # The offset before the wheel, both as the
+                # baseline for what the wheel did and as a
+                # layout read of the target.
+                try:
+                    before = _current_browser.evaluate(
+                        _offset_script(selector))
+                except RuntimeError as e:
+                    return f"Could not scroll '{selector}': {e}"
                 point, err = _element_point(_current_browser, selector, "scroll")
                 if err:
                     return err
                 x, y = point
-            elif x is None or y is None:
-                x = _current_browser.evaluate("Math.round(window.innerWidth / 2)")
-                y = _current_browser.evaluate("Math.round(window.innerHeight / 2)")
-            delta_x = arguments.get("delta_x", 0)
-            delta_y = arguments.get("delta_y", 600)
+            else:
+                before = _current_browser.evaluate(
+                    "[window.scrollX, window.scrollY]")
+                if x is None or y is None:
+                    x = _current_browser.evaluate(
+                        "Math.round(window.innerWidth / 2)")
+                    y = _current_browser.evaluate(
+                        "Math.round(window.innerHeight / 2)")
+            delta_x = arguments.get("delta_x", 0) or 0
+            delta_y = arguments.get("delta_y", 600) or 0
             _current_browser.scroll(x, y, delta_x, delta_y)
-            return f"Scrolled by ({delta_x}, {delta_y}) at ({x}, {y})"
+            # A wheel scroll is applied on the compositor thread
+            # and lands in the DOM a frame or two later: reading
+            # the offset in the same millisecond still sees the
+            # old position (measured 2026-10-08: scrollTop read
+            # 0 at +0ms, 400 at +50ms). The raw CDP harness
+            # waits 0.3s after a wheel before reading; wait the
+            # same, then report what actually moved.
+            time.sleep(0.3)
+            if selector:
+                try:
+                    after = _current_browser.evaluate(
+                        _offset_script(selector))
+                except RuntimeError as e:
+                    return f"Could not scroll '{selector}': {e}"
+            else:
+                after = _current_browser.evaluate(
+                    "[window.scrollX, window.scrollY]")
+            moved_x = _num(after[0] - before[0])
+            moved_y = _num(after[1] - before[1])
+            where = f"'{selector}'" if selector else "the viewport"
+            return (f"Scrolled {where} by ({delta_x}, {delta_y}) "
+                    f"at ({x}, {y}); it moved ({moved_x}, {moved_y})")
 
         elif action == "hover":
             selector = arguments.get("selector", "")
@@ -882,13 +1003,36 @@ def _run(arguments: dict) -> str:
             return f"Set {len(files)} file(s) on '{selector}'"
 
         elif action in ("back", "forward", "reload"):
-            method = {"back": "Page.goBack", "forward": "Page.goForward",
-                      "reload": "Page.reload"}[action]
+            if action == "reload":
+                try:
+                    _current_browser.go("Page.reload")
+                except Exception as e:
+                    return f"Error performing 'reload': {e}"
+                return "Reload done"
+            # CDP has no Page.goBack/Page.goForward; the
+            # history API does. A back/forward can be served
+            # from the bfcache, which restores the page without
+            # firing a load event, so the only reliable signal
+            # that it happened is the URL itself changing.
+            delta = -1 if action == "back" else 1
             try:
-                _current_browser.go(method)
+                before_url = _current_browser.evaluate(
+                    "window.location.href")
+                _current_browser.evaluate(f"history.go({delta})")
             except Exception as e:
                 return f"Error performing '{action}': {e}"
-            return f"{action.capitalize()} done"
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                try:
+                    url = _current_browser.evaluate(
+                        "window.location.href")
+                except Exception:
+                    url = None
+                if url is not None and url != before_url:
+                    return f"{action.capitalize()} done"
+                time.sleep(0.1)
+            return (f"Error performing '{action}': history did "
+                    f"not move (still at {before_url})")
 
         elif action == "stop":
             _current_browser.cdp.send("Page.stopLoading")
@@ -967,6 +1111,17 @@ def _run(arguments: dict) -> str:
         elif action == "get_url":
             url = _current_browser.evaluate("window.location.href")
             return f"Current URL: {url}"
+
+        elif action == "get_text":
+            from shani_chronoa.gui.browser import page_from_text
+            url = _current_browser.evaluate("window.location.href") or ""
+            title = _current_browser.evaluate("document.title") or ""
+            text = _current_browser.evaluate(
+                "document.body ? document.body.innerText : ''") or ""
+            if not str(text).strip():
+                return f"{url} shows no text."
+            from shani_chronoa import webtext
+            return webtext.render(page_from_text(url, str(text), str(title)))
 
         elif action == "wait":
             wait_for = arguments.get("wait_for", "")

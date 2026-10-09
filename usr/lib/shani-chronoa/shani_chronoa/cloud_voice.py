@@ -170,6 +170,28 @@ KEY_REQUIRED_FOR_SPEECH = True
 #: elevenlabs/turbo-v2.5, elevenlabs/multilingual-v2, elevenlabs/v3,
 #: bytedance/seed-audio-1.0". Sending `tts-1` there fails on a route that works.
 TTS_MODELS = {"blockrun": "elevenlabs/turbo-v2.5"}
+
+
+def abilities(provider_id: str) -> "list[str]":
+    """What a key for `provider_id` unlocks, in words: chat, listening, speaking.
+
+    One place for the answer the setup wizard shows on its Cloud keys, Ears and
+    Voice pages, built from the measured route sets above so the wizard cannot
+    claim a provider speaks when it does not.
+    """
+    said = ["chat"]
+    if provider_id in STT_ROUTES:
+        said.append("listening")
+    if provider_id in TTS_ROUTES:
+        said.append("speaking")
+    return said
+
+
+def provider_names(route: frozenset) -> "list[str]":
+    """Display names of the providers on a speech route, in the key page's order."""
+    from shani_chronoa import cloud_llm
+    order = list(cloud_llm.BYOK_PROVIDER_ORDER) + [p for p in sorted(route) if p not in cloud_llm.BYOK_PROVIDER_ORDER]
+    return [getattr(cloud_llm.PROVIDERS.get(p), "name", p.title()) for p in order if p in route]
 STT_MODELS = {}
 
 #: Which `response_format` each provider accepts. Measured: OpenAI returns WAV;

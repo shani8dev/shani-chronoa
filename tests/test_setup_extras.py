@@ -82,6 +82,10 @@ def test_vision_pins_are_real_and_tiers_follow_ram_and_gpu():
 
 
 def test_eyes_step_downloads_both_files_and_points_the_server_at_them(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     model, proj = b"GGUF" + os.urandom(3000), b"GGUF" + os.urandom(1500)
     m = local_vision.VisionModel("smolvlm2-500m", "Small - x", _spec("smolvlm2-500m", "v.gguf", model),
                                  _spec("smolvlm2-500m-mmproj", "mmproj-v.gguf", proj), 0)
@@ -232,6 +236,10 @@ def test_vectors_go_with_a_deleted_conversation(root):
 
 
 def test_memory_step_writes_an_embedding_server(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     data = b"GGUF" + os.urandom(500)
     monkeypatch.setattr(local_embed, "MODEL", _spec("nomic", "e.gguf", data))
     monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
@@ -315,6 +323,10 @@ def test_image_generation_gets_the_longer_time_limit():
 
 
 def test_imagine_step_installs_the_engine_for_the_hardware(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     engine = _zip([("sd-server", b"#!/bin/sh\n", 0o100755)])
     model = b"GGUF" + os.urandom(800)
     monkeypatch.setattr(imagegen, "ENGINE_VULKAN", _spec("v", "sd-vulkan.zip", engine, "https://github.com/x"))
@@ -338,6 +350,10 @@ def test_scripts_are_told_apart():
 
 
 def test_language_step_installs_reading_data_and_turns_listening_on(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     data = os.urandom(900)
     lang = languages.LANGUAGES["hi"]._replace(tess_size=len(data), tess_sha256=hashlib.sha256(data).hexdigest(),
                                               voice="")
@@ -419,6 +435,10 @@ def _kokoro_archives(monkeypatch):
 
 
 def test_picking_a_kokoro_voice_installs_kokoro_and_speaks_with_it(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     from shani_chronoa import tts as tts_mod
     out = setup_wizard.setup_voice("bf_emma", transport=_kokoro_archives(monkeypatch))
     assert out.startswith("Chronoa now speaks with Kokoro (Emma)")
@@ -436,6 +456,10 @@ def test_picking_a_kokoro_voice_installs_kokoro_and_speaks_with_it(monkeypatch):
 
 
 def test_picking_a_piper_voice_after_kokoro_switches_back(monkeypatch):
+    # The wizard grants this on its Review page before any step runs; the
+    # step functions refuse without it (stt_provision.ConsentRequired), so
+    # a test calling a step directly grants it as the wizard would.
+    ChronoaConfig().set("model-download-enabled", "true")
     transport = _kokoro_archives(monkeypatch)
     setup_wizard.setup_voice("af_sarah", transport=transport)
     monkeypatch.setattr(voices, "install_piper", lambda **kw: "/bin/true")

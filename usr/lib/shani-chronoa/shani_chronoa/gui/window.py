@@ -918,7 +918,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._command_menu = Gtk.Popover()
         self._command_menu.set_child(self._command_list)
         self._command_menu.set_position(Gtk.PositionType.BOTTOM)
-        GLib.idle_add(lambda: (self._command_menu.set_parent(self._input_entry), False)[1])
+        GLib.idle_add(lambda: (self._parent_command_menu(), False)[1])
         # Typing must not imply "Enter submits" to everyone: it rules out
         # on-screen keyboards whose return key inserts a newline, and for a
         # motor-impaired user it is a gesture to get wrong repeatedly. The
@@ -1729,13 +1729,27 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         available = surfaces.available_surfaces()
 
+        import sys as _sys
+
+        def prebuilt(build) -> bool:
+            # A panel whose build is slow by nature (Diagnostics runs real
+            # probes - a screen capture among them) sets PREBUILD = False and is
+            # built when opened, not here.
+            module = _sys.modules.get(getattr(build[2], "__module__", ""), None)
+            return getattr(module, "PREBUILD", True)
+
         def one() -> bool:
+            # ONE panel per main-loop turn. This used to loop over all of them
+            # inside a single callback, so every panel was built back to back
+            # with the main loop held - measured 2026-10-08: ~8 s just after
+            # startup, during which the mic button did nothing and a spoken
+            # request was lost before recording began.
             while names:
                 name = names.pop(0)
                 page = self._surface_pages.get(name)
                 if page is None:
                     build = available.get(name)
-                    if build is None:
+                    if build is None or not prebuilt(build):
                         continue
                     try:
                         page = build[2](getattr(self, "_app", None))
@@ -1748,6 +1762,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                     # change underneath the person who is looking at it.
                     self._surface_pages[name] = page
                 self._sidebar_page.set_status(name, _panel_status(page))
+                return GLib.SOURCE_CONTINUE if names else GLib.SOURCE_REMOVE
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(one, priority=GLib.PRIORITY_DEFAULT_IDLE)
@@ -1918,9 +1933,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._fill_command_menu(prefix)
         if self._command_menu is not None:
             if showing and not self._command_menu.get_visible():
+                # Parented first, here as well as on idle: `popup()` realizes
+                # the popover, and realizing one with no parent segfaults in
+                # GTK. Typing "/" before the idle callback had run crashed the
+                # whole app - reproduced under CPU load, two of two runs.
+                self._parent_command_menu()
                 self._command_menu.popup()
             elif not showing and self._command_menu.get_visible():
                 self._command_menu.popdown()
+
+    def _parent_command_menu(self) -> None:
+        """Attach the command popover to the entry, once. Safe to call again."""
+        if self._command_menu is not None and self._command_menu.get_parent() is None:
+            self._command_menu.set_parent(self._input_entry)
 
     def _fill_command_menu(self, prefix: str) -> None:
         from shani_chronoa.gui import commands as slash

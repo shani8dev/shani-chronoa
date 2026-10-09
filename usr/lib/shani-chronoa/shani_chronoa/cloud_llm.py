@@ -340,7 +340,16 @@ class OpenAICompatibleLLM:
         return messages
 
     def postprocess(self, message: dict, tools: Optional[list[dict]]) -> dict:
-        return message
+        """Recover tool calls a model wrote as text, for cloud models too.
+
+        This used to return the message unchanged, so only the local model got
+        `recover_tool_calls`. Free gateway models write calls as text often
+        enough (measured 2026-10-08: a Kilo-routed model sent
+        `<function=browse><parameter=url>...`), and the person was shown the
+        markup as the reply instead of the action happening.
+        """
+        from shani_chronoa.local_llm import recover_tool_calls
+        return recover_tool_calls(message, tools)
 
     def __init__(self, provider: CloudProvider, model: Optional[str] = None, api_key: str = "") -> None:
         self.provider = provider

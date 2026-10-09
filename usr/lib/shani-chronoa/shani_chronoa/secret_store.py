@@ -22,6 +22,20 @@ logger = logging.getLogger(__name__)
 SCHEMA_NAME = "dev.shani.chronoa.ApiKey"
 
 
+def _opted_out() -> bool:
+    """SHANI_CHRONOA_KEYRING=0: never read or write the session keyring.
+
+    The same opt-out `config._is_secret` honours. Without it here, the hermetic
+    test suite still read and wrote the real keyring through `get`/`put`: a key
+    typed into a Settings probe outside pytest was read back by
+    `test_api_key_defaults_are_empty_not_quoted` inside it (2026-10-08).
+    Checked in `get`/`put`, not in `_secret`: `_secret` answers "is libsecret
+    installed", which the Desktop panel reports, and an opt-out is not that.
+    """
+    import os
+    return os.environ.get("SHANI_CHRONOA_KEYRING", "1") == "0"
+
+
 def _secret():
     try:
         import gi
@@ -35,6 +49,8 @@ def _secret():
 
 def get(provider: str) -> Optional[str]:
     """The stored key, '' if none is stored, or None if there is no usable keyring."""
+    if _opted_out():
+        return None
     Secret, schema = _secret()
     if Secret is None:
         return None
@@ -48,6 +64,8 @@ def get(provider: str) -> Optional[str]:
 
 def put(provider: str, value: str) -> bool:
     """Store (or, for an empty value, remove) a key; True when the keyring reads it back."""
+    if _opted_out():
+        return False
     Secret, schema = _secret()
     if Secret is None:
         return False

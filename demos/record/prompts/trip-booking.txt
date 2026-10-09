@@ -1,0 +1,1 @@
+On blazedemo.com (a demo booking site, nothing is really paid) book the cheapest flight from Boston to London for Asha Patil, 12 FC Road, Pune, zip 411004. Then check today's weather in London, tell me the price in Indian rupees, save an itinerary as an HTML document, and remind me tomorrow 9am to check in.

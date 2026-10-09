@@ -64,6 +64,8 @@ _CONSENT_NAMES = (
 _IMPL = {
     "screenshot": "shani_chronoa.skills.screenshot",
     "move_pointer": "shani_chronoa.skills.input_control",
+    "nfc": "shani_chronoa.skills.nfc",
+    "fm_radio": "shani_chronoa.skills.fm_radio",
     "click_pointer": "shani_chronoa.skills.input_control",
     "type_text": "shani_chronoa.skills.input_control",
     "notify": "shani_chronoa.skills.notify",
@@ -123,6 +125,9 @@ _IMPL = {
     "temperatures": "shani_chronoa.skills.temperatures",
     "usb_devices": "shani_chronoa.skills.usb_devices",
     "crash_report": "shani_chronoa.skills.crash_report",
+    # Drives a real browser, and checks the `web` sense's own
+    # switch - the same one web_search asks permission through.
+    "browse": "shani_chronoa.skills.browse",
     "set_screensaver": "shani_chronoa.skills.set_screensaver",
     "set_sleep_inhibit": "shani_chronoa.skills.set_sleep_inhibit",
     # All three share `appearance-control-enabled` with set_theme: they are the
@@ -147,11 +152,30 @@ _IMPL = {
     # filenames cannot disagree about whether that is permitted.
     "git_inspect": "shani_chronoa.skills.git_inspect",
     "todo_list": "shani_chronoa.skills.todo_list",
+    "manage_goals": "shani_chronoa.skills.manage_goals",
     "manage_triggers": "shani_chronoa.skills.manage_triggers",
     "conversations": "shani_chronoa.skills.conversations",
     "office_document": "shani_chronoa.skills.office_document",
     "ui_elements": "shani_chronoa.skills.ui_elements",
     "android_device": "shani_chronoa.skills.android_device",
+    # The Siri/Google parity skills. Each consults a gate through a helper or the
+    # sense API, which is why `_CONSENT_NAMES` carries `_consent` and
+    # `sense_allowed` rather than this test knowing each file's spelling.
+    "news": "shani_chronoa.skills.news",
+    "maps": "shani_chronoa.skills.maps",
+    "take_photo": "shani_chronoa.skills.take_photo",
+    "toggle_wifi": "shani_chronoa.skills.toggle_wifi",
+    "calendar_edit": "shani_chronoa.skills.calendar_edit",
+    # Reads a device's own attributes. Gated on `get_bool`, which is deliberately
+    # NOT in `_CONSENT_NAMES` - so this module has to route it through a helper
+    # the reader can see, or the check reports a real gate as ungated.
+    "bluetooth_gatt": "shani_chronoa.skills.bluetooth_gatt",
+    "find_device": "shani_chronoa.skills.bluetooth_gatt",
+    "watch": "shani_chronoa.skills.watch",
+    "phone_remote": "shani_chronoa.skills.phone_remote",
+    # Places a call over Bluetooth. Also gates on `get_bool`, so it needs the
+    # same visible `_consent` helper the reader can see.
+    "bluetooth_call": "shani_chronoa.skills.bluetooth_call",
 }
 
 

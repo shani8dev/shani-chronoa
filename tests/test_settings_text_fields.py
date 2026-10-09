@@ -56,6 +56,7 @@ def rows(gsettings_env_module):
     # check inside the same settings store as the write, whichever HOME a later
     # test's autouse fixture points at.
     found["__config__"] = app.config
+    found["__window__"] = window
     return found
 
 
@@ -70,14 +71,14 @@ def gsettings_env_module(tmp_path_factory, compiled_schema_dir):
 
 def test_no_text_row_carries_a_second_field(rows):
     assert rows, "the settings window built no text rows"
-    doubled = [title for title, row in rows.items() if title != "__config__"
+    doubled = [title for title, row in rows.items() if not title.startswith("__")
                if any(type(n) is Gtk.Entry for n in _walk(row)[1:])]
     assert not doubled, f"rows with a second, unconnected field: {doubled}"
 
 
 def test_secret_rows_are_password_rows(rows):
     for title, row in rows.items():
-        if title != "__config__" and "key" in title.lower():
+        if not title.startswith("__") and "key" in title.lower():
             assert isinstance(row, Adw.PasswordEntryRow), title
 
 
@@ -97,3 +98,12 @@ def test_the_custom_model_server_can_be_set_from_settings(rows):
     url, model = config.get("custom-llm-base-url", ""), config.get("custom-llm-model", "")
     assert (url, model) == ("http://192.168.1.20:8080/v1", "qwen3-8b")
     assert custom_provider(url, model) is not None, "the brain would not use what was typed"
+
+
+def test_the_voice_style_choice_is_on_the_voice_page(rows):
+    """The "Voice" style row was never built: it read `config.get_string`, which
+    ChronoaConfig does not have, and the AttributeError skipped the whole row
+    (2026-10-08). Built from the same window as the text rows above."""
+    window = rows["__window__"]
+    titles = [n.get_title() for n in _walk(window) if isinstance(n, Adw.ComboRow)]
+    assert "Voice" in titles, f"no Voice style row; combo rows found: {titles}"

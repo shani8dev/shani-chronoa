@@ -671,8 +671,13 @@ class SandboxExecutor:
         # redirection and wrote to the real ~/.local/share instead. That made
         # the suite non-hermetic: a dispatched screenshot landed in the
         # developer's own home rather than the fixture directory.
+        # XDG_SESSION_TYPE and the desktop names travel because the window
+        # skills choose their backend from them (`shani_chronoa.windows.detect`):
+        # without them a Plasma child could not tell it was on Plasma.
         for k in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
                   "DBUS_SESSION_BUS_ADDRESS", "XDG_CURRENT_DESKTOP",
+                  "XDG_SESSION_TYPE", "XDG_SESSION_DESKTOP", "DESKTOP_SESSION",
+                  "KDE_FULL_SESSION",
                   "GSETTINGS_SCHEMA_DIR", "GSETTINGS_BACKEND",
                   "GSETTINGS_BACKEND_MEMORY", "GSETTINGS_KEYFILE_BACKEND",
                   "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",

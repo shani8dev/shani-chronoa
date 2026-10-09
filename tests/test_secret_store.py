@@ -61,3 +61,12 @@ def test_settings_writes_to_the_keyring_when_there_is_one(keyring, monkeypatch):
     monkeypatch.setattr(ss, "put", lambda p, v: False)
     ChronoaConfig.set_api_key(cfg, "openrouter-api-key", "or-2")
     assert written["openrouter-api-key"] == "or-2", "no keyring: GSettings, exactly as before"
+
+
+def test_the_keyring_opt_out_is_honoured_by_the_store_itself(monkeypatch):
+    """With SHANI_CHRONOA_KEYRING=0 the store must not reach Secret Service at
+    all - neither read nor write. `config` honoured it and the store did not,
+    so the suite could read and write the real session keyring."""
+    monkeypatch.setenv("SHANI_CHRONOA_KEYRING", "0")
+    assert ss.get("anthropic") is None, "read the real keyring with the opt-out set"
+    assert ss.put("anthropic", "sk-must-not-land") is False

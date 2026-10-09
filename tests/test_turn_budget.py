@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -28,7 +27,21 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import assistant as assistant_mod  # noqa: E402
-from shani_chronoa.assistant import MAX_TOOL_ROUNDS, Assistant  # noqa: E402
+from shani_chronoa.assistant import Assistant  # noqa: E402
+
+
+#: These tests check that the round cap *applies*, not what it is. The shipped
+#: cap (`MAX_TOOL_ROUNDS`, 40 since 2026-10-08) is above the loop detector's
+#: threshold, so a fake model repeating one identical call would be stopped by
+#: the detector first and the cap would never be observed. Pinning a small cap
+#: here keeps the cap itself under test, whatever its shipped value.
+_ROUNDS = 4
+
+
+@pytest.fixture(autouse=True)
+def _a_small_round_cap(monkeypatch):
+    monkeypatch.setattr(assistant_mod, "TOOL_ROUNDS_BY_ORIGIN",
+                        {**assistant_mod.TOOL_ROUNDS_BY_ORIGIN, assistant_mod.ORIGIN_USER: _ROUNDS})
 
 
 class _Looping:
@@ -79,7 +92,7 @@ class TestTheBudgetStopsALoop:
         llm = _Looping(delay=0.25)
         a = Assistant(llm, session_path=transcript)
         out = asyncio.run(a.handle("loop forever"))
-        assert llm.calls < MAX_TOOL_ROUNDS, (
+        assert llm.calls < _ROUNDS, (
             f"the loop ran {llm.calls} times, so the round cap stopped it - the "
             f"budget never fired"
         )
@@ -113,7 +126,7 @@ class TestNormalTurnsAreUntouched:
         a = Assistant(llm, session_path=transcript)
         asyncio.run(a.handle("loop"))
         # 4 rounds, then one final plain answer.
-        assert llm.calls == MAX_TOOL_ROUNDS + 1
+        assert llm.calls == _ROUNDS + 1
 
 
 class TestTheMessageDoesNotMisstateTheTime:
@@ -152,7 +165,7 @@ class TestTurnStats:
         a = Assistant(_Looping(delay=0.01), session_path=transcript)
         asyncio.run(a.handle("loop"))
         stats = a.turn_stats()
-        assert stats["model_calls"] == MAX_TOOL_ROUNDS + 1
+        assert stats["model_calls"] == _ROUNDS + 1
         assert stats["model_seconds"] > 0
         assert stats["wall_seconds"] >= stats["model_seconds"]
 

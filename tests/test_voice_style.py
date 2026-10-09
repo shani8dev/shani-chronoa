@@ -171,7 +171,7 @@ class TestItCompositesWithTheExistingPipeline:
 
     def test_an_unknown_preset_name_costs_the_style_not_the_reply(self):
         class Config:
-            def get_string(self, key, default):
+            def get(self, key, default):
                 return "no-such-voice"
 
         assert voice_style.selected_style(Config()) is None
@@ -179,7 +179,7 @@ class TestItCompositesWithTheExistingPipeline:
 
     def test_natural_in_the_settings_costs_nothing(self):
         class Config:
-            def get_string(self, key, default):
+            def get(self, key, default):
                 return "natural"
 
         assert voice_style.selected_style(Config()) is None
@@ -187,10 +187,25 @@ class TestItCompositesWithTheExistingPipeline:
 
     def test_a_config_that_raises_costs_the_style_not_the_reply(self):
         class Broken:
-            def get_string(self, *_a, **_k):
+            def get(self, *_a, **_k):
                 raise RuntimeError("the schema is missing")
 
         assert voice_style.selected_style(Broken()) is None
+
+    def test_a_style_chosen_in_the_real_settings_is_applied(self, gsettings_env):
+        """Through the real `ChronoaConfig`, not a fake.
+
+        The fakes above had `get_string`, which ChronoaConfig does not: every
+        one of them expects "no style", so they passed while no style was ever
+        applied - `selected_style` raised AttributeError on the real object and
+        swallowed it (measured 2026-10-08, every style "effects: none").
+        """
+        from shani_chronoa.config import ChronoaConfig
+        config = ChronoaConfig()
+        config.set("voice-style", "clear")
+        style = voice_style.selected_style(config)
+        assert style is not None, "a style set in the settings was not read"
+        assert voice_style.effects_for_config(config), "the chosen style produced no effects"
 
 
 class TestDescription:

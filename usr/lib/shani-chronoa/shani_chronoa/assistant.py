@@ -25,7 +25,11 @@ byte-for-byte what it was before the senses layer existed.
 from shani_chronoa import permissions
 from shani_chronoa import provenance
 
+import asyncio
+import contextvars
+import functools
 import json
+import re
 import logging
 import time
 from pathlib import Path
@@ -63,7 +67,15 @@ SYSTEM_PROMPT = (
     + provenance.describe_boundary()
 )
 
-MAX_TOOL_ROUNDS = 4
+#: Rounds of tool calls one request from a person may take. Was 4, which cut
+#: every multi-step task off: measured 2026-10-08 in the real app, "book the
+#: cheapest flight on a demo site, then weather, rupees, itinerary, reminder"
+#: needs ~18 actions (a free model used ~30, re-reading the page after
+#: each click; 24 ran out one click short), and the turn ended after 4 with the model's fifth call
+#: shown as text. The other bounds stay what stops a runaway turn - the loop
+#: detector (identical calls, `loops.LOOP_THRESHOLD`), the per-tool attempt
+#: budget, the turn's wall-clock ceiling and the person's Stop button.
+MAX_TOOL_ROUNDS = 40
 
 #: One config key, one appended clause on every request. The identity
 #: statement and skill contract stay in SYSTEM_PROMPT; the user's "brief"
@@ -168,8 +180,10 @@ TOOL_FAILURE_TYPE_OVERRIDES: dict[str, tuple[str, ...]] = {}
 #: cannot interrupt, because the UI has no idea it is still working.
 #:
 #: Generous on purpose: this is a backstop against a run that is not going to
-#: end, not a target. Exceeding it stops the turn and says so.
-MAX_TURN_SECONDS = 300.0
+#: end, not a target. Exceeding it stops the turn and says so. 600s since
+#: MAX_TOOL_ROUNDS went to 40: a browser task with a free cloud model ran
+#: ~11s a round (measured 2026-10-08), so 300s would cut it off midway.
+MAX_TURN_SECONDS = 600.0
 
 # _history grew unboundedly across a session before this - combined with a
 # small num_ctx that was previously hardcoded, a long session would
@@ -717,6 +731,18 @@ class Assistant:
         # between turns must not be told about a turn that has already been
         # answered.
         self.restored_interruption = ""
+        # A routine's phrase ("good morning") stands for its saved request. It is
+        # swapped in here, before the request is recorded or tools are chosen, so
+        # the routine runs exactly as that request typed out would - same tool
+        # choice, same gates. See `routines.py`.
+        try:
+            from shani_chronoa import routines
+            routine = routines.expand(text)
+        except Exception:  # noqa: BLE001 - a broken routines file must not cost the turn
+            routine = None
+        if routine is not None:
+            logger.info("Running the %r routine: %s", routine[0], routine[1])
+            text = routine[1]
         self._record({"role": "user", "content": text})
         self._trim_history()
         self._channel = channel
@@ -792,6 +818,7 @@ class Assistant:
         # ~11,800 tokens against an 8192-token window (see tool_select). Tools
         # already called this turn stay, so a follow-up round keeps them.
         in_use: set = set()
+        corrections = 0
         named, self.forced_tool = self.forced_tool, ""  # this turn only
         # Consecutive calls the dispatcher refused as never-run (bad JSON,
         # non-dict args, guardrail refusal). Reset by any real execution.
@@ -817,7 +844,18 @@ class Assistant:
 
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
-                return message.get("content", "")
+                correction = _call_correction(message.get("content", ""), sent, corrections)
+                if correction is None:
+                    return message.get("content", "")
+                # The reply was only a call to a tool that does not exist or was
+                # not offered (measured 2026-10-08: `set_reminder` for `reminders`,
+                # spoken aloud as JSON, no reminder set). Say so to the model and
+                # offer the closest real tools, instead of showing the markup.
+                corrections += 1
+                note, suggested = correction
+                in_use.update(suggested)
+                self._record({"role": "user", "content": note})
+                continue
 
             attempts.clear()
             in_use.update((c.get("function") or {}).get("name", "") for c in tool_calls)
@@ -901,7 +939,16 @@ class Assistant:
                     continue
 
                 attempts[name] = attempts.get(name, 0) + 1
-                result = execute_tool(name, arguments, origin=origin)
+                # Off the event loop. Called directly, a tool blocked this loop for
+                # as long as it ran - and `ask_user` waits up to 180 s for a person,
+                # while the spoken answer's transcription is a coroutine on this
+                # same loop: it could not run until the question had timed out
+                # (measured 2026-10-08: answer recorded at 13:56:33, transcribed at
+                # 13:59:23, after "no option was chosen"). The context is copied so
+                # whatever the turn set for its tools is still there in the thread.
+                ctx = contextvars.copy_context()
+                result = await asyncio.get_running_loop().run_in_executor(
+                    None, ctx.run, functools.partial(_run_tool, name, arguments, origin))
                 # A result that begins with these is a call the dispatcher
                 # refused before execution (ill-formed arguments, a schema
                 # mismatch). Three of those in a row is not a turn making
@@ -971,7 +1018,7 @@ class Assistant:
         self._note_model_call(time.monotonic() - started)
         self._record(message)
         self._turn_deadline = None
-        return message.get("content", "")
+        return _out_of_rounds(message.get("content", ""), max_rounds)
 
     def _malformed_stop(self, misses: int) -> str:
         """The turn that cannot form a well-formed call ends honestly.
@@ -985,3 +1032,66 @@ class Assistant:
         self.close_interrupted_turn("validation")
         return (f"I could not form a valid call after {misses} attempts - "
                 "the tool call is not fitting together. Nothing further ran.")
+
+
+_CALL_MARKUP = re.compile(r"<tool_call>|<function=[\w.\-]+>|</function>|<parameter=", re.S)
+
+
+def _out_of_rounds(text: str, rounds: int) -> str:
+    """The final answer after the rounds ran out - never raw tool markup.
+
+    The last request is sent without tools, and a model that still wants to act
+    writes its next call as text. That markup was the reply the person saw
+    (seen in the real app on 2026-10-08). Whatever plain words came with it are
+    kept; the markup is replaced by what actually happened.
+    """
+    if not text or not _CALL_MARKUP.search(text):
+        return text
+    plain = re.sub(r"<tool_call>.*?(</tool_call>|$)|<function=.*?(</function>|$)", "", text, flags=re.S).strip()
+    note = (f"I used all {rounds} steps this turn before finishing, so I stopped there. "
+            "Say \"continue\" and I'll pick up where I left off.")
+    return f"{plain}\n\n{note}" if plain else note
+
+
+def _run_tool(name, arguments, origin):
+    """`execute_tool`, looked up at call time so a test's monkeypatch still applies."""
+    return execute_tool(name, arguments, origin=origin)
+
+
+#: Corrections per turn for a call to a tool that is not there, before the
+#: reply is returned as it is.
+MAX_CALL_CORRECTIONS = 2
+
+
+def _call_correction(content, sent, corrections):
+    """(note to the model, tool names to offer) when `content` is a call to a missing tool, else None."""
+    from difflib import get_close_matches
+    from shani_chronoa.local_llm import text_tool_call
+    if corrections >= MAX_CALL_CORRECTIONS:
+        return None
+    found = text_tool_call(content)
+    if not found:
+        return None
+    name, _args = found
+    offered = {(t.get("function") or {}).get("name") for t in (sent or [])}
+    if name in offered:
+        return None  # a real, offered call is recovered by the client, not here
+    real = {t["function"]["name"]: t for t in TOOLS}
+    if name in real:
+        suggested = [name]
+        lead = f"The tool {name} was not offered on that request; it is now."
+    else:
+        words = set(re.findall(r"[a-z]+", name.lower())) - {
+            "set", "get", "list", "read", "make", "create", "do", "open", "add", "show", "check"}
+        by_word = [n for n in real if words & set(n.split("_"))]
+        suggested = (get_close_matches(name, list(real), n=3, cutoff=0.5) + by_word)[:3]
+        if not suggested:
+            return None
+        lead = f"There is no tool named {name}."
+    shapes = "; ".join(
+        f"{n}({', '.join((real[n]['function'].get('parameters') or {}).get('properties', {}))})"
+        for n in dict.fromkeys(suggested))
+    note = (f"(Chronoa) {lead} Nothing ran. Use one of these instead, as a real tool call: "
+            f"{shapes}.")
+    return note, list(dict.fromkeys(suggested))
+

@@ -14,11 +14,7 @@ from __future__ import annotations
 import subprocess
 
 from shani_chronoa.skills import Skill
-from shani_chronoa.skills.list_windows import session_problem
-from shani_chronoa.skills.window_atspi import (
-    focus_window_atspi,
-    is_atspi_available,
-)
+from shani_chronoa.skills.list_windows import act, session_problem
 
 _TIMEOUT = 15
 
@@ -28,7 +24,8 @@ SCHEMA = {
         "name": "focus_window",
         "description": (
             "Bring a window to the front and give it keyboard focus, by window "
-            "id from list_windows or by matching part of its title. X11 and Wayland."
+            "id from list_windows or by matching part of its title. Works on X11 and "
+            "Plasma; on GNOME it needs Chronoa's window control extension and says so."
         ),
         "parameters": {
             "type": "object",
@@ -45,18 +42,13 @@ SCHEMA = {
 
 
 def _run(arguments: dict) -> str:
-    # AT-SPI Wayland backend (portable across GNOME, Plasma, COSMIC)
-    if is_atspi_available():
-        wid = (arguments.get("window_id") or "").strip()
-        needle = (arguments.get("title_contains") or "").strip()
-        if wid:
-            return f"AT-SPI does not support window_id; give a title_contains match instead"
-        return focus_window_atspi(title_contains=needle if needle else None)
-
-    # X11 fallback via xdotool
     problem = session_problem()
     if problem:
-        return f"Could not focus a window: {problem}"
+        # Wayland: KWin, or the GNOME extension. The accessibility bus cannot
+        # focus (measured: GTK4 atspi_error (1), GTK3 True with nothing raised),
+        # and its backend says so with what would make it work.
+        return act("focus a window", arguments,
+                   lambda b, w: (b.focus(w.id), "Focused {label} through {backend}.")[1])
 
     wid = (arguments.get("window_id") or "").strip()
     needle = (arguments.get("title_contains") or "").strip()

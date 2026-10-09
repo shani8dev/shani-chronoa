@@ -15,9 +15,10 @@ while talking to an assistant with its hands on their machine had no home:
   may only look.
 
 **What is deliberately not in it.** Not the sense feeds (the senses panels own
-that), not health (Diagnostics owns it, with a per-row reason), and not a plan
-or a goal - `goals.py` has no producer yet, and a card for a queue nothing can
-enqueue is a dead control. Every section below reads a store that already
+that) and not health (Diagnostics owns it, with a per-row reason). Goals were
+left out while `goals.py` had no producer - a card for a queue nothing can
+enqueue is a dead control. `skills/manage_goals.py` produces them now, so the
+Goals section shows open runs, and hides itself when there are none. Every section below reads a store that already
 exists and shows an honest empty state, because a rail that renders decoration
 is worse than no rail: it looks like it knows something.
 
@@ -216,9 +217,10 @@ class NowRail(Gtk.Box):
         self._timers = _Section("Timers")
         self._changed = _Section("Changed")
         self._tasks = _Section("Tasks")
+        self._goals = _Section("Goals")
         self._posture = _Section("Posture")
         for section in (self._now, self._context, self._timers, self._changed,
-                        self._tasks, self._posture):
+                        self._tasks, self._goals, self._posture):
             inner.append(section)
 
         scroller.set_child(inner)
@@ -342,6 +344,26 @@ class NowRail(Gtk.Box):
         if len(outstanding) > 8:
             self._tasks.empty(f"and {len(outstanding) - 8} more")
 
+    def _fill_goals(self) -> None:
+        """Open goal runs, each a link to the Goals panel. Hidden when none.
+
+        Hidden rather than "No goals" because, unlike tasks, there is no
+        consent switch whose state the silence could be mistaken for: saved
+        goals are either there or not, and an empty card on every window is
+        decoration.
+        """
+        self._goals.clear()
+        from shani_chronoa.gui.surfaces.goals import open_runs
+        runs = open_runs()
+        self._goals.set_visible(bool(runs))
+        for run in runs[:4]:
+            word = {"awaiting": "waiting for you", "pending": "not started",
+                    "running": "in progress"}.get(run.phase.value, run.phase.value)
+            self._goals.link(run.goal, f"{word} - {min(run.index, len(run.steps))}/"
+                                       f"{len(run.steps)} steps", "goals", self.on_open)
+        if len(runs) > 4:
+            self._goals.empty(f"and {len(runs) - 4} more")
+
     def _fill_posture(self) -> None:
         self._posture.clear()
         try:
@@ -388,7 +410,8 @@ class NowRail(Gtk.Box):
         """Rebuild every section. Never raises: a rail that cannot be built
         must leave the window exactly as it was."""
         for fill in (self._fill_now, self._fill_context, self._fill_timers,
-                     self._fill_changed, self._fill_tasks, self._fill_posture):
+                     self._fill_changed, self._fill_tasks, self._fill_goals,
+                     self._fill_posture):
             try:
                 fill()
             except Exception as exc:  # noqa: BLE001

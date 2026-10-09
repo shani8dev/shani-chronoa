@@ -133,16 +133,22 @@ class VoiceMixin:
         else:
             self._begin_listening()
 
-    def _begin_listening(self) -> None:
+    def _begin_listening(self, keep_reply: bool = False) -> None:
         """Start a listening turn, however it was triggered (button or wake word).
+
+        `keep_reply`: listening for the answer to a question this turn asked.
+        The turn's own reply is still to come, so it must not be silenced - doing
+        that stopped the turn's speech queue, and the reply after the answer was
+        never spoken (measured 2026-10-08).
 
         Interrupts any in-progress TTS playback first - this is Chronoa's
         barge-in: starting to talk again while the assistant is still
         speaking cuts it off immediately instead of waiting it out.
         """
         was_speaking = self.window is not None and self.window.get_state() is AssistantState.SPEAKING
-        self._silence_reply()  # the rest of a sentence-by-sentence reply, not only the one playing
-        self.player.stop()
+        if not keep_reply:
+            self._silence_reply()  # the rest of a sentence-by-sentence reply, not only the one playing
+            self.player.stop()
         self._listening = True
         if self.window:
             # Route the handover through INTERRUPTING so the stop is visible
@@ -508,6 +514,14 @@ class VoiceMixin:
         self._async.run(self._transcribe(audio_path), self._on_transcribed)
         return GLib.SOURCE_REMOVE
 
+    def _model_turn_in_flight(self) -> bool:
+        """Whether a model turn is running now - the contention the gate exists for."""
+        future = getattr(self, "_turn_future", None)
+        try:
+            return future is not None and not future.done()
+        except Exception:  # noqa: BLE001 - "could not tell" must not cost the transcript
+            return False
+
     async def _transcribe(self, audio_path: str) -> str:
         """Run (blocking) whisper.cpp transcription off the GTK thread.
 
@@ -527,8 +541,12 @@ class VoiceMixin:
         loop = asyncio.get_event_loop()
         gate = getattr(self, "_speech_gate", None)
         if gate is None:
-            gate = self._speech_gate = speech_gate.Gate(
-                speech_gate.window_busy(getattr(self, "window", None)))
+            # Busy means a model turn is actually in flight. It read the window's
+            # state, and the voice path itself sets THINKING ("processing") just
+            # before transcribing - so the gate waited its full 4 s behind its own
+            # orb on every spoken request, with no model running (measured
+            # 2026-10-08: "still generating after 4s" on the first turn of a run).
+            gate = self._speech_gate = speech_gate.Gate(self._model_turn_in_flight)
         try:
             def _work() -> str:
                 waited = gate.run()
@@ -624,7 +642,7 @@ class VoiceMixin:
     def _listen_for_answer(self) -> bool:
         pending = bool(self.window and self.window.has_pending_question())
         if pending and not self._listening:
-            self._begin_listening()
+            self._begin_listening(keep_reply=True)
         else:
             logger.info(f"Not listening for an answer (question open: {pending}, already listening: {self._listening})")
         return GLib.SOURCE_REMOVE

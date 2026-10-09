@@ -579,16 +579,25 @@ class TestNobodyToAskSaysNobodyIsThere:
 
         config = ChronoaConfig()
         gated = _gated_tools()
-        # The four that gate inline in `_run` rather than through a `_consent`
-        # helper. Each is called with arguments that would otherwise *act* -
-        # Ctrl+C, a real capture, a real notification - so a gate that had
-        # quietly stopped working would do the thing instead of refusing it,
-        # which is the failure this is looking for.
+        # The ones that gate inline in `_run` rather than through a `_consent`
+        # helper - they consult `config.sense_allowed(...)` or a sense property
+        # directly, which is the documented precedent (`screenshot.py` does the
+        # same). Each is called with arguments that would otherwise *act* - a
+        # Ctrl+C, a real capture, a real notification, a real outbound request
+        # - so a gate that had quietly stopped working would do the thing
+        # instead of refusing it, which is the failure this is looking for.
+        #
+        # This list has to be completed whenever a skill starts gating inline:
+        # an unlisted one is reported as "no _consent() gate and no probe",
+        # which reads as a missing gate rather than a missing entry here.
         probes = {
             "list_wifi_networks": {},
             "notify": {"summary": "consent sweep probe"},
             "press_key": {"key": "ctrl+c"},
             "screenshot": {},
+            "maps": {"action": "find", "place": "the consent sweep probe"},
+            "news": {"topic": "the consent sweep probe"},
+            "take_photo": {},
         }
 
         problems = []

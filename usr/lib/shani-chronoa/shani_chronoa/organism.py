@@ -207,6 +207,67 @@ INVENTORY: Tuple[Organ, ...] = (
 )
 
 
+#: What Chronoa deliberately does not do, and why - ARCHITECTURE-TARGET.md
+#: Part 4, as data, so the Inventory panel can show it and a test can keep the
+#: two in step. `(diagram term, what it would be, the standing decision, why)`.
+#: These are decisions, not gaps: each stays until a person decides otherwise.
+#: The document's table was the only place they existed, so someone reading the
+#: app could not tell "not built yet" from "will not be built" - and a refused
+#: request read like a missing feature.
+STANDING_DECISIONS: "Tuple[Tuple[str, str, str, str], ...]" = (
+    ("Shell / CLI", "Run any shell command", "no generic shell exec",
+     "a fixed whitelist of typed skills is the safety model; the sandbox exists "
+     "for those, not for free-form commands"),
+    ("MCP", "Use other apps' tools (an MCP client)", "server only; ask before a client",
+     "a client imports someone else's tools and bypasses the whitelist's reasoning"),
+    ("Skill learning", "Write its own new skills", "skills are code a person writes",
+     "a self-written skill is generic exec by another route"),
+    ("Rust / Tokio", "A rewrite for speed", "stays on Python with GLib and asyncio",
+     "latency is set by the model (first word about 5 s on CPU), not the language"),
+    ("Qdrant, LanceDB, Chroma", "A vector database server", "one SQLite file",
+     "a server is another daemon to keep alive; SQLite with full-text search "
+     "covers a personal-scale index"),
+    ("libinput / evdev", "Read every keystroke", "no raw input capture",
+     "reading every key is a keylogger whatever the intent; idle time is read "
+     "as a single number instead"),
+    ("AppArmor / udev rules", "Ship system security policy", "owned by the OS layer",
+     "Chronoa ships no system policy; that belongs to shani-settings"),
+    ("Video, 3D, audio generation", "Make video, 3D or music", "out of scope on this hardware",
+     "with no GPU, generating one item takes minutes on the processor"),
+    ("Affect, Curiosity, Dream acting alone", "Act on its own initiative",
+     "everything unattended asks first",
+     "unattended is the riskiest origin; any background behaviour is off by "
+     "default and goes through consent and approvals"),
+)
+
+
+#: Decisions that are about *this hardware*, not about Chronoa. Generation is
+#: out of scope on a machine with no compute GPU because one item takes minutes
+#: on the processor; on a machine with one it is simply not built yet, and the
+#: Inventory panel must not call it a refusal there.
+HARDWARE_GATED = frozenset({"Video, 3D, audio generation"})
+
+#: Kernel drivers that mean a GPU fit for generation. Not every adapter: an
+#: integrated i915 is a GPU and would make the claim false (this development
+#: machine has exactly that).
+COMPUTE_GPU_DRIVERS = frozenset({"nvidia", "amdgpu"})
+
+
+def compute_gpu() -> "tuple[Optional[str], List[str]]":
+    """(driver of a GPU fit for generation, or None; every GPU driver found).
+
+    From sysfs through the `gpu` sense, which costs nothing - not from
+    `local_llm.gpu_devices()`, which starts llama-server and can take 30 s.
+    """
+    try:
+        from shani_chronoa.senses.gpu import read_gpus
+        drivers = [str(g.get("driver") or "unknown") for g in read_gpus()]
+    except Exception:  # noqa: BLE001 - a panel must not raise over hardware
+        return None, []
+    capable = next((d for d in drivers if d in COMPUTE_GPU_DRIVERS), None)
+    return capable, drivers
+
+
 def by_system() -> "List[Tuple[str, List[Organ]]]":
     """The inventory grouped for display, in `SYSTEMS` order.
 

@@ -132,7 +132,9 @@ class VoicePage:
         # to reach for when it is not enough.
         try:
             from shani_chronoa import voice_style
-            chosen = config.get_string("voice-style", "natural")
+            # `get`: ChronoaConfig has no `get_string`, and the AttributeError
+            # used to skip this whole row - the style choice never appeared.
+            chosen = config.get("voice-style", "natural")
             row = self._choice(
                 group, "Voice",
                 "A whole character rather than one slider at a time. Applied in "

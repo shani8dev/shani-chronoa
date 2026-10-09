@@ -423,6 +423,14 @@ class HelpWindow(Gtk.Window):
         for extra in sorted({c.group for c in self._caps} - set(ordered)):
             ordered.append(extra)
 
+        rows.append(self._build_tasks(config))
+        everything = Gtk.Label(label="Everything Chronoa can do")
+        everything.add_css_class("title-4")
+        everything.set_halign(Gtk.Align.START)
+        everything.set_margin_start(14)
+        everything.set_margin_top(18)
+        rows.append(everything)
+
         for group in ordered:
             group_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
             group_box.add_css_class("help-group")
@@ -442,6 +450,67 @@ class HelpWindow(Gtk.Window):
             self._index.append((group_box, indexed))
             rows.append(group_box)
         return rows
+
+    def _build_tasks(self, config) -> Gtk.Box:
+        """The jobs first: how Chronoa helps with a day, each one ready to send.
+
+        Above the full list, because "what can you do?" is asked by someone with
+        something to get done, and a list of tool names does not answer it.
+        Searchable with the rest; a card says which switches its job still needs.
+        """
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.add_css_class("help-group")
+        box.set_margin_start(14)
+        box.set_margin_end(14)
+        heading = Gtk.Label(label="Get things done")
+        heading.add_css_class("title-4")
+        heading.set_halign(Gtk.Align.START)
+        box.append(heading)
+        intro = Gtk.Label(label="Say what you want done, the way you would ask a person. "
+                                "Chronoa works out the steps, asks before anything that "
+                                "pays or deletes, and tells you what it did.")
+        intro.add_css_class("dim-label")
+        intro.set_wrap(True)
+        intro.set_xalign(0.0)
+        box.append(intro)
+        indexed = []
+        for task in capabilities.EVERYDAY_TASKS:
+            card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            card.add_css_class("card")
+            card.add_css_class("help-task")
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            text.set_hexpand(True)
+            for side in ("start", "top", "bottom"):
+                getattr(text, f"set_margin_{side}")(10)
+            title = Gtk.Label(label=task.title, xalign=0.0)
+            title.add_css_class("heading")
+            text.append(title)
+            how = Gtk.Label(label=task.how, xalign=0.0, wrap=True)
+            text.append(how)
+            said = Gtk.Label(label=f"\u201c{task.prompt}\u201d", xalign=0.0, wrap=True)
+            said.add_css_class("dim-label")
+            said.add_css_class("caption")
+            text.append(said)
+            needs = capabilities.task_needs(task, config)
+            if needs:
+                gate = Gtk.Label(label="Needs switched on: " + "; ".join(needs), xalign=0.0, wrap=True)
+                gate.add_css_class("help-row-gate")
+                gate.add_css_class("help-row-gate-closed")
+                text.append(gate)
+            card.append(text)
+            if self._on_try is not None:
+                try_button = Gtk.Button(label="Try it")
+                try_button.add_css_class("suggested-action")
+                try_button.set_valign(Gtk.Align.CENTER)
+                try_button.set_margin_end(10)
+                try_button.set_tooltip_text(f"Send: {task.prompt}")
+                try_button.update_property([Gtk.AccessibleProperty.LABEL], [f"Try: {task.title}"])
+                try_button.connect("clicked", self._on_try, task.prompt)
+                card.append(try_button)
+            box.append(card)
+            indexed.append((card, " ".join((task.title, task.how, task.prompt)).lower()))
+        self._index.append((box, indexed))
+        return box
 
     def _build_row(self, capability, config) -> Gtk.Box:
         # Text in one column, Try beside the whole of it. Try used to sit in the

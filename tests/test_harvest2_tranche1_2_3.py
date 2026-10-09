@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
 import sys
 from pathlib import Path
 
@@ -29,7 +27,6 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 from shani_chronoa import (  # noqa: E402
     assistant as assistant_mod, goals, permissions, tools,
 )
-from shani_chronoa.assistant import Assistant  # noqa: E402
 from shani_chronoa.config import ChronoaConfig  # noqa: E402
 from shani_chronoa.sandbox import executor as executor_mod  # noqa: E402
 from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel  # noqa: E402
@@ -257,7 +254,7 @@ def test_a_broken_sink_cannot_break_a_turn():
 
 
 def test_rounds_budget_per_origin():
-    assert assistant_mod._rounds_for_origin("user") == 4
+    assert assistant_mod._rounds_for_origin("user") == assistant_mod.MAX_TOOL_ROUNDS
     assert assistant_mod._rounds_for_origin("unattended") == 1
     # A name we have never heard of fails closed: unattended, not trusted.
     assert assistant_mod._rounds_for_origin("some-future-origin") == 1

@@ -522,6 +522,20 @@ _PACKAGE_HINTS = {
     "upower": "upower",
     "fwupdmgr": "fwupd",
     "bluetoothctl": "bluez-utils",
+    # libnfc ships its whole tool set as one package (verified from upstream's
+    # `BUILD_UTILS` default and Arch's PKGBUILD, which never turns it off), so
+    # every `nfc-*` binary maps to the same answer. Without these entries
+    # `tool_missing` fell back to its literal placeholder and produced
+    # "On Arch it comes from the 'the package that provides it' package."
+    "nfc-list": "libnfc",
+    "rtl_fm": "rtl-sdr",
+    "obexd": "bluez-obex",
+    "nfc-scan-device": "libnfc",
+    "nfc-mfultralight": "libnfc",
+    "nfc-mfclassic": "libnfc",
+    "nfc-emulate-forum-tag4": "libnfc",
+    "nfc-jewel": "libnfc",
+    "nfc-relay-picc": "libnfc",
     "udisksctl": "udisks2",
     "pdftotext": "poppler",
     "scanimage": "sane",

@@ -381,17 +381,11 @@ _SCHEMA = {
     "function": {
         "name": "sing",
         "description": (
-            "Sing a line aloud instead of speaking it: each syllable is moved to "
-            "its own note, using the app's own text-to-speech engine (Kokoro "
-            "when installed and permitted, else Piper/RHVoice/espeak-ng) and the "
-            "local pitch shifter. Use this when someone asks to be sung to, to "
-            "hear a line sung, or for a melody. It sings the words it is given "
-            "on one of five named contours (rising, falling, arch, level, wave), "
-            "or on the real tune from a .mid file when 'midi_file' is given. It "
-            "does NOT know any song's tune, so never present its output as a "
-            "specific song unless a MIDI file was supplied. Needs soundtouch or "
-            "rubberband; reports the engine it used and any part of the request "
-            "it could not honour."
+            "Sing a line aloud: each syllable gets its own note, on one of five "
+            "named contours (rising, falling, arch, level, wave) or the real tune "
+            "from a 'midi_file'. It does NOT know any song, so never present its "
+            "output as a particular tune unless a MIDI file was supplied. Needs "
+            "soundtouch or rubberband."
         ),
         "parameters": {
             "type": "object",

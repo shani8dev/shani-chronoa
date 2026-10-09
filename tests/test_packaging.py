@@ -8,7 +8,6 @@ import re
 import shlex
 from pathlib import Path
 
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 #: The Arch manifest that actually ships this package lives in the sibling
@@ -102,6 +101,54 @@ class TestSchemaMetadata:
         for value in ("auto", "low", "medium", "high", "gpu"):
             assert value in block.lower()
         assert "startup" in block.lower()
+
+
+class TestThePkgbuildActuallyParses:
+    """`bash -n` on the manifest, because nothing else here can see a syntax error.
+
+    Every other check in this file reads the manifest as **data** - a regex for
+    the array, `shlex` for its entries - and both are blind to the way this
+    broke. An apostrophe inside one of the single-quoted `optdepends`
+    descriptions,
+
+        'pulseaudio-utils: pactl, for bridging a Bluetooth call's audio ...'
+
+    closes the string early. The consequence is not a mangled description:
+
+    - `bash -n` reports `syntax error near unexpected token '('`, so **the whole
+      PKGBUILD stops parsing and makepkg cannot build the package at all**;
+    - `shlex.split(..., comments=True)` raised `ValueError: No closing
+      quotation`, so four tests failed with a parser traceback rather than with
+      anything naming the real cause;
+    - every entry after the apostrophe silently disappeared from what `bash`
+      itself evaluates, so `sox` and the RHVoice voices were no longer declared
+      at all - `tts.py apply_timbre` would have been a permanent no-op on any
+      real install.
+
+    So the guard is the shell's own parser, and it is the only one of the three
+    that names the real problem.
+    """
+
+    def test_the_manifest_parses_as_shell(self):
+        proc = subprocess.run(["bash", "-n", str(_PKGBUILD)],
+                              capture_output=True, text=True, timeout=60)
+        assert proc.returncode == 0, (
+            f"the PKGBUILD does not parse, so the package cannot be built:\n"
+            f"{proc.stderr.strip()}"
+        )
+
+    def test_no_description_contains_an_apostrophe_that_would_close_its_quote(self):
+        """The specific mistake, named, so it is not reintroduced quietly."""
+        offenders = [
+            line.strip()
+            for line in _PKGBUILD.read_text().splitlines()
+            if line.strip().startswith("'") and line.strip().endswith("'")
+            and "'" in line.strip()[1:-1]
+        ]
+        assert offenders == [], (
+            "an apostrophe inside a quoted entry closes the quote early and makes "
+            "the manifest unparseable:\n  " + "\n  ".join(repr(o) for o in offenders)
+        )
 
 
 class TestPackagingMetadata:
@@ -397,6 +444,10 @@ class TestPackagingMetadata:
         if u2net_source.exists():
             assert "import onnxruntime" in u2net_source.read_text(), (
                 "the object background remover is offered a runtime it never reads")
+            if not any("onnxruntime" in name for name in optdepends):
+                problems.append(
+                    "no onnxruntime package is in optdepends, so nothing offers "
+                    "the runtime remove_background's u2net path needs")
         if "espeak-ng" not in depends:
             problems.append(
                 "'espeak-ng' is not a hard dependency although it is the one "

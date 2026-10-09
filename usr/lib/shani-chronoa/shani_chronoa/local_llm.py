@@ -877,6 +877,26 @@ _RULES_PREFIX = "The user's standing rules for you"
 _THINK = re.compile(r"<think>.*?</think>\s*", re.S)
 _TOOL_TAG = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
+#: Qwen3-Coder's XML form - `<function=name><parameter=key>value</parameter></function>`,
+#: usually inside `<tool_call>`. Seen live 2026-10-08: a free cloud model asked
+#: for `browse` this way and Chronoa showed the markup to the person as its reply.
+_XML_FUNCTION = re.compile(r"<function=([\w.\-]+)>(.*?)</function>", re.S)
+_XML_PARAMETER = re.compile(r"<parameter=([\w.\-]+)>(.*?)</parameter>", re.S)
+
+
+def _xml_value(raw: str, schema: dict):
+    """A parameter's text as the type its schema asks for; the text itself when it is not one."""
+    text = raw.strip("\n")
+    kind = (schema or {}).get("type")
+    if kind in ("integer", "number", "boolean", "array", "object"):
+        try:
+            value = json.loads(text.strip())
+        except ValueError:
+            return text
+        if kind == "integer" and isinstance(value, bool):
+            return text
+        return value
+    return text
 
 
 def _redact(messages: "list[dict]") -> "list[dict]":
@@ -958,8 +978,51 @@ def normalize_messages(messages: "list[dict]") -> "list[dict]":
     return ([head] if head is not None else []) + body
 
 
+def _is_json(text: str) -> bool:
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def text_tool_call(content) -> "Optional[tuple]":
+    """(name, arguments) when a reply is nothing but a tool call written as text, else None.
+
+    Unlike `recover_tool_calls` this does not check the name against the offered
+    tools - it is how the assistant notices a model calling a tool that does not
+    exist (`set_reminder` for `reminders`, seen live 2026-10-08) or was not
+    offered, so it can say so to the model instead of showing the markup.
+    """
+    if not isinstance(content, str):
+        return None
+    text = _THINK.sub("", content).strip()
+    match = _XML_FUNCTION.search(text)
+    if match and text.replace(match.group(0), "").replace("<tool_call>", "").replace("</tool_call>", "").strip() == "":
+        return match.group(1), dict(_XML_PARAMETER.findall(match.group(2)))
+    block = None
+    for found in (_TOOL_TAG.search(text), _JSON_FENCE.search(text)):
+        if found and text.replace(found.group(0), "").strip() == "":
+            block = found.group(1)
+    if block is None and text.startswith("{") and text.endswith("}"):
+        block = text
+    if block is None:
+        return None
+    try:
+        obj = json.loads(block)
+    except ValueError:
+        return None
+    if isinstance(obj, dict) and isinstance(obj.get("name"), str):
+        args = obj.get("arguments", obj.get("parameters", {}))
+        return obj["name"], args if isinstance(args, dict) else {}
+    return None
+
+
 def recover_tool_calls(message: dict, tools) -> dict:
-    """A tool call a small model wrote as text (`<tool_call>{...}</tool_call>`, a JSON block) turned into a real one.
+    """A tool call a model wrote as text turned into a real one.
+
+    Three spellings: `<tool_call>{...}</tool_call>` (JSON), a fenced JSON block,
+    and Qwen3-Coder's `<function=name><parameter=k>v</parameter></function>`.
 
     Only for a tool that was offered, with an object of arguments; anything
     else is left as the text it was. Also removes a leaked `<think>` block,
@@ -969,13 +1032,42 @@ def recover_tool_calls(message: dict, tools) -> dict:
     if isinstance(content, str) and "<think>" in content:
         content = _THINK.sub("", content).strip()
         message = {**message, "content": content}
+    # A malformed entry (a string, None) in the tool list is skipped, not fatal:
+    # the cloud path runs this too now, and its schema guard is tested with a
+    # deliberately broken list (`test_skills.TestCloudSchemaGuards`).
+    tools = [t for t in (tools or []) if isinstance(t, dict)]
     if message.get("tool_calls") or not tools or not isinstance(content, str):
         return message
     offered = {(t.get("function") or {}).get("name") for t in tools}
     calls = []
-    for match in list(_TOOL_TAG.finditer(content)) or list(_JSON_FENCE.finditer(content)):
+    schemas = {(t.get("function") or {}).get("name"): (t.get("function") or {}).get("parameters") or {}
+               for t in tools}
+    for match in _XML_FUNCTION.finditer(content):
+        name = match.group(1)
+        if name not in offered:
+            continue
+        props = (schemas.get(name) or {}).get("properties") or {}
+        args = {key: _xml_value(value, props.get(key) or {})
+                for key, value in _XML_PARAMETER.findall(match.group(2))}
+        calls.append({"id": f"recovered-{len(calls)}", "type": "function",
+                      "function": {"name": name, "arguments": json.dumps(args)}})
+    if calls:
+        logger.info("Recovered %d tool call(s) the model wrote as XML text", len(calls))
+        return {**message, "content": "", "tool_calls": calls}
+    blocks = [m.group(1) for m in (list(_TOOL_TAG.finditer(content)) or list(_JSON_FENCE.finditer(content)))]
+    if not blocks:
+        # A reply that is nothing but the call as a bare JSON object (or one per
+        # line) - seen live 2026-10-08: `{"name": "browse", "parameters": {...}}`
+        # ended a booking after four steps. Only when the whole reply is JSON, so
+        # an answer that merely quotes some JSON is never turned into an action.
+        stripped = content.strip()
+        lines = [l.strip() for l in stripped.splitlines() if l.strip()]
+        if stripped.startswith("{") and stripped.endswith("}"):
+            blocks = [stripped] if _is_json(stripped) else (
+                lines if all(l.startswith("{") and l.endswith("}") and _is_json(l) for l in lines) else [])
+    for block in blocks:
         try:
-            obj = json.loads(match.group(1))
+            obj = json.loads(block)
         except ValueError:
             continue
         name = obj.get("name") if isinstance(obj, dict) else None

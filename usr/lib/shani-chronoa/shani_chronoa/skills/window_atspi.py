@@ -6,10 +6,14 @@ Provides AT-SPI-based window control for Wayland sessions, with xdotool fallback
 from __future__ import annotations
 
 import logging
-import os
 from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+# A shared backend for focus_window and close_window, not a skill: without the
+# marker every startup logged "Skipping 'builtin:window_atspi': SKILLS must be a
+# list of Skill entries" (see skills/__init__.py NOT_A_SKILL).
+_CHRONOA_NOT_A_SKILL = True
 
 
 def _atspi():

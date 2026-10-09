@@ -57,7 +57,8 @@ import re
 import shutil
 import subprocess
 import time
-from typing import Any, Callable, List, NamedTuple, Optional, Tuple
+from pathlib import Path
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import gi
 
@@ -1171,6 +1172,13 @@ def _summary(finding_statuses: List[str]) -> Gtk.Widget:
     return common.banner(
         _text(" - ".join(parts) + ". The rows below say which, and why the rest are not."),
     )
+
+
+#: Not built in the window's start-up pass (`ChronoaWindow` reads this): the
+#: probes below are real - a screen capture, device and model checks - and run
+#: on the main thread, so building this panel unasked froze the window for
+#: seconds right after start (measured 2026-10-08). It is built when opened.
+PREBUILD = False
 
 
 def build(app: Any = None) -> Gtk.Widget:

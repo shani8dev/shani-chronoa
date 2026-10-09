@@ -4173,6 +4173,11 @@ Third gap round (function level and reverse direction, same day):
   rows), Activity -> Tool activity. `NO_GEAR` in
   `tests/test_settings_targets_resolve.py` listed Desktop and Machine on
   reasons the code contradicts; the note there now records the evidence.
+- Test-isolation trap found on the way: `ChronoaApplication` registers a
+  spoken permission presenter in `ask_bridge` at startup and nothing clears it,
+  so any later in-process call that needs consent *asks* and blocks. Tests that
+  expect a skill's own refusal must clear `ask_bridge._presenter` (see
+  `tests/test_surfaced_backends.py::_nobody_to_ask`).
 - Checked clean: no setting in the UI that nothing reads (the three hits are
   read by the wizard and the organ strip); session grants are listed and
   revocable in Settings > Approvals; the remaining store functions without UI
@@ -4283,6 +4288,125 @@ sending BindShortcuts to the real desktop portal. Anything that talks D-Bus in a
 takes an explicit private connection (`Gio.DBusConnection.new_for_address_sync`) or
 runs in a subprocess. `dbus-launch` is not installed on the dev box; use
 `dbus-daemon --session --print-address`.
+
+## A real task end to end in the real app, and what it took (2026-10-08)
+
+Driven by recording demos: first a scripted one, then the **real
+`ChronoaApplication`** with a free cloud model (Kilo Gateway via the custom
+model-server fields, `kilo-auto/free`). The final run: one typed request ("book
+the cheapest Boston -> London flight on blazedemo.com, weather, rupees,
+itinerary, remind me tomorrow 9am") -> 27 tool calls chosen by the model ->
+booked (demo site, no real payment), weather, INR, HTML itinerary, reminder.
+Every gap below was found by a run failing, fixed, and re-run.
+
+**Harness gaps (each one ended the task):**
+- `MAX_TOOL_ROUNDS` 4 -> 40 and `MAX_TURN_SECONDS` 300 -> 600. Four rounds cut
+  every multi-step task off; the loop detector, per-tool budget, wall clock and
+  Stop remain the bounds. `test_multi_step_turns.py`.
+- The out-of-rounds answer (sent without tools) was the model's next call as
+  raw markup; now `assistant._out_of_rounds` says the steps ran out instead.
+- `tool_select.wants_a_browser`: a request naming a site or a page action
+  (book, fill in, sign in, order...) is offered `browse`. Before, the model
+  tried to book with `web_search`.
+- Text tool calls: `recover_tool_calls` now also reads Qwen3-Coder XML
+  (`<function=x><parameter=k>v</parameter>`) and a reply that is only a JSON
+  call, and the **cloud** client now runs it (its `postprocess` returned the
+  message unchanged). Only offered tools; quoted JSON is left alone.
+  `test_text_tool_calls_recovered.py`.
+- `reaction.py`'s repeat check ("needs a person") never reached a person:
+  `tools._reaction_refuses` turned the question into "Not run". It now asks
+  through `ask_bridge` (person's own turns only, never from the GTK main
+  thread), and an approval restarts that tool's count. `test_reaction.py`.
+
+**browse in the in-app browser (fork-built, then verified here):** runs
+in-process while a GUI browser window can serve it (`tools._runs_locally`),
+egress-checks every model navigation incl. clicks and redirects, refuses
+`evaluate` and `file://`. Added here: a visible cursor/ring/ripple and an
+activity strip in the window; typing in visible chunks that carries on into the
+focused field when a framework re-creates the input (Wikipedia did); smooth
+scroll + `direction`; a click on a hidden element is an error naming the
+form's real button (it used to report success); CAPTCHA pages are handed to
+the person, never solved; **typing into a card field or pressing a
+Pay/Purchase/Place-order button asks the person** (once per site for 5 min;
+nobody to ask = not done). `test_browse_in_app.py` (real window on Broadway).
+
+**Skill bugs the recordings showed on screen:** `reminders` refused its own
+schema example "tomorrow 9am" and built "tomorrow" on today's date;
+`create_document` HTML dumped markdown as one paragraph (now rendered, escaped
+first). `test_reminder_times_and_html_documents.py`.
+
+**Window control (`shani_chronoa/windows/`):** one API (list/find/focus/close/
+minimize/maximize/fullscreen/move/resize/set_workspace) over GNOME (the shipped
+`usr/share/gnome-shell/extensions/chronoa-windows@shani.dev` - enabling it is
+the permission), KWin scripting, X11 (xdotool, wmctrl fallback), and the
+AT-SPI bus. Measured on GNOME 50: GTK4 frames expose `window.close/minimize/
+toggle-maximized` and those work; nothing focuses or moves through AT-SPI;
+GTK3/Chromium expose no window actions. New skill `arrange_window`.
+`test_windows_gnome_live.py` runs a **private headless gnome-shell** (own
+bus/HOME/runtime dir, `--no-x11`) with real windows and drives the skills
+through `tools.execute_tool`. **KWin and X11 backends are written but not yet
+run against a real KWin/X server.** sway/Hyprland deliberately not done.
+
+**Recording:** GNOME's Screencast in the headless shell produced one frame
+for a minute of activity - not usable. Windows record themselves instead
+(`Gtk.WidgetPaintable` -> `render_texture` -> PNG at ~6 fps, joined by
+ffmpeg at the frames' real timestamps). A fully covered GTK window on Wayland
+stops being drawn, so windows are laid out side by side (`_Shell(monitor=)`).
+
+## Voice, measured end to end through real audio (2026-10-08)
+
+`tests/test_voice_loop_live.py` and `demos/record/record.py voice` run a private
+PipeWire graph: `mic_feed -> demo_mic` (a virtual microphone) and
+`demo_speaker -> speaker_tap` (a virtual speaker). Spoken WAVs go in, Chronoa's
+voice is recorded out, and both directions are scored by word error rate. A
+transcript that merely exists is not evidence: "two hundred dollars" came back
+as "to $100".
+
+**Bugs this found and fixed:**
+- **No named voice style was ever applied.** `voice_style.selected_style`
+  called `config.get_string`, which ChronoaConfig does not have. The
+  AttributeError was swallowed as "unstyled". The same call made the Settings
+  "Voice" style row fail to build, so it never appeared. The unit tests' fake
+  configs had `get_string`, so they passed. Now `config.get`, with a
+  real-config test and a control.
+- **The window froze for about 8 seconds after start.**
+  `_seed_status_dots` built every sidebar panel in one idle callback,
+  Diagnostics' real probes (a screen capture) included. The mic press waited
+  behind it, and a spoken request was lost before recording began. Now one
+  panel per main-loop turn, and Diagnostics has `PREBUILD = False`.
+  `test_startup_does_not_freeze.py`, with a control.
+- **Every spoken request waited 4 seconds at the transcription gate.** Its
+  busy probe read the window state, and the voice path sets THINKING itself
+  just before transcribing. It now asks `VoiceMixin._model_turn_in_flight`
+  (`_turn_future`). `test_speech_gate.py`.
+
+**Measured with whisper `base`:**
+- **Hearing:** WER 0.00–0.29 for the synthetic "person" voice. Wording
+  matters: "at nine" is heard as "time", "at nine o'clock" exactly.
+- **Speaking:** espeak-ng (the fallback; no Piper voice in the test profile)
+  scores WER 0.35–0.47 with numbers lost, so the word-for-word speaking test
+  skips under espeak-ng and runs once a neural voice exists.
+- **espeak variants:** `+m3` at 160 wpm 0.27, against the default `+f3` at
+  0.39. Changing the default voice's gender is a product call, not made here.
+- **Styles** (with SoX) shape timbre: 0.33–0.42, inside the noise.
+- **SoX is only an optdepend.** Without it, every style, plus pitch, tempo
+  and rate, is a silent no-op.
+
+**Voice engines compared** (`test_voice_engines_measured`, 8-thread laptop CPU,
+no GPU; voices installed once into the git-ignored `cache/data-home/`):
+
+| engine | WER | first sentence ready | RTF |
+|---|---|---|---|
+| espeak-ng `+f3` | 0.39 | 0.02 s | 0.00 |
+| **Piper Lessac** | **0.18** (0.00 on the reply sentence) | **0.47 s** | **0.11** |
+| Kokoro (int8, 4 threads) | 0.41 (dropped words) | 9.9 s | 2.0-2.4 |
+
+Kokoro reloads its model in each per-sentence `sherpa-onnx-offline-tts` call
+(about 3.4 s of load). Without that, synthesis alone is still RTF ≈ 1.3, so a
+persistent worker would not make it keep up on this class of CPU and was not
+built. It stays opt-in; Piper, which setup's Voice page installs on every path,
+is the voice to use. The Kokoro thread count is now `min(4, cpu_count)`, not
+a fixed 2: 4 threads were fastest, and 8 were slower again.
 
 ## Audit-verified known issues (confirmed present)
 
@@ -4721,6 +4845,13 @@ Re-scan against `../garuda-catalog.md` (29 repos, not 34). **Confirmed mapping: 
 
 ## Deliberately not done (as of 2026-09-16)
 
+> **Superseded (2026-10-08).** The live list is `ARCHITECTURE-TARGET.md` Part 4,
+> mirrored as data in `organism.STANDING_DECISIONS` and shown in the app on the
+> Inventory panel under "Deliberately not built";
+> `tests/test_standing_decisions_are_shown.py` fails when the two drift. Of the
+> items below, the tray and background mode have since been built (`app/tray.py`,
+> `daemon.py`) and sherpa-onnx is in use (Kokoro); the MCP client stays refused.
+
 Found during a competitor-comparison pass but not implemented, because each
 needs a real design decision rather than just typing code - don't assume
 these were missed:
@@ -4878,3 +5009,757 @@ statement about the 2026-09-18 measurement, not about the tree today.
     verified this pass: real git history, 9 commits, `git status`/`git log`
     work normally. Whatever blocked git detection during the 2026-09-17
     pass was environmental, not a property of this repo.
+
+## The Siri/Google parity batch shipped a skill that could never run (2026-10-08)
+
+Six builders were launched in parallel to close the gap between what Siri and
+Google Assistant can do and what Chronoa could. The session hit a spend limit
+mid-build; the files landed, the wiring did not. Four of the new skills
+(`alarm`, `calendar_edit`, `maps`, `news`) had **no test file at all**, and
+checking what they actually did turned up three defects that only running them
+showed.
+
+**`calendar_edit` refused every call, and the switch it named did not exist.**
+Measured, through the real dispatch path:
+
+```
+create -> Refusing: changing your calendar is turned off
+          (enable 'calendar-write-enabled' in Settings). Nothing was changed.
+```
+
+`calendar-write-enabled` was **not in the schema at all**, so `get_bool` returned
+its Python default `False` for every value, and there was no row in Settings to
+turn it on either. A permanent refusal wearing the shape of a permission - the
+same class as the `heard-sound` sense above, where the only switch that granted
+it was not on screen. This is worse than a missing feature because the skill
+looks configurable: the model advertised it and the refusal explained itself.
+Fixed by adding the key (default `false`), the Privacy row beside the read
+switch, and the `GATED` entry. Verified by granting it: the skill then reaches
+the calendar service and reports the honest environmental reason (no Evolution
+Data Server bindings on this box) - a *different* sentence, which is what shows
+the gate opened. `tests/test_parity_skill_gates_are_reachable.py`.
+
+**`eds_calendar._escape` never escaped a semicolon.** Written as a backslash in
+front of `;` in a non-raw string literal, which Python reads as just `;`. A
+`SyntaxWarning` on every import (visible) and a malformed property value for any
+title containing one (not visible). The other four escapes in the same call were
+correct, which is why only this one was wrong.
+
+**Eight of the twelve new tools fell through to the `Other` help group**, failing
+`test_capabilities.py::test_no_builtin_skill_lands_in_the_other_group` - a test
+that was already red on HEAD for an unrelated untracked file, so the failure was
+easy to mistake for the known one. The full name list is the tell: the assertion
+prints all eight.
+
+**A documented invariant was nearly broken by the obvious fix.** `calendar_edit`
+was in neither `MUTATING_TOOLS` nor `READ_ONLY_TOOLS`, so `cli_matrix`
+classified it as neither actuator nor reader and no post-condition column was
+computed for it. Adding it to `MUTATING_TOOLS` is the intuitive repair and is
+**wrong**: the module states that a consent-gated tool must not be in that set,
+because `tool_annotations` has a separate gated branch that already answers
+`read_only_hint: False` and the two branches disagree about `idempotent_hint`.
+`toggle_wifi` and `take_photo` were gated too, so all three had to stay out.
+`alarm` and `routines` are ungated and are in it - `alarm` has a post-condition,
+and `routines` gained one that re-reads the saved store, because a writer that
+reports success for a store it never wrote is its own failure mode.
+
+**A duplicate dict key had been silently killing a help label.** `browse`
+appeared twice in `capabilities._GROUPS` with two different menu labels ("Use a
+web page: click, type and read it" and "Drive a web browser"). Python resolves a
+duplicate key to the last one, so the better label was dead with no error in
+either direction - the table is correct as far as any reader can tell, and the
+Help window showed the worse text. `python3 -m pyflakes` names it; nothing in the
+suite did. Worth remembering that pyflakes is already this repo's declared lint
+(AGENTS.md, "Lint with pyflakes") and a duplicate key in a data table is exactly
+the class it is for.
+
+**Two tests that could not fail, found by mutation rather than by reading:**
+
+- `test_a_refused_confirmation_is_reported_as_a_refusal_not_as_a_change` asserted
+  that the skill *asked*, so a mutation that skipped the confirmation while still
+  calling `_confirm()` stayed green - the question was still asked, the answer
+  ignored. It now asserts on `cal.remove_event` never being called.
+- `maps`' location-gate test asserted the answer contained the word "location",
+  which the *environmental* refusal on this box ("This computer's location is not
+  available") also contains. With the gate deleted the test passed. The
+  `locate` probe is now stubbed to **succeed**, so consent is the only thing that
+  can stop the lookup.
+
+**Three test bugs of my own, each recorded because the failure pointed at the
+code instead of at the test:** a stub written with `netjson.get_bytes`'s
+signature where `news._fetch`'s was needed (recording a params dict where a URL
+belonged, so the section-feed assertion failed as if routing were broken); a
+haversine band tightened to a distance remembered as ~115 km that is really
+120.2 km, and a second pair asserted at ~1380 km when it is 735; and a store
+reader that raised on an absent file, so "nothing was stored" assertions failed
+with a `FileNotFoundError` that looked nothing like the bug.
+
+Run: 224 passed across the parity, capability, consent, annotation and
+post-condition suites. Each skill's gate, refusal and post-condition confirmed by
+reverting it and watching the test fail.
+
+## The wearable read twice; `listen` had to be rebuilt on bluez's own API (2026-10-08)
+
+Asked how Da Fit changes smartwatch settings over Bluetooth, then asked to find
+the paired device. Doing the second thing is what found four bugs in the first.
+
+**The device is MoYoung.** Read through the real path, live:
+
+| | |
+|---|---|
+| `FB BGS002` | `B3:69:73:62:B2:B6`, connected, RSSI -67, 9 services / 21 characteristics |
+| Manufacturer Name | **`MOYOUNG-V2`** |
+| Firmware Revision | `JLQFNJFD1.0` · Software `MOY-7OT4-2.0.1` · Sensor location `chest` |
+| services | 0x1800, 0x1801, **0x180D**, 0x180F, 0x180A, **0x190E**, 0xFEEA, 0xFEE7, **0xAE00** |
+| vendor command channel | **0xAE01 `write-without-response` / 0xAE02 `notify`** |
+
+So the earlier research was right about the vendor and this is that vendor. **And
+0xAE01/0xAE02 is the closed MoYoung protocol**, the one whose framing lives in a
+closed-source AAR — see the Dart plugin's `MethodChannel.invokeMethod` chain with
+zero UUIDs in its 93 KB Java layer, and `McuPlatform`'s six MCU dialects. Its
+*shape* is now known and still not safe to drive: an unknown write to a wearable
+is how firmware is bricked, so it is not implemented and that is a decision, not
+an oversight. 0x190E (Phone Alert Status) is the GATT half of what
+`bluetooth_call` does over HFP.
+
+**`read` was truncating every multi-byte value.** `_READ_VALUE` was
+`([0-9a-fA-F]+)`, which stops at the **first space** in gatttool's
+`Characteristic value/descriptor: 06 4a 00`. Battery Level (0x2A19) is one byte,
+so it read correctly and hid it completely — while a firmware string came back
+as one character. Before/after on real hardware: `4a` → **`JLQFNJFD1.0`**,
+`4d4f594f554e472d5632` → **`MOYOUNG-V2`** instead of "M".
+
+Formats are taken from the binary's own strings, not from what a BLE tool is
+assumed to print — `strings $(which gatttool)` gives both: a read is
+`Characteristic value/descriptor: <bytes>`, a notification is
+`handle: 0x0022 <tab> value: <bytes>`. The first version of the notification
+pattern matched a *different* tool's format entirely and captured one byte, so
+every live reading arrived too short to decode.
+
+**`decode_heart_rate` had flags bit 0 backwards** (bit 0 is uint16, not uint8),
+so **every 8-bit measurement** — nearly all of them — was refused with "the
+measurement did not say whether the rate is 8 or 16 bit", the sentence you write
+for a device that failed to set a bit rather than one that correctly cleared it.
+
+### `listen` could not have worked, because gatttool cannot see a device bluez holds
+
+The whole `listen` action was built on `gatttool --listen`, and on a real desktop
+it fails **always**: gatttool opens a connection of its own, and bluez holds the
+link to any in-range paired device by policy. Measured with the device connected
+at RSSI -67, every call answers `Device or resource busy (16)`. Disconnecting
+first works, but bluez reclaims the device and the next call fails — so it would
+have worked in the seconds after a manual disconnect and nowhere else.
+
+It now goes through bluez's own `org.bluez.GattCharacteristic1` first, with
+gatttool as the fallback, and **says which route it used**. Four traps, all
+measured, all silent:
+
+- **`busctl get-property` takes the service name** —
+  `get-property SERVICE OBJECT INTERFACE PROPERTY`. Omitted, every property
+  returns empty, so **all 21 characteristics of a connected device read as
+  absent** — a lookup that silently finds nothing.
+- **`busctl tree` takes a service name, never an object path.** Given a path it
+  prints `Invalid bus service name: <the path>`. The whole tree is fetched and
+  filtered.
+- **bluez is on the *system* bus.** `busctl --user tree org.bluez` answers "not
+  provided by any .service files"; `--system` lists it owned by `bluetoothd`.
+- **The method name moved between bluez versions**: the installed daemon has
+  `StartNotify`, and `StartNotifications` is refused with `doesn't exist`.
+
+`busctl monitor` is **polkit-denied** (`Access denied` on `BecomeMonitor`), so
+the route polls the cached `Value` property at 200 ms rather than watching
+`PropertiesChanged` — unprivileged, and a heart rate notifies at ~1 Hz.
+
+### Two bugs that fix created, and the one that mattered most
+
+- **`ay 0` is an *empty* array, not a zero reading.** The first version read it as
+  the byte `0` and reported **"Battery Level: 0%"** for a device that had never
+  sent anything — a believable, confidently wrong number about a battery, from a
+  change made to *fix* a failure. Introduced by the bluez work.
+- **`ay 1 00` parsed as `100`**, because the array *length* was taken for a byte,
+  so every real value would have been off by one leading byte.
+- A notify session left subscribed holds the connection, so `StopNotify` is in a
+  `finally` and asserted to be called.
+
+**And the device confirms why `read` can never answer heart rate**: bluez reports
+`0x2A37` with `Flags: "notify"` — no `read` property at all. `read` on it is not
+slow or flaky, it is impossible, which is why the refusal now names `listen`.
+
+`0x180A` and `0x190E` were both advertised by that device and came back as
+`UUID 0x180a` / `UUID 0x190e`. **Both were then checked against
+`NordicSemiconductor/bluetooth-numbers-database` `v1/service_uuids.json`, the
+SIG's adopted-number list, and one of the two names this file had recorded was
+wrong:**
+
+- **`0x190E` is not Phone Alert Status Service — `0x180E` is.** The name was
+  right and the UUID was wrong, written from memory earlier the same day. The
+  wearable advertises `0x190E`, which is **not in the SIG's adopted list at
+  all**, so it is now reported by its number. That is the exact failure this
+  module documents — a name attached to the wrong UUID reads as fact and nobody
+  can tell it was invented. It also *shadowed* the real gap: `0x180E` was
+  missing from the table the whole time.
+- `0x180A` = Device Information: confirmed correct.
+- Three added from the same source while checking: `0x1802` Immediate Alert,
+  `0x1811` Alert Notification Service, `0x1812` Human Interface Device.
+
+**`0x1811` is Alert Notification Service, not the Health Device Profile.** Android's
+`BluetoothHealth` class is HDP, and HDP is **not a GATT service** — it is a
+classic Bluetooth profile discovered over SDP. So Android's health-device support
+maps onto a protocol `bluetooth_gatt` does not speak at all, which is a real
+boundary and not a gap in the UUID table.
+
+`0x0003`/`0x0004` remain named from the HID *usage* specification rather than
+the SIG list, because they are HID usage descriptors and the SIG list assigns
+those numbers differently (`0x2A4B` is "Report Map" there). Two numbering spaces,
+deliberately distinguished in a comment.
+
+**`bluetoothctl` on this box exposes no SDP at all** — measured: its menu has
+`scan`, `devices`, `connect`, `disconnect` and nothing else; `search-services`
+and `register-service` are absent. `rfcomm` *is* installed, so classic-Bluetooth
+serial is available as a binary while SDP is not available through the menu.
+
+### The manifest could not be built, and the suite could not see it
+
+An apostrophe inside a single-quoted `optdepends` description —
+`'pulseaudio-utils: pactl, for bridging a Bluetooth call's audio ...'` — closes
+the quote early. `bash -n` reports `syntax error near unexpected token '('`, so
+**the whole PKGBUILD stops parsing and makepkg cannot build the package at all**.
+It was introduced in this session and caught only because a packaging test
+failed with an unrelated-looking `ValueError: No closing quotation` from
+`shlex.split`.
+
+Every existing check in `test_packaging.py` reads the manifest as **data** — a
+regex for the array, `shlex` for its entries — and both are blind to this.
+Worse, `bash` itself then evaluated every entry *after* the apostrophe as
+commands, so `sox` and the RHVoice voices were no longer declared at all and
+`tts.py apply_timbre` would have been a permanent no-op on any real install. The
+guard added is `bash -n`, the only one of the three that names the real problem,
+plus a named check for the specific mistake.
+
+Run: **301 passed** across the bluetooth, capability, consent, annotation,
+post-condition and packaging suites. **20 mutations** (14 for the skill, 6 for
+the manifest and the new bluez route) confirmed to fail.
+
+## A Raspberry Pi HFP write-up, checked rather than believed (2026-10-08)
+
+[Automating Calls on Real Mobile Devices with Bluetooth HFP on a Raspberry
+Pi](https://sipfront.com/blog/2025/03/automating-calls-on-real-mobile-devices-with-bluetooth-hfp-on-a-raspberry-pi/)
+(March 2025) is the closest public description of what `bluetooth_call` does, so
+it is worth reading closely. **Its architecture is right and its tooling is
+Debian's** — which is the useful distinction, because the interesting parts are
+the claims that survived contact with this box.
+
+**oFono is not on Arch, so every command in that post is unavailable here.** No
+`ofono` package, no `/usr/share/ofono`, nothing named `org.ofono` on either bus
+(measured). So `list-modems`, `dial-number` and `hangup-active-calls` do not
+exist on ShaniOS. That is not a gap to close — `org.pipewire.Telephony` **is**
+the equivalent, and it is what this skill talks to. Introspecting it live:
+
+    org.pipewire.Telephony   (session bus, owned by wireplaster)
+      ObjectManager          GetManagedObjects / InterfacesAdded / InterfacesRemoved
+      org.ofono.Manager      GetModems / ModemAdded / ModemRemoved
+
+PipeWire **re-exports the ofono interface names** rather than inventing its own,
+which is why searching for `org.ofono` is the right instinct even on Arch — and
+why `bluez_cards()` having to walk `/proc/asound` for the HFP card is the only
+part of this path that is not already a D-Bus call.
+
+**Their `pw-dump` caveat is stale, and it matters.** The post says
+`pw-dump | jq` "does not work due to PipeWire producing broken JSON" and uses
+`pw-cli ls` + scraping `object.serial` instead. Measured here: `pw-dump` exits 0
+and yields **264,627 bytes that `json.loads` parses into 87 objects**. So the
+text-scraping workaround is not needed on this PipeWire, and anything that wants
+call-audio node ids should read the JSON.
+
+**The one finding to take seriously is the mixing.** "When playing to and
+recording from the phone at the same time, regardless of the sources and sinks
+used, we always got both streams mixed into the recording", worked around by
+tapping the PipeWire bluetooth *device node* rather than a sink. That is a real
+limitation of routing through a sink, and it is the kind of thing that otherwise
+shows up as mysteriously two-sided audio in a recording.
+
+Also true and worth stating so nobody expects more: the HFP codec ceiling is
+**CVSD 8 kHz or mSBC 16 kHz** even when the cellular leg is EVS/wideband, and
+there is Bluetooth latency in both directions.
+
+### What is actually missing, and one dead alias removed
+
+The post treats **call events** as first class — "receive phone events (incoming
+call, call closed)". `bluetooth_call` has none: `status/dial/answer/hangup/audio/
+profile` all *act or report on request*, and an incoming call is never
+signalled. That is the real gap, and it is the one worth building, because
+"your phone is ringing" is exactly what a voice assistant should say out loud
+and there is currently no way for it to know.
+
+It maps onto the existing trigger engine — `read_btconnect` in
+`triggers/desktop_sources.py` is the exact shape — and the data is there:
+`InterfacesAdded` on the ObjectManager carries `org.ofono.Voice`/`org.ofono.Call`
+for a modem, so an incoming call is a state transition on an object already
+being polled. **Not built, and the reason is the one this file keeps recording:
+there are zero gateways connected on any machine here, so a reader for it could
+only be verified returning UNAVAILABLE.** The honest reading — "no phone is
+connected" — is the easy half; detecting a real ringing phone is not something
+a unit test substitutes for.
+
+Second, smaller: `_audio_report` **reports** where call audio is going and what
+is missing, and moves nothing. The post's actual subject is injecting and
+capturing call audio by node id, which `pw-dump` now makes reachable here.
+
+**Removed a dead alias found on the way.** `if action in ("audio", "route")`
+accepted `route`, but the schema enum is
+`["status", "dial", "answer", "hangup", "audio", "profile"]` — so `route` was
+unreachable from the model and from every MCP client, and existed only as a
+second spelling of a live action. Same shape as the slash commands "that are
+advertised without a check": a name that reads as capability and can never be
+invoked.
+
+## NFC: the library is on every install and nothing reads it (2026-10-08)
+
+Asked about [Android's NFC
+overview](https://developer.android.com/develop/connectivity/nfc), which
+describes three modes - **reader/writer**, **card emulation**, and **HCE** - and
+noted that ShaniOS has libnfc. Both are right, and checking the second one
+against the first is worth writing down.
+
+**It is genuinely on every install.** `shani-pkgbuilds/shani-peripherals`
+`depends` on `libnfc` (with `ccid`, `pcsclite`, `acsccid`, `opensc`,
+`pcsc-tools`), and `shani-peripherals` is in **all four** image profiles -
+`gnome` and `cosmic` in `Packages-Desktop`, `plasma` in `Packages-Desktop`,
+`gamescope` in `Packages-Base`. Verified by reading the profile lists, not
+assumed.
+
+**And it ships the command-line tools**, which is the part that decides whether
+a skill is possible at all. Arch's `libnfc 1.8.0-3` runs cmake without
+`BUILD_UTILS=OFF`; upstream `libnfc-1.8.0/CMakeLists.txt` has
+`option (BUILD_UTILS "build utils ON/OFF" ON)` and an unconditional
+`add_subdirectory (utils)`. So the binaries are:
+
+    nfc-list  nfc-scan-device  nfc-mfclassic  nfc-mfultralight
+    nfc-jewel  nfc-emulate-forum-tag4  nfc-relay-picc  nfc-barcode
+    nfc-read-forum-tag3  nfc-utils
+
+Mapping Android's modes onto those: reader/writer and NDEF are `nfc-list` plus
+`nfc-mfultralight`; raw tag tech is `nfc-mfclassic`/`nfc-mfultralight`; and
+**HCE has a Linux equivalent after all** - `nfc-emulate-forum-tag4` presents an
+ISO-DEP Type 4 tag and `nfc-jewel` a Type 1 one, so "tap the laptop with your
+phone" is library-supported. It is **hardware-gated**: emulation needs a
+PN532-class reader, and x86 laptops essentially never have an NFC controller
+built in. Arch builds with `LIBNFC_DRIVER_PCSC`, `ACR122_PCSC` and
+`PN53X_USB` on, so an ACR122U or PN532 USB dongle is the whole hardware
+requirement - a few dollars - and `pcsclite`/`ccid`/`acsccid` are already deps.
+
+**Arch's package is `arch=('x86_64')`**, worth knowing before anyone tries this
+on a Pi - which is the platform the HFP write-up above is about.
+
+**Nothing here can verify any of it.** This dev box is **Ubuntu 26.04, not
+Arch** (the repo's own "the unit tests ran on the wrong distro" trap in a new
+place): no `pacman`, no reader on the USB bus, no `/sys/class/nfc`, no
+`/dev/nfc*`, no `ccid`/`pcsc` modules, and not one of the ten binaries. So the
+read and write paths can only be written, not exercised.
+
+Chronoa references NFC in exactly **one** line today - `airplane_mode.py`'s
+rfkill label list includes `"nfc"` next to wlan/bluetooth/wwan/uwb - so the
+radio is already acknowledged and the data path is entirely unwired.
+
+## The `nfc` skill, and the one bit that killed it (2026-10-08)
+
+Built on the finding above: libnfc is on every install, ten tools come with it,
+and nothing read them. The skill is `scan` (is there a reader), `read` (tap a
+tag, be told what is on it), `write` (a link onto a sticker) and `emulate`
+(present a tag to a phone - Android's HCE, which libnfc can do via
+`nfc-emulate-forum-tag4`).
+
+**The NDEF decoder is written here rather than delegated to a binary**, because
+NDEF is a published format and `nfc-list`'s output is a human dump. So the
+verifiable part is the format itself, and the tests run against real bytes with
+no reader present.
+
+**One bit made the whole thing decode to nothing, silently.** The short-record
+bit is `0x20`. A first version emitted `0xD1` - MB | ME | TNF=1, SR *clear* -
+then wrote a one-byte payload length where the decoder, reading the same bits,
+expected the high byte of a four-byte one. Every record produced decoded to an
+empty list, with no error and no warning anywhere. The correct bytes are
+
+    E1 01 0C 55 04 65 78 61 6D 70 6C 65 2E 63 6F 6D
+
+which is what an NTAG213 actually holds, and the test asserts
+`ndef_bytes("https://example.org") == that literal` **and** decodes the literal
+separately - so a broken encoder cannot make the test pass by being decoded by a
+matching broken decoder. The URI abbreviation table is also ordered longest
+first, because `0x02` "https://www." has to beat `0x04` "https://" or the
+result is `https://https://www...`.
+
+**The destructive-write refusal runs before the tool check, deliberately.** With
+the checks the other way round, the answer to "write to my bank card" was
+"nfc-mfultralight is not installed" - so the refusal existed only on machines
+that happened to have the tool. A refusal about destroying somebody's card has
+to be the same answer everywhere. Eight different names (bank card, transit pass,
+hotel key, credit card, fob, mifare classic, door card, smartcard) are all
+refused, and the tests assert the tool is never *invoked*, not merely that the
+answer sounds right.
+
+**Three of my own test bugs, all the same shape - asserting the wrong byte.**
+The record layout is `[0]` header, `[1]` type *length*, `[2]` payload length,
+`[3]` the type itself, `[4:]` the payload. I indexed `[5]`, then `[4]` as a
+length, before reading `ndef_bytes` again. The record was right every time.
+Separately, four hand-written fixtures had length fields disagreeing with their
+payloads and the decoder was right about all of them - so `record()` in the test
+file **computes** its lengths, and the MIME/long-record cases are correct now.
+
+**One equivalent mutant, kept and documented.** Making the *text* branch also
+accept `"U"` changes nothing: the URI branch precedes it and returns for every
+input. Verified rather than assumed - the mutation stays in the run and is
+reported with the reason, alongside the real risk it stands for (the text branch
+removed entirely), which is caught.
+
+**Wiring:** `nfc-enabled` (default `false`) in the schema, a Privacy row, a
+`GATED` entry and a Devices help-group entry, plus seven `files._PACKAGE_HINTS`
+entries - without which `tool_missing` printed the literal
+*"it comes from the 'the package that provides it' package"*, since libnfc ships
+all ten binaries as one package. Two suite tables also needed it
+(`test_skill_gates_are_enforced._IMPL`, and `libnfc` in
+`test_package_names_match_arch`'s list of real Arch packages, verified against the
+Arch package API: `libnfc 1.8.0-3`, `extra`, `arch=(x86_64)`).
+
+63 tests in `tests/test_nfc_skill.py`, **23 mutations, 22 caught** and the one
+survivor documented above. 366 passing across the bluetooth, nfc, capability,
+consent, annotation, post-condition, packaging and package-name suites.
+
+**Still unexercised:** every read and write path. This box is Ubuntu with no
+`pacman`, no reader on the USB bus, no `/sys/class/nfc` and none of the ten
+binaries. The refusals, the gate and the NDEF format are all verified; the I/O
+is written and marked so.
+
+## BLE: two hard boundaries, measured rather than assumed (2026-10-08)
+
+From [Android's BLE overview](https://developer.android.com/develop/connectivity/bluetooth/ble/ble-overview).
+It is conceptual - GATT/ATT, central-vs-peripheral, client-vs-server, and what a
+descriptor is - and two of its points turn out to be limits of **bluez**, not
+of the protocol.
+
+> **WRONG - corrected 2026-10-09.** The paragraphs below introspected `/org/bluez`;
+> the advertising and GATT-server interfaces live on the **adapter**,
+> `/org/bluez/hci0`. There: `Adapter1.Roles = ["central", "peripheral"]`,
+> `GattManager1.RegisterApplication` and `LEAdvertisingManager1` (12 instances).
+> Proved by registering a `LEAdvertisement1` named "Chronoa": `ActiveInstances`
+> went 0 -> 1 -> 0. So this laptop **can** be a BLE peripheral, a beacon, and a
+> GATT server (man org.bluez.GattManager(5), org.bluez.LEAdvertisingManager(5)).
+> Kept below as the record of how a wrong object path produced a confident "no".
+
+**bluez is central-only. There is no peripheral role, so no beacon.** Android's
+own page says it "provides built-in platform support for BLE in the central role",
+which reads like an Android limitation. Measured on this box, it is also a bluez
+one: `busctl --system introspect org.bluez /org/bluez` exports exactly three
+interfaces - `AgentManager1`, `HealthManager1`, `ProfileManager1` - and
+**`LEAdvertisingManager1` is not among them**. No `RegisterAdvertisement`, no
+peripheral, no Eddystone, no iBeacon.
+
+So the first use case on that page - *"interacting with proximity sensors to
+give users a customized experience based on their current location"* - **cannot
+be built on this stack at all**, and no amount of skill work changes it. Reading
+a device that advertises is everything Chronoa can do; being one it can see is
+not.
+
+**`HealthManager1` being present corrects what this file said an hour ago.** The
+entry above records that Android's `BluetoothHealth` "is not a GATT service - it
+is a classic profile found over SDP, which is a different protocol from
+everything above", which is true of `bluetooth_gatt` and misleading about the
+machine: **bluez does expose `org.bluez.HealthManager1`**, in the same object
+tree the GATT reader walks. HDP devices - blood-pressure cuffs, glucose meters,
+the SIG-profiled ones - therefore have their own D-Bus home, reached through the
+proxy bluez registers rather than through a characteristic read.
+
+That is a better answer than reading a raw characteristic would have been, and it
+is a different one: HDP carries RACP (remote access control), so the protocol
+handles the session rather than this module interpreting bytes. **Not built.**
+There is no HDP device connected to anything here, so it could only be verified
+returning "nothing registered" - the same wall as `bluetooth_call`'s call
+events.
+
+**Descriptors are the third door, and this device has nothing behind it.** The
+page notes a characteristic carries "0-n descriptors that describe the
+characteristic's value ... a human-readable description, an acceptable range, or
+a unit of measure". That is `0x2901` User Description, and it would beat any
+UUID table this module maintains - the *device* would say what a characteristic
+is. Measured: the wearable has **8 descriptors and all 8 are CCCD `0x2902`**,
+which is exactly the set you need for `listen` to work, and is confirmation that
+every one of its notify/indicate characteristics is subscribable. But there is
+not one `0x2901` here, so the improvement is real and unexercised.
+
+Worth noting as the reason to want it: `0x2901` is **authoritative where this
+module's own table is not** - and this session's table had one wrong entry
+(`0x190E` named "Phone Alert Status", which is `0x180E`). A device's own
+descriptor cannot have my UUID transcription wrong.
+
+## The wearable, driven live: find, listen, and what the suite was hiding (2026-10-08, later)
+
+All of this was run against the real FB BGS002 (MoYoung) through
+`tools.execute_tool`, with consent granted in a scratch keyfile GSettings
+(`GSETTINGS_BACKEND=keyfile`; the keyfile group is `[org.shani.chronoa]`, the
+schema id, because `config._new_settings` roots the backend there - a
+`[org/shani/chronoa]` group is silently ignored and every gate stays closed).
+
+**`find_device` (new tool, same module, same `bluetooth-gatt-enabled` switch).**
+Two fixed writes only: the SIG Immediate Alert (0x2A06 <- 0x02) and MoYoung's
+`CMD_FIND_MY_WATCH`, taken from Gadgetbridge (`MoyoungConstants` 97,
+`MoyoungPacketOut.buildPacket(mtu=20)`): `FE EA 10 05 61` to 0xFEE2, only when
+the 0xFEEA service is present too. **The watch vibrated**, confirmed by the
+person wearing it, first by hand and then through the tool. Measured traps:
+bluez's `WriteValue` answers `Not connected` (this watch drops bluez's LE link
+within half a second of "Connection successful"), and `gatttool --char-write`
+only ever ends at its timeout; gatttool's interactive mode is the route that
+works. A classic device (the JBL) is refused at once instead of waiting 25 s.
+`bluetooth_gatt` is now in `READ_ONLY_TOOLS` (the one write is the separate
+tool), so its reads no longer end with "unverified - nothing observed it".
+
+**`listen` over gatttool never worked.** `gatttool --listen -a H` with no
+command prints the usage text and exits 1, which read as "sent nothing in 15s"
+after 4 s. It now writes 0x0100 to the characteristic's own CCCD, found with
+`cccd_for` from `--char-desc` (never handle+1), and an early stop is reported
+as one. Live after the fix: two real Heart Rate notifications, correctly
+flagged "sensor contact LOST" for a watch not being worn.
+
+**`list` sent people to connect a device a read reaches anyway**: a read on
+the "not connected" watch succeeded and left it connected. The line now says so.
+
+**Wiring the parity batch missed:** `fm_radio` named `fm-radio-enabled`, which
+was not in the schema - a permanent refusal (same as `calendar_edit` above).
+Added the key, a Privacy row, `GATED`, a help group, `_IMPL`, and
+`rtl_fm -> rtl-sdr` (verified: `rtl-sdr 2.0.3-1`, `extra`, ships
+`usr/bin/rtl_fm`). `nfc-enabled` had a Privacy row but was missing from the
+settings-coverage test's `CONTROLLED`; the window-building test confirms both rows.
+
+**Other suite fixes:** pyflakes found a dead duplicate `captions` key in
+`tool_select` (the later entry always won); the cloud-keys wizard page was
+590px of 560 because a sentence was appended to a `PreferencesGroup`
+description (now its own wrapping label); the memory-ceiling test's
+`'ALLOCATED-OK' not in out` matched the traceback echoing its own source line;
+`timer` now accepts `60.0` by design, so the test moved it to the accepted list.
+
+**Not fixable on this dev box (Ubuntu), not regressions:** two seccomp tests
+need unprivileged user namespaces (`kernel.apparmor_restrict_unprivileged_userns
+= 1`: bwrap "Failed to make / slave"); the vision real-path test times out in
+`gnome-screenshot` on GNOME Wayland. And `bluetooth_call` could only be checked
+saying "no phone connected": no phone is paired here as a hands-free gateway.
+
+**Running the suite:** about 960 tests per sixth of the files; a serial run
+was ~10% after 15 minutes. Running six file shards in parallel makes GUI and
+live-audio tests flaky (`test_question_presenter` and others failed only
+there), and one shard aborted inside GTK; re-run failures serially before
+believing them. Running the package outside pytest leaves `__pycache__` in
+`usr/`, which fails two packaging tests until removed.
+
+**The phone (acer ZX), connected over HFP, same session.** `bluetooth_call`
+answered "no phone is connected" with the phone connected, for two reasons
+found only by running it: PipeWire 1.4's `GetModems` returns the gateway with
+**no fields** (`{"/org/pipewire/Telephony/ag1":{}}`) while the skill kept only
+rows with `Name`/`Address`; and the text parser expected a count before every
+key, which busctl never prints - its fixtures had been hand-written in that same
+wrong shape. Now parsed from `busctl --json=short`, the address read from
+`GetManagedObjects` (`AudioGateway1.Address`), the name from bluez. Third:
+`calls()` asked `GetCalls` of `org.ofono.Manager`, where it does not exist
+(measured), so a ringing phone always read as "no calls"; it is on
+`org.ofono.VoiceCallManager`. Live after: `acer ZX (74:6B:AB:67:7F:91), no call
+in progress, audio: card 94`. Fixtures now carry the captured JSON; 3 mutants
+caught. Nothing was dialled. **GATT on the phone is a dead end**: bluez shows no
+GATT services for it (Android serves none to a classic-connected laptop), and a
+separate gatttool LE link times out. What it does offer is AVRCP
+(`.../avrcp/player0`, `org.bluez.MediaPlayer1`: Play/Pause/Next/Previous,
+Position, Shuffle, Repeat), plus PBAP, MAP, OBEX push and PAN NAP in its UUIDs -
+none of which Chronoa uses yet.
+
+## The phone with no app: MAP, PBAP, HFP, OPP (2026-10-08, later still)
+
+`phone_bluez.py` is a third `phone` backend, used only when neither GSConnect
+nor KDE Connect is installed and bluez has a paired phone (`Icon: phone`).
+Measured live on the acer ZX through the real `phone` skill: `status` (battery
+20% from `org.bluez.Battery1`) and `messages` (225 messages, 67 conversations,
+names from the phone's 813 contacts). Text and names were redacted in every
+run; nothing was sent, dialled or shared.
+
+- **obexd drops a session when the D-Bus client that made it disconnects.**
+  Driven from `busctl`, one process per call, every PBAP/MAP session vanished
+  before its first method, and the error ("Method ... doesn't exist") reads
+  like the phone refusing. `_Session` holds one Gio connection for the lot.
+  `Target` is lowercase (`pbap`, `map`, `opp`).
+- **Android gates both per device**: Settings > Bluetooth > this computer >
+  "Contacts and call history" / "Text messages". Off, PBAP answered
+  `OBEX Connect failed with 0x46` and MAP timed out; `_why` names the switch.
+- **MAP `ConversationId` is useless on this phone**: all 225 messages had the
+  same one. Threads are keyed by correspondent (`thread_key`, last 9 digits).
+  The text is in `Subject`; RCS/MMS arrive with an empty one.
+- **Calls are placed, not typed into a dialer**: over HFP `dial` calls
+  `AudioGateway1.Dial`, so the confirmation asks "Call X now from <phone>?"
+  (`ph.places_calls()`) instead of "Open the dialer".
+- Sending a text is `PushMessage` of a bMessage whose LENGTH counts bytes from
+  BEGIN:MSG to END:MSG inclusive. Written and unit-tested; **not yet sent
+  live**. Sharing is OBEX Object Push, files only. Ring and ping are refused
+  over Bluetooth: no profile does it; a watch does it through its own app.
+- A messages listing takes ~24 s (813 contacts plus 200 messages per call).
+- **Music needs no code**: bluez's own `mpris-proxy` user unit (shipped in
+  bluez-utils on Arch and Ubuntu) exposes the phone's AVRCP player as MPRIS,
+  and `media_control` then reports "acer ZX is paused". It was enabled but had
+  exited; keeping it running belongs to the image (`shani-settings`), not here.
+
+**The watch as an input device for this laptop is blocked by pairing, not code.**
+Connecting its HID profile logged `hidp_add_connection() Rejected connection
+from !bonded device`: the watch dials in over classic HID, and bluez only
+accepts classic HID from a bonded device; this laptop holds an LE bond only.
+bluez's encrypted LE link is also dropped within a second while gatttool's
+unencrypted one holds, which fits stale LE keys. Re-pairing is the fix, and it
+is the owner's call because it touches the watch's pairings.
+
+**Phone panel, incoming calls, call audio (same day, last).** `gui/surfaces/phone.py`
+(Calls with dialer / answer / hang up / recent calls / audio route, Messages with
+thread and reply, Contacts, Music, Watch) runs everything in threads through
+`phone.py`, `bluetooth_call`, `media_control` and `bluetooth_gatt`/`find_device`.
+Rendered headless on Broadway against the real phone: 30 calls, 40
+conversations, 60 contacts, the watch row, status `ok`. Found by running it:
+- **A phone serves one PBAP session at a time.** Loading contacts and call
+  history together gave `OBEX Connect failed with 0x53` (busy); `phone_bluez`
+  now holds one lock around every obexd session. After that burst the phone
+  **withdrew** the contacts permission (PBAP refused, MAP still fine), so the
+  person had to re-allow it on the phone.
+- **`bluetooth_call` could never dial, hang up, or answer properly**: `Dial`
+  was passed without its `s` signature; hang-up called `SendReleaseAndHangup`,
+  which the gateway does not have (`HangupAll` it does); answer used
+  `ReleaseAndAnswer`, which ends the active call to take a waiting one. Answer
+  is now `Call1.Answer` on the ringing call. 3 mutants caught.
+- **Call audio route** is `AudioGatewayTransport1` on the gateway: `Activate()`
+  brings it to this PC, writable `RejectSCO` keeps it on the phone, `State`
+  says which (flipped and restored live with no call). `bluetooth_call audio
+  to=pc|phone` and the panel's This PC / Phone toggle use it.
+- **`incoming_call.py`** posts an incoming call (named from cached contacts)
+  with Answer/Decline via org.freedesktop.Notifications, critical urgency,
+  `category=call.incoming`, and closes it when the call is answered anywhere or
+  ends. Verified on a private dbus-daemon with stand-in services (6 tests, 3
+  mutants caught); **not yet seen with a real ringing phone.**
+
+## The watch's own protocol (MoYoung / Da Fit), live (2026-10-08, night)
+
+`moyoung.py` + skill `watch` + the Phone panel's Watch tab. Protocol from
+Gadgetbridge (`service/devices/moyoung/`, read that day), verified on the FB
+BGS002 through `tools.execute_tool`: settings read (goal 10000, 12h, metric,
+raise-to-wake on), clock set, messages sent, step goal 10000 -> 10001 -> 10000
+read back each time, **SpO2 97 %** and **heart rate 100 bpm** measured on the
+wrist. Steps, sleep, stress all answered with zeros (watch not worn / Da Fit
+had synced them off); training and HR history did not answer on this firmware;
+blood pressure did not answer in 70 s.
+
+Measured, not from Gadgetbridge:
+- **The watch takes one LE connection.** With Da Fit connected on a phone it
+  stops advertising entirely; turning the phone's Bluetooth off frees it.
+- **A set is unanswered and takes ~2 s**: read back after 0.5 s showed
+  nothing; after 2 s the new value (`SET_SETTLE`).
+- **Heart rate from command 109 streams on 0x2A37**, not as a 0xFEE3 reply.
+- **Stress is 48 half-hour slots** (51-byte reply), not the 26 Gadgetbridge reads.
+- **An empty night is one all-zero sleep triple**, not "awake at 00:00".
+- Interactive gatttool prints `char value handle: 0x..`, one-shot prints `=`.
+- **The sandbox's 30 s default killed every measurement** (and `bluetooth_gatt
+  listen` above ~25 s, which accepts up to 60): `_SLOW_TOOLS` now has watch 150,
+  bluetooth_gatt 100, find_device 60.
+- Each skill call is its own process, so the one-connection rule is an flock
+  per watch in `$XDG_RUNTIME_DIR`, not a thread lock.
+- Weight is a profile value (`profile`), never measured.
+
+From Maze Connect (github.com/berk-kucuk/Maze-Connect, read as a reference; it
+is a LAN + own-Android-app link, so its transport does not apply): text from a
+phone is screened for bidi overrides/isolates and control characters before it
+is shown (`phone.clean_text`, applied to every backend's messages and contacts).
+
+## Files both ways, the watch companion, AI voice (2026-10-08, late)
+
+All verified live on the acer ZX and the FB BGS002 unless marked.
+
+- **Files to the phone (OBEX Push)**: received on the phone, confirmed by its
+  owner. `_Session` now subscribes to Transfer1 status *before* sending; the
+  first version treated "the transfer object vanished" as success, which a
+  refusal also does.
+- **Files from the phone** (`obex_receive.py`, an obexd Agent1): Accept/Decline
+  notification, then **staged in ~/.cache/obexd and moved to ~/Downloads**.
+  Returning a Downloads path failed live: obexd refuses any path outside its
+  root (`open(...): Operation not permitted`, OBEX Forbidden to the phone).
+  Names are stripped of paths and direction characters, never overwrite.
+- **Phone music without mpris-proxy**: it was measured exiting 1 at boot and
+  **segfaulting** 40 s after a start. `media_control` now falls back to bluez's
+  `MediaPlayer1` directly and **reads the state back** - Play was accepted with
+  the player still paused when no music app was open.
+- **Phone battery triggers work over Bluetooth** (`read_phone` via phone.py).
+- **`watch_companion.py`** (switch `watch-companion-enabled`, off: holding the
+  watch locks Da Fit out) - live: find-my-phone (98, `00` start / `ff` stop),
+  camera (102), music next/play (103 `02`/`06`), volume (103 `04`/`05`, 0.40 ->
+  0.55, echoed back as 103 [12, level/16]), and the `watch` skill served
+  **through the companion's socket** while it held the watch. Reconnects by
+  itself after a drop.
+- **Found running it**: polling now-playing through `tools.execute_tool` every
+  5 s tripped the repeat guard after 35 calls and then refused `media_control`
+  to everyone - it reads the player directly now. A SIGTERM'd caller left
+  gatttool holding the watch; gatttool now gets PR_SET_PDEATHSIG.
+- **AI voice is 0xF9** (not in Gadgetbridge): `01 01 00`/`01 01 01` on press,
+  `02 00` when it ends. Wired to Chronoa's listening (`_watch_voice`). The
+  start was captured once and the stop twice; **not yet seen starting a real
+  listening turn in the app**.
+- **Weather to the watch** (requested by 100 on connect): Gadgetbridge's four
+  packets, WMO codes mapped to the watch's icons, through the weather skill's
+  web and location gates. Refused live by privacy mode (correct), then by **no
+  location source on the dev box** - so `home-place` (Settings > Privacy) is
+  now the fallback for the weather skill too. Not yet seen on the watch screen.
+- **take_photo timed out at 30 s** when the camera button fired it; webcam
+  capture itself, not the watch path. Not investigated yet.
+
+## Calibration, and the log the learning layer trains on (2026-10-09)
+
+- **The outcome model's probabilities are now calibrated** (`learning.fit_calibration`,
+  `cross_fit_calibration`, `calibration_metrics`; stdlib, after the standard
+  temperature-scaling method, plus a per-class shift for the prior the class-balanced
+  fit removes on purpose). Fitted on `out_of_fold_logits` - the same folds
+  `cross_validate` scores, which now shares that code - and scored by a 2-way
+  cross-fit over feature vectors so its own before/after is held out too. Measured
+  on this machine's 17,891 labelled calls: ECE **0.430 -> 0.107**, NLL 0.938 -> 0.547,
+  Brier 0.561 -> 0.272, argmax accuracy 85.1% -> 85.8% (majority baseline 89.0%).
+  T = 0.28: the balanced fit is *under*-confident, not over. Stored in the model
+  file as `calibration`; a file without it loads as identity, and out-of-range
+  values are ignored. A fit that does not lower held-out NLL returns identity.
+- **`score_predictions` paired every prediction with the first call of its tool
+  ever logged** (sorted with a constant key, never consumed a call). Now: the
+  next same-tool call at or after the prediction's epoch (2 s slack, 600 s
+  window), each call answering one prediction, plus NLL/Brier/ECE of the recorded
+  probabilities. Negative control: widening the slack to admit earlier calls
+  makes `test_predictions_pair_with_their_own_call_not_the_first_one` fail.
+- **Tests were writing into the real user's `tool_calls.log`.**
+  `tool_tracking.LOG_DIR` was computed at import and `tools._TRACKER` is built at
+  import, before conftest redirects `XDG_DATA_HOME`, so every test that dispatched
+  a tool appended to `~/.local/share/shani-chronoa/logs/tool_calls.log`. The
+  development machine's 18,277-line log holds 374 `liar`, 378 `unver`, 369
+  `add_reminder`, 40 `harvest2_tf_ok` fixture calls (and the heavy
+  `get_datetime`/`screenshot`/`delete_file` counts look synthetic too) - which the
+  outcome model trained on. Fixed: the path is resolved per write (module
+  `__getattr__` keeps `tool_tracking.LOG_FILE` / `dream.LOG_FILE` working).
+  Measured: four test files that added 2 lines to the real log now add 0.
+  **The existing log was not cleaned** - it is append-only and the user's to
+  decide; until it is, read the outcome model's numbers as being about a mix of
+  real use and fixtures.
+- **The distilled router has nothing to learn from on this machine.**
+  `harvest_rows()` reads (request, tool_calls) pairs from saved sessions, and the
+  only session file is test residue (128 user turns, no tool calls). The router
+  trained in `shani-install-media/test-env/eval-out/distill-qwen3-0.6b.json`
+  (62% vs 12% baseline on 8 held-out) was written into a throwaway HOME. Its
+  `DISTILLED_MARGIN` stays uncalibrated until there is a router to calibrate.
+- **Tool selection, Qwen3-1.7B, before/after on the same server** (15 cases,
+  `select+recover` and `+greedy`): rewriting the `web_search`/`news`/
+  `get_world_time`/`open_file`/`find_files`/`calculate` descriptions boundary-first
+  changed nothing measurable (14/15 both). The one miss, `past-chat`, was the model
+  putting the search words in `which`; giving `query` its own parameter description
+  fixed it (3/3 re-run, both configs), and `search` also accepts `which` now.
+  `search-web` ("search the web for the latest news about ISRO") accepts `news` as
+  well, since it is a correct answer; `search-web-fact` is the case that requires
+  `web_search`.
+- **"what is two plus two" sent only `ask_user`**: `CONVERSATIONAL` treated every
+  "what is X" as chat. Arithmetic (digits, number words, plus/minus/percent...) is
+  excluded now; "explain gravity" / "thanks!" still are chat.
+- **The OBEX receiver held obexd's only agent slot while switched off**, rejecting
+  every incoming file and keeping the desktop's own receiver out. It now registers
+  only while `phone-control-enabled` is on (re-read every 5 s), on its own thread's
+  context: `GLib.timeout_add_seconds` attaches to the *global* default context, so
+  the poll never ran (a test caught it) and the per-file decline timeout ran on
+  the GTK thread.

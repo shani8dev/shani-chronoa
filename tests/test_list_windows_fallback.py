@@ -160,19 +160,26 @@ class TestX11IsUnchanged:
         assert "accessibility bus" not in out
 
 
-class TestTheControlHalfIsUnchanged:
-    """Focusing and closing have no portable path, and must keep refusing."""
+class TestTheControlHalfIsRecorded:
+    """What control can and cannot do off X11 is written where it is read.
 
-    def test_the_docstring_says_they_still_refuse(self):
-        source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-                  / "skills" / "list_windows.py").read_text()
-        assert "control half is still X11 only" in source
+    These used to pin "the control half is still X11 only". Measured on
+    2026-10-08 that stopped being true: GTK4 frames offer close/minimize/
+    toggle-maximized as AT-SPI actions, and KWin and the GNOME extension do the
+    rest - while focusing through the bus still does nothing. The docstring is
+    where the next person looks before adding a route, so it must say both.
+    """
 
-    def test_and_explains_why_there_is_no_fallback(self):
-        source = (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
-                  / "skills" / "list_windows.py").read_text()
-        assert "WindowAction" in source, (
-            "the reason there is no control fallback should be recorded where "
+    def _source(self):
+        return (_REPO / "usr" / "lib" / "shani-chronoa" / "shani_chronoa"
+                / "skills" / "list_windows.py").read_text()
+
+    def test_the_docstring_names_what_the_bus_can_do(self):
+        assert "window.close" in self._source() and "window.minimize" in self._source()
+
+    def test_and_what_it_cannot(self):
+        assert "cannot focus" in self._source(), (
+            "the reason focus has no accessibility route should be recorded where "
             "someone will read it before adding one"
         )
 
