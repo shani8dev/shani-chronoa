@@ -7,6 +7,11 @@ route), does the router answer (ping the gateway), is the internet reachable
 load. Each answer names the step, so "the router answers but DNS fails" is
 something a person can act on.
 
+It also checks for an **IP conflict** - the same address answering from two
+different MACs in the kernel's ARP cache. That is the classic cause of a
+connection that works sometimes and drops other times, it is invisible to a
+ping (a ping reaches whichever host replied), and nothing else here looks.
+
 In privacy mode only the local steps run: the rest send packets beyond this
 network.
 """
@@ -44,6 +49,65 @@ def _ping(host: str):
     return float(m.group(1)) if m else 0.0
 
 
+def _arp_entries() -> "list[tuple[str, str, str]]":
+    """`(ip, device, mac)` from `ip neigh show` - the kernel's ARP cache.
+
+    **Why the kernel cache and not `arping -D`.** A duplicate address - two
+    hosts answering for one IP - is the classic cause of "the internet works
+    sometimes", and ping never shows it. `arping -D` is the usual probe, but
+    its exit-status contract could not be measured on this box (no root, not
+    installed), and a status code read from memory is exactly the wrong
+    answer this module is built to avoid. The kernel's own cache is the same
+    information - a conflicting address shows up as two entries for one IP
+    with different MACs - it needs no extra binary (`ip` is already the tool
+    this skill reads the route from) and it cannot send anything.
+    """
+    try:
+        r = subprocess.run(["ip", "neigh", "show"], capture_output=True,
+                           text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if r.returncode != 0:
+        return []
+    entries = []
+    for line in (r.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        ip = parts[0]
+        mac = ""
+        dev = ""
+        i = 1
+        while i < len(parts) - 1:
+            if parts[i] == "dev":
+                dev = parts[i + 1]
+            elif parts[i] == "lladdr":
+                mac = parts[i + 1]
+            i += 2
+        if ip and dev and mac:
+            entries.append((ip, dev, mac))
+    return entries
+
+
+def _conflicts(ip: "str | None" = None) -> "list[str]":
+    """Addresses the cache has seen at two different MACs, router first.
+
+    A conflict is only ever *what the cache has recorded*: the entries are
+    short-lived, so no conflict here is not proof of none. That is stated in
+    the answer rather than left to the reader.
+    """
+    seen: "dict[str, set[str]]" = {}
+    for addr, _dev, mac in _arp_entries():
+        if mac in ("00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"):
+            continue
+        seen.setdefault(addr, set()).add(mac)
+    conflicts = sorted(a for a, macs in seen.items() if len(macs) > 1)
+    if ip and ip in conflicts:
+        conflicts.remove(ip)
+        conflicts.insert(0, ip)
+    return conflicts
+
+
 def _gateway():
     try:
         r = subprocess.run(["ip", "-4", "route", "show", "default"], capture_output=True, text=True, timeout=5)
@@ -59,6 +123,21 @@ def _run(_arguments: dict) -> str:
     if not gw:
         return "No network connection: there is no default route (Wi-Fi or cable is not connected)."
     steps = [f"Connected through {dev}, router {gw}."]
+    conflicts = _conflicts(gw)
+    if conflicts:
+        # Router first, and named as the router: a second MAC answering for
+        # the router's address is the one case where the answer is urgent
+        # rather than merely interesting.
+        if conflicts[0] == gw:
+            who = f"the router's address {gw} itself"
+        else:
+            who = f"{conflicts[0]} on this network"
+        steps.append(f"**Possible IP conflict:** {who} has answered from two "
+                     "different MAC addresses. Two machines answering for one "
+                     "address is a common cause of connections that work "
+                     "sometimes and drop other times - and it is invisible to "
+                     "a ping, which reaches whichever one replied. This is what "
+                     "the ARP cache has recorded, not a guarantee none exist.")
     rt = _ping(gw)
     steps.append(f"The router answers ({rt:.0f} ms)." if rt is not None else
                  "The router does not answer pings (many do not; carrying on).")

@@ -221,6 +221,34 @@ with `iso-install --boot-only --console-exec=CMD`, for anything touching `/var`.
 
 ## Rule: verify by actually running it, not by reading it
 
+**A command that is not on this box is a slot run, not a workaround and never
+a guess.** This dev machine is Ubuntu (see `test_package_names_match_arch.py`),
+so an image binary like `arping` or `smartctl` may be absent or behave
+differently than on ShaniOS. When a CLI command is the thing being wired, the
+honest order is: run it on the image first (`cd ../shani-install-media;
+./run_in_container.sh build.sh test ...`, or `slot-test <slot> <name>` after
+`bootstrap`), and only then write the parser against its real output.
+
+Measured cost of skipping that step (2026-10-10): `check_internet` needed a
+duplicate-address check. `arping -D` is the usual probe, `iputils` ships it on
+both images, and it was *not installed here* - so the code was written against
+the kernel's ARP cache instead (`ip neigh show`), which needs no extra binary,
+sends nothing, and was verified for real on this box. The swap was defensible
+on its own merits, but the reason it was chosen was that the tool was missing,
+not that the tool was wrong - and its exit-status contract went unmeasured. If
+a slot had been used, `arping`'s real status codes would have settled it and
+the choice could have been made on the merits instead of the environment.
+
+Two rules that follow, both already stated above in other words:
+
+- **A contract you cannot measure is a contract you do not have.** Exit codes,
+  empty-output-on-success, and permission-denied-on-rc-0 are all documented
+  for real binaries elsewhere in this file; do not reason one out from a man
+  page summary or from another distribution's version.
+- **Prefer a mechanism whose behaviour is verifiable here** when the two are
+  otherwise equal - but record *why* the preference happened, so a later
+  reader can tell a measured decision from an environment's accident.
+
 This repo has shipped multiple bugs that read as completely correct and
 only broke when actually executed — this is not hypothetical caution, it's
 what happened on the first two passes here (2026-09-16):
