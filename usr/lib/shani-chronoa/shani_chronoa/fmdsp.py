@@ -87,6 +87,27 @@ def _lowpass_poles(order: int, cutoff_hz: float, fs: float) -> "list[complex]":
     return out
 
 
+def _highpass_poles(order: int, cutoff_hz: float, fs: float) -> "list[complex]":
+    """Digital poles of a Butterworth **highpass**, via the analog prototype.
+
+    The lowpass prototype is inverted with the substitution `s -> omega_c / s`, so
+    a lowpass pole `omega_c * exp(j*angle)` becomes `omega_c * exp(-j*angle)` -
+    divide by the same complex exponential rather than negating, because negation
+    reflects through the origin and lands some poles in the *right* half-plane,
+    which the bilinear transform then puts outside the unit circle: an unstable
+    filter that amplifies instead of attenuating.
+
+    The angles are the same as the lowpass case, so both are left half-plane.
+    """
+    omega = _prewarp(cutoff_hz, fs)
+    out = []
+    for k in range(order):
+        angle = math.pi * (2 * k + order + 1) / (2 * order)
+        pole = omega / cmath.exp(1j * angle)
+        out.append((2.0 * fs + pole) / (2.0 * fs - pole))
+    return out
+
+
 def _to_bandpass(lp_poles: "list[complex]", low_hz: float, high_hz: float,
                  fs: float) -> "list[complex]":
     """Map digital lowpass poles onto a digital bandpass, doubling the order.
@@ -176,23 +197,32 @@ def butter_sos(order: int, cutoff, fs: float, btype: str = "low") -> "list[list[
         return _normalise(sections, "low", fs)
 
     if btype == "high":
-        # H_hp(z) = (-1)^N * H_lp(-z), applied per section: keep the constant
-        # numerator (the lowpass prototype has none) and flip a1's sign, which
-        # reflects every pole through the origin to the high-frequency side.
+        # **A Butterworth highpass has its zeros at DC, z = +1** - one per pole,
+        # so two per section, which as one second-order numerator is
+        # `(1 - z^-1)^2 = [1, -2, 1]`. That is the mirror of the bandpass case
+        # below and the opposite of a lowpass, which has none.
         #
-        # The first version marked extra zeros with a (1 - z^-1)^2 numerator.
-        # That is not derived from this prototype - a Butterworth highpass does
-        # not have its zeros at DC - and it made the numerator near-zero across
-        # the whole of the passband, i.e. the filter silenced everything: the
-        # empirical check gave amp == 0 at 100 Hz AND at 10 kHz, instead of
-        # "low down, high passes". Confusion about which transformation the
-        # zeros belong to is the recurring mistake, so it is written out here.
-        poles = _lowpass_poles(order, float(cutoff), fs)
-        sections = []
-        for section in _sections_from_poles(poles):
-            b0, b1, b2, _a0, a1, a2 = section
-            sections.append([b0, b1, b2, 1.0, -a1, a2])
-        return _normalise(sections, "high", fs)
+        # Two wrong designs are recorded here because both produced a filter that
+        # *ran* and only misbehaved on the passband:
+        #
+        # 1. The first version kept the constant numerator and flipped `a1`'s
+        #    sign, on the reasoning that `H_hp(z) = (-1)^N * H_lp(-z)`. The
+        #    substitution `z -> -z` flips the sign of *every odd power*, and
+        #    omitting the zeros entirely leaves a filter with no zero at DC at
+        #    all - measured, a 300 Hz highpass at 250 kS/s attenuated 5 kHz by
+        #    116 dB, i.e. it passed nothing.
+        # 2. The correction to (1) then claimed in a comment that "a Butterworth
+        #    highpass does not have its zeros at DC". **That is backwards**, and
+        #    the comment is the reason the wrong filter survived: it read as the
+        #    settled mathematics and so discouraged the check. A highpass blocks
+        #    DC, which means a zero at DC; a lowpass blocks Nyquist.
+        #
+        # The poles come from the inverted analog prototype rather than from the
+        # lowpass poles - `_highpass_poles` says why negating them does not work.
+        poles = _highpass_poles(order, float(cutoff), fs)
+        with_zeros = [[1.0, -2.0, 1.0, 1.0, s[4], s[5]]
+                      for s in _sections_from_poles(poles)]
+        return _normalise(with_zeros, "high", fs)
 
     if btype == "bandpass":
         low_hz, high_hz = float(cutoff[0]), float(cutoff[1])

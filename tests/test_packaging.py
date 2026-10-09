@@ -483,6 +483,56 @@ class TestPackagingMetadata:
             )
         assert problems == []
 
+    def test_pkgbuild_offers_a_pitch_transposer_without_requiring_it(self):
+        """The singing path, which sox cannot do and nothing used to offer.
+
+        `prosody.apply_song()` cuts the notes apart in Python and hands each one
+        to a transposer, because pitch has to move **once per syllable** - that
+        is the whole difference between singing and intonation, and
+        `tests/test_prosody.py` measures it. `_best_transposer()` looks for
+        `soundstretch` then `rubberband`; with neither installed it raises
+        `SingingUnsupported` naming both packages.
+
+        So on every Arch install `sing` refused for a reason nobody could act on:
+        `DEBIAN/control` has carried both since it was written, and the Arch
+        `PKGBUILD` - the one that is actually built - declared neither. Asserted
+        from the binary names the module looks for, so a package that ships a
+        differently-named shifter is caught here rather than at runtime.
+
+        Offered, not required, for the same reason as sox: singing is a feature
+        a user may decline, and a missing optional engine has to degrade to an
+        assistant that says what is missing.
+        """
+        depends = _pkgbuild_array("depends")
+        optdepends = _pkgbuild_array("optdepends")
+        source = (REPO_ROOT / "usr/lib/shani-chronoa/shani_chronoa/singing.py")
+        if not source.exists():
+            return
+        looked_for = [b for b in ("soundstretch", "rubberband")
+                      if f'"{b}"' in source.read_text()]
+        assert looked_for, (
+            "singing.py no longer names any transposer, so this test is "
+            "asserting about a mechanism that is gone - fix the test")
+        # Package name -> the binary it ships, from pacman's own file database
+        # via tools/cli_matrix.py. Not guessed: `/usr/bin/soundstretch` is in
+        # `soundtouch`, not in a package named `soundstretch`.
+        offered = {"soundstretch": "soundtouch", "rubberband": "rubberband"}
+        problems = []
+        for binary in looked_for:
+            package = offered[binary]
+            if package not in optdepends:
+                problems.append(
+                    f"{binary!r} is what singing.py looks for, and no "
+                    f"optdepends entry offers {package!r} (the package that "
+                    f"ships it), so `sing` refuses with a reason nobody can act "
+                    f"on; optdepends today is {optdepends}")
+            if package in depends:
+                problems.append(
+                    f"{package!r} is a hard dependency, but singing is optional "
+                    f"and an assistant without it still works - it must be a "
+                    f"user's choice, not an install-time requirement")
+        assert problems == []
+
     def test_debian_control_offers_sox_as_a_suggestion(self):
         # The Debian sibling of the check above, and the convention trap AGENTS.md
         # warns about: the field here is Suggests, not optdepends, and a `sox`

@@ -5764,6 +5764,121 @@ All verified live on the acer ZX and the FB BGS002 unless marked.
   the poll never ran (a test caught it) and the per-file decline timeout ran on
   the GTK thread.
 
+## A pre-existing highpass that passed 5,000 Hz, and a rules file nobody could fix (2026-10-09)
+
+Three failures that were **red on unmodified source**, found by running the whole
+suite file-by-file (318 files, each in its own process — the per-file log is what
+made "which ones are mine" answerable at all). Two were real, one was a missing
+declaration, and **in every case the first explanation was wrong.**
+
+### `fmdsp.butter_sos(..., "high")` built a filter with no zero at DC
+
+`tests/test_fmdsp.py` was 5 red and stayed red through a previous pass, which is
+how a real defect sits for months in a suite nobody reads to the end. Measured: a
+**300 Hz highpass at 250 kS/s attenuated 5 kHz by 116 dB** — it passed nothing.
+`highpass(4, 300)` reported 1.6e-06 where the test asked for > 0.95, and the
+order-8 impulse response peaked at **8529** against a bound of 1000.
+
+The cause was a comment:
+
+> *"The first version marked extra zeros with a (1 - z^-1)^2 numerator. That is
+> not derived from this prototype - **a Butterworth highpass does not have its
+> zeros at DC** - and it made the numerator near-zero across the whole of the
+> passband."*
+
+**That sentence is backwards.** A highpass blocks DC, which *means* a zero at
+DC; a lowpass blocks Nyquist. So the "correction" removed the zeros on the
+strength of a false premise, and left behind `H_hp(z) = (-1)^N * H_lp(-z)`
+implemented as *keep the constant numerator, flip `a1`'s sign* — which is wrong
+independently, because `z -> -z` flips the sign of **every odd power**, not one
+coefficient. A comment that reads as settled mathematics is worse than no
+comment: it is a reason not to check.
+
+Fixed by `_highpass_poles()` — the analog prototype inverted with `s -> w/s`,
+dividing by the same complex exponential rather than negating, because negation
+reflects through the origin and puts some poles in the *right* half-plane, which
+the bilinear transform then puts outside the unit circle — and by a `(1 - z^-1)^2`
+numerator on every section. Measured after: **-48 dB at ¼ cutoff, -3.1 dB at
+cutoff, ~0 dB in the passband, all poles inside the unit circle**, for orders 4
+and 8 at 300 Hz and 5 kHz. 5 failures → 0.
+
+**4 mutations, all caught:** zeros moved back to Nyquist (2), zeros removed
+entirely (2), poles negated instead of inverted (2), the pole angle offset dropped
+(2). The first two are the two wrong designs above, so the suite now fails on
+each of them rather than on the consequence.
+
+### Two test expectations that were measuring the harness, not the filter
+
+Both were fixed **in the test**, and both are recorded because "fix the code, not
+the test" is not the rule — *make the test measure the thing* is, and these two
+were not measuring the filter at all.
+
+- **`test_rolloff_is_twice_the_order` failed on its own clamp.** Order 8 read a
+  slope of 14.0 dB/octave against 16. The true amplitude at 20 kHz is
+  **2.8e-10**, and `max(amp, 1e-9)` reports -180.0 dB for it — so the test was
+  dividing by its own measurement floor and the slope came out of a *clamped*
+  number. Single-pass slopes, which never reach the floor, were 1.94 / 3.97 /
+  7.94 against 2 / 4 / 8. The clamp is now 1e-15, chosen from this signal
+  length and not picked to pass: Goertzel over 30000 float64 samples of an
+  all-zero signal reads exactly 0.0, and order 8 at 40 kHz is 7.1e-15, i.e. at
+  the noise. A control asserts the response is above the floor, and asserts the
+  all-zero signal reads 0.0, so the floor stays honest as orders grow.
+- **`test_it_removes_offset_and_keeps_audio` measured inside the transient.**
+  `dc_block` is a one-pole `y = x - x[n-1] + r*y[n-1]`, `r = 0.999246` at 30 Hz
+  and 250 kS/s, so its time constant is **1326 samples** and the offset decays as
+  `r**n`. Measured means of the same signal: 33.16 whole, 0.0351 over
+  `[10000:30000]` — the window the test used, still inside the decay — 1.9e-5 over
+  `[20000:40000]`, 0.0 over the tail, with the 1 kHz audio at **1.002** amplitude
+  throughout. The filter was never wrong. It now measures a settled window, **and
+  a new test asserts the transient decays at exactly the rate the one-pole model
+  predicts**, so the settling is checked rather than skipped past.
+- **`test_lengths_match_the_ratio` asked for a length the input cannot produce.**
+  `resample(sig_199999, 32000, 128000)` is a quarter of 199999 = 49999.75, and the
+  code returns **50000**. The expected `(31999, 32000)` is the answer for a
+  128000-sample input. Corrected, plus a property test over five rate pairs so a
+  future pair cannot pass by luck. **Two equivalent mutants kept and documented**
+  (reducing the pair list, weakening a bound) — both leave the file green because
+  both are true, which is what an equivalent mutant is.
+
+### `soundtouch` and `rubberband` were declared in Debian and not in Arch
+
+`tests/test_prosody.py` was 4 red: `prosody.apply_song()` raises
+`SingingUnsupported` because neither `soundstretch` nor `rubberband` is
+installed. **`DEBIAN/control` has carried both since it was written; the Arch
+`PKGBUILD` — the one that is actually built — declared neither.** So on every Arch
+install `sing` refused for a reason nobody could act on, and sox cannot substitute:
+`sox` shifts a whole file in one go, which is precisely the intonation path the
+per-syllable design replaced.
+
+Added to `shani-pkgbuilds/shani-chronoa/PKGBUILD`, with the package names read
+out of pacman's own file database via `chronoa-matrix.json`
+(`/usr/bin/soundstretch` → **`soundtouch`**, not a package named
+`soundstretch`) rather than guessed, and offered rather than required for the same
+reason as sox. `tests/test_packaging.py` now derives the requirement from the
+binary names `singing.py` actually looks for, so a differently-named shifter is
+caught at packaging time instead of at runtime; 2 mutations (each entry removed)
+confirmed to fail, and `bash -n` passes.
+
+The four measurement tests now carry `@needs_transposer`, whose condition is
+probed through `singing._best_transposer()` — **the module's own chooser, not a
+second `shutil.which`**, because two probes answering different questions is how a
+suite skips where the feature works. And the branch a machine without a shifter
+always takes is now **asserted rather than skipped**: the refusal names both
+packages, writes no output file, and `singing_support()` reports
+`can_transpose: False` instead of claiming the capability. Verified the other way
+too, with a stand-in `soundstretch` on `PATH`: the four measurement tests run and
+fail on pitch (the stub copies the file without shifting it), which is the
+behaviour of a machine that *can* call the shifter.
+
+### One lesson, repeated a fourth time in this repository
+
+The stray-bytecode pair (`test_no_pycache_in_packaged_payload`,
+`test_no_bytecode_files_in_packaged_payload`) went red twice during this pass and
+both times it was **my own probe** leaving `.pyc` in `usr/`, not a regression —
+`PYTHONDONTWRITEBYTECODE=1` on every invocation, and check whether the bytecode is
+yours before believing the repo is broken. Verified by bisecting: no single test
+file in the group writes bytecode, and cleaning between runs makes both green.
+
 ## Two gaps from `digital-travel-agent`, one of them a control (2026-10-09)
 
 `harness-study/digital-travel-agent` (LangGraph, 15.4k LOC, pointed at a live

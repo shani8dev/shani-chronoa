@@ -24,9 +24,20 @@ from shani_chronoa import prosody, singing
 
 HAS_SOX = shutil.which("sox") is not None
 HAS_ESPEAK = shutil.which("espeak-ng") is not None
+#: A per-note pitch shifter, which is a different program from sox and not
+#: something sox can do: `apply_song` cuts the notes apart itself and hands each
+#: one to this to move by its own number of semitones. Probed through the
+#: module's own chooser rather than `shutil.which`, so the skip condition and the
+#: code's condition cannot drift apart - the two answering different questions is
+#: how a test ends up skipping on a machine that can run the thing.
+HAS_TRANSPOSER = singing._best_transposer() is not None
 
 needs_sox = pytest.mark.skipif(not HAS_SOX, reason="sox is not installed")
 needs_espeak = pytest.mark.skipif(not HAS_ESPEAK, reason="espeak-ng is not installed")
+needs_transposer = pytest.mark.skipif(
+    not HAS_TRANSPOSER,
+    reason="no pitch shifter installed: prosody.apply_song needs soundstretch "
+           "(soundtouch) or rubberband to move a note, and sox cannot do it")
 
 
 # --------------------------------------------------------------------------
@@ -242,6 +253,7 @@ class TestTheSongPlanIsCutPerSyllable:
 # --------------------------------------------------------------------------
 
 @needs_sox
+@needs_transposer
 class TestThePitchReallyMovesPerSyllable:
     """The claim, measured on a signal where nothing else has an intonation.
 
@@ -328,6 +340,57 @@ class TestThePitchReallyMovesPerSyllable:
 def singing_shifter_present() -> bool:
     from shani_chronoa import singing
     return singing._best_transposer() is not None
+
+
+class TestWhenNoTransposerIsInstalled:
+    """The branch a machine without one always takes, asserted rather than skipped.
+
+    A `skipif` on the four measurement tests is right - they measure pitch and
+    there is nothing to measure with - but it leaves the *refusal* untested,
+    which is the half every install without `soundtouch` and `rubberband` gets.
+    So it is covered here, and both halves are asserted: the message names the
+    packages that would fix it, and `singing_support()` reports the capability
+    as absent rather than as working.
+    """
+
+    def test_it_refuses_and_names_the_packages_that_would_fix_it(self, tmp_path):
+        if singing_shifter_present():
+            pytest.skip("a shifter is installed, so the refusal is unreachable")
+        original = tone_train(tmp_path / "flat.wav", window=0.25, count=4)
+        out = tmp_path / "sung.wav"
+        syllables = prosody.segment([prosody.Token("a", i * 0.25, 0.25) for i in range(4)])
+        plan = prosody.song_plan(syllables, prosody.Melody((0.0, 2.0, 4.0, 2.0)),
+                                 total=1.0)
+        with pytest.raises(singing.SingingUnsupported) as caught:
+            prosody.apply_song(str(original), str(out), plan)
+        message = str(caught.value)
+        for package in ("soundstretch", "rubberband"):
+            assert package in message, (
+                f"the refusal does not name {package!r}, so it is a dead end for "
+                f"whoever reads it: {message!r}")
+        assert not out.exists(), (
+            "a refused shift still wrote its output, so the refusal is not the "
+            "whole story")
+
+    def test_it_reports_the_capability_as_absent_not_broken(self):
+        if singing_shifter_present():
+            pytest.skip("a shifter is installed, so the absent case is unreachable")
+        support = singing.singing_support()
+        assert support["can_transpose"] is False, (
+            "singing_support reports transposing as possible with no shifter "
+            "installed, which is the confident-wrong-answer shape")
+        assert support["transposer"] is None
+
+    def test_the_two_probes_agree(self):
+        """The skip condition and the code's condition must be the same question.
+
+        `HAS_TRANSPOSER` decides four tests' skip; `singing._best_transposer()`
+        decides whether the code can run at all. If they ever answered different
+        questions the suite would skip where the feature works, or run where it
+        cannot - and both read as a green file.
+        """
+        assert HAS_TRANSPOSER == (singing._best_transposer() is not None)
+        assert singing_shifter_present() == HAS_TRANSPOSER
 
 
 @needs_espeak
