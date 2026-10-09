@@ -309,3 +309,44 @@ def test_a_tesseract_failure_is_not_reported_as_a_blank_page(scan, tools_on,
 # `(Page images kept in <dir>.)`). The property worth holding is "the pages are
 # kept and the answer says where", and both sentences serve it; testing the
 # note specifically would pin wording, not behaviour.
+
+
+def test_the_fallback_never_assumes_english(monkeypatch):
+    """It used to return `-l eng`, which is the one language the Plasma image lacks.
+
+    Measured there: `tesseract --list-langs` answers `afr osd`, and `-l eng`
+    exits 1 with empty stdout. So the "a settings problem must not stop reading"
+    branch guaranteed the failure it existed to prevent, silently. It now asks
+    what is installed.
+    """
+    import shani_chronoa.senses.ocr as ocr_mod
+
+    def _boom():
+        raise RuntimeError("settings are broken")
+
+    monkeypatch.setattr(rd, "_installed_languages", lambda: ["afr", "osd"])
+    monkeypatch.setattr("shani_chronoa.senses.ocr.default_languages", _boom)
+    argv = rd._tesseract_argv("x.png")
+    assert "-l" in argv, argv
+    languages = argv[argv.index("-l") + 1]
+    assert "eng" not in languages, argv
+    assert "afr" in languages, argv
+    # `osd` is orientation data, not a language anybody reads a page in.
+    assert "osd" not in languages, argv
+    assert ocr_mod is not None      # the reader is the sense's, not a local glob
+
+
+def test_with_nothing_installed_it_passes_no_language_at_all(monkeypatch):
+    """So tesseract uses its own default and reports its own error.
+
+    Inventing `-l eng` here is the exact failure above; inventing any other
+    single language is the same mistake with a different letter.
+    """
+    import shani_chronoa.senses.ocr as ocr_mod
+    monkeypatch.setattr(rd, "_installed_languages", lambda: [])
+    monkeypatch.setattr("shani_chronoa.senses.ocr.default_languages",
+                        lambda: (_ for _ in ()).throw(RuntimeError("broken")))
+    argv = rd._tesseract_argv("x.png")
+    assert "-l" not in argv, argv
+    assert argv[0] == "tesseract" and "x.png" in argv, argv
+    assert ocr_mod is not None

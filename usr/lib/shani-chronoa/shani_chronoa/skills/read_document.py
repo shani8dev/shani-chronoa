@@ -27,6 +27,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+from typing import List
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
@@ -45,6 +46,21 @@ _RENDER_DPI = 200
 _MAX_OCR_PAGES = 5
 
 
+def _installed_languages() -> List[str]:
+    """The language codes tesseract can actually read on this machine.
+
+    Read through the OCR sense's own reader, which walks the tessdata
+    directory `find_tessdata_dir()` resolves - so this honours `TESSDATA_PREFIX`
+    the same way the primary path does, and a hand-rolled `glob` here would be a
+    second answer to a question the package already answers.
+    """
+    try:
+        from shani_chronoa.senses import ocr
+        return list(ocr.list_installed_languages(ocr.find_tessdata_dir()))
+    except Exception:  # noqa: BLE001 - no reader means no languages to offer
+        return []
+
+
 def _tesseract_argv(image: str) -> list:
     """tesseract's argv for one image, in the user's languages.
 
@@ -53,11 +69,27 @@ def _tesseract_argv(image: str) -> list:
     `find_tessdata_dir()`; copying that into a second branch is how a language
     setting stops applying to one kind of file and not the other.
 
-    **Read in the user's languages, not silently just English.** This used to
-    hardcode `-l eng`, so a person who turned on Hindi or Marathi in setup got
-    tesseract forcing every Latin-only guess onto a Devanagari page -
-    confident-looking garbage, the same failure `scan_document` already refuses
-    by routing through the OCR sense.
+    **Read in the user's languages, not silently just English.** This
+    used to hardcode `-l eng`, so a person who turned on Hindi or
+    Marathi in setup got tesseract forcing every Latin-only guess onto
+    a Devanagari page - confident-looking garbage, the same failure
+    `scan_document` already refuses by routing through the OCR sense.
+    `senses.ocr.default_languages()` is English plus every installed
+    language the person turned on, and `find_tessdata_dir()` honours
+    the `TESSDATA_PREFIX` setup set up - so no second copy of that
+    knowledge lives here.
+
+    **The fallback asks what is installed rather than assuming English.**
+    It used to be `["tesseract", image, "-", "-l", "eng"]`, and that is
+    not a safety net - it is the one language the Plasma image does not
+    have. Measured on it: `tesseract --list-langs` answers `afr osd`, and
+    `-l eng` then exits **1** with empty stdout and "Failed loading
+    language 'eng'". So on a real shipped image this branch guaranteed
+    the failure it existed to prevent, and did so silently. It now takes
+    the installed languages, dropping `osd` (orientation data, not a
+    language you can read), and when even that cannot be determined it
+    passes **no** `-l` at all - so tesseract uses its own default and
+    reports its own error, rather than this code inventing one.
     """
     try:
         from shani_chronoa.senses import ocr
@@ -67,8 +99,11 @@ def _tesseract_argv(image: str) -> list:
         if tessdata:
             argv += ["--tessdata-dir", tessdata]
         return argv
-    except Exception:  # noqa: BLE001 - a settings problem must not stop reading English
-        return ["tesseract", image, "-", "-l", "eng"]
+    except Exception:  # noqa: BLE001 - see above: never hardcode one language
+        readable = [lang for lang in _installed_languages() if lang != "osd"]
+        if not readable:
+            return ["tesseract", image, "-"]
+        return ["tesseract", image, "-", "-l", "+".join(readable)]
 
 
 def _ocr_image(image: str, timeout: int = 120):
