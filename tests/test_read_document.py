@@ -176,41 +176,54 @@ def test_a_refusal_is_never_a_guess_about_the_document(scan, tools_on):
 
 # ── the temporary directory, which is the user's document ───────────────────
 
-def test_no_rendered_page_image_is_left_on_disk(scan, tools_on, tmp_path):
-    """A rendered page of somebody's document is their document.
+def test_the_rendered_pages_are_kept_and_where_they_are(scan, tools_on,
+                                                         tmp_path, monkeypatch):
+    """They are the artefact, and the answer has to say where they went.
 
-    Checked by counting what is left under the system temp dir before and
-    after, because the work directory's name is an implementation detail - the
-    property is "nothing survives", not "nothing survives under this name".
+    The first version rendered into a temp dir and deleted it in a `finally`.
+    Its two cleanup tests then went **vacuously green** after the change - they
+    globbed `/tmp/chronoa-pdf-*`, which nothing creates any more, so "nothing
+    before and nothing after" was true of a run that had done nothing. Replaced
+    with the property that is actually wanted.
     """
-    before = {p for p in pathlib.Path("/tmp").glob("chronoa-pdf-*")}
-    rd._run({"path": str(scan / "scan.pdf")})
-    after = {p for p in pathlib.Path("/tmp").glob("chronoa-pdf-*")}
-    assert after == before, f"left behind: {after - before}"
+    home = tmp_path / "home"
+    (home / "Documents").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(rd.pathlib.Path, "home", classmethod(lambda cls: home))
+
+    out = rd._run({"path": str(scan / "scan.pdf")})
+    kept = home / "Documents" / "Scans" / "scan-pages"
+    assert kept.is_dir(), f"no page images kept at {kept}"
+    assert sorted(x.name for x in kept.glob("*.png")) == ["page-1.png", "page-2.png"]
+    assert str(kept) in out, f"the answer does not say where the pages went:\n{out}"
 
 
-def test_the_directory_is_removed_even_when_ocr_fails(scan, tools_on, monkeypatch):
-    """The failure paths are the ones most likely to skip a cleanup.
+def test_the_pages_are_kept_even_when_reading_fails(scan, tools_on, tmp_path,
+                                                    monkeypatch):
+    """The failure case is where the images matter most.
 
-    **The subprocess is made to fail, not `_ocr_image`.** Patching `_ocr_image`
-    to raise replaces the function whose `try/except` is the thing under test, so
-    the exception escaped `finally`-adjacent code instead of being handled - the
-    first version failed with a bare `OSError: no` and proved nothing about
-    cleanup.
+    A missing language pack is a real state on the Plasma image, and then the
+    rendered pages are the only thing produced - which is what another OCR, or
+    the person themselves, can still read.
     """
+    home = tmp_path / "home"
+    (home / "Documents").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(rd.pathlib.Path, "home", classmethod(lambda cls: home))
     real_run = rd.subprocess.run
 
     def _run(cmd, **k):
         if cmd and cmd[0] == "tesseract":
-            raise OSError("no tesseract today")
+            return type("R", (), {"returncode": 1, "stdout": "",
+                                  "stderr": "Failed loading language 'eng'\n"})()
         return real_run(cmd, **k)
 
     monkeypatch.setattr(rd.subprocess, "run", _run)
-    before = {p for p in pathlib.Path("/tmp").glob("chronoa-pdf-*")}
     out = rd._run({"path": str(scan / "scan.pdf")})
-    after = {p for p in pathlib.Path("/tmp").glob("chronoa-pdf-*")}
-    assert "could not read the page as a picture" in out, out
-    assert after == before, f"left behind after a failure: {after - before}"
+    kept = home / "Documents" / "Scans" / "scan-pages"
+    assert kept.is_dir(), "a failed OCR threw away the rendered pages"
+    assert len(list(kept.glob("*.png"))) == 2
+    assert "tesseract failed" in out, out
 
 
 def test_a_render_failure_says_so_rather_than_reporting_an_empty_document(
@@ -287,3 +300,12 @@ def test_a_tesseract_failure_is_not_reported_as_a_blank_page(scan, tools_on,
     assert "tesseract failed" in out, out
     assert "missing language pack" in out, out
     assert "found no text" not in out, out
+
+
+# One mutation is equivalent and is kept here rather than hidden: deleting the
+# sentence "The page images are kept in <dir>." from the provenance note leaves
+# this file green, because the trailing line names the directory on every path
+# (`... further page(s) not read, and already rendered in <dir>` or
+# `(Page images kept in <dir>.)`). The property worth holding is "the pages are
+# kept and the answer says where", and both sentences serve it; testing the
+# note specifically would pin wording, not behaviour.

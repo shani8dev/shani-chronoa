@@ -15,13 +15,18 @@ is the branch below. Render, OCR, and say so.
 the same as a text layer, and a summary built from it should not look like one -
 so the output says the document has no text layer and the words come from
 reading the page.
+
+**The rendered pages are kept**, in `~/Documents/Scans/<name>-pages` beside
+where `scan_document` puts a scan, and the answer says so. They are what makes a
+long scan usable rather than a dead end: only the first few pages are read, and
+when reading fails outright - no language pack installed, which is the state the
+Plasma image is in - they are the part that is still worth having.
 """
 
 import pathlib
 import re
 import shutil
 import subprocess
-import tempfile
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
@@ -78,13 +83,33 @@ def _ocr_image(image: str, timeout: int = 120):
     return r.returncode, r.stdout
 
 
-def _render_and_read(path, first, last) -> str:
-    """OCR a PDF that has no text layer, or say precisely why it could not be.
+def _render_dir(pdf) -> pathlib.Path:
+    """Where the rendered pages of `pdf` are kept.
 
-    **The temporary directory is removed on every path**, including both
-    refusals - a rendered page image of somebody's document is their document,
-    and leaving one in `/tmp` is a disclosure nobody asked for.
+    **`~/Documents/Scans`, the same place `scan_document` keeps a scanned page** -
+    a function, not an import-time constant, for the reason every other data path
+    here is one: resolved at import it points a test run at a real user's
+    Documents.
+
+    **They are kept, not deleted.** My first version rendered into
+    `tempfile.mkdtemp()` and removed it in a `finally`, reasoning that a page
+    image of somebody's document is their document and should not be left behind.
+    That has the direction backwards: it threw away the expensive artefact and
+    both things it was for. A forty-page scan OCRs five, and the other
+    thirty-five were rendered and then deleted, so asking for page 7 re-renders
+    from scratch; and when OCR *fails* - a missing language pack, which is the
+    state the Plasma image is in - the rendered pages are exactly what is still
+    useful, because they are what any other OCR, or the user themselves, can
+    read. `scan_document` keeps its image for the same reason, and two skills
+    should not disagree about it.
     """
+    out = pathlib.Path.home() / "Documents" / "Scans" / (pdf.stem + "-pages")
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+def _render_and_read(path, first, last) -> str:
+    """OCR a PDF that has no text layer, or say precisely why it could not be."""
     missing = [b for b in ("pdftoppm", "tesseract") if shutil.which(b) is None]
     if missing:
         names = ", ".join(missing)
@@ -93,8 +118,8 @@ def _render_and_read(path, first, last) -> str:
                 f"{names} (the poppler and tesseract packages). Nothing was "
                 "guessed from a document that has no words in it.")
 
-    workdir = tempfile.mkdtemp(prefix="chronoa-pdf-")
-    try:
+    workdir = _render_dir(path)
+    if True:
         argv = ["pdftoppm", "-r", str(_RENDER_DPI), "-png"]
         if first:
             argv += ["-f", str(first)]
@@ -157,12 +182,12 @@ def _render_and_read(path, first, last) -> str:
         note = (f"[{path.name} has no text layer; these words come from "
                 f"reading {where} as {_RENDER_DPI} DPI pictures, so numbers and "
                 f"names are more likely to be wrong than from a real text "
-                f"layer.]\n\n")
-        more = (f"\n\n({len(pages) - len(shown)} further page(s) not read - ask "
-                f"for a page range to read one.)" if len(pages) > len(shown) else "")
+                f"layer. The page images are kept in {workdir}.]\n\n")
+        more = (f"\n\n({len(pages) - len(shown)} further page(s) not read, and "
+                f"already rendered in {workdir} - ask for a page range to read "
+                f"one.)" if len(pages) > len(shown) else
+                f"\n\n(Page images kept in {workdir}.)")
         return note + "\n\n".join(out)[:MAX_CHARS] + more
-    finally:
-        shutil.rmtree(workdir, ignore_errors=True)
 
 _SCHEMA = {
     "type": "function",
