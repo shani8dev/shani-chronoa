@@ -147,9 +147,8 @@ SENSE_LABELS = {
     ),
     "polkitpolicy": (
         "What you can do without a password",
-        "Which of the polkit actions installed on this machine need no "
-        "authentication for you, which need your own password, which need an "
-        "administrator, and which are never allowed at all",
+        "Which installed polkit actions need no password, only yours, or an "
+        "administrator's",
     ),
     "firewall": (
         "Firewall",
@@ -165,9 +164,8 @@ SENSE_LABELS = {
     ),
     "kernellog": (
         "What the kernel said",
-        "Hardware faults and OOM kills from the kernel ring buffer itself, "
-        "which no service has touched - the record that exists before journald "
-        "is even running",
+        "Hardware faults and OOM kills from the kernel ring buffer, before "
+        "journald exists",
     ),
     "updates": (
         "Waiting updates",
