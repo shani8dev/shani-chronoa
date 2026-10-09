@@ -37,8 +37,11 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 #: coverage is the claim: if a post-condition is added elsewhere the coverage
 #: widens, and this test should be the thing that says so rather than the thing
 #: that quietly stops being true.
-COVERED = ["airplane_mode", "control_service", "default_apps", "delete_file",
-           "desktop_setting", "kill_process", "office_document", "print_queue",
+COVERED = ["airplane_mode", "close_window", "control_service",
+           "conversations", "default_apps", "delete_file",
+           "desktop_setting", "edit_file", "find_and_replace",
+           "kill_process", "manage_mount", "manage_triggers",
+           "office_document", "power_action", "print_queue",
            "set_hostname", "set_locale", "take_photo", "toggle_wifi"]
 
 

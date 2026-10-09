@@ -70,4 +70,49 @@ def _run(arguments: dict) -> str:
         return f"Could not {action}: {e.__class__.__name__}"
 
 
+def _post_condition(arguments: dict) -> tuple[bool, str]:
+    """Did the power action actually take, read from the system's own state.
+
+    Without this the call returned UNVERIFIED, and UNVERIFIED is exactly the
+    cell the replay guard refuses to store - so a notification pressed twice,
+    or a client replaying after a timeout that actually succeeded, could shut
+    the machine down twice. It is the sharpest instance of that gap: every
+    other uncovered destructive tool can be repeated harmlessly, and this one
+    takes the desktop with it.
+
+    The check is deliberately narrow. Suspend and hibernate cannot be observed
+    from outside - by the time anything could read the state, the machine is
+    asleep or coming back - so they report what the tool itself reported
+    rather than inventing a check. `restart`/`shutdown` schedule through
+    systemd's shutdown binary, which arms `systemd-shutdown.timer`; that timer
+    is the real evidence, and it is what `shutdown -c` clears.
+    """
+    action = (arguments.get("action") or "").strip()
+    if action in ("suspend", "hibernate"):
+        return True, (f"systemctl {action} returned success; the state cannot be "
+                      f"read from outside without waking the machine again")
+    if action == "cancel":
+        return True, "cancellation is a negative claim and is not observable here"
+    if shutil.which("systemctl") is None:
+        return False, "systemctl is not available, so the shutdown timer cannot be read"
+    try:
+        props = subprocess.run(
+            ["systemctl", "show", "systemd-shutdown.timer", "--property=ActiveState"],
+            capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"could not read systemd-shutdown.timer: {exc.__class__.__name__}"
+    if props.returncode != 0:
+        return False, (f"systemd-shutdown.timer did not answer: "
+                        f"{(props.stderr or '').strip()[:120]}")
+    state = ""
+    for line in props.stdout.splitlines():
+        if line.startswith("ActiveState="):
+            state = line.split("=", 1)[1].strip()
+    if state == "active":
+        return True, "systemd-shutdown.timer is armed"
+    return False, f"systemd-shutdown.timer is {state or 'in an unknown state'}, not armed"
+
+
+POST_CONDITION = _post_condition
+
 SKILLS = [Skill(name="power_action", schema=_SCHEMA, run=_run)]

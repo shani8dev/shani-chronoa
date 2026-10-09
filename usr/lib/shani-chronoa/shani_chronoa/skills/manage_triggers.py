@@ -367,6 +367,43 @@ def _run(arguments: dict) -> str:
     return _add_percept_rule(arguments)
 
 
+def _post_condition(arguments: dict) -> tuple[bool, str]:
+    """Is the rule this call claims to have armed actually armed?
+
+    Arming a rule is the most consequential thing this skill does: it creates
+    something that acts *unattended*, without anyone typing again. The call
+    returning without an exception said nothing about whether the rule landed,
+    and UNVERIFIED is the one verdict the replay guard refuses to store - so a
+    replayed "arm a doorbell rule" would silently arm a second one, and the
+    person would have no way to see there were two.
+
+    The check is the store's own `all()`, read back through the same `_open`
+    the listing uses, so both stores are covered. A store that will not open
+    reports failure rather than passing: an unverifiable arm must not be
+    recorded as a completed one.
+    """
+    name = (arguments.get("name") or "").strip()
+    if not name:
+        return False, "no rule name was given, so there is nothing that could have been armed"
+    event_type = (arguments.get("event_type") or "").strip().lower()
+    kind = "event" if event_type else "percept"
+    store, problem = _open(kind)
+    if store is None:
+        return False, f"the {kind} rule store could not be read: {problem}"
+    try:
+        rules = store.all()
+    except Exception as exc:  # noqa: BLE001 - a store that raises is not an armed rule
+        return False, f"the {kind} rule store could not be listed: {exc.__class__.__name__}"
+    for rule in rules:
+        if getattr(rule, "name", None) == name:
+            return True, f"rule {name!r} is armed in the {kind} store"
+    known = ", ".join(sorted(str(getattr(r, 'name', '?')) for r in rules)) or "none"
+    return False, f"no rule called {name!r} is armed in the {kind} store (armed: {known})"
+
+
+POST_CONDITION = _post_condition
+
+
 def _list_both() -> str:
     """Every armed rule of either kind, plus any store that would not open.
 

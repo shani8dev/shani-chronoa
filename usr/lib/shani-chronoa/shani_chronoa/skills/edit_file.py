@@ -221,4 +221,48 @@ def _run(arguments: dict) -> str:
     )
 
 
+def _post_condition(arguments: dict) -> tuple[bool, str]:
+    """Does the file now contain the replacement, read back from disk?
+
+    The edit above already re-reads the file and refuses to claim success when
+    the bytes differ - so the property exists, it just was not visible to the
+    layer that decides whether a call is verified. UNVERIFIED is the only
+    verdict the replay guard refuses to store, so an unverifiable edit could be
+    replayed by a notification pressed twice.
+
+    The check asks the file, not the write: `new_string` present and
+    `old_string` gone is the effect, and reading it back is the only thing that
+    can distinguish "written" from "reported as written". A `replace_all` edit
+    is the same question and gets the same answer, because the count is not
+    what is being verified.
+    """
+    new = arguments.get("new_string")
+    if new is None:
+        return False, "no new_string was given, so there is nothing to look for"
+    try:
+        target = files.resolve_in_home(arguments.get("path") or "")
+    except files.PathProblem as exc:
+        return False, str(exc)
+    if not target.exists():
+        return False, f"{target} does not exist, so nothing was edited there"
+    try:
+        text = target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        return False, f"{target} could not be read back: {exc.__class__.__name__}"
+    if new == "":
+        # A deletion: the old text must be gone, which is the whole effect.
+        return True, f"{target} no longer contains the deleted text" \
+            if text != arguments.get("old_string") else \
+            f"{target} still contains exactly the text that was to be deleted"
+    if new not in text:
+        return False, f"{target} does not contain the replacement text"
+    old = arguments.get("old_string")
+    if old and not arguments.get("replace_all") and old in text and old != new:
+        return False, f"{target} still contains the original text as well"
+    return True, f"{target} contains the replacement and not the original"
+
+
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="edit_file", schema=SCHEMA, run=_run)]

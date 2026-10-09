@@ -126,4 +126,41 @@ def _run(arguments: dict) -> str:
     return f"action must be one of {', '.join(_ACTIONS)}."
 
 
+def _post_condition(arguments: dict) -> "tuple[bool, str] | None":
+    """Is the conversation this call deleted actually gone?
+
+    Only the `delete` action is checked. Everything else this skill
+    does is a read or a non-destructive write, and `None` - the
+    contract's "nothing this call changed can be checked" - is the
+    honest verdict for those, never `True`.
+
+    The check re-resolves `which` through the *same* resolver `delete`
+    used, rather than a second one written here: two resolvers can
+    disagree about an ambiguous or partial title, and a check that
+    disagrees with the action it verifies is worse than no check.
+
+    A delete with no `which` is refused by the skill itself before
+    anything is deleted, so there is nothing to verify - and the
+    active conversation cannot be re-resolved by name, because
+    deleting it moved the active pointer.
+    """
+    action = (arguments.get("action") or "").strip().lower()
+    if action != "delete":
+        return None
+    ref = (arguments.get("which") or "").strip()
+    if not ref:
+        return None
+    try:
+        data = conversation_store.index(conversation_store.session_dir())
+        still = conversation_store._resolve(data, ref)  # noqa: SLF001 - the same resolver delete used
+    except Exception as exc:  # noqa: BLE001 - a store that raises is not a deletion
+        return False, f"the conversation store could not be read: {exc.__class__.__name__}"
+    if still:
+        return False, f"a conversation still matches {ref!r}"
+    return True, f"no conversation matches {ref!r} any more"
+
+
+POST_CONDITION = _post_condition
+
+
 SKILLS = [Skill(name="conversations", schema=SCHEMA, run=_run)]

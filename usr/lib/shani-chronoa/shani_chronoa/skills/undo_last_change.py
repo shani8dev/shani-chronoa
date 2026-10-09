@@ -30,6 +30,22 @@ gemini-cli offer, scoped to Chronoa's own writes.
 
 Consent is checked *before* the path is looked at, so a refusal does not
 reveal whether a file exists.
+
+**No post-condition is declared, and that is deliberate.** A restore
+consumes the very ring entry that names the content it wrote, so after
+a successful restore the expected bytes exist nowhere the arguments
+can reach - and the count of remaining entries cannot stand in for
+them, because "asked for 2 steps with 1 recorded" (a refusal) and
+"asked for 2 steps with 2 recorded, both consumed" (a success) leave
+the ring in the same shape. A post-condition that guessed would verify
+a refused call as done and a failed one as held, which is the exact
+failure `verification.py` exists to prevent. The skill's own
+read-back (`its contents do not match`) stays, so an in-process write
+failure is still caught; what is not claimed is the post-hoc replay
+check. A repeat of a restore within the replay window therefore asks
+again and undoes one more step - which is what a person pressing
+"undo" twice means, and the bounded, per-typed-request shape of this
+skill makes that the honest behaviour rather than a hole.
 """
 
 from __future__ import annotations

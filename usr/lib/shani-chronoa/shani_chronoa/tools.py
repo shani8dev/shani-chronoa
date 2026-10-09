@@ -296,15 +296,22 @@ REPLAY_CAPACITY = 64
 #: with the stale refusal instead of running. **A stale refusal is worse than no
 #: replay protection at all**, so `VERIFIED` is the whole rule.
 #:
-#: What that costs, measured on this tree: **12 of the 62 gated tools** have a
+#: What that costs, measured on this tree: **19 of the 62 gated tools** have a
 #: post-condition and can therefore reach `VERIFIED` -
-#: `airplane_mode`, `control_service`, `default_apps`, `delete_file`,
-#: `desktop_setting`, `kill_process`, `office_document`, `print_queue`,
-#: `set_hostname`, `set_locale`, `take_photo`, `toggle_wifi` - of which four are
-#: also classified destructive. The other 50 are not replay-protected, and
-#: `install_app`, `power_action`, `move_pointer`, `click_pointer`, `type_text`
-#: and `connect_wifi` are among them. That is the honest coverage, recorded here
-#: rather than implied by the feature's presence.
+#: `airplane_mode`, `close_window`, `control_service`, `conversations`,
+#: `default_apps`, `delete_file`, `desktop_setting`, `edit_file`,
+#: `find_and_replace`, `kill_process`, `manage_mount`, `manage_triggers`,
+#: `office_document`, `power_action`, `print_queue`, `set_hostname`,
+#: `set_locale`, `take_photo`, `toggle_wifi` - of which eleven are
+#: also classified destructive. The other 43 are not replay-protected, and
+#: `install_app`, `move_pointer`, `click_pointer`, `type_text` and
+#: `connect_wifi` are among them. That is the honest coverage, recorded here
+#: rather than implied by the feature's presence. The one destructive tool
+#: without a post-condition is `undo_last_change`, which cannot have a sound
+#: one: a restore consumes the ring entry that names the bytes it wrote, so
+#: the expected content is unreachable from the call's arguments - its
+#: module docstring says why, and why a repeat within the window is the
+#: honest behaviour there rather than a hole.
 #:
 #: What would widen it, not built here: a refusal marker in the child, as a
 #: sibling to `ToolFailure.MARKER`. That is a change across the skill set, and

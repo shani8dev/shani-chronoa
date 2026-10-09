@@ -225,6 +225,64 @@ def _run(arguments: dict) -> str:
     return "\n".join(lines)
 
 
+def _post_condition(arguments: dict) -> tuple[bool, str]:
+    """Is `find` gone from the files this call reported changing?
+
+    Multi-file and pattern-driven, so the check is the same shape as
+    `edit_file`'s: read the files back and look for what should no longer be
+    there. A file that legitimately still contains the text elsewhere - the
+    replacement may itself contain it - is counted as not-changed rather than
+    passed, because the honest reading of "did the replacement hold" is "is the
+    search text still in the file at all", and anything else needs the caller to
+    know how many occurrences were expected.
+
+    A dry run changed nothing, so it is reported as a completed call: that is
+    what it did. Returning failure there would store the refusal as if it were a
+    refusal to work.
+    """
+    find = arguments.get("find")
+    if find is None or find == "":
+        return False, "no search text was given, so nothing could have been replaced"
+    dry_run = arguments.get("dry_run")
+    if dry_run is None or bool(dry_run):
+        return True, "this was a dry run; nothing was written, which is what it was asked to do"
+    try:
+        root = files.resolve((arguments.get("path") or "").strip() or ".")
+    except files.PathProblem as exc:
+        return False, str(exc)
+    if not root.exists():
+        return False, f"{root} does not exist, so nothing there could have been replaced"
+    if root.is_file():
+        root = root.parent
+    try:
+        matches, _already, _skipped = _scan(
+            root, find, (arguments.get("file_pattern") or "").strip(),
+            bool(arguments.get("case_sensitive")))
+    except Exception as exc:  # noqa: BLE001 - a scanner that raises is not a verification
+        return False, f"the files could not be re-scanned: {exc.__class__.__name__}"
+    if not matches:
+        return False, ("no files matched the search text, so there is nothing "
+                       "whose replacement could be checked")
+    still = []
+    for path, _count, _first in matches:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if arguments.get("case_sensitive"):
+            if find in text:
+                still.append(str(path))
+        elif find.lower() in text.lower():
+            still.append(str(path))
+    if still:
+        return False, (f"{len(still)} file(s) still contain the search text: "
+                       f"{still[0]}" + (f" and {len(still)-1} more" if len(still) > 1 else ""))
+    return True, f"the search text is gone from all {len(matches)} file(s) it was found in"
+
+
+POST_CONDITION = _post_condition
+
+
 def _replace_insensitive(text: str, find: str, replace: str) -> str:
     """Case-insensitive replace that preserves nothing clever about case."""
     out, low, i = [], text.lower(), 0

@@ -163,4 +163,41 @@ def _run(arguments: dict) -> str:
     return f"Asked the disk service to {action} {device} and it reported success."
 
 
+def _post_condition(arguments: dict) -> tuple[bool, str]:
+    """Did the mount change, read from the mount table rather than the exit code.
+
+    `udisksctl` returning 0 says the disk service accepted the request, which
+    is not the same as the filesystem being mounted - and UNVERIFIED is the one
+    verdict the replay guard refuses to store, so an unverifiable unmount could
+    be replayed by a notification pressed twice.
+
+    A mount is observable directly: `findmnt --target` answers for the mount
+    point. An unmount is a negative claim, and the honest way to check one is to
+    ask whether the target is *absent* from the table - which is still the mount
+    table, not the exit code.
+    """
+    action = (arguments.get("action") or "list").strip().lower()
+    if action not in ("mount", "unmount"):
+        return True, f"'{action}' changes nothing, so there is nothing to verify"
+    device = (arguments.get("device") or "").strip()
+    if not device:
+        return False, "no device was named, so there is nothing that could have changed"
+    if shutil.which("findmnt") is None:
+        return False, "findmnt is not installed, so the mount table cannot be read"
+    try:
+        found = subprocess.run(["findmnt", "--target", device], capture_output=True,
+                                text=True, timeout=_TIMEOUT, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f"could not read the mount table: {exc.__class__.__name__}"
+    mounted = found.returncode == 0 and bool(found.stdout.strip())
+    if action == "mount" and mounted:
+        return True, f"the mount table lists {device}"
+    if action == "unmount" and not mounted:
+        return True, f"the mount table no longer lists {device}"
+    state = "still listed" if mounted else "not listed"
+    return False, f"{device} is {state} in the mount table, so the {action} did not hold"
+
+
+POST_CONDITION = _post_condition
+
 SKILLS = [Skill(name="manage_mount", schema=SCHEMA, run=_run)]
