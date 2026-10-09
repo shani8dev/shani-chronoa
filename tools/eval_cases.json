@@ -1,5 +1,5 @@
 {
-  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS PARTIAL, and recorded here so it cannot rot quietly: the cases assert one or more acceptable calls for 59 of the 204 skills, so selection on the other 145 is unmeasured - including 56 that are consent-gated. Two other layers cover the rest and are not this one: `tests/test_every_skill_handler_is_importable.py` (every handler is reachable) and `tests/test_matrix_skills.py` (every skill dispatches). What neither can answer is whether the model *chooses* it. `tests/test_task_eval.py` asserts these counts against this file.",
+  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS COMPLETE: every skill now has at least one case, so a regression in tool selection is visible anywhere in the list. The wording of the generated cases is a starting point rather than a transcript - each says so in its own `note` - so the depth is uneven on purpose: the hand-written cases are transcripts, and the generated ones assert the tool and the presence of its required arguments. `tools/gen_eval_cases.py --check` reports what is missing and `tests/test_task_eval.py` asserts the counts against this file.",
   "cases": [
     {
       "id": "time",
@@ -864,11 +864,1641 @@
           }
         }
       ]
+    },
+    {
+      "id": "generated-accessibility",
+      "say": "Turn on the screen reader",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "accessibility",
+          "args": {
+            "feature": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-airplane-mode",
+      "say": "Report the radios, or turn airplane mode on or off.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "airplane_mode"
+        }
+      ]
+    },
+    {
+      "id": "generated-alarm",
+      "say": "Set, change, snooze or delete an alarm.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "alarm"
+        }
+      ]
+    },
+    {
+      "id": "generated-analyze-table",
+      "say": "Ask questions of a spreadsheet or CSV, and chart it.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "analyze_table",
+          "args": {
+            "action": "*",
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-android-device",
+      "say": "Battery, screenshot, apps and files of a phone connected with adb.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "android_device",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-arrange-window",
+      "say": "Minimize, maximize, move or resize a window.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "arrange_window",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-ask-user",
+      "say": "Ask a clarifying question.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "ask_user",
+          "args": {
+            "question": "*",
+            "options": [
+              "*"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-audio-output",
+      "say": "Switch speakers, headphones and microphones.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "audio_output"
+        }
+      ]
+    },
+    {
+      "id": "generated-bluetooth-call",
+      "say": "Call through a paired phone, on this computer's speakers.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "bluetooth_call",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-bluetooth-gatt",
+      "say": "Read a watch or band's battery, sensors and firmware.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "bluetooth_gatt",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-boot-report",
+      "say": "Why booting is slow, and whether it shut down cleanly.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "boot_report"
+        }
+      ]
+    },
+    {
+      "id": "generated-bridge-topology",
+      "say": "Which interfaces are bridges, and what is plugged into them.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "bridge_topology"
+        }
+      ]
+    },
+    {
+      "id": "generated-calendar-edit",
+      "say": "Add, move or cancel a calendar event.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "calendar_edit",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-calendar-events",
+      "say": "Read what is on your calendar.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "calendar_events"
+        }
+      ]
+    },
+    {
+      "id": "generated-calendar-month",
+      "say": "Month calendar.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "calendar_month"
+        }
+      ]
+    },
+    {
+      "id": "generated-capture-packets",
+      "say": "Watch the packets crossing an interface.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "capture_packets"
+        }
+      ]
+    },
+    {
+      "id": "generated-capture-video",
+      "say": "Record a short video from the camera.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "capture_video"
+        }
+      ]
+    },
+    {
+      "id": "generated-charger-info",
+      "say": "Say what is charging this machine, and how fast.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "charger_info"
+        }
+      ]
+    },
+    {
+      "id": "generated-cleanup-report",
+      "say": "What can I clean up to free space?",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "cleanup_report"
+        }
+      ]
+    },
+    {
+      "id": "generated-click-pointer",
+      "say": "Click.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "click_pointer",
+          "args": {
+            "button": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-close-window",
+      "say": "Close a window.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "close_window"
+        }
+      ]
+    },
+    {
+      "id": "generated-compare-files",
+      "say": "Compare two files.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "compare_files",
+          "args": {
+            "path_a": "*",
+            "path_b": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-compute-hash",
+      "say": "Checksum a file.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "compute_hash"
+        }
+      ]
+    },
+    {
+      "id": "generated-connect-wifi",
+      "say": "Join a WiFi network.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "connect_wifi"
+        }
+      ]
+    },
+    {
+      "id": "generated-control-service",
+      "say": "Start or stop a service.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "control_service"
+        }
+      ]
+    },
+    {
+      "id": "generated-convert-color",
+      "say": "Colour codes.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "convert_color",
+          "args": {
+            "color": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-convert-document",
+      "say": "Convert a document between md, txt, and html.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "convert_document",
+          "args": {
+            "path": "*",
+            "to": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-convert-media",
+      "say": "Convert audio, video and pictures.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "convert_media",
+          "args": {
+            "path": "*",
+            "to": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-crash-report",
+      "say": "What crashed recently.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "crash_report"
+        }
+      ]
+    },
+    {
+      "id": "generated-create-archive",
+      "say": "Make or extract an archive.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "create_archive"
+        }
+      ]
+    },
+    {
+      "id": "generated-create-directory",
+      "say": "Create a folder.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "create_directory"
+        }
+      ]
+    },
+    {
+      "id": "generated-create-document",
+      "say": "Create a markdown, text, or HTML document.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "create_document",
+          "args": {
+            "title": "*",
+            "body": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-create-video",
+      "say": "Make a slideshow or colour clip.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "create_video"
+        }
+      ]
+    },
+    {
+      "id": "generated-data-usage",
+      "say": "Data used.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "data_usage"
+        }
+      ]
+    },
+    {
+      "id": "generated-default-apps",
+      "say": "Which app opens a kind of file, and the default browser.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "default_apps",
+          "args": {
+            "target": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-delete-file",
+      "say": "Delete.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "delete_file"
+        }
+      ]
+    },
+    {
+      "id": "generated-desktop-setting",
+      "say": "Read or change a desktop setting (animations, clock, cursor, touchpad...).",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "desktop_setting",
+          "args": {
+            "setting": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-discover-hosts",
+      "say": "Who is on this network right now.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "discover_hosts"
+        }
+      ]
+    },
+    {
+      "id": "generated-disk-health",
+      "say": "Drive health and disk encryption.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "disk_health"
+        }
+      ]
+    },
+    {
+      "id": "generated-dissect-traffic",
+      "say": "Dissect traffic into protocol fields.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "dissect_traffic"
+        }
+      ]
+    },
+    {
+      "id": "generated-dns-lookup",
+      "say": "Look a name up in DNS, or read its mail, name or certificate records.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "dns_lookup"
+        }
+      ]
+    },
+    {
+      "id": "generated-driver-info",
+      "say": "Which driver each device uses.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "driver_info"
+        }
+      ]
+    },
+    {
+      "id": "generated-edit-audio",
+      "say": "Trim, normalize, change volume or speed.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "edit_audio",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-edit-file",
+      "say": "Change one exact piece of text.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "edit_file",
+          "args": {
+            "path": "*",
+            "old_string": "*",
+            "new_string": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-edit-video",
+      "say": "Trim, resize, rotate, or mute a video.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "edit_video",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-empty-trash",
+      "say": "Permanently empty the desktop trash.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "empty_trash"
+        }
+      ]
+    },
+    {
+      "id": "generated-encode-text",
+      "say": "Encode or decode text.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "encode_text",
+          "args": {
+            "text": "*",
+            "scheme": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-explain-command",
+      "say": "Explain a command.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "explain_command"
+        }
+      ]
+    },
+    {
+      "id": "generated-extract-archive",
+      "say": "Unpack a tar or zip archive.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "extract_archive"
+        }
+      ]
+    },
+    {
+      "id": "generated-find-and-replace",
+      "say": "Find and replace.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "find_and_replace"
+        }
+      ]
+    },
+    {
+      "id": "generated-find-device",
+      "say": "Make a lost watch or band buzz so you can find it.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "find_device"
+        }
+      ]
+    },
+    {
+      "id": "generated-find-recently-modified",
+      "say": "What changed today.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "find_recently_modified"
+        }
+      ]
+    },
+    {
+      "id": "generated-firmware-updates",
+      "say": "List firmware updates for this machine's devices.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "firmware_updates"
+        }
+      ]
+    },
+    {
+      "id": "generated-fm-radio",
+      "say": "Listen to FM radio through a USB receiver.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "fm_radio",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-focus-window",
+      "say": "Focus a window.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "focus_window"
+        }
+      ]
+    },
+    {
+      "id": "generated-get-file-info",
+      "say": "File size, age and permissions.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "get_file_info",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-get-location",
+      "say": "Where this computer is.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "get_location"
+        }
+      ]
+    },
+    {
+      "id": "generated-git-inspect",
+      "say": "What changed in a git repository.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "git_inspect"
+        }
+      ]
+    },
+    {
+      "id": "generated-install-app",
+      "say": "Install and remove apps.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "install_app",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-install-model",
+      "say": "Download a model.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "install_model",
+          "args": {
+            "name": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-interface-counters",
+      "say": "How much traffic each interface has carried.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "interface_counters"
+        }
+      ]
+    },
+    {
+      "id": "generated-json-query",
+      "say": "Ask what a JSON document contains.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "json_query"
+        }
+      ]
+    },
+    {
+      "id": "generated-kill-process",
+      "say": "Stop a process.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "kill_process"
+        }
+      ]
+    },
+    {
+      "id": "generated-lab-network-create",
+      "say": "Build an isolated lab network with named subnets.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "lab_network_create",
+          "args": {
+            "name": "*",
+            "cidr": "*",
+            "subnets": [
+              "*"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-lab-network-destroy",
+      "say": "Remove a lab network this machine built.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "lab_network_destroy",
+          "args": {
+            "name": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-lab-network-list",
+      "say": "List the lab networks built on this machine.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "lab_network_list"
+        }
+      ]
+    },
+    {
+      "id": "generated-lab-network-status",
+      "say": "Check what a lab network can actually reach.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "lab_network_status"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-apps",
+      "say": "List installed applications.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_apps"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-capabilities",
+      "say": "What it can do right now.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_capabilities"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-containers",
+      "say": "Distroboxes and containers.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_containers"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-fonts",
+      "say": "Installed fonts, and which one is used.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_fonts"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-percepts",
+      "say": "What it perceives.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_percepts"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-services",
+      "say": "System services.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_services"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-vms",
+      "say": "Virtual machines.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_vms"
+        }
+      ]
+    },
+    {
+      "id": "generated-list-windows",
+      "say": "Open windows.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "list_windows"
+        }
+      ]
+    },
+    {
+      "id": "generated-login-history",
+      "say": "Who logged in recently.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "login_history"
+        }
+      ]
+    },
+    {
+      "id": "generated-machine-capabilities",
+      "say": "What this machine can actually do.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "machine_capabilities"
+        }
+      ]
+    },
+    {
+      "id": "generated-manage-goals",
+      "say": "Save a multi-step goal to run later.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "manage_goals"
+        }
+      ]
+    },
+    {
+      "id": "generated-manage-mount",
+      "say": "Mount or unmount.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "manage_mount"
+        }
+      ]
+    },
+    {
+      "id": "generated-manage-triggers",
+      "say": "Arm an automatic rule.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "manage_triggers"
+        }
+      ]
+    },
+    {
+      "id": "generated-maps",
+      "say": "Find a place, get directions, or look up what is nearby.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "maps"
+        }
+      ]
+    },
+    {
+      "id": "generated-move-or-copy-file",
+      "say": "Move or copy.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "move_or_copy_file"
+        }
+      ]
+    },
+    {
+      "id": "generated-move-pointer",
+      "say": "Move the pointer.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "move_pointer",
+          "args": {
+            "x": "*",
+            "y": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-neighbour-table",
+      "say": "Which addresses on this link have answered, and which never have.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "neighbour_table"
+        }
+      ]
+    },
+    {
+      "id": "generated-nfc",
+      "say": "Read an NFC tag, or write a link to a sticker.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "nfc",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-notes",
+      "say": "Keep your own notes: add, list, search and remove.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "notes"
+        }
+      ]
+    },
+    {
+      "id": "generated-notify",
+      "say": "Send a notification.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "notify",
+          "args": {
+            "summary": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-office-document",
+      "say": "Read, create or edit Word, Excel and PowerPoint files.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "office_document",
+          "args": {
+            "action": "*",
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-open-file",
+      "say": "Open a file.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "open_file"
+        }
+      ]
+    },
+    {
+      "id": "generated-open-settings",
+      "say": "Open the system Settings at a page.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "open_settings",
+          "args": {
+            "page": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-pdf-pages",
+      "say": "Merge, split or take pages out of PDFs.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "pdf_pages",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-phone",
+      "say": "Find, ping or send a file to your paired phone.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "phone",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-phone-remote",
+      "say": "Press the phone camera shutter, media keys, or type on the phone.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "phone_remote",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-photo-metadata",
+      "say": "When, where and with what camera a photo was taken.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "photo_metadata",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-photos",
+      "say": "Find your photos by what is in them, what is written on them, or when they were taken.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "photos",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-ping-host",
+      "say": "Ping a host.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "ping_host",
+          "args": {
+            "host": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-port-owner",
+      "say": "Which program is using a port.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "port_owner"
+        }
+      ]
+    },
+    {
+      "id": "generated-press-key",
+      "say": "Press a key.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "press_key"
+        }
+      ]
+    },
+    {
+      "id": "generated-print-file",
+      "say": "Print a file.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "print_file"
+        }
+      ]
+    },
+    {
+      "id": "generated-print-queue",
+      "say": "The print queue, and cancelling a job.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "print_queue"
+        }
+      ]
+    },
+    {
+      "id": "generated-project-outline",
+      "say": "Outline a code project: files, classes and functions.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "project_outline",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-read-audio",
+      "say": "Read an audio file's length, format, and bitrate.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "read_audio",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-read-image",
+      "say": "Read a picture's dimensions, format, and colour.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "read_image",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-read-logs",
+      "say": "Read the system log.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "read_logs"
+        }
+      ]
+    },
+    {
+      "id": "generated-read-video",
+      "say": "Read a video's length, size, and format.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "read_video",
+          "args": {
+            "path": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-recommend-model",
+      "say": "Which model would fit this machine?",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "recommend_model"
+        }
+      ]
+    },
+    {
+      "id": "generated-routines",
+      "say": "Save a phrase that runs a whole request.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "routines",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-routing-table",
+      "say": "The machine's routing table.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "routing_table"
+        }
+      ]
+    },
+    {
+      "id": "generated-scan-document",
+      "say": "Scan and read a page.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "scan_document"
+        }
+      ]
+    },
+    {
+      "id": "generated-scan-network",
+      "say": "Find other devices on the local network.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "scan_network"
+        }
+      ]
+    },
+    {
+      "id": "generated-search-file-contents",
+      "say": "Search inside files.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "search_file_contents"
+        }
+      ]
+    },
+    {
+      "id": "generated-security-status",
+      "say": "Secure Boot, TPM and firewall status.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "security_status"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-clipboard",
+      "say": "Copy this to the clipboard",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_clipboard",
+          "args": {
+            "text": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-set-hostname",
+      "say": "This computer's name.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_hostname"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-keyboard-layout",
+      "say": "Change the keyboard layout.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_keyboard_layout"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-locale",
+      "say": "System language and date, number and money formats.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_locale"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-mic-mute",
+      "say": "Mute or unmute the microphone input.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_mic_mute"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-power-profile",
+      "say": "Power profile.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_power_profile"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-privacy",
+      "say": "Mute the microphone, disable a camera, or blank the screen.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_privacy",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-set-scaling",
+      "say": "Change the text size.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_scaling"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-screensaver",
+      "say": "Change when the screen blanks and locks.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_screensaver"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-sleep-inhibit",
+      "say": "Hold the machine awake for a bounded time.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_sleep_inhibit"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-timezone",
+      "say": "Report or change the system timezone.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_timezone"
+        }
+      ]
+    },
+    {
+      "id": "generated-set-wallpaper",
+      "say": "Change the desktop wallpaper.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "set_wallpaper"
+        }
+      ]
+    },
+    {
+      "id": "generated-sing",
+      "say": "Sing that for me",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "sing",
+          "args": {
+            "text": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-snapshot-status",
+      "say": "Can this machine roll back, and which slot is it on.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "snapshot_status"
+        }
+      ]
+    },
+    {
+      "id": "generated-solve-math",
+      "say": "What is the integral of x squared?",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "solve_math",
+          "args": {
+            "operation": "*",
+            "expression": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-speak",
+      "say": "Read that back to me",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "speak",
+          "args": {
+            "text": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-speed-test",
+      "say": "Internet speed.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "speed_test"
+        }
+      ]
+    },
+    {
+      "id": "generated-stopwatch",
+      "say": "Stopwatch.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "stopwatch",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-tailscale-status",
+      "say": "Tailscale.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "tailscale_status"
+        }
+      ]
+    },
+    {
+      "id": "generated-take-photo",
+      "say": "Take a photo or selfie with the webcam.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "take_photo"
+        }
+      ]
+    },
+    {
+      "id": "generated-temperatures",
+      "say": "Temperatures and fan speeds.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "temperatures"
+        }
+      ]
+    },
+    {
+      "id": "generated-tls-certificate",
+      "say": "Inspect a TLS certificate.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "tls_certificate",
+          "args": {
+            "host": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-toggle-bluetooth",
+      "say": "Turn the Bluetooth adapter on or off.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "toggle_bluetooth"
+        }
+      ]
+    },
+    {
+      "id": "generated-toggle-wifi",
+      "say": "Turn the Wi-Fi radio on or off.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "toggle_wifi"
+        }
+      ]
+    },
+    {
+      "id": "generated-trace-route",
+      "say": "Trace the network path to a host.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "trace_route",
+          "args": {
+            "host": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-trash-file",
+      "say": "Move a file or folder to the trash, recoverably.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "trash_file"
+        }
+      ]
+    },
+    {
+      "id": "generated-type-text",
+      "say": "Type text.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "type_text",
+          "args": {
+            "text": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-ui-elements",
+      "say": "Press buttons, fill fields and open menus in other apps.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "ui_elements",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-undo-last-change",
+      "say": "Undo Chronoa's last change to a file.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "undo_last_change"
+        }
+      ]
+    },
+    {
+      "id": "generated-usb-devices",
+      "say": "What is plugged in, and Thunderbolt docks.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "usb_devices"
+        }
+      ]
+    },
+    {
+      "id": "generated-vpn-control",
+      "say": "VPN connections.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "vpn_control",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-watch",
+      "say": "Steps, sleep, stress, heart rate, SpO2 and settings on your watch.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "watch",
+          "args": {
+            "action": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "generated-whois-lookup",
+      "say": "Look up who a domain or address is registered to.",
+      "note": "generated from the skill's schema and its capability label by tools/gen_eval_cases.py - the wording is a starting point, not a transcript; improve it here",
+      "expect": [
+        {
+          "tool": "whois_lookup"
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 72,
-    "skills_asserted": 59,
+    "cases": 217,
+    "skills_asserted": 204,
     "skills_total": 204,
     "note": "partial so far; not a claim that the other skills are unreachable",
     "gated_unguarded": 56

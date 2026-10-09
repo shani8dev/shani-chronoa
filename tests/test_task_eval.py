@@ -100,7 +100,14 @@ def test_the_recorded_coverage_is_still_the_coverage():
     assert stated["skills_asserted"] == len(asserted), (
         f"coverage.skills_asserted says {stated['skills_asserted']} but the "
         f"cases assert {len(asserted)}: {sorted(asserted)}")
-    # And the claim is stated as partial, which is the part worth keeping true.
-    assert "PARTIAL" in data["about"], (
-        "the about text must say the coverage is partial, or the number reads "
-        "as a claim that these are the only skills that matter")
+    # And the prose claim matches those numbers. This used to assert the word
+    # "PARTIAL", which was right when it was written and wrong the moment
+    # coverage became complete - a guard that fails on the truth is a guard that
+    # has to be deleted to make the suite green.
+    complete = stated["skills_asserted"] == stated["skills_total"]
+    assert ("COVERAGE IS COMPLETE" in data["about"]) == complete, (
+        "the about text's coverage claim does not match the numbers it records")
+    if complete:
+        assert "generated" in data["about"], (
+            "complete coverage from generated cases must say so, or a reader "
+            "cannot tell a transcript from a starting point")
