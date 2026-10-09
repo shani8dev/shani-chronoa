@@ -98,11 +98,14 @@ GATED: dict[str, str] = {
     # that is a very different permission.
     "capture_packets": "packet-capture-enabled",
     "control_service": "service-control-enabled",
-    # `systemd-analyze verify`, the command that answers "why won't it start".
-    # Read-only, so ungated: it reports on a configuration file, not on anyone's
-    # work. `control_service` can act on a unit but could not say what was wrong
-    # with it.
-    "check_units": "service-check-enabled",
+    # `systemd-analyze verify` - the command that answers "why won't it start"
+    # - is deliberately **not** here. It reads a configuration file, starts
+    # nothing and reports only what `verify` prints, so gating it would make
+    # the first question of troubleshooting wait on a permission the person
+    # granting it does not connect to the question. It is in READ_ONLY_TOOLS
+    # instead, with `list_services` and `read_logs`. A key that lived only in
+    # this table would refuse every call while looking configurable: it would
+    # have to be in the schema and on screen in Settings to be a real gate.
     "find_and_replace": "bulk-edit-enabled",
     "manage_mount": "mount-control-enabled",
     # One key for both directions of a single-file edit. `undo_last_change` is
