@@ -119,6 +119,42 @@ def _root_precondition() -> str | None:
     return None
 
 
+def _request_from_record(name: str, entry: dict) -> dict:
+    """The request that rebuilds a recorded network, for a plan or a teardown.
+
+    **Every field the record holds is passed through, and dropping one is not a
+    simplification.** An earlier version of `destroy`'s plan path rebuilt this
+    by hand and omitted `uplink`, which the record has carried since the helper
+    began writing it (`usr/bin/shani-chronoa-lab-network:186`). `parse_request`
+    then rejected the network - *"nat is on but no uplink was given"* - so
+    **`destroy` without `apply` refused to show a plan for any network created
+    with NAT on**, which is the default. Measured on this machine against a real
+    interface:
+
+        helper's shape (uplink present) -> parses OK
+        destroy's shape (uplink DROPPED) -> REJECTED: nat is on but no uplink
+
+    The `apply` path never noticed, because it hands the name to the helper,
+    which does its own rebuild from the same record. So the two halves of one
+    call disagreed about what the record means, and only the read-only half was
+    broken - which is why it survived: the destructive path is the one anybody
+    notices.
+
+    `usr/bin/shani-chronoa-lab-network`'s `_recorded_network` builds the same
+    shape. Two copies of this is the duplication that produced the bug, so it is
+    named here and both are expected to keep agreeing; a test asserts the field
+    set, because a *missing* field cannot fail an equality check written against
+    a list that already omits it.
+    """
+    return {
+        "name": name,
+        "cidr": entry.get("cidr"),
+        "nat": bool(entry.get("nat", True)),
+        "uplink": entry.get("uplink") or "",
+        "subnets": entry.get("subnets") or [],
+    }
+
+
 def _subnet_arguments(arguments: dict):
     """The subnets a caller asked for.
 
@@ -275,12 +311,7 @@ def _lab_network_destroy(arguments: dict) -> str:
                 f"never removed by it.")
     if not arguments.get("apply"):
         try:
-            network = parse_request(load_record()[name] and {
-                "name": name,
-                "cidr": load_record()[name].get("cidr"),
-                "nat": bool(load_record()[name].get("nat", True)),
-                "subnets": load_record()[name].get("subnets") or [],
-            })
+            network = parse_request(_request_from_record(name, load_record()[name]))
             steps = build_teardown(network)
         except Rejected as exc:
             return (f"Not removed: the record for {name!r} no longer validates "

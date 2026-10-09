@@ -6218,3 +6218,80 @@ passed, 1 skipped with the reason naming AppArmor.
 **What I got wrong by not measuring first, in one line:** I read "the environment
 list says these are expected" as "these are environmental", and the first of the
 two was a defect that had been sitting behind that sentence.
+
+### `lab_network_destroy` refused every call, and its *plan* path could not
+### work at all (2026-10-09)
+
+Found while closing the gap left by `c2408de` (pyflakes: undefined names in
+shipped code). That commit **fixed** the first of these two bugs. Neither had a
+test, because `skills/lab_network.py` had no test file at all — and
+`test_netprovision_routes.py` covers the *plan the builder emits*, which is a
+different question from *whether the skill's gate opens and its teardown runs*.
+
+**Bug 1 (fixed by `c2408de`):** one line refused every call.
+
+    blocked = (reason if not allowed else _refuse("")) or _root_paths("")
+
+With consent **granted**, `reason` is `""`, so the `or` moved on to
+`_refuse("")` — a *truthy* refusal sentence — and never reached the name check,
+the record lookup or the teardown. The undefined `_root_paths` behind it was
+reported by pyflakes and simultaneously unreachable on every call, so linter and
+runtime agreed on a fact that could never happen.
+
+**Bug 2 (found here, still present after that fix):** the read-only half of the
+same call rebuilt the network request **by hand and dropped `uplink`** — a field
+the record has carried since the helper started writing it
+(`usr/bin/shani-chronoa-lab-network:186`). `parse_request` rejects a NAT network
+without an uplink, and NAT is the default, so:
+
+    destroy WITHOUT apply, pre-fix:
+      Not removed: the record for 'lab1' no longer validates (nat is on but no
+      uplink was given, so a public subnet's default route would have no next hop...)
+
+**Every plan preview was refused**, while `apply` worked — because that path
+hands the name to the helper, which does its own correct rebuild. The two halves
+of one call disagreed about what the record means, and only the read-only half
+was broken, which is why it survived: the destructive path is the one a person
+notices. Fixed with `_request_from_record()`, named so both halves share one
+definition.
+
+Verified through the real record store and real keyfile gsettings, against a
+record with a real interface:
+
+    plan shown?  True      (was: refused)
+    apply ->     'destroy lab1 done'
+
+`tests/test_lab_network_skill.py` (7 tests): the teardown is asserted on
+`helper_calls`, **not on the return string**, because bug 1 returned a plausible
+refusal sentence and asserting on text would only prove some sentence came back.
+Five controls, each aimed at a mutation that would otherwise survive: consent
+refused (catches removing the gate), root precondition consulted (catches
+dropping the call — the granted path stubs it to `None` and would never notice),
+an unrecorded name refused, a missing name asked about rather than guessed.
+
+**Mutations: 6 confirmed to fail, and the original bug restored verbatim fails
+6 of 7.** One survivor worth recording, because it was my mutation that was
+wrong, not the test: inserting `blocked = _refuse("") or None` *above* the real
+`blocked = _root_precondition()` left all 7 green, because the next line
+overwrote it. That is the recorded "a `str.replace` that silently does nothing"
+trap — asserted `s.count(old) == 1`, which passed, and still mutated nothing
+behaviourally. The check that caught it was noticing that a *whole-file* fault
+should not leave the file green.
+
+**Two of my own test bugs, the second one worse than a failing assertion:**
+
+- The first `RECORD` fixture had `subnets: []`, which `parse_request` **rejects**
+  — so the plan test was measuring that rejection and calling it a plan. Then
+  it had no `uplink` at all, the same trap one level down. Both fixed by
+  building the fixture from the shape `usr/bin` actually writes, with the
+  interface looked up from `/sys/class/net` rather than typed, since
+  `parse_request` checks that the named interface exists.
+- A `try`/`finally` restore that put `_invoke` back to itself — so an assertion
+  failure would have left the module **globally patched for every later test**,
+  a failure that reads as the next file's bug. `monkeypatch` throughout. This
+  is the `NameError`-inside-a-`finally` lesson in a different guise: both are a
+  failure corrupting the run instead of reporting itself.
+
+75 passed across the lab-network, netprovision, capabilities, gate,
+handler-importability, tool-outcome and labnetworks-sense suites; 35 more
+across packaging and package names.
