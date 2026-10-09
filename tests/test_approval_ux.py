@@ -161,45 +161,48 @@ class TestStageTwoEnumeratesTheScope:
         what a fall-through reports - so it cannot distinguish "granted" from
         "no rule matched". `execute_tool` can.
 
-        `edit_file` rather than `delete_file`: a session grant on a
-        bypass-immune tool is ignored by design (T2.6), so a narrow-grant test
-        written on one would now prove the immunity instead of the scope, and
-        the scope would have no witness at all.
+        `git_inspect` rather than a file-writing tool: every tool that
+        writes a file (`edit_file`, `delete_file`, `office_document`,
+        `undo_last_change`) carries a destructive consent key, and a
+        session grant on a bypass-immune tool is ignored by design
+        (T2.6), so a narrow-grant test written on one proves the
+        immunity instead of the scope, and the scope has no witness
+        at all. `git_inspect` is gated and read-only, so its session
+        grant is honoured and the scope of that grant is observable:
+        the granted tree is read, the sibling is refused by its own
+        gate.
         """
         # Under $HOME, not `tmp_path`: `files` refuses a path outside the
         # user's home, and a refusal for *that* reason proves nothing about
         # which grant matched.
         home = Path(os.environ["HOME"])
-        granted = home / "notes.txt"
-        granted.write_text("old")
-        sibling = home / "other.txt"
-        sibling.write_text("old")
-        permissions.add_rule("edit_file", str(granted),
+        granted = home / "granted-tree"
+        granted.mkdir()
+        sibling = home / "other-tree"
+        sibling.mkdir()
+        permissions.add_rule("git_inspect", str(granted),
                              permissions.Decision.ALLOW_SESSION, session_only=True)
-        assert permissions.evaluate("edit_file", str(granted)) == \
+        assert permissions.evaluate("git_inspect", str(granted)) == \
             permissions.Decision.ALLOW_SESSION
-        assert permissions.evaluate("edit_file", str(sibling)) == \
+        assert permissions.evaluate("git_inspect", str(sibling)) == \
             permissions.Decision.FALL_THROUGH, (
             "a grant naming one path matched a different path"
         )
-        # `ran`, not a substring of the prose: the old assertion here was
-        # `"not found" not in result`, and a *successful* edit's text
-        # ("... (unverified - this action reports success but nothing observed
-        # it)") contains "no" inside "nothing".
+        # A reading, not a refusal: a directory that is not a git
+        # repository is git's own answer, and the only way to tell it
+        # apart from the gate's refusal is that the refusal names the
+        # switch. The granted path must reach the skill and come back
+        # with that answer.
         allowed = execute_tool_outcome(
-            "edit_file", {"path": str(granted), "old_string": "old",
-                          "new_string": "new"})
+            "git_inspect", {"path": str(granted)})
         assert allowed.ran, f"the granted path did not reach the skill: {allowed.text}"
-        assert granted.read_text() == "new", "the granted file was not edited"
-        refused = execute_tool("edit_file", {"path": str(sibling),
-                                             "old_string": "old",
-                                             "new_string": "new"})
-        assert "turned off" in refused or "not permitted" in refused.lower(), (
-            f"the sibling edit was not refused ({refused!r}); the grant "
-            f"leaked past its path"
+        assert "turned off" not in allowed.text and "Refusing" not in allowed.text, (
+            f"the granted path was refused by its own gate: {allowed.text!r}"
         )
-        assert sibling.read_text() == "old", (
-            "the sibling file was edited by a grant that named the other path"
+        refused = execute_tool("git_inspect", {"path": str(sibling)})
+        assert "turned off" in refused or "not permitted" in refused.lower(), (
+            f"the sibling read was not refused ({refused!r}); the grant "
+            f"leaked past its path"
         )
 
     def test_a_narrow_grant_on_a_bypass_immune_tool_is_refused_not_honoured(self):
@@ -390,8 +393,14 @@ class TestDeclineIsNotCancel:
 
 class TestTheOrderCarriesMeaning:
     def test_the_refusal_is_last_and_nothing_is_the_default(self):
-        ask = permissions.approval_request("edit_file", "/tmp/x",
-                                           "file-edit-enabled")
+        # `git_inspect` rather than a destructive tool: every
+        # destructive tool is bypass-immune now, so its prompt
+        # offers two options, not three - and the companion test
+        # below asserts that. The order (refusal last, nothing
+        # the default) is the property here, and a gated
+        # read-only tool carries it without the immunity.
+        ask = permissions.approval_request("git_inspect", "/tmp/x",
+                                           "git-sense-enabled")
         assert ask.options == [permissions.ALLOW_ONCE_CHOICE,
                                permissions.ALLOW_SESSION_CHOICE,
                                permissions.DENY_CHOICE]

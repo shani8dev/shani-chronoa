@@ -147,10 +147,44 @@ def explore_refuses(tool_name: str) -> "Optional[str]":
 #: allowed once is not thereby allowed for the rest of the session. See
 #: AgentScope's `PermissionDecision.bypass_immune`
 #: (`permission/_decision.py:33-60`).
-_BYPASS_IMMUNE = frozenset({
-    "delete_file", "remove_file", "trash_file", "empty_trash",
-    "kill_process", "control_service",
-})
+#: The six tools that were bypass-immune when this list was written, plus
+#: every tool whose consent key is one of the ten `DESTRUCTIVE_CONSENT_KEYS`.
+#:
+#: **The rule is the key, not the name.** One "yes, for this session" was
+#: pre-authorising six further destructive tools across six different switches:
+#: saying yes to `edit_file` also covered `office_document` and
+#: `undo_last_change`, and saying yes to `close_window` also covered
+#: `manage_mount`, `manage_triggers` and `power_action` for the rest of the
+#: session. None of those switches had been granted.
+#:
+#: That is defensible - the person did say yes to something destructive - but
+#: it was invisible: the prompt names one action, and the grant quietly
+#: covered tools the person was never asked about. So a grant now covers
+#: exactly the action it was given for, and every destructive action is asked
+#: about every time. The cost is friction on a repeated edit, which is the
+#: trade this list exists to make explicit rather than absorb silently.
+#:
+#: Read from the capability table rather than kept beside it, because a
+#: hand-kept second list is how `files._PACKAGE_HINTS` and the four-way
+#: TTS cascade went stale - and the names below are now *derived*, so adding a
+#: destructive tool is covered the day it is registered.
+def _bypass_immune_set() -> frozenset:
+    from shani_chronoa import capabilities
+
+    by_key = {
+        tool for tool, key in capabilities.GATED.items()
+        if key in capabilities.DESTRUCTIVE_CONSENT_KEYS
+    }
+    # `trash_file`/`empty_trash`/`remove_file` gate themselves with their own
+    # `_CONSENT_KEY` rather than through GATED, so they are added by name -
+    # they are destructive regardless of which table lists them.
+    return frozenset(by_key | {
+        "delete_file", "remove_file", "trash_file", "empty_trash",
+        "kill_process", "control_service",
+    })
+
+
+_BYPASS_IMMUNE = _bypass_immune_set()
 
 
 def is_bypass_immune(tool_name: str) -> bool:
