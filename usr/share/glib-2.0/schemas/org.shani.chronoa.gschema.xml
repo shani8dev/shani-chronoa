@@ -584,6 +584,16 @@
       <summary>Let Chronoa edit many files at once</summary>
       <description>When true, Chronoa may replace a string across every file matching a pattern. Off by default, and separate from writing one named file: a pattern that matches in forty files rewrites forty files, and that blast radius is not knowable in advance. Without this, find_and_replace still runs as a dry run and lists what it would change.</description>
     </key>
+    <key name="git-write-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa record commits and branches</summary>
+      <description>When true, Chronoa may commit the files you name and create or switch branches. Off: git_inspect still reports what changed, the diff, and how far the branch is from its upstream. Only the paths given are staged - nothing is swept up from the rest of the tree, because a sweep turns a bounded request into an unbounded one. A commit is reversible with git reset, so this is a switch and not a question every time.</description>
+    </key>
+    <key name="git-push-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa push a branch to a remote</summary>
+      <description>When true, Chronoa may push a branch to a remote you name, and asks before every push - a standing yes does not carry over. Off by default and separate from recording commits, because a local commit you regret is one reset away while a pushed one may already be in somebody's history. The remote must be one the repository already has and must be named; force-pushing is refused.</description>
+    </key>
     <key name="cleanup-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa clear caches and unused Flatpak runtimes</summary>

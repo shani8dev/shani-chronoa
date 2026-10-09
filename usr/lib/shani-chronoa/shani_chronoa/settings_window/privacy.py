@@ -370,6 +370,20 @@ class PrivacyPage:
              "Off: find-and-replace runs as a dry run and only lists what it "
              "would change. Writing one named file still works without this.",
              "find_and_replace refuses to write while this is off"),
+            ("Let Chronoa record commits and branches", "git-write-enabled",
+             "Off: Chronoa can still report what changed in a repository, the diff, "
+             "and how far the branch is from its upstream - it just cannot record "
+             "anything. On, it commits only the files you name: nothing is swept "
+             "up from the rest of the tree, because a sweep turns a bounded "
+             "request into an unbounded one. A commit is undoable with git reset.",
+             "git_commit and git_branch refuse while this is off"),
+            ("Let Chronoa push a branch to a remote", "git-push-enabled",
+             "Off by default and separate from recording commits, because a local "
+             "commit you regret is one reset away while a pushed one may already be "
+             "in somebody's history. On, Chronoa asks before every push - a "
+             "standing yes does not carry over - and the remote must be one the "
+             "repository already has and must be named. Force-pushing is refused.",
+             "git_push refuses to push while this is off"),
             ("Let Chronoa clear caches and unused Flatpak runtimes", "cleanup-enabled",
              "Off: Chronoa still reports what is taking the space and the safe "
              "way to free it, but you clear it yourself. Turning this on lets it "

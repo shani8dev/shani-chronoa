@@ -1,5 +1,5 @@
 {
-  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS PARTIAL, and recorded here so it cannot rot quietly: the cases assert one or more acceptable calls for 55 of the 201 skills, so selection on the other 146 is unmeasured - including 56 that are consent-gated. Two other layers cover the rest and are not this one: `tests/test_every_skill_handler_is_importable.py` (every handler is reachable) and `tests/test_matrix_skills.py` (every skill dispatches). What neither can answer is whether the model *chooses* it. `tests/test_task_eval.py` asserts these counts against this file.",
+  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS PARTIAL, and recorded here so it cannot rot quietly: the cases assert one or more acceptable calls for 59 of the 204 skills, so selection on the other 145 is unmeasured - including 56 that are consent-gated. Two other layers cover the rest and are not this one: `tests/test_every_skill_handler_is_importable.py` (every handler is reachable) and `tests/test_matrix_skills.py` (every skill dispatches). What neither can answer is whether the model *chooses* it. `tests/test_task_eval.py` asserts these counts against this file.",
   "cases": [
     {
       "id": "time",
@@ -813,12 +813,64 @@
           "tool": "browse"
         }
       ]
+    },
+    {
+      "id": "git-commit-the-files-i-named",
+      "say": "Commit notes.txt with the message 'update the notes'.",
+      "note": "the files argument is required and unbounded on purpose; the point is that a commit names its paths",
+      "expect": [
+        {
+          "tool": "git_commit",
+          "args": {
+            "files": "*",
+            "message": "*"
+          }
+        }
+      ]
+    },
+    {
+      "id": "git-branch-for-this-work",
+      "say": "Make a branch called feature/login and switch to it.",
+      "expect": [
+        {
+          "tool": "git_branch",
+          "args": {
+            "name": "feature/login"
+          }
+        }
+      ]
+    },
+    {
+      "id": "git-push-names-the-remote",
+      "say": "Push this branch to origin.",
+      "note": "the remote is a required argument; there is no default and no push-everything",
+      "expect": [
+        {
+          "tool": "git_push",
+          "args": {
+            "remote": "origin"
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-up-the-caches-you-measured",
+      "say": "Clear the cache folder you said was taking the space.",
+      "expect": [
+        {
+          "tool": "cleanup_apply",
+          "args": {
+            "target": "cache"
+          }
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 68,
-    "skills_asserted": 55,
-    "skills_total": 201,
-    "note": "partial so far; not a claim that the other skills are unreachable"
+    "cases": 72,
+    "skills_asserted": 59,
+    "skills_total": 204,
+    "note": "partial so far; not a claim that the other skills are unreachable",
+    "gated_unguarded": 56
   }
 }

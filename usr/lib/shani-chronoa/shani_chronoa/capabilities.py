@@ -110,6 +110,13 @@ GATED: dict[str, str] = {
     # skill report the same facts, and separate keys would let a fresh install
     # ship one open and the other shut.
     "git_inspect": "git-sense-enabled",
+    # Recording a change is gated, not asked every time: a commit is undone
+    # with `git reset --soft HEAD~1` and the working tree is untouched by it.
+    "git_commit": "git-write-enabled",
+    "git_branch": "git-write-enabled",
+    # Publishing is the other half and gets its own key, so turning on
+    # local commits never turns on pushing. Destructive, so it asks.
+    "git_push": "git-push-enabled",
     "todo_list": "todo-list-enabled",
     "manage_goals": "goals-enabled",
     "manage_triggers": "trigger-control-enabled",
@@ -370,6 +377,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
                            "Hold the machine awake for a bounded time"),
     "set_timezone": ("Time and reminders", "Report or change the system timezone"),
     "git_inspect": ("Code and git", "What changed in a git repository"),
+    "git_commit": ("Code and git", "Commit the files you name"),
+    "git_branch": ("Code and git", "Create or switch branch"),
+    "git_push": ("Code and git", "Push a branch to a named remote"),
     "project_outline": ("Code and git", "Outline a code project: files, classes and functions"),
     "todo_list": ("Code and git", "Keep a list of tasks to do"),
     "manage_goals": ("Code and git", "Save a multi-step goal to run later"),
@@ -922,6 +932,10 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
     # existing switch to cover something its prompt never named is exactly the
     # defect that made a session grant cover six other tools.
     "cleanup-enabled",
+    # Pushing publishes to a remote, so a session grant must not cover it.
+    # Destructive here means "asks first, always", which is the property a
+    # person assumes about a push without having to read the skill.
+    "git-push-enabled",
 })
 
 #: Tools that only observe. Kept as an allowlist rather than "anything ungated",

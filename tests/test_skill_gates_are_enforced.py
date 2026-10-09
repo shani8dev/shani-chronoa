@@ -64,6 +64,9 @@ _CONSENT_NAMES = (
 _IMPL = {
     "screenshot": "shani_chronoa.skills.screenshot",
     "cleanup_apply": "shani_chronoa.skills.cleanup_apply",
+    "git_commit": "shani_chronoa.skills.git_write",
+    "git_branch": "shani_chronoa.skills.git_write",
+    "git_push": "shani_chronoa.skills.git_push",
     "move_pointer": "shani_chronoa.skills.input_control",
     "nfc": "shani_chronoa.skills.nfc",
     "fm_radio": "shani_chronoa.skills.fm_radio",
