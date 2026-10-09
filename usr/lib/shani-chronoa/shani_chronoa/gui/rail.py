@@ -46,7 +46,8 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402 - after require_version
+gi.require_version("Pango", "1.0")
+from gi.repository import Adw, Gtk, Pango  # noqa: E402 - after require_version
 
 from shani_chronoa import config as config_mod  # noqa: E402
 
@@ -63,7 +64,7 @@ def _label(text: str, css: str = "") -> Gtk.Widget:
     label = Gtk.Label(label=text)
     label.set_xalign(0.0)
     label.set_wrap(True)
-    label.set_wrap_mode(3)  # Pango.WrapMode.WORD_CHAR, without importing Pango
+    label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
     if css:
         label.add_css_class(css)
     return label

@@ -29,7 +29,8 @@ from typing import Any, Callable, Optional
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa import phone as ph  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -96,7 +97,7 @@ def _clear(box: Gtk.Widget) -> None:
 
 def _label(text: str, dim: bool = False, wrap: bool = True) -> Gtk.Label:
     lab = Gtk.Label(label=text, xalign=0.0, wrap=wrap, selectable=False)
-    lab.set_wrap_mode(2)  # WORD_CHAR: a long number or link must not widen the page
+    lab.set_wrap_mode(Pango.WrapMode.WORD_CHAR)  # a long number or link must not widen the page
     if dim:
         lab.add_css_class("dim-label")
     return lab

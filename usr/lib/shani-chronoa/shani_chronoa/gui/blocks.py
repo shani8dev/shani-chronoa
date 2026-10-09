@@ -46,8 +46,9 @@ import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GdkPixbuf', '2.0')
+gi.require_version('Pango', '1.0')
 
-from gi.repository import Gdk, Gio, GLib, Gtk  # type: ignore
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # type: ignore
 
 from shani_chronoa import markdown_lite
 
@@ -633,7 +634,7 @@ class InlineDiff(Gtk.Box):
             label = Gtk.Label(xalign=0.0)
             label.set_markup(f"<tt>{markdown_lite.escape(line.tag + ' ' + line.text[:200])}</tt>")
             label.set_selectable(True)
-            label.set_ellipsize(3)
+            label.set_ellipsize(Pango.EllipsizeMode.END)
             # Own class names: the Diff panel installs app-wide `.diff-add` /
             # `.diff-del` rules with a pale fill, and under them these lines
             # rendered white on near-white - present and unreadable.
@@ -688,7 +689,7 @@ class ToolCallCard(Gtk.Box):
         if summary:
             hint = Gtk.Label(label=summary)
             hint.add_css_class("dim-label")
-            hint.set_ellipsize(3)
+            hint.set_ellipsize(Pango.EllipsizeMode.END)
             row.append(hint)
 
         toggle = Gtk.ToggleButton()
@@ -717,7 +718,7 @@ class ToolCallCard(Gtk.Box):
             # the card its child's minimum width, so one long path here pushed
             # the whole card - and its buttons - off the right of the column.
             value_label.set_wrap(True)
-            value_label.set_wrap_mode(2)          # Pango.WrapMode.WORD_CHAR
+            value_label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
             value_label.set_hexpand(True)
             grid.attach(value_label, 1, index, 1, 1)
         inner.append(grid)
