@@ -26,7 +26,8 @@ from typing import Any, List
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -125,7 +126,7 @@ def _copy_block(title: str, text: str) -> Gtk.Widget:
     head.append(button)
     card.append(head)
     body = Gtk.Label(label=text, xalign=0.0, selectable=True, wrap=True)
-    body.set_wrap_mode(2)  # Pango.WrapMode.WORD_CHAR - paths have no spaces
+    body.set_wrap_mode(Pango.WrapMode.WORD_CHAR)  # paths have no spaces
     body.add_css_class("monospace")
     for side in ("start", "end", "bottom"):
         getattr(body, f"set_margin_{side}")(10)

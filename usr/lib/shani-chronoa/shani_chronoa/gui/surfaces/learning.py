@@ -43,7 +43,8 @@ from typing import Any, Callable, Dict
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import GLib, Gtk  # noqa: E402
+gi.require_version("Pango", "1.0")
+from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -674,7 +675,7 @@ def _background_passes() -> Gtk.Widget:
         "it would say; nothing here changes a setting.")
     report = Gtk.Label(wrap=True, xalign=0, selectable=True)
     report.add_css_class("monospace")
-    report.set_wrap_mode(2)  # Pango.WrapMode.WORD_CHAR
+    report.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
     report.set_margin_start(12)
     report.set_margin_end(12)
 

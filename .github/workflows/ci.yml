@@ -28,7 +28,12 @@ jobs:
       # repo's own conftest documents as its required dep set.
       test-command: |
         xvfb-run -a env PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -v -p no:cacheprovider
-      python-version: "3.12"
+      # The runner's own stack, not ubuntu-latest's: the app needs libadwaita
+      # newer than 24.04's 1.5, and on 24.04 the GUI tests segfaulted the run.
+      # 26.04 matches the development machine (Python 3.14, GTK/Adw from the
+      # distro, which system-site-packages tests against).
+      runs-on: ubuntu-26.04
+      python-version: "3.14"
       # xvfb is not optional. tests/test_window_ux.py builds real Gtk widgets
       # (ChronoaOrbWidget is a Gtk.Button), and GTK4 with no display does not
       # raise a clean error on construction - it segfaults. That is what ended
