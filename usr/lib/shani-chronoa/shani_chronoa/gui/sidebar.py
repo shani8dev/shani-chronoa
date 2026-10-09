@@ -291,8 +291,26 @@ class SidebarPage(Adw.NavigationPage):
                     # route, and `Gtk.Button.set_icon_size()` is GTK3 and does not
                     # exist (measured: AttributeError). An image child takes
                     # pixels, which is what matching the rows actually needs.
+                    # **`emblem-system-symbolic`, not `preferences-system-symbolic`,
+                    # and the reason is that both names exist in both themes.**
+                    # `preferences-system-symbolic` is a *gear* in Yaru and a
+                    # *wrench and screwdriver* in Adwaita - the sidebar's "Open
+                    # Settings on X" button drew the wrench on GNOME, from the
+                    # theme ShaniOS ships. Found by rendering the panel and
+                    # looking, then rasterising each theme's own file side by
+                    # side: `has_icon` is True for both names in both themes, so
+                    # neither the installed-theme check nor
+                    # `test_sidebar_icons_exist_in_adwaita.py` can see this -
+                    # it is not a missing icon, it is the wrong picture.
+                    # `emblem-system-symbolic` is a gear in Adwaita *and* Yaru.
+                    #
+                    # Not unit-tested, deliberately: comparing the two themes'
+                    # pixels cannot decide "same meaning" - measured, same-meaning
+                    # pairs differ on 32-52% of alpha pixels and different-meaning
+                    # pairs on 51-55%, so the ranges overlap and any threshold
+                    # flags every icon. A render is the instrument here.
                     gear_icon = Gtk.Image.new_from_icon_name(
-                        "preferences-system-symbolic")
+                        "emblem-system-symbolic")
                     gear_icon.set_pixel_size(SIDEBAR_ICON_PX)
                     gear = Gtk.Button(child=gear_icon)
                     gear.add_css_class("flat")
