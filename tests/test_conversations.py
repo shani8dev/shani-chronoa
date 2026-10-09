@@ -89,6 +89,8 @@ def test_the_skill_end_to_end(root, tmp_path):
     assert "renew my passport" in conv._run({"action": "list"})
     found = conv._run({"action": "search", "query": "passport seva"})
     assert "renew my passport" in found and "seva" in found
+    # The small model's habit: the words in `which` instead of `query`.
+    assert conv._run({"action": "search", "which": "passport seva"}) == found
     assert "Opened" in conv._run({"action": "open", "which": "passport"})
     out = tmp_path / "out.md"
     assert "Saved" in conv._run({"action": "export", "path": str(out)})

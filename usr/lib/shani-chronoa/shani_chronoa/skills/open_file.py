@@ -27,7 +27,8 @@ SCHEMA = {
         "name": "open_file",
         "description": (
             "Open one specific file or folder (by its path) using the desktop's default application for "
-            "it - the same thing double-clicking it would do."
+            "it - the same thing double-clicking it would do. To launch an app such as the file "
+            "manager, use open_application."
         ),
         "parameters": {
             "type": "object",

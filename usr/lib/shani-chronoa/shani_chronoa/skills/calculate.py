@@ -301,7 +301,8 @@ SCHEMA = {
     "function": {
         "name": "calculate",
         "description": (
-            "Evaluate arithmetic, or convert between units. Handles the four "
+            "Evaluate arithmetic and percentages ('15% of 2400'), or convert "
+            "between units. Handles the four "
             "operations, powers, parentheses, factorial, permutations and "
             "combinations (perm/nPr, comb/nCr), gcd, lcm, sqrt, exp, log, ln, "
             "trig and inverse trig, and pi/e/tau - exact for whole numbers. "

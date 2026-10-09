@@ -39,7 +39,8 @@ SCHEMA = {
             "action": {"type": "string", "enum": list(_ACTIONS)},
             "which": {"type": "string", "description": "A conversation's title (or part of it) or id. "
                                                        "Defaults to the open one for rename/copy/export."},
-            "query": {"type": "string"},
+            "query": {"type": "string", "description": "search: the words to look for in what was said, "
+                                                       "e.g. 'router'."},
             "title": {"type": "string"},
             "path": {"type": "string", "description": "export: where to save, e.g. '~/Documents/chat.md'."},
             "keep_turns": {"type": "integer"},
@@ -74,7 +75,9 @@ def _run(arguments: dict) -> str:
             f"- {s['title']} ({s['messages']} messages, {_when(s['updated'])}){' - open now' if s['active'] else ''}"
             for s in items)
     if action == "search":
-        query = (arguments.get("query") or "").strip()
+        # Qwen3-1.7B put the words in `which` (eval case past-chat, 2026-10-09):
+        # for a search there is nothing else it could mean, so take it.
+        query = (arguments.get("query") or arguments.get("which") or "").strip()
         if not query:
             return "Say what to look for with query."
         hits = conversation_store.search(root, query, exclude=conversation_store.index(root)["active"])
