@@ -306,8 +306,27 @@ def build(app: Any) -> Gtk.Widget:
     flow_available = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE,
                                  min_children_per_line=1, max_children_per_line=1,
                                  homogeneous=True, row_spacing=6, column_spacing=6)
-    scroll_added = common.scrolled(flow_added)
-    scroll_available = common.scrolled(flow_available)
+    # **Each list goes in a box that does not expand.** A `Gtk.ScrolledWindow`
+    # hands its child the whole viewport, so a `Gtk.FlowBox` placed directly in
+    # one is allocated 732px for 268px of cards and passes the slack on to its
+    # children - measured in the render as a **195px gap between the two model
+    # cards**, each sitting in 363px of height holding about 100px of content.
+    #
+    # It is *not* `homogeneous`: measured side by side, `homogeneous=True` and
+    # `homogeneous=False` both give 363px cards, so the equalising that flag
+    # documents is not what is stretching them. Swapping the FlowBox for a plain
+    # `Gtk.Box` does not fix it either - the Box is filled just the same
+    # (732px). The non-expanding wrapper is what does it: the same probe reads
+    # 268px, the natural height, with the slack left at the end of the list.
+    # `set_child_align` is not available to say this more directly - it is
+    # GTK3, and GTK4's ScrolledWindow has no equivalent.
+    def _list_scrolled(flow):
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        holder.append(flow)
+        return common.scrolled(holder)
+
+    scroll_added = _list_scrolled(flow_added)
+    scroll_available = _list_scrolled(flow_available)
     # With icons: `add_titled` gives a page none, and the switcher then draws
     # a placeholder box above each label - the two blank cards in the render.
     stack.add_titled_with_icon(scroll_added, "added", "On this machine",
