@@ -6510,3 +6510,28 @@ class as `SKILLS` itself had in the sense layer. And `sensitivity` must be one
 of `personal`/`private`/`public`; `"machine"` is not in the vocabulary and the
 loader refuses the whole sense over it. The kernel ring is `public`, beside
 `faults` and `firewall`.
+
+**`kernellog`, not `kernel_log` — and the reason is worth keeping.** The new
+kernel-ring sense was written as `kernel_log`, and two rules collide on that
+name. The consent key is **`<sense-name>-sense-enabled` derived from the name**
+(so `kernel_log-sense-enabled`), and **`glib-compile-schemas` rejects `_` in key
+names and discards the entire file when it hits one** — all keys at once, not
+just the bad one. A single snake_case sense name would therefore have silently
+undeclared every other key in the schema. Renamed to `kernellog`, which is legal
+as a key fragment.
+
+Measured, both halves: with `kernel_log-sense-enabled` the schema compiles to
+*"Invalid name ... only lowercase letters, numbers and hyphen are permitted. This
+entire file has been ignored"* and `test_sense_manifest` fails with *"these senses
+are registered but have no consent key ... so `sense_allowed()` denies them
+forever"* — the `calendar_write` / `fm_radio` dead-switch class, reached a third
+way. The rule this file already records (*"a sense name must be legal as a key
+fragment; there is a test asserting this across the whole registry"*) catches it
+too late to be useful here, so the fix is the rename, and the schema now compiles
+clean with `gschemas.compiled` produced.
+
+Its Settings row sits **beside `faults` deliberately** — the same question
+("what went wrong") asked of two different records, and a reader comparing them
+is doing exactly the right thing. Off by default, unlike `faults`: the ring
+usually needs root or a group membership, and it carries hardware detail rather
+than a service's own account of itself.

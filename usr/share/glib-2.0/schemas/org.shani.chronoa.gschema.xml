@@ -609,6 +609,11 @@
       <summary>Let Chronoa report programs that crashed</summary>
       <description>Reports recorded crashes from the last week, and states whether crash recording is even enabled - a machine that records nothing is not a machine where nothing crashed. On by default: it reads the local crash store and never leaves the machine.</description>
     </key>
+    <key name="kernellog-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report what the kernel itself has logged</summary>
+      <description>Reads the kernel ring buffer - dmesg, or /dev/kmsg drained non-blocking when dmesg is unavailable - for hardware faults, USB denials and out-of-memory kills that no service has touched. Off by default, unlike the journal-reading faults sense: the ring is a different record, it usually needs root or a group membership to read, and it carries hardware detail rather than a service's own account of itself. A machine where the ring cannot be read reports UNKNOWN, never zero.</description>
+    </key>
     <key name="firewall-sense-enabled" type="b">
       <default>true</default>
       <summary>Let Chronoa report whether a firewall is actually enforcing</summary>

@@ -217,7 +217,7 @@ SCHEMAS = [
 ]
 
 _SENSE = Sense(
-    name="kernel_log",
+    name="kernellog",
     kind=KIND,
     sensitivity=SENSITIVITY,
     schema=SCHEMAS[0],

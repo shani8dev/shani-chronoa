@@ -157,6 +157,12 @@ SENSE_LABELS = {
         "Recent errors",
         "What the system journal has complained about recently",
     ),
+    "kernellog": (
+        "What the kernel said",
+        "Hardware faults and OOM kills from the kernel ring buffer itself, "
+        "which no service has touched - the record that exists before journald "
+        "is even running",
+    ),
     "updates": (
         "Waiting updates",
         "Updates waiting, and how old the database behind that count is",
@@ -264,7 +270,11 @@ SENSE_CATEGORIES = [
      "Failed services, errors the system has logged, updates that are waiting, "
      "and the running code and containers that have died - the ways a machine "
      "says it needs attention",
-     ["services", "faults", "updates", "coredumps", "stale", "containers"]),
+     # `kernellog` beside `faults` deliberately: they are the same question
+     # ("what went wrong") asked of two different records, and a reader
+     # comparing them is doing exactly the right thing.
+     ["services", "faults", "kernellog", "updates", "coredumps", "stale",
+      "containers"]),
     ("Plugged in and running out",
      "What is attached by USB, and the ways a process runs out of something "
      "without the machine ever looking busy - including the limits it is held "
