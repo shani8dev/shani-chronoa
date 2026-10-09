@@ -69,11 +69,7 @@ jobs:
       # installed on this machine" - which is the honest answer and not
       # the state the tests are about. Both packages exist on Arch
       # (libsecret, wireplumber) because the product has them there.
-      # bluez-utils ships bluetoothctl, the client the bluetooth skills shell
-      # out to - bluez itself is only the daemon. Without it six tests in
-      # test_bluetooth_listen_skill.py fail on "bluetoothctl is not
-      # installed", which says nothing about the code under test.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez-utils
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the
