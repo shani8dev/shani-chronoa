@@ -168,6 +168,26 @@ def strip_fences(text: str) -> str:
                   "", str(text))
 
 
+def is_fenced(text: str) -> bool:
+    """Whether this text already carries a fence.
+
+    The counter-question to `strip_fences`, and the one its caller needed:
+    a stored transcript holds plain text, so a restored message must be fenced
+    before it is sent - but one that is *already* fenced must not be fenced
+    again, or each restore adds a layer and the nonce stack grows. Shares the
+    pattern with `strip_fences` rather than keeping a second copy of it, so
+    the two cannot disagree about what a marker is.
+    """
+    return bool(_FENCE_MARKER.search(str(text)))
+
+
+#: The one shape a fence marker has, used by both directions. Kept beside the
+#: two functions rather than inside either, so `is_fenced` cannot drift from
+#: `strip_fences` the way a second hand-kept pattern would.
+_FENCE_MARKER = re.compile(
+    r"\[(?:end-)?untrusted-content-[0-9a-f]{8}(?: source=[^\]]*)?\]")
+
+
 def describe_boundary() -> str:
     """One line, for the system prompt or a settings row.
 

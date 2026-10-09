@@ -245,6 +245,7 @@ class Assistant:
         self._saved = self._history[:1]
         restored = ([m for m in conversation_store.load(session_path)
                      if m.get("role") != "system"] if session_path else [])
+        restored = self._fence_restored(restored)
         self.restored_interruption = ""
         if restored:
             self._history = self._saved + restored
@@ -263,6 +264,7 @@ class Assistant:
         """
         self._session_path = path
         restored = ([m for m in conversation_store.load(path) if m.get("role") != "system"] if path else [])
+        restored = self._fence_restored(restored)
         self._history = self._saved + restored
         self.restored_interruption = ""
         self._note_unfinished_turn(restored)
@@ -376,16 +378,75 @@ class Assistant:
             return "file"
         return "tool"
 
-    def _record(self, message: dict) -> None:
+    def _record(self, message: dict, source: "str | None" = None) -> None:
         """Add a message to the conversation and to the saved transcript.
 
         Every history append goes through here, so a crash cannot leave a gap:
         the transcript is written as the turn happens, which is the only moment
         worth having it.
+
+        `source` is where a tool result came from, and it is written *beside*
+        the stored message rather than into it: `_history` is what the
+        backends are handed, and an undocumented key in a message is a
+        validation failure waiting for one strict provider to find.
         """
         self._history.append(message)
         if self._session_path is not None and message.get("role") != "system":
-            conversation_store.append(message, self._session_path)
+            # **The fence is for the model, not for the transcript.**
+            # `provenance.strip_fences` removes its markers before the message
+            # is written, because each fence carries a fresh random nonce and
+            # the saved file otherwise accumulates one opaque token per tool
+            # call into the user's own conversation. Measured before this line:
+            # a recorded tool result wrote `[untrusted-content-f829d8da
+            # source=file]` into the session file, and a second call wrote a
+            # different nonce beside it.
+            #
+            # The source is stored next to it, so `_fence_restored` can put
+            # the boundary back when the conversation is loaded. The model
+            # still gets the fence on the way out; the file never keeps the
+            # nonce.
+            stored = dict(message)
+            content = stored.get("content")
+            if isinstance(content, str) and provenance.is_fenced(content):
+                stored["content"] = provenance.strip_fences(content)
+            if source:
+                stored["_provenance_source"] = source
+            conversation_store.append(stored, self._session_path)
+
+    @staticmethod
+    def _fence_restored(messages: "list[dict]") -> "list[dict]":
+        """Put the fence back on tool results loaded from a saved conversation.
+
+        The counterpart to the strip in `_record`: a stored transcript holds
+        plain text plus the source it came from, because a fence is a thing
+        for the model and not for the file. The model still needs the boundary
+        on the way out, so it is re-applied here rather than stored.
+
+        A message with no recorded source, or one that is already fenced, is
+        left alone - re-fencing would nest and grow the nonce stack, and a
+        tool result from a build that did not record one has nothing to fence
+        it with. Both restore sites call this, so a switched conversation is
+        treated the same as a reopened one.
+
+        The source is **dropped** on the way into `_history`, because it is a
+        detail of the file's format and `_history` is what the backends are
+        handed: a message carrying a key no provider documents is a validation
+        failure waiting for one strict provider to find.
+        """
+        out: "list[dict]" = []
+        for message in messages:
+            source = message.get("_provenance_source")
+            if not source:
+                out.append(message)
+                continue
+            message = {k: v for k, v in message.items() if k != "_provenance_source"}
+            content = message.get("content")
+            if (message.get("role") == "tool"
+                    and isinstance(content, str)
+                    and not provenance.is_fenced(content)):
+                message = dict(message, content=provenance.fence(content, str(source)).text)
+            out.append(message)
+        return out
 
     def active_percepts(self) -> "list[Percept]":
         """Every percept still within its lifetime, or [] if sensing is off.
@@ -989,9 +1050,16 @@ class Assistant:
                 # data here, at the point it enters the conversation, rather
                 # than relying on the model to notice. See provenance.py for
                 # what this does and does not claim.
+                source = Assistant._tool_source(call)
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""),
                               "content": provenance.fence(
-                                  result, Assistant._tool_source(call)).text})
+                                  result, source).text},
+                             # Recorded beside the message, not inside it:
+                             # `_record` stores it next to the plain text and
+                             # `_fence_restored` re-applies the fence after a
+                             # reload, so the file never holds the nonce and
+                             # `_history` never holds an extra key.
+                             source=source)
                 # **"No, and stop this turn" now stops the turn.**
                 # `permissions.decide()` files a `Decision.CANCEL` when the user
                 # picks it, and until now nothing read it - the option was
