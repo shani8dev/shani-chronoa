@@ -367,6 +367,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # that file, and that is the sort doing its job rather than a stray row.
     "list_shortcuts": ("Pointer and keyboard",
                        "What the keyboard shortcuts on this machine are"),
+    # Reads a crontab, /etc/cron.d and both systemd timer sets - all three,
+    # because a machine can have any one and none of the others.
+    "scheduled_tasks": ("System",
+                        "What is scheduled to run: cron jobs and systemd timers"),
     "lock_screen": ("Power and screen", "Lock this session"),
     "empty_trash": ("Files", "Permanently empty the desktop trash"),
     "search_documents": ("Files", "Search inside your files with the desktop's own index"),
@@ -967,6 +971,11 @@ READ_ONLY_TOOLS = frozenset({
     # every answer with "(unverified - this action reports success but nothing
     # observed it)" - a hedge about a tool that cannot report success at all.
     "list_shortcuts",
+    # Reads a crontab and both systemd timer sets, and schedules nothing. A
+    # machine with a user crontab and no timers still has work coming, and vice
+    # versa, so the three sources are reported separately rather than merged
+    # into one number that would be wrong half the time.
+    "scheduled_tasks",
     "list_services", "read_logs", "check_updates", "compute_hash",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",

@@ -389,6 +389,11 @@ def test_its_own_answer_carries_no_unverified_hedge():
     "what is F4 bound to",
     "show my keybindings",
     "what are my hotkeys",
+    # "what is X" phrasings: `CONVERSATIONAL` matches "what is " on its own and
+    # sends these to `ask_user` alone unless its machine-subject lookahead names
+    # them. It named `timer` and not `shortcut`, so these two were misses.
+    "what is my keybinding",
+    "what are my keyboard shortcuts",
 ])
 def test_the_router_offers_it_for_the_plainest_phrasings(request_):
     """A registered skill nobody is offered is the `midi.py` defect class.

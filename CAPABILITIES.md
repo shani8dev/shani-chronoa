@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**205 skills in 24 groups.** Each is a named, schema-typed module; the model
+**206 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,52 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**81 of 205 are consent-gated and 16 are destructive.**
+**81 of 206 are consent-gated and 16 are destructive.**
+
+## System
+
+Processes, packages, updates, containers, vms, disks, network.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `boot_report` | Why booting is slow, and whether it shut down cleanly | needs `boots-sense-enabled` |
+| `bridge_topology` | Which interfaces are bridges, and what is plugged into them | — |
+| `capture_packets` | Watch the packets crossing an interface | needs `packet-capture-enabled` |
+| `check_internet` | Is the internet working? | — |
+| `check_updates` | Check for waiting package updates | — |
+| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
+| `data_usage` | Data used | — |
+| `discover_hosts` | Who is on this network right now | — |
+| `disk_usage` | Report filesystem and directory space use | — |
+| `dissect_traffic` | Dissect traffic into protocol fields | needs `packet-capture-enabled` |
+| `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
+| `firmware_updates` | List firmware updates for this machine's devices | — |
+| `interface_counters` | How much traffic each interface has carried | — |
+| `lab_network_create` | Build an isolated lab network with named subnets | needs `network-provision-enabled` |
+| `lab_network_destroy` | Remove a lab network this machine built | needs `network-provision-enabled` |
+| `lab_network_list` | List the lab networks built on this machine | needs `network-provision-enabled` |
+| `lab_network_status` | Check what a lab network can actually reach | needs `network-provision-enabled` |
+| `list_wifi_networks` | WiFi networks | — |
+| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
+| `machine_capabilities` | What this machine can actually do | — |
+| `my_ip_address` | IP address | — |
+| `neighbour_table` | Which addresses on this link have answered, and which never have | — |
+| `open_settings` | Open the system Settings at a page | — |
+| `ping_host` | Ping a host | — |
+| `port_owner` | Which program is using a port | — |
+| `print_file` | Print a file | — |
+| `routing_table` | The machine's routing table | — |
+| `scan_network` | Find other devices on the local network | — |
+| `scheduled_tasks` | What is scheduled to run: cron jobs and systemd timers | — |
+| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
+| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
+| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
+| `system_info` | Describe this machine | — |
+| `tailscale_status` | Tailscale | — |
+| `tls_certificate` | Inspect a TLS certificate | — |
+| `trace_route` | Trace the network path to a host | — |
+| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
+| `whois_lookup` | Look up who a domain or address is registered to | — |
 
 ## Files
 
@@ -80,50 +125,6 @@ Read, write, move, archive and undo files.
 | `trash_file` | Move a file or folder to the trash, recoverably | **asks first, always** · needs `file-delete-enabled` |
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
-
-## System
-
-Processes, packages, updates, containers, vms, disks, network.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `boot_report` | Why booting is slow, and whether it shut down cleanly | needs `boots-sense-enabled` |
-| `bridge_topology` | Which interfaces are bridges, and what is plugged into them | — |
-| `capture_packets` | Watch the packets crossing an interface | needs `packet-capture-enabled` |
-| `check_internet` | Is the internet working? | — |
-| `check_updates` | Check for waiting package updates | — |
-| `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
-| `data_usage` | Data used | — |
-| `discover_hosts` | Who is on this network right now | — |
-| `disk_usage` | Report filesystem and directory space use | — |
-| `dissect_traffic` | Dissect traffic into protocol fields | needs `packet-capture-enabled` |
-| `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
-| `firmware_updates` | List firmware updates for this machine's devices | — |
-| `interface_counters` | How much traffic each interface has carried | — |
-| `lab_network_create` | Build an isolated lab network with named subnets | needs `network-provision-enabled` |
-| `lab_network_destroy` | Remove a lab network this machine built | needs `network-provision-enabled` |
-| `lab_network_list` | List the lab networks built on this machine | needs `network-provision-enabled` |
-| `lab_network_status` | Check what a lab network can actually reach | needs `network-provision-enabled` |
-| `list_wifi_networks` | WiFi networks | — |
-| `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
-| `machine_capabilities` | What this machine can actually do | — |
-| `my_ip_address` | IP address | — |
-| `neighbour_table` | Which addresses on this link have answered, and which never have | — |
-| `open_settings` | Open the system Settings at a page | — |
-| `ping_host` | Ping a host | — |
-| `port_owner` | Which program is using a port | — |
-| `print_file` | Print a file | — |
-| `routing_table` | The machine's routing table | — |
-| `scan_network` | Find other devices on the local network | — |
-| `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
-| `set_hostname` | This computer's name | needs `hostname-control-enabled` |
-| `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
-| `system_info` | Describe this machine | — |
-| `tailscale_status` | Tailscale | — |
-| `tls_certificate` | Inspect a TLS certificate | — |
-| `trace_route` | Trace the network path to a host | — |
-| `vpn_control` | VPN connections | needs `wifi-connect-enabled` |
-| `whois_lookup` | Look up who a domain or address is registered to | — |
 
 ## Devices
 

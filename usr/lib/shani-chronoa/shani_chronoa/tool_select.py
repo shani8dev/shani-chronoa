@@ -20,12 +20,82 @@ model, no index, nothing to download. A short core is always sent, and so is
 any tool the conversation has already used this turn.
 """
 
+import json
 import math
 import re
 from typing import Dict, Iterable, List, Optional, Set
 
 #: How many scored tools to send, besides the core and the ones in use.
 DEFAULT_LIMIT = 8
+
+#: The smallest context window any supported tier has, and the share of it a
+#: tool selection may take. The rest is the conversation - the request, the
+#: reply, and the system prompt - and a request that is rejected before the
+#: model reads a word is the failure selection exists to prevent.
+WINDOW_TOKENS = 2048
+SELECTION_SHARE = 0.75
+
+#: Chars per token used **for the size cap**, deliberately the pessimistic 4
+#: rather than `local_llm.CHARS_PER_TOKEN`'s measured 3. The cap has to hold on
+#: the machine that tokenises most favourably, or the guarantee it makes is one
+#: this particular box happens to satisfy.
+_CAP_CHARS_PER_TOKEN = 4
+
+
+def _fits(request_tools: List[dict], budget_tokens: int) -> bool:
+    """Whether this selection's schemas fit in the budget.
+
+    Measured the same way the test that guards this measures it - `len(json.dumps(...))`
+    over 4 chars per token - so the cap and its guard cannot disagree about what
+    "fits" means, which is the shape of failure this function is here to remove.
+    """
+    return len(json.dumps(request_tools)) // _CAP_CHARS_PER_TOKEN <= budget_tokens
+
+
+def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
+                   budget_tokens: int, protected: Set[str]) -> Set[str]:
+    """Drop the lowest-scoring tools until the selection fits the window.
+
+    **The cap the selection never had.** `keep` is assembled from a score
+    threshold, a cue regex, the distilled router and `wants_a_browser`, and
+    nothing anywhere measured the result: `browse` alone is ~850 tokens and is
+    *added* rather than matched, so a request that trips the browser rule could
+    push a selection past what the smallest tier can accept. The test asserting
+    this (`test_a_selection_fits_the_smallest_window`) passed in isolation and
+    failed in a full run, because `ranked()` re-sorts through learned weights -
+    which is the same code path a real machine takes once it has trained
+    anything. So the failure was order-dependent for the same reason it was real.
+
+    Dropped by ascending score, so the *worst* match goes first rather than an
+    arbitrary one, and it stops the moment the selection fits rather than
+    trimming to a target.
+
+    **`protected` is `CORE | in_use`, and it is honoured on both lists.** That
+    detail was a real bug in the first version and is why the parameter exists:
+    the scored list was filtered against `CORE` but the *unscored* list was not,
+    so a tool that scored nothing - which is exactly what `in_use` tools and
+    the core look like on a request matching neither - was the first thing
+    dropped. `read_text_file`, mid-task, went missing from a turn that had
+    already started using it.
+
+    If the protected set alone exceeds the budget the answer is to send it
+    anyway: dropping `ask_user` to fit leaves a turn with no way to ask the
+    person anything, and the resulting rejection says nothing about why. An
+    over-budget core fails visibly; a starved one fails invisibly.
+    """
+    if _fits([t for t in tools if _name(t) in keep], budget_tokens):
+        return keep
+    scored_names = {name for _s, name, _h in scored}
+    droppable = [name for _s, name, _h in sorted(scored, key=lambda x: x[0])
+                 if name not in protected]
+    # Added by a cue, by `in_use`, or by the distilled router, and scored zero:
+    # there is no evidence for it, so it is dropped after the scored ones.
+    unscored = sorted(n for n in keep if n not in scored_names and n not in protected)
+    for name in droppable + unscored:
+        if _fits([t for t in tools if _name(t) in keep], budget_tokens):
+            break
+        keep.discard(name)
+    return keep
 
 #: Always sent: asking back, the time, and the web.
 #:
@@ -51,6 +121,15 @@ _SYNONYMS: Dict[str, str] = {
     # "which keys are bound" and "what are my keyboard shortcuts" to
     # `get_datetime` - the skill existing and unreachable for the plainest
     # phrasing of its own question. Measured over six phrasings: 2 before.
+    # Scheduled work. "scheduled"/"cron"/"timer" are the words for it and the
+    # schema's own words are "source", so without these the router offered this
+    # for "what cron jobs do I have" and sent "what is scheduled to run" to
+    # `ask_user` - measured over four phrasings, 2 before.
+    "scheduled": "cron jobs systemd timers", "schedule": "cron jobs systemd timers",
+    "cron job": "cron jobs systemd timers", "cron jobs": "cron jobs systemd timers",
+    "crontab": "cron jobs systemd timers", "timer": "cron jobs systemd timers",
+    "timers": "cron jobs systemd timers", "scheduled task": "cron jobs systemd timers",
+    "runs automatically": "cron jobs systemd timers",
     "shortcut": "keyboard shortcuts", "shortcuts": "keyboard shortcuts",
     "keybinding": "keyboard shortcuts", "keybindings": "keyboard shortcuts",
     "hotkey": "keyboard shortcuts", "hotkeys": "keyboard shortcuts",
@@ -377,6 +456,9 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
         keep.add("browse")
         if not _FILE_OR_APP.search(request or ""):
             keep -= _DISPLACED_BY_A_SITE - set(in_use or ())
+    keep = _cap_to_window(keep, tools, scored,
+                          int(WINDOW_TOKENS * SELECTION_SHARE),
+                          set(CORE) | set(in_use or ()))
     return [t for t in tools if _name(t) in keep]
 
 
@@ -475,10 +557,21 @@ CONVERSATIONAL = re.compile(
     r"(?:a |an |the )?"
     # A request naming one of these is about the machine, not a question to
     # answer in words.
+    #
+    # `cron`, `crontab`, `shortcut`, `keybinding` and `hotkey` were missing,
+    # which sent "what is scheduled to run" and "what are my keyboard
+    # shortcuts" to `ask_user` alone - both have a tool that answers them
+    # exactly, and both were read as things to be talked about. `timer` was
+    # already here, so the set was not principled about machine subjects; it
+    # was a list that had been added to as gaps appeared rather than derived.
+    # `scheduled task|scheduled job|scheduled to run|cron job` is spelled out rather than
+    # matching a bare "scheduled", which appears in plenty of ordinary prose.
     r"(?!.*\b(?:file|folder|window|app|setting|image|photo|pdf|"
     r"document|this computer|my |weather|forecast|temperature|time|clock|"
     r"timer|alarm|date|calendar|volume|battery|network|wifi|bluetooth|"
-    r"music|note|song|call|message|email)\b)",
+    r"music|note|song|call|message|email|"
+    r"cron|crontab|scheduled task|scheduled job|scheduled to run|cron job|"
+    r"shortcut|keybinding|hotkey|keyboard)\b)",
     re.I)
 
 

@@ -2507,12 +2507,22 @@
           }
         }
       ]
+    },
+    {
+      "id": "generated-scheduled-tasks",
+      "say": "What is scheduled to run on this machine?",
+      "note": "hand-worded over the generated case, which read as a capability label rather than something anyone would type",
+      "expect": [
+        {
+          "tool": "scheduled_tasks"
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 218,
-    "skills_asserted": 205,
-    "skills_total": 205,
+    "cases": 219,
+    "skills_asserted": 206,
+    "skills_total": 206,
     "note": "partial so far; not a claim that the other skills are unreachable",
     "gated_unguarded": 56
   }
