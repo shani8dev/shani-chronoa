@@ -69,7 +69,19 @@ jobs:
       # installed on this machine" - which is the honest answer and not
       # the state the tests are about. Both packages exist on Arch
       # (libsecret, wireplumber) because the product has them there.
-      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick
+      #
+      # bluez is here for the same reason, and its name is the one trap worth
+      # writing down: on Arch the client is a separate package (bluez-utils),
+      # so `apt install bluez-utils` is the natural thing to type and it does
+      # not exist on Ubuntu at any release - the apt step dies with exit 100
+      # and the whole Test job reports zero failures because it never ran a
+      # test. Checked against the package's own filelist for resolute
+      # (26.04), where bluez ships /usr/bin/bluetoothctl, gatttool, rfcomm,
+      # obexctl and bluetoothd together. skills/bluetooth_gatt.py:_run gates
+      # on shutil.which("bluetoothctl"), so without this package six tests in
+      # test_bluetooth_listen_skill.py fail on the absence of the binary
+      # rather than on anything they are testing.
+      apt-packages: python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 libglib2.0-bin xvfb gir1.2-secret-1 wireplumber xdotool x11-apps imagemagick bluez
       # Nine tests read shani-pkgbuilds/shani-chronoa/PKGBUILD next door: the
       # package's install list, its units, its icon, its optdepends and the
       # bytecode rule are all asserted against the real file, because the
