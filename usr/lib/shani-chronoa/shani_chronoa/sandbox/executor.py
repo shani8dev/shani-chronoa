@@ -153,6 +153,45 @@ _SIGXCPU = 24
 #: than being applied or ignored.
 _SECCOMP_SKIPPED_LEVELS: "set" = set()
 
+#: Said once when the filter is withheld from a bubblewrap child. Separate from
+#: `_SECCOMP_SKIPPED_LEVELS` because the reason is the opposite shape: the level
+#: is not being skipped, and the command *is* confined - by bubblewrap's own
+#: namespace, which is the stronger mechanism. What is lost is the second layer.
+_SECCOMP_SKIPPED_FOR_BWRAP: "set" = set()
+
+
+def _seccomp_conflicts_with_bwrap(level: SandboxLevel, use_bwrap: bool) -> bool:
+    """Whether a filter in this child would stop bubblewrap from starting.
+
+    **This is a measured conflict, not a theoretical one.** The filter denies
+    `mount(2)` - correctly, since Landlock has no mount right in any ABI and
+    mounting over a path is invisible to it - and `_harden_child` runs as
+    `preexec_fn` on the **bwrap process itself**. So the filter is installed
+    before bwrap builds the namespace it exists to build, and bwrap dies:
+
+        filter ON  -> bwrap rc=1  bwrap: Failed to make / slave: Operation not permitted
+        filter OFF -> bwrap rc=0
+
+    Measured on this machine by installing the real filter and then running the
+    real bwrap, and it is why `test_sandbox_seccomp.py::
+    test_the_landlock_wrapper_path_also_survives_the_filter` fails: with the
+    gate on, **every** `LEVEL_1`/`LEVEL_2` call on this host returned that
+    bwrap error, which is a confinement mechanism refusing to confine anything.
+
+    The filter is withheld rather than narrowed. Narrowing it would mean leaving
+    `mount` out of the deny list, and `mount` is the whole reason that list has a
+    filesystem section - it is the one syscall in it that a sandbox exists to
+    deny. bwrap's namespace *is* the confinement for this level and it is
+    enforced by the kernel in a way a seccomp list cannot improve on, so the
+    trade is one layer lost, loudly named, rather than a hole left open quietly.
+
+    Only `use_bwrap` matters, not the level: `_run_landlock` falls back to
+    Landlock-only when bubblewrap is unusable, and in that path the filter is
+    perfectly compatible - which is why this takes the decision the spawn path
+    already made rather than re-deriving it from the level.
+    """
+    return use_bwrap
+
 
 #: `network_access=False` is declared by every restricted profile and enforced by
 #: none of them - see the module docstring of `profiles.py` for why no path in
@@ -607,6 +646,27 @@ class SandboxExecutor:
                 "--",
                 *inner_argv,
             ]
+            # **Here, and not where `_PENDING_SECCOMP` is set.** That assignment
+            # happens before this function is reached, and whether bubblewrap
+            # will actually wrap the command is only known here - so deciding it
+            # there would have had to re-derive the `_bwrap_usable()` answer.
+            # The filter goes into the bwrap process's own `preexec_fn`, so it
+            # would be installed before bwrap's `mount` calls; see
+            # `_seccomp_conflicts_with_bwrap` for the measurement.
+            if _PENDING_SECCOMP.get("enabled"):
+                _PENDING_SECCOMP["enabled"] = False
+                if config.level.value not in _SECCOMP_SKIPPED_FOR_BWRAP:
+                    _SECCOMP_SKIPPED_FOR_BWRAP.add(config.level.value)
+                    logger.warning(
+                        "The '%s' setting is on but this call is confined by "
+                        "bubblewrap, whose own setup needs mount(2) - a syscall "
+                        "the filter denies, because Landlock has no mount right "
+                        "in any ABI. Installing it would leave bubblewrap unable "
+                        "to start ('Failed to make / slave'), so no confinement "
+                        "ran at all. The command is still confined by the "
+                        "namespace bubblewrap built; what is missing is the "
+                        "second layer.",
+                        _seccomp.SECCOMP_SETTING)
 
         env = redactor.child_env()
         env.update(

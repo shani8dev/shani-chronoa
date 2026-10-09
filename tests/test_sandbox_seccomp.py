@@ -35,7 +35,7 @@ mode that matters, and only the marker distinguishes it.
 from __future__ import annotations
 
 import errno
-import os
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -52,6 +52,55 @@ from shani_chronoa.sandbox.models import SandboxConfig, SandboxLevel  # noqa: E4
 from shani_chronoa.sandbox.seccomp import SECCOMP_SETTING, SeccompError  # noqa: E402
 
 EXIT_SECURITY_ERROR = 126
+
+
+def _memfd_exec_is_allowed_by_this_kernel() -> bool:
+    """Can this kernel run a program out of a file with no pathname?
+
+    **The premise of the headline test, established rather than assumed.** That
+    test's control is: with the gate off, `memfd_create` + `execve` on the
+    descriptor escapes this repo's own Landlock ruleset, so a refusal with the
+    gate on is attributable to the filter and not to the program being unable to
+    run at all. That is the correct shape - and it means the test can only run
+    where the premise holds.
+
+    **Measured on this machine (Ubuntu, kernel 7.0.0-38): the premise does not
+    hold, and the reason is an LSM, not the syscall.** `memfd_create`, `write`
+    and `fchmod` all succeed and `execve(fd)` is then killed with
+
+        Security violation: Requested utility `3` does not match executable name:
+          /memfd:chronoa-probe (deleted)
+
+    which is **AppArmor's `exec` profile refusing a file with no pathname**, and
+    it arrives on stderr with the *process already gone* - so a probe that
+    catches `OSError` in Python sees nothing at all. That is why the first
+    version of this check was wrong twice: it looked for an errno, found none,
+    and would have skipped on any machine for any reason.
+
+    So the probe runs the **real payload** - `/bin/echo` copied into the
+    descriptor and executed with `MEMFD-EXECUTED` as its argument - in a
+    separate process, and asks the only question that matters: did it print?
+    That is the control's own assertion, so the guard and the test cannot
+    disagree, and a probe that always returns False (a test that always skips)
+    is not possible to confuse with one that always passes.
+    """
+    probe = textwrap.dedent("""
+        import os
+        fd = os.memfd_create("chronoa-premise-probe", 0)
+        with open("/bin/echo", "rb") as handle:
+            os.write(fd, handle.read())
+        os.fchmod(fd, 0o700)
+        os.execve(fd, ["/bin/echo", "PREMISE-OK"], {})
+    """)
+    try:
+        done = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                              text=True, timeout=30)
+    except Exception:  # noqa: BLE001 - cannot run a program, cannot have the premise
+        return False
+    return done.returncode == 0 and "PREMISE-OK" in done.stdout
+
+
+_MEMFD_EXEC_ALLOWED = _memfd_exec_is_allowed_by_this_kernel()
 
 #: A real program, run exactly the way `tools.py` runs every skill: a fresh
 #: interpreter with `-c`. The ctypes dance is the smallest thing that can ask
@@ -227,6 +276,14 @@ class TestTheFilterIsReal:
         assert "NOT_DENIED []" in out, (
             f"these blocked syscalls were reachable under the running filter: {out}")
 
+    @pytest.mark.skipif(
+        not _MEMFD_EXEC_ALLOWED,
+        reason="an LSM on this machine refuses to execute a file with no "
+               "pathname (memfd_create + execve is killed with 'Security "
+               "violation: Requested utility 3 does not match executable name'), "
+               "so the control cannot escape and the refusal below would prove "
+               "nothing about the filter",
+    )
     def test_the_memfd_exec_which_escapes_landlock_is_refused(self, executor,
                                                                chronoa_config,
                                                                tmp_path):

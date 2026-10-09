@@ -6150,3 +6150,71 @@ exactly the "a skip reads as coverage" shape in reverse.
   real image, which is what AGENTS.md already says.
 
 150 passed, 4 skipped across the vision, idle, sense-manifest and sandbox suites.
+
+### The seccomp filter silently broke bubblewrap — and the last two "environmental" failures (2026-10-09)
+
+`test_sandbox_seccomp.py` was 2 red and had been left alone twice with the
+reason "Landlock and seccomp need the real kernel; AGENTS.md already says so."
+**One of the two was a real product defect**, and it was invisible because the
+environment table said it was expected. Checking the recorded reason rather than
+the recorded conclusion is the whole lesson.
+
+**Measured, directly.** Installing the real filter and then running the real
+bwrap, in one process, in that order:
+
+    filter ON  -> bwrap rc=1  bwrap: Failed to make / slave: Operation not permitted
+    filter OFF -> bwrap rc=0
+
+`_harden_child` runs as `preexec_fn` on the **bwrap process itself**, so the
+filter is installed *before* bwrap builds the namespace it exists to build — and
+the filter denies `mount(2)`, correctly, because Landlock has no mount right in
+any ABI. So **every `LEVEL_1`/`LEVEL_2` call failed whenever the gate was on**:
+a confinement mechanism refusing to confine anything, reported as an exit code
+rather than as a security decision.
+
+Fixed by withholding the filter **from a bwrap child only**, at the point where
+bwrap is actually chosen rather than where `_PENDING_SECCOMP` is set — that
+assignment happens earlier, and whether bwrap will wrap the command is only
+known inside `_run_landlock`. Narrowing the deny list was rejected: `mount` is
+the one syscall in that list a sandbox exists to deny, and bwrap's namespace is
+already kernel-enforced confinement for this level. One layer lost, named in a
+`logger.warning` once per level, rather than a hole left open quietly.
+
+Verified after, through the real `SandboxExecutor` with the gate on:
+
+    gate=false -> code=0 out='WRAPPER ok'
+    gate=true  -> code=0 out='WRAPPER ok'
+
+and confinement is intact — reading a file outside the allowlist still returns
+`PermissionError: [Errno 13]` with no leak. One mutation (keep the filter on)
+fails. 320 passed across the sandbox, actuator and matrix-skill suites.
+
+**The second failure: the premise is absent, and my first two probes were wrong.**
+The headline test's control needs `memfd_create` + `execve` to actually escape
+Landlock. Here it does not, and I got the reason wrong twice:
+
+1. First I concluded "the kernel returns `EACCES` (13), a memfd execution policy."
+   Wrong: my probe used `['/nonexistent']` as the interpreter, so `execve` failed
+   with **`ENOENT` (8)** — an absent interpreter, not a policy at all. The real
+   payload, with `/bin/echo` copied in and executed, **works on the host**.
+2. Then I wrote a probe that looked for errno 13 or `EPERM`. It found neither and
+   returned False for the wrong reason — which would have skipped the test on
+   *any* machine, for *any* cause. That is the "a check that cannot fail" trap in
+   a new place: a probe that is always False is a test that always skips.
+
+**The actual cause is an LSM, and it kills the process before Python can catch
+anything:**
+
+    Security violation: Requested utility `3` does not match executable name:
+      /memfd:chronoa-probe (deleted)
+
+AppArmor's `exec` profile, so there is no errno to read — the process is gone.
+The probe now runs the **real payload** and asks the only question that matters,
+"did it print `PREMISE-OK`?", which is the control's own assertion, so guard and
+test cannot disagree. Verified it discriminates: `False` here, and `True` for a
+control payload that does print — so it is not a test that always skips. 56
+passed, 1 skipped with the reason naming AppArmor.
+
+**What I got wrong by not measuring first, in one line:** I read "the environment
+list says these are expected" as "these are environmental", and the first of the
+two was a defect that had been sitting behind that sentence.
