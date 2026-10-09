@@ -3690,9 +3690,35 @@ recorded for that reason:
   strip and one of them does nothing - worth knowing before editing either.
 
 `Gtk.Center` and `Gtk.Alignment` are both gone in GTK4 and `Gtk.FlowBox` has no
-`justify`, so this is not a one-liner: centring has to happen inside the flow box,
-or the strip has to stop being *measured* as full. Recorded as an open lead with
-its numbers rather than a fix nobody could verify.
+`justify`, so this is not a one-liner.
+
+**CLOSED 2026-10-09 - and the numbers above are why it was never closed.** The
+two no-op attempts were real, and so is the fix: `OrganStrip.do_measure`
+overrides `Gtk.FlowBox`'s widest-child-x-count measure with the sum of the
+cells' own naturals, so the strip is allocated **exactly** what its lights need
+and `halign=CENTER` finally has slack to work with. The `set_halign(CENTER)`
+line is in the tree, it was written *before* `do_measure` existed, and it was a
+no-op until `do_measure` landed. Nothing was left out; the second one was simply
+built in the wrong order.
+
+Measured on a real window (`tests/test_organ_strip_is_centred.py`, broadway):
+
+| | `reported_natural` | content left | content right | verdict |
+|---|---|---|---|---|
+| as shipped, 1024px | 479 | 130 | 131 | **centred**, 0.5px off |
+| `halign` -> `FILL` | 479 | 0 | 258 | 129px off |
+| `do_measure` removed | **815** | 1 | 260 | 130px off |
+
+815 is the exact figure this section recorded for the un-overridden flow box, so
+the historical root cause is reproduced rather than approximated, and 129px here
+against 86px at 1280px is the same defect at a different column width.
+
+**Measure the cells, not the strip's own box.** Under `halign=FILL` the box is
+trivially centred - left 0, right 0 - while the lights sit hard against the left
+with 258px of nothing beside them. A centring check written against the box
+reports "centred" for the broken layout and passes; the first version of that
+test did exactly that and stayed green under mutation until the FILL control
+was written.
 
 **Three defects the second full run found, all of them mine.**
 
