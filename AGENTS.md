@@ -6392,3 +6392,57 @@ registry, and whose only distinctive function is unreachable, is not a merge
 candidate — merging it would have put a second CLI and a second classifier into
 `tools/` for a reader to choose between, with no way to tell from the code which
 one produced a given number.
+
+**The two matrix scripts were one live tool and one abandoned fork (2026-10-09).**
+Asked to merge `tools/cli_matrix.py` and `tools/cli_matrix_v2.py`. Measured first,
+because "merge" is the wrong verb if one of the two is not a version of the other:
+
+| question | v2 |
+|---|---|
+| callers anywhere in the repo | **zero** - no test, no doc, no harness, no slot-test |
+| can it run today | **no** - its `main` needs `chronoa-matrix/chronoa-matrix.json` to exist and prints *"No matrix JSON found"*; that path only exists on a slot |
+| does it read Chronoa's registries | **no** - `SKILLS_DIR` defined and never used; `discover_skills`/`ast.parse` appear 0 times against v1's 2 |
+| its own headline feature | `enhanced_intent_detection` called **nowhere**, not even by its own `main` |
+| what v1 has that it lacks | `--check`, `--diff`, `--audit-packaging`, `--suggest`, `--scaffold`, `--enrich`, `--resolve-files`, `--package-report`; and it reads the real schemas, so `open_surfaces` measures *calls* |
+
+So v2 is a fork with its own incompatible CLI, added 2026-10-07 with the harvest2
+work and never referenced since. **Deleted with `git rm`**, not merged: merging
+would have left two CLIs and two classifiers in `tools/` for a reader to choose
+between, with nothing in the code to say which produced a given number - the same
+defect as `scan_archive.py`, which was deleted as a superseded duplicate of a
+strictly better guard.
+
+**Two things worth knowing about v2 before anyone restores it.** Its docstring
+makes five claims and the two most interesting are false: "cross-profile analysis
+to identify consistent missing functionality" is implemented nowhere in the file,
+while v1 has a real `audit_packaging` over the image profiles. And its regexes
+are corrupted - `INTENTS` and `CATEGORIES` repeat every alternative two or three
+times (one 33-way alternation holds 22 duplicates, 11 unique terms), and
+**`search` appears twice in `INTENTS`**, so the first entry can never match. A
+classifier whose first rule is unreachable and whose rules are triple-counted
+produces a confident coverage number derived from nothing, which is the failure
+`--suggest`'s own caveat already warns about.
+
+**`--check` on a real image found a live defect, which is the argument for the
+slot-test over any host test.** `set_theme` shelled to three KDE helpers it never
+checked for. Nothing crashed - `_run_cmd` returns `None` and every caller handled
+it - so on a GNOME desktop a person asking "am I in dark mode?" got a bare "no"
+with no reason. Fixed both halves: `_missing_kde_tools()` checks first, and
+`files._PACKAGE_HINTS` gained `kreadconfig6 -> kconfig` and
+`plasma-apply-colorscheme -> plasma-workspace`, read out of pacman's file database
+via `chronoa-matrix.json`'s `commands[].package` - **the only machine-readable
+authority in the tree for what package ships a binary**. `plasma-lookandfeeltool`
+and `kreadconfig5` get no hint on purpose: they are Plasma 5 names, absent from a
+Plasma 6 image, so naming a package for them would be the invented answer that
+table exists to avoid. Measured before/after on `@blue`: FAIL, then
+`chronoa-deps-explained PASS (26 tool(s)/sense(s) need a command this image lacks,
+and every one checks for it first)`, and tree-wide `unguarded_missing == []`.
+
+Running the matrix outside a slot is a silent refusal: `--check` prints
+*"No pacman database here: run this on a Shanios/Arch system or in a testbed
+slot."* and **exits 0**, which reads as a pass. The run needs a bootstrapped slot
+(`build.sh test ca`, then `bootstrap -p gnome -d latest`, ~40 min) and an output
+directory that exists **inside the container's mount namespace** - a host
+`/tmp/opencode/...` path makes nspawn die with *"Failed to clone ...: No such file
+or directory"* while the overlay still reports success, so the failure looks like
+a boot problem. Use `test-env/mout:/mnt/out`.
