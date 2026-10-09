@@ -17,8 +17,25 @@ logger = logging.getLogger(__name__)
 # raised PermissionError on a real, unprivileged install). Use the same
 # per-user XDG data location the sandbox executor already uses for its
 # own state (~/.local/share/shani-chronoa/...).
-LOG_DIR = files.data_home() / "shani-chronoa" / "logs"
-LOG_FILE = LOG_DIR / "tool_calls.log"
+#
+# **Resolved on every use, never at import.** These were module constants and
+# `tools._TRACKER` is built at import - during test collection, before a test
+# redirects `XDG_DATA_HOME` - so every test that dispatched a tool appended to
+# the real user's log. Measured on the development machine: the 18,000-line log
+# the outcome model trains on carried 374 `liar`, 378 `unver` and 369
+# `add_reminder` fixture calls, and running four test files added two more.
+def log_dir() -> Path:
+    return files.data_home() / "shani-chronoa" / "logs"
+
+
+def __getattr__(name: str) -> Path:
+    # `tool_tracking.LOG_DIR` / `.LOG_FILE` keep working for readers, resolved now.
+    if name == "LOG_DIR":
+        return log_dir()
+    if name == "LOG_FILE":
+        return log_dir() / "tool_calls.log"
+    raise AttributeError(name)
+
 
 # Who asked for this call. The audit trail's whole point for the trigger
 # engine is being able to tell a user-initiated actuation from an
@@ -114,13 +131,21 @@ class ToolCallRecord:
 class ToolTracker:
     """Tracks tool calls made by shani-chronoa agents."""
 
-    def __init__(self, log_dir: Path = LOG_DIR, max_in_memory: int = 100):
-        self.log_dir = log_dir
-        self.log_file = log_dir / "tool_calls.log"
+    def __init__(self, log_dir: Optional[Path] = None, max_in_memory: int = 100):
+        #: An explicit directory is fixed; None follows `XDG_DATA_HOME` per write.
+        self._log_dir = log_dir
         # In-memory ring buffer for conversation-context use (last N calls);
         # the on-disk log below is append-only and unbounded, this is not.
         self._calls: deque[ToolCallRecord] = deque(maxlen=max_in_memory)
         self._ensure_log_dir()
+
+    @property
+    def log_dir(self) -> Path:
+        return self._log_dir if self._log_dir is not None else log_dir()
+
+    @property
+    def log_file(self) -> Path:
+        return self.log_dir / "tool_calls.log"
 
     def _ensure_log_dir(self) -> None:
         """Ensure the log directory exists, and is not readable by anyone else.
@@ -200,6 +225,7 @@ class ToolTracker:
         the same shape for the same reason. The trailing chmod is kept anyway: it
         is what tightens a file that already existed at a looser mode.
         """
+        self._ensure_log_dir()
         fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
             f.write(json.dumps(record.to_log_dict(), default=repr) + "\n")
