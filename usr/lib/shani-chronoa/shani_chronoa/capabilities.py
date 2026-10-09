@@ -98,6 +98,11 @@ GATED: dict[str, str] = {
     # that is a very different permission.
     "capture_packets": "packet-capture-enabled",
     "control_service": "service-control-enabled",
+    # `systemd-analyze verify`, the command that answers "why won't it start".
+    # Read-only, so ungated: it reports on a configuration file, not on anyone's
+    # work. `control_service` can act on a unit but could not say what was wrong
+    # with it.
+    "check_units": "service-check-enabled",
     "find_and_replace": "bulk-edit-enabled",
     "manage_mount": "mount-control-enabled",
     # One key for both directions of a single-file edit. `undo_last_change` is
@@ -225,6 +230,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "reminders": ("Time and reminders", "Add, list, complete, and remove reminders"),
     "notes": ("Files", "Keep your own notes: add, list, search and remove"),
     "list_services": ("Services and logs", "System services"),
+    "check_units": ("Services and logs", "Verify systemd units"),
     "control_service": ("Services and logs", "Start or stop a service"),
     "read_logs": ("Services and logs", "Read the system log"),
     "create_archive": ("Files", "Make or extract an archive"),
@@ -995,6 +1001,8 @@ READ_ONLY_TOOLS = frozenset({
     # has no post-condition to verify and no reason to withhold the answer.
     "fingerprint_status",
     "list_services", "read_logs", "check_updates", "compute_hash",
+    # Runs systemd-analyze verify and changes nothing.
+    "check_units",
     "list_percepts", "recommend_model", "calculate", "system_info",
     "get_weather", "get_location", "get_world_time", "convert_units",
     "convert_currency", "lookup_wikipedia", "define_word", "solve_math",

@@ -90,7 +90,46 @@ def thunderbolt_lines() -> "list[str]":
     return out
 
 
+def _usb_devices_detail() -> list[str]:
+    import re
+    """`lsusb` reports vendor/product IDs; `usb-devices` reports the driver
+    actually bound to each device and its USB class (hub, HID, storage,
+    video, etc.). That is the detail `usb_devices` previously could not
+    answer.
+
+    **Measured here: `usb-devices` exits 0 even when nothing matches a device
+    line, and it walks the full system bus rather than only your devices.**
+    The output is filtered to device records (`D:` lines only, skipping the
+    `T:` bus header and blanks) so the answer is not the full dump.
+    """
+    if shutil.which("usb-devices") is None:
+        return ["usb-devices (the 'usbutils' package) is not installed, so the "
+                "USB driver/class detail is UNKNOWN."]
+    try:
+        proc = subprocess.run(["usb-devices"], capture_output=True, text=True,
+                              timeout=_TIMEOUT, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [f"usb-devices did not answer ({exc}). UNKNOWN."]
+    if proc.returncode != 0:
+        return [f"usb-devices failed: {(proc.stderr or '').strip() or 'no detail'}. UNKNOWN."]
+    lines = [line for line in proc.stdout.splitlines()
+             if line.strip() and line.startswith("D:")]
+    if not lines:
+        return ["No USB devices were listed by usb-devices."]
+    out = [f"USB driver and class detail ({len(lines)} device record(s)):" ]
+    for line in lines[:20]:
+        cls_match = re.search(r"Cls=([0-9a-f]{2})\(([^)]+)\)", line)
+        cls_text = f"({cls_match.group(2)})" if cls_match else "(unknown class)"
+        spd = re.search(r"Spd=([0-9.]+)", line)
+        spd_text = f" @ {spd.group(1)} Mbps" if spd else ""
+        out.append(f"  {line.split()[0]} - class {cls_text}{spd_text}")
+    if len(lines) > 20:
+        out.append(f"  ... and {len(lines) - 20} more device record(s)")
+    return out
+
+
 def _run(_arguments: dict) -> str:
+    import re
     lines = ["USB:"]
     config = ChronoaConfig()
     allowed, why = _consent(config)
@@ -98,6 +137,9 @@ def _run(_arguments: dict) -> str:
     lines.append("")
     lines.append("Thunderbolt:")
     lines.extend(thunderbolt_lines())
+    lines.append("")
+    lines.append("USB driver and class detail:")
+    lines.extend(_usb_devices_detail())
     return "\n".join(lines)
 
 

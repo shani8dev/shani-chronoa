@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**208 skills in 24 groups.** Each is a named, schema-typed module; the model
+**209 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**82 of 208 are consent-gated and 16 are destructive.**
+**83 of 209 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -328,6 +328,7 @@ Systemd units and the journal.
 
 | Skill | What it does | Before it runs |
 |---|---|---|
+| `check_units` | Verify systemd units | needs `service-check-enabled` |
 | `control_service` | Start or stop a service | **asks first, always** · needs `service-control-enabled` |
 | `crash_report` | What crashed recently | needs `coredumps-sense-enabled` |
 | `list_services` | System services | — |
