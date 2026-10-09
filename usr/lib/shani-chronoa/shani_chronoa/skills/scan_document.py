@@ -51,6 +51,45 @@ def scanners() -> list:
     return [tuple(l.split("\t", 1)) for l in r.stdout.splitlines() if "\t" in l]
 
 
+def _usb_probe() -> "tuple[list[str], bool]":
+    """`sane-find-scanner`: is a scanner on the bus that SANE cannot see?
+
+    **Why this runs only when SANE sees nothing.** When the answer to "scan
+    this" is "No scanner is connected", the usual truth is one of two very
+    different things and they need different fixes: there is genuinely no
+    scanner plugged in, or there is one and SANE's backend for it is missing
+    (the vendor driver, or `sane-airscan` for a network scanner). `scanimage`
+    cannot tell them apart - it answers "no devices" either way.
+
+    `sane-find-scanner` walks the USB bus itself, so it separates them:
+    a scanner-class device it can name with SANE unable to open it is the
+    missing-driver case, and that is a sentence a person can act on.
+
+    Returns `(found-names, ran)`. `ran` is False when the tool is absent or
+    failed, because **"the probe could not run" and "no scanner" are opposite
+    answers** and collapsing them is the confident-wrong-answer this module
+    already refuses to produce.
+    """
+    if shutil.which("sane-find-scanner") is None:
+        return [], False
+    try:
+        r = subprocess.run(["sane-find-scanner"], capture_output=True,
+                           text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return [], False
+    if r.returncode != 0:
+        return [], False
+    found = []
+    for line in (r.stdout or "").splitlines():
+        # The real format when it finds one: `found USB scanner (vendor=...,
+        # product=...) at libusb:001:004`. The leading banner is prose about
+        # what it is about to do, so only lines with the verb count.
+        if "found USB scanner" in line:
+            detail = line.split("found USB scanner", 1)[1].strip()
+            found.append(detail.rstrip(" .") or "unnamed USB scanner")
+    return found, True
+
+
 def _out_path(kind: str) -> Path:
     out_dir = Path.home() / "Documents" / "Scans"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -78,10 +117,32 @@ def _scanner(arguments: dict) -> str:
         return "Scanning needs SANE's scanimage (the sane package), which is not installed."
     found = scanners()
     if arguments.get("list_only"):
-        return ("Scanners: " + "; ".join(f"{d} ({n})" for d, n in found)) if found else "No scanner is connected."
+        if found:
+            return "Scanners: " + "; ".join(f"{d} ({n})" for d, n in found)
+        usb, ran = _usb_probe()
+        if usb:
+            return ("SANE lists no scanners, but a scanner IS on the USB bus: "
+                    + "; ".join(usb)
+                    + ". SANE cannot open it, which is usually a missing backend "
+                    "(the vendor driver, or sane-airscan for a network scanner) "
+                    "rather than a disconnected device.")
+        if ran:
+            return "No scanner is connected (nothing on the USB bus either)."
+        return ("No scanner is connected, as far as SANE can tell. "
+                "Whether one is on the USB bus could not be checked - "
+                "sane-find-scanner is not installed (the sane package).")
     device = (arguments.get("device") or "").strip() or (found[0][0] if found else "")
     if not device:
-        return "No scanner is connected. To use the camera instead, ask to scan with the camera."
+        usb, ran = _usb_probe()
+        if usb:
+            return ("No SANE scanner to use, but a scanner is on the USB bus: "
+                    + "; ".join(usb)
+                    + ". SANE cannot open it - usually a missing backend (the "
+                    "vendor driver, or sane-airscan for a network scanner). "
+                    "To use the camera instead, ask to scan with the camera.")
+        return ("No scanner is connected"
+                + (" (nothing on the USB bus either)." if ran else ".")
+                + " To use the camera instead, ask to scan with the camera.")
     if not re.fullmatch(r"[A-Za-z0-9:._/\-=@\[\]]{1,200}", device):
         return f"'{device}' is not a scanner name."
     image = _out_path("scan")
@@ -167,7 +228,6 @@ def _verify_scanned_document(arguments: dict, tool=None):
     as a failure**, and that limit is stated rather than hidden - a blank page is
     a correct outcome this check cannot tell from a broken scan.
     """
-    from pathlib import Path as _P
     out = str(arguments.get("output") or "").strip()
     source = str(arguments.get("path") or "").strip()
     if not source:
