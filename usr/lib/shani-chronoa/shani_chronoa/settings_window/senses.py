@@ -145,6 +145,12 @@ SENSE_LABELS = {
         "Crashes",
         "Programs that actually crashed, and whether crashes are recorded at all",
     ),
+    "polkitpolicy": (
+        "What you can do without a password",
+        "Which of the polkit actions installed on this machine need no "
+        "authentication for you, which need your own password, which need an "
+        "administrator, and which are never allowed at all",
+    ),
     "firewall": (
         "Firewall",
         "Whether packets are being filtered, not just whether a firewall is installed",

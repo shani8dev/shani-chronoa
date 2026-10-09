@@ -304,6 +304,11 @@
       <summary>Retired: merged into the hwmon sense</summary>
       <description>The `cooling` sense was merged into `hwmon`, which reported fan speeds and liquid coolers. The kernel exposes the same sensors through both the thermal-zone and the hwmon trees and they agree, so one sense now reports chips, fans, liquid cooling and thermal zones together. This key is still honoured: setting it to true grants the `hwmon` sense, so a grant made before the merge is not revoked by it.</description>
     </key>
+    <key name="polkitpolicy-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report what you may do without a password</summary>
+      <description>Reads the polkit policies actually installed and reports which actions need no authentication for an active session on this machine, which need your own password, which need an administrator and which are never allowed. Off by default: this describes what the person at this desk is permitted to do, which is a fact about them rather than about the machine. Reports UNKNOWN when the policies could not be read, which is not the same as nothing being allowed.</description>
+    </key>
     <key name="security-sense-enabled" type="b">
       <default>true</default>
       <summary>Firmware security</summary>

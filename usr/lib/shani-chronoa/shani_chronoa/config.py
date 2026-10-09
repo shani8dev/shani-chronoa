@@ -113,6 +113,10 @@ _SENSE_CONSENT_KEYS = {
     "cpu": "cpu-sense-enabled",
     "gpu": "gpu-sense-enabled",
     "security": "security-sense-enabled",
+    # What this user may do without a password: the one question whose answer is a
+    # *permission* rather than a state. Hand-kept table, so a sense missing from
+    # it is permanently ungrantable - see `kernellog` above.
+    "polkitpolicy": "polkitpolicy-sense-enabled",
     "devices": "devices-sense-enabled",
     "audio": "audio-sense-enabled",
     "printing": "printing-sense-enabled",
