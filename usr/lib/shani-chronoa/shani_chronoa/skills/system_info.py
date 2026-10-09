@@ -38,8 +38,9 @@ _SCHEMA = {
         "name": "system_info",
         "description": (
             "Describe the machine Chronoa is running on: distribution, kernel, "
-            "architecture, uptime, load, memory, CPU count, and whether this is "
-            "a desktop session or a container."
+            "architecture, uptime, load, memory, CPU count, whether this is a "
+            "desktop session or a container, and the hardware identity (make, "
+            "model, board, BIOS version)."
         ),
         "parameters": {"type": "object", "properties": {}},
     },
@@ -143,6 +144,40 @@ def _session() -> str:
     return f"session: {kind}" + (f" on {desktop}" if desktop else "")
 
 
+def _identity() -> str:
+    """Make, model, board and BIOS, from `/sys/class/dmi/id` without root.
+
+    **Why the sysfs tree and not `dmidecode`.** Measured on this box:
+    `dmidecode -s bios-version` prints *"Permission denied"* and
+    *"Can't read memory from /dev/mem"* while **exiting 0** - so the tool
+    most people reach for is unusable without root and silent about it. The
+    same facts are world-readable in `/sys/class/dmi/id` (`bios_version`,
+    `board_name`, `sys_vendor`, ...), which is the pattern this package
+    already follows for processes and ports: read the kernel's own file
+    rather than a binary that may be missing, restricted, or both.
+
+    **Only the fields the kernel makes readable.** `product_serial` and
+    friends are root-only by design and are never read, because a skill
+    reporting `Permission denied` for half a table reads as a broken answer
+    rather than as a permission boundary. A missing file is reported as
+    unknown, never as blank.
+    """
+    fields = (("vendor", "sys_vendor"), ("model", "product_name"),
+              ("board", "board_name"), ("bios", "bios_version"),
+              ("bios date", "bios_date"))
+    parts = []
+    for label, name in fields:
+        raw = _read(f"/sys/class/dmi/id/{name}")
+        value = (raw or "").strip()
+        # Some DMI strings end in whitespace by design, and a value that is
+        # only whitespace is not a value.
+        parts.append(f"{label}: {value}" if value and value.strip()
+                     else f"{label}: unknown")
+    return ("machine: " + ", ".join(parts)
+            if any(not p.endswith("unknown") for p in parts)
+            else "machine: unknown (no readable /sys/class/dmi/id - a container?)")
+
+
 def _virtualisation() -> str:
     if Path("/run/systemd/container").exists():
         return f"virtualisation: container ({Path('/run/systemd/container').read_text().strip()})"
@@ -166,6 +201,7 @@ def _run(_arguments: dict) -> str:
         f"kernel: {uname.release} ({uname.version})",
         f"architecture: {uname.machine}",
         _distribution(),
+        _identity(),
         _uptime(),
         _load(),
         _memory(),
