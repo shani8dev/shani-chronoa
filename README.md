@@ -2,6 +2,11 @@
 
 Local-first voice/text AI assistant, integrated into the Shanios desktop.
 
+> **What can it actually do? → [`CAPABILITIES.md`](CAPABILITIES.md)** — all 200
+> skills, grouped by what they are for, with each one's consent switch and
+> whether the assistant asks before running it. Generated from the same table
+> the Help window renders, so it cannot claim something the build does not have.
+
 Chronoa listens for a wake-word, transcribes speech locally with
 [whisper.cpp](https://github.com/ggerganov/whisper.cpp), routes the text through an on-device LLM — by default `llama.cpp`'s
 `llama-server`, with Ollama optional — with tool-calling, and speaks the reply
@@ -23,6 +28,12 @@ the machine unless you switch it twice on purpose.
   rather than just chatting about it. **200 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
+  **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
+  what they are for, each with the consent switch it needs and whether the
+  assistant asks before running it — 75 are consent-gated and 14 are
+  destructive. That file is generated from `capabilities._GROUPS`, the same
+  table the Help window renders, so it cannot drift from what the build does;
+  `tests/check_capabilities_doc.py` fails if it does.
 - **Local text-to-speech** — espeak-ng by default; a Piper voice is used
   verbatim when one is provisioned — the voice directory, down to the voice
   name, is configurable.
