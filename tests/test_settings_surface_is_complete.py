@@ -78,6 +78,15 @@ CONTROLLED = {
     # nowhere else, so `calendar_edit` refused every call with an instruction to
     # enable a switch the window did not have.
     "calendar-write-enabled",
+    # The two halves of writing to a git repository, each its own row in
+    # privacy.py, beside each other and NOT one switch: `git_commit` and
+    # `git_branch` are reversible (a reset undoes them) while `git_push`
+    # publishes to a remote you may not own. `cleanup-enabled` is the third
+    # row added the same day and belongs to the same list - a key in the
+    # schema with no row here is a permission that cannot be granted from the
+    # app, which is the `calendar_edit` defect this comment above already
+    # records.
+    "git-write-enabled", "git-push-enabled", "cleanup-enabled",
     "phone-control-enabled", "phone-sense-enabled", "global-shortcut-enabled", "radio-control-enabled",
     # The two halves of talking to a phone, each its own row in privacy.py.
     # They were named in `phone`'s own description and checked by the skill

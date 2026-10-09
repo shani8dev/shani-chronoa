@@ -40,9 +40,17 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 COVERED = ["airplane_mode", "close_window", "control_service",
            "conversations", "default_apps", "delete_file",
            "desktop_setting", "edit_file", "find_and_replace",
+           "git_branch", "git_commit", "git_push",
            "kill_process", "manage_mount", "manage_triggers",
            "office_document", "power_action", "print_queue",
            "set_hostname", "set_locale", "take_photo", "toggle_wifi"]
+#: Kept by hand, deliberately, because the whole point of this list is to be a
+#: **claim** about coverage rather than a re-derivation of it: if it were
+#: computed from the registry it would agree with the registry by construction
+#: and assert nothing. `test_the_tools_named_as_covered_still_have_post_conditions`
+#: is the other half - it fails when the two disagree, which is what happened
+#: when three git skills gained post-conditions in the same session that wrote
+#: this. So the shape is intentional; the *drift* is what the guard is for.
 
 
 def _compile_schemas(directory: Path) -> None:
