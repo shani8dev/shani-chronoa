@@ -502,6 +502,24 @@ def tool_missing(binary: str, purpose: str) -> str:
 #: image audited, so there was no pacman file to read); it is a single-word
 #: package, so there is nothing for it to be confused with.
 _PACKAGE_HINTS = {
+    # Read out of pacman's own file database via `chronoa-matrix.json`
+    # (`commands[].package`), which is the only authority in the tree with a
+    # machine-readable package name per binary - not guessed. Added when
+    # `tools/cli_matrix.py --check` ran on a real GNOME image (slot-test
+    # `chronoa-matrix`, 2026-10-09) and found `set_theme` running three Plasma
+    # binaries it never checks for: without these, `files.tool_missing` said
+    # "kreadconfig6 is not installed" and stopped there, naming nothing the
+    # reader could act on.
+    #
+        # `plasma-lookandfeeltool` and `kreadconfig5` are deliberately absent:
+        # they are Plasma 5 binary names. `plasma-lookandfeeltool` is absent
+        # from the matrix on a Plasma 6 image and `kreadconfig5` from this
+        # GNOME one, which is the same fact `set_theme`'s own docstring records
+        # (measured on the Plasma image 2026-10-01). Listing a package for a
+        # binary that does not exist would be the invented answer this table
+        # exists to avoid.
+        "kreadconfig6": "kconfig",
+        "plasma-apply-colorscheme": "plasma-workspace",
     "nmcli": "networkmanager",
     "lp": "cups",
     "lpr": "cups",

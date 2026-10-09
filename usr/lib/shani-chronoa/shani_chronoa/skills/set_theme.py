@@ -52,6 +52,53 @@ def _run_cmd(argv, env=None):
     """This module's seam over `subproc.run` (tests replace it), with the module's timeout."""
     return subproc.run(argv, timeout=_TIMEOUT, env=env)
 
+
+#: The Plasma helpers this module shells to, with the question each answers.
+#: `plasma-lookandfeeltool` is Plasma 5 and is kept only because the image that
+#: shipped it is a real target; it has no entry in `files._PACKAGE_HINTS` and
+#: must not grow one, because on Plasma 6 the binary does not exist at all and a
+#: named package for it would be the invented answer that table exists to avoid.
+_KDE_TOOLS = ("kreadconfig6", "kreadconfig5", "plasma-apply-colorscheme",
+              "plasma-lookandfeeltool")
+
+
+def _missing_kde_tools() -> "list[str]":
+    """The Plasma helpers this machine does not have.
+
+    Checked with `shutil.which` *before* running anything, which is what
+    `tools/cli_matrix.py --check` asserts and what it caught here: on a real
+    GNOME image (slot-test `chronoa-matrix`, 2026-10-09) it reported
+
+        set_theme: runs kreadconfig6, which is not installed here, and unchecked
+
+    for all three. Before this, `_run_cmd` returned `None` and each caller
+    handled that, so nothing crashed - but the person asking "am I in dark
+    mode?" on a GNOME desktop got a bare "no" with no reason, and a person on a
+    machine missing one helper got silence rather than the name of the package
+    that would fix it. `files.tool_missing` is the established helper and
+    names the package from the routes table.
+    """
+    import shutil
+
+    from shani_chronoa import files
+
+    return [tool for tool in _KDE_TOOLS if shutil.which(tool) is None]
+
+
+def _kde_readable() -> bool:
+    """Whether a KDE reading is actually available, helpers or not.
+
+    The honest second half of `_missing_kde_tools()`: an absent `kreadconfig6`
+    is a reason to *say* something, not proof there is nothing to say. A machine
+    with the tools present, or one whose helpers answer anyway, must still get
+    its reading — so the refusal in `_run` is conditional on this as well.
+    """
+    _, current = _kde_schemes()
+    if current:
+        return True
+    _, current = _kde_looks()
+    return bool(current)
+
 _GNOME_SCHEME = "org.gnome.desktop.interface"
 _GNOME_KEY = "color-scheme"
 #: KDE's own light/dark preference names, mapped to the two states.
@@ -150,6 +197,16 @@ def _kde_look() -> str:
     return ""
 
 
+def _kde_looks() -> "tuple[list[str], str]":
+    """`(_kde_schemes(), _kde_look())` as one call, for the availability check.
+
+    Named rather than inlined so `_kde_readable()` is obviously asking the same
+    question the reader below asks, instead of re-deriving a subset of it - the
+    two drifting apart is how a guard ends up checking something adjacent.
+    """
+    return _kde_schemes(), _kde_look()
+
+
 def _pick_scheme(available: "list[str]", want_dark: bool) -> str:
     preferred = ("BreezeDark",) if want_dark else ("BreezeLight", "BreezeClassic")
     for name in preferred:
@@ -175,6 +232,25 @@ def _run(arguments: dict) -> str:
     if desktop == "gnome":
         state, raw = _gnome_state()
     else:
+        missing = _missing_kde_tools()
+        if missing and not _kde_readable():
+            # Answer with the reason instead of a bare "could not read". This is
+            # the case the matrix check found: a machine that reports itself as
+            # KDE without the KDE helpers installed, which is exactly what a
+            # GNOME box running KDE's session variables looks like.
+            #
+            # **Guarded on `_kde_readable()`**, not applied unconditionally: the
+            # helpers' absence alone is not proof the answer is unavailable, and
+            # returning early on it broke four existing tests that stub
+            # `_run_cmd` and assert a round trip. Those tests were right to
+            # fail - a check that refuses a path it has not proved is broken is
+            # the over-fix this repo keeps recording. So the sentence appears
+            # only when reading has *also* come back empty.
+            from shani_chronoa import files
+
+            return (f"This session reports as {desktop}, but "
+                    f"{files.tool_missing(missing[0], 'read the desktop appearance')} "
+                    f"Nothing was changed.")
         state, raw = _kde_state()
         look = _kde_look()
 

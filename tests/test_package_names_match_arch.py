@@ -139,6 +139,17 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # Verified 2026-10-08: `bluez-obex` in `extra` ships usr/lib/bluetooth/obexd and
         # obex.service (Arch splits it out of bluez and bluez-utils).
         "bluez-obex",
+        # Verified 2026-10-09 against the matrix a slot run wrote from
+        # pacman's own file database: `kconfig` ships exactly `kreadconfig6` and
+        # `kwriteconfig6`, and nothing else in the image provides them. The
+        # second pair is read the same way: `plasma-workspace` ships
+        # `plasma-apply-colorscheme`, and `plasma-apply-lookandfeel` with it
+        # (the Plasma 6 rename of `plasma-lookandfeeltool`, which `set_theme`
+        # already falls back to). Added with `set_theme`'s helpers, which ran
+        # them unchecked until `tools/cli_matrix.py --check` said so on a real
+        # GNOME image.
+        "kconfig",
+        "plasma-workspace",
         # The NFC tool set. Verified against the Arch package API rather than
         # assumed: `libnfc 1.8.0-3`, repo `extra`, `arch=(x86_64)`,
         # depends=(libusb-compat pcsclite). Its ten `nfc-*` binaries all come

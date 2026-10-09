@@ -639,12 +639,6 @@ class PhonePanel:
         _in_thread(lambda: _tool("watch", {**arguments, "device": name}),
                    lambda r: note.set_text(str(r).split(" (unverified")[0]))
 
-    def watch_heart(self, name: str, note: Gtk.Label) -> None:
-        note.set_text("Listening for 15 s - wear the watch...")
-        _in_thread(lambda: _tool("bluetooth_gatt", {"action": "listen", "device": name,
-                                                   "characteristic": "heart rate measurement", "seconds": 15}),
-                   lambda r: note.set_text(str(r)))
-
     def watch_info(self, name: str, note: Gtk.Label) -> None:
         note.set_text("Reading the watch's details...")
 
