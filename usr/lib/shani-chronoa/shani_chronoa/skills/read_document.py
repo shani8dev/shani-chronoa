@@ -21,6 +21,13 @@ where `scan_document` puts a scan, and the answer says so. They are what makes a
 long scan usable rather than a dead end: only the first few pages are read, and
 when reading fails outright - no language pack installed, which is the state the
 Plasma image is in - they are the part that is still worth having.
+
+**It also says whether the PDF embeds its fonts** (`pdffonts`), because a file
+whose fonts are not embedded reads fine here and prints wrong everywhere else,
+and `pdftotext` - the tool this path turned to for everything - says nothing
+about the font table. Measured on a real file: `pdffonts` can print syntax
+errors on stderr while **exiting 0 with an empty table**, so an empty table is
+reported as "no fonts listed", never as "all embedded".
 """
 
 import pathlib
@@ -229,13 +236,128 @@ _SCHEMA = {
     "function": {
         "name": "read_document",
         "description": "Read the text of a PDF (optionally a page range) or of an image (OCR), "
-                       "e.g. to summarise it or read it out.",
+                       "e.g. to summarise it or read it out. For a PDF it also reports whether the "
+                       "document embeds its fonts, since one that does not prints wrong elsewhere.",
         "parameters": {"type": "object", "properties": {
             "path": {"type": "string", "description": "The file, e.g. '~/Documents/letter.pdf'."},
             "first_page": {"type": "integer"}, "last_page": {"type": "integer"},
         }, "required": ["path"]},
     },
 }
+
+
+def _column_spans(text: str) -> "dict[str, tuple[int, int]]":
+    """Column boundaries from the dashed rule under `pdffonts`' header.
+
+    **The table is fixed-width, and `split()` gets it wrong in two measured
+    ways.** The type column holds `Type 1` - two words - and a font *name*
+    regularly holds spaces (`Liberation Serif`, `DejaVu Sans Mono`), so a
+    field index lands on a different column for different rows while still
+    producing the right *number* of fields. Measured on a real two-font PDF:
+    field-index parsing read `Standard` as the `emb` value and reported one
+    font as embedded when it was not.
+
+    The rule line under the header is the one line whose dashes mark exactly
+    where each column starts and ends, so the boundaries come from it - and
+    from nothing about the header's own spacing, which a name column that
+    right-pads differently in another locale could shift.
+    """
+    lines = (text or "").splitlines()
+    rule = next((l for l in lines if l.count("-") >= 8 and set(l) <= {"-", " "}), "")
+    if not rule:
+        return {}
+    spans = []
+    start = None
+    for i, ch in enumerate(rule + " "):
+        if ch == "-" and start is None:
+            start = i
+        elif ch != "-" and start is not None:
+            spans.append((start, i))
+            start = None
+    header = next((l for l in lines if l[:4].strip().lower() == "name"), "")
+    if not header:
+        return {}
+    columns: dict[str, tuple[int, int]] = {}
+    for i, (begin, end) in enumerate(spans):
+        title = header[begin:end].strip().lower()
+        if title and title not in columns:
+            columns[title] = (begin, end)
+    return columns
+
+
+def _row_cells(line: str, columns: "dict[str, tuple[int, int]]") -> "dict[str, str] | None":
+    """One row sliced by those column boundaries, or None if it is not a row.
+
+    The row is padded before slicing, because the last column is the only one
+    whose width varies - `object ID` holds `12  0` or `4  0` - and requiring a
+    row to be as long as the header silently drops every short row, which is
+    every row. Only the columns asked for are read.
+    """
+    emb = columns.get("emb")
+    if emb is None or len(line) < emb[0]:
+        return None
+    padded = line.ljust(max(end for _b, end in columns.values()))
+    cells = {name: padded[begin:end].strip() for name, (begin, end) in columns.items()}
+    return cells or None
+
+
+def _font_lines(path) -> "list[str]":
+    """Whether this PDF embeds its fonts, from `pdffonts`.
+
+    **Why this is a question worth answering.** A PDF whose fonts are not
+    embedded renders fine on the machine that made it and *wrong* everywhere
+    else - substituted metrics, reflowed lines, wrong glyphs - because every
+    viewer falls back to whatever it has. `pdftotext` extracts the words and
+    says nothing about that, and nothing else in this package looks at the
+    font table at all.
+
+    **Measured on a real PDF here: `pdffonts` prints syntax errors on stderr
+    while exiting 0 with an empty table** (fed a non-PDF, it warns
+    "May not be a PDF file (continuing anyway)" and rc=0 with no rows). So the
+    exit code proves nothing and an empty table is reported as *no fonts
+    listed*, never as "all fonts embedded" - the confident wrong answer this
+    whole module is built to avoid. A missing file is rc=1.
+
+    `pdffonts` ships in **poppler**, the same package as the `pdftotext` the
+    caller already requires, so the guard is a formality rather than a
+    dependency.
+    """
+    if shutil.which("pdffonts") is None:
+        return ["Fonts: unknown - pdffonts (the poppler package) is not installed."]
+    try:
+        proc = subprocess.run(["pdffonts", str(path)], capture_output=True,
+                              text=True, timeout=30, check=False)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return [f"Fonts: could not be read ({exc})."]
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().splitlines()
+        return ["Fonts: could not be read"
+                + (f" ({detail[-1][:120]})" if detail else f" (exit {proc.returncode})")
+                + "."]
+    missing, total = [], 0
+    columns = _column_spans(proc.stdout)
+    for line in (proc.stdout or "").splitlines():
+        if not columns:
+            break
+        cells = _row_cells(line, columns)
+        if cells is None:
+            continue
+        name, emb = cells.get("name", ""), cells.get("emb", "")
+        if emb not in ("yes", "no"):
+            continue
+        total += 1
+        if emb == "no":
+            missing.append(name)
+    if not total:
+        return ["Fonts: pdffonts listed no fonts for this file, so whether they "
+                "are embedded could not be determined."]
+    if not missing:
+        return [f"Fonts: all {total} are embedded, so this file prints the same "
+                "on another machine."]
+    names = ", ".join(missing[:5]) + ("..." if len(missing) > 5 else "")
+    return [f"Fonts: {len(missing)} of {total} are NOT embedded ({names}); those "
+            "are substituted when this is printed or opened elsewhere, so lines "
+            "may shift."]
 
 
 def _run(arguments: dict) -> str:
@@ -246,6 +368,7 @@ def _run(arguments: dict) -> str:
     if not path.is_file():
         return f"{path} is not a file."
     suffix = path.suffix.lower()
+    extra: "list[str]" = []
     try:
         if suffix == ".pdf":
             if not shutil.which("pdftotext"):
@@ -261,10 +384,13 @@ def _run(arguments: dict) -> str:
             # and the answer used to be "a scanned PDF needs to be read as a
             # picture", which named something this package could not do.
             if not (r.stdout or "").strip():
-                return _render_and_read(
-                    path,
-                    int(arguments["first_page"]) if arguments.get("first_page") else None,
-                    int(arguments["last_page"]) if arguments.get("last_page") else None)
+                return "\n".join(
+                    [_render_and_read(
+                        path,
+                        int(arguments["first_page"]) if arguments.get("first_page") else None,
+                        int(arguments["last_page"]) if arguments.get("last_page") else None)]
+                    + _font_lines(path))
+            extra = _font_lines(path)
         elif suffix in IMAGES:
             if not shutil.which("tesseract"):
                 return "Reading pictures needs tesseract."
@@ -283,7 +409,7 @@ def _run(arguments: dict) -> str:
     if not text:
         return f"{path.name} has no readable text (a scanned PDF needs to be read as a picture)."
     more = f"\n... ({len(text) - MAX_CHARS} more characters)" if len(text) > MAX_CHARS else ""
-    return f"{path.name}:\n{text[:MAX_CHARS]}{more}"
+    return f"{path.name}:\n{text[:MAX_CHARS]}{more}" + ("".join(f"\n{line}" for line in extra))
 
 
 SKILLS = [Skill(name="read_document", schema=_SCHEMA, run=_run)]
