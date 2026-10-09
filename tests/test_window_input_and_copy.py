@@ -23,7 +23,35 @@ _HARNESS = textwrap.dedent(
     import json
     import gi
     gi.require_version("Gtk", "4.0")
-    from gi.repository import Gtk, Gdk, GLib
+    gi.require_version("Adw", "1")
+    from gi.repository import Gtk, Gdk, GLib, Adw
+
+    # **Initialise GTK and libadwaita here, before the window exists.**
+    # `gui/window.py` calls `Adw.init()` at import, which is the product's own
+    # rule and does cover a widget built before the application is started -
+    # but it cannot initialise *GTK*, and `Gtk.Application` only does that from
+    # `run()`/`register()`. So without this the harness died with
+    # `RuntimeError: Gtk couldn't be initialized` inside `on_activate`, wrote
+    # `RESULT {}`, and every assertion below failed on a **missing key** rather
+    # than on a wrong value - nine tests reporting `KeyError: 'send_visible'`
+    # for a send button that works. Checked before fixing: the same nine fail
+    # at session start (9817575), so this was pre-existing and not a
+    # regression from anything recent.
+    if not Gtk.init_check():
+        raise SystemExit("NOGTK")
+    from gi.repository import Gdk
+    if Gdk.Display.get_default() is None:
+        # **No display at all.** GTK initialises, but every widget built from
+        # here on is unallocated and icon-theme lookups fail, so the window
+        # raises inside `ChronoaWindow.__init__`. Say so distinctly: the same
+        # empty result would come back from a crash, and the module fixture turns
+        # a missing `RESULT` line into `{}`, so every assertion below fails with
+        # a **KeyError on a key that was never written** - nine tests reporting
+        # `KeyError: 'send_visible'` for a send button that works perfectly.
+        # That is the shape this repo records as "an absence read as a
+        # failure", and it cost the whole file its signal.
+        raise SystemExit("NODISPLAY")
+    Adw.init()
 
     from shani_chronoa.gui import ChronoaWindow
     import shani_chronoa.gui as gui_mod
@@ -130,6 +158,15 @@ def ux(tmp_path_factory):
     for line in proc.stdout.splitlines():
         if line.startswith("RESULT"):
             payload = json.loads(line[len("RESULT"):])
+    if payload is None and "NODISPLAY" in (proc.stdout + proc.stderr):
+        # A skip, and deliberately a **visible** one: this file's nine tests are
+        # about a real window, and on a machine with no display there is no
+        # window to be right or wrong about. Before this, the empty result was
+        # returned as `{}` and every test failed on a KeyError for a key the
+        # harness had never written - nine failures that read as "the send
+        # button is broken" and were about nothing at all.
+        pytest.skip("no display backend: this file's assertions are about a "
+                    "real allocated window, which needs one")
     assert payload is not None, (
         f"harness produced no result:\n{proc.stdout}\n{proc.stderr[-2000:]}"
     )
