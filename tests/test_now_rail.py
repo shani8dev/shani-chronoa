@@ -53,6 +53,23 @@ def _rail(tmp_path, monkeypatch, **kwargs):
     return widget
 
 
+def _tooltips(widget) -> "list[str]":
+    """Every widget's tooltip in the tree.
+
+    The meter's meaning is a tooltip rather than a label - the bar is read as
+    a length, and a sentence beside it would compete with the breakdown rows.
+    So this walks for `get_tooltip_text` the way `_labels` walks for labels.
+    """
+    out: "list[str]" = []
+    if hasattr(widget, "get_tooltip_text") and widget.get_tooltip_text():
+        out.append(widget.get_tooltip_text())
+    child = widget.get_first_child()
+    while child is not None:
+        out.extend(_tooltips(child))
+        child = child.get_next_sibling()
+    return out
+
+
 class TestTheRailShowsRealState:
     def test_every_section_is_present_and_says_something_when_empty(self, tmp_path,
                                                                    monkeypatch):
@@ -371,3 +388,63 @@ class TestTheRailSaysWhetherTheRulesFileIsInForce:
         assert reason in rail_text, (
             f"the rail reports a different reason than the assistant sends: "
             f"{rail_text!r}")
+
+
+class TestTheContextBarCountsTheRoomItActuallyHas:
+    """`usable_percent` had no caller, so the bar read the one figure that
+    cannot answer "can another question still fit".
+
+    `context_meter` has computed the usable share on every turn since the
+    meter shipped - the opencode `overflow.ts` idea, reserving the reply
+    allowance before measuring - and nothing displayed it. With
+    `REPLY_RESERVE = 1024` on an 8k window that is 12.5% of the window, so a
+    turn that is 80% of the raw window is 91% of the room it can send. The
+    raw figure is not wrong, it answers a different question.
+
+    Both are asserted, because the fix has to keep the raw number reachable
+    (it is in the headline) and has to change nothing when no reserve is set.
+    """
+
+    def _rail_with(self, tmp_path, monkeypatch, **report_fields):
+        from shani_chronoa import context_meter
+        report = context_meter.Report(**report_fields)
+        return _rail(tmp_path, monkeypatch, get_state=lambda: "Ready",
+                     get_tool=lambda: "", get_context=lambda: report)
+
+    def test_the_bar_shows_the_usable_share_when_room_is_reserved(self, tmp_path,
+                                                                 monkeypatch):
+        widget = self._rail_with(tmp_path, monkeypatch,
+                                 limit=8192, total_tokens=6554,
+                                 reply_reserve=1024)
+        tips = "\n".join(_tooltips(widget))
+        # 100 * 6554 / (8192 - 1024) = 91.4
+        assert "91% of the room this turn can send" in tips, (
+            f"the bar still shows only the raw percentage: {tips!r}")
+        assert "80% of the raw window" in tips, (
+            "the reserve is not explained, so the number reads as a different "
+            f"measurement rather than the same one: {tips!r}")
+
+    def test_the_raw_percentage_stays_visible(self, tmp_path, monkeypatch):
+        """A correction that hides what it corrects is worse than the original."""
+        widget = self._rail_with(tmp_path, monkeypatch,
+                                 limit=8192, total_tokens=6554,
+                                 reply_reserve=1024)
+        text = "\n".join(_labels(widget))
+        assert report_headline(8192, 6554, 1024) in text, (
+            f"the headline row lost the raw figure: {text!r}")
+
+    def test_with_no_reserve_nothing_changes(self, tmp_path, monkeypatch):
+        """The guard is `reserve`, not `usable_percent` - and the two are equal
+        when nothing is reserved, so the plain wording is the honest one."""
+        widget = self._rail_with(tmp_path, monkeypatch,
+                                 limit=8192, total_tokens=1000, reply_reserve=0)
+        tips = "\n".join(_tooltips(widget))
+        assert "% of the model's window in use" in tips, (
+            f"the no-reserve wording changed: {tips!r}")
+        assert "of the room this turn can send" not in tips
+
+
+def report_headline(limit: int, total_tokens: int, reserve: int) -> str:
+    """The headline `context_meter` prints, computed here rather than shared,
+    so a change to the wording cannot quietly move this test with it."""
+    return f"{total_tokens:,} of {limit:,} tokens ({100 * total_tokens / limit:.0f}%)"

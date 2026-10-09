@@ -260,7 +260,27 @@ class NowRail(Gtk.Box):
             self._context.empty("Nothing measured yet")
             return
         self._context.row(report.headline())
-        if report.percent is not None:
+        # **The bar shows the *usable* share, not the raw one.** A window that
+        # is 80% full of input while 1,024 tokens are held back for the reply
+        # is 91% used, and the number that answers "can another question still
+        # fit" is the second one. `usable_percent` has been computed on every
+        # turn since the meter shipped and had no caller at all, so the rail
+        # read the one figure that cannot answer that question - the same
+        # "a feature that exists and is unreachable" gap as the organ strip's
+        # centring, found by the same never-called scan.
+        #
+        # The raw percentage stays in the row above it, so nothing is lost.
+        # With no reserve set the two are equal and the plain wording is the
+        # honest one.
+        usable = report.usable_percent
+        reserve = report.reply_reserve
+        if reserve and usable is not None and report.percent is not None:
+            self._context.meter(
+                usable / 100.0,
+                f"{usable:.0f}% of the room this turn can send "
+                f"({report.percent:.0f}% of the raw window, with "
+                f"{reserve:,} tokens held back for the reply)")
+        elif report.percent is not None:
             self._context.meter(report.percent / 100.0,
                                 f"{report.percent:.0f}% of the model's window in use")
         for label, tokens, share in report.segment_rows()[:4]:
