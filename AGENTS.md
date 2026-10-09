@@ -6446,3 +6446,67 @@ directory that exists **inside the container's mount namespace** - a host
 `/tmp/opencode/...` path makes nspawn die with *"Failed to clone ...: No such file
 or directory"* while the overlay still reports success, so the failure looks like
 a boot problem. Use `test-env/mout:/mnt/out`.
+
+**Forty failures that were a missing display, not a broken product (2026-10-09).**
+A chunked run came back with 59 failures where the last verified state had 6.
+Nine were `test_window_input_and_copy.py`, **twenty-eight** were
+`test_tool_activity_panel.py`, three were errors of
+`test_help_gate_labels_match_settings.py` — and all of them **pre-existing**,
+checked by restoring the senses directory from `9817575` where the same counts
+fail. Not one was a product fault.
+
+Each file runs a real `ChronoaWindow` in a subprocess. With no display backend
+the subprocess died with `RuntimeError: Gtk couldn't be initialized` and
+`Gtk-CRITICAL: ... 'GDK_IS_DISPLAY (display)' failed`, printed **no `RESULT`
+line**, and the module fixture read the missing line as `{}`. Every assertion
+then failed on **a key that had never been written** — `KeyError:
+'send_visible'` for a send button that works on every display-capable machine,
+where that file is **9 of 9**.
+
+**An absence presented as a failure is the same defect as an absence presented
+as a pass**, and this file has been bitten by both. The failure *text* is what
+costs: it names the product, not the machine.
+
+**`Gtk.init_check()` is not the question.** It returns `True` with no display and
+every widget built afterwards is unallocated — `Adw.init()` warns `invalid
+(NULL) pointer instance`, icon-theme lookups critically fail, and
+`Gtk.ApplicationWindow.__init__` raises. A guard written against `init_check`
+passes and then the window raises anyway, which is what the first version of this
+fix did. The guard asks **`Gdk.Display.get_default()`**: whether a window can
+exist, not whether the library loaded.
+
+**Two halves, because one was not enough.** A function-scoped autouse fixture
+covers the files whose harness fixture is function-scoped; a
+**`pytest_ignore_collect` hook** covers the module-scoped ones, because a module
+fixture is set up *before* any function fixture and raised into
+`ERROR at setup` — three errors where a skip belongs, the same absence in a
+different word. Refusing to collect is the honest shape for a file that cannot
+run: no test to skip, because no test exists on this machine. Note the hook does
+**not** fire for a file named directly on the pytest command line — verified,
+and it is why the two halves are both needed.
+
+**Neither half can hide a product fault**: it fires only when no display backend
+exists at all, and `test_window_input_and_copy.py` is 9 of 9 on X11. That is the
+control, and `tests/test_a_harness_that_cannot_run_says_so.py` holds it — with a
+probe that proves `init_check() == True` **and** `display == None`, which is the
+claim the entire fix rests on.
+
+**A new sense, found by the matrix's own calibration and then checked against the
+tree: `kernel_log`** (49 senses → 50). `chronoa-matrix.json` lists `dmesg` with
+`used by: []` while `faults` reads **journalctl** and `containers` asks the
+runtime — so nothing read the kernel ring buffer at all. That is the one record
+no service has touched: a disk controller that reset, a USB denial, an OOM kill
+before journald was running. Route order is `dmesg`, then `/dev/kmsg` drained
+**non-blocking** (it is a stream; a blocking read waits for a message that may
+never come and burns the whole skill budget), and a permission failure is
+**UNKNOWN**, never an empty list — "no kernel messages" and "the kernel will not
+tell me" are opposite claims.
+
+**Two loader conventions that make a finished sense silently dead**, both caught
+by running it rather than by reading: the loader reads **`SENSES`, not
+`SKILLS`** (`senses/__init__.py:_register`), and a module carrying `SKILLS` is
+treated as a library module and returns **without a warning** — the same defect
+class as `SKILLS` itself had in the sense layer. And `sensitivity` must be one
+of `personal`/`private`/`public`; `"machine"` is not in the vocabulary and the
+loader refuses the whole sense over it. The kernel ring is `public`, beside
+`faults` and `firewall`.
