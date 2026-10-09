@@ -20,7 +20,7 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **181 callable
+  rather than just chatting about it. **200 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
 - **Local text-to-speech** — espeak-ng by default; a Piper voice is used
@@ -31,6 +31,16 @@ the machine unless you switch it twice on purpose.
   *percepts* the assistant can reason about: **24 default on, 25 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
+
+  Those two numbers are about the **49 senses that are modules today**, which is
+  what the table lists. The schema holds **74** `<name>-sense-enabled` keys
+  because 18 belong to the *trigger event* types (`screenlock`, `usbplug`,
+  `schedule`, … — `triggers.EVENT_TYPES`) and 7 more are **retired** keys kept
+  because a rename would silently revoke somebody's permission; they still grant
+  their successor through `config._SENSE_CONSENT_ALIASES`. Only 18 of the 74
+  default on, and those 18 are all senses. So "24 on / 25 off" and "24 on / 50
+  off" are both true of different sets, which is worth stating once here rather
+  than leaving a reader to work out which one a given number describes.
 - **Actuators** — the outbound side, as ordinary whitelisted skills:
   `speak`, `notify`, `clipboard`, `screenshot`, plus pointer/click/type
   behind their own `input-control-enabled` key. There is deliberately no
@@ -99,6 +109,8 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 
 | Sense | Kind | Default |
 |---|---|---|
+| Sense | Kind | Default |
+|---|---|---|
 | `audio` | machine-state | on |
 | `boots` | machine-state | on |
 | `cgroup` | machine-state | on |
@@ -127,22 +139,30 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 | `bluetooth` | machine-state | off |
 | `capture` | machine-state | off |
 | `containers` | machine-state | off |
+| `dnsresolvers` | machine-state | off |
+| `filesystem` | text-file | off |
 | `git` | machine-state | off |
+| `heard-sound` | machine-state | off |
+| `hearing` | utterance | off |
 | `hwmon` | machine-state | off |
 | `idle` | machine-state | off |
+| `labnetworks` | machine-state | off |
 | `listeners` | machine-state | off |
+| `location` | machine-state | off |
 | `modelfit` | machine-state | off |
+| `ocr` | image_text | off |
 | `printing` | machine-state | off |
 | `privilege` | machine-state | off |
 | `rfsense` | machine-state | off |
 | `sessions` | machine-state | off |
 | `stale` | machine-state | off |
 | `thermalgrid` | machine-state | off |
-| `filesystem` | text-file | off |
-| `hearing` | utterance | off |
-| `ocr` | image_text | off |
 | `vision` | image_description | off |
 | `web` | page | off |
+| `wirelesslink` | machine-state | off |
+
+**The table is generated, and the numbers in the prose above are checked against it.** The 49 rows are `senses.discover_senses()`; the Default column is each `<name>-sense-enabled` key's own `default` in the compiled schema, not a reading of intent. A row here that disagrees with the schema is a bug in the documentation, which is why the two are compared rather than trusted.
+
 
 `filesystem` (one named text file, confined to `$HOME`) and `filesystems`
 (what is mounted, and real room per filesystem) are **not** duplicates. The
@@ -211,8 +231,13 @@ shani-chronoa-sense egress
 There are two kinds, and they are gated the same way.
 
 **Percept rules** match a deposited percept. **Event rules** fire on one of
-**6 event types** — `containerrun`, `expiry`, `failure`, `fswatch`, `git`,
-`unithealth` — each with its own consent key. Both are built by
+**19 event types** — `audiodevice`, `btconnect`, `calendar`, `containerrun`,
+`dbusprop`, `expiry`, `failure`, `fswatch`, `git`, `journalmatch`, `netstate`,
+`phone`, `powerstate`, `schedule`, `screenlock`, `sleepwake`, `sound`,
+`unithealth`, `usbplug` — each with its own `<type>-sense-enabled` consent key.
+The names are deliberately different from the machine-state *senses* above, so
+one switch is never shared between "the desktop is locked" and "something in
+the user's world changed". Both kinds are built by
 `triggers.build_rule`, which validates the rule's shape and refuses one that
 names a skill outside the whitelist. **No event type is default-on**, and
 arming either kind requires `trigger-control-enabled`, so nothing can watch
@@ -266,6 +291,12 @@ Two further properties:
 A request that was sent and then failed still counts as having left the machine,
 and is still recorded.
 
+The README's architecture section, refreshed against the tree.
+
+*Every number is read out of the code rather than typed, and
+`tests/check_readme_numbers.py` re-derives all of them - so these cannot
+rot the way the previous set did.*
+
 ## Architecture
 
 There is no daemon. `app/` is a package whose `application.py` defines
@@ -274,6 +305,7 @@ loop, and the senses scheduler are all one process with one main loop.
 Anything that needs another process is an external engine, and each of those is
 optional:
 
+```
 ┌──────────────────────────────────────────────────────────┐
 │  shani-chronoa — one GTK4 process, one main loop         │
 ├──────────────────────────────────────────────────────────┤
@@ -294,13 +326,41 @@ optional:
 ```
 
 A turn is audio → whisper.cpp transcribes → the local LLM generates a response
-(possibly calling skills) → espeak-ng or Piper speaks the reply. `llama-server` and Ollama are
-interchangeable behind one `chat_message()` interface, and a cloud provider
-(Anthropic, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, and keyless
-gateways) is reachable behind the same interface **only** when privacy mode is
-off *and* `cloud-fallback-enabled` is on. The MCP server is a *second entry
-point to the same skill set*, started on demand by `shani-chronoa-mcp`; it is
-not a service the running app depends on.
+(possibly calling skills) → espeak-ng or Piper speaks the reply.
+
+**The tool loop is what the small model depends on, and it is measured.** All
+200 schemas sent with every request is ~35,000 tokens (~47,000 at
+`local_llm.CHARS_PER_TOKEN`, the 3 the tree actually uses) — past the window of
+every hardware tier, so the request is rejected before the model reads a word.
+`tool_select` narrows the offer to what a request could plausibly use. Measured
+on llama.cpp/Qwen3-1.7B over the 68-case `tools/eval_cases.json`:
+
+| config | score |
+|---|---|
+| every schema | **0/68** — the request overflows the context |
+| `tool_select` | **67/68**, 12.6 s mean |
+
+The single miss is instructive rather than a bug: *"explain what a black hole is
+in two sentences"* once failed because the harness read `two` as arithmetic and
+offered `web_search`. A length instruction is not a sum.
+
+Three layers exist because each was measured earning its place, and two of them
+are deliberately *not* defaults:
+
+- **`select` beats `select+recover`** on both accuracy and speed, so recovering
+  a call a model wrote as text is a fallback, not the main path.
+- **Shrinking the schemas further made it worse** (52/62 against 56/62), so
+  `COMPACT_TOOLS` is off. The obvious guess was wrong and the measurement
+  overrode it.
+- **An arriving cloud turn is announced** in the transcript. Privacy mode
+  existing is not the same as a person knowing their sentence left.
+
+`llama-server` and Ollama are interchangeable behind one `chat_message()`
+interface, and a cloud provider (Anthropic, OpenAI, Gemini, Groq, OpenRouter,
+opencode-zen, and keyless gateways) is reachable behind the same interface
+**only** when privacy mode is off *and* `cloud-fallback-enabled` is on. The MCP
+server is a *second entry point to the same skill set*, started on demand by
+`shani-chronoa-mcp`; it is not a service the running app depends on.
 
 ## Confinement
 
