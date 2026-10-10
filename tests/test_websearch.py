@@ -147,8 +147,8 @@ class _FakeDump:
 
 @pytest.fixture
 def no_network(monkeypatch):
-    """Stub **both** halves, or the JSON providers answer first and the
-    HTML-half tests are at the network's mercy.
+    """Stub **all three** shapes (JSON, feed, HTML), or whichever is
+    unstubbed answers for a test that scripted a different one.
 
     Measured: the JSON providers are tried before the HTML engines, so a test
     that stubbed only `_dump` saw `fake.calls == []` - the request never
@@ -161,6 +161,13 @@ def no_network(monkeypatch):
         monkeypatch.setattr(W, "_fetch_json",
                            lambda url, params, component: (
                                json_answers or {}, ""))
+        # **And the feed half, or the feeds reach the network.**
+        # Measured: with only the JSON and HTML halves stubbed, the feed
+        # loop fetched real Google News results for a test that had scripted
+        # Bing - the same trap that cost three tests when the JSON
+        # providers were added, one shape later.
+        monkeypatch.setattr(W, "_fetch_feed",
+                           lambda url, params, component: (b"", ""))
         return fake
     return install
 
@@ -240,13 +247,23 @@ def test_consent_still_refuses(chronoa_config, no_network):
 
 
 def test_a_missing_lynx_is_named(allowed, monkeypatch):
-    """**The JSON half is stubbed, the HTML half is not** - because the guard
-    under test lives *inside* `_dump`, and stubbing `_dump` replaces the very
-    code that checks. Measured: with `_dump` stubbed the reason read
+    """**The JSON and feed halves are stubbed, the HTML half is not** - because
+    the guard under test lives *inside* `_dump`, and stubbing `_dump` replaces
+    the very code that checks. Measured: with `_dump` stubbed the reason read
     "Bing: nothing matched", i.e. the fake's own message, and the test passed on
     the network's answers.
+
+    **And the feeds have to be stubbed for a reason that is not a guard but an
+    improvement: they do not use `lynx` at all.** Measured, with only the JSON
+    half stubbed, this test failed with 12 real Google News results - because a
+    feed answering is *correct* when lynx is missing, and the premise "lynx is
+    gone, so nothing can answer" stopped being true the moment a provider was
+    added that never needed it. The test is about the lynx engines' reasons, so
+    the non-lynx path is stubbed out of it.
     """
     monkeypatch.setattr(W, "_fetch_json", lambda url, params, component: ({}, ""))
+    monkeypatch.setattr(W, "_fetch_feed",
+                        lambda url, params, component: (b"", ""))
     monkeypatch.setattr(W.shutil, "which", lambda name: None)
     results, why, notes = W.search("arch linux")
     assert results == []
@@ -490,3 +507,125 @@ class TestTheQueryActuallyReachesTheApi:
         # the source is named so the reader can see it is the newest, not the
         # most relevant.
         assert results and results[0].source == "Stack Exchange"
+
+
+# --- the feeds ---------------------------------------------------------------
+# **XML, not JSON - so a separate table and a separate parser, rather than a
+# JSON one bent to fit.**
+
+def _capfeed(name):
+    return (FIX / name).read_bytes()
+
+
+class TestGoogleNewsFeed:
+    def test_the_real_feed_gives_real_results(self):
+        results, why = W._parse_googlenews(_capfeed("googlenews.rss"))
+        assert why == "", why
+        assert len(results) >= 20, len(results)
+        for r in results:
+            assert r.title and r.url, r
+
+    def test_every_result_is_credited_to_its_publisher(self):
+        """**The nested `<source>` is the publisher, and it is the only thing
+        that says who is being cited.** Measured: every item on the real feed
+        has one, so an item without one would otherwise be cited to "Google" -
+        which is the index, not the source.
+        """
+        results, _why = W._parse_googlenews(_capfeed("googlenews.rss"))
+        assert results
+        for r in results:
+            assert r.source, r
+            assert r.source != "Google News", (
+                "credited to the index rather than the publisher: %r" % r.title)
+        assert "9to5Linux" in {r.source for r in results}
+
+    def test_an_item_with_no_source_falls_back_by_name(self):
+        data = ("<rss><channel><item><title>T</title>"
+                "<link>https://e.g/x</link></item></channel></rss>")
+        results, _why = W._parse_googlenews(data)
+        assert results and results[0].source == "Google News"
+
+    def test_the_date_is_reported(self):
+        results, _why = W._parse_googlenews(_capfeed("googlenews.rss"))
+        assert any(r.description.strip() for r in results)
+
+    def test_an_item_with_no_title_or_link_is_dropped(self):
+        data = ("<rss><channel><item><title></title>"
+                "<link>https://e.g/x</link></item>"
+                "<item><title>Has title</title><link></link></item>"
+                "</channel></rrss>".replace("rrss", "rss"))
+        results, _why = W._parse_googlenews(data)
+        assert results == []
+
+    def test_malformed_xml_is_named_not_swallowed(self):
+        results, why = W._parse_googlenews("<rss><channel><item>")
+        assert results == []
+        assert "not valid XML" in why, why
+
+    def test_an_empty_body_is_named(self):
+        results, why = W._parse_googlenews("")
+        assert results == []
+        assert "empty" in why, why
+
+
+class TestFeedProviders:
+    def test_a_feed_names_a_query_parameter(self):
+        """**The same bug the JSON providers had, so the same guard.** A feed
+        table entry with no query parameter answers about anything.
+        """
+        for name, url, params, parser in W._FEED_PROVIDERS:
+            assert any(k in params for k in ("q", "query", "srsearch")), name
+
+    def test_the_query_starts_empty(self):
+        for name, url, params, parser in W._FEED_PROVIDERS:
+            key = "query" if "query" in params else "q"
+            assert params[key] == "", "%s's %s must start empty" % (name, key)
+
+    def test_the_stubbed_fetch_sees_the_query(self, monkeypatch):
+        """End to end through the real `search()`: what actually goes out."""
+        import shani_chronoa.netjson as netjson
+        seen = []
+        netjson.get_bytes = lambda c, u, p=None: (seen.append(p or {}), b"")[1]
+        monkeypatch.setattr(W, "_fetch_json",
+                             lambda url, params, component: ({}, ""))
+        from shani_chronoa.config import ChronoaConfig
+        ChronoaConfig().set("privacy-mode", "false")
+        ChronoaConfig().set("web-sense-enabled", "true")
+        W.search("arch linux news")
+        assert seen, "nothing was requested"
+        for params in seen:
+            assert any("arch linux news" in str(v)
+                       for v in params.values()), params
+
+
+def test_the_answer_credits_the_publisher_not_the_index(allowed, monkeypatch):
+    """**Saying "this is from 9to5Linux" is honest; "this is from Google" is
+    not** - Google News is the index, the nested `<source>` element is the
+    publisher. The parser credits the publisher and `format_results` carries it
+    into the answer.
+    """
+    monkeypatch.setattr(W, "_fetch_json",
+                        lambda url, params, component: ({}, ""))
+    monkeypatch.setattr(W, "_fetch_feed",
+                        lambda url, params, component: (
+                            _capfeed("googlenews.rss"), ""))
+    got, why, notes = W.search("arch linux")
+    assert why == "", why
+    assert got
+    text = W.format_results("arch linux", got, notes)
+    assert "9to5Linux" in text, text
+
+
+def test_a_feed_that_will_not_answer_reaches_the_html_engines(
+        allowed, monkeypatch, no_network):
+    """**The feeds are not a dead end.** A feed that errors must fall through to
+    the HTML engines rather than ending the search.
+    """
+    monkeypatch.setattr(W, "_fetch_json",
+                         lambda url, params, component: ({}, ""))
+    monkeypatch.setattr(W, "_fetch_feed",
+                         lambda url, params, component: (b"", "boom"))
+    no_network([("bing.com", (_cap("bing.lynx.txt"), ""))])
+    results, why, notes = W.search("arch linux")
+    assert why == "", why
+    assert results

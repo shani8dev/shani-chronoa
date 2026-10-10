@@ -11,7 +11,8 @@ distro's own text browser.
 
 | engine | raw curl, browser headers | `lynx -dump` | verdict |
 |---|---|---|---|
-| Google | 200, **0** result URLs | empty | **unusable** - results arrive inside a JS blob |
+| Google **web** search | 200, **0** result URLs | empty | **unusable** - results arrive inside a JS blob |
+| Google **News** (`news.google.com/rss/search`) | 200, 100 `<item>` entries | n/a | **works, keyless** - but news-scoped, added as a provider |
 | Bing | 200, 10 `b_algo` blocks | 14 KB of clean numbered text | **works** |
 | DuckDuckGo `lite` | 200, 11 redirect links | 6.9 KB of clean numbered text | **works** |
 | Brave Search | 200, 27 `snippet` blocks | 22 KB of clean numbered text | **works** |
@@ -43,8 +44,22 @@ Two findings shaped this module more than anything else:
    `aria2c`, `lynx` and the DNS tools. **No browser, no `node`, no `phantomjs`,
    no `wkhtmltopdf`, no RSS reader.** Chrome exists on the dev box and still
    gets gated, so it is not a missing binary here - it is that Google serves
-   results only to something that runs its JavaScript, and nothing that ships
-   on ShaniOS does.
+   *web-search* results only to something that runs its JavaScript, and nothing
+   that ships on ShaniOS does.
+
+   **That was measured for web search alone, and the module was wrong to carry
+   it as a blanket claim about Google.** Measured later: Google's *news* feed
+   answers an automated reader with no key at all - 100 items, 119,567 bytes,
+   every one with a title, a link, a date and a nested `<source>`. So the
+   accurate statement is the narrower one: **Google's web-search endpoint is
+   JS-gated; its news endpoint is a keyless structured API and works.** The
+   generic search API (`/customsearch/v1`) is the same shape as the four JSON
+   providers below and is measured to refuse with
+   `403 Method doesn't allow unregistered callers (callers without established
+   identity). Please use API Key` - so it is a *key* that is missing, not a
+   fetcher. Google News is in `_FEED_PROVIDERS` because it is genuinely a
+   different shape (XML, not JSON), and its scope is stated in the answer
+   rather than hidden.
 
    Reported as "Google found nothing" for a page that never contained a result
    is the confidently-wrong answer this repo keeps recording, so Google is not
@@ -133,6 +148,24 @@ _JSON_PROVIDERS = (
      {"query": "", "hitsPerPage": 8}, "_parse_hackernews"),
     ("GitHub", "https://api.github.com/search/repositories",
      {"q": "", "per_page": 8}, "_parse_github"),
+)
+
+#: **RSS feeds, which are XML rather than JSON, so they get their own table
+#: rather than being squeezed into `_JSON_PROVIDERS`.** The only keyless Google
+#: surface that answers an automated reader is Google News' feed, and it is
+#: news-scoped - which is a scope, not a failure, and one this module now says
+#: out loud instead of reporting "Google found nothing".
+#:
+#: **Measured, no API key:** `https://news.google.com/rss/search?q=...` returns
+#: `http=200`, 119,567 bytes and **100 `<item>` entries** with title, link,
+#: `pubDate` and a nested `<source>`. The general web-search endpoint
+#: (`/customsearch/v1`) is the same shape as the four JSON providers above and
+#: is measured to refuse: `403 Method doesn't allow unregistered callers
+#: (callers without established identity). Please use API Key`.
+_FEED_PROVIDERS = (
+    ("Google News", "https://news.google.com/rss/search",
+     {"q": "", "hl": "en-US", "gl": "US", "ceid": "US:en"},
+     "_parse_googlenews"),
 )
 
 #: The HTML engines, tried after the JSON ones.
@@ -250,6 +283,18 @@ def _fetch_json(url, params, component):
     except Exception as exc:
         return {}, "%s (%s)" % (exc.__class__.__name__,
                                 str(exc)[:80])
+
+
+def _fetch_feed(url, params, component):
+    """(raw, reason). Through `netjson.get_bytes` - the same HTTP policy, the
+    same timeout and the same egress record as the JSON path, so there is still
+    one policy and one record rather than one per provider shape.
+    """
+    from shani_chronoa.netjson import get_bytes
+    try:
+        return get_bytes(component, url, params), ""
+    except Exception as exc:
+        return b"", "%s (%s)" % (exc.__class__.__name__, str(exc)[:80])
 
 
 def _dump(url):
@@ -607,6 +652,41 @@ def _parse_github(data):
     return out
 
 
+# --- the RSS feeds -------------------------------------------------------------
+# **No markup is assumed here either** - the feed is parsed as XML, so an item
+# is a field rather than a position in a page.
+
+def _parse_googlenews(raw):
+    """(results, reason). `raw` is the body, because `get_bytes` is the fetch
+    that keeps the same policy - not JSON, so it does not go through the JSON
+    path."""
+    import xml.etree.ElementTree as ET
+    if not isinstance(raw, (str, bytes)) or not raw:
+        return [], "the feed came back empty"
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return [], "the feed is not valid XML (%s)" % exc.__class__.__name__
+    out = []
+    for item in root.iter("item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        if not title or not link:
+            continue
+        # **A nested `<source>` is the publisher, and it is the only thing that
+        # says who is being cited.** Measured: every item on the real feed has
+        # one (`9to5Linux`, `How-To Geek`, ...), and an item without one would
+        # otherwise be cited to "Google" - which is the index, not the source.
+        out.append(Result(_clean(title), link,
+                          _clean(item.findtext("pubDate") or ""),
+                          _clean(item.findtext("source") or "Google News")))
+    return out, ""
+
+
+_FEED_PARSERS = {
+    "Google News": _parse_googlenews,
+}
+
 _JSON_PARSERS = {
     "Arch Wiki": _parse_archwiki,
     "Stack Exchange": _parse_stackexchange,
@@ -683,6 +763,37 @@ def search(query, component="skill:web_search"):
         return merged, "", problems
     if not problems:
         problems.append("no JSON API answered")
+
+    # **Then the feeds, which are a different shape and are not forced into the
+    # JSON loop.** Saying "Google News is news, not the web" in the answer is
+    # honest; presenting it as a web search result is not.
+    merged = []
+    seen = set()
+    for name, url, params, parser_name in _FEED_PROVIDERS:
+        filled = dict(params)
+        if "q" in filled:
+            filled["q"] = query
+        elif "query" in filled:
+            filled["query"] = query
+        raw, why = _fetch_feed(url, filled, component)
+        if why:
+            problems.append("%s: %s" % (name, why))
+            continue
+        found, why = _FEED_PARSERS[name](raw)
+        if why:
+            problems.append("%s: %s" % (name, why))
+            continue
+        for result in found:
+            if result.url in seen:
+                continue
+            seen.add(result.url)
+            merged.append(result)
+            if len(merged) >= _MAX_RESULTS:
+                break
+        if merged:
+            break
+    if merged:
+        return merged, "", problems
 
     # Then the HTML engines.
     merged = []
