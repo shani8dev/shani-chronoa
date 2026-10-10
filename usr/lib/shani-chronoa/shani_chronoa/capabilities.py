@@ -530,9 +530,14 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: walks and classifies. Never removes a link (asserted by a
     # mutation on the closing sentence).
     "broken_symlinks": ("Files", "Which shortcuts point at nothing"),
+    # A file's name is a claim about its bytes, and the bytes are the evidence -
+    # it sits beside the other Files readers for that reason.
+    "identify_file": ("Files", "What is this file, really"),
     # Read-only: nothing deleted, and no "safe to delete" is claimed for any
     # file (both asserted by a mutation each).
     "stale_files": ("Files", "What is big AND untouched - the deletion candidates"),
+    # Read-only: reads a bounded 512-byte head. Never renames or moves.
+    "identify_file": ("Files", "What this file really is, whatever its name says"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
@@ -731,6 +736,23 @@ GATE_NAMES: dict[str, str] = {
     # whatever disk or ISO it is pointed at.
     "container-control-enabled": "Let Chronoa run containers",
     "vm-control-enabled": "Let Chronoa run and drive virtual machines",
+    # The rest of the gated keys, each carrying the label its own settings row
+    # shows. Without these a refusal names the raw key - "enable
+    # 'git-write-enabled'" - while the row the user is meant to find says "Let
+    # Chronoa record commits and branches", which is the documented
+    # switch-nobody-can-find failure in the other direction.
+    "git-write-enabled": "Let Chronoa record commits and branches",
+    "git-push-enabled": "Let Chronoa push a branch to a remote",
+    "calendar-write-enabled": "Let Chronoa change your calendar",
+    "bluetooth-gatt-enabled": "Let Chronoa read your Bluetooth devices",
+    "bluetooth-call-enabled": "Let Chronoa call through your paired phone",
+    "phone-remote-enabled": "Let my phone pair this computer as a Bluetooth keyboard",
+    "nfc-enabled": "Let Chronoa read and write NFC tags",
+    "fm-radio-enabled": "Let Chronoa tune an FM radio",
+    "ir-remote-enabled": "Let Chronoa send and receive infrared",
+    "driver-build-enabled": "Let Chronoa compile a kernel module",
+    "i2c-write-enabled": "Let Chronoa write to a device",
+    "filesystems-sense-enabled": "Filesystems and room",
 }
 
 

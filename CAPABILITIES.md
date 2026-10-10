@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**237 skills in 24 groups.** Each is a named, schema-typed module; the model
+**238 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 237 are consent-gated and 17 are destructive.**
+**89 of 238 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -122,6 +122,7 @@ Read, write, move, archive and undo files.
 | `find_files` | Find files by name | — |
 | `find_recently_modified` | What changed today | — |
 | `get_file_info` | File size, age and permissions | — |
+| `identify_file` | What this file really is, whatever its name says | — |
 | `json_query` | Ask what a JSON document contains | — |
 | `list_archive` | List what is inside an archive, without extracting it | — |
 | `list_directory` | List a folder | — |
