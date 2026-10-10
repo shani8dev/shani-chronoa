@@ -538,6 +538,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "stale_files": ("Files", "What is big AND untouched - the deletion candidates"),
     # Read-only: reads a bounded 512-byte head. Never renames or moves.
     "identify_file": ("Files", "What this file really is, whatever its name says"),
+    # Writes (on `apply`), but defaults to a dry run and never prompts or
+    # reverse-applies. `--forward` and `--batch` are asserted on the argv.
+    "apply_patch": ("Files", "Apply a .patch/.diff file to files here"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**238 skills in 24 groups.** Each is a named, schema-typed module; the model
+**239 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 238 are consent-gated and 17 are destructive.**
+**89 of 239 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -102,6 +102,7 @@ Read, write, move, archive and undo files.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `analyze_table` | Ask questions of a spreadsheet or CSV, and chart it | — |
+| `apply_patch` | Apply a .patch/.diff file to files here | — |
 | `broken_symlinks` | Which shortcuts point at nothing | — |
 | `cleanup_apply` | Clear caches and unused Flatpak runtimes | **asks first, always** · needs `cleanup-enabled` |
 | `cleanup_report` | What could be cleaned up | — |
