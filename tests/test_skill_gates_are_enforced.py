@@ -72,6 +72,9 @@ _IMPL = {
     # check has to see the module rather than skip it.
     "resolve_conflict": "shani_chronoa.skills.resolve_conflict",
     "move_pointer": "shani_chronoa.skills.input_control",
+    # Sense-gated through `config.sense_allowed("filesystems")`, like
+    # snapshot_status; the reader needs to know where to look for the check.
+    "compression_savings": "shani_chronoa.skills.compression_savings",
     "nfc": "shani_chronoa.skills.nfc",
     "fm_radio": "shani_chronoa.skills.fm_radio",
     "click_pointer": "shani_chronoa.skills.input_control",

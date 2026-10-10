@@ -152,6 +152,10 @@ GATED: dict[str, str] = {
     # follows `firewall-sense-enabled`; one key per tool here, so the primary
     # one is named.
     "snapshot_status": "snapshots-sense-enabled",
+    # btrfs compression saving: the same subject the filesystems sense reports
+    # (mounts and real room), so it follows that sense's switch - measured on a
+    # slot, compsize walks extents and reports the ratio.
+    "compression_savings": "filesystems-sense-enabled",
     "security_status": "security-sense-enabled",
     "list_containers": "containers-sense-enabled",
     "boot_report": "boots-sense-enabled",
@@ -472,6 +476,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
     # The 2026-10-07 matrix skills.
     "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
+    "compression_savings": ("System", "How much space btrfs compression is saving"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),
