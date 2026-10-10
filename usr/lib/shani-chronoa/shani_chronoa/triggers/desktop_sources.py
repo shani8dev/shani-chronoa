@@ -109,9 +109,42 @@ def read_screenlock(source: str, now: Optional[float] = None) -> EventSignal:
 POWER_SUPPLY_DIR = Path("/sys/class/power_supply")
 
 
+def _ac_from_status(status: str) -> Optional[bool]:
+    """Whether a status word means mains is present, or None if it says nothing.
+
+    **Two vocabularies, and they do not spell "on battery" the same way.**
+
+      * a `Battery` entry says ``Discharging`` when it is running down;
+      * a `UPS` entry says ``OB ...`` (on battery) - NUT's own `upsc` spells it
+        the same way, `OL` / `OB` / `OB LB`.
+
+    Treating one vocabulary as the other is how a UPS reporting ``OB DISCHRG``
+    comes to be read as **on AC**: the old inference was
+    ``status != "Discharging"``, and ``"OB DISCHRG" != "Discharging"`` is true.
+    That silences the one rule a UPS exists for, on the machine that has one.
+    """
+    if not status:
+        return None
+    if status.startswith("OB"):
+        return False
+    if status == "Discharging":
+        return False
+    if status.startswith("OL") or status in ("Charging", "Full"):
+        return True
+    return None
+
+
 def _read_power() -> "tuple[Optional[bool], Optional[int], str]":
     """(on AC, battery percent, battery status) from sysfs; None where it cannot be read."""
-    ac, levels, status = None, [], ""
+    levels: list[int] = []
+    statuses: list[str] = []
+    # One vote per source, rather than one answer overall: a machine can have a
+    # mains adapter AND a UPS, and the old "first status wins" kept only the
+    # first device's word - so a UPS on battery beside a Mains entry reading "OL"
+    # was reported as on AC.
+    online_votes: list[bool] = []
+    status_votes: list[bool] = []
+
     if not POWER_SUPPLY_DIR.is_dir():
         return None, None, ""
     for dev in sorted(POWER_SUPPLY_DIR.iterdir()):
@@ -121,16 +154,51 @@ def _read_power() -> "tuple[Optional[bool], Optional[int], str]":
             except OSError:
                 return ""
         kind = attr("type")
+        online, word = attr("online"), attr("status")
         if kind in ("Mains", "USB", "USB_C", "USB_PD"):
-            if attr("online") in ("0", "1"):
-                ac = bool(ac) or attr("online") == "1"
-        elif kind == "Battery" and attr("scope") != "Device":  # a mouse's battery is not the machine's
+            if online in ("0", "1"):
+                online_votes.append(online == "1")
+        elif kind == "UPS":
+            # A UPS answers BOTH questions at once, which is why it needs its own
+            # branch rather than falling into either of the two below:
+            #   online   - whether utility power is reaching the UPS, so it is a
+            #              mains source exactly like `Mains`
+            #   capacity - the UPS battery's charge, so it is a battery source
+            #              exactly like `Battery`
+            # Handling it as only one of the two would make "the power is out"
+            # armable on a laptop and not on the machine that actually has a UPS.
+            if online in ("0", "1"):
+                online_votes.append(online == "1")
+            if word:
+                statuses.append(word)
+                vote = _ac_from_status(word)
+                if vote is not None:
+                    status_votes.append(vote)
             if attr("capacity").isdigit():
                 levels.append(int(attr("capacity")))
-                status = status or attr("status")
+        elif kind == "Battery" and attr("scope") != "Device":  # a mouse's battery is not the machine's
+            if word:
+                statuses.append(word)
+                vote = _ac_from_status(word)
+                if vote is not None:
+                    status_votes.append(vote)
+            if attr("capacity").isdigit():
+                levels.append(int(attr("capacity")))
     level = round(sum(levels) / len(levels)) if levels else None
-    if ac is None and status:
-        ac = status != "Discharging"
+    status = " / ".join(dict.fromkeys(statuses)) if statuses else ""
+
+    # Combine the votes, and let "on battery" win. A source reporting that it is
+    # discharging is the more urgent fact than one reporting that it is charging,
+    # so OR-ing them would let a charging laptop mask a UPS that has lost mains.
+    # Any one "no" therefore makes the answer "no".
+    if any(v is False for v in status_votes):
+        ac = False
+    elif status_votes:
+        ac = True
+    elif online_votes:
+        ac = any(online_votes)
+    else:
+        ac = None
     return ac, level, status
 
 

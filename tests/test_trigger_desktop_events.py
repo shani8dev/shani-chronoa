@@ -170,6 +170,72 @@ def test_a_desktop_with_no_battery_is_unavailable_not_charged(sysfs_power):
     assert triggers.read_powerstate("on-ac").event is not None
 
 
+# --- a UPS is BOTH a mains source and a battery source -----------------------
+#
+# The reason these exist: `_read_power` handled Mains, USB and Battery, so a
+# machine with a UPS could not arm "when the power goes out" at all - the one rule
+# a UPS is for. A UPS reports `online` (is utility power reaching it) and
+# `capacity` (its own charge), so it answers both halves and needs both.
+
+
+def test_a_ups_on_mains_is_on_ac(sysfs_power):
+    """A UPS with utility power is `on-ac` exactly like a Mains entry."""
+    _supply(sysfs_power, "ups0", type="UPS", online=1, capacity=100, status="OL")
+    sig = triggers.read_powerstate("on-ac")
+    assert sig.status == SIGNAL_OK and sig.event is not None
+    assert triggers.read_powerstate("on-battery").event is None
+
+
+def test_a_ups_that_lost_mains_is_on_battery(sysfs_power):
+    """The rule a UPS is for. `online=0` means utility power is out."""
+    _supply(sysfs_power, "ups0", type="UPS", online=0, capacity=88, status="OB DISCHRG")
+    sig = triggers.read_powerstate("on-battery")
+    assert sig.status == SIGNAL_OK and sig.event is not None
+    assert triggers.read_powerstate("on-ac").event is None
+
+
+def test_a_ups_charge_level_is_readable(sysfs_power):
+    """`capacity` is the UPS battery's percentage, so the threshold rules work on
+    it too - which is the other half a UPS answers."""
+    _supply(sysfs_power, "ups0", type="UPS", online=0, capacity=18, status="OB DISCHRG")
+    assert triggers.read_powerstate("battery-below:20").event is not None
+    assert triggers.read_powerstate("battery-below:10").event is None
+    assert triggers.read_powerstate("battery-above:10").event is not None
+
+
+def test_a_peripheral_battery_and_a_ups_do_not_blur(sysfs_power):
+    """A mouse at 5% must still not read as the machine at 5%, and it must not
+    drag a UPS's charge down either - the levels are averaged, which is right for
+    two real packs and wrong for a mouse."""
+    _supply(sysfs_power, "hidpp_battery_0", type="Battery", capacity=5,
+            status="Discharging", scope="Device")
+    _supply(sysfs_power, "ups0", type="UPS", online=0, capacity=90, status="OB DISCHRG")
+    sig = triggers.read_powerstate("battery-below:20")
+    assert sig.event is None, "a mouse at 5% must not make a UPS at 90% read as low"
+
+
+def test_a_ups_with_neither_online_nor_status_is_unavailable_not_mains(sysfs_power):
+    """A UPS entry that reports neither `online` nor a status word says nothing
+    either way, and guessing "on AC" would silence the one rule that matters.
+
+    `online` alone is not required, because the existing `status != "Discharging"`
+    fallback is a real second signal - a driver word of "OL" is the UPS saying it
+    is on line. What must not happen is reading a bare `capacity` as "fine".
+    """
+    _supply(sysfs_power, "ups0", type="UPS", capacity=90)
+    sig = triggers.read_powerstate("on-battery")
+    assert sig.status == SIGNAL_UNAVAILABLE
+
+
+def test_a_ups_status_word_alone_is_enough(sysfs_power):
+    """`status="OL"` is the UPS saying it is on line, so it infers AC without
+    `online` - and "OB DISCHRG" must infer the opposite."""
+    _supply(sysfs_power, "ups0", type="UPS", capacity=90, status="OL")
+    assert triggers.read_powerstate("on-ac").event is not None
+    _supply(sysfs_power, "upz0", type="UPS", capacity=90, status="OB DISCHRG")
+    assert triggers.read_powerstate("on-battery").event is not None
+
+
 def test_battery_threshold_must_be_a_percentage(sysfs_power):
     _supply(sysfs_power, "BAT0", type="Battery", capacity=50, status="Charging")
     assert triggers.read_powerstate("battery-below:abc").status == SIGNAL_UNAVAILABLE
