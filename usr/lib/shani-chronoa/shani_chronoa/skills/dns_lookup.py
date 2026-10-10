@@ -209,6 +209,81 @@ def _dnssec(name: str, rtype: str) -> Tuple[str, str]:
     return verdict, ""
 
 
+#: `host`'s own answers, measured on this box:
+#:
+#:     example.com has address 172.66.147.243
+#:     example.com has IPv6 address 2606:4700:8de5:72db:f2de:da2:ef6b:ff98
+#:     example.com mail is handled by 0 .
+#:     example.com descriptive text "v=spf1 -all"
+#:     3.2.1.in-addr.arpa domain name pointer one.one.one.one.     (reverse)
+#:
+#: The type is passed with `-t`, which `host` shares with `dig`, so the same
+#: rtype works for both.
+_HOST_PATTERNS = [
+    ("A", "has address"),
+    ("AAAA", "has IPv6 address"),
+    ("MX", "mail is handled by"),
+    ("TXT", "descriptive text"),
+    ("NS", "name server"),
+    ("SOA", "has SOA record"),
+    ("CNAME", "is an alias"),
+]
+
+#: `host -t PTR 1.2.3.4` prints `4.3.2.1.in-addr.arpa domain name pointer ...`.
+_PTR = "domain name pointer"
+
+
+def _host_records(name: str, rtype: str) -> "tuple[str, dict]":
+    """(rendered, raw). An empty rendered string means it did not work."""
+    try:
+        proc = subprocess.run(["host", "-t", rtype, name],
+                              capture_output=True, text=True,
+                              timeout=_TIMEOUT, check=False)
+    except (subprocess.TimeoutExpired, OSError):
+        return "", {}
+    if proc.returncode not in (0, 1):
+        # host exits 1 for NXDOMAIN and for a name with no record of the
+        # requested type, which are different answers; both go through the
+        # empty-output path below.
+        return "", {}
+    rows = []
+    for line in (proc.stdout or "").splitlines():
+        text = line.strip()
+        if not text or text.startswith(";"):
+            continue
+        # **`host` puts NXDOMAIN in its *output text*, not in a recognised
+        # status field**: `Host foo not found: 3(NXDOMAIN)`. The first version
+        # carried that through as an answer line, so "the name does not exist"
+        # was reported in the same shape as an address - which is precisely the
+        # conflation this module exists to avoid.
+        if text.lower().startswith("host ") and "not found" in text.lower():
+            return "", {"status": "NXDOMAIN"}
+        if "has no " in text.lower() and "record" in text.lower():
+            return "", {"status": "NODATA"}
+        rows.append(text)
+    if not rows:
+        return "", {}
+    return "\n".join(rows), {"tool": "host"}
+
+
+def _host_describe(lines: "list[str]", name: str, rtype: str) -> str:
+    """`host`'s lines, reworded into the same shape `_describe` returns, so a
+    caller cannot tell which tool answered from the answer's structure."""
+    if rtype == "PTR":
+        # **`rstrip(".")`** - `host`'s pointer records are fully qualified and
+        # already end in a dot, so the first version printed
+        # "The name is: one.one.one.one.."
+        pointers = [line.split(_PTR, 1)[1].strip().rstrip(".")
+                    for line in lines if _PTR in line]
+        if pointers:
+            return f"The name is: {', '.join(pointers)}."
+        return "No pointer record came back."
+    if not lines:
+        return "There is no answer."
+    interesting = [line for line in lines if not line.startswith(";;")]
+    return "; ".join(interesting)
+
+
 def _run(arguments: dict) -> str:
     name, problem = _name(arguments.get("name"))
     if problem:
@@ -217,8 +292,15 @@ def _run(arguments: dict) -> str:
     if problem:
         return problem
 
-    if shutil.which(_DIG) is None:
-        return files.tool_missing(_DIG, f"look up {name} in DNS")
+    # **`dig` is not the only thing that can ask, and refusing without it
+    # meant a machine with only `host` got nothing.** `host` ships in the same
+    # `bind` package on both images and answers every type the schema offers,
+    # so the question now has a fallback rather than a refusal. `nslookup` is
+    # deliberately not chained: its output is prefixed with its own resolver
+    # address and a "Non-authoritative answer" banner that varies between
+    # implementations, so a parser written to it would break on the variation.
+    if shutil.which(_DIG) is None and shutil.which("host") is None:
+        return files.tool_missing("dig", f"look up {name} in DNS")
 
     # Same switch as ping_host and trace_route, for the same reason: the query
     # goes to a resolver that is not this machine.
@@ -228,6 +310,51 @@ def _run(arguments: dict) -> str:
             f"name to a DNS server outside this machine, which tells it what "
             f"this computer is interested in. Turn privacy mode off to allow it."
         )
+
+    egress.record("skill:dns_lookup", name, method=rtype, privacy_mode=False)
+
+    if shutil.which(_DIG) is None:
+        # **`host` is not `dig` with a different name, and the difference has
+        # to be visible.** `host` cannot report the answer's TTL, does not
+        # quote the status line, and prints NXDOMAIN as an exit status rather
+        # than a word. So the answer says which tool ran, and the sections the
+        # fallback cannot fill are reported as absent rather than as "none".
+        rendered, meta = _host_records(name, rtype)
+        if not rendered:
+            # **The status, when `host` gave one, is the answer - not a refusal
+            # to look.** "The name does not exist" and "nothing was heard back"
+            # are different facts and both are reportable.
+            status = meta.get("status", "")
+            if status == "NXDOMAIN":
+                return (f"**{name} does not exist.** The resolver said NXDOMAIN, "
+                        "which is an assertion that there is no such name - not "
+                        "a failure to look, and not a name with no record of "
+                        "this type.")
+            if status == "NODATA":
+                return (f"**{name} exists, but has no {rtype} record.** That is "
+                        "a different answer from the name not existing at all, "
+                        "and both are worth separating: a domain with no MX "
+                        "record still resolves.")
+            return (f"No answer for {name} (type {rtype}) came back from "
+                    "`host`. An empty answer is not the same as the name being "
+                    "absent, and nothing is claimed about which it was.")
+        lines = [l for l in rendered.splitlines() if l.strip()]
+        out = [f"DNS lookup of {name}, type {rtype}."]
+        out.append(_host_describe(lines, name, rtype))
+        out.append("")
+        out.append("Answered by `host`, because `dig` is not installed on this "
+                   "machine. A TTL and a response status are not in that "
+                   "output, so neither is claimed here.")
+        out.append("")
+        out.append("This is what the DNS said. The system's own resolver also "
+                   "considers mDNS/Avahi names, so a name that resolves here "
+                   "but not above is usually a local device on the network, "
+                   "not a public host.")
+        out.append("")
+        out.append("DNSSEC: unknown - delv (the bind package) is not installed, "
+                   "or the answer came from `host`, which does not validate. "
+                   "Nothing is claimed about this answer's authenticity.")
+        return "\n".join(out)
 
     argv = [_DIG, "+noall", "+answer", "+comments", "+time=3", "+tries=1",
             "-t", rtype, name]
@@ -249,8 +376,6 @@ def _run(arguments: dict) -> str:
                 + (f": {detail[-1]}" if detail else ".")
                 + " dig said nothing usable, so nothing is reported about "
                   f"{name}.")
-
-    egress.record("skill:dns_lookup", name, method=rtype, privacy_mode=False)
 
     out = [f"DNS lookup of {name}, type {rtype}."]
     out.append(_describe(answers, rtype, status, note))
