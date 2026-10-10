@@ -6850,6 +6850,106 @@ reports as UNKNOWN rather than guessing, and nspawn cannot settle it either. A
 not the real blue/green layout - so that line reports both rather than
 contradicting the read-only claim `driver_build` makes on a real machine.
 
+### And running it end to end on this dev box: a 182 KB `.ko`, and a post-condition that judged the wrong tool (2026-10-10)
+
+The whole loop was driven for real with `driver-build-enabled` granted in a
+scratch keyfile GSettings: `driver_scaffold` wrote its five files, `driver_build`
+compiled one, and `modinfo` read the result back off disk:
+
+    filename:    .../probe.ko
+    description: An out-of-tree module scaffolded by Chronoa
+    license:     GPL
+    srcversion:  3BD5FBA16EB91DABEECD91A
+    name:        probe
+
+**182,840 bytes** — so on a machine with a toolchain the five skills really do
+produce a loadable module, which is the claim the whole driver set rests on and
+which had only ever been asserted against a scaffold.
+
+**The run also found a real defect, in the second skill rather than the first.**
+`driver_scaffold` replied
+
+    Scaffolded the module 'probe' in ...:
+      probe.c  Makefile  dkms.conf  99-probe.rules  README.md
+    ...
+    This is source, not a built module. Ask driver_status whether this machine
+    can compile it, and driver_build to try. (VERIFICATION FAILED: no .ko file is
+    in ...)
+
+`verification.post_condition_for` reads **one `POST_CONDITION` per module**, so
+all three skills in `driver_dev.py` inherited the build's `.ko` freshness check —
+including the one that writes source and the one that only reads. A
+post-condition describing another tool's output calls a correct action a
+failure, which is the confident-wrong-answer shape this file keeps recording, and
+it is the same defect `verification._call`'s own docstring describes fixing for
+`clipboard` (*"reading the clipboard was verified as a write of the empty
+string"*).
+
+**The fix was free, which is the part worth remembering.** `_call` already passes
+the tool name to any check that takes two arguments, specifically *for* the module
+holding several skills; `driver_dev` had simply never used it. `_post_condition`
+now takes `(arguments, tool)` and answers `None` (UNVERIFIED) for `driver_status`,
+the source-plus-`obj-m` claim for `driver_scaffold`, and the `.ko` freshness claim
+for `driver_build`.
+
+**Checked the other three multi-skill modules for the same shape:** `clipboard`
+and `volume` already dispatch on the tool name, and `git_write` discriminates on
+its own `action` argument, so it is correct. `driver_dev` was the only one.
+
+**6 tests in `TestPostConditionKnowsWhichToolRan`, 41 in the file, and the
+mutation (drop the dispatch, fall back to one shared check) fails 5 of them** —
+restored and re-run green after. `shani-testbed`'s
+`chronoa-driver-skills` gained `driver-scaffold-is-not-verified-as-a-build`, so
+the dispatch path is covered on a real slot too: **19 pass, 0 fail** on `@blue`,
+and `tests/chronoa-driver-skills-results.sh` is at **24 host checks** with that
+mutation among them.
+
+Two of my own test bugs while writing it, both recorded because both looked like
+product failures: one assertion was pointed at the `project` fixture, which is
+scaffolded *by definition*, so it asserted the opposite of what it claimed; and
+the first version of the slot-test's new check drove a `driver_scaffold` call
+with no `path`, which a post-condition cannot resolve and therefore answers
+`None` for — a check that could never fail.
+
+### The consent-write trap: `gsettings get` does not read what the app writes (2026-10-10, measured on the image)
+
+Driving the five skills on a real slot to close the last SKIP found this, and it
+is worth knowing **before** anyone debugs a stuck consent key from a shell.
+
+`ChronoaConfig._new_settings` builds an explicit keyfile backend with
+`root_path="/org/shani/chronoa/"` and `root_group="org.shani.chronoa"`
+(`config.py:416`). The **default** backend — what the `gsettings` CLI uses, and
+what any other GLib process on the machine uses — derives the group from the
+schema path and writes `[org/shani/chronoa]`. Both land in the same file:
+
+    $ cat ~/.config/glib-2.0/settings/keyfile
+    [org/shani/chronoa]          <- what `gsettings set` wrote
+    i2c-write-enabled=true
+
+    [org.shani.chronoa]          <- what ChronoaConfig.set() wrote
+    i2c-write-enabled=true
+
+So **`gsettings get org.shani.chronoa i2c-write-enabled` answers `false` for a
+value the app's Settings window turned on.** The switch says on, every gated skill
+still refuses, and the CLI insists the key is off — a debugging path that
+contradicts the thing it is meant to check. This repo's own AGENTS.md already
+recorded the two spellings as *"the group is `[org.shani.chronoa]` … `[org/shani/
+chronoa]` is silently ignored"* without joining it to the consequence.
+
+Which spelling is correct is a decision, not a bug fixed here: the skills read
+`ChronoaConfig`, so the app is self-consistent either way, and what is broken is
+only the *external* reader. Changing it would make the CLI agree and make every
+existing keyfile unreadable. **Recorded rather than fixed, because the honest next
+step is one store and one spelling, and that is a call for a person.**
+
+The second half of the same measurement, for anyone writing a probe: **the two
+writers are not equally culpable in how they fail.** Under the private session bus
+`dbus-run-session` creates (no activatable `ca.desrt.dconf`), `ChronoaConfig.set()`
+and `gsettings set` *both* return success, the writing process reads its own value
+back as `true`, and nothing reaches disk — so a child reads `false`. Set
+`GSETTINGS_BACKEND=keyfile` to test consent crossing for real;
+`sandbox/executor.py:741` carries it to the child for exactly that reason.
+
 ### Booted on the image's own kernel (2026-10-10): every unanswerable fact, answered
 
 `iso-install -p gnome --boot-only --console-exec` firmware-boots the image, so
@@ -6922,3 +7022,86 @@ remote yet, so the split is still possible - **but another session is committing
 in this repository right now, so rewriting history underneath one is a decision
 for a person and not a mechanical fix.** This section is the record until
 someone decides otherwise.
+
+## FM stereo never worked, and infrared got a codec (2026-10-10)
+
+Four defects made `skills/fm_radio.py`'s stereo decoder unable to separate a
+channel at all, and none was visible by reading. Full methodology, the
+measurement tables and the three mutations that first survived are in
+**AUDIT-HISTORY.md**; this is the current state.
+
+| defect | measured |
+|---|---|
+| **the discriminator had no phase wrap** — `atan2`'s branch cut injects a spurious `±2π` step whenever the accumulated phase crosses `±π` | true advance **1.41 rad**, shipped difference **5.79 rad**, wrong 24 000 times in 200 000 samples |
+| **the de-matrix compounded two 0.5s into 0.25** | `L = 0.75L + 0.25R`; a hard-panned tone leaked a third of itself across |
+| **`_deemphasis` had DC gain `a`, not 1** — `a*(state + (1-a)*value)` carries an extra `a` in the second coefficient | **-3.6 dB** on every signal |
+| **the pole scaled with the rate** — `1/(1+2πτf)` is valid only while `2πτf << 1`, and at 32 kS/s that product is 15.08 | corner **14 146 Hz** at 32 kS/s, 145 037 at 200 kS/s, for a nominal 2 122 |
+| the pilot was measured through a bandpass costing 30% of its amplitude | lock threshold margin **1.24×** |
+| pre-emphasis used the audio-rate pole on IQ-rate samples | its shelf at 822 Hz, not 2 122; the pair did not cancel |
+
+`exp(-1/(τ·fs))` gives the 2 122 Hz corner at every rate because
+`-log(a)·fs/(2π)` cancels the rate exactly, and `_deemphasis_pole()` is a named
+function so a test reads the module's own value rather than re-deriving the
+algebra. Measured after, 1 s at 200 kS/s: left-only rejection **+32.4 dB**,
+right-only **+35.1 dB**, hard-panned **+31.3 / +38.2 dB**, mono residual
+**-23.1 dB**.
+
+`tests/test_fm_radio_stereo.py` (29 tests) pins all of it; **10 of 10 mutations
+confirmed to fail**. Two lessons in it worth keeping:
+
+- **A single-tone level test through `demodulate` proves nothing.** It normalises
+  every frame to a peak of 1.0, so every signal comes back at 1.0 whatever was
+  done to it — a 6 kHz tone sent alone reads -1.77 dB against 300 Hz *with the
+  transmitter given a lowpass instead of the pre-emphasis inverse*. The flatness
+  test sends both tones in one signal.
+- **The passband half of the anti-alias contract was untested.**
+  `test_fmdsp`'s stopband test uses 40 kHz for `resample(x, 1, 2)` at 250 kS/s,
+  which is *not above* the 62 500 Hz output Nyquist, so it cannot catch a filter
+  that is too narrow. Halving the sinc's argument left it green.
+  `test_the_passband_is_flat_up_to_the_output_nyquist` is the missing half.
+
+Both FM fixes in `fmdsp.py` are now measured by DTFT of the filter the code
+actually convolves with, rather than inferred from output amplitudes: the
+lowpass's sinc argument was missing a **factor of two** (`sin(πfc·m)/(πm)` is a
+lowpass with cutoff **fc/2**), which left it a mild shelf that never crossed
+-6 dB at all, and the interpolator's kernel was never normalised.
+
+### The `ir_remote` skill
+
+`usr/lib/shani-chronoa/shani_chronoa/skills/ir_remote.py` — NEC and RC-6
+pulse-space codecs in the standard library, plus a device probe, a send path and
+a receive path. There is no IR hardware on the dev box, so **the protocol is the
+verifiable half and that is what is verified**: a codec that can only be tested
+on hardware nobody owns is a codec nobody has tested.
+
+What ShaniOS really has, read out of the image's own pacman database:
+`lirc` is a `shani-peripherals` dependency and is in **all four image profiles**,
+shipping **29 commands**; `ir-ctl` and `ir-keytable` are **v4l-utils**, not lirc.
+The send route is `ir-ctl --send=<file>` and its file format is quoted from the
+man page (`carrier <hz>` then alternating `pulse`/`space` µs, **pulse first**),
+because that is the one contract here a wrong guess would make useless.
+
+**Every NEC frame is exactly 67 420 µs, and that is a theorem**: each byte
+travels with its one's complement, so of any 16 bits exactly 8 are ones however
+the byte was chosen. The decoder checks the total exactly, and a band would be
+the weaker check rather than the safer one.
+
+Wired the way `nfc` is: `ir-remote-enabled` (default false), a `GATED` entry, a
+Devices help-group row, six `files._PACKAGE_HINTS` entries, a Settings row, and
+`_IMPL` in the gate test. Reachability was proven through the real dispatch path
+— the loader sees it, the handler's `__name__` is a real identifier, the gate
+refuses by name with the key false and answers the device question with it true,
+and the Settings row is confirmed present in the **built** `SettingsWindow`
+rather than only in the table.
+
+`tests/test_ir_remote_skill.py` (43), `tests/test_ir_settings_row_exists.py` (4).
+**14 of 14 mutations confirmed to fail**, including the three that first survived:
+an index of `2 + 2*25` flipped the *pulse* instead of the *space* at `3 + 2*25`
+(which the burst-width check refuses for an unrelated reason, so the complement
+check could be deleted silently), a carrier-line mutation placed in the inner
+token loop where `break` is equivalent to `index += 2`, and a package-hint claim
+untested by the codec's own file.
+
+**Not claimed:** that a real remote recognises a frame this module builds, or
+that `send`/`receive` drive `ir-ctl`. Both need hardware nobody here owns, and
+the module that runs them says so.

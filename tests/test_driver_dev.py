@@ -252,7 +252,7 @@ class TestBuildForReal:
         info = subprocess.run(["modinfo", str(ko)], capture_output=True, text=True,
                               timeout=30, check=False)
         assert "mymod" in info.stdout, info.stdout + info.stderr
-        assert driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)})[0] is True
+        assert driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)}, tool="driver_build")[0] is True
 
     def test_a_leftover_module_does_not_verify_a_failed_build(self, project, monkeypatch):
         """Freshness, because a refused build leaves the old .ko sitting there.
@@ -263,15 +263,91 @@ class TestBuildForReal:
         directory = project
         (directory / "mymod.ko").write_bytes(b"")
         os.utime(directory / "mymod.c", (9e9, 9e9))
-        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)})
+        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)}, tool="driver_build")
         assert ok is False
         assert "older than" in detail
 
     def test_no_module_at_all_is_a_failure_not_an_unknown(self, project):
         directory = project
-        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)})
+        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)}, tool="driver_build")
         assert ok is False
         assert "no .ko" in detail
+
+
+class TestPostConditionKnowsWhichToolRan:
+    """One module, three skills, and one check that was written for the wrong two.
+
+    `verification.post_condition_for` reads a single module-level
+    `POST_CONDITION`, so `driver_status` and `driver_scaffold` were being checked
+    for a `.ko` - and running `driver_scaffold` for real on this machine printed
+    **"reported success but verification failed: no .ko file is in ..."** about a
+    call whose own last line is *"This is source, not a built module."* A
+    post-condition describing another tool's output calls a correct action a
+    failure, which is the confident-wrong-answer shape the repo keeps recording.
+
+    The framework already passes the tool name when a check takes two arguments
+    (`verification._call`), precisely for the module holding several skills, so
+    the dispatch belongs there rather than in `Skill`.
+    """
+
+    def _scaffold(self, directory, monkeypatch):
+        monkeypatch.setattr(driver_dev.files, "resolve_in_home",
+                            lambda raw: directory, raising=False)
+        out = driver_dev._run_scaffold({"name": "mymod", "path": "unused"})
+        assert "Scaffolded" in out, out
+        return out
+
+    def test_a_status_query_is_unverified_not_a_failed_write(self):
+        assert driver_dev.POST_CONDITION({}, tool="driver_status") is None
+
+    def test_scaffold_is_verified_by_its_source_not_by_a_ko(self, project, monkeypatch):
+        self._scaffold(project, monkeypatch)
+        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": "unused"},
+                                               tool="driver_scaffold")
+        assert ok is True, detail
+        assert "obj-m := mymod.o" in detail
+
+    def test_a_scaffold_that_wrote_nothing_fails_its_own_check(self, home):
+        # An EMPTY directory, not the `project` fixture: that one is scaffolded by
+        # definition, so pointing this at it asserted the opposite of what it says.
+        directory = home / "drivers" / "never-scaffolded"
+        directory.mkdir(parents=True)
+        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": str(directory)},
+                                               tool="driver_scaffold")
+        assert ok is False
+        assert "did not leave" in detail
+
+    def test_the_scaffold_check_catches_a_kbuild_line_that_does_not_build(self, project,
+                                                                         monkeypatch):
+        """The line is the claim, so it is what is read back off the disk."""
+        self._scaffold(project, monkeypatch)
+        (project / "Makefile").write_text("obj-m := mymod\n")
+        ok, detail = driver_dev.POST_CONDITION({"name": "mymod", "path": "unused"},
+                                               tool="driver_scaffold")
+        assert ok is False, detail
+        assert "obj-m := mymod.o" in detail
+
+    def test_scaffold_needs_no_ko_and_build_still_does(self, project, monkeypatch):
+        """The two checks do not bleed into each other."""
+        self._scaffold(project, monkeypatch)
+        assert driver_dev.POST_CONDITION(
+            {"name": "mymod", "path": "unused"}, tool="driver_scaffold")[0] is True
+        ok, detail = driver_dev.POST_CONDITION(
+            {"name": "mymod", "path": "unused"}, tool="driver_build")
+        assert ok is False, detail
+        assert "no .ko" in detail
+
+    def test_the_framework_passes_the_tool_name_it_proves(self, project, monkeypatch):
+        """Not just the signature - that `verify()` really supplies it.
+
+        Otherwise the dispatch above is dead code nobody calls.
+        """
+        from shani_chronoa import verification
+        self._scaffold(project, monkeypatch)
+        result = verification.verify("shani_chronoa.skills.driver_dev",
+                                     {"name": "mymod", "path": "unused"},
+                                     tool="driver_scaffold")
+        assert result.verdict.value == "verified", result.evidence
 
 
 class TestI2cGuard:

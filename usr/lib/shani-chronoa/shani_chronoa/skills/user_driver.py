@@ -201,8 +201,19 @@ def _run_probe(arguments: dict) -> str:
         lines.append(f"  Video: none listed - {video_note}")
 
     fused, fuse_note = _fuse_state()
-    lines.append(f"  FUSE mounts: {', '.join(fused) if fused else 'none'}")
-    lines.append(f"       {fuse_note}")
+    # The empty case says what is true AND what would change it, on the same
+    # line. It used to print a bare "none" and then, on the next line, which
+    # helper exists - which reads as though the helper note explained the
+    # absence, and it does not: it answers a different question. Found by
+    # running the skill on a real slot (shani-testbed's
+    # chronoa-driver-skills), where "no mounts" and "mounting is possible" are
+    # two separate facts a caller needs both of.
+    if fused:
+        lines.append(f"  FUSE mounts: {', '.join(fused)}")
+    else:
+        lines.append(f"  FUSE mounts: none (nothing is mounted through FUSE here; "
+                     f"{fuse_note})")
+    lines.append(f"       FUSE helper: {fuse_note}")
 
     lines.append("")
     lines.append("For which driver a device is bound to right now, driver_info reads "

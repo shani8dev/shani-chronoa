@@ -489,16 +489,61 @@ def _build_module(project: Path, release: str, tree: Path) -> "tuple[int, str]":
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
-def _post_condition(arguments: dict):
-    """The `.ko` must exist *and* be newer than the source it came from.
+def _post_condition(arguments: dict, tool: str = ""):
+    """Check what THIS tool was supposed to produce - the module holds three.
 
-    Freshness is the whole point: a failed build leaves the previous `.ko`
-    sitting there, and matching its mere existence would verify work that did
-    not happen - the same defect `pdf_pages` has a test for. `None` means
-    UNVERIFIED, which is the right answer whenever there is nothing to read.
+    One module-level `POST_CONDITION` is read by `verification.post_condition_for`
+    for every skill the module declares, and the first version of this check was
+    the build's alone: it looked for a `.ko`. Running `driver_scaffold` for real
+    on this machine then reported **"reported success but verification failed:
+    no .ko file is in ..."** about a call whose whole purpose is writing source -
+    the file that says, in its own last paragraph, "This is source, not a built
+    module". A post-condition that describes a different tool's output reports a
+    correct action as a failure, which is the confident-wrong-answer shape this
+    repository keeps recording.
+
+    The framework already passes the tool name when a check takes two arguments
+    (`verification._call`), exactly for the module that holds several skills, so
+    this is where it belongs rather than in `Skill`.
+
+    `driver_status` reads, so it returns `None` -> UNVERIFIED: a read has no
+    effect to check, and reporting a status query as a failed write is the
+    clipboard bug `_call`'s own docstring records.
     """
     name = (arguments.get("name") or "").strip().lower()
     raw = (arguments.get("path") or "").strip()
+
+    if tool == "driver_status":
+        return None
+
+    if tool == "driver_scaffold":
+        # Scaffolding wrote source files. What can be checked is that they are
+        # there, that the Makefile carries the line that actually builds, and
+        # that nothing pre-existing was overwritten - the three things this
+        # tool claims. `None` (UNVERIFIED) when there is nothing to read.
+        if not name or not raw or not _NAME_RE.match(name):
+            return None
+        try:
+            directory = files.resolve_in_home(raw)
+        except files.PathProblem:
+            return None
+        expected = [f"{name}.c", "Makefile"]
+        missing = [f for f in expected if not (directory / f).exists()]
+        if missing:
+            return False, f"the scaffold did not leave {', '.join(missing)} in {directory}"
+        makefile = (directory / "Makefile").read_text(errors="replace")
+        want = f"obj-m := {name}.o"
+        if want not in makefile:
+            return False, (f"the Makefile does not carry '{want}', which is the line "
+                            "that builds a module")
+        return True, (f"{expected[0]} and the '{want}' line are in {directory}")
+
+    # driver_build: the `.ko` must exist *and* be newer than the source it came
+    # from. Freshness is the whole point: a failed build leaves the previous
+    # `.ko` sitting there, and matching its mere existence would verify work
+    # that did not happen - the same defect `pdf_pages` has a test for. `None`
+    # means UNVERIFIED, which is the right answer whenever there is nothing to
+    # read.
     if not name or not raw or not _NAME_RE.match(name):
         return None
     try:
