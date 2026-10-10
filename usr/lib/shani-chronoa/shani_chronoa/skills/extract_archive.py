@@ -38,6 +38,8 @@ Honesty rules:
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
@@ -48,16 +50,21 @@ from shani_chronoa.files import PathProblem
 from shani_chronoa.skills import Skill
 
 _MAX_MEMBERS = 20000
+#: 7z is slower than the stdlib on a big archive and reads the whole index
+#: first; the same ceiling the sandbox applies to a slow skill is the reason
+#: this is generous rather than short.
+_TIMEOUT = 60
 
 SCHEMA = {
     "type": "function",
     "function": {
         "name": "extract_archive",
         "description": (
-            "Unpack a .tar/.tar.gz/.tgz/.zip archive into a directory. Every "
-            "member is checked first and the archive is refused whole if any "
-            "entry would be written outside the destination or is a link, a "
-            "device or a FIFO. Will not overwrite existing files unless asked."
+            "Unpack a .tar/.tar.gz/.tgz/.zip archive, or any format 7z reads "
+            "(.7z, .rar, .cab ...), into a directory. Every member is checked "
+            "first and the archive is refused whole if any entry would be "
+            "written outside the destination or is a link, a device or a "
+            "FIFO. Will not overwrite existing files unless asked."
         ),
         "parameters": {
             "type": "object",
@@ -172,7 +179,122 @@ def _plan(archive: Path, dest: Path, overwrite: bool) -> Tuple[Optional[str], Li
                 return (refusal, names, len(infos))
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return (f"the archive could not be read: {exc}", [], 0)
-    return ("it is neither a tar archive nor a zip file, so there is nothing to unpack", [], 0)
+    # Not tar and not zip: 7z, if it is installed, can still open it. The
+    # refusal says which formats exist and what would open them, because "it is
+    # neither a tar archive nor a zip file" is a true sentence and a dead end.
+    return _sevenzip_members(archive, dest)
+
+
+def _sevenzip_members(archive: Path, dest: Path) -> "Tuple[Optional[str], List[str], int]":
+    """(refusal, member names, member count) for a 7z archive, via `7z l -slt`.
+
+    **Why 7z at all.** Python's stdlib reads tar and zip and nothing else, so a
+    `.7z`, `.rar` or `.cab` was answered with "this is neither a tar archive
+    nor a zip file" - a true sentence and a dead end. `7z` ships on both images
+    (`p7zip`/`7zip`) and reads all of them.
+
+    **`7z x` extracts a symlink member with exit 0 and no warning** - measured
+    on a real slot (`chronoa-cli-formats.sh`, `@blue`, 2026-10-10), by building
+    an archive containing `escape -> /etc/passwd` and unpacking it. So
+    delegating to 7z without checking the listing first would write **outside
+    the destination**, which is exactly what the tar and zip branches refuse.
+    Hence this function: the whole archive is listed and checked before
+    anything is extracted, through the same `_check_members` model.
+
+    **`-slt`'s output has a trap the measurement caught.** It prints one
+    `Key = value` block per member *and a first block describing the archive
+    itself*:
+
+        --
+        Path = /tmp/round.7z        <- the archive, NOT a member
+        Type = 7z
+        Physical Size = 208
+        ----------
+        Path = seven                 <- members start here
+        Attributes = D drwxr-xr-x
+        ----------
+        Path = seven/one.txt
+        Attributes = A -rw-r--r--
+
+    so a member is a block that carries an `Attributes` line; the archive's own
+    block carries `Type`/`Physical Size` and none. Reading every `Path =` as a
+    member would report the archive as its own first member.
+
+    **A symlink is the leading `l` of the mode string** (`Attributes = A
+    lrwxrwxrwx`), and a directory is `D` - both measured, not assumed.
+    """
+    if shutil.which("7z") is None:
+        return ("7z is not installed, so a format Python's stdlib does not read "
+                "(7z, rar, cab) cannot be unpacked here", [], 0)
+    try:
+        proc = subprocess.run(["7z", "l", "-slt", str(archive)],
+                              capture_output=True, text=True, timeout=_TIMEOUT,
+                              check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return (f"7z did not answer ({exc})", [], 0)
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        return (f"7z could not list it: {detail[-1] if detail else f'exit {proc.returncode}'}",
+                [], 0)
+
+    kinded: List[Tuple[str, Optional[str]]] = []
+    block: dict = {}
+    for line in (proc.stdout or "").splitlines():
+        if not line.strip():
+            if block.get("Path") is not None and "Attributes" in block:
+                kinded.append((block["Path"], _member_kind(block["Attributes"])))
+            block = {}
+            continue
+        key, sep, value = line.partition(" = ")
+        if sep and key.strip():
+            block[key.strip()] = value.strip()
+    if block.get("Path") is not None and "Attributes" in block:
+        kinded.append((block["Path"], _member_kind(block["Attributes"])))
+
+    if len(kinded) > _MAX_MEMBERS:
+        return (f"the archive holds {len(kinded)} members, more than the "
+                f"{_MAX_MEMBERS} this will unpack", [], len(kinded))
+    refusal = _check_members(kinded, dest)
+    names = [name for name, kind in kinded if kind == "file"]
+    return (refusal, names, len(kinded))
+
+
+def _member_kind(attributes: str) -> str:
+    """`"A -rw-r--r--"` -> "file", `"D drwxr-xr-x"` -> "dir", a link -> "symlink".
+
+    The mode string's first character is the unix type, which is the whole
+    answer; the letter before it (`A` archive, `D` directory) is 7z's own
+    attribute flag and is not the type.
+    """
+    parts = attributes.split()
+    mode = parts[-1] if parts else ""
+    if mode.startswith("l"):
+        return "symlink"
+    if mode.startswith("d"):
+        return "dir"
+    return "file"
+
+
+def _sevenzip_extract(archive: Path, dest: Path) -> None:
+    """`7z x` into `dest`. Raises OSError/RuntimeError like the stdlib paths.
+
+    **`-o` and the destination are one argument** - 7z takes `-o<path>` with no
+    space, so `-o $dest` would be read as a bare `-o` and an archive name.
+    Measured on a slot; the round-trip there used exactly this form.
+
+    `-y` answers 7z's own overwrite prompt. This skill has already refused the
+    overwrite case above (`_would_overwrite`), so arriving here means replacing
+    nothing; `-y` only stops a prompt from hanging the child.
+    """
+    proc = subprocess.run(["7z", "x", f"-o{dest}", "-y", str(archive)],
+                          capture_output=True, text=True, timeout=_TIMEOUT,
+                          check=False)
+    if proc.returncode not in (0, 1):
+        # 0 = OK, 1 = warning (a non-fatal one, e.g. an empty member). Anything
+        # else is a real failure and 2+ is fatal; both are raised so the caller
+        # reports a partial unpack rather than a clean one.
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        raise RuntimeError(detail[-1] if detail else f"7z exited {proc.returncode}")
 
 
 def _would_overwrite(archive: Path, names: List[str], dest: Path) -> List[str]:
@@ -235,10 +357,12 @@ def _run(arguments: dict) -> str:
                     tar.extractall(dest, filter="data")
                 except TypeError:
                     tar.extractall(dest)
-        else:
+        elif zipfile.is_zipfile(archive):
             with zipfile.ZipFile(archive) as zf:
                 for name in names:
                     zf.extract(name, dest)
+        else:
+            _sevenzip_extract(archive, dest)
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return (f"Unpacking {archive.name} stopped partway: {exc}. Some files "
                 f"may have been written - the pre-flight checks passed, so this "
