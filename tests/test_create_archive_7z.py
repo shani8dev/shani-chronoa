@@ -148,8 +148,16 @@ def test_the_format_enum_and_description_name_7z():
     `git_inspect`'s stash and reflog, found in the same pass."""
     schema = C.SCHEMA["function"]["parameters"]["properties"]["format"]
     assert "7z" in schema["description"]
-    assert C._run({"action": "create", "source": ".", "format": "rar"}).startswith(
-        "Format must be zip, tar.gz or 7z")
+    # **The property, not the exact words.** The refusal used to begin "Format
+    # must be zip, tar.gz or 7z"; with the three stdlib formats added it begins
+    # "Format must be one of zip, tar.gz, targz, tar, ...". Pinning the prefix
+    # failed on a message that is now *more* accurate - and a test that fails
+    # when the answer gets better is a test that will be weakened next time.
+    refusal = C._run({"action": "create", "source": ".", "format": "rar"})
+    assert refusal.startswith("Format must be"), refusal
+    for good in ("zip", "tar.gz", "7z"):
+        assert good in refusal, f"the refusal no longer names {good}"
+    assert "not 'rar'" in refusal, refusal
 
 
 class TestTheStdlibPathsStillWork:

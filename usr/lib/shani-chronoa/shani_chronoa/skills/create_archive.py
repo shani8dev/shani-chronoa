@@ -72,6 +72,24 @@ SCHEMA = {
 }
 
 
+#: The compression `tarfile` gets for each tar format, and None for a plain tar.
+#:
+#: **Module level, not local to `_run`, because `_create` reads it** - the first
+#: version defined it inside `_run`, which pyflakes then reported as unused in
+#: one function and undefined in another: two errors describing one mistake.
+#:
+#: Every entry is stdlib. `tarfile` writes bz2 and xz; `compression.zstd` is
+#: stdlib from Python 3.14 and `tarfile` picks it up for `w:zst`. **None of the
+#: three needs a binary**, which is why they were a gap: a skill that needs
+#: nothing refused three formats it could have written.
+_COMPRESSION = {
+    "tar.gz": "gz", "targz": "gz",
+    "tar.bz2": "bz2", "tar.bz": "bz2",
+    "tar.xz": "xz",
+    "tar.zst": "zst", "tar.zstd": "zst",
+    "tar": None,
+}
+
 def _collect(path: Path) -> "tuple[list, list]":
     """(files to add, reasons they were skipped)."""
     if path.is_file():
@@ -113,8 +131,16 @@ def _run(arguments: dict) -> str:
     if action not in ("create", "list", "extract"):
         return f"Action must be create, list or extract, not {action!r}."
     fmt = (arguments.get("format") or "zip").strip().lower()
-    if fmt not in ("zip", "tar.gz", "targz", "tar", "7z"):
-        return f"Format must be zip, tar.gz or 7z, not {fmt!r}."
+    # **`tar.bz2`, `tar.xz` and `tar.zst` were refused, and none of them needs a
+    # binary.** `tarfile` writes bz2 and xz, and `compression.zstd` is stdlib
+    # from Python 3.14 - so a skiff of formats people actually use ("why can't I
+    # make a .tar.xz") was answered with "Format must be zip, tar.gz or 7z" on a
+    # machine that could have written all three.
+    _KNOWN = ("zip", "tar.gz", "targz", "tar", "tar.bz2", "tar.bz", "tar.xz",
+              "tar.zst", "tar.zstd", "7z")
+    if fmt not in _KNOWN:
+        return ("Format must be one of %s, not %r."
+                % (", ".join(_KNOWN), fmt))
     is_tar = fmt.startswith("tar")
 
     try:
@@ -282,7 +308,11 @@ def _create(source: Path, destination: str, is_tar: bool, fmt: str) -> str:
         if fmt == "7z":
             return _create_7z(source, target, entries)
         if is_tar:
-            with tarfile.open(target, "w:gz") as t:
+            # **The mode comes from the table, not from `is_tar`.** A plain tar
+            # and three compressions share the `tar` prefix, so keying the writer
+            # on the prefix alone silently gzipped a `tar.bz2` request.
+            mode = "w" if _COMPRESSION[fmt] is None else "w:" + _COMPRESSION[fmt]
+            with tarfile.open(target, mode) as t:
                 for e in entries:
                     t.add(e, arcname=str(e.relative_to(source.parent))
                           if source.is_dir() else e.name, recursive=False)
