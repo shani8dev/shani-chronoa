@@ -437,6 +437,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
                          "What is conflicting in a git repository, and resolve it"),
     "git_commit": ("Code and git", "Commit the files you name"),
     "git_branch": ("Code and git", "Create or switch branch"),
+    # Read-only: reads the marker and asks the tool, and never modifies a
+    # repository - which is what makes it safe to point at any path.
+    "vcs_status": ("Code and git", "State of a git, subversion or mercurial checkout"),
     "git_push": ("Code and git", "Push a branch to a named remote"),
     "project_outline": ("Code and git", "Outline a code project: files, classes and functions"),
     "todo_list": ("Code and git", "Keep a list of tasks to do"),
