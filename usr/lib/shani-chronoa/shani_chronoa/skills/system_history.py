@@ -76,17 +76,22 @@ _SAMPLE = re.compile(r"^(\d{2}:\d{2}:\d{2})\s+(\S+)\s+(.*)$")
 _PERCENT = re.compile(r"^-?\d+(\.\d+)?$")
 
 
-#: `06:40:39        CPU     %user     %nice   %system ...` - the header. Its
-#: **first token is a time-format label, not a column**, because that cell
-#: holds `06:40:40` on the rows below. So the header line is the same shape as
-#: a data row, which is what makes it easy to mistake for one - and getting
-#: it wrong shifts every value onto its neighbour's name:
+#: **The columns start at the first `%`-bearing token, not at a position.**
 #:
-#:     columns[1:] = ['CPU', '%user', '%nice', ...]
-#:     values      = ['20.59', '0.00',  '0.00',  ...]
-#:     -> "CPU 20.6%, user 0.0%"      # %user's figure, labelled "CPU"
+#: Two attempts fixed this by counting leading tokens, and both were wrong on
+#: the *other* distribution:
 #:
-#: Every number is right and every label is off by one.
+#:     @blue slot:   06:40:39        CPU     %user ...    one leading token
+#:     dev box:      12:55:13 PM     CPU     %user ...    **two** - the AM/PM
+#:
+#: Dropping exactly one token put the dev box's header back off by one, so
+#: `CPU` took `%user`'s figure and the answer read "CPU 6.6%, user 0.0%" - the
+#: same defect, one distribution later, and the slot-shaped test suite stayed
+#: green. Found only by running the skill for real here.
+#:
+#: A header is not a fixed-width record: it is a row of `%`-named columns with
+#: an unbounded amount of timestamp ahead of them. Finding the first `%` token
+#: is right for 12-hour, 24-hour and any other locale, and cannot drift.
 _TIME_LABEL = re.compile(r"^\d{2}:\d{2}:\d{2}$")
 
 
@@ -135,12 +140,13 @@ def _parse(text: str) -> "tuple[dict, list]":
             continue
         if "%" in stripped and not _PERCENT.match(stripped.split()[0]
                                                   if stripped.split() else ""):
-            columns = stripped.split()
-            # **Drop the leading time-format token.** Without this, `CPU`
-            # becomes the name of %user's figure - and the resulting sentence
-            # reads perfectly, which is what made it worth catching.
-            if columns and _TIME_LABEL.match(columns[0]):
-                columns = columns[1:]
+            tokens = stripped.split()
+            # **The columns begin at the first `%` token.** See `_TIME_LABEL`
+            # above for why counting leading tokens is wrong on either
+            # distribution.
+            start = next((i for i, t in enumerate(tokens) if t.startswith("%")),
+                         None)
+            columns = tokens[start:] if start is not None else tokens
             continue
         match = _SAMPLE.match(stripped)
         if match:
@@ -151,7 +157,12 @@ def _parse(text: str) -> "tuple[dict, list]":
 
 def _explain(columns: "list[str]", values: "list[str]") -> str:
     pairs = []
-    for name, raw in zip(columns[1:], values):
+    # **Every column, not `columns[1:]`.** The first version skipped the
+    # first because the columns then started with `CPU`; once they start at
+    # `%user` the skip silently drops `%user`'s figure and moves every other
+    # value down one. Ran on the dev box and printed
+    # "nice 6.6%, system 0.0%" for a header that says `%user %nice %system`.
+    for name, raw in zip(columns, values):
         try:
             number = float(raw)
         except ValueError:

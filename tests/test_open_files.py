@@ -131,8 +131,12 @@ def test_a_listening_socket_is_not_an_established_one(tmp_path, monkeypatch):
     sort of wrong that sends someone to fix the wrong thing."""
     _fake_lsof(tmp_path, monkeypatch, SOCKETS)
     out = OF._run_skill({})
-    assert "is listening on 127.0.0.1:8765" in out
-    assert "established connection 127.0.0.1:35842 → 127.0.0.1:49374" in out
+    # **With the protocol, not without it.** The first parser swallowed `TCP`
+    # as a NODE column and this assertion was written against that loss; the
+    # parse now keeps it, because "is this TCP or UDP" is a real question
+    # about a socket.
+    assert "is listening on TCP 127.0.0.1:8765" in out
+    assert "established connection TCP 127.0.0.1:35842 → 127.0.0.1:49374" in out
 
 
 def test_a_named_descriptor_is_described_as_what_it_is(tmp_path, monkeypatch):
@@ -301,3 +305,87 @@ def test_a_nonexistent_path_is_reported_before_running_anything(tmp_path,
     out = OF._run_skill({"path": str(tmp_path / "definitely-absent")})
     assert "does not exist" in out
     assert not (tmp_path / "bin" / "argv").exists(), "it ran lsof anyway"
+
+# --- two bugs found by running the skill, not by reading it --------------------
+# Both are in the parser, both produced a confident wrong answer, and both
+# are why these tests exist.
+
+#: `lsof -p 1` as an unprivileged user, verbatim. **The gap between `PID` and
+#: `USER` is a single space**, because pid 1 is short and lsof pads the other
+#: way - so a split on two-or-more spaces merges `1 root` and the row is
+#: dropped. Measured: the first version answered "nothing open" for a process
+#: with four handles, while the same rows in a full listing parsed fine.
+UNPRIVILEGED = """COMMAND PID USER   FD      TYPE DEVICE SIZE/OFF NODE NAME
+systemd   1 root  cwd   unknown                      /proc/1/cwd (readlink: Permission denied)
+systemd   1 root  rtd   unknown                      /proc/1/root (readlink: Permission denied)
+systemd   1 root NOFD      0000                      /proc/1/fd (opendir: Permission denied)
+"""
+
+
+def test_a_row_with_no_device_size_or_node_is_not_dropped(tmp_path, monkeypatch):
+    """The shape is 9 fields for a readable descriptor and 6 for one lsof
+    could not read, and the second has a single space where the first has
+    many. Both were measured from a real run."""
+    _fake_lsof(tmp_path, monkeypatch, UNPRIVILEGED)
+    rows = OF._parse(UNPRIVILEGED)
+    assert len(rows) == 3, rows
+    assert all(r["command"] == "systemd" and r["pid"] == 1 for r in rows)
+    assert [r["fd"] for r in rows] == ["cwd", "rtd", "NOFD"]
+
+
+def test_an_answer_that_says_nothing_open_for_a_process_with_four_handles(
+        tmp_path, monkeypatch):
+    """**The regression this file is for.** `lsof -p 1` parsed to zero rows,
+    so the skill said `Process 1 has nothing open that this user can see` -
+    while the very same rows in `lsof -nP` parsed fine. Two parsers, one
+    shape, and the pid-filtered one was silent."""
+    _fake_lsof(tmp_path, monkeypatch, UNPRIVILEGED)
+    out = OF._run_skill({"pid": 1})
+    assert "nothing open" not in out, out
+    assert "cannot read" in out
+
+
+def test_a_path_lsof_could_not_read_is_not_reported_as_a_path(tmp_path,
+                                                             monkeypatch):
+    """**`/proc/1/cwd (readlink: Permission denied)` is not a working
+    directory.** The first version described it as one - a confident, wrong,
+    entirely plausible answer, and the one that sends someone exploring /proc
+    instead of looking at their permissions."""
+    _fake_lsof(tmp_path, monkeypatch, UNPRIVILEGED)
+    out = OF._run_skill({"pid": 1})
+    assert "holds /proc/1/cwd open as its working directory" not in out
+    assert "Permission denied" not in out
+    # And it names the descriptor, so four refused rows are four answers.
+    assert "its working directory" in out
+    assert "its root" in out
+
+
+def test_a_refused_row_still_shows_the_full_command(tmp_path, monkeypatch):
+    """The refusal is about the path, not about the program - so the argv that
+    came from /proc, which works for another user's process, is still worth
+    having."""
+    _fake_lsof(tmp_path, monkeypatch, UNPRIVILEGED)
+    monkeypatch.setattr(OF, "_cmdline", lambda pid: "/sbin/init splash")
+    out = OF._run_skill({"pid": 1})
+    assert "/sbin/init splash" in out
+
+
+def test_the_readable_shape_still_parses_after_the_fix(tmp_path, monkeypatch):
+    """The fix must not break the shape the tests were written against: a
+    readable row has all three of DEVICE/SIZE/NODE and a path with no spaces
+    in the fixture."""
+    _fake_lsof(tmp_path, monkeypatch, LISTEN)
+    rows = OF._parse(LISTEN)
+    assert [r["name"] for r in rows] == ["/tmp/opencode", "/", "/usr/bin/bash"]
+    assert all(not r["refused"] for r in rows)
+
+
+def test_a_name_containing_spaces_is_not_truncated(tmp_path, monkeypatch):
+    """`My Documents` inside the NAME column: the name is everything past the
+    three-column block, so a path with spaces survives whole."""
+    _fake_lsof(tmp_path, monkeypatch, LISTEN)
+    spaced = ("COMMAND  PID USER  FD   TYPE DEVICE SIZE/OFF NODE NAME\n"
+              "bash 4242 you cwd    DIR   0,38    4320      426 "
+              "/home/you/My Documents\n")
+    rows = OF._parse(spaced)
+    assert rows[0]["name"] == "/home/you/My Documents", rows

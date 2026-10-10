@@ -67,17 +67,51 @@ _TIMEOUT = 30
 #: `COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME`, with a header whose
 #: column widths change with the content - `COMMAND` is 7 here and 9 there -
 #: so the row is split on **runs of two or more spaces**, not on columns.
-_ROW = re.compile(
-    r"^(\S+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(\S+)\s+"
-    r"(?:(\S+)\s+(?:(\S+)\s+)?(\S+)\s+)?(.+)$")
+#:
+#: **And the number of separators varies by row, which a regex cannot say.**
+#: Measured, the same split gives two shapes:
+#:
+#:     9 fields   `bash 587023 you cwd DIR 0,38 4320 426 /tmp/opencode`
+#:     6 fields   `systemd 1 root cwd unknown /proc/1/cwd (readlink: ...)`
+#:
+#: In the second there is **no DEVICE, SIZE/OFF or NODE at all** - lsof leaves
+#: them blank for a descriptor it could not read. A regex written against the
+#: 9-field shape parses the 6-field one by taking its last token, which is how
+#: the first version reported `denied)` as a path. So the name is the *last*
+#: field and the field count is what distinguishes them.
+#:
+#:     `_GAP.split('systemd 1 root cwd unknown /proc/1/cwd (readlink: Permission denied)')`
+#:         -> ['systemd', '1', 'root', 'cwd', 'unknown', '/proc/1/cwd (readlink: Permission denied)']
+#:
+#: because the gap before `/proc` is wide and the gap inside the path is one
+#: space. Splitting is therefore both necessary and sufficient.
+#: `DEVICE`, `SIZE/OFF` and `NODE` are numeric. Skipping leading numeric
+#: tokens is what separates them from the name - sockets carry only two
+#: of the three and files all three, so counting them is wrong.
+_NUMERIC = re.compile(r"^\d+(,\d+)?$|^\d+t\d+$|^\d+f$")
+
+#: A number, with an optional unit. `SIZE/OFF` is `0t0` for a socket.
+_SIZE = re.compile(r"^[0-9a-fA-F]+t?\d*$")
+_NODE = re.compile(r"^\d+$")
 
 #: `FD` values that name a descriptor rather than numbering it.
-_NAMED_FD = frozenset({"cwd", "rtd", "txt", "mem", "DEL", "unk", "tr", "pd"})
+_NAMED_FD = frozenset({"cwd", "rtd", "txt", "mem", "DEL", "unk", "tr", "pd",
+                      "NOFD"})
 
 #: A `(deleted)` suffix means the file is gone but still held open, so the
 #: space is still in use. That is the single most useful line lsof prints and
 #: the one most often dropped.
 _DELETED = "(deleted)"
+
+#: **`/proc/1/cwd (readlink: Permission denied)` is not a working directory.**
+#: Measured by running this skill for real: `lsof -p 1` as an unprivileged user
+#: returns four rows, every one with the real name replaced by the unreadable
+#: path and the kernel's own refusal in parentheses. A parser that takes the
+#: last whitespace-separated field reports that string **as the program's
+#: working directory** - a confident, wrong, and entirely plausible-looking
+#: answer, and the one that sends someone exploring /proc instead of looking
+#: at their permissions. A path lsof could not read is not a path.
+_REFUSAL = re.compile(r"\s*\((?:readlink|opendir|open|stat):\s*[^)]*\)\s*$")
 
 
 def _run(arguments: "list[str]") -> "tuple[str, str, int]":
@@ -92,24 +126,74 @@ def _run(arguments: "list[str]") -> "tuple[str, str, int]":
 
 
 def _parse(text: str) -> "list[dict]":
-    """Rows from lsof's stdout. Warnings on stderr never reach this."""
+    """Rows from lsof's stdout. Warnings on stderr never reach this.
+
+    **The first five columns are whitespace-separated and the middle ones are
+    numeric.** Two attempts at the separator, both wrong:
+
+      - split on two-or-more spaces: with a short pid the gap between `PID` and
+        `USER` collapses to *one* space, so `1 root` merges and the row is
+        silently dropped;
+      - take `DEVICE SIZE/OFF NODE` as an all-or-nothing block: sockets have
+        **only two of the three** (`34848  0t0` and no NODE), so they parsed
+        with `TCP` in the name.
+
+    So the name is: everything after the first five whitespace tokens, with
+    the leading **numeric** tokens skipped. Measured against all four shapes:
+
+        socket    ... 3u  IPv4 34848 0t0  TCP 127.0.0.1:8765 (LISTEN)
+                     -> name "TCP 127.0.0.1:8765 (LISTEN)"
+        file      ... cwd DIR  0,38  4320 426  /tmp/opencode
+                     -> name "/tmp/opencode"
+        unreadable... cwd unknown    /proc/1/cwd (readlink: Permission denied)
+                     -> name "/proc/1/cwd (readlink: Permission denied)"
+        spaced    ... cwd DIR  0,38   4320 426  /home/you/My Documents
+                     -> name "/home/you/My Documents"
+    """
     rows = []
     for line in text.splitlines():
         if not line.strip():
             continue
-        match = _ROW.match(line.rstrip())
-        if not match:
-            continue  # the header, whose COMMAND column may be 7 or 9 wide
-        (command, pid, user, fd, kind, _device, _size, _node, name) = match.groups()
+        tokens = line.split()
+        if len(tokens) < 6 or not tokens[1].isdigit():
+            # The header (whose second token is `PID`, not a number), or
+            # something this does not understand.
+            continue
+        command, pid_s, user, fd, kind = tokens[:5]
+        rest = tokens[5:]
+        while rest and _NUMERIC.match(rest[0]):
+            rest = rest[1:]
+        if not rest:
+            continue
+        name = " ".join(rest)
+        # lsof prefixes a socket's NAME with its protocol (`TCP 127.0.0.1:8765
+        # (LISTEN)`). **The protocol is kept, not folded into the name** - "is
+        # this TCP or UDP" is a real question about a socket - but it is moved
+        # out of `name` so the address stays clean and the arrow/state parse
+        # does not have to know about it.
+        protocol = ""
+        if kind in ("IPv4", "IPv6") and " " in name:
+            head, _, tail = name.partition(" ")
+            if head.isupper() or head in ("TCP", "UDP", "RAW", "UNIX"):
+                protocol, name = head, tail
+        # **A refused read is its own state, not a path.** See `_REFUSAL`.
+        refused = bool(_REFUSAL.search(name))
+        if refused:
+            # lsof names the /proc entry it tried, so the honest name is that
+            # path and not the refusal that follows it.
+            name = name.split(" ", 1)[0].strip()
+        unreadable = refused or kind == "unknown" or fd == "NOFD"
         rows.append({
             "command": command,      # TRUNCATED - see _real_command
-            "pid": int(pid),
+            "pid": int(pid_s),
             "user": user,
             "fd": fd,
             "named_fd": fd in _NAMED_FD,
             "type": kind,
-            "name": name.strip(),
+            "protocol": protocol,
+            "name": name,
             "deleted": _DELETED in name,
+            "refused": unreadable,
         })
     return rows
 
@@ -149,6 +233,17 @@ def _cmdline(pid: int) -> str:
 
 
 def _describe(row: dict) -> str:
+    if row["refused"]:
+        # The name is what lsof could not read, so it must not be described as
+        # a path. This is a *permission* answer, which is the whole point.
+        # **The descriptor is named**, because four refused rows read as one
+        # sentence otherwise and there is no way to tell them apart.
+        which = {"cwd": "its working directory", "rtd": "its root",
+                 "txt": "the program itself", "mem": "mapped memory"}.get(
+                     row["fd"], f"its descriptor {row['fd']}")
+        return (f"is holding {which}, but this user cannot read where that "
+                f"points - lsof got the `/proc/{row['pid']}/{row['fd']}` "
+                f"link back instead of the real name")
     if row["named_fd"]:
         meaning = {"cwd": "its working directory", "rtd": "its root",
                    "txt": "the program itself", "mem": "mapped memory"}.get(
@@ -158,7 +253,8 @@ def _describe(row: dict) -> str:
         # `local->peer (STATE)` vs `local (STATE)`: the arrow is the whole
         # difference between listening and connected, and the state word is
         # the difference between connected and broken.
-        address, _, state = row["name"].rpartition("(")
+        label = (row.get("protocol") or "") + " " + row["name"] if row.get("protocol") else row["name"]
+        address, _, state = label.rpartition("(")
         state = state.rstrip(")").strip()
         if "->" in address:
             local, _, peer = address.partition("->")
