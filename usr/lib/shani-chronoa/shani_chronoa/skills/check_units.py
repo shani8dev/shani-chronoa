@@ -9,12 +9,14 @@ that, was unused.
 **Two behaviours measured on this machine, and both would have shipped a
 confident wrong answer:**
 
-- **`systemd-analyze verify` exits 0 whether or not it found problems.** Verified
-  with a unit whose `ExecStart` points at a file that does not exist: it printed
-  `broken.service: Command /nonexistent/binary is not executable` and still
-  returned 0. A check that read the return code would call every unit valid -
-  the same shape as `cupsreject` reporting `not-found` and exiting 0, found in
-  `print_queue` the same day.
+- **The exit status is not the verdict, and it is not stable across versions.**
+  The first version of this docstring recorded *"exits 0 whether or not it found
+  problems"* - measured on the systemd of the machine this was written on.
+  Measured again here (systemd 257, Ubuntu 26.04) with the same broken unit: it
+  prints the complaint and **exits 1**. A reader that trusts the status code is
+  right on one version and wrong on the other, which is exactly why the
+  complaint text is what this module reads and the exit code is read for
+  nothing at all.
 - **It verifies the whole system, not the unit you asked about.** The same two
   invocations printed the same three pre-existing complaints about
   `/usr/lib/systemd/system/com.Workpuls.service`, which has nothing to do with
