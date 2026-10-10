@@ -103,3 +103,71 @@ that cannot see what an unprivileged read produces.**
 | `system_history` | `sar` | what the machine was doing *earlier*, which no live reading can say |
 | `dns_lookup` | `delv` | the DNSSEC verdict (", fully validated") |
 | `disk_activity`, `cpu_per_core`, `cpu_frequency`, `inspect_binary`, `process_detail`, `download_file`, `sync_folder`, `check_port`, `list_archive`, `extract_archive`, `vcs_status` | `iostat`, `mpstat`, `cpupower`, `readelf`, `/proc`, `curl`, `rsync`, `nc`, stdlib+7z, stdlib+7z, `git`/`svn`/`hg` | — |
+## The matrices predate the last depends change (measured 2026-10-10)
+
+**Five commands in `shani-tools-extra` are declared by the PKGBUILD but the
+matrices on disk cannot say whether they land, because the images they describe
+were built before they were added.**
+
+| image | `image_version` | matrix generated |
+|---|---|---|
+| GNOME  | `20260925` | 2026-10-09T17:30:53Z |
+| Plasma | `20260922` | 2026-10-09T18:21:55Z |
+
+`shani-pkgbuilds` commit `173a759` landed at **2026-10-08T23:22Z** - roughly two
+weeks *after* both images - and its diff to `shani-tools-extra/PKGBUILD` is:
+
+    -pkgrel=13
+    +pkgrel=15
+    +    playerctl
+    +    brightnessctl
+    +    wl-clipboard
+    +    grim
+    +    slurp
+
+So the matrix is recent in *file* mtime and stale in *content*: it was copied on
+2026-10-09 but generated from an image whose package set predates the commit.
+**A matrix's `generated` timestamp is not evidence about which packages the
+current PKGBUILDs ship - `image_version` is.**
+
+The 16 packages absent from both matrices, and what each case actually is:
+
+| package | declared in | verdict |
+|---|---|---|
+| `playerctl`, `brightnessctl`, `wl-clipboard`, `grim`, `slurp` | `shani-tools-extra` (added 2026-10-08) | **unmeasurable from these matrices** - added after both images were built |
+| `gptfdisk`, `btop`, `NVTOP`, `iotop`, `hdparm`, `cabextract` | `shani-tools-extra` | absent from images older than the current PKGBUILD; needs a fresh image to judge |
+| `bsd-games` | `shani-tools` | not a question a desktop user asks |
+| `nbd`, `wireshark-cli`, `gobuster` | `shani-tools-network` | `capinfos`/`editcap` absent for this reason - already recorded above |
+
+**What survives the staleness: `grim` is a downgrade regardless of whether it
+ships, and the reason is a fact about compositors rather than about which box it
+was measured on.** `grim` implements `wlr-screencopy-unstable-v1`, which only
+wlroots compositors (Sway, Hyprland, river) provide. Neither GNOME's Mutter nor
+KDE's KWin is wlroots, so `grim` fails on both images by construction - measured
+here as `compositor doesn't support wlr-screencopy-unstable-v1` (rc=1), which is
+the same answer a real desktop gives. **The verdict holds on a stronger basis
+than the matrix that was first used to reach it.**
+
+The GNOME screenshot path was measured properly rather than assumed, and it is
+the interesting half of this:
+
+- `gnome-screenshot -f out.png` - **rc=124, no file**, after
+  `Unable to use GNOME Shell's builtin screenshot interface, resorting to
+  fallback X11` and `Unable to capture a screenshot of any window`.
+- `org.gnome.Shell.Screenshot` on the session bus - **`AccessDenied: Screenshot
+  is not allowed`**, because that service is behind a *bus-name allowlist*
+  (`checkInvocation` throws `ACCESS_DENIED` for a sender not in it). Read out of
+  `libshell-18.so`; the guard is a `_isSenderAllowed` check against watched
+  well-known names, so a shell spawned by an assistant is not on it.
+- `org.freedesktop.portal.Desktop` Screenshot - **works**: response
+  `(0, {'uri': 'file:///.../Pictures/Screenshot.png'})`, and the file is a real
+  1920x1080 RGBA PNG of 207,949 bytes. It is asynchronous (a request handle,
+  then the `Request::Response` signal), so a caller must run a main loop.
+- **But `xdg-desktop-portal` is on neither matrix either**, so this cannot be
+  assumed to ship.
+
+`screenshot` and `qr_code` already delegate to `screengrab.capture_screen()`,
+which has its own backend chain (`grim`, then `gnome-screenshot`, then
+`spectacle`, then XWD) - so there is **no gap to fill here** and the measurement
+above is the reason to leave it alone. Building a second capture skill against
+a portal that is not on the image would have been the confidently-wrong answer.
