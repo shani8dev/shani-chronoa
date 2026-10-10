@@ -6710,3 +6710,102 @@ no cause in its message (now prints stderr, and environmental is a SKIP), an
 while the summary still counted its results, two commands missing from the
 presence list so a run could not say whether they were on the image, and a
 truncated capture that left the parser writer completing a fixture by hand.
+
+## Driver development: what this platform can and cannot do (2026-10-10)
+
+Five skills, in two modules, built after reading both image matrices
+(`chronoa-matrix.json` for GNOME 20260925 and Plasma 20260922, 3,982 and 4,116
+commands) rather than guessing at what a Linux desktop can do.
+
+**The headline is a negative one, and it is the reason this is worth recording.**
+A kernel module **cannot be built on a stock ShaniOS image**: no compiler, no
+`make`, no `dkms`, and no `linux-headers` on any desktop profile - only
+`linux-api-headers`, which is the UAPI half and cannot build a module.
+`linux-headers` is in exactly one profile (`server/Packages-Base`) and *no*
+profile installs `base-devel`. `kmod` does ship (insmod/rmmod/modprobe/modinfo/
+lsmod/depmod) and `binutils` does, so the load and inspect sides exist.
+
+Two more facts make a module that *builds* still unusable, and both are why
+`install` is deliberately not an action: `/` is a read-only blue/green slot and
+`/var` is tmpfs, so a module has nowhere to persist across a reboot; and
+`sbctl`/`sbsigntools`/`mokutil` are **server-only**, so a desktop has Secure Boot
+with no tool to sign with.
+
+**The user-space half is the feasible half**, and that is why it got the bigger
+share of the design. Already on both images, no compiler involved:
+`fusermount3` (fuse3), `v4l2-ctl`/`edid-decode` (v4l-utils),
+`i2cdetect`/`i2cget`/`i2cset` (i2c-tools), `socat`, `udevadm`. Reading an I2C
+register *is* a user-space driver, so `device_i2c` is the part that works here.
+
+| skill | module | gate |
+|---|---|---|
+| `driver_status` | `driver_dev.py` | — (read-only) |
+| `driver_scaffold` | `driver_dev.py` | — (writes new files under home, like `write_text_file`) |
+| `driver_build` | `driver_dev.py` | `driver-build-enabled` |
+| `device_probe` | `user_driver.py` | — |
+| `device_i2c` | `user_driver.py` | `i2c-write-enabled`, **destructive** |
+
+**Reads are ungated and writes are not, and that asymmetry is the design.** A
+register write to the wrong address can erase an EEPROM's stored calibration or
+drive a power device into a state nothing here can undo. The denylist runs
+*before* the tool check, deliberately: a refusal about destroying a device has
+to be the same answer on every machine, or it exists only where a binary
+happens to be missing (the `nfc` bank-card rule, and the same reasoning that
+kept the MoYoung wearable protocol unimplemented).
+
+### Four bugs in the first version, all found by running it
+
+1. **`obj-m := mymod` does not build a module.** I "fixed" this twice by
+   reasoning and was wrong both times. Sweeping all five spellings against real
+   headers (7.0.0-38-generic) settles it: **`obj-m := mymod.o`** builds, the
+   bare form fails with *"No rule to make target 'mymod', needed by
+   modules.order"* and the compile never happens - so the failure names a target
+   nobody wanted. The template now carries the whole measured sweep as a
+   comment, and `tests/test_driver_dev.py` asserts the active line.
+2. **`/sys/kernel/security/lockdown` read whole instead of by its bracketed
+   active mode.** The real file says `[none] integrity confidentiality`, so the
+   code called an unlocked machine **"locked down"** and claimed unsigned
+   modules would be refused when they are not - the dangerous direction to be
+   wrong in. This is the one fact the matrix cannot supply, which is what
+   `slot-tests/chronoa-driver-tools.sh` in `../shani-testbed` now measures.
+3. **The EEPROM denylist could not fire on any input.** It was a dict keyed
+   `(address, register)` holding what are plainly register *ranges*, so every
+   lookup missed - a refusal that existed only in the source. Re-keyed on the
+   register, and the message now says it is a **convention** and the datasheet
+   is the authority, because a rule presenting itself as certain about the
+   device in front of you is the confident wrong answer this file keeps
+   recording.
+4. **Two inverted verdicts**: dkms was in the "blocks a build" set, so a
+   machine with a compiler and headers was told it could not build a module
+   because the one optional piece was missing - contradicting the four lines
+   above it - and I2C buses were sorted as strings, so `10` came before `2`.
+   `driver_status`'s rows now carry their own `blocks_a_build` flag instead of
+   two string-matching comprehensions disagreeing with each other.
+
+The build is verified **for real**: a scaffolded module compiles through the
+real `driver_build`, and `modinfo` reads the resulting 182,776-byte `.ko` as a
+loadable module. The post-condition requires the `.ko` to be **newer than the
+`.c`**, because a refused build leaves the previous one sitting there and
+matching mere existence verifies work that never happened (the `pdf_pages`
+defect). 34 tests, **7 mutations all caught** - two of which first reported
+"passed" because `str.replace` silently mutated nothing (the anchor appeared
+twice), which is why every mutation asserts `count == 1` first.
+
+**The Arch claims are measured, not inferred.** `../shani-testbed`'s
+`slot-tests/chronoa-driver-tools.sh` asserts them on a real image, with
+`tests/chronoa-driver-tools-results.sh` (22 host checks) proving those
+assertions can go red. Writing that file found three more bugs of mine: a
+`present()` helper that returned true when **nothing had been measured** (11
+PASSes from an emptied capture), and two FAILs for the same reason.
+
+### Where this landed, for anyone reading `git log`
+
+**All of the above is in commit `ec6b295`**, whose message is *"gui, tests:
+SENSE_TITLES was a fifth hand-kept sense-name list..."* - a concurrent session
+committed the tree with my work in it, and the commit message does not mention
+it. `capabilities.py`'s half (the `GATED` entries, the `_GROUPS` rows, the
+destructive key) went the same way inside `f5ece62`. Neither commit is on any
+remote yet, so the split is still possible - **but another session is committing
+in this repository right now, so rewriting history underneath one is a decision
+for a person and not a mechanical fix.** This section is the record until
+someone decides otherwise.
