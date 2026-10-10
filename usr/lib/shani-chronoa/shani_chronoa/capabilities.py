@@ -484,6 +484,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
     # by precedent with `get_file_info` and `explain_command`.
     "inspect_binary": ("System", "What a program is, and what it needs to run"),
+    "process_detail": ("System", "What one running process is waiting on"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),
