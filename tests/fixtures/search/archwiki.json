@@ -1,0 +1,50 @@
+{
+ "batchcomplete": "",
+ "continue": {
+  "sroffset": 4,
+  "continue": "-||"
+ },
+ "query": {
+  "searchinfo": {
+   "totalhits": 12
+  },
+  "search": [
+   {
+    "ns": 0,
+    "title": "Official Arch Linux Install Guide (日本語)",
+    "pageid": 13465,
+    "size": 44,
+    "wordcount": 2,
+    "snippet": "",
+    "timestamp": "2015-03-01T04:03:51Z"
+   },
+   {
+    "ns": 0,
+    "title": "Official Arch Linux Install Guide Appendix",
+    "pageid": 6320,
+    "size": 37,
+    "wordcount": 3,
+    "snippet": "",
+    "timestamp": "2014-02-17T03:15:55Z"
+   },
+   {
+    "ns": 0,
+    "title": "Official Arch Linux Install Guide (Українська)",
+    "pageid": 13466,
+    "size": 51,
+    "wordcount": 5,
+    "snippet": "",
+    "timestamp": "2017-11-24T03:14:33Z"
+   },
+   {
+    "ns": 0,
+    "title": "Official Arch Linux Install Guide (简体中文)",
+    "pageid": 13029,
+    "size": 40,
+    "wordcount": 4,
+    "snippet": "#REDIRECT [[zh-hans:Installation <span class=\"searchmatch\">guide</span>]]\n",
+    "timestamp": "2022-12-02T10:22:00Z"
+   }
+  ]
+ }
+}

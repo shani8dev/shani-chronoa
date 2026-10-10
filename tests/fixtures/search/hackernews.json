@@ -1,0 +1,298 @@
+{
+ "exhaustive": {
+  "nbHits": false,
+  "typo": false
+ },
+ "exhaustiveNbHits": false,
+ "exhaustiveTypo": false,
+ "hits": [
+  {
+   "_highlightResult": {
+    "author": {
+     "matchLevel": "none",
+     "matchedWords": [],
+     "value": "jbott"
+    },
+    "title": {
+     "fullyHighlighted": false,
+     "matchLevel": "full",
+     "matchedWords": [
+      "arch",
+      "linux"
+     ],
+     "value": "Show HN: Twitch Installs <em>Arch</em> <em>Linux</em> – A cooperative text-based horror game"
+    },
+    "url": {
+     "matchLevel": "none",
+     "matchedWords": [],
+     "value": "https://twitchinstalls.com"
+    }
+   },
+   "_tags": [
+    "story",
+    "author_jbott",
+    "story_10477721",
+    "show_hn"
+   ],
+   "author": "jbott",
+   "children": [
+    10477729,
+    10477832,
+    10477848,
+    10477853,
+    10477882,
+    10477894,
+    10477909,
+    10477924,
+    10477936,
+    10477946,
+    10478096,
+    10478267,
+    10478355,
+    10478406,
+    10478525,
+    10478695,
+    10478842,
+    10479334,
+    10479346,
+    10479539,
+    10479666,
+    10479673,
+    10480100,
+    10480117,
+    10480179,
+    10480191,
+    10480482,
+    10480791,
+    10481383,
+    10482467
+   ],
+   "created_at": "2015-10-30T13:45:40Z",
+   "created_at_i": 1446212740,
+   "num_comments": 250,
+   "objectID": "10477721",
+   "points": 802,
+   "story_id": 10477721,
+   "title": "Show HN: Twitch Installs Arch Linux – A cooperative text-based horror game",
+   "updated_at": "2025-08-27T11:59:39Z",
+   "url": "https://twitchinstalls.com"
+  },
+  {
+   "_highlightResult": {
+    "author": {
+     "matchLevel": "none",
+     "matchedWords": [],
+     "value": "meribold"
+    },
+    "title": {
+     "fullyHighlighted": false,
+     "matchLevel": "full",
+     "matchedWords": [
+      "arch",
+      "linux"
+     ],
+     "value": "Using the same <em>Arch</em> <em>Linux</em> installation for a decade"
+    },
+    "url": {
+     "fullyHighlighted": false,
+     "matchLevel": "full",
+     "matchedWords": [
+      "arch",
+      "linux"
+     ],
+     "value": "https://meribold.org/2022/08/16/same-<em>arch</em>-<em>linux</em>-installation-for-a-decade/"
+    }
+   },
+   "_tags": [
+    "story",
+    "author_meribold",
+    "story_32483979"
+   ],
+   "author": "meribold",
+   "children": [
+    32484889,
+    32484962,
+    32485026,
+    32485038,
+    32485093,
+    32485106,
+    32485128,
+    32485185,
+    32485210,
+    32485218,
+    32485224,
+    32485267,
+    32485299,
+    32485302,
+    32485330,
+    32485384,
+    32485387,
+    32485418,
+    32485438,
+    32485486,
+    32485512,
+    32485552,
+    32485657,
+    32485684,
+    32485852,
+    32485862,
+    32485909,
+    32485912,
+    32485981,
+    32486003,
+    32486023,
+    32486058,
+    32486062,
+    32486199,
+    32486202,
+    32486205,
+    32486242,
+    32486247,
+    32486404,
+    32486637,
+    32486648,
+    32486684,
+    32486730,
+    32486761,
+    32486805,
+    32486856,
+    32486939,
+    32486945,
+    32487059,
+    32487121,
+    32487163,
+    32487309,
+    32487808,
+    32487812,
+    32488032,
+    32488275,
+    32488609,
+    32488761,
+    32488774,
+    32488860,
+    32488910,
+    32488930,
+    32488938,
+    32488967,
+    32489132,
+    32489203,
+    32489358,
+    32489477,
+    32489511,
+    32489615,
+    32489713,
+    32489772,
+    32489845,
+    32489898,
+    32490046,
+    32490177,
+    32490361,
+    32490536,
+    32491749,
+    32491757,
+    32491907,
+    32492379,
+    32492512,
+    32493056,
+    32493847,
+    32493980,
+    32494389,
+    32494427,
+    32495295,
+    32506320,
+    32507412,
+    32509968
+   ],
+   "created_at": "2022-08-16T15:20:12Z",
+   "created_at_i": 1660663212,
+   "num_comments": 411,
+   "objectID": "32483979",
+   "points": 526,
+   "story_id": 32483979,
+   "title": "Using the same Arch Linux installation for a decade",
+   "updated_at": "2026-03-10T11:07:42Z",
+   "url": "https://meribold.org/2022/08/16/same-arch-linux-installation-for-a-decade/"
+  },
+  {
+   "_highlightResult": {
+    "author": {
+     "matchLevel": "none",
+     "matchedWords": [],
+     "value": "nixcraft"
+    },
+    "title": {
+     "fullyHighlighted": false,
+     "matchLevel": "full",
+     "matchedWords": [
+      "arch",
+      "linux"
+     ],
+     "value": "M1 Pro 14“ MacBook Pro Running KDE Plasma 5 on <em>Arch</em> <em>Linux</em> ARM"
+    },
+    "url": {
+     "matchLevel": "none",
+     "matchedWords": [],
+     "value": "https://twitter.com/marcan42/status/1458473546225577987"
+    }
+   },
+   "_tags": [
+    "story",
+    "author_nixcraft",
+    "story_29197509"
+   ],
+   "author": "nixcraft",
+   "children": [
+    29197782,
+    29197822,
+    29197858,
+    29197899,
+    29198076,
+    29198187,
+    29198200,
+    29198336,
+    29198339,
+    29198364,
+    29198694,
+    29198809,
+    29198912,
+    29199283,
+    29199447,
+    29200188,
+    29201087,
+    29201515,
+    29202253,
+    29202685,
+    29209933,
+    29215273
+   ],
+   "created_at": "2021-11-12T09:13:12Z",
+   "created_at_i": 1636708392,
+   "num_comments": 259,
+   "objectID": "29197509",
+   "points": 392,
+   "story_id": 29197509,
+   "title": "M1 Pro 14“ MacBook Pro Running KDE Plasma 5 on Arch Linux ARM",
+   "updated_at": "2024-09-20T09:52:34Z",
+   "url": "https://twitter.com/marcan42/status/1458473546225577987"
+  }
+ ],
+ "hitsPerPage": 3,
+ "nbHits": 17579,
+ "nbPages": 334,
+ "page": 0,
+ "params": "query=arch+linux&hitsPerPage=3&advancedSyntax=true&analyticsTags=backend",
+ "processingTimeMS": 44,
+ "processingTimingsMS": {
+  "_request": {
+   "roundTrip": 23
+  },
+  "fetch": {
+   "query": 18,
+   "scanning": 24,
+   "total": 43
+  },
+  "total": 44
+ },
+ "query": "arch linux",
+ "serverTimeMS": 45
+}

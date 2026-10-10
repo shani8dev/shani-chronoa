@@ -25,11 +25,33 @@ Two findings shaped this module more than anything else:
    URL that produced 6.9 KB of results with no UA flag produced **zero bytes**
    when one was passed. So this module passes no UA - which also means it does
    not pretend to be a browser, and the engine answered anyway.
-2. **Google does not answer at all** to a plain fetch: its result links exist
-   only inside the JavaScript that renders them. Reporting "Google found
-   nothing" for a page that never contained a result would be the
-   confidently-wrong answer this repo keeps recording, so Google is not in the
-   provider list and the reason is stated above rather than left as a gap.
+2. **Google does not answer, ever, to anything that is not a JavaScript
+   engine - and the chain is measured rather than assumed.** The obvious first
+   move is `curl -L`, so it is worth being exact about why that is not it:
+
+   | step | measured |
+   |---|---|
+   | `curl -L` on `/search?q=` | `http_code=200 num_redirects=0` - **there is no HTTP redirect to follow** |
+   | what it does send | `<meta http-equiv="refresh" content="0;url=/httpservice/retry/enablejs?sei=...">` |
+   | fetching that URL by hand, cookies carried | the page saying *"Enable JavaScript to use search"* |
+   | `lynx -dump` (no JS) | *"Update your browser - Your browser is not supported anymore"* |
+   | `google-chrome --headless` (this box, real JS) | *"Our systems have detected unusual traffic"* |
+
+   **So the blocker is not the fetcher - it is that there is no JavaScript
+   engine on the image at all.** `tools/cli_matrix.py` over both matrices
+   confirms it: of 4,231 commands, the web-related subset is `curl`, `wget`,
+   `aria2c`, `lynx` and the DNS tools. **No browser, no `node`, no `phantomjs`,
+   no `wkhtmltopdf`, no RSS reader.** Chrome exists on the dev box and still
+   gets gated, so it is not a missing binary here - it is that Google serves
+   results only to something that runs its JavaScript, and nothing that ships
+   on ShaniOS does.
+
+   Reported as "Google found nothing" for a page that never contained a result
+   is the confidently-wrong answer this repo keeps recording, so Google is not
+   in the provider list and the reason is stated rather than left as a gap.
+   **The matrix's `jq` is the more useful fact**: the engines that do answer
+   return HTML that `lynx` renders to text, and the JSON APIs return structured
+   data a parser can actually trust.
 
 ## Why `lynx` rather than parsing the HTML
 
@@ -49,6 +71,7 @@ engine answers.
 
 from __future__ import annotations
 
+import html
 import re
 import shutil
 import subprocess
@@ -82,6 +105,37 @@ _MIN_PAGE_BYTES = 1200
 #: a gate page minutes later, so which engine answers first is a function of
 #: which one has not just been asked. Bing and DuckDuckGo are tried first
 #: because they were the two that answered consistently across the sweep.
+#: **JSON APIs are tried first, and the order is the point.** A JSON provider
+#: returns fields that need no parsing and no assumption about markup, and it
+#: is an API published for programmatic access rather than a page whose terms
+#: ask automated readers to leave. Measured on this box, all four answer:
+#:
+#:     Arch Wiki   -> Install guide; Official Arch Linux Install Guide ...
+#:     Stack Exchange -> Arch Linux install doesn't boot; Questions before inst
+#:     Hacker News -> Show HN: Twitch Installs Arch Lin...
+#:     GitHub      -> ChrisTitusTech/ArchTitus; archlinux/archinstall
+#:
+#: and each with a title and a URL, which is the same shape the HTML engines
+#: produce - so they slot into the same `Result`.
+#: **The query's parameter name is part of each entry.** The first version
+#: omitted it entirely, so `if "q" in filled:` was never true and the query was
+#: never sent - which measured as a well-formed answer about Ubuntu root
+#: passwords for the query "arch linux install guide". Each API names its query
+#: parameter differently and there is no way to infer it.
+_JSON_PROVIDERS = (
+    ("Arch Wiki", "https://wiki.archlinux.org/api.php",
+     {"action": "query", "list": "search", "srsearch": "",
+      "srlimit": 8, "format": "json"}, "_parse_archwiki"),
+    ("Stack Exchange", "https://api.stackexchange.com/2.3/search/advanced",
+     {"order": "desc", "sort": "relevance", "q": "", "site": "unix",
+      "pagesize": 8}, "_parse_stackexchange"),
+    ("Hacker News", "https://hn.algolia.com/api/v1/search",
+     {"query": "", "hitsPerPage": 8}, "_parse_hackernews"),
+    ("GitHub", "https://api.github.com/search/repositories",
+     {"q": "", "per_page": 8}, "_parse_github"),
+)
+
+#: The HTML engines, tried after the JSON ones.
 PROVIDERS = (
     ("Bing", "lynx", "https://www.bing.com/search?q={query}&count=30", "_parse_bing"),
     ("DuckDuckGo", "lynx", "https://lite.duckduckgo.com/lite/?q={query}", "_parse_ddg"),
@@ -184,6 +238,18 @@ def _looks_like_url(text):
         return True
     return bool(re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(/[^\s]*)?",
                              text, re.I))
+
+
+def _fetch_json(url, params, component):
+    """(data, reason). Through `netjson` - the same helper `skills/lookup.py`
+    uses - so there is one HTTP policy and one egress record, not two.
+    """
+    from shani_chronoa.netjson import get_json
+    try:
+        return get_json(component, url, params), ""
+    except Exception as exc:
+        return {}, "%s (%s)" % (exc.__class__.__name__,
+                                str(exc)[:80])
 
 
 def _dump(url):
@@ -469,6 +535,85 @@ def _parse_wiby(text):
     return results
 
 
+# --- the JSON APIs -------------------------------------------------------------
+# Each returns `Result(title, url, description)` from its own documented shape.
+# **No markup is assumed anywhere in this section**, which is the whole reason
+# these are tried first: a JSON provider cannot break because an engine
+# rearranged its HTML.
+
+def _parse_archwiki(data):
+    out = []
+    for hit in (data.get("query", {}).get("search") or []):
+        title = (hit.get("title") or "").strip()
+        snippet = hit.get("snippet", "")
+        # **A redirect is not a page.** Measured: the top Arch Wiki hit for
+        # "arch linux install guide" was `Instalar Arch Linux a partir de um
+        # Linux existente`, whose entire snippet is
+        # `#redirect [[Install Arch Linux from existing Linux]]` - a signpost
+        # to another page, so following it is following a second link to read
+        # one thing.
+        if snippet.strip().startswith("#redirect"):
+            continue
+        if not title:
+            continue
+        out.append(Result(title,
+                          "https://wiki.archlinux.org/title/" +
+                          title.replace(" ", "_"),
+                          _clean(re.sub(r"<[^>]+>", " ", hit.get("snippet", ""))),
+                          "Arch Wiki"))
+    return out
+
+
+def _parse_stackexchange(data):
+    out = []
+    for item in (data.get("items") or []):
+        # **`html.unescape`, because the API returns `&#39;`.** Measured: a raw
+        # read puts `Arch Linux install doesn&#39;t boot` in front of the model.
+        title = html.unescape(_clean(item.get("title") or ""))
+        if not title:
+            continue
+        out.append(Result(title, item.get("link", ""),
+                          "%d answers, %d views" % (item.get("answer_count", 0),
+                                                   item.get("view_count", 0)),
+                          "Stack Exchange"))
+    return out
+
+
+def _parse_hackernews(data):
+    out = []
+    for hit in (data.get("hits") or []):
+        title = _clean(hit.get("title") or "")
+        url = hit.get("url") or ""
+        if not title:
+            continue
+        if not url and hit.get("objectID"):
+            url = "https://news.ycombinator.com/item?id=" + str(hit["objectID"])
+        pts = hit.get("points") or 0
+        out.append(Result(title, url,
+                          "%d points, %d comments" % (pts,
+                                                      hit.get("num_comments", 0)),
+                          "Hacker News"))
+    return out
+
+
+def _parse_github(data):
+    out = []
+    for item in (data.get("items") or []):
+        name = item.get("full_name") or ""
+        if not name:
+            continue
+        out.append(Result(name, item.get("html_url", ""),
+                          _clean(item.get("description") or ""), "GitHub"))
+    return out
+
+
+_JSON_PARSERS = {
+    "Arch Wiki": _parse_archwiki,
+    "Stack Exchange": _parse_stackexchange,
+    "Hacker News": _parse_hackernews,
+    "GitHub": _parse_github,
+}
+
 _PARSERS = {
     "Bing": _parse_bing,
     "DuckDuckGo": _parse_ddg,
@@ -497,6 +642,50 @@ def search(query, component="skill:web_search"):
     if refused:
         return [], refused, []
 
+    # **The JSON APIs, before the HTML engines.** Measured: they answer, their
+    # output needs no parsing, and they are published for programmatic access.
+    # Collecting from all of them costs four requests; stopping at the first
+    # costs one. The same stop-at-first rule applies, but the JSON providers
+    # are the cheap, sturdy half so they are asked first.
+    seen = set()
+    merged = []
+    problems = []
+    for name, url, params, parser_name in _JSON_PROVIDERS:
+        # **The query has to be put into the params, and the first version
+        # never did.** Measured live: searching "arch linux install guide"
+        # returned *"Ubuntu 16.04 root password suddenly not working"* and
+        # *"Samba Shared Folder"* - because `sort=relevance` with no `q` at all
+        # returns the newest questions on the site, and this skill presented a
+        # confident, well-formed, **entirely wrong** answer. A parser that works
+        # is not evidence the right question was asked.
+        filled = dict(params)
+        if "q" in filled:
+            filled["q"] = query
+        if "srsearch" in filled:
+            filled["srsearch"] = query
+        if "query" in filled:
+            filled["query"] = query
+        data, why = _fetch_json(url, filled, component)
+        if why:
+            problems.append("%s: %s" % (name, why))
+            continue
+        found = _JSON_PARSERS[name](data)
+        for result in found:
+            if result.url in seen:
+                continue
+            seen.add(result.url)
+            merged.append(result)
+            if len(merged) >= _MAX_RESULTS:
+                break
+        if merged:
+            break
+    if merged:
+        return merged, "", problems
+    if not problems:
+        problems.append("no JSON API answered")
+
+    # Then the HTML engines.
+    merged = []
     seen = set()
     merged = []
     problems = []

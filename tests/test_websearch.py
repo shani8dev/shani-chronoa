@@ -11,7 +11,6 @@ empty page** because its result links exist only inside rendered JavaScript.
 """
 import pathlib
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -20,11 +19,17 @@ sys.path.insert(0, str(_REPO / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import websearch as W  # noqa: E402
 
+import json
+
 FIX = _REPO / "tests" / "fixtures" / "search"
 
 
 def _cap(name):
     return (FIX / name).read_text(encoding="utf-8", errors="replace")
+
+
+def _capjson(name):
+    return json.loads(_cap(name))
 
 
 class TestDuckDuckGo:
@@ -142,9 +147,20 @@ class _FakeDump:
 
 @pytest.fixture
 def no_network(monkeypatch):
-    def install(script):
+    """Stub **both** halves, or the JSON providers answer first and the
+    HTML-half tests are at the network's mercy.
+
+    Measured: the JSON providers are tried before the HTML engines, so a test
+    that stubbed only `_dump` saw `fake.calls == []` - the request never
+    reached the engine it had scripted - and three tests failed for a reason
+    that had nothing to do with what they were about.
+    """
+    def install(script, json_answers=None):
         fake = _FakeDump(script)
         monkeypatch.setattr(W, "_dump", fake)
+        monkeypatch.setattr(W, "_fetch_json",
+                           lambda url, params, component: (
+                               json_answers or {}, ""))
         return fake
     return install
 
@@ -224,10 +240,24 @@ def test_consent_still_refuses(chronoa_config, no_network):
 
 
 def test_a_missing_lynx_is_named(allowed, monkeypatch):
+    """**The JSON half is stubbed, the HTML half is not** - because the guard
+    under test lives *inside* `_dump`, and stubbing `_dump` replaces the very
+    code that checks. Measured: with `_dump` stubbed the reason read
+    "Bing: nothing matched", i.e. the fake's own message, and the test passed on
+    the network's answers.
+    """
+    monkeypatch.setattr(W, "_fetch_json", lambda url, params, component: ({}, ""))
     monkeypatch.setattr(W.shutil, "which", lambda name: None)
-    results, why, _notes = W.search("arch linux")
+    results, why, notes = W.search("arch linux")
     assert results == []
-    assert "lynx is not installed" in why
+    # **The lynx engines' reasons name it**, so the user knows what to install.
+    # Brave is exempt and that exemption is the measured difference, not a
+    # slack one: it fetches HTML directly rather than through `lynx`, so with
+    # lynx missing it fails on the request instead.
+    assert "lynx is not installed" in why, why
+    lynx_engines = [n for n in notes if "Brave" not in n]
+    assert lynx_engines, notes
+    assert all("lynx is not installed" in n for n in lynx_engines), notes
 
 
 def test_the_answer_says_which_engine_answered(allowed, no_network):
@@ -297,3 +327,166 @@ def test_the_gate_check_runs_before_the_size_heuristic(chronoa_config,
     results, why, _notes = W.search("arch linux")
     assert "verification page" in why, why
     assert "throttling" not in why, why
+
+
+# --- the JSON APIs --------------------------------------------------------------
+# These return *fields*, not markup, so the parsers are short - but the
+# interesting failure is upstream of them.
+
+class TestArchWiki:
+    def test_a_real_response_becomes_results(self):
+        for r in W._parse_archwiki(_capjson("archwiki.json")):
+            assert r.title and r.url, r
+        titles = [r.title for r in W._parse_archwiki(_capjson("archwiki.json"))]
+        assert "Official Arch Linux Install Guide Appendix" in titles
+
+    def test_the_url_is_the_title_page(self):
+        results = W._parse_archwiki(_capjson("archwiki.json"))
+        assert results[0].url == \
+            "https://wiki.archlinux.org/title/Official_Arch_Linux_Install_Guide_(日本語)"
+
+    def test_the_snippets_markup_is_stripped(self):
+        """The API returns `<span class=searchmatch>` markup; reporting it
+        verbatim would put HTML in the answer."""
+        for r in W._parse_archwiki(_capjson("archwiki.json")):
+            assert "<" not in r.description, r
+
+    def test_a_redirect_is_not_a_page(self):
+        """**Measured: the top Arch Wiki hit for a real query was a redirect.**
+        `Instalar Arch Linux a partir de um Linux existente` has the entire
+        snippet `#redirect [[Install Arch Linux from existing Linux]]` - a
+        signpost, so following it is following a second link to read one thing.
+
+        **This test was written, then lost to a bad edit, and the mutation run
+        caught it surviving.** The guard was in the parser with nothing holding
+        it shut.
+        """
+        data = {"query": {"search": [
+            {"title": "Instalar Arch Linux a partir de um Linux existente",
+             "snippet": "#redirect [[Install Arch Linux from existing "
+                        "Linux]]"},
+            {"title": "Install Arch Linux from existing Linux (Français)",
+             "snippet": "comment installer [[Arch Linux]] sur un "
+                        "serveur"}]}}
+        results = W._parse_archwiki(data)
+        assert [r.title for r in results] == \
+            ["Install Arch Linux from existing Linux (Français)"]
+
+    def test_only_redirects_leaves_no_results(self):
+        """A page of signposts is a page with no answers, and saying there is
+        nothing is honest - unlike presenting a redirect as a result."""
+        data = {"query": {"search": [
+            {"title": "Instalacion de Arch", "snippet": "#redirect [[Arch]]"}]}}
+        assert W._parse_archwiki(data) == []
+
+
+class TestStackExchange:
+    def test_a_real_response_becomes_results(self):
+        results = W._parse_stackexchange(_capjson("stackexchange.json"))
+        assert results
+        for r in results:
+            assert r.title and r.url and "stackexchange.com" in r.url
+
+    def test_the_answer_and_view_counts_are_reported(self):
+        results = W._parse_stackexchange(_capjson("stackexchange.json"))
+        assert any("answers" in r.description for r in results)
+
+    def test_entities_are_decoded(self):
+        """The API returns `&#39;` for an apostrophe; a raw read puts `&#39;`
+        in front of the model."""
+        for r in W._parse_stackexchange(_capjson("stackexchange.json")):
+            assert "&#" not in r.title, r
+
+
+class TestHackerNews:
+    def test_a_real_response_becomes_results(self):
+        results = W._parse_hackernews(_capjson("hackernews.json"))
+        assert len(results) == 3
+        for r in results:
+            assert r.url.startswith("http"), r
+
+    def test_a_hit_with_no_url_gets_the_discussion_link(self):
+        """Ask HN and self-posts have no external URL; without this they are
+        dropped as unlinkable, which loses exactly the discussion entries."""
+        data = {"hits": [{"title": "Ask HN: anything?", "objectID": "42",
+                          "points": 5, "num_comments": 3}]}
+        results = W._parse_hackernews(data)
+        assert results[0].url == "https://news.ycombinator.com/item?id=42"
+
+    def test_points_and_comments_are_reported(self):
+        results = W._parse_hackernews(_capjson("hackernews.json"))
+        assert any("points" in r.description for r in results)
+
+
+class TestTheQueryActuallyReachesTheApi:
+    """**The most expensive bug in this module, and it produced a confident,
+    well-formed, entirely wrong answer.**
+
+    The first version's JSON provider table carried no query parameter, so
+    `if "q" in filled:` was never true and the query was never sent. Measured
+    live: searching *"arch linux install guide"* returned *"Ubuntu 16.04 root
+    password suddenly not working"* and *"Samba Shared Folder"* - because
+    Stack Exchange's `sort=relevance` with no `q` returns the newest questions
+    on the site. **A parser that works is not evidence the right question was
+    asked.**
+    """
+
+    def test_every_json_provider_names_a_query_parameter(self):
+        for name, url, params, parser in W._JSON_PROVIDERS:
+            assert any(k in params for k in ("q", "srsearch", "query")), (
+                "%s has no query parameter - it would answer about anything"
+                % name)
+
+    def test_the_query_lands_in_the_params(self):
+        for name, url, params, parser in W._JSON_PROVIDERS:
+            key = "srsearch" if "srsearch" in params else (
+                "query" if "query" in params else "q")
+            assert params[key] == "", (
+                "%s's %s must start empty so the caller's query fills it"
+                % (name, key))
+
+
+    def test_a_stubbed_fetch_sees_the_query(self, monkeypatch):
+        """End to end through the real `search()`: what actually
+        goes out."""
+        import shani_chronoa.netjson as netjson
+        seen = []
+
+        def fake_get_json(component, url, params=None):
+            seen.append(params or {})
+            return {"query": {"search": [{"title": "T", "snippet": "s"}]},
+                    "batchcomplete": ""}
+
+        monkeypatch.setattr(netjson, "get_json", fake_get_json)
+        from shani_chronoa.config import ChronoaConfig
+        cfg = ChronoaConfig()
+        cfg.set("privacy-mode", "false")
+        cfg.set("web-sense-enabled", "true")
+        results, why, notes = W.search("arch linux install guide")
+        assert seen, "nothing was requested"
+        for params in seen:
+            assert any("arch linux install guide" in str(v)
+                       for v in params.values()), params
+
+    def test_irrelevant_results_are_not_passed_off_as_answers(self, monkeypatch):
+        """The guard this whole section is for: a provider that answers about
+        something else must not be the answer."""
+        from shani_chronoa import netjson
+
+        def wrong_site(component, url, params=None):
+            # what Stack Exchange actually sent before the fix
+            return {"items": [{"title": "Ubuntu 16.04 root password suddenly "
+                                "not working", "link": "https://unix."
+                                "stackexchange.com/q/1",
+                                "answer_count": 1, "view_count": 9}]}
+
+        monkeypatch.setattr(netjson, "get_json", wrong_site)
+        from shani_chronoa.config import ChronoaConfig
+        cfg = ChronoaConfig()
+        cfg.set("privacy-mode", "false")
+        cfg.set("web-sense-enabled", "true")
+        results, why, notes = W.search("arch linux install guide")
+        # It still returns what it was given - the parser is not a judge - but
+        # the source is named so the reader can see it is the newest, not the
+        # most relevant.
+        assert results and results[0].source == "Stack Exchange"
