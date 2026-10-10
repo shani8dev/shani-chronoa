@@ -1038,6 +1038,28 @@ with a UPS was indistinguishable from a desktop, and the one question a UPS exis
   new sense cannot fall into the `heard-sound` / `calendar_edit` trap of having a key no user
   can reach. Verified: 52 senses in the registry, 52 with a consent key, none unreachable.
 
+  **The trigger engine was blind to the same hardware, and fixing it found two bugs in code
+  that already shipped.** `powerstate` is one of the event types and its reader handled
+  `Mains`, `USB` and `Battery` — so a machine with a UPS could not arm "when the power goes
+  out" at all, which is the one rule a UPS exists for. The sense could therefore report the
+  power was out while nothing could act on it. A UPS answers both halves (`online` is a mains
+  source, `capacity` is a battery source), so it needed its own branch; two bugs followed,
+  both found by writing the tests rather than by reading:
+
+  * **The shipped status inference could not read a UPS at all.** It was
+    `status != "Discharging"`, and a UPS's word is `OB DISCHRG` — which is not equal to it,
+    so a UPS on battery would have been read as **on AC**. That silences the exact rule this
+    was meant to enable, on the machine that has a UPS. `_ac_from_status` handles both
+    vocabularies now (NUT's own `upsc` spells it `OL` / `OB` / `OB LB`).
+  * **"First status wins" let one device's word discard every other's.** `status` was
+    assigned with `or`, so a UPS that had lost mains read as on AC because some other entry
+    said `OL`. Each source now casts a vote and **"on battery" wins** — a discharging source
+    is the more urgent fact than a charging one, so OR-ing them would let a charging laptop
+    mask a dead UPS.
+
+  The `scope` guard still holds for the new branch: a mouse at 5% must not make a UPS at 90%
+  read as low, which is what averaging levels across a `Device`-scoped battery would do.
+
 ## Surfaces added 2026-10-01: six event types, post-conditions, "Open with"
 
 Found by `tools/cli_matrix.py` (see below), which reads Chronoa's own registries
