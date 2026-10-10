@@ -485,6 +485,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # by precedent with `get_file_info` and `explain_command`.
     "inspect_binary": ("System", "What a program is, and what it needs to run"),
     "process_detail": ("System", "What one running process is waiting on"),
+    # Read-only: cpupower frequency-info reports, and changes nothing.
+    "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),
