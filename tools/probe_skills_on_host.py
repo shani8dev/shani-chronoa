@@ -43,6 +43,7 @@ PROBES = [
      "rsync between two fresh empty directories"),
     ("download_file", {"url": "https://example.com/",
                        "destination": "<tmp>/dl.html"}, "curl, into a temp file"),
+    ("cloud_files", {}, "rclone is absent here - refusal expected"),
     ("backup_status", {}, "restic is absent here - refusal expected"),
     ("bandwidth_to_host", {}, "iperf3 is absent here - refusal expected"),
     # --- the second batch: skills whose *state* is here, not a binary -------
