@@ -524,6 +524,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: logrotate is always run with --debug, which rotates nothing
     # (a mutation removing that flag fails 1 test).
     "log_files": ("System", "Which logs are biggest, still growing, and unrotated"),
+    # Read-only: hashes and lists. Never deletes, never marks a copy as the
+    # original (both asserted by a mutation each).
+    "duplicate_files": ("Files", "Which files are stored twice, and how much that wastes"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
