@@ -52,7 +52,7 @@ def _keyfile(backend: Path, **settings) -> None:
     settings_dir = backend / "glib-2.0" / "settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     lines = "\n".join(f"{k}={'true' if v else 'false'}" for k, v in settings.items())
-    (settings_dir / "keyfile").write_text(f"[org.shani.chronoa]\n{lines}\n")
+    (settings_dir / "keyfile").write_text(f"[org/shani/chronoa]\n{lines}\n")
 
 
 @pytest.fixture

@@ -17,8 +17,9 @@ rule that avoids it; `test_a_refusal_is_never_cached` is why.
 The keyfile gsettings backend is not incidental. `GSETTINGS_BACKEND=memory` is
 per-process, so a grant made in the parent is invisible to the sandboxed child
 that runs the skill - the refusal reads as "turned off" however the parent was
-configured. The group is `[org.shani.chronoa]`, the schema id, because a
-`[org/shani/chronoa]` group is silently ignored and every gate stays shut.
+configured. The group is `[org/shani/chronoa]`, after the schema's **path**,
+which is what the app writes; the older `[org.shani.chronoa]` spelling is
+migrated on read (`config._adopt_legacy_group`) and has its own tests.
 """
 
 from __future__ import annotations
@@ -37,20 +38,26 @@ _SRC = _REPO / "usr" / "lib" / "shani-chronoa"
 #: coverage is the claim: if a post-condition is added elsewhere the coverage
 #: widens, and this test should be the thing that says so rather than the thing
 #: that quietly stops being true.
-COVERED = ["airplane_mode", "close_window", "control_service",
+COVERED = ["airplane_mode", "close_window", "container", "control_service",
            "conversations", "default_apps", "delete_file",
-           "desktop_setting", "edit_file", "find_and_replace",
-           "git_branch", "git_commit", "git_push",
+           "desktop_setting", "driver_build", "edit_file",
+           "find_and_replace", "git_branch", "git_commit", "git_push",
            "kill_process", "manage_mount", "manage_triggers",
            "office_document", "power_action", "print_queue",
-           "set_hostname", "set_locale", "take_photo", "toggle_wifi"]
+           "set_hostname", "set_locale", "take_photo", "toggle_wifi", "vm"]
 #: Kept by hand, deliberately, because the whole point of this list is to be a
 #: **claim** about coverage rather than a re-derivation of it: if it were
 #: computed from the registry it would agree with the registry by construction
 #: and assert nothing. `test_the_tools_named_as_covered_still_have_post_conditions`
 #: is the other half - it fails when the two disagree, which is what happened
 #: when three git skills gained post-conditions in the same session that wrote
-#: this. So the shape is intentional; the *drift* is what the guard is for.
+# this. So the shape is intentional; the *drift* is what the guard is for.
+#
+# **`driver_build`, `container` and `vm` were added by three separate sessions'
+# work and none updated this list**, so the guard went red on all three at once.
+# `ir_remote` is deliberately *not* here: it has no post-condition, because an
+# infrared blast cannot be verified by reading anything back, and the AGENTS.md
+# note about the 50 unprotected tools covers it.
 
 
 def _compile_schemas(directory: Path) -> None:
@@ -64,7 +71,7 @@ def _keyfile(backend: Path, **settings) -> None:
     settings_dir = backend / "glib-2.0" / "settings"
     settings_dir.mkdir(parents=True, exist_ok=True)
     lines = "\n".join(f"{k}={'true' if v else 'false'}" for k, v in settings.items())
-    (settings_dir / "keyfile").write_text(f"[org.shani.chronoa]\n{lines}\n")
+    (settings_dir / "keyfile").write_text(f"[org/shani/chronoa]\n{lines}\n")
 
 
 def _isolate(monkeypatch, tools) -> None:

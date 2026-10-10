@@ -6,19 +6,58 @@ and privacy controls.
 
 import logging
 import os
+import tempfile
 from typing import Optional
 from urllib.parse import urlparse
 
 import gi
 
 gi.require_version("Gio", "2.0")
-from gi.repository import Gio
+from gi.repository import GLib, Gio
 
 logger = logging.getLogger(__name__)
 
 # GSettings schema constants
 SCHEMA_ID = "org.shani.chronoa"
 SCHEMA_PATH = "/org/shani/chronoa/"
+
+# The keyfile group this schema's settings live in, and the one spelling every
+# external reader assumes.
+#
+# **`gsettings get` could not read what this app wrote, and the cause was two
+# spellings of one group.** `Gio.keyfile_settings_backend_new(keyfile,
+# root_path, root_group)` writes its keys under a group named after `root_group`,
+# and this module passed `SCHEMA_ID` - the dotted form. The *default* keyfile
+# backend, which is what the `gsettings` CLI and every other GLib process on the
+# machine construct, names the group after the schema's **path**: `/org/shani/
+# chronoa/` becomes `org/shani/chronoa`. So both wrote into the same file under
+# different groups:
+#
+#     [org/shani/chronoa]      <- what `gsettings set` writes
+#     i2c-write-enabled=true
+#     [org.shani.chronoa]      <- what ChronoaConfig.set() wrote
+#     i2c-write-enabled=true
+#
+# and `gsettings get org.shani.chronoa i2c-write-enabled` answered **false** for
+# a switch turned on in Settings. The app was self-consistent - every skill reads
+# through `ChronoaConfig` - so what was broken was the *external* reader, which
+# is the one anyone debugging a stuck consent key reaches for first.
+#
+# Measured rather than assumed: `(SCHEMA_PATH, "org/shani/chronoa")` writes the
+# group the CLI writes, `(SCHEMA_PATH, SCHEMA_ID)` writes the other one, and
+# `root_group=""` is refused outright by GLib (`g_key_file_is_group_name`
+# assertion), so the group cannot simply be left empty.
+#
+# Derived from `SCHEMA_PATH` rather than written as a second literal, so a path
+# change cannot leave a stale spelling behind - the same reasoning that derives
+# `<sense-name>-sense-enabled` from the name.
+_ROOT_GROUP = SCHEMA_PATH.strip("/")
+
+# The spelling written before 2026-10-10. Read on the way in and migrated, so a
+# keyfile written by an older build is not silently unreadable: a user who had
+# already granted a consent key would find every gated skill refusing with the
+# switch reading on, which is the dead-switch class this repo keeps recording.
+_LEGACY_GROUP = SCHEMA_ID
 
 # Hostnames that count as "local" for local-only privacy mode. Anything
 # else (a LAN IP, a hostname, a public URL) is rejected while privacy mode
@@ -47,6 +86,88 @@ def _is_secret(key: str) -> bool:
     # SHANI_CHRONOA_KEYRING=0: settings only (the hermetic test suite - it
     # must not read or write the real session keyring)
     return key.endswith("-api-key") and os.environ.get("SHANI_CHRONOA_KEYRING", "1") != "0"
+
+
+def _adopt_legacy_group(keyfile: str) -> None:
+    """Move keys written under the old group spelling into the right one.
+
+    Before 2026-10-10 `ChronoaConfig` built its keyfile backend with
+    `root_group=SCHEMA_ID`, so every value the app wrote landed in
+    `[org.shani.chronoa]` while `gsettings` and every other GLib process read
+    `[org/shani/chronoa]`. Changing the spelling without this step would make
+    those keyfiles unreadable: **a user who had already granted a consent key
+    would find every gated skill refusing while the switch reads on** - the
+    dead-switch class (`calendar_write`, `fm_radio`) reached by a rename.
+
+    Read through `GLib.KeyFile` rather than `Gio.Settings` because the whole
+    point is a group the current backend does not know how to ask for. Keys the
+    correct group already has are left alone: an old copy must not overwrite a
+    newer value. Never raises - a migration that cannot run must not stop the
+    settings object being built.
+    """
+    try:
+        kf = GLib.KeyFile.new()
+        kf.load_from_file(keyfile, GLib.KeyFileFlags.NONE)
+        if not kf.has_group(_LEGACY_GROUP):
+            return
+        # `GLib.KeyFile` has no `has_key` in this PyGObject, and `get_keys`
+        # raises when the group is absent, so presence is a listing. A keyfile
+        # with no correct group yet is an empty set, not an error.
+        try:
+            already = set(kf.get_keys(_ROOT_GROUP)[0])
+        except GLib.Error:
+            already = set()
+        adopted = 0
+        for key in kf.get_keys(_LEGACY_GROUP)[0]:
+            if key in already:
+                continue          # the newer group already has an answer
+            value = kf.get_string(_LEGACY_GROUP, key)
+            kf.set_string(_ROOT_GROUP, key, value)
+            adopted += 1
+        # **The legacy group goes whatever happened above.** The first version
+        # removed it only when something was adopted, so a keyfile whose keys
+        # were all already in the correct group kept the stale spelling
+        # forever - measured as 2 groups after three runs, with the migration
+        # never converging. The newer group holds the answer either way, so
+        # dropping the old copy is always right once it has been read.
+        kf.remove_group(_LEGACY_GROUP)
+        if adopted:
+            logger.info("migrated %d setting(s) from [%s] to [%s]",
+                        adopted, _LEGACY_GROUP, _ROOT_GROUP)
+        _atomic_write(keyfile, kf.to_data()[0])
+    except GLib.Error:
+        # An unreadable keyfile is not this function's decision to make: the
+        # caller builds the settings object either way and a settings read
+        # reports what it can.
+        logger.debug("no legacy group to adopt in %s", keyfile, exc_info=True)
+    except OSError as exc:
+        logger.warning("could not migrate the legacy settings group: %s", exc)
+
+
+def _atomic_write(path: str, text: str) -> None:
+    """Write `text` to `path` through a temporary file and a rename.
+
+    `GLib.KeyFile.save_to_file` rewrites the file in place, so a crash or a full
+    disk between the truncate and the flush leaves a user's settings file
+    truncated and unreadable - and this function's whole job is rewriting
+    exactly that file. The rename is atomic on the same filesystem, so the old
+    contents survive any failure up to the instant they are replaced.
+    """
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=directory, prefix=".chronoa-keyfile-")
+    try:
+        with os.fdopen(handle, "w") as stream:
+            stream.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        # Covers OSError and anything a signal raises: the temp file is ours,
+        # and the real settings file must not be left half-migrated.
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
 
 
 # Senses that reach outside this machine no matter how they are configured,
@@ -400,13 +521,19 @@ class ChronoaConfig:
         fresh instance over the same path still sees persisted values. On a
         real install (no `GSETTINGS_BACKEND=keyfile`) the default backend
         (dconf) is used so settings persist normally.
+
+        The backend is built with `_ROOT_GROUP`, the group spelling the
+        default backend uses - see the note beside it. Passing `SCHEMA_ID`
+        there instead made `gsettings get` unable to read anything this app
+        wrote.
         """
         if os.environ.get("GSETTINGS_BACKEND") == "keyfile":
             config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
                 os.path.expanduser("~"), ".config"
             )
             keyfile = os.path.join(config_home, "glib-2.0", "settings", "keyfile")
-            backend = Gio.keyfile_settings_backend_new(keyfile, SCHEMA_PATH, SCHEMA_ID)
+            _adopt_legacy_group(keyfile)
+            backend = Gio.keyfile_settings_backend_new(keyfile, SCHEMA_PATH, _ROOT_GROUP)
             return Gio.Settings.new_with_backend(SCHEMA_ID, backend)
         return Gio.Settings.new(SCHEMA_ID)
 

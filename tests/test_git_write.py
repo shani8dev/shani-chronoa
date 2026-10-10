@@ -173,7 +173,7 @@ class TestTheSwitchesAreReal:
         assert result.returncode == 0, result.stderr
         (backend / "glib-2.0" / "settings").mkdir(parents=True, exist_ok=True)
         (backend / "glib-2.0" / "settings" / "keyfile").write_text(
-            "[org.shani.chronoa]\ngit-write-enabled=true\n")
+            "[org/shani/chronoa]\ngit-write-enabled=true\n")
         monkeypatch.setenv("GSETTINGS_BACKEND", "keyfile")
         monkeypatch.setenv("GSETTINGS_SCHEMA_DIR", str(backend))
         monkeypatch.setenv("XDG_CONFIG_HOME", str(backend))

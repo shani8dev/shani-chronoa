@@ -5658,9 +5658,10 @@ descriptor cannot have my UUID transcription wrong.
 
 All of this was run against the real FB BGS002 (MoYoung) through
 `tools.execute_tool`, with consent granted in a scratch keyfile GSettings
-(`GSETTINGS_BACKEND=keyfile`; the keyfile group is `[org.shani.chronoa]`, the
-schema id, because `config._new_settings` roots the backend there - a
-`[org/shani/chronoa]` group is silently ignored and every gate stays closed).
+(`GSETTINGS_BACKEND=keyfile`). Use the group `[org/shani/chronoa]` — the schema
+*path* — which is what the app itself writes; the `[org.shani.chronoa]` spelling
+below records the older behaviour and a keyfile written in it is migrated on
+read.
 
 **`find_device` (new tool, same module, same `bluetooth-gatt-enabled` switch).**
 Two fixed writes only: the SIG Immediate Alert (0x2A06 <- 0x02) and MoYoung's
@@ -6161,9 +6162,10 @@ fails if that list rots.
 **Driving these for real needs a keyfile gsettings backend, not a stub.**
 `GSETTINGS_BACKEND=memory` is per-process, so a grant made in the probe is
 invisible to the sandboxed child that runs the skill and the refusal reads as
-"turned off" however the parent was configured. The group is `[org.shani.chronoa]`
-— the schema id — because `[org/shani/chronoa]` is silently ignored and every
-gate stays shut. With that, `delete_file` really deletes and really verifies.
+"turned off" however the parent was configured. Write the group
+`[org/shani/chronoa]` — the schema *path*, which is what the app writes; a
+keyfile using the older `[org.shani.chronoa]` spelling is migrated on read. With
+that, `delete_file` really deletes and really verifies.
 
 **Three of my own mistakes, all caught by running, all recorded because the shape
 recurs.** The replay's own note was stored instead of the clean receipt, so a
@@ -6911,16 +6913,16 @@ the first version of the slot-test's new check drove a `driver_scaffold` call
 with no `path`, which a post-condition cannot resolve and therefore answers
 `None` for — a check that could never fail.
 
-### The consent-write trap: `gsettings get` does not read what the app writes (2026-10-10, measured on the image)
+### The consent-write trap: `gsettings get` did not read what the app writes — FIXED (2026-10-10)
 
 Driving the five skills on a real slot to close the last SKIP found this, and it
 is worth knowing **before** anyone debugs a stuck consent key from a shell.
 
-`ChronoaConfig._new_settings` builds an explicit keyfile backend with
-`root_path="/org/shani/chronoa/"` and `root_group="org.shani.chronoa"`
-(`config.py:416`). The **default** backend — what the `gsettings` CLI uses, and
-what any other GLib process on the machine uses — derives the group from the
-schema path and writes `[org/shani/chronoa]`. Both land in the same file:
+`ChronoaConfig._new_settings` built its explicit keyfile backend with
+`root_group=SCHEMA_ID`, so the app wrote `[org.shani.chronoa]` while the
+**default** backend — what the `gsettings` CLI uses, and what any other GLib
+process on the machine uses — derives the group from the schema's **path** and
+writes `[org/shani/chronoa]`. Both landed in the same file:
 
     $ cat ~/.config/glib-2.0/settings/keyfile
     [org/shani/chronoa]          <- what `gsettings set` wrote
@@ -6929,25 +6931,69 @@ schema path and writes `[org/shani/chronoa]`. Both land in the same file:
     [org.shani.chronoa]          <- what ChronoaConfig.set() wrote
     i2c-write-enabled=true
 
-So **`gsettings get org.shani.chronoa i2c-write-enabled` answers `false` for a
+So **`gsettings get org.shani.chronoa i2c-write-enabled` answered `false` for a
 value the app's Settings window turned on.** The switch says on, every gated skill
 still refuses, and the CLI insists the key is off — a debugging path that
-contradicts the thing it is meant to check. This repo's own AGENTS.md already
-recorded the two spellings as *"the group is `[org.shani.chronoa]` … `[org/shani/
-chronoa]` is silently ignored"* without joining it to the consequence.
+contradicts the thing it is meant to check. It was invisible because the app
+reads back through `ChronoaConfig` too, so every round-trip test passed on both
+spellings; **only a second reader can tell them apart.**
 
-Which spelling is correct is a decision, not a bug fixed here: the skills read
-`ChronoaConfig`, so the app is self-consistent either way, and what is broken is
-only the *external* reader. Changing it would make the CLI agree and make every
-existing keyfile unreadable. **Recorded rather than fixed, because the honest next
-step is one store and one spelling, and that is a call for a person.**
+**Measured, not reasoned out** — GLib's own behaviour settled which of the two
+spellings is "correct", because it is not a free choice:
 
-The second half of the same measurement, for anyone writing a probe: **the two
-writers are not equally culpable in how they fail.** Under the private session bus
-`dbus-run-session` creates (no activatable `ca.desrt.dconf`), `ChronoaConfig.set()`
-and `gsettings set` *both* return success, the writing process reads its own value
-back as `true`, and nothing reaches disk — so a child reads `false`. Set
-`GSETTINGS_BACKEND=keyfile` to test consent crossing for real;
+    root_path='/org/shani/chronoa/'  root_group='org.shani.chronoa'  -> [org.shani.chronoa]
+    root_path='/org/shani/chronoa/'  root_group='org/shani/chronoa'  -> [org/shani/chronoa]
+    root_group=''                    -> refused: g_key_file_is_group_name assertion
+
+`root_group=""` cannot be used to mean "derive it", so the group is now
+`_ROOT_GROUP = SCHEMA_PATH.strip("/")` — **derived from the path rather than
+written as a second literal**, so a path change cannot leave a stale spelling
+behind (the same reasoning that derives `<sense-name>-sense-enabled` from a
+sense's name).
+
+**And the old spelling is adopted, not orphaned.** A keyfile written by an older
+build still holds `[org.shani.chronoa]`, and a user who had already granted a
+consent key would find every gated skill refusing while the switch reads on —
+the dead-switch class this file keeps recording (`calendar_write`, `fm_radio`),
+reached by a rename. `_adopt_legacy_group` reads it through `GLib.KeyFile`,
+copies any key the correct group lacks, and removes the old group. Three things
+running it settled:
+
+- **The newer group wins.** Both spellings holding `model` keeps the correct
+  group's value; an old copy must not overwrite a newer one.
+- **The old group must go even when nothing was adopted.** The first version
+  removed it only under `if adopted:`, so a keyfile whose keys were all already
+  correct kept the stale spelling **forever** — measured as two groups after any
+  number of runs. The control that caught it is a keyfile where *both* spellings
+  hold the same key: the plain case adopts, so it converges either way and the
+  mutation survived a green suite.
+- **It is written atomically.** `GLib.KeyFile.save_to_file` rewrites in place, so
+  a crash or a full disk between the truncate and the flush truncates a user's
+  settings file — in the function whose whole job is rewriting it. `mkstemp` +
+  `os.replace` now.
+
+Verified: app writes, `gsettings get` reads `true`; an old keyfile keeps all
+three keys and both readers agree; one group, no stray temp file.
+`tests/test_config_gsettings.py::TestTheKeyfileGroupSpelling` — 6 tests, and
+**both mutations confirmed to fail** (the group spelling reverted: 6 red; the
+group never removed: 1 red, caught only by the control added above).
+
+**Swept the whole suite rather than trusting the file:** 7568 passed. The 11
+failures are all pre-existing or order-dependent — `test_capabilities` on the
+untracked `log_files.py`, `test_routines_live` needing a real model,
+`test_task_eval` on a stale skill count, `test_sidebar_toggle` (documented as
+failing 4/4 on untouched HEAD), and a trigger cluster that passes **1201
+tests** in its own chunk both with the fix and at HEAD. Two earlier flakes
+(`multi_step_turns`, `question_presenter`) likewise pass in isolation and in
+their own chunk with the fix applied — re-run failures serially before believing
+them.
+
+The second half of the original measurement, for anyone writing a probe: **the
+two writers are not equally culpable in how they fail.** Under the private session
+bus `dbus-run-session` creates (no activatable `ca.desrt.dconf`),
+`ChronoaConfig.set()` and `gsettings set` *both* return success, the writing
+process reads its own value back as `true`, and nothing reaches disk — so a child
+reads `false`. Set `GSETTINGS_BACKEND=keyfile` to test consent crossing for real;
 `sandbox/executor.py:741` carries it to the child for exactly that reason.
 
 ### Booted on the image's own kernel (2026-10-10): every unanswerable fact, answered
