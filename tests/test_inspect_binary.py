@@ -202,10 +202,40 @@ def test_no_path_is_a_question_not_a_guess():
 
 
 def test_a_missing_readelf_names_the_package(tmp_path, monkeypatch):
+    """**`binutils`, not `elfutils`.** Both are real Arch packages and
+    `elfutils` is what `shani-tools-extra` already pulls in, so the obvious
+    answer looks right - but the binary called `readelf` ships in **binutils**,
+    and elfutils provides the `eu-*` spellings. Naming elfutils sends someone
+    to install a package that does not contain the binary they need, which is
+    the wpctl->pipewire defect AGENTS.md records three of.
+
+    The package name is not written into this module at all: it comes from
+    `files._PACKAGE_HINTS`, and `test_package_names_match_arch.py` checks that
+    hint against pacman's own data.
+    """
+    target = _real_file(tmp_path, "somename")
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-    out = IB._run({"path": str(_real_file(tmp_path, "somename"))})
-    assert "elfutils" in out
-    assert "UNKNOWN" in out
+    out = IB._run({"path": str(target)})
+    assert "binutils" in out
+    assert "elfutils" not in out
+    assert "Could not read what this program is" in out
+
+
+def test_the_package_name_comes_from_the_hint_table_not_this_module():
+    """The sentence above is generated. A hard-coded package name inside the
+    skill is how `pdffonts`' exit-code contract came to be recorded wrongly
+    and then believed - the string cannot be re-derived from the data, so it
+    rots silently.
+    """
+    source = (_REPO / "usr/lib/shani-chronoa/shani_chronoa/skills"
+              / "inspect_binary.py").read_text()
+    code = "\n".join(line for line in source.splitlines()
+                     if not line.lstrip().startswith("#"))
+    body = code.split('"""', 2)[-1] if code.count('"""') >= 2 else code
+    for name in ("binutils", "elfutils"):
+        assert name not in body, (
+            f"{name!r} must not be written into the skill; it belongs in "
+            f"files._PACKAGE_HINTS so the package-names guard can check it")
 
 
 def test_it_never_runs_the_file_it_inspects(tmp_path, monkeypatch):

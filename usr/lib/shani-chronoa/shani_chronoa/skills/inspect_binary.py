@@ -147,9 +147,18 @@ def _run(arguments: dict) -> str:
         return f"There is no file at {path}. Nothing was guessed."
 
     if shutil.which("readelf") is None:
-        return ("This binary is UNKNOWN: readelf (the elfutils package) is not "
-                "installed. shani-tools-extra ships it, so an image without it "
-                "has dropped something it installs by design.")
+        # Through `files.tool_missing()`, not a hand-written package name. The
+        # obvious name here is **wrong**: `elfutils` is a real Arch package
+        # (Core, 0.196-1) and it is what `shani-tools-extra` already pulls in,
+        # but the binary called `readelf` ships in **binutils** - elfutils
+        # provides the `eu-*` spellings. A sentence naming elfutils sends
+        # someone to install a package that does not contain the binary they
+        # need, which is the same defect as wpctl->pipewire recorded in
+        # AGENTS.md. The hint lives in `files._PACKAGE_HINTS` for that reason.
+        # `purpose` is a noun phrase: `tool_missing` builds "Could not
+        # <purpose>", so a clause here reads as "Could not what this program
+        # is". Found by running it, which is the only way that shows up.
+        return files.tool_missing("readelf", "read what this program is")
 
     fields, problem = _header(path)
     if problem:

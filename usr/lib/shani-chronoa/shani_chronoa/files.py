@@ -521,6 +521,12 @@ _PACKAGE_HINTS = {
         "kreadconfig6": "kconfig",
         "plasma-apply-colorscheme": "plasma-workspace",
     "nmcli": "networkmanager",
+    # **binutils, not elfutils.** Both exist on Arch, and `elfutils` is
+    # what this file's own package list already pulls in - but the binary
+    # called `readelf` ships in `binutils`; elfutils provides the
+    # `eu-*` spellings (`eu-readelf`). Read out of pacman's own file
+    # database in chronoa-matrix.json, on both images.
+    "readelf": "binutils",
     "lp": "cups",
     "lpr": "cups",
     "lpstat": "cups",

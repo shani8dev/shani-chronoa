@@ -137,6 +137,13 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # which is pacman's own file database rather than a guess: fprintd ships
         # /usr/bin/fprintd-{list,verify,enroll,delete}.
         "fprintd",
+        # Read out of the matrix's `commands[].package` on 2026-10-10, for
+        # `inspect_binary`: the binary called `readelf` ships in **binutils**;
+        # Arch's `elfutils` (Core, 0.196-1) provides the `eu-*` spellings
+        # instead. Naming `elfutils` here would send someone to install a
+        # package that does not contain the binary they need - the same defect
+        # as wpctl/pipewire above.
+        "binutils",
         # Verified 2026-10-08 against the Arch package API: `rtl-sdr 2.0.3-1`,
         # `extra`, and its file list has `usr/bin/rtl_fm`.
         "rtl-sdr",
