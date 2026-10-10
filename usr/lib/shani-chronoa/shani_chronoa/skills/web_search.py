@@ -47,6 +47,37 @@ logger = logging.getLogger(__name__)
 # rendered in the browser, so fetching its HTML yields a shell.
 SEARCH_ENDPOINT = "https://lite.duckduckgo.com/lite/?q="
 
+#: **Phrases that mean the page is a challenge, not a result.** Measured live on
+#: 2026-10-10: this endpoint answers HTTP 200 with
+#:
+#:     Unfortunately, bots use DuckDuckGo too.
+#:     Please complete the following challenge to confirm this search was made
+#:     by a human.
+#:     Select all squares containing a duck:
+#:
+#: and the previous version of this skill handed that to the model as the search
+#: result - so it answered "what did the search say" with "select all squares
+#: containing a duck", a confident wrong answer with nothing marking it as one.
+#: **A 200 is not evidence of results.**
+_CHALLENGE = (
+    "complete the following challenge",
+    "confirm this search was made by a human",
+    "select all squares containing",
+    "unfortunately, bots use duckduckgo too",
+    "are you a robot",
+    "cf-challenge",
+    "checking your browser before",
+)
+
+
+def _challenge_phrase(text: str) -> str:
+    """The phrase that identified a challenge page, or an empty string."""
+    low = text.lower()
+    for phrase in _CHALLENGE:
+        if phrase in low:
+            return phrase
+    return ""
+
 _SCHEMA = {
     "type": "function",
     "function": {
@@ -98,7 +129,26 @@ def _run(arguments: dict) -> str:
         # string is what made this skill useless in the first place.
         return f"Could not search the web for '{query}': {e}"
 
-    return render(page)
+    try:
+        body = render(page)
+    except Exception as exc:
+        # A rendering failure must not look like an empty result.
+        return (f"The page came back but could not be shown: {exc}. That is a "
+                "problem here, not an empty result.")
+
+    hit = _challenge_phrase(body)
+    if hit:
+        return (
+            "The search engine did not return results: it returned a "
+            f"human-verification challenge instead (it said \"{hit}\"). That "
+            "is the engine refusing an automated reader, and it is not a "
+            "statement that there is nothing to find.\n\n"
+            "Two paths that still work:\n"
+            "- fetch a **specific URL** instead - give me the address and I will "
+            "read it;\n"
+            "- use news, lookup_wikipedia or maps, which query services that do "
+            "allow automated readers.")
+    return body
 
 
 SKILLS = [Skill(name="web_search", schema=_SCHEMA, run=_run)]
