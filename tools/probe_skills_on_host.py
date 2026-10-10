@@ -62,6 +62,8 @@ PROBES = [
     ("temperatures", {}, "/sys/class/hwmon + thermal zones, read only"),
     ("list_services", {}, "systemctl list-units, read only"),
     ("read_logs", {}, "journalctl, read only"),
+    ("log_files", {"limit": 3},
+     "/var/log walk + `logrotate --debug`, which rotates nothing"),
     ("scheduled_tasks", {}, "crontab -l, read only"),
     ("tls_certificate", {"host": "example.com"}, "ssl from the stdlib, one handshake"),
     ("compute_hash", {"path": "/bin/true"}, "hashlib, read only"),
