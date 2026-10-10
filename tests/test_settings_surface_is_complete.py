@@ -69,6 +69,8 @@ CONTROLLED = {
     "auto-start",              # toggle-auto-start
     "start-hidden-at-login",   # toggle-start-hidden
     "reply-style",             # the ComboRow in the System group
+    "driver-build-enabled",    # the "Let Chronoa compile a kernel module" row
+    "i2c-write-enabled",       # the "Let Chronoa write to a device" row
     "notification-enabled",    # written directly; gates the notify skill
     # the actuator consent gate, written directly
     "input-control-enabled",

@@ -909,6 +909,16 @@
       <summary>Let Chronoa edit your files</summary>
       <description>When true, Chronoa may rewrite the contents of a file it is asked to change, and may undo a change it recorded. Off by default, and separate from the general file-access permission: reading a file and changing what it says are different risks, and a wrong edit discards work that nothing here can put back. One key covers both directions on purpose - undoing an edit is the strictly safer half, so two switches would let a user allow the risky direction and refuse the safe one, which is not a choice anyone makes deliberately. Undo restores only what Chronoa itself wrote and recorded: it is not git, and it cannot undo a change made in an editor, a shell or another program.</description>
     </key>
+    <key name="driver-build-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa compile a kernel module</summary>
+      <description>When true, Chronoa may run Kbuild over a kernel module's directory and report what came out. Off by default. Writing the module's source is NOT this switch - scaffolding a project under your home is text generation, like any new document - so this key covers only the act that hands a toolchain your files. A built module is not installed or loaded either: on this layout the root filesystem is a read-only slot and /var is temporary, so a module has nowhere to persist, and the kernel refuses an unsigned one when Secure Boot is on. driver_status reports what it can actually read about all of that.</description>
+    </key>
+    <key name="i2c-write-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa write to a device register</summary>
+      <description>When true, Chronoa may write a value to a register on an I2C device. Off by default, and reading a register needs no switch at all. The asymmetry is the point: a read returns what the device already said, while a write to the wrong address can erase an EEPROM's stored calibration or drive a power device into a state nothing here can undo. Register ranges that do that are refused outright whatever this says, and no session grant covers this switch.</description>
+    </key>
     <key name="todo-list-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa keep a task list</summary>

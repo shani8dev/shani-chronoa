@@ -172,6 +172,41 @@ def test_no_fallback_accepting_label_check_can_live_here():
     assert True, "deliberately assertion-free; the label test above is the check"
 
 
+def test_every_registered_sense_has_a_gui_title(registry):
+    """The FIFTH hand-kept sense-name list, found by the audit rather than by a
+    failure.
+
+    `settings_window.SENSE_LABELS` and `gui.surfaces.common.SENSE_TITLES` are two
+    copies of the same fact - what each sense is called in the UI - and they live
+    in different modules for different windows. Testing one and not the other is
+    how three senses came to show as raw module names in the GUI's sense panel:
+    `ups` from this session's NUT work, plus `kernellog` and `polkitpolicy` from
+    earlier. All three had Settings labels and none had a GUI title.
+
+    Both directions are checked, because a title for a sense that no longer
+    exists is dead config that reads as a working row.
+    """
+    from shani_chronoa.gui.surfaces.common import SENSE_TITLES
+    missing = sorted(n for n in registry if n not in SENSE_TITLES)
+    assert not missing, (
+        f"these senses have no GUI title, so the sense panel shows their module "
+        f"name: {missing}")
+    stale = sorted(set(SENSE_TITLES) - set(registry))
+    assert not stale, f"GUI titles for senses that are not registered: {stale}"
+
+
+def test_the_two_ui_label_lists_agree_that_every_sense_is_named():
+    """`SENSE_LABELS` and `SENSE_TITLES` both cover the registry, but they are
+    separate tables, so a sense can be in one and missing from the other. This
+    asserts the coverage is the same set rather than trusting that it is."""
+    from shani_chronoa.gui.surfaces.common import SENSE_TITLES
+    only_settings = set(sw.SENSE_LABELS) - set(SENSE_TITLES)
+    only_gui = set(SENSE_TITLES) - set(sw.SENSE_LABELS)
+    assert not only_settings and not only_gui, (
+        f"the two UI label tables cover different senses - settings-only: "
+        f"{sorted(only_settings)}, gui-only: {sorted(only_gui)}")
+
+
 def test_every_label_names_a_sense_that_exists(registry):
     stale = sorted(set(sw.SENSE_LABELS) - set(registry))
     assert not stale, f"labels for senses that are not registered: {stale}"

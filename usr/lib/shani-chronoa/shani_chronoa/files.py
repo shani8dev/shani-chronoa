@@ -518,6 +518,24 @@ _PACKAGE_HINTS = {
         # (measured on the Plasma image 2026-10-01). Listing a package for a
         # binary that does not exist would be the invented answer this table
         # exists to avoid.
+        # Driver development (2026-10-10). `i2cdetect`/`i2cget`/`i2cset`,
+        # `fusermount3` and `v4l2-ctl` are read out of both image matrices
+        # (GNOME 20260925, Plasma 20260922) by the same route as the entries
+        # above. The three build packages are NOT on any image - no profile
+        # installs a compiler - and their names come from the Arch package
+        # database rather than from a guess, because a hint that names a
+        # package which does not contain the binary is the exact failure this
+        # table was widened to fix.
+        "i2cdetect": "i2c-tools",
+        "i2cget": "i2c-tools",
+        "i2cset": "i2c-tools",
+        "v4l2-ctl": "v4l-utils",
+        "fusermount3": "fuse3",
+        "gcc": "base-devel",
+        "cc": "base-devel",
+        "clang": "base-devel",
+        "make": "base-devel",
+        "dkms": "dkms",
         "kreadconfig6": "kconfig",
         "plasma-apply-colorscheme": "plasma-workspace",
     "nmcli": "networkmanager",

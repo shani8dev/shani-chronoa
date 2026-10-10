@@ -144,6 +144,21 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # package that does not contain the binary they need - the same defect
         # as wpctl/pipewire above.
         "binutils",
+        # Driver development (2026-10-10). Each checked against the Arch
+        # package API on 2026-10-10, not read off a mirror: `i2c-tools extra
+        # 4.4-4`, `v4l-utils extra 1.32.0-2`, `fuse3 extra 3.18.3-1`,
+        # `base-devel core 1-2`, `dkms extra 3.4.4-1`.
+        #
+        # `base-devel` is a group rather than a package holding the compiler,
+        # and that is the point of the hint: `pacman -S base-devel` is the
+        # command that installs a C compiler, `make` and `patch` together, so
+        # naming it is actionable where naming `gcc` alone would only install
+        # half of what a build needs.
+        "i2c-tools",
+        "v4l-utils",
+        "fuse3",
+        "base-devel",
+        "dkms",
         # Verified 2026-10-08 against the Arch package API: `rtl-sdr 2.0.3-1`,
         # `extra`, and its file list has `usr/bin/rtl_fm`.
         "rtl-sdr",

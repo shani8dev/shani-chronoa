@@ -72,6 +72,10 @@ _IMPL = {
     # check has to see the module rather than skip it.
     "resolve_conflict": "shani_chronoa.skills.resolve_conflict",
     "move_pointer": "shani_chronoa.skills.input_control",
+    # Gated through `ChronoaConfig().get_bool` on the module's own key, which is
+    # what the scan below looks for.
+    "driver_build": "shani_chronoa.skills.driver_dev",
+    "device_i2c": "shani_chronoa.skills.user_driver",
     # Sense-gated through `config.sense_allowed("filesystems")`, like
     # snapshot_status; the reader needs to know where to look for the check.
     "compression_savings": "shani_chronoa.skills.compression_savings",

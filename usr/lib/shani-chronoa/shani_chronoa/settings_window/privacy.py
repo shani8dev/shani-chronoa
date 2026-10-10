@@ -434,6 +434,17 @@ class PrivacyPage:
              "Off: Chronoa can read and search your files but cannot write to "
              "them. Turning this on lets a tool call change your work.",
              "edit_file and undo_last_change refuse while this is off"),
+            ("Let Chronoa compile a kernel module", "driver-build-enabled",
+             "Off: Chronoa can write a driver's source for you but cannot hand a "
+             "compiler your files. A built module is still neither installed nor "
+             "loaded - this layout has nowhere to keep one, and an unsigned one is "
+             "refused when Secure Boot is on.",
+             "driver_build refuses while this is off"),
+            ("Let Chronoa write to a device", "i2c-write-enabled",
+             "Off: Chronoa can read device registers but cannot change them. "
+             "Reading a sensor is ordinary inspection; writing to the wrong "
+             "register can erase an EEPROM's stored calibration for good.",
+             "device_i2c refuses every write while this is off"),
             ("Let Chronoa keep a task list", "todo-list-enabled",
              "Off: Chronoa cannot keep a to-do list between turns.",
              "todo_list refuses while this is off"),
