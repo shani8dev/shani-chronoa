@@ -58,6 +58,22 @@ def _run(arguments: dict) -> str:
             active = next((t.strip("[]") for t in usb.split() if t.startswith("[")), "")
             lines.append(f"plugged in through {'USB-C' if kind == 'USB' else 'an AC adapter'}"
                          + (f" ({active})" if active else ""))
+        if kind == "UPS":
+            # A UPS answers both halves, exactly as it does for the powerstate
+            # trigger: `online` is whether utility power is reaching it, so it is
+            # a mains source and NOT counting it here reported "Running on
+            # battery" on a machine sitting on mains. `capacity` is its own
+            # charge, so it is a battery source too.
+            if online == "1":
+                plugged = True
+            cap, status = _read(dev / "capacity"), _read(dev / "status")
+            if online == "1":
+                lines.append("on mains through a UPS")
+            else:
+                lines.append("ON BATTERY - the UPS is carrying the machine")
+            if cap:
+                lines.append(f"UPS battery {cap}%"
+                             + (f" ({status.lower()})" if status else ""))
         if kind == "Battery" and _read(dev / "scope") != "Device":
             cap, status = _read(dev / "capacity"), _read(dev / "status")
             rate = _read(dev / "power_now")

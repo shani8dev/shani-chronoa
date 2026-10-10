@@ -58,6 +58,65 @@ def test_switching_is_gated_and_verified(rf, tmp_path, monkeypatch):
     assert air._post_condition({"action": "status"}) is None
 
 
+def test_charger_reports_a_ups_on_mains_as_plugged_in(tmp_path, monkeypatch):
+    """The bug this covers: `plugged` was only set by a Mains/USB entry with
+    online=1, so a UPS - which answers `online` exactly like Mains - left the
+    flag false and the skill reported "Running on battery" on a machine sitting
+    on mains. That is not an omission, it is the opposite of the truth."""
+    ps = tmp_path / "ps"
+    _w(ps / "ups0", type="UPS", online=1, capacity=100, status="OL")
+    monkeypatch.setattr(chg, "POWER_SUPPLY_DIR", ps)
+    monkeypatch.setattr(chg, "TYPEC_DIR", tmp_path / "no-typec")
+    out = chg._run({})
+    assert out.startswith("On mains through a UPS"), out
+    assert "Running on battery" not in out
+    assert "UPS battery 100%" in out
+
+
+def test_charger_reports_a_ups_that_lost_mains_as_on_battery(tmp_path, monkeypatch):
+    """The other direction, and the one that matters. `online=0` means utility
+    power is out, so the machine is being carried by the UPS."""
+    ps = tmp_path / "ps"
+    _w(ps / "ups0", type="UPS", online=0, capacity=42, status="OB DISCHRG")
+    monkeypatch.setattr(chg, "POWER_SUPPLY_DIR", ps)
+    monkeypatch.setattr(chg, "TYPEC_DIR", tmp_path / "no-typec")
+    out = chg._run({})
+    assert "ON BATTERY" in out
+    assert "the UPS is carrying the machine" in out
+    assert "UPS battery 42%" in out
+
+
+def test_a_peripheral_battery_still_does_not_read_as_the_machines(tmp_path, monkeypatch):
+    """The scope guard, held for the new branch too - the levels are averaged
+    across machine-scoped batteries only, and a mouse at 5% must not drag a UPS
+    at 90% down."""
+    ps = tmp_path / "ps"
+    _w(ps / "hidpp_battery_0", type="Battery", capacity=5, status="Discharging",
+       scope="Device")
+    _w(ps / "ups0", type="UPS", online=1, capacity=90, status="OL")
+    monkeypatch.setattr(chg, "POWER_SUPPLY_DIR", ps)
+    monkeypatch.setattr(chg, "TYPEC_DIR", tmp_path / "no-typec")
+    out = chg._run({})
+    assert "UPS battery 90%" in out
+    # Matched case-insensitively AND on either spelling, because the reply is
+    # sentence-capitalised (`[:1].upper()`) - asserting the lowercase form only
+    # matched nothing at all, which is a test that cannot fail. Confirmed by
+    # running it: with the scope guard removed the reply reads
+    # "Battery 5% (discharging); on mains through a UPS; ...".
+    assert "5%" not in out.replace("UPS battery 90%", ""), out
+
+
+def test_a_machine_with_only_a_ups_is_not_reported_as_no_power_supplies(tmp_path, monkeypatch):
+    """The empty-answer sentence names a desktop on mains with no battery. A
+    machine with a UPS is not that, so that sentence must not be shown."""
+    ps = tmp_path / "ps"
+    _w(ps / "ups0", type="UPS", online=1, capacity=100, status="OL")
+    monkeypatch.setattr(chg, "POWER_SUPPLY_DIR", ps)
+    monkeypatch.setattr(chg, "TYPEC_DIR", tmp_path / "no-typec")
+    out = chg._run({})
+    assert "reports no power supplies" not in out
+
+
 def test_charger_reports_pd_wattage_only_when_offered(tmp_path, monkeypatch):
     ps, tc = tmp_path / "ps", tmp_path / "typec"
     _w(ps / "ucsi", type="USB", online=1, usb_type="C [PD] PD_PPS")

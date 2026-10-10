@@ -45,7 +45,7 @@ import zipfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from shani_chronoa import files
+from shani_chronoa import archives, files
 from shani_chronoa.files import PathProblem
 from shani_chronoa.skills import Skill
 
@@ -179,9 +179,23 @@ def _plan(archive: Path, dest: Path, overwrite: bool) -> Tuple[Optional[str], Li
                 return (refusal, names, len(infos))
     except (OSError, tarfile.TarError, zipfile.BadZipFile) as exc:
         return (f"the archive could not be read: {exc}", [], 0)
-    # Not tar and not zip: 7z, if it is installed, can still open it. The
-    # refusal says which formats exist and what would open them, because "it is
-    # neither a tar archive nor a zip file" is a true sentence and a dead end.
+    # Not tar and not zip. **Two formats 7-Zip cannot open, measured on `@blue`
+    # 2026-10-10:** `7z l -slt` returns rc=2 on a `.lzo` and a `.lrz` that
+    # `lzop` and `lrzip` had just created themselves, while both tools sit
+    # installed in the same image - so those two were refused here for want of
+    # a reader rather than for want of the tool. `archives` knows the measured
+    # exceptions and nothing else, so every other format still goes to 7z.
+    own, own_problem = archives.members(archive)
+    if own:
+        names = [name for name, _ in own]
+        return None, names, len(names)
+    if own_problem:
+        return own_problem, [], 0
+    # 7z reads everything else, including `.rar` - this image's is 7-Zip 26.03
+    # and `7z i` lists Rar/Rar1/Rar2/Rar3/Rar5.
+    # The refusal says which formats exist and what would open them, because
+    # "it is neither a tar archive nor a zip file" is a true sentence and a
+    # dead end.
     return _sevenzip_members(archive, dest)
 
 

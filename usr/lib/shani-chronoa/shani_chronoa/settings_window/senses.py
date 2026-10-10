@@ -31,6 +31,10 @@ SENSE_LABELS = {
         "Read text in images",
         "Extract words from a picture you point it at",
     ),
+    "ups": (
+        "Uninterruptible power",
+        "Whether the machine is on mains or on a UPS, and how long is left",
+    ),
     "filesystem": (
         "Files and folders",
         "Find, read and write files on this machine",
@@ -302,13 +306,13 @@ SENSE_CATEGORIES = [
      "battery, disks and their health, graphics, temperature, fans, arrays, and "
      "when it last booted",
      ["hardware", "kernel", "boots",
-      "cpu", "power", "storage", "gpu", "hwmon", "thermalgrid"]),
+      "cpu", "power", "ups", "storage", "gpu", "hwmon", "thermalgrid"]),
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
      "administrator, what is already using your camera, which ports are open "
      "to the network, and who else is currently on this machine",
-     ["security", "devices", "privilege", "capture", "sessions", "firewall",
-      "listeners"]),
+     ["security", "devices", "privilege", "polkitpolicy", "capture",
+      "sessions", "firewall", "listeners"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),

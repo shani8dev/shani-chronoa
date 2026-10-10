@@ -306,6 +306,10 @@ _SENSE_DEFAULT_ENABLED = frozenset({
     # local package database, `faults` reads the local journal, and `snapshots`
     # reads the filesystem layout. None of them leaves the machine.
     "updates", "faults", "snapshots", "coredumps", "firewall",
+    # Default-on with the rest of the machine's own state: whether utility power
+    # is present, and how much battery is left. Read from sysfs, which needs no
+    # binary, and an absent UPS reports absent rather than as a fault.
+    "ups",
     # Default-on: the machine's own immutable and current facts. Identity, the
     # running kernel, the limits this process is held to, and when it last
     # booted. Each reads a kernel-owned value and none of them leaves the

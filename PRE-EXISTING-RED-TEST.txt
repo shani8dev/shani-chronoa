@@ -1,0 +1,14 @@
+PRE-EXISTING RED TEST (not from my work): tests/test_question_presenter.py::
+TestNobodyToAskSaysNobodyIsThere::test_every_gated_tool_names_its_consent_key_with_nobody_to_ask
+
+  TypeError: _consent() missing 1 required positional argument: 'key'
+
+Fails identically on HEAD with my changes stashed, so it predates them. The last
+commits touching either file are 225b2cf (capabilities) and 156bf08
+(permissions) - a signature change in permissions._consent() that a caller in
+test_question_presenter.py was not updated for.
+
+NOT fixed here: it is another session's in-flight work, and fixing it blind
+risks the same class the repo warns about (patching a test to agree with a
+half-finished change). Recording so it is not read as a regression from this
+session's NUT/trigger/hand-kept-list work.
