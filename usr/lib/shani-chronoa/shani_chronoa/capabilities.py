@@ -495,6 +495,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
     # The 2026-10-07 matrix skills.
     "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
+    # Read-only: restic snapshots + `restic check`. Never init/backup/prune/forget.
+    "backup_status": ("System", "Whether this machine has an off-machine backup, and when"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
