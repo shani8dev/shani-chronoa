@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**218 skills in 24 groups.** Each is a named, schema-typed module; the model
+**224 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**84 of 218 are consent-gated and 16 are destructive.**
+**86 of 224 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -47,6 +47,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `bridge_topology` | Which interfaces are bridges, and what is plugged into them | — |
 | `capture_packets` | Watch the packets crossing an interface | needs `packet-capture-enabled` |
 | `check_internet` | Is the internet working? | — |
+| `check_port` | Whether a host accepts connections on a port | — |
 | `check_updates` | Check for waiting package updates | — |
 | `compression_savings` | How much space btrfs compression is saving | needs `filesystems-sense-enabled` |
 | `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
@@ -145,8 +146,13 @@ Hardware, peripherals, sensors and their state.
 | `bluetooth_call` | Call through a paired phone, on this computer's speakers | needs `bluetooth-call-enabled` |
 | `bluetooth_devices` | Bluetooth devices | — |
 | `bluetooth_gatt` | Read a watch or band's battery, sensors and firmware | needs `bluetooth-gatt-enabled` |
+| `device_i2c` | Read or write an I2C device register | **asks first, always** · needs `i2c-write-enabled` |
+| `device_probe` | User-space driver routes: I2C buses, video, FUSE | — |
 | `disk_health` | Drive health and disk encryption | needs `storage-sense-enabled` |
+| `driver_build` | Compile a kernel module with Kbuild | needs `driver-build-enabled` |
 | `driver_info` | Which driver each device uses | — |
+| `driver_scaffold` | Write an out-of-tree kernel module project | — |
+| `driver_status` | Whether this machine can build a kernel driver | — |
 | `find_device` | Make a lost watch or band buzz so you can find it | needs `bluetooth-gatt-enabled` |
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
 | `nfc` | Read an NFC tag, or write a link to a sticker | needs `nfc-enabled` |

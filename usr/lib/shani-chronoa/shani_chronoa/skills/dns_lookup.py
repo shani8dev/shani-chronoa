@@ -128,9 +128,9 @@ def _describe(answers: Dict[str, List[str]], rtype: str, status: str,
         return note
     if status == "NXDOMAIN" and not answers:
         return (
-            f"NXDOMAIN: the nameserver says that name does not exist at all. "
-            f"That is a real answer, not a failure - check the spelling, or "
-            f"that the domain is registered."
+            "NXDOMAIN: the nameserver says that name does not exist at all. "
+            "That is a real answer, not a failure - check the spelling, or "
+            "that the domain is registered."
         )
     if not answers:
         if status and status not in ("NOERROR", ""):
@@ -165,6 +165,48 @@ def _describe(answers: Dict[str, List[str]], rtype: str, status: str,
         lines.append(f"({len(answers)} record type(s) came back; the type you "
                      f"asked for was {rtype}.)")
     return "\n".join(lines)
+
+
+def _dnssec(name: str, rtype: str) -> Tuple[str, str]:
+    """(`delv`'s verdict sentence, reason).
+
+    **`dig` cannot answer this at all.** `dig +dnssec` asks for DNSSEC records
+    and shows the RRSIGs, which is the evidence; `delv` is the tool that
+    *validates the chain and states the outcome*, and its first line is the
+    verdict itself - measured here as `; fully validated`.
+
+    That distinction matters because the two halves of a DNSSEC failure look
+    identical from `dig`: a name that is unsigned and a name whose signature
+    does not verify both come back as "some answers, look at the RRSIGs". One
+    is expected for a domain that never signed; the other means the answer is
+    being forged or the key is broken. `delv` names which.
+
+    `(reason)` is non-empty when the question could not be asked, and the
+    caller must not present an absent verdict as a clean one.
+    """
+    if shutil.which("delv") is None:
+        return "", ("delv (the bind package) is not installed, so the DNSSEC "
+                    "chain could not be validated")
+    try:
+        proc = subprocess.run(["delv", name, rtype], capture_output=True,
+                              text=True, timeout=_TIMEOUT, check=False)
+    except subprocess.TimeoutExpired:
+        return "", "delv did not answer within the time allowed"
+    except OSError as exc:
+        return "", str(exc)
+    # delv's verdict is its first `;` comment line, whatever the exit status.
+    verdict = ""
+    for line in (proc.stdout or "").splitlines():
+        if line.startswith(";"):
+            text = line.lstrip("; ").strip()
+            if text and not text.lower().startswith("this query"):
+                verdict = text
+                break
+    if not verdict:
+        detail = (proc.stderr or "").strip().splitlines()
+        return "", (detail[-1] if detail
+                    else f"delv exited {proc.returncode} without a verdict")
+    return verdict, ""
 
 
 def _run(arguments: dict) -> str:
@@ -208,7 +250,7 @@ def _run(arguments: dict) -> str:
                 + " dig said nothing usable, so nothing is reported about "
                   f"{name}.")
 
-    egress.record(f"skill:dns_lookup", name, method=rtype, privacy_mode=False)
+    egress.record("skill:dns_lookup", name, method=rtype, privacy_mode=False)
 
     out = [f"DNS lookup of {name}, type {rtype}."]
     out.append(_describe(answers, rtype, status, note))
@@ -217,6 +259,21 @@ def _run(arguments: dict) -> str:
                "considers mDNS/Avahi names, so a name that resolves here but "
                "not above is usually a local device on the network, not a "
                "public host.")
+
+    # The signing verdict, which is a different question from the lookup and
+    # the one `dig` cannot answer. Appended as its own labelled section so it
+    # is never read as part of the address answer.
+    verdict, why = _dnssec(name, rtype)
+    out.append("")
+    if verdict:
+        out.append(f"DNSSEC: {verdict}.")
+        if "fully validated" in verdict.lower() or "secure" in verdict.lower():
+            out.append("  The chain of trust from a root key to this record "
+                       "checks out, so the answer above cannot have been "
+                       "altered in transit.")
+    else:
+        out.append(f"DNSSEC: unknown - {why}. Nothing is claimed about "
+                   "whether this answer was signed.")
     return "\n".join(out)
 
 
@@ -227,7 +284,8 @@ SCHEMA = {
         "description": (
             "Look a hostname or address up in DNS and report what came back: "
             "the addresses, or the mail servers, name servers, TXT records, "
-            "certificate records or other records a name publishes. Distinguishes "
+            "certificate records or other records a name publishes, and whether the "
+            "answer is DNSSEC-signed and valid. Distinguishes "
             "'this name does not exist' from 'the resolver did not answer', "
             "because those have different fixes. Obeys privacy mode, since the "
             "query goes to a resolver outside this machine. Read-only."

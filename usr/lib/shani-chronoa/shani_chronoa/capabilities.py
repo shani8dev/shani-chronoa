@@ -49,6 +49,14 @@ __all__ = [
 # parse should be a visible constant to correct rather than a regex change
 # whose effect nobody can see.
 GATED: dict[str, str] = {
+    # Driver development: scaffolding text is ungated (it creates files in the
+    # user's own home, like write_text_file); *building* runs a toolchain over a
+    # tree, which is a different act and gets its own key.
+    "driver_build": "driver-build-enabled",
+    # Writing a device register can erase an EEPROM's calibration or drive a
+    # power device into a state it cannot be talked out of. Reading one is not
+    # gated - it is the same data class as reading a sysfs file.
+    "device_i2c": "i2c-write-enabled",
     "desktop_setting": "appearance-control-enabled",
     "airplane_mode": "radio-control-enabled",
     "phone": "phone-control-enabled",
@@ -353,6 +361,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # entry, so they fell through to OTHER and failed
     # test_no_builtin_skill_lands_in_the_other_group. Grouped here so the
     # surface test passes and they appear somewhere a user can find them.
+    # Opens one TCP connection to one address and sends nothing. Not a
+    # scan: one host, one port, one connect - the same shape as ping_host.
+    "check_port": ("System", "Whether a host accepts connections on a port"),
     "ping_host": ("System", "Ping a host"),
     "routing_table": ("System", "The machine's routing table"),
     "tls_certificate": ("System", "Inspect a TLS certificate"),
@@ -508,6 +519,14 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "temperatures": ("Devices", "Temperatures and fan speeds"),
     "usb_devices": ("Devices", "What is plugged in, and Thunderbolt docks"),
     "driver_info": ("Devices", "Which driver each device uses"),
+    # Driver work (2026-10-10). Beside driver_info because that answers "which
+    # driver is bound right now" and these answer "can I write one, and how do I
+    # talk to hardware without one".
+    "driver_status": ("Devices", "Whether this machine can build a kernel driver"),
+    "driver_scaffold": ("Devices", "Write an out-of-tree kernel module project"),
+    "driver_build": ("Devices", "Compile a kernel module with Kbuild"),
+    "device_probe": ("Devices", "User-space driver routes: I2C buses, video, FUSE"),
+    "device_i2c": ("Devices", "Read or write an I2C device register"),
     "list_fonts": ("Appearance", "Installed fonts, and which one is used"),
     "photo_metadata": ("Photos and video", "When, where and with what camera a photo was taken"),
     "crash_report": ("Services and logs", "What crashed recently"),
@@ -1002,6 +1021,10 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
     # Destructive here means "asks first, always", which is the property a
     # person assumes about a push without having to read the skill.
     "git-push-enabled",
+    # A register write is the hardware equivalent of an irreversible delete: an
+    # EEPROM's data area has no undo, and the denylist in the skill cannot cover
+    # every device. So a session grant must not cover it either.
+    "i2c-write-enabled",
 })
 
 #: Tools that only observe. Kept as an allowlist rather than "anything ungated",
@@ -1009,6 +1032,10 @@ DESTRUCTIVE_CONSENT_KEYS = frozenset({
 #: and `speak` are ungated and both act.
 READ_ONLY_TOOLS = frozenset({
     "charger_info", "firmware_updates",
+    # `device_i2c` reads by default; its write half is the gated direction, and
+    # being in this set is what stops `EXPLORE` mode from reaching it.
+    "device_i2c",
+    "driver_status",
     "project_outline",
     "calendar_events",
     # Gated like calendar_events, and only reads: the one write a wearable can be
