@@ -92,7 +92,15 @@ def _known_units(user: bool) -> Optional[List[str]]:
     flag made every listing come back empty while looking like a healthy
     machine with no services. Same shape as the exit-code traps twice already:
     a flag that is rejected quietly is worse than one that is obviously wrong.
+
+    **`systemctl` is checked for like `systemd-analyze` is.** They ship
+    together, but "ships together" is not a guarantee and a missing binary is
+    an OSError from `subprocess.run` rather than the UNKNOWN this call is
+    supposed to return - which `tests/test_disk_usage_missing_df.py`'s
+    unguarded-command scan exists to catch, and did, on this very function.
     """
+    if shutil.which("systemctl") is None:
+        return None
     argv = ["systemctl"] + (["--user"] if user else []) + \
            ["list-unit-files", "--type=service", "--no-pager", "--no-legend",
             ]

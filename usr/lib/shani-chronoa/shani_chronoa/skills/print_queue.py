@@ -35,11 +35,12 @@ SCHEMA = {
     "function": {
         "name": "print_queue",
         "description": (
-            "Show the printers, which one is the default, and the print jobs "
-            "still waiting; or cancel a waiting job by its id. Use for 'what's "
-            "printing', 'why isn't my document printing', 'cancel that print'. "
-            "Cancelling requires the 'print-control-enabled' consent key; "
-            "listing does not."
+            "Show the printers, which one is the default, the print jobs "
+            "still waiting, and what this machine can print to even when "
+            "nothing is configured; or cancel a waiting job by its id. Use for "
+            "'what's printing', 'why isn't my printer there', 'what can I "
+            "print to', 'cancel that print'. Cancelling requires the "
+            "'print-control-enabled' consent key; listing does not."
         ),
         "parameters": {
             "type": "object",
@@ -99,6 +100,76 @@ def _matches(job: dict, wanted: str) -> bool:
     return job["id"] == wanted or (wanted.isdigit() and job["id"].rsplit("-", 1)[-1] == wanted)
 
 
+def _available_devices() -> "list[str]":
+    """What this machine can print to, from `lpinfo -v`.
+
+    **Why this is a different question from the one `_list` answers.**
+    `lpstat -a` lists the *configured* queues, so a printer the machine can
+    reach but nobody has added yet is invisible — and "my printer isn't
+    there" is the usual symptom. `lpinfo -v` asks CUPS what it can *reach*:
+    every backend it has loaded, and any network printer it has discovered.
+
+    Measured here, and the distinction it forces is real:
+
+        network beh
+        network lpd
+        network ipp
+        network https
+        direct hp
+        network http
+
+    **Those are transports, not printers** — `network ipp` says CUPS *can*
+    speak IPP, not that a printer is waiting. Saying "you can print to
+    network ipp" would be the confident wrong answer this module refuses
+    elsewhere, so the backends are reported as what they are, and a
+    discovered printer (a real `network ipp://host/queue` line) is called out
+    separately as one.
+    """
+    if shutil.which("lpinfo") is None:
+        return ["Print destinations are UNKNOWN: lpinfo (the cups package) is "
+                "not installed, so what this machine can print to cannot be listed."]
+    try:
+        proc = subprocess.run(["lpinfo", "-v"], capture_output=True, text=True,
+                              timeout=_TIMEOUT, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return [f"Print destinations are UNKNOWN: lpinfo did not answer ({exc})."]
+    if proc.returncode != 0:
+        # **stderr first, stdout as the fallback** - the same order
+        # `boot_report` uses, because a tool that writes its refusal to
+        # stdout exists and a message nobody can read is no message at all.
+        detail = ((proc.stderr or "") or (proc.stdout or "")).strip().splitlines()
+        return ["Print destinations are UNKNOWN: lpinfo said "
+                f"{(detail[-1] if detail else f'exit {proc.returncode}')!r}."]
+
+    backends: "list[str]" = []
+    discovered: "list[str]" = []
+    for line in (proc.stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        kind, rest = parts[0], parts[1]
+        if kind == "network" and "://" in rest:
+            # A real destination, not just a transport CUPS can speak.
+            discovered.append(rest)
+        elif kind not in backends:
+            backends.append(kind)
+    if not backends:
+        return ["CUPS reported no printing backends at all, so what this "
+                "machine can print to is UNKNOWN."]
+    out = [f"Printing backends CUPS has loaded ({len(backends)}): "
+           + ", ".join(sorted(backends))
+           + ". Those are transports, not printers - they say what CUPS can "
+             "speak, not that anything is waiting on the other end."]
+    if discovered:
+        out.append(f"Discovered on the network right now ({len(discovered)}): "
+                   + ", ".join(discovered[:8])
+                   + ("..." if len(discovered) > 8 else ""))
+    else:
+        out.append("Nothing was discovered on the network, so a network printer "
+                   "would have to be added by address.")
+    return out
+
+
 def _list() -> str:
     jobs = queued_jobs()
     if jobs is None:
@@ -115,6 +186,11 @@ def _list() -> str:
     else:
         lines.append(f"{len(jobs)} job(s) waiting:")
         lines.extend(f"  {j['id']:<24} {j['user']:<12} {j['when']}" for j in jobs)
+    # **What the machine can print to, beside what is configured.** The queue
+    # answers "what is waiting"; a printer that exists and has no queue yet is
+    # the other half of the same question, and it used to have no answer.
+    lines.append("")
+    lines.extend(_available_devices())
     return "\n".join(lines)
 
 

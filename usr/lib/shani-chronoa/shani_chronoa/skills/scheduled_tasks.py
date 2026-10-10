@@ -225,6 +225,17 @@ def _cron_sources() -> Tuple[List[dict], List[str]]:
 
 
 def _systemctl(user: bool, *args: str) -> Optional[str]:
+    """`systemctl ...`, or None when it cannot be asked.
+
+    **Checked for, not assumed.** `shutil.which` here means a machine without
+    `systemctl` returns None - the caller's UNKNOWN - rather than the OSError
+    `subprocess.run` raises, which is exactly the unguarded-command defect
+    `tests/test_disk_usage_missing_df.py` scans for. This function had been
+    unguarded since it was written and the scan reported it the day
+    `check_units` shipped with the same gap.
+    """
+    if shutil.which("systemctl") is None:
+        return None
     prefix = ["systemctl"] + (["--user"] if user else [])
     return _run(prefix + list(args))
 
