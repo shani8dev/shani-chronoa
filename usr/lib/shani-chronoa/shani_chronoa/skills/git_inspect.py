@@ -203,10 +203,11 @@ SCHEMA = {
         "description": (
             "Report a git working tree: what has changed and is not committed, "
             "the diff of those changes, recent commits, or the current branch "
-            "and how far it is from its upstream. Reports UNKNOWN - never "
-            "'clean tree' - when git is missing, the folder is not a "
-            "repository, or git fails. Requires the 'git-sense-enabled' consent "
-            "key."
+            "and how far it is from its upstream; also the stashed work and the "
+            "reflog (the record that survives rebases and amends). Reports "
+            "UNKNOWN - never 'clean tree' - when git is missing, the folder is "
+            "not a repository, or git fails. Requires the 'git-sense-enabled' "
+            "consent key."
         ),
         "parameters": {
             "type": "object",

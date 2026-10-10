@@ -72,6 +72,12 @@ def _consent(config: ChronoaConfig, key: str) -> tuple:
     The same shape `git_write.py` uses, and deliberately so - the gate table
     in `capabilities.GATED` names one key per tool, so the second key has to be
     checked in the module, and this is where the package keeps that check.
+
+    **The refusal names the key.** This package's rule, stated in
+    `capabilities.py`, is that a shut gate is never mistaken for a missing
+    feature - so the sentence a person reads must name the switch they can
+    turn on. A reason that only says "the git sense is off by default" names
+    no switch and sends them looking through Settings for the wrong row.
     """
     if not config.get_bool(key, False):
         return False, (_REFUSAL_REASON if key == _READ_KEY else _WRITE_REASON)
@@ -340,11 +346,10 @@ def _run(args: dict) -> str:
 
 _REFUSAL_REASON = (
     "conflicted file names and their contents are your work, not the machine's "
-    "state, which is why the git sense is off by default")
+    f"state, which is why '{_READ_KEY}' is off by default")
 _WRITE_REASON = (
     "taking one side of a conflict and marking files resolved change the working "
-    "tree, which is what the git write switch says")
-
+    f"tree, which is what '{_WRITE_KEY}' says")
 
 _SCHEMA = {
     "type": "function",
