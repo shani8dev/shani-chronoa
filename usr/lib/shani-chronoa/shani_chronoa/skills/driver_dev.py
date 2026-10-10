@@ -39,14 +39,19 @@ Two more platform facts the report has to carry, because both make a module that
   on reboot. That is why `install`/`persist` is not an action here: there is no
   place to install one that survives, and a skill that offered it would be
   offering a module that disappears at the next reboot.
-- **Secure Boot.** `sbctl`, `sbsigntools` and `mokutil` are in the **server**
-  profile only, so a desktop image has Secure Boot and no tool to sign with.
-  Since Linux 5.18 upstream kernels accept only modules signed with a trusted
-  key, so an unsigned out-of-tree module is refused by the kernel rather than
-  loaded. SecureBoot's efivar is root-only readable, so `driver_status` reports
-  UNKNOWN unless it could actually read the state - it never guesses, because
-  "secure boot is off" and "I could not check" are opposite claims and the
-  second is the dangerous one.
+- **Signing, measured rather than assumed.** `sbctl`, `sbsigntools` and
+  `mokutil` are in the **server** profile only, so no desktop image ships a tool
+  to sign a module. What that first draft went on to assert - "so a desktop has
+  Secure Boot, and an unsigned module is refused" - was **never measured**, and a
+  firmware boot of the image settled it the other way:
+  `/sys/kernel/security/lockdown` exists and enforces **`none`**, and there is
+  **no SecureBoot efivar at all**. So the real barriers to loading a module here
+  are the missing toolchain and having nowhere to keep the result, **not** a
+  signing wall. The lockdown file is the only universally readable evidence
+  (efivarfs is root-only 0400), which is why that is the half `driver_status`
+  reports, and why it reports UNKNOWN rather than either verdict: "not enforced"
+  and "I could not check" are opposite claims and the second is the dangerous
+  one.
 
 **The feasible half is user space, and it has its own module:** `user_driver.py`
 (FUSE, i2c-tools register access, V4L2, socat), where every tool is already on
@@ -624,9 +629,10 @@ def _run_build(arguments: dict) -> str:
     if not keepable:
         lines.append(f"It cannot be installed from here: {keep_reason}. A module on "
                      "this layout has to be baked into the image or the initramfs.")
-    lines.append("Nothing was loaded: loading an unsigned module is refused by the "
-                 "kernel when Secure Boot is on, and driver_status reports only "
-                 "what it could actually read.")
+    lines.append("Nothing was loaded. Whether an unsigned module would load is "
+                 "reported by driver_status from what it could actually read - "
+                 "on this platform lockdown enforces 'none', so signing is not "
+                 "what stops one; the toolchain and the read-only root are.")
     return " ".join(lines)
 
 

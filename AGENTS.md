@@ -6850,6 +6850,67 @@ reports as UNKNOWN rather than guessing, and nspawn cannot settle it either. A
 not the real blue/green layout - so that line reports both rather than
 contradicting the read-only claim `driver_build` makes on a real machine.
 
+### Booted on the image's own kernel (2026-10-10): every unanswerable fact, answered
+
+`iso-install -p gnome --boot-only --console-exec` firmware-boots the image, so
+`uname -r` is **the image's kernel** rather than the host's, which is the only
+way to measure any of this (`../shani-testbed`'s `tests/driver-boot-facts.sh`).
+Measured on the installed disk, as root, in one boot:
+
+| fact | measured |
+|---|---|
+| kernel | **`7.2.6-arch2-1`** (pacman calls the same package `7.2.6.arch2-1`) |
+| **`/sys/kernel/security/lockdown`** | **present, reads `[none] integrity confidentiality`** |
+| enforced mode | **`[none]` — not locked down** |
+| `/var` | **tmpfs** |
+| `/usr/lib/modules` | **read-only** |
+| `/lib/modules/<kernel>/build` | absent |
+| SecureBoot efivar | absent (no UEFI Secure Boot variable on this boot) |
+| `/dev/i2c-*` | **one node**, `crw-rw----+ root i2c` |
+| `/dev/fuse`, fuse mounts | present, 4 |
+| `v4l2-ctl` | rc=0, 0 devices |
+| toolchain | no `gcc`, no `make`, no `dkms`; `kmod`, `i2c-tools`, `v4l-utils`, `fuse3`, `socat`, `udevadm`, `dracut` all present |
+
+**Two of those confirm claims that only the matrix had suggested, and one
+corrects a claim this section made.** `/var` really is tmpfs and
+`/usr/lib/modules` really is read-only on a real blue/green boot — so
+`driver_build`'s "cannot be installed from here" and `driver_status`'s
+"nowhere to persist" are measured, not inferred. And `/dev/i2c-0` **does**
+exist on a real boot, group-owned by `i2c`, which is the opposite of the nspawn
+slot where the bus was listed and no node was created; both facts now have a
+test, and the message distinguishes them.
+
+**The correction: lockdown is `none`, so an unsigned module would load here.**
+This section previously said a desktop "has Secure Boot with no tool to sign
+with", on the strength of `sbctl`/`sbsigntools`/`mokutil` being server-only in
+the profile. The signing tooling's absence is real; **Secure Boot being *on* was
+never measured and this boot shows no SecureBoot variable at all** — so the
+honest statement is that the profile installs no signing tools and that the
+firmware state was not observable on either boot, which is exactly what
+`driver_status` reports (UNKNOWN) rather than asserting either way. The real
+barriers to loading a module here are the missing toolchain and having nowhere
+to keep the result — **not** a signing wall.
+
+**And the format bug would have shipped wrong on the target platform.** The
+lockdown file on the image's own kernel reads `[none] integrity confidentiality`
+— byte for byte the same as the Ubuntu dev box that caught the parser reading
+the whole line. So the first version's "locked down" would have been reported on
+the real ShaniOS kernel, i.e. a confident wrong answer about whether an unsigned
+module loads, on the distribution the app ships to. The bracketed-mode reading is
+now measured on the image itself.
+
+**One measurement came back wrong before it came back honest.** The first boot
+script called `pacman -Q` naively and reported `linux_pkg=` and `headers_pkg=`
+as **empty strings** — which reads exactly like "this image has no kernel". It
+has one: on a real boot `/var` is an empty tmpfs, so `/var/lib/pacman/local`
+does not exist at runtime. `slot-tests/_pacdb.sh` documents precisely this and
+mounts the read-only subvolume underneath it; the script now does that, and says
+`unknown (no readable package database at runtime)` instead of an empty list. **An
+empty string is not an answer**, and it is the same class as every `0/0` this
+file keeps recording. Its `set -u` also died on `$_src: unbound variable` where
+the label *existed* — this repo's documented command-substitution trap, in a new
+place.
+
 ### Where this landed, for anyone reading `git log`
 
 **All of the above is in commit `ec6b295`**, whose message is *"gui, tests:
