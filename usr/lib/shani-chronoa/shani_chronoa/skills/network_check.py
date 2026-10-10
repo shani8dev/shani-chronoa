@@ -55,12 +55,22 @@ def _arp_entries() -> "list[tuple[str, str, str]]":
     **Why the kernel cache and not `arping -D`.** A duplicate address - two
     hosts answering for one IP - is the classic cause of "the internet works
     sometimes", and ping never shows it. `arping -D` is the usual probe, but
-    its exit-status contract could not be measured on this box (no root, not
-    installed), and a status code read from memory is exactly the wrong
-    answer this module is built to avoid. The kernel's own cache is the same
-    information - a conflicting address shows up as two entries for one IP
-    with different MACs - it needs no extra binary (`ip` is already the tool
-    this skill reads the route from) and it cannot send anything.
+    when this was written its exit-status contract could not be measured on
+    this box (no root, not installed) and a status code read from memory is
+    the wrong answer this module exists to avoid.
+
+    **That contract is now measured, on a real slot** (shani-testbed
+    `chronoa-cli-formats.sh`, `@blue`, 2026-10-10): `arping -D -c 2 -w 3` on
+    an address nobody answers **exits 0**, printing *"Sent 2 probes (2
+    broadcast(s)), Received 0 response(s)"* - so rc=0 means *no duplicate*,
+    which is the opposite of what anyone guesses about a probe. `arping` is at
+    `/usr/sbin/arping` on both images. Whatever a future version does with it,
+    that number is now recorded rather than assumed.
+
+    The kernel's own cache is the same information - a conflicting address
+    shows up as two entries for one IP with different MACs - it needs no extra
+    binary (`ip` is already the tool this skill reads the route from), it
+    sends nothing, and it was verified for real on the dev box first.
     """
     try:
         r = subprocess.run(["ip", "neigh", "show"], capture_output=True,

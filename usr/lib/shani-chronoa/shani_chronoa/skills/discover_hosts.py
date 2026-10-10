@@ -34,10 +34,9 @@ a hostname it did not already resolve.
 (`avahi-browse`) is the other discovery path entirely, and the two are disjoint
 - a printer, a Chromecast or a phone announces `_ipp._tcp.local` /
 `_googlecast._tcp.local` and answers nothing else, so a silent address in a
-sweep is exactly the device that has a name over mDNS. `avahi-browse` is not
-installed on the dev box this was written on, so the output is reduced to what
-a wrong parse cannot fake - a count and the service *types* - and a slot run
-with the binary present is the outstanding verification.
+sweep is exactly the device that has a name over mDNS. Its service-type lines
+are measured on a real slot and the reduced answer (a count and the *types*,
+names reported verbatim) is what that measurement supports.
 """
 
 from __future__ import annotations
@@ -171,15 +170,18 @@ def _mdns_lines(device: str) -> List[str]:
     with a documented-but-easily-misread field order, and this module's
     standing rule is that a shape which cannot be verified must not be
     asserted (see the `pdffonts` fixed-width lesson in `read_document.py`).
-    `avahi-browse` is **not installed on the dev box this was written on**, so
-    the output here is reduced to what a wrong parse cannot fake: a count of
-    announced services and the service *types* seen (`_ipp._tcp`,
-    `_googlecast._tcp`, ...). Every name is reported verbatim rather than
-    unescaped, because unescaping is exactly where a plausible wrong answer
-    would come from.
+    When first written the binary was absent on the dev box, so the output is
+    reduced to what a wrong parse cannot fake: a count of announced services
+    and the service *types* seen (`_ipp._tcp`, `_googlecast._tcp`, ...). Every
+    name is reported verbatim rather than unescaped, because unescaping is
+    exactly where a plausible wrong answer would come from.
 
-    A run that cannot answer (binary absent, non-zero exit, timeout) says so
-    and is never read as "nothing is on the network".
+    **The token shape is now measured on a real slot** (shani-testbed
+    `chronoa-cli-formats.sh`, `@blue`, 2026-10-10): `avahi-browse --all
+    --terminate --resolve` answered with a real service-type line, and
+    `/usr/sbin/avahi-browse` exists on both images. A full run still needs a
+    network where something announces itself - the slot saw exactly one type,
+    which is why the count and the type list are the whole answer.
     """
     if shutil.which("avahi-browse") is None:
         return ["mDNS: could not be checked - avahi-browse is not installed "
