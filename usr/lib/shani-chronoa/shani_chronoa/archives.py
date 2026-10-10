@@ -36,6 +36,42 @@ only streaming reader). Both are single-stream compressors rather than
 archives: each file is one compressed *file*, so "what is inside" is the
 original name and its size - which is what `lzop -l` prints and what `lrzip`
 does not.
+
+**Three tools that ship here are *not* wired to anything, and one of them is
+not the universal reader it looks like.** `arj`, `unar` and `lsar` all have
+entries in `files._PACKAGE_HINTS` and no caller in this package - which is
+worth stating here because this module is where somebody adding a format
+would look first, and the obvious reach is "send it to `unar`, it does
+everything".
+
+Measured on `@blue` against a real `.arj` that `arj` had just created:
+
+| tool | exit | read the `.arj`? |
+|---|---|---|
+| `7z` (bare `l`) | 0 | **yes** |
+| `arj l` | 0 | yes |
+| `lsar` | 0 | yes |
+| **`unar -l`** | **1** | **no** |
+
+So `unar` refuses a format `7z` opens without complaint, and it is therefore
+not a safe fallback for "something 7z cannot read" - a routing rule built on
+it would fail on exactly the inputs it was added for. `lsar` and `arj l` both
+work, and `7z` remains the right default, which is what `NEEDS_OWN_TOOL`
+above already encodes for the two formats measured against it.
+
+**Each reader also takes a different listing flag, and none of the three
+accepts `-l` except `unzip`.** This is a trap because the failure is silent:
+
+    unzip -l FILE     ok
+    7z l FILE         ok          <- a bare subcommand, not `-l`
+    7za l FILE        ok
+    bsdtar -tf FILE   ok          <- `-tf`, not `-l`
+
+All three wrong spellings exit **non-zero with no output at all** - exactly
+what "this archive is unreadable" looks like. A check written against the
+wrong spelling reports a perfectly good reader as unable to open the file;
+that happened here, in `chronoa-cli-formats.sh`, and produced three FAILs
+against tools that read zip perfectly.
 """
 
 from __future__ import annotations
