@@ -6793,10 +6793,62 @@ twice), which is why every mutation asserts `count == 1` first.
 
 **The Arch claims are measured, not inferred.** `../shani-testbed`'s
 `slot-tests/chronoa-driver-tools.sh` asserts them on a real image, with
-`tests/chronoa-driver-tools-results.sh` (22 host checks) proving those
+`tests/chronoa-driver-tools-results.sh` (30 host checks) proving those
 assertions can go red. Writing that file found three more bugs of mine: a
 `present()` helper that returned true when **nothing had been measured** (11
 PASSes from an emptied capture), and two FAILs for the same reason.
+
+### Run on a real slot (2026-10-10): 13 pass, 0 fail, rc=0
+
+`slot-test blue chronoa-driver-tools` on a bootstrapped `@blue`, and it settled
+the claims above **from the image's own pacman database** rather than from a
+matrix:
+
+- **no `linux-headers` package installed** - the load-bearing claim, confirmed
+  directly and independently of which kernel is booted;
+- no `gcc`, no `make`, no `dkms`; `kmod` at `/usr/sbin` (modprobe, insmod,
+  modinfo), so the load side exists;
+- the image's own kernel is **`7.2.6.arch2-1`**;
+- `fusermount3` + `/dev/fuse` present, and one real `fusectl` fuse mount in
+  `mountinfo`, which exercised the `' - '` splitting `device_probe` parses;
+- `v4l2-ctl` exits 0 with **0** video devices - the tool works, the slot has no
+  camera, and the check reports both.
+
+**And it found two more defects, both in what I had written:**
+
+- **`uname -r` in a slot is the HOST's kernel.** Measured: `7.0.0-38-generic`
+  while the image's own is `7.2.6.arch2-1`, because `systemd-nspawn` shares the
+  host kernel (this file already says so about `audit-rules-loaded`). So the
+  build-tree check was reporting *the dev machine's* headers while claiming to
+  report the image's - a fact about the wrong machine wearing the right
+  clothes. It now reads the image's kernel from pacman, and a `kernel_source()`
+  line says which kernel any `uname`-derived fact describes. **A caveat of this
+  shape has to be in the result, not only in the commit:** the slot-test now
+  states that settling the real layout needs `vmspawn` or `iso-install`.
+- **The separators differ, and reading the printed output is what showed it.**
+  pacman says `7.2.6.arch2-1`; a booted kernel says `7.2.6-arch2-1` (Arch's
+  pkgver `.` becomes `-` in `KERNELRELEASE`). Compared literally they do not
+  match, so a boot running the image's own kernel would have been reported as a
+  host kernel - attaching the wrong caveat to a real boot and hiding a real
+  build tree. Both sides are now compared with separators folded away, and the
+  printed pair is a test case.
+- **A bus can exist with no device node.** `i2cdetect -l` lists `i2c-0` and
+  `i2c-1` (Synopsys DesignWare) while `/dev/i2c-*` is **empty** in the slot. So
+  `device_i2c`'s "there is no such bus on this machine" was wrong on the machine
+  it was measured on: the adapter is there and the *node* is not, which is a
+  udev question rather than a wrong bus number. It now says which of the two it
+  is.
+
+Two honest SKIPs, both environmental and both named: no
+`/sys/kernel/security/lockdown` and no SecureBoot efivar under nspawn. **The
+SecureBoot measurement is the one worth having** - it is the fact a desktop user
+cannot read (efivarfs is root-only 0400) and that `driver_status` therefore
+reports as UNKNOWN rather than guessing, and nspawn cannot settle it either. A
+`vmspawn`/`iso-install` boot of the image's own kernel can, and is what would.
+
+`/usr/lib/modules` is **writable in the slot**, which is the slot's overlay and
+not the real blue/green layout - so that line reports both rather than
+contradicting the read-only claim `driver_build` makes on a real machine.
 
 ### Where this landed, for anyone reading `git log`
 

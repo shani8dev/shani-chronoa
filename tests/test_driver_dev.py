@@ -328,6 +328,22 @@ class TestI2cSkill:
                                     "register": "0x00"})
         assert "/dev/i2c-200 does not exist" in out
 
+    def test_a_bus_with_no_device_node_is_not_called_a_missing_bus(self, monkeypatch):
+        """Measured on a real slot: i2cdetect lists i2c-0/1 with no /dev nodes.
+
+        Those are two different facts with two different fixes - a udev rule
+        versus a different bus - and the first version of this said "there is no
+        such bus", which was wrong on the machine it was measured on.
+        """
+        monkeypatch.setattr(user_driver, "_i2c_buses",
+                            lambda: (["0", "1"], "from i2cdetect -l (2 bus)"))
+        monkeypatch.setattr(user_driver.Path, "exists", lambda self: False)
+        out = user_driver._run_i2c({"action": "read", "bus": 1, "address": "0x48",
+                                    "register": "0x00"})
+        assert "Bus 1 exists" in out
+        assert "no device node" in out
+        assert "there is no such bus" not in out
+
     def test_a_non_numeric_bus_asks_the_question(self):
         assert "Which I2C bus?" in user_driver._run_i2c({"bus": "one", "address": "0x48",
                                                         "register": "0x00"})

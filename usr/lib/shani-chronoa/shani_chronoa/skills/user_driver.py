@@ -257,8 +257,21 @@ def _run_i2c(arguments: dict) -> str:
 
     node = Path(f"/dev/i2c-{bus}")
     if not node.exists():
-        return (f"{node} does not exist, so there is no such bus on this machine. "
-                "device_probe lists the ones there are.")
+        # **Measured 2026-10-10 on a real ShaniOS slot:** `i2cdetect -l` lists
+        # i2c-0 and i2c-1 (Synopsys DesignWare adapters) while `/dev/i2c-*` has
+        # no nodes at all - udev does not create them there. So "there is no
+        # such bus" would be wrong: the adapter exists and the *node* does not,
+        # and those are different facts with different fixes (a rule for
+        # udev, versus a different bus).
+        known, note = _i2c_buses()
+        if str(bus) in known:
+            return (f"Bus {bus} exists ({note}) but {node} does not, so this "
+                    f"machine has no device node for it. Nothing was read or "
+                    f"written. On a desktop the node is usually missing because "
+                    f"udev has no rule for the adapter's group - a udev rule, or "
+                    f"running as a member of that group, is what creates it.")
+        return (f"{node} does not exist, and bus {bus} is not one of the buses "
+                f"reported here ({note}). device_probe lists the ones there are.")
 
     if action == "read":
         if shutil.which("i2cget") is None:
