@@ -147,6 +147,12 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # package that does not contain the binary they need - the same defect
         # as wpctl/pipewire above.
         "binutils",
+        # Read out of the matrix's `commands[].package` on 2026-10-10, for the
+        # shani-tools sweep. **`7z` is `7zip`, not `p7zip`** - the matrix caught
+        # my guess, which is the same wpctl->pipewire class a fifth time.
+        "iperf3", "rclone", "restic", "subversion", "mercurial", "7zip",
+        "lrzip", "lzop", "unrar", "cabextract", "unarchiver", "arj",
+        "openbsd-netcat", "nethogs", "bandwhich", "iftop", "socat",
         # Driver development (2026-10-10). Each checked against the Arch
         # package API on 2026-10-10, not read off a mirror: `i2c-tools extra
         # 4.4-4`, `v4l-utils extra 1.32.0-2`, `fuse3 extra 3.18.3-1`,
