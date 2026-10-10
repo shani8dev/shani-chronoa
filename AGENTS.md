@@ -6563,3 +6563,30 @@ Its Settings row sits **beside `faults` deliberately** — the same question
 is doing exactly the right thing. Off by default, unlike `faults`: the ring
 usually needs root or a group membership, and it carries hardware detail rather
 than a service's own account of itself.
+
+## Eight skills enriched from the CLI matrices, and the three lies the work found (2026-10-10)
+
+Both image matrices exist in the tree now — GNOME (`shani-install-media/test-env/mout/matrix-gnome.json`, 3,982 commands) and Plasma (`test-env/mout-plasma/shanios-matrix.json`, 4,116) — and this pass enriched **eight existing skills** from them. Every one was verified by running the real binary; the two that could not be were measured on a real slot afterwards.
+
+| skill | what it answers now | verified |
+|---|---|---|
+| `read_document` | whether the PDF embeds its fonts (`pdffonts`), and pages/encryption/page size (`pdfinfo`) | real binary, this box |
+| `firmware_updates` | which firmware the machine is *running*, not only what could update (`fwupdmgr get-devices`) | real, a live ThinkPad's 27 devices |
+| `check_internet` | an IP conflict — one address at two MACs in the kernel's ARP cache, the classic cause of "works sometimes" | real `ip neigh` |
+| `scan_document` | "no scanner" told apart from "SANE cannot open it" (`sane-find-scanner`) | real, no-scanner path |
+| `system_info` | vendor, model, board, BIOS version, from `/sys/class/dmi/id` | real; `dmidecode` needs root and **exits 0** while refusing |
+| `discover_hosts` | devices that announce themselves *by name* over mDNS (`avahi-browse`) | real slot, `@blue` 14 pass 0 fail |
+| `check_units` | `systemd-analyze verify` — the command that answers "why won't it start" | real output, this box |
+| `usb_devices` | driver and USB class per device (`usb-devices`) | real binary, this box |
+
+**Three things the work found, each a false claim rather than a missing feature:**
+
+1. **`pdffonts`' exit code had been measured through a pipe.** The docstring recorded *"exits 0 even on a file that is not a PDF"* — that code belonged to `head`. Measured properly: a non-PDF is **rc=1**, and a **fontless** PDF is the rc=0-empty-table case. Two different contracts, both handled, one of them cited wrongly. `tests/test_read_document_fonts.py` now covers each on its own terms.
+2. **`check_units`' consent gate was a row in a table.** `capabilities.GATED` declared `service-check-enabled` and the skill never consulted it, and the key existed nowhere else — honouring the table would have refused every call forever. Removed: it is a read-only verifier and belongs with `list_services` and `read_logs`. This is the `calendar_edit`/`fm_radio` dead-switch class caught by the suite rather than by a user.
+3. **The `pdffonts` parser misread real output on its first day.** The table is fixed-width, `Type 1` is two words and font names hold spaces, so field-index parsing counted a non-embedded font as embedded. Boundaries now come from the dashed rule under the header, and the fixture generator is asserted byte-for-byte against captured real rows — a hand-typed fixture had been one space narrower and was misread by the parser it existed to test.
+
+**Five of my own test controls could not fail** and mutation testing is what caught them: a router that sorted first anyway, a zero-MAC listed once per different IP, a banner test that replaced a fixture line with itself, a composed test whose PDF had no text layer (so the OCR branch kept the mutation green), and a slot-test seam assertion counting stderr prose as table rows. Each is fixed and each is why the mutations below are recorded per skill.
+
+**Where this left the harness.** `shani-testbed` gained `slot-tests/chronoa-cli-formats.sh` and its self-test `tests/chronoa-cli-formats-results.sh`, which settle on Arch the four output shapes the Ubuntu dev box could not run. **Run for real on `@blue`: 14 pass, 0 fail, rc=0**, and it measured the two facts this repo had been guessing — `arping -D` on an unanswered address **exits 0** (so rc=0 means *no duplicate*, the opposite of the guess), and `avahi-browse`'s service-type lines with both binaries at `/usr/sbin`. The rule above about a missing command being a slot run rather than a workaround is the lesson that produced the file.
+
+**Still unmeasured on Arch:** `compsize` (btrfs compression ratio) and `bootctl` (EFI boot entries) are both open on the matrix and absent on the dev box, and both are in `chronoa-cli-formats.sh`'s presence list waiting for a run that exercises them.
