@@ -87,13 +87,34 @@ def _run(arguments: dict) -> str:
         target = Path(os.path.expanduser("~")) / "Downloads" / name
     target = target.expanduser()
 
-    if shutil.which("curl") is None:
+    # **`wget` is the fallback, and it ships in the same shani-tools-network
+    # package as `curl`.** The first version had no fallback, so a machine with
+    # `wget` and no `curl` - the normal Debian-family layout - could not download
+    # anything from a skill whose only job is downloading.
+    #
+    # The two tools' contracts are opposite and that is the whole of the work:
+    #
+    #                                curl             wget --no-verbose
+    #     success                    rc=0, silent     rc=0, silent
+    #     a 404                      rc=22, stderr    rc=8, stderr
+    #                                "curl: (22)"     "ERROR 404: Not Found."
+    #     a name that will not       rc=6, stderr     rc=4, stderr
+    #     resolve                    "curl: (6)"      "unable to resolve host"
+    #
+    # **`wget -q` gives an exit code and no stderr at all** - measured, so a
+    # reader that quotes stderr would quote nothing. `--no-verbose` keeps the
+    # diagnostics, which is what makes the failure reportable.
+    use_wget = shutil.which("curl") is None and shutil.which("wget") is not None
+    if shutil.which("curl") is None and shutil.which("wget") is None:
         return files.tool_missing("curl", "download that file")
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return f"I could not make {target.parent}: {exc}. Nothing was saved."
+
+    if use_wget:
+        return _download_with_wget(url, target, parsed)
 
     command = [
         "curl", "--silent", "--show-error", "--location",
@@ -186,3 +207,68 @@ SCHEMA = {
 }
 
 SKILLS = [Skill(name="download_file", schema=SCHEMA, run=_run)]
+
+#: wget's exit statuses that mean something specific. **These are not curl's** -
+#: a 404 is 22 for curl and 8 for wget, so a table copied between the two tools
+#: would misreport every server error.
+_WGET_CODES = {
+    0: None,                                   # success
+    4: "the address could not be resolved",
+    5: "TLS verification failed",
+    6: "the server asked for a username and password",
+    7: "the server refused the connection",
+    8: "the server returned an error status",
+}
+
+
+def _download_with_wget(url: str, target: Path, parsed) -> str:
+    """Fetch with `wget`, reporting in the same shape the curl path uses.
+
+    **`--no-verbose`, never `-q`.** Measured: `-q` produces an exit code and
+    *nothing on stderr*, so a failure would be reported with no reason. The
+    progress bar is suppressed and the errors are kept.
+    """
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return f"I could not make {target.parent}: {exc}. Nothing was saved."
+
+    command = ["wget", "--no-verbose", "--tries=1",
+               "--timeout=%d" % _TIMEOUT,
+               "--output-document=%s" % target, "--", url]
+    try:
+        done = subprocess.run(command, capture_output=True, text=True,
+                              timeout=_TIMEOUT + 15, check=False)
+    except subprocess.TimeoutExpired:
+        return (f"The download did not finish within {_TIMEOUT} seconds, so "
+                "nothing is known to be saved. That is a timeout talking to "
+                "the server, not a statement about whether the file exists.")
+    except OSError as exc:
+        return f"Could not run wget: {exc}."
+
+    if done.returncode == 0:
+        try:
+            size = target.stat().st_size
+        except OSError:
+            size = -1
+        if size == 0:
+            # A zero exit with a zero-byte file is not "an empty file was
+            # downloaded" without saying so - it is also what a server sending
+            # only headers looks like.
+            return ("wget reported success, but the file it wrote is 0 bytes. "
+                    "That may be the real size of what is at that address, or "
+                    "the server may have sent nothing useful; nothing here "
+                    "claims which.")
+        return (f"Downloaded {size} byte(s) to {target} with wget (curl is not "
+                "installed on this machine).")
+
+    reason = _WGET_CODES.get(done.returncode)
+    detail = [line for line in (done.stderr or "").splitlines()
+              if line.strip() and not line.startswith("  ")]
+    said = detail[-1].strip() if detail else "wget said nothing usable"
+    if done.returncode == 8:
+        return (f"The server at {parsed.netloc} returned an error status, so no "
+                f"file was saved. wget said: {said}. That is the server "
+                "refusing the address, not this machine failing to reach it.")
+    return ("Could not download that file: %s - %s. Nothing was saved."
+            % (reason or "wget exited %d" % done.returncode, said))
