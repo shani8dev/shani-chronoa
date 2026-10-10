@@ -557,6 +557,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: reports modes, never chmods (a mutation asserting "Permissions
     # changed to 0600" fails 1 test).
     "permission_audit": ("System", "What other users on this machine can read or write"),
+    # Read-only: lists empty dirs, removes none (a mutation replacing the
+    # closing sentence fails 1 test).
+    "empty_directories": ("Files", "Which directories hold nothing at all"),
+    # Read-only: lists matches with sizes and dates, deletes none.
+    "files_by_name": ("Files", "Where every file with this name lives"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated

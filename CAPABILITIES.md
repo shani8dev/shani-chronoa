@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**241 skills in 24 groups.** Each is a named, schema-typed module; the model
+**243 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 241 are consent-gated and 17 are destructive.**
+**89 of 243 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -118,8 +118,10 @@ Read, write, move, archive and undo files.
 | `directory_tree` | Show a folder's shape | — |
 | `duplicate_files` | Which files are stored twice, and how much that wastes | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
+| `empty_directories` | Which directories hold nothing at all | — |
 | `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
 | `extract_archive` | Unpack a tar, zip, 7z, rar or cab archive | — |
+| `files_by_name` | Where every file with this name lives | — |
 | `find_and_replace` | Find and replace | **asks first, always** · needs `bulk-edit-enabled` |
 | `find_files` | Find files by name | — |
 | `find_recently_modified` | What changed today | — |
