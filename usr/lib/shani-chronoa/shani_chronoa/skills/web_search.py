@@ -138,11 +138,20 @@ def _run(arguments: dict) -> str:
 
     hit = _challenge_phrase(body)
     if hit:
+        # **`websearch.search`, not a fixed string.** Three of the engines this
+        # DuckDuckGo path used to depend on still answer, so a challenge on the
+        # one that was tried is a reason to try the others rather than a dead
+        # end - the fixed-string answer that used to be returned here is exactly
+        # what made the old skill useless.
+        from shani_chronoa import websearch
+        results, _why, notes = websearch.search(query)
+        if results:
+            return websearch.format_results(query, results, notes)
         return (
-            "The search engine did not return results: it returned a "
-            f"human-verification challenge instead (it said \"{hit}\"). That "
-            "is the engine refusing an automated reader, and it is not a "
-            "statement that there is nothing to find.\n\n"
+            "The search engine did not return results, and no other engine "
+            f"answered either (it said \"{hit}\")). That is the engines "
+            "refusing an automated reader, and it is not a statement that there "
+            "is nothing to find.\n\n"
             "Two paths that still work:\n"
             "- fetch a **specific URL** instead - give me the address and I will "
             "read it;\n"

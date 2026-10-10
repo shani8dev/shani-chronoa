@@ -1,0 +1,525 @@
+   #[1]Brave Search [2]Ask Brave
+
+   [3]Brave logo Brave logo Brave logo
+   (BUTTON)
+   [4]Brave logo
+   arch linux__________
+   (BUTTON)
+   (BUTTON) (BUTTON)
+   (BUTTON)
+   (BUTTON)
+
+   (BUTTON)
+
+     * [5]Ask
+     * [6]All
+     * [7]Images
+     * [8]News
+     * [9]Videos
+     * [10]Maps
+     * [11]Goggles
+
+   (BUTTON)
+
+   [12]🌐
+   Arch Linux
+   archlinux.org
+   Arch Linux
+   You've reached the website for Arch Linux, a lightweight and flexible
+   Linux® distribution that tries to Keep It Simple.
+   [13]Downloads
+   The image can be burned to a DVD, mounted as an ISO file, or be
+   directly written to a USB flash drive. It is intended for new
+   installations only; an existing Arch Linux system can always be updated
+   with pacman -Syu.
+   [14]Package Search
+   You are browsing the Arch Linux package database.
+   [15]Pacman Mirrorlist Generator
+   This page generates the most up-to-date mirrorlist possible for Arch
+   Linux. The data used here comes straight from the developers' internal
+   mirror database used to track mirror availability and tiering.
+
+   [16]Arch Linux
+   Linux distribution
+   [17]archlinux.org
+   Archlinux-logo-standard-version
+   [18]Arch Linux - Wikipedia
+     * Archlinux-logo-standard-version
+     * [19]Arch Linux - Wikipedia
+     * [20]Donate via Click&Pledge to Arch Linux
+
+   Arch Linux (/ɑːrtʃ/) is an open source, rolling release Linux
+   distribution. Arch Linux is kept up-to-date by regularly updating the
+   individual pieces of software that it comprises. It provides monthly
+   "snapshots" which … [21]Wikipedia
+
+   Factsheet
+   (BUTTON)
+   Developer Levente Polyak ([22]lead developer)
+   OS family [23]Linux ([24]Unix-like)
+   Working state Current
+   (BUTTON) More about Arch Linux
+
+   Factsheet
+   Developer Levente Polyak ([25]lead developer)
+   OS family [26]Linux ([27]Unix-like)
+   Working state Current
+   (BUTTON) More about Arch Linux
+
+   [28]🌐 [29]🌐 [30]🌐 [31]🌐 [32]🌐 [33]🌐 [34]🌐 [35]🌐 [36]🌐 [37]🌐
+
+   Data from [38]Wikipedia
+   (BUTTON)
+   [39]
+   🌐
+   Wikipedia
+   en.wikipedia.org › wiki › Arch_Linux
+   Arch Linux - Wikipedia
+   1 week ago - Arch Linux (/ɑːrtʃ/) is an open source, rolling release
+   Linux distribution. Arch Linux is kept up-to-date by regularly updating
+   the individual pieces of software that it comprises. It provides
+   monthly "snapshots" which are used as installation media. Arch Linux is
+   intentionally minimal, ...
+   [40]History[41]Design and principles[42]Installation[43]Package
+   management[44]Derivatives and other products[45]Reception
+
+   Discussions
+   (BUTTON)
+     __________________________________________________________________
+
+   What even IS Arch Linux?
+   (BUTTON)
+   Arch Linux, and likely most distros, are defined by these few things
+   and are not limited to: The Linux Kernel, what type of config and
+   modules it's been compiled with. The pre-packaged programs it comes
+   with by default. The init. The package manager. The repositories it
+   references. The slightly differing Linux Filesystem Hierarchy. The
+   types of computers it runs on. So as for Arch Linux, we can conclude
+   that it: Has 3 different configured Arch-specific kernels (Stock, Zen
+   and LTS). Includes basic GNU coreutils, and whatever else is in the
+   "base" package. Uses Systemd for init. Uses pacman as its package
+   manager References Arch Linux repos for additional software (AMD64 with
+   an optional choice of x86 32bit software) Has a (relatively) simple
+   Filesystem Hierarchy that follows Version 3 of the Filesystem Hierarchy
+   Standard. Officially supports both x86 and AMD64 processors only. Edit:
+   Arch only officially supports AMD64. However there are sister distro
+   projects that offer x86, ARMv7 and ARMv8 versions. [46]More on
+   reddit.com
+   🌐 r/archlinux
+   128
+   306
+   21 March 2022
+   Why would someone use Arch Linux
+   (BUTTON)
+   I've been using arch for a while now and the main reasons I'm sticking
+   with it are I like having all the latest software The AUR The AUR The
+   AUR [47]More on reddit.com
+   🌐 r/linux
+   128
+   0
+   25 December 2024
+   Is installing Arch Linux worth it?
+   (BUTTON)
+   I'm an arch user (btw), but honestly just use it for the AUR, i would
+   recommend endeavourOS since it is still pretty much arch but it has a
+   normal gui installer. I will say that arch has given me more knowledge
+   about linux since i have configured pretty much everything by myself
+   [48]More on reddit.com
+   🌐 r/linuxquestions
+   136
+   22
+   4 December 2024
+   Why is Arch Linux so loved by everyone?
+   (BUTTON)
+   i always considered "i use arch btw" as a cry for help [49]More on
+   reddit.com
+   🌐 r/linux4noobs
+   265
+   151
+   15 December 2024
+   (BUTTON) Show more
+
+   (BUTTON)
+
+   Videos
+   [50]
+   [LmpwZw]
+   32:50
+   🌐 YouTube
+   The Only Arch Linux Installation Guide You'll Ever Need - YouTube
+   5 May 2026
+   [51]
+   [LmpwZw]
+   14:50
+   🌐 YouTube
+   Install Arch Linux The Lazy Way - YouTube
+   9 April 2026
+   [52]
+   [dlZB]
+   🌐 youtube.com
+   Install Arch Linux The Lazy Way
+   [53]
+   [dlZB]
+   🌐 youtube.com
+   The Only Arch Linux Installation Guide You'll Ever Need
+   [54]
+   [dlZB]
+   🌐 youtube.com
+   How to Install Arch Linux in 2026 - The Complete Step-by- ...
+   [55]View all
+   [56]View all
+   [57]
+   🌐
+   GitHub
+   github.com › archlinux
+   Arch Linux · GitHub
+   Arch Linux is an independently developed, x86-64 general-purpose
+   GNU/Linux distribution that strives to provide the latest stable
+   versions of most software by following a rolling-release model.
+   [58]
+   🌐
+   Arch Linux ARM
+   archlinuxarm.org
+   Arch Linux ARM
+   Arch Linux ARM is a distribution of Linux for ARM computers. We provide
+   targeted kernel and software support for hard-float ARMv7 with NEON and
+   ARMv8 AArch64 instruction sets on a variety of consumer devices and
+   development platforms.
+   [59]
+   🌐
+   GeeksforGeeks
+   geeksforgeeks.org › linux-unix › what-is-arch-linux
+   Introduction to Arch Linux - GeeksforGeeks
+   20 November 2025 - Arch Linux is an independently developed,
+   open-source Linux distribution known for its simplicity, bleeding-edge
+   updates, and user-focused design.
+   [60]
+   🌐
+   Arch Linux
+   archlinux.org › download
+   Arch Linux - Downloads
+   Images for installing Arch can be downloaded via BitTorrent or right
+   here in your browser from one of the Arch HTTP(S) mirrors down below.
+   [61]
+   🌐
+   DistroSea
+   distrosea.com › select › archlinux
+   Try Arch Linux online on DistroSea
+   Arch Linux is a rolling-release Linux distribution that follows a
+   minimalist philosophy. It is known for its simplicity, flexibility, and
+   cutting-edge software. Arch Linux uses the Pacman package manager and
+   the Arch Build System (ABS) for package ...
+
+   Find elsewhere
+   [62]Google [63]Bing [64]Mojeek
+   [65]
+   🌐
+   DEV Community
+   dev.to › kurealnum › an-actually-productive-arch-linux-setup-2d62
+   An Actually Productive Arch Linux Setup - DEV Community
+   28 February 2025 - I personally find both Cachy OS and Endeavour OS to
+   be excellent implementations of Arch Linux. They save me time, still
+   give me plenty of flexibility, and they look and function quite well.
+   They also complement the other collections of mostly Debian-based
+   systems, plus one instance of Slackware CURRENT.
+   [66]
+   🌐
+   9to5Linux
+   9to5linux.com › home › news › distros › arch linux iso release for
+   october 2026 ships with the archinstall 4.5 installer
+   Arch Linux ISO Release for October 2026 Ships with the ArchInstall 4.5
+   Installer - 9to5Linux
+   1 week ago - Arch Linux 2026.10.01 ISO release for October 2026 is now
+   available for download powered by Linux 7.2.7 and the ArchInstall 4.5
+   installer.
+   [67]
+   🌐
+   ArchWiki
+   wiki.archlinux.org › title › Main_page
+   ArchWiki - Arch Linux
+   Guide through the process of installing Arch Linux.
+   [68]
+   🌐
+   Cantech
+   cantech.in › home › what is arch linux?
+   What is Arch Linux? History, Advantages, and Key Uses
+   1 April 2026 - Judd Vinet (a Canadian programmer and guitarist) made
+   Arch Linux – a simple and efficient operating system in March 2002. He
+   took inspiration from other distributions like CRUX, Slackware, and BSD
+   and made a lightweight system with the principles of simplicity and
+   modernity.
+   [69]
+   🌐
+   MilesWeb
+   milesweb.com › home › exploring what is arch linux: user base and
+   unique features
+   Exploring What Is Arch Linux: User Base And Unique Features
+   21 June 2024 - This blog will explain everything you need to know about
+   this Linux distribution. ... Arch Linux is an open-source and free
+   Linux distribution that offers exceptional customizability and control
+   over your system.
+   [70]
+   🌐
+   GitHub
+   github.com › archlinux › archinstall
+   GitHub - archlinux/archinstall: Arch Linux installer - guided,
+   templates etc. · GitHub
+   Ensure some unallocated space is available for the Linux installation
+   after the Windows installation. Boot into the ISO and run archinstall.
+   [71]
+   🌐
+   Reddit
+   reddit.com › r/archlinux › what even is arch linux?
+   r/archlinux on Reddit: What even IS Arch Linux?
+   21 March 2022 -
+
+   I install a kernal, boot loader, text editor and desktop... None of
+   that is arch
+
+   I also install pacman and yay, which also is not arch but is a
+   collection of repos.
+
+   Is arch Linux just the repository? The collection of repos and
+   pac-strap the command to let me quickly install tools that let me use
+   the repos easily?
+
+   UPDATE: I use Arch btw
+   [72]Top answer
+   1 of 62
+   742
+   Arch Linux, just like any other distribution, is not one singular
+   thing. It's a combination of tooling, infrastructure and people.
+   [73]
+   2 of 62
+   90
+   "Arch Linux is what gives a sudoer his power. It's a distro created by
+   all pac-straps. It roots us and boots us. It binds the computer
+   together." - Obi-Wan Kenobi
+   [74]
+   🌐
+   OperaVPS
+   operavps.com › blog › what is arch linux? a complete guide for 2026
+   ✅ What is Arch Linux? A Complete Guide for 2026
+   22 April 2026 - What is Arch Linux? It is an open-source distribution
+   of Linux that was created independently and allows users to customize
+   all features from installation to management.
+   [75]
+   🌐
+   Google Play
+   play.google.com › store › apps › details
+   Arch Linux Tutorial – Apps on Google Play
+   1 month ago - Arch Linux is the most powerful and customizable Linux
+   distribution — loved by developers, sysadmins and power users
+   worldwide. Mastering Arch Linux opens doors to DevOps, cybersecurity,
+   cloud computing and data science careers.
+   Rating: 3.8 ​ - ​ 120 votes
+   [76]
+   🌐
+   YouTube
+   youtube.com › watch
+   How to Install Arch Linux in 2026 - The Complete Step-by-Step Guide -
+   YouTube
+   [77]
+   01:09:11
+   In this complete Arch Linux installation guide, you'll learn how to
+   install Arch Linux step-by-step using both the archinstall script (the
+   easiest method) an...
+   Published: 28 May 2026
+   [78]
+   🌐
+   MakeUseOf
+   makeuseof.com › home › linux › what is arch linux and who uses it?
+   What Is Arch Linux and Who Uses It?
+   8 September 2021 - Arch's lightweight and minimalistic nature is the
+   prime reason for its rising popularity in the tech community. The
+   x86-64 centric Linux distro adheres to the KISS principle (keep it
+   simple, stupid). As the name suggests, Arch believes in making the
+   operating system a clean slate that leaves every decision to the user.
+   [79]
+   🌐
+   TechSpot
+   techspot.com › downloads › 5571-arch-linux.html
+   Arch Linux Download Free - 2026.10.01 | TechSpot
+   1 week ago - Arch Linux is an independently developed, i686/x86-64
+   general purpose GNU/Linux distribution versatile enough to suit any
+   role. TechSpot is the fastest mirror for Arch Linux.
+   Rating: 4.4 ​ - ​ 78 votes
+   [80]
+   🌐
+   ArchWiki
+   wiki.archlinux.org › title › Arch_Linux
+   Arch Linux - ArchWiki
+   The large number of packages and build scripts in the various Arch
+   Linux repositories offer free and open source software for those who
+   prefer it, as well as proprietary software packages for those who
+   embrace functionality over ideology.
+
+   Related queries
+   [81]
+   arch linux iso
+   [82]
+   arch linux download
+   [83]
+   arch linux install
+   [84]
+   arch linux system requirements
+   [85]
+   arch linux distros
+   [86]
+   arch linux download iso
+   [87]
+   arch linux vs ubuntu
+   [88]
+   arch linux gui
+   [89]Next
+
+Resources
+
+   [90]Brave Search Premium [91]Brave Search Help [92]Transparency Report
+   [93]Report a security issue [94]Status
+
+Products
+
+   [95]Brave Browser [96]Brave Search [97]Brave Wallet [98]Brave Talk
+   [99]Brave Firewall + VPN [100]Brave Playlist [101]Brave News [102]Brave
+   Rewards [103]Brave Search API [104]Brave Ads
+
+Policies
+
+   [105]Privacy Policy [106]Terms of Use
+
+References
+
+   Visible links:
+   1. https://search.brave.com/opensearch.xml
+   2. https://search.brave.com/opensearch.ask.xml
+   3. https://search.brave.com/
+   4. https://search.brave.com/
+   5. https://search.brave.com/ask?q=arch+linux&source=web
+   6. https://search.brave.com/search?q=arch+linux&source=web
+   7. https://search.brave.com/images?q=arch+linux&source=web
+   8. https://search.brave.com/news?q=arch+linux&source=web
+   9. https://search.brave.com/videos?q=arch+linux&source=web
+  10. https://search.brave.com/maps/search?q=arch+linux&source=web
+  11. https://search.brave.com/goggles?q=arch+linux&source=web
+  12. https://archlinux.org/
+  13. https://archlinux.org/download/
+  14. https://archlinux.org/packages/
+  15. https://archlinux.org/mirrorlist/
+  16. https://en.wikipedia.org/wiki/Arch_Linux
+  17. https://archlinux.org/
+  18. https://search.brave.com/images?q=Arch+Linux&context=W3sic3JjIjoiaHR0cHM6Ly90aHVtYi53aWtpbWVkaWEub3JnL3dpa2lwZWRpYS9jb21tb25zL3RodW1iL2MvY2QvQXJjaF9MaW51eF9zY3JlZW5zaG90JTJDXzEyLjA2LjIwMjQucG5nLzEyODBweC1BcmNoX0xpbnV4X3NjcmVlbnNob3QlMkNfMTIuMDYuMjAyNC5wbmc_dXRtX3NvdXJjZT1lbi53aWtpcGVkaWEub3JnJmFtcDt1dG1fY2FtcGFpZ249aW5kZXgmYW1wO3V0bV9jb250ZW50PXRodW1ibmFpbCIsInRleHQiOiJBcmNoIExpbnV4IC0gV2lraXBlZGlhIiwicGFnZV91cmwiOiJodHRwczovL2VuLndpa2lwZWRpYS5vcmcvd2lraS9BcmNoX0xpbnV4In1d&sig=784781eeb44e30178fb330663b66e9ee14660adf69fccaef565d9671954dd996&nonce=7b86c349c2c2127508b8c60a63bc037f&source=infoboxImg
+  19. https://search.brave.com/images?q=Arch+Linux&context=W3sic3JjIjoiaHR0cHM6Ly90aHVtYi53aWtpbWVkaWEub3JnL3dpa2lwZWRpYS9jb21tb25zL3RodW1iL2MvY2QvQXJjaF9MaW51eF9zY3JlZW5zaG90JTJDXzEyLjA2LjIwMjQucG5nLzEyODBweC1BcmNoX0xpbnV4X3NjcmVlbnNob3QlMkNfMTIuMDYuMjAyNC5wbmc_dXRtX3NvdXJjZT1lbi53aWtpcGVkaWEub3JnJmFtcDt1dG1fY2FtcGFpZ249aW5kZXgmYW1wO3V0bV9jb250ZW50PXRodW1ibmFpbCIsInRleHQiOiJBcmNoIExpbnV4IC0gV2lraXBlZGlhIiwicGFnZV91cmwiOiJodHRwczovL2VuLndpa2lwZWRpYS5vcmcvd2lraS9BcmNoX0xpbnV4In1d&sig=784781eeb44e30178fb330663b66e9ee14660adf69fccaef565d9671954dd996&nonce=7b86c349c2c2127508b8c60a63bc037f&source=infoboxImg
+  20. https://search.brave.com/images?q=Arch+Linux&context=W3sic3JjIjoiaHR0cHM6Ly9hcmNobGludXgub3JnL3N0YXRpYy9jbGlja19hbmRfcGxlZGdlLnBuZyIsInRleHQiOiJEb25hdGUgdmlhIENsaWNrJlBsZWRnZSB0byBBcmNoIExpbnV4IiwicGFnZV91cmwiOiJodHRwczovL2FyY2hsaW51eC5vcmcvIn1d&sig=816c4260d78414e47330b369393246f4451993adfa5f9d397c0bc3b093f40e86&nonce=bec47d62d8c3b78e01712b2f03dd66af&source=infoboxImg
+  21. https://en.wikipedia.org/wiki/Arch_Linux
+  22. https://en.wikipedia.org/wiki/Lead_developer
+  23. https://en.wikipedia.org/wiki/Linux
+  24. https://en.wikipedia.org/wiki/Unix-like
+  25. https://en.wikipedia.org/wiki/Lead_developer
+  26. https://en.wikipedia.org/wiki/Linux
+  27. https://en.wikipedia.org/wiki/Unix-like
+  28. https://en.wikipedia.org/wiki/Arch_Linux
+  29. https://www.quora.com/topic/Arch-Linux
+  30. https://github.com/archlinux
+  31. https://www.reddit.com/r/archlinux/
+  32. https://www.crunchbase.com/organization/arch-linux
+  33. https://sourceforge.net/projects/archlinux/
+  34. https://alternativeto.net/software/arch-linux/
+  35. http://www.wikidata.org/entity/Q185576
+  36. https://hub.docker.com/r/library/archlinux
+  37. https://dic.pixiv.net/a/ArchLinux
+  38. https://en.wikipedia.org/wiki/Arch_Linux
+  39. https://en.wikipedia.org/wiki/Arch_Linux
+  40. https://en.wikipedia.org/wiki/Arch_Linux#History
+  41. https://en.wikipedia.org/wiki/Arch_Linux#Design_and_principles
+  42. https://en.wikipedia.org/wiki/Arch_Linux#Installation
+  43. https://en.wikipedia.org/wiki/Arch_Linux#Package_management
+  44. https://en.wikipedia.org/wiki/Arch_Linux#Derivatives_and_other_products
+  45. https://en.wikipedia.org/wiki/Arch_Linux#Reception
+  46. https://www.reddit.com/r/archlinux/comments/tj4jvb/what_even_is_arch_linux/
+  47. https://www.reddit.com/r/linux/comments/1hlvz0u/why_would_someone_use_arch_linux/
+  48. https://www.reddit.com/r/linuxquestions/comments/1h6as1g/is_installing_arch_linux_worth_it/
+  49. https://www.reddit.com/r/linux4noobs/comments/1herq4g/why_is_arch_linux_so_loved_by_everyone/
+  50. https://www.youtube.com/watch?v=TS1ghG3c3xI
+  51. https://www.youtube.com/watch?v=la21SXOll6c
+  52. https://www.youtube.com/watch?v=la21SXOll6c&xstg=CAMSEBUJ_b-oH-PhF0yjBgaukzY=
+  53. https://www.youtube.com/watch?v=TS1ghG3c3xI&xstg=CAMSEBUJ_b-oH-PhF0yjBgaukzY=
+  54. https://www.youtube.com/watch?v=U8uMmsJQTZM&xstg=CAMSEBUJ_b-oH-PhF0yjBgaukzY=
+  55. https://search.brave.com/videos?q=arch linux&source=vcluster
+  56. https://search.brave.com/videos?q=arch linux&source=vcluster
+  57. https://github.com/archlinux
+  58. https://archlinuxarm.org/
+  59. https://www.geeksforgeeks.org/linux-unix/what-is-arch-linux/
+  60. https://archlinux.org/download/
+  61. https://distrosea.com/select/archlinux/
+  62. https://search.brave.com/search?q=arch linux !g
+  63. https://search.brave.com/search?q=arch linux !b
+  64. https://search.brave.com/search?q=arch linux !mojeek
+  65. https://dev.to/kurealnum/an-actually-productive-arch-linux-setup-2d62
+  66. https://9to5linux.com/arch-linux-iso-release-for-october-2026-ships-with-the-archinstall-4-5-installer
+  67. https://wiki.archlinux.org/title/Main_page
+  68. https://www.cantech.in/blog/what-is-arch-linux/
+  69. https://www.milesweb.com/blog/hosting/vps/what-is-arch-linux/
+  70. https://github.com/archlinux/archinstall
+  71. https://www.reddit.com/r/archlinux/comments/tj4jvb/what_even_is_arch_linux/
+  72. https://www.reddit.com/r/archlinux/comments/tj4jvb/what_even_is_arch_linux/
+  73. https://www.reddit.com/r/archlinux/comments/tj4jvb/what_even_is_arch_linux/
+  74. https://operavps.com/blog/what-is-arch-linux/
+  75. https://play.google.com/store/apps/details?id=com.iam.finalarchlinux&hl=en_IN
+  76. https://www.youtube.com/watch?v=U8uMmsJQTZM
+  77. https://www.youtube.com/watch?v=U8uMmsJQTZM
+  78. https://www.makeuseof.com/what-is-arch-linux/
+  79. https://www.techspot.com/downloads/5571-arch-linux.html
+  80. https://wiki.archlinux.org/title/Arch_Linux
+  81. https://search.brave.com/search?q=arch linux iso&source=relatedQueries
+  82. https://search.brave.com/search?q=arch linux download&source=relatedQueries
+  83. https://search.brave.com/search?q=arch linux install&source=relatedQueries
+  84. https://search.brave.com/search?q=arch linux system requirements&source=relatedQueries
+  85. https://search.brave.com/search?q=arch linux distros&source=relatedQueries
+  86. https://search.brave.com/search?q=arch linux download iso&source=relatedQueries
+  87. https://search.brave.com/search?q=arch linux vs ubuntu&source=relatedQueries
+  88. https://search.brave.com/search?q=arch linux gui&source=relatedQueries
+  89. https://search.brave.com/search?q=arch+linux&offset=1&spellcheck=0
+  90. https://account.brave.com/?intent=checkout&product=search
+  91. https://search.brave.com/help
+  92. https://brave.com/transparency/
+  93. https://hackerone.com/brave
+  94. https://status.brave.app/
+  95. https://brave.com/download/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+  96. https://search.brave.com/
+  97. https://brave.com/wallet/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+  98. https://talk.brave.com/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+  99. https://brave.com/firewall-vpn/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 100. https://brave.com/playlist/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 101. https://brave.com/brave-news/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 102. https://brave.com/brave-rewards/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 103. https://brave.com/search/api/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 104. https://brave.com/brave-ads/?mtm_source=brave-search&mtm_medium=searchfooter&mtm_campaign=brave-search&mtm_content=evergreen
+ 105. https://search.brave.com/help/privacy-policy
+ 106. https://brave.com/terms-of-use/
+
+   Hidden links:
+ 108. https://search.brave.com/settings
+ 109. https://search.brave.com/help/discussions
+ 110. https://github.com/archlinux
+ 111. https://github.com/archlinux
+ 112. https://www.geeksforgeeks.org/linux-unix/what-is-arch-linux/
+ 113. https://www.geeksforgeeks.org/linux-unix/what-is-arch-linux/
+ 114. https://distrosea.com/select/archlinux/
+ 115. https://distrosea.com/select/archlinux/
+ 116. https://dev.to/kurealnum/an-actually-productive-arch-linux-setup-2d62
+ 117. https://dev.to/kurealnum/an-actually-productive-arch-linux-setup-2d62
+ 118. https://9to5linux.com/arch-linux-iso-release-for-october-2026-ships-with-the-archinstall-4-5-installer
+ 119. https://9to5linux.com/arch-linux-iso-release-for-october-2026-ships-with-the-archinstall-4-5-installer
+ 120. https://www.cantech.in/blog/what-is-arch-linux/
+ 121. https://www.cantech.in/blog/what-is-arch-linux/
+ 122. https://www.milesweb.com/blog/hosting/vps/what-is-arch-linux/
+ 123. https://www.milesweb.com/blog/hosting/vps/what-is-arch-linux/
+ 124. https://github.com/archlinux/archinstall
+ 125. https://github.com/archlinux/archinstall
+ 126. https://operavps.com/blog/what-is-arch-linux/
+ 127. https://operavps.com/blog/what-is-arch-linux/
+ 128. https://www.makeuseof.com/what-is-arch-linux/
+ 129. https://www.makeuseof.com/what-is-arch-linux/
+ 130. https://www.techspot.com/downloads/5571-arch-linux.html
+ 131. https://www.techspot.com/downloads/5571-arch-linux.html

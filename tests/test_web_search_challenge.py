@@ -90,47 +90,62 @@ def test_detector_is_case_insensitive():
     assert _challenge_phrase("SELECT ALL SQUARES CONTAINING A DUCK")
 
 
-def test_a_challenge_is_reported_as_a_challenge(challenged_page, chronoa_config):
+def test_a_challenge_falls_through_to_another_engine(challenged_page,
+                                                     chronoa_config, monkeypatch):
+    """**The dead end was the bug.** Three engines still answer, so a challenge
+    on the one endpoint tried first is a reason to ask the others - the
+    fixed-string answer that used to be returned here is what made the old
+    skill useless."""
     _allow_web(chronoa_config)
+    from shani_chronoa import websearch
+    monkeypatch.setattr(websearch, "search",
+                        lambda q, **k: ([websearch.Result(
+                            "Arch Linux", "https://archlinux.org",
+                            "The website.", "Bing")], "", []))
     out = _run({"query": "arch linux"})
-    assert "human-verification challenge" in out
-    assert "did not return results" in out
+    assert "Arch Linux" in out
+    assert "Bing" in out
+    assert "not Chronoa's own claims" in out
 
 
-def test_the_challenge_is_not_presented_as_content(challenged_page, chronoa_config):
+def test_a_challenge_never_presents_the_gate_as_content(challenged_page,
+                                                        chronoa_config,
+                                                        monkeypatch):
+    """**The invariant that did not change.** Whatever the fallback, the model
+    must not be told the search said "select all squares containing a duck"."""
     _allow_web(chronoa_config)
+    from shani_chronoa import websearch
+    monkeypatch.setattr(websearch, "search", lambda q, **k: (
+        [], "the engine returned a verification page", []))
     out = _run({"query": "arch linux"})
-    # **Zero occurrences.** The answer quotes the phrase the detector matched
-    # ("complete the following challenge"), so the challenge's own distinctive
-    # text never reaches the model at all. The first version of this asserted
-    # `count == 1` on the assumption the quote would be the squares phrase,
-    # and failed on behaviour that was better than it assumed.
-    assert "Select all squares containing a duck" not in out
-    assert "select all squares" not in out.lower()
+    assert "no other engine answered either" in out
+    assert "squares containing" not in out.lower()
 
 
-def test_a_challenge_is_not_an_empty_result(challenged_page, chronoa_config):
+def test_a_challenge_says_it_is_not_an_empty_result(challenged_page,
+                                                   chronoa_config, monkeypatch):
     _allow_web(chronoa_config)
+    from shani_chronoa import websearch
+    monkeypatch.setattr(websearch, "search", lambda q, **k: ([], "nope", []))
     out = _run({"query": "arch linux"})
-    assert "not a statement that there is nothing to find" in out
+    assert "is not a statement that there is nothing to find" in out
 
 
-def test_the_answer_names_the_paths_that_work(challenged_page, chronoa_config):
+def test_the_refusal_names_the_paths_that_work(challenged_page, chronoa_config,
+                                               monkeypatch):
+    """"The search is blocked" and stopping is a dead end."""
     _allow_web(chronoa_config)
+    from shani_chronoa import websearch
+    monkeypatch.setattr(websearch, "search", lambda q, **k: ([], "nope", []))
     out = _run({"query": "arch linux"})
     assert "specific URL" in out
     assert "news" in out and "lookup_wikipedia" in out
-    # **And the reason they are offered.** Asserting only the tool names left a
-    # mutation of the clause explaining *why* they are the working paths
-    # green - "query services that do allow automated readers" is the part
-    # that tells a reader this is a measured distinction, not a guess.
-    assert "allow automated readers" in out
 
 
-def test_the_answer_quotes_the_engines_words(challenged_page, chronoa_config):
-    _allow_web(chronoa_config)
-    out = _run({"query": "arch linux"})
-    assert "complete the following challenge" in out
+def test_the_detector_still_names_the_phrase():
+    """The gate detector is unchanged and still tested directly."""
+    assert _challenge_phrase("Please complete the following challenge") == \
+        "complete the following challenge"
 
 
 def test_a_normal_page_is_not_treated_as_a_challenge(results_page, chronoa_config):

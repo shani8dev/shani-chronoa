@@ -1,0 +1,521 @@
+   #Marginalia
+
+   Search Filters Updated
+
+   Skip to content Marginalia About Donate Random
+
+   Color Theme [System]
+
+Search The Internet
+
+   arch linux__________ Search
+
+   Showing 25 search results.
+
+   https://archlinux.org/
+
+Arch Linux
+
+   Arch Linux 2026 Leader Election Results. 2026-06-04 Recently we held
+   our leader elections and after a lively discussion period on the,
+   internal, mailing lists and voting phase with two candidates. Levente,
+   anthraxx, Polyak
+
+   Info 16313+
+   Js ⡂⠀⠆⡎⠀⠀⠀⠀
+   Terms appear in 8 positions
+     __________________________________________________________________
+
+   https://en.wikipedia.org/wiki/Arch_Linux
+
+Arch Linux
+
+   Arch Linux, /rt/, is an open source, rolling release Linux
+   distribution. Arch Linux is kept up-to-date by regularly updating the
+   individual pieces of software that it comprises. It provides monthly,
+   snapshots, which are used as installation...
+
+   Info 262+
+   Js Tr ⡢⡻⣸⣩⠧⣺⠅⠀
+   Terms appear in 31 positions
+     __________________________________________________________________
+
+   https://forum.endeavouros.com/t/arch-linux-gui-or-endeavouros/17221
+
+Arch Linux Gui or EndeavourOS - Lounge - EndeavourOS
+
+   Arch Linux GUI. Arch Linux installer September 2, 2021, 4:31pm I havent
+   tried Arch Linux GUI. If done well, it should work exactly like
+   EndeavourOS installer. EndeavourOS, in addition to a GUI installer,
+   also has a small repo of useful...
+
+   Info 4643+
+   Js ⠊⡏⠈⡀⡀⠀⠀⠀
+   Terms appear in 10 positions
+     __________________________________________________________________
+
+   https://bbs.archlinux.org/
+
+Arch Linux Forums
+
+   Moderated by ewaller, fukawi2, Lone_Wolf, schard, Slithery, V1del,
+   WorMzy, 82, 884 560, 048 by aarch_angel Issues related to installation
+   of the Arch Linux operating system. Moderated by ewaller, fukawi2,
+   Lone_Wolf, schard, Slithery, V1del...
+
+   Info 35384+
+   ⠂⢁⡀⡀⠀⠀⠀⠀
+   Terms appear in 5 positions
+     __________________________________________________________________
+
+   https://techrights.org/o/2014/02/12/arch-linux-2014/
+
+Now Might be a Good Time to Give Arch Linux a Try
+
+   Opinion: Arch Linux and Stability. Arch Linux, the popular rolling
+   release Linux distribution, seemingly has a reputation as bleeding
+   edge, elitist and sometimes unstable. Bleeding edge. Most seem to agree
+   it is. Elitist
+
+   Info 3425+
+   ⡨⣧⠙⠁⠀⠀⠀⠀
+   Terms appear in 13 positions
+     __________________________________________________________________
+
+   https://wiki.archlinux.org/title/Arch_Linux_Archive
+
+Arch Linux Archive - ArchWiki
+
+   The Arch Linux Archive, ALA. formerly known. as Arch Linux Rollback
+   Machine, ARM, stores:. official ISO images and bootstrap tarballs. all
+   versions of each package. official repositories daily snapshots. across
+   time. You can use it to: find a...
+
+   Info 1012+
+   Js ⡊⡄⡸⢠⠁⠀⠀⠀
+   Terms appear in 12 positions
+     __________________________________________________________________
+
+   https://blog.paranoidpenguin.net/2014/03/arch-linux-2014-review-livin-o
+   n-the-edge/
+
+Arch Linux 2014 review - Livin' on the edge | ParanoidPenguin.net
+
+   Arch Linux 2014 review. Livin on the edge. Ive not been doing any
+   serious distro hopping since 2008 and figured it was about time to see
+   if there is anything new under the sun. Enter Arch Linux, a highly
+   touted and matured distribution with a...
+
+   Info 8+
+   Js ⣂⠖⠁⢈⡌⠀⠀⠀
+   Terms appear in 12 positions
+     __________________________________________________________________
+
+   https://www.rousette.org.uk/archives/arch-linux-and-xmonad/
+
+BSAG » Arch Linux and XMonad
+
+   Arch Linux. When I got the netbook, I installed Arch, and used.
+   Awesome. as a window manager. It worked well, but then in a fit of
+   curiosity and tweakery I decided to try out. Jolicloud. Jolicloud is a
+   nice distribution, specially designed for...
+
+   Info 7+
+   Js ⠦⡔⠂⡂⠀⠀⠀⠀
+   Terms appear in 9 positions
+     __________________________________________________________________
+
+   https://kiljan.org/2023/11/24/arch-linux-arm-on-a-raspberry-pi-5-model-
+   b/
+
+Arch Linux ARM on a Raspberry Pi 5 Model B - Sven and the Art of Computer
+Maintenance
+
+   Update Arch Linux ARM. In previous steps, the boot loader was forcibly
+   removed and the kernel forcibly replaced. This dirty state of manually
+   replaced files does not reflect the currently installed Arch Linux ARM
+   packages
+
+   Info 56+
+   Js ⠪⢠⢠⣳⠀⠀⠀⠀
+   Terms appear in 13 positions
+     __________________________________________________________________
+
+   https://cheapskatesguide.org/articles/arch-linux.html
+
+Increasing Your Linux Knowledge with Arch Linux
+
+   Arch Linux's usefulness as a Learning Aid. If one goes about it
+   correctly, Arch can be an excellent tool for increasing both the depth
+   and the breadth of one's Linux knowledge. Installing and using Arch is
+   also a great way of identifying and...
+
+   Info 14+
+   ⠄⢀⡂⢠⣺⡦⠁⠀
+   Terms appear in 17 positions
+     __________________________________________________________________
+
+   https://rfc.archlinux.page/0032-arch-linux-ports/
+
+0032 Arch Linux Ports | Arch Linux RFCs
+
+   Arch Linux. Arch Linux Ports. Date proposed: 2024-03-11. Summary.
+   Introduce, Arch Linux Ports, as testbed for unofficial architectures
+   until they are integrated in the main Arch Linux repositories. This
+   integration is meant to provide...
+
+   Info 31+
+   Js ⣞⣄⢃⠪⢀⡃⡅⣅
+   Terms appear in 26 positions
+     __________________________________________________________________
+
+   https://kvibber.com/reviews/software/arch-linux/
+
+Arch Linux - Review
+
+   Arch Linux. Ive mostly used Arch Linux. on my PineTab2. and
+   occasionally in virtual machines for tinkering. What Ive found is that
+   once its installed its generally fine. The biggest issue I have with it
+   is instead of. apk. or. apt. or. dnf
+
+   Info 20+
+   ⡆⠐⠃⠀⠀⠀⠀⠀
+   Terms appear in 6 positions
+     __________________________________________________________________
+
+   https://alchetron.com/Arch-Linux
+
+Arch Linux - Alchetron, The Free Social Encyclopedia
+
+   The Arch Linux. website. supplies ISO images that can be run from CD
+   or. USB. A simple command line script, pacstrap, is used to install the
+   base system. The installation of additional packages, which are not
+   part of the base system, for example
+
+   Info 6+
+   Js ⢂⡸⠊⠍⢱⡎⠀⠀
+   Terms appear in 19 positions
+     __________________________________________________________________
+
+   https://unixdigest.com/articles/trying-out-arch-linux.html
+
+Trying out Arch Linux
+
+   Trying out Arch Linux. Published on 2008-11-04. Modified on 2009-08-17
+   I have been using GNU/Linux, FreeBSD and OpenBSD exclusively since
+   about 1999 and I spend time with Linux and BSD every single day both at
+   home and at work
+
+   Info 41+
+   ⠆⡅⠛⣠⣯⣝⠁⠀
+   Terms appear in 26 positions
+     __________________________________________________________________
+
+   https://boseji.com/posts/archlinux-install-procedure-part1/
+
+Arch Linux Installation : Part 1 | Boseji’s Lab
+
+   Arch Linux. based you still have supporting wrappers. Having your own
+   custom install of Linux was far dream. I had tried my luck with debian
+   and failed to get close to Ubuntu This time, it was different. Linux is
+   running the Windows in VM now
+
+   Info 39+
+   Js ⡢⡒⢂⠄⠖⠄⠀⠀
+   Terms appear in 13 positions
+     __________________________________________________________________
+
+   https://ssh.guru/posts/200801-arch-linux-install/
+
+Arch Linux Installation for Newbs :: SSH.Guru - tech, rants and memes
+
+   Arch Linux. the best, and the worst, Linux there is. Why is it the best
+   and the worst at the same time you ask. Let me explain. Arch Linux is
+   the best. The design approach of the Arch development team follows the
+   KISS principle, keep it simple...
+
+   Info 12+
+   Js ⣊⠨⠤⢈⠀⠠⠴⠀
+   Terms appear in 14 positions
+     __________________________________________________________________
+
+   https://www.forum.puppylinux.com/viewtopic.php?t=1460
+
+Automated compiling & packaging, using Arch Linux build scripts - Puppy Linux
+Discussion Forum
+
+   Automated compiling, packaging, using Arch Linux build scripts. Post
+   Reply. 9 posts Page of. sc0ttman. Posts:. 106. Joined: Sat Aug 22, 2020
+   3:55 pm Has thanked:. 4 times. Been thanked:. 49 times. Automated
+   compiling, packaging, using Arch Linux build...
+
+   Info 113+
+   Js ⢌⠡⡈⣩⡲⠀⠀⠀
+   Terms appear in 16 positions
+     __________________________________________________________________
+
+   https://loicpefferkorn.net/2015/01/arch-linux-on-macbook-pro-retina-201
+   4-with-dm-crypt-lvm-and-suspend-to-disk/
+
+Arch Linux on MacBook Pro Retina 2014 with DM-Crypt, LVM and suspend to disk -
+Loïc Pefferkorn
+
+   Arch Linux wiki. Successfully tested with a Samsung Ace2. Wireless. The
+   wireless card, pci 14e4:43a0 rev 03, needs a proprietary Broadcom
+   driver, provided by the. broadcom-wl. package. The easiest way to build
+   this package is to have around...
+
+   Info
+   Js ⠊⢀⠁⣘⠓⠔⠠⢀
+   Terms appear in 15 positions
+     __________________________________________________________________
+
+   https://reckoning.dev/posts/complete-setup-arch-gnome
+
+My Arch Linux Setup with GNOME 3 - reckoning.dev
+
+   Arch Linux. is still going strong. However, I have moved on to. Gnome
+   3. as my choice desktop. This post is an updated version of my.
+   previous post. with the latest configuration of my machine. I have also
+   update my GPU to 1080 Ti to be able to run...
+
+   Info 15+
+   Js ⣃⡀⠂⠀⠀⠆⠀⢀
+   Terms appear in 9 positions
+     __________________________________________________________________
+
+   https://stardot.org.uk/forums/viewtopic.php?t=31952
+
+RPCemu Arch Linux Compiling - stardot.org.uk
+
+   RPCemu Arch Linux Compiling. A space specifically to discuss RPCEmu,
+   the Risc PC emulator. Get support and contribute to its development.
+   Post Reply. 8 posts Page of. derek. Posts: 323 Joined: Thu May 07, 2015
+   8:31 pm Location: Sunny Runcorn, UK
+
+   Info 10+
+   Js ⠦⡣⣫⠅⠀⠀⠀⠀
+   Terms appear in 15 positions
+     __________________________________________________________________
+
+   https://www.lions-wing.net/lessons/arch-linux/arch.html
+
+Arch Linux a different type of Linux
+
+   Arch Linux. Arch Linux is an independently developed, i686/x86-64
+   general purpose GNU/Linux distribution versatile enough to suit any
+   role. Development focuses on simplicity, minimalism, and code elegance.
+   Arch is installed as a minimal base...
+
+   Info 5+
+   Js ⠆⠡⠃⣐⢨⠉⡃⠀
+   Terms appear in 17 positions
+     __________________________________________________________________
+
+   https://discuss.privacyguides.net/t/arch-linuxs-aur-sees-more-than-400-
+   packages-compromised-with-malware/38514
+
+Arch Linux's AUR Sees More Than 400 Packages Compromised With Malware - News -
+Privacy Guides Community
+
+   Arch Linux's AUR Sees More Than 400 Packages Compromised With Malware.
+   The Arch Linux User Repository 'AUR was hit by a large-scale malware
+   campaign this week with more than 400 of these user-supplied packages
+   being compromised
+
+   Info 145+
+   ⢚⠄⠀⠀⠀⠀⠀⠀
+   Terms appear in 5 positions
+     __________________________________________________________________
+
+   https://community.theforeman.org/t/automatically-install-arch-linux/335
+   90
+
+Automatically Install Arch Linux - Tutorials - TheForeman
+
+   LABEL archlinux MENU LABEL Arch Linux LINUX. INITRD. APPEND
+   archisobasedir, arch archiso_http_srv,
+   http://foreman.localdomain/pub/archlinux/ cms_verify, y ip, ::: script,
+   http://foreman.localdomain/unattended/provision, token...
+
+   Info 33+
+   Js ⣂⡇⢿⣷⢣⠐⡜⠀
+   Terms appear in 30 positions
+     __________________________________________________________________
+
+   https://www.garron.me/en/linux/kiss-simplicity-arch-linux-review.html
+
+KISS simplicity: Arch Linux — garron.me — English
+
+   KISS simplicity: Arch Linux. May 21, 2012 ####Introduction #### Arch
+   Linux History Arch Linux saw the light with Arch Linux 0.1 on March 11,
+   2002 from the hand of Judd Vinet. Vinet's inspiration came from
+   Slackware and CRUX, but he added...
+
+   Info 19+
+   ⣚⠕⣻⣏⡤⡏⠀⠀
+   Terms appear in 29 positions
+     __________________________________________________________________
+
+   https://danielpecos.com/2017/05/24/ubuntu-arch-linux/
+
+From Ubuntu to Arch Linux | GeekWare - Daniel Pecos Martínez
+
+   From Ubuntu to Arch Linux. May 24, 2017 in. Computer Science Linux.
+   Recently I took the decision of leaving my. long beloved distro Ubuntu,
+   sorry, link in spanish. and moving forward into Arch Linux. And why.
+   As. JFK said. when the USA was aiming to...
+
+   Info 3+
+   Js ⡤⠀⠀⠁⠀⠀⠀⠀
+   Terms appear in 4 positions
+     __________________________________________________________________
+
+   1 2 3 4 5 6 7 8 9 10 11
+
+Filters
+
+     * Remove Javascript
+     * Reduce Adtech
+     * Recent Results
+     * Search In Title
+
+  Domains
+
+     * No Filter
+     * Small Web
+     * Blogosphere
+     * Academia
+         ______________________________________________________________
+
+     * Vintage
+     * Plain Text
+     * ~tilde
+         ______________________________________________________________
+
+     * Wiki
+     * Forum
+     * Docs
+     * Recipes
+         ______________________________________________________________
+
+                                     Syntax
+
+   This is a keyword-based search engine. When entering multiple search
+   terms, the search engine will attempt to match them against documents
+   where the terms occur in close proximity.
+
+   Search terms can be excluded with a hyphen.
+
+   While the search engine at present does not allow full text search,
+   quotes can be used to specifically search for names or terms in the
+   title. Using quotes will also cause the search engine to be as literal
+   as possible in interpreting the query.
+
+   Parentheses can be used to add terms to the query without giving weight
+   to the terms when ranking the search results.
+
+Samples
+
+   soup -chicken
+          Look for keywords that contain soup, but not chicken.
+
+   "keyboard"
+          Look for pages containing the exact word keyboard, not keyboards
+          or the like.
+
+   "steve mcqueen"
+          Look for pages containing the exact words steve mcqueen in that
+          order, with no words in between.
+
+   apology (plato)
+          Look for pages containing apology and plato, but only rank them
+          based on their relevance to apology
+
+                                Special Keywords
+
+   Several special keywords are supported by the search engine.
+
+   Keyword Meaning
+   site:example.com Display site information about example.com
+   site:example.com keyword Search example.com for keyword
+   site:*.example.com keyword Search example.com and its subdomains for
+   keyword
+   browse:example.com Show similar websites to example.com
+   ip:127.0.0.1 Search documents hosted at 127.0.0.1
+   links:example.com Search documents linking to example.com
+   tld:edu keyword Search documents with the top level domain edu.
+   ?tld:edu keyword Prefer but do not require results with the top level
+   domain edu. This syntax is also possible for links:..., ip:... and
+   site:...
+   q>5 The amount of javascript and modern features is at least 5 (on a
+   scale 0 to 25)
+   q<5 The amount of javascript and modern features is at most 5 (on a
+   scale 0 to 25)
+   year>2005 (beta) The document was ostensibly published in or after 2005
+   year=2005 (beta) The document was ostensibly published in 2005
+   year<2005 (beta) The document was ostensibly published in or before
+   2005
+   rank>50 The ranking of the website is at least 50 in a span of 1 - 255
+   rank<50 The ranking of the website is at most 50 in a span of 1 - 255
+   count>10 The search term must appear in at least 10 results form the
+   domain
+   count<10 The search term must appear in at most 10 results from the
+   domain
+   format:html5 Filter documents using the HTML5 standard. This is
+   typically modern websites.
+   format:xhtml Filter documents using the XHTML standard
+   format:html123 Filter documents using the HTML standards 1, 2, and 3.
+   This is typically very old websites.
+   generator:wordpress Filter documents with the specified generator, in
+   this case wordpress
+   file:zip Filter documents containing a link to a zip file (most
+   file-endings work)
+   file:audio Filter documents containing a link to an audio file
+   file:video Filter documents containing a link to a video file
+   file:archive Filter documents containing a link to a compressed archive
+   file:document Filter documents containing a link to a document
+   -special:media Filter out documents with audio or video tags
+   -special:scripts Filter out documents with javascript
+   -special:affiliate Filter out documents with likely Amazon affiliate
+   links
+   -special:tracking Filter out documents with analytics or tracking code
+   -special:cookies Filter out documents with cookies
+
+                                 Results Legend
+
+   The estimated relevance of the search result is indicated using the
+   color saturation of the color of the search result, as well as the
+   order the results are presented.
+
+   Information about the position of the match is indicated using a dot
+   matrix in the bottom bar of each search result. Each dot represents
+   four sentences, and are presented in an order of top-to-bottom,
+   left-to-right.
+   ⣿⠃⠀⠀   — The terms occur heavily toward the beginning of the document.
+   ⠠⠀⡄⠁   — The terms occur sparsely throughout the document.
+   ⠀⠁⠀⠀   — The terms occur only in a single sentence.
+
+   Potentially problems with the document are presented with a warning
+   triangle, e.g. ⚠ 3. Desktop users can mouse-over this to get a detailed
+   breakdown.
+
+                                    Policies
+
+   This website complies with the GDPR by not collecting any personal
+   information, and with the EU Cookie Directive by not using cookies.
+   More Information.
+
+                                    Contact
+
+   Reach me at kontakt@marginalia.nu, @MarginaliaNu on twitter.
+
+                                  Open Source
+
+   The search engine is open source with an AGPL license. The sources can
+   be perused at https://git.marginalia.nu/.
+
+                                  Data Sources
+
+   IP geolocation is sourced from the IP2Location LITE data available from
+   https://lite.ip2location.com/ under CC-BY-SA 4.0.
