@@ -153,6 +153,10 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         "iperf3", "rclone", "restic", "subversion", "mercurial", "7zip",
         "lrzip", "lzop", "unrar", "cabextract", "unarchiver", "arj",
         "openbsd-netcat", "nethogs", "bandwhich", "iftop", "socat",
+        # `lsof` really is its own package - confirmed against the Arch
+        # package API (`extra`, 4.99.7), not assumed from the binary name.
+        "lsof",
+        "sysstat", "lm_sensors",
         # Driver development (2026-10-10). Each checked against the Arch
         # package API on 2026-10-10, not read off a mirror: `i2c-tools extra
         # 4.4-4`, `v4l-utils extra 1.32.0-2`, `fuse3 extra 3.18.3-1`,

@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**228 skills in 24 groups.** Each is a named, schema-typed module; the model
+**229 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**86 of 228 are consent-gated and 17 are destructive.**
+**86 of 229 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -85,6 +85,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `security_status` | Secure Boot, TPM and firewall status | needs `security-sense-enabled` |
 | `set_hostname` | This computer's name | needs `hostname-control-enabled` |
 | `snapshot_status` | Can this machine roll back, and which slot is it on | needs `snapshots-sense-enabled` |
+| `system_history` | What this machine was doing earlier today | — |
 | `system_info` | Describe this machine | — |
 | `tailscale_status` | Tailscale | — |
 | `tls_certificate` | Inspect a TLS certificate | — |
