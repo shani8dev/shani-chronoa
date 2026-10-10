@@ -368,6 +368,62 @@ def _font_lines(path) -> "list[str]":
             "may shift."]
 
 
+def _meta_lines(path) -> "list[str]":
+    """Page count, encryption and page size, from `pdfinfo`.
+
+    **Why these three and not the whole dump.** `pdfinfo` prints twenty
+    fields; the ones that change what the answer means are:
+
+    - **whether it is encrypted**. An owner-password PDF extracts nothing,
+      and the useful answer is *this is encrypted*, not *it has no text*.
+    - **how many pages**. The scanned path reads at most five and says so;
+      without a total, "5 further pages not read" cannot be reconciled with
+      the document the person is holding.
+    - **the page size**, because A4 and Letter are the difference between a
+      document that prints as intended and one that comes out scaled.
+
+    Measured here: rc=0 with the `Pages:`/`Encrypted:`/`Page size:` lines for a
+    real PDF, and rc=1 for a file that is not one - so a non-zero exit adds
+    nothing and the caller's own read already names that failure.
+
+    `pdfinfo` ships in **poppler**, the same package as the `pdftotext` the
+    caller already requires.
+    """
+    if shutil.which("pdfinfo") is None:
+        return []
+    try:
+        proc = subprocess.run(["pdfinfo", str(path)], capture_output=True,
+                              text=True, timeout=15, check=False)
+    except (subprocess.SubprocessError, OSError) as exc:
+        return [f"Document details: could not be read ({exc})."]
+    if proc.returncode != 0:
+        return []
+    pages, encrypted, size = "", "", ""
+    for line in (proc.stdout or "").splitlines():
+        key, _, value = line.partition(":")
+        key, value = key.strip().lower(), value.strip()
+        if key == "pages":
+            pages = value
+        elif key == "encrypted":
+            encrypted = value
+        elif key == "page size":
+            size = value
+    facts = []
+    if pages:
+        facts.append(f"{pages} page(s)")
+    if encrypted:
+        # Stated as a fact, not a warning: an encrypted PDF is not an error,
+        # it is a document this read cannot extract words from.
+        facts.append("encrypted" if encrypted.lower().startswith("y")
+                     else "not encrypted")
+    if size:
+        facts.append(size.replace(" pts", "pt"))
+    if not facts:
+        return ["Document details: pdfinfo answered but named no pages, no "
+                "encryption state and no page size, so those are UNKNOWN."]
+    return [f"Document: {', '.join(facts)}."]
+
+
 def _run(arguments: dict) -> str:
     try:
         path = files.resolve((arguments.get("path") or "").strip())
@@ -397,8 +453,8 @@ def _run(arguments: dict) -> str:
                         path,
                         int(arguments["first_page"]) if arguments.get("first_page") else None,
                         int(arguments["last_page"]) if arguments.get("last_page") else None)]
-                    + _font_lines(path))
-            extra = _font_lines(path)
+                    + _meta_lines(path) + _font_lines(path))
+            extra = _meta_lines(path) + _font_lines(path)
         elif suffix in IMAGES:
             if not shutil.which("tesseract"):
                 return "Reading pictures needs tesseract."
