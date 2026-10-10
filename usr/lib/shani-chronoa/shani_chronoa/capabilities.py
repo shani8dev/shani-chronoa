@@ -208,10 +208,23 @@ GATED: dict[str, str] = {
     "phone_remote": "phone-remote-enabled",
     "nfc": "nfc-enabled",
     "fm_radio": "fm-radio-enabled",
+    # Infrared: a write to the physical world, so it gets its own switch and not
+    # the shared `nfc-enabled` one. "Turn on the TV" is not "read a tag".
+    "ir_remote": "ir-remote-enabled",
     # Placing and answering calls. Its own switch because a call rings *someone
     # else* - the same reason `phone-messages-send-enabled` exists, and the same
     # reason the skill confirms before dialling.
     "bluetooth_call": "bluetooth-call-enabled",
+    # Running containers: a container is a whole computer as far as what it
+    # does is concerned, so starting one or running a command inside it is
+    # its own agreement, never the `containers-sense-enabled` read key that
+    # `list_containers` follows. `machinectl` shares it because an nspawn
+    # machine is the same thing with a boot.
+    "container": "container-control-enabled",
+    # Driving a virtual machine: QEMU with a window on the desktop and QMP
+    # on a socket, which is the same shape as `browse`'s window-plus-protocol.
+    # Off by default, like every actuator that can run arbitrary code.
+    "vm": "vm-control-enabled",
 }
 
 # The per-event-type trigger gates are *not* in `GATED` above, and deliberately
@@ -386,6 +399,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "phone_remote": ("Devices", "Press the phone camera shutter, media keys, or type on the phone"),
     "nfc": ("Devices", "Read an NFC tag, or write a link to a sticker"),
     "fm_radio": ("Devices", "Listen to FM radio through a USB receiver"),
+    "ir_remote": ("Devices", "Send or receive infrared remote-control codes"),
     # PipeWire's `org.pipewire.Telephony`, which is where ofono's role ended up.
     "bluetooth_call": ("Devices", "Call through a paired phone, on this computer's speakers"),
     "set_mic_mute": ("Sound", "Mute or unmute the microphone input"),
@@ -504,6 +518,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "open_files": ("System", "Which programs have a file or socket open"),
     # Read-only: `sar` reading /var/log/sa. No -f, no -o (asserted on argv).
     "system_history": ("System", "What this machine was doing earlier today"),
+    # Read-only: rclone listremotes/size/lsf only. `_FORBIDDEN` is enforced in
+    # `_run`, not merely documented, and the test owns its own copy of the list.
+    "cloud_files": ("System", "What is in this machine's cloud storage remotes"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
@@ -526,6 +543,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),
+    # The actuator half of both siblings: the read skills list what exists,
+    # these two start and drive it.
+    "container": ("Apps", "Run and drive containers"),
+    "vm": ("Apps", "Run and drive a virtual machine"),
     "boot_report": ("System", "Why booting is slow, and whether it shut down cleanly"),
     "disk_health": ("Devices", "Drive health and disk encryption"),
     "temperatures": ("Devices", "Temperatures and fan speeds"),
@@ -693,6 +714,11 @@ GATE_NAMES: dict[str, str] = {
     # sends them looking for a switch that is not there under that name.
     "filesystem-sense-enabled": "Files and folders",
     "sandbox-seccomp-enabled": "Restrict tools to a seccomp sandbox",
+    # Two rows whose labels name the act, because each switch opens a whole
+    # computer: a container runs whatever its image carries, and a VM boots
+    # whatever disk or ISO it is pointed at.
+    "container-control-enabled": "Let Chronoa run containers",
+    "vm-control-enabled": "Let Chronoa run and drive virtual machines",
 }
 
 
