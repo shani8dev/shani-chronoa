@@ -18,6 +18,7 @@ directories and nothing else.
 """
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -44,14 +45,48 @@ PROBES = [
                        "destination": "<tmp>/dl.html"}, "curl, into a temp file"),
     ("backup_status", {}, "restic is absent here - refusal expected"),
     ("bandwidth_to_host", {}, "iperf3 is absent here - refusal expected"),
+    # --- the second batch: skills whose *state* is here, not a binary -------
+    # These read /proc, /sys, the journal, or the filesystem, so they need no
+    # package at all and have never been exercised on a machine that is not the
+    # slot they were built on.
+    ("system_info", {}, "lscpu + /proc, read only"),
+    ("disk_usage", {}, "df + du, read only"),
+    ("list_processes", {}, "ps, read only"),
+    ("port_owner", {}, "/proc/net/tcp + /proc/<pid>, read only"),
+    ("interface_counters", {}, "/proc/net/dev, read only"),
+    ("neighbour_table", {}, "/proc/net/arp, read only"),
+    ("routing_table", {}, "the kernel's routing table, read only"),
+    ("usb_devices", {}, "/sys/bus/usb, read only"),
+    ("driver_info", {}, "/proc/modules + /sys/module, read only"),
+    ("temperatures", {}, "/sys/class/hwmon + thermal zones, read only"),
+    ("list_services", {}, "systemctl list-units, read only"),
+    ("read_logs", {}, "journalctl, read only"),
+    ("scheduled_tasks", {}, "crontab -l, read only"),
+    ("tls_certificate", {"host": "example.com"}, "ssl from the stdlib, one handshake"),
+    ("compute_hash", {"path": "/bin/true"}, "hashlib, read only"),
+    ("compare_files", {"path_a": "<tmp>/same-a", "path_b": "<tmp>/same-b"},
+     "two nearly identical files in the scratch directory"),
+    ("ping_host", {"host": "127.0.0.1"}, "one ICMP to loopback, bounded"),
+    ("trace_route", {"host": "127.0.0.1"}, "mtr to loopback, bounded"),
+    ("my_ip_address", {}, "the kernel's view of this machine's addresses"),
+    ("list_fonts", {}, "fc-list, read only"),
 ]
 
 _TRACES = ("Traceback", "NameError", "AttributeError", "KeyError",
            "TypeError", "IndexError")
 
 
+#: **The scratch lives under `$HOME`, not `/tmp`.** The sandbox confines file
+#: skills to your home directory, and a fixture in `/tmp` gets the sandbox's own
+#: refusal - which is correct and is not the thing being probed. Measured: a
+#: probe at `/bin/true` and then at `/tmp/probe-skills-*/same-a` both answered
+#: "Not touching ... it is outside your home directory". The directory is named
+#: for what it is and removed on the way out.
+_SCRATCH_PARENT = Path.home()
+
+
 def _scratch():
-    work = Path(tempfile.mkdtemp(prefix="probe-skills-"))
+    work = Path(tempfile.mkdtemp(prefix="probe-skills-", dir=_SCRATCH_PARENT))
     with zipfile.ZipFile(work / "std.zip", "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("a.txt", "one\n")
         archive.writestr("dir/b.txt", "two\n")
@@ -67,6 +102,12 @@ def _scratch():
                    capture_output=True, timeout=30)
     (work / "from").mkdir()
     (work / "to").mkdir()
+    # Two files that differ by one line, for `compare_files`. Both live under
+    # the scratch directory because the sandbox confines it to your home - a
+    # probe at `/bin/true` gets the sandbox's refusal, which is correct and
+    # which is not the thing being probed.
+    (work / "same-a").write_text("one\ntwo\nthree\n")
+    (work / "same-b").write_text("one\nTWO\nthree\n")
     return work
 
 
@@ -110,8 +151,11 @@ def main():
             print("  | ... (%d lines total)" % len(lines))
 
     print("\n" + "=" * 74)
+    shutil.rmtree(work, ignore_errors=True)
     if not problems:
         print("no skill raised, went empty, or answered with a traceback.")
+        print("(the scratch directory was removed; it only ever held the zip,"
+              " the git repo and two empty directories)")
         return 0
     print("%d problem(s):" % len(problems))
     for name, what in problems:
@@ -124,7 +168,8 @@ if __name__ == "__main__":
 
 
 # --- the verified result, so the next run is a diff -----------------------------
-# Run on this box, 2026-10-10, after the four parser bugs below were fixed:
+# Run on this box, 2026-10-10, after the four parser bugs above were fixed.
+# **32 skills, no raise, no empty answer, no traceback.**
 #
 #     disk_activity      1 disk(s) working (per second, over the last second)
 #                        nvme0n1 read 0.00/s ... 0.70% used
@@ -141,6 +186,27 @@ if __name__ == "__main__":
 #     download_file      577 bytes, HTTP 200, 0.189s
 #     backup_status      restic is not installed ... the 'restic' package
 #     bandwidth_to_host  iperf3 is not installed ... the 'iperf3' package
+#
+# and the second batch, whose *state* is here rather than a binary:
+#
+#     system_info        LENOVO 20TAS19000, R1EET47W(1.47), Ubuntu 26.04.1 LTS
+#     disk_usage         /dev/mapper/ubuntu--vg-ubuntu--lv 466G 313G 129G 71%
+#     list_processes     361 process(es); showing 60 by CPU use
+#     neighbour_table    172.17.0.3 dev docker0 COMPLETE de:ac:eb:97:4e:a6
+#     routing_table      default via 192.168.31.1 dev wlp0s20f3 metric 600 from dhcp
+#     usb_devices        7 USB device interface(s) attached, Integrated Camera 480 Mb/s
+#     driver_info        iwlwifi, i915, skl_hda_dsp_generic, btusb, r8169
+#     list_services      232 service unit(s); showing 80 (running first)
+#     read_logs          the kernel journal, 20 line(s) shown
+#     scheduled_tasks    cron: 7 scheduled job(s) across 6 source(s)
+#     compute_hash       SHA256(true) = 913a39cd38f353...  [34.5 KiB]
+#     compare_files      3 vs 3 line(s), the diff is `two` -> `TWO`
+#     ping_host          127.0.0.1 answered: 5/5 replies, average 0.0 ms
+#     my_ip_address      wlp0s20f3: 192.168.31.202, plus an IPv6 and two bridges
+#     list_fonts         231 font families installed
+#     temperatures       the hwmon sense is turned off - its consent gate, correctly
+#     tls_certificate    privacy mode is on - the correct refusal
+#     trace_route        privacy mode is on - the correct refusal
 #
 # **No skill raised, went empty, or answered with a traceback.** The two
 # refusals are correct answers and they name real packages, which is the
