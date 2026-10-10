@@ -25,9 +25,10 @@ Plasma image is in - they are the part that is still worth having.
 **It also says whether the PDF embeds its fonts** (`pdffonts`), because a file
 whose fonts are not embedded reads fine here and prints wrong everywhere else,
 and `pdftotext` - the tool this path turned to for everything - says nothing
-about the font table. Measured on a real file: `pdffonts` can print syntax
-errors on stderr while **exiting 0 with an empty table**, so an empty table is
-reported as "no fonts listed", never as "all embedded".
+about the font table. Two shapes measured on real files, and they are *not* the
+one the first version of this recorded: a non-PDF exits **1**, and a valid PDF
+with no fonts exits **0 with an empty table**, which is reported as "no fonts
+listed" rather than as "all embedded".
 """
 
 import pathlib
@@ -311,12 +312,19 @@ def _font_lines(path) -> "list[str]":
     says nothing about that, and nothing else in this package looks at the
     font table at all.
 
-    **Measured on a real PDF here: `pdffonts` prints syntax errors on stderr
-    while exiting 0 with an empty table** (fed a non-PDF, it warns
-    "May not be a PDF file (continuing anyway)" and rc=0 with no rows). So the
-    exit code proves nothing and an empty table is reported as *no fonts
-    listed*, never as "all fonts embedded" - the confident wrong answer this
-    whole module is built to avoid. A missing file is rc=1.
+    **What was measured here - corrected, because the first measurement was
+    taken through a pipe and was wrong.** The earlier docstring recorded
+    *"`pdffonts` exits 0 even on a file that is not a PDF"*: that exit code
+    belonged to `head`, not to `pdffonts`. Measured properly, the two cases
+    are different and both are handled below:
+
+    - a **non-PDF** prints `Syntax Error: Couldn't find trailer dictionary`
+      and exits **1** - so it takes the could-not-be-read branch, and never
+      the empty-table one;
+    - a **valid PDF declaring no fonts** exits **0** with an empty table, and
+      that is reported as *no fonts listed*, never as "all embedded" - an
+      empty table and a file that could not be read are different facts, and
+      only the second is about a file that failed to parse at all.
 
     `pdffonts` ships in **poppler**, the same package as the `pdftotext` the
     caller already requires, so the guard is a formality rather than a

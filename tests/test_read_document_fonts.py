@@ -10,12 +10,15 @@ machine?"* was structurally absent.
 **Two measured traps, both from real runs here, both the shape of bug this
 repository keeps recording:**
 
-1. **`pdffonts` exits 0 on a file that is not a PDF at all.** Fed a text file
-   it prints `Syntax Warning: May not be a PDF file (continuing anyway)` on
-   stderr, **exits 0, and prints no rows**. Reading the exit code as "fine" and
-   an empty table as "every font is embedded" is the confident wrong answer
-   this module exists to avoid, so an empty table reports *could not be
-   determined*.
+1. **`pdffonts` exits are two different contracts, and the first measurement of
+   them was taken through a pipe and was wrong.** The original docstring here
+   recorded *"exits 0 even when the file is not a PDF"* - that exit code
+   belonged to `head`. Measured properly: a **non-PDF exits 1** with
+   `Syntax Error: Couldn't find trailer dictionary`, and a **valid PDF that
+   declares no fonts exits 0 with an empty table**. Both branches are real:
+   the first is "this file could not be read", the second is "there are no
+   fonts here" - and the empty table is never read as *all embedded*, because
+   those are different facts about different files.
 2. **The table is fixed-width, and `split()` got it wrong on a real file.** The
    `type` column holds `Type 1` - two words - and font *names* hold spaces
    (`DejaVu Sans Mono`), so a field index lands on a different column for
@@ -170,18 +173,38 @@ def test_all_embedded_is_not_reported_as_unknown(tmp_path, monkeypatch):
     assert "NOT embedded" not in " ".join(lines)
 
 
-def test_an_empty_table_that_exited_zero_is_undetermined(tmp_path, monkeypatch):
-    """**The measured trap: rc=0 with no rows is not 'all embedded'.**
+def test_a_fontless_pdf_that_exits_zero_lists_no_fonts(tmp_path, monkeypatch):
+    """**The measured case: a valid PDF declaring no fonts, rc=0, no rows.**
 
-    Fed a non-PDF, the real `pdffonts` warns on stderr and exits 0 with an
-    empty table. A control that asserted *some* positive answer here would
-    pass against code that invented one.
+    This is not the same as a file that could not be read - which is the
+    correction the original docstring needed, because its "rc=0 on a non-PDF"
+    had been measured through a pipe and was wrong. An empty table reports
+    *could not be determined*, and specifically not *all embedded*: only the
+    second would be a confident answer about a file that parsed.
     """
-    bindir = _fake_binary(tmp_path, stderr="Syntax Warning: May not be a PDF file (continuing anyway)", code=0)
+    bindir = _fake_binary(tmp_path, code=0)
     monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
     lines = rd._font_lines(_real_pdf(tmp_path))
     assert "listed no fonts" in lines[0]
     assert "could not be determined" in lines[0]
+
+
+def test_a_non_pdf_exits_one_and_is_not_an_empty_table(tmp_path, monkeypatch):
+    """**The other measured contract: a non-PDF exits 1.**
+
+    `Syntax Error: Couldn't find trailer dictionary` stderr and rc=1, so it
+    takes the could-not-be-read branch and never the empty-table one. The
+    assertion that matters is that the answer says *could not be read* rather
+    than either of the two all-embedded-flavoured sentences - a wrong exit
+    code here is how a non-PDF would be reported as a perfectly good one.
+    """
+    bindir = _fake_binary(tmp_path, stderr="Syntax Error: Couldn't find trailer dictionary",
+                          code=1)
+    monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+    lines = rd._font_lines(tmp_path / "hostname.pdf")
+    assert "could not be read" in lines[0]
+    assert "no fonts listed" not in lines[0]
+    assert "embedded" not in lines[0]
 
 
 def test_a_failing_exit_is_reported_as_a_failure(tmp_path, monkeypatch):
