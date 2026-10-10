@@ -530,6 +530,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: walks and classifies. Never removes a link (asserted by a
     # mutation on the closing sentence).
     "broken_symlinks": ("Files", "Which shortcuts point at nothing"),
+    # Read-only: nothing deleted, and no "safe to delete" is claimed for any
+    # file (both asserted by a mutation each).
+    "stale_files": ("Files", "What is big AND untouched - the deletion candidates"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
