@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**241 skills in 25 groups.** Each is a named, schema-typed module; the model
+**241 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -77,6 +77,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `neighbour_table` | Which addresses on this link have answered, and which never have | — |
 | `open_files` | Which programs have a file or socket open | — |
 | `open_settings` | Open the system Settings at a page | — |
+| `permission_audit` | What other users on this machine can read or write | — |
 | `ping_host` | Ping a host | — |
 | `port_owner` | Which program is using a port | — |
 | `print_file` | Print a file | — |
@@ -436,12 +437,6 @@ Capture and describe the screen.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `screenshot` | Screenshot | needs `vision-sense-enabled` |
-
-## Security
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `permission_audit` | What other users on this machine can read or write | — |
 
 ## Sounds and recordings
 
