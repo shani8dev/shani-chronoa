@@ -69,6 +69,30 @@ looks strictly better than what we use, and it is not.
 - **`capinfos` is not on either image.** It comes from `wireshark-cli`, and
   the presence check reports it absent, so no reader should route to it.
 
+## The asymmetry no slot run sees
+
+**Three of the four parser bugs found on 2026-10-10 came from reading lsof's
+output as an unprivileged user, which a slot never does.** A slot runs as root
+inside `systemd-nspawn`, so every `lsof` there returns readable paths and rc=0
+with no warnings - measured, 3,893 lines and an empty stderr. Here, as a user:
+
+    COMMAND PID USER   FD      TYPE DEVICE SIZE/OFF NODE NAME
+    systemd   1 root  cwd   unknown        /proc/1/cwd (readlink: Permission denied)
+
+Four rows, every one with the real name replaced by the unreadable path, and
+**the gap between `PID` and `USER` collapsed to a single space** because pid 1
+is short. Two shapes the slot cannot produce, and both changed the answer.
+
+The same asymmetry is why `timestamps` differ: the `@blue` `sar` header is
+24-hour (`06:40:39 CPU`), this box is 12-hour (`12:55:13 PM CPU`), so a column
+alignment fixed on one distribution broke on the other while the slot-shaped
+test suite stayed green. **`tools/probe_skills_on_host.py` is the thing that
+closes this gap** - it dispatches each shipped skill here, as a user, and a
+green run there is not evidence about here.
+
+Rule worth keeping: **a test fixture captured from a root session is a fixture
+that cannot see what an unprivileged read produces.**
+
 ## Built from this survey
 
 | skill | command | what the current one could not answer |
