@@ -40,6 +40,13 @@ _SCHEMA = {
             "mute": {"type": "boolean", "description": "Remove the audio track."},
             "audio_only": {"type": "boolean", "description": "Keep only the sound as an audio file (.m4a)."},
             "speed": {"type": "number", "description": "Playback speed: 2.0 is twice as fast, 0.5 half."},
+            # **Named, like convert_media and pdf_pages, so the post-condition can
+            # verify it.** This skill's `_verify_edit` reads `arguments["output"]`
+            # and returns None without one - and the schema did not declare the
+            # parameter, so the model could never pass it and the post-condition
+            # was dead code reading as a control. The path it defaults to is
+            # reported either way.
+            "output": {"type": "string", "description": "Where to write the edit. Defaults to <name>-edit.mp4 beside the original."},
         }, "required": ["path"]},
     },
 }
@@ -59,6 +66,35 @@ def _seconds(raw: str) -> float | None:
             return None
         return float(text)
     except ValueError:
+        return None
+
+
+def _source_fps(src) -> "float | None":
+    """The source's frame rate, for the `fps` filter that actually shortens a clip.
+
+    **Why this exists: `setpts` alone does not change a file's duration.**
+    Measured on this box with a real 1-second clip: `ffmpeg -vf
+    "setpts=0.5*PTS"` produced a container whose ffprobe duration is still
+    **1.000s** - the frames are timestamped closer together but not one is
+    dropped. Adding `fps=4` (twice the source's 2) produced **0.500s**. So a
+    speed change needs both, and this skill had only the half that renames the
+    timeline.
+    """
+    if not shutil.which("ffprobe"):
+        return None
+    try:
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                                "-show_entries", "stream=r_frame_rate",
+                                "-of", "csv=p=0", str(src)],
+                               capture_output=True, text=True, timeout=30, check=False)
+        text = (probe.stdout or "").strip()
+        if "/" in text:
+            numerator, _slash, denominator = text.partition("/")
+            numerator, denominator = int(numerator), int(denominator or 1)
+            if numerator and denominator:
+                return numerator / denominator
+        return float(text) if text else None
+    except (OSError, ValueError):
         return None
 
 
@@ -114,9 +150,24 @@ def _run(arguments: dict) -> str:
     if audio_only and not shutil.which("ffmpeg"):
         return "Extracting audio needs ffmpeg."
 
+    # **The declared destination, resolved and refused like every other path
+    # here.** Without one the edit lands beside the original under a name the
+    # skill derives; with one, the caller said where - and `_verify_edit` needs
+    # a real path to verify, which is why the parameter exists in the schema.
+    # A refusal happens before ffmpeg runs, so a bad destination is not a
+    # half-written file.
+    output = str(arguments.get("output") or "").strip()
+    target = None
+    if output:
+        try:
+            target = files.resolve(output)
+        except files.PathProblem as exc:
+            return str(exc)
+        files.refuse_catalogue(target, "write the edited video to")
+
     # An edit that removes *all* the sound is a statement, not a mistake.
     if audio_only:
-        target = _new_beside(src, "audio", ".m4a")
+        target = target or _new_beside(src, "audio", ".m4a")
         codec = ["-vn", "-codec:a", "aac", "-b:a", "192k"]
     else:
         tag = []
@@ -143,7 +194,8 @@ def _run(arguments: dict) -> str:
         if speed and speed != 1.0:
             tag.append(f"{speed:g}x")
         tag = "-".join(tag) or "edit"
-        target = _new_beside(src, tag, src.suffix if src.suffix.lower() in _VIDEO_OK else ".mp4")
+        target = target or _new_beside(
+            src, tag, src.suffix if src.suffix.lower() in _VIDEO_OK else ".mp4")
         codec = []
 
     argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y"]
@@ -161,7 +213,14 @@ def _run(arguments: dict) -> str:
         angle = {"90": "transpose=1", "180": "transpose=1,transpose=1", "270": "transpose=2"}[rotate]
         vf.append(angle)
     if speed and speed != 1.0 and not mute and not audio_only:
-        vf.append(f"setpts={1.0/speed}*PTS")
+        vf.append(f"setpts={1.0/speed:g}*PTS")
+        # **And the frame rate, or the duration does not move.** `setpts` alone
+        # renames the timeline and drops no frame; measured here it leaves a
+        # 1-second clip at 1.000s. `fps` at the source rate times the factor is
+        # what actually shortens (or lengthens) it - see `_source_fps`.
+        rate = _source_fps(src)
+        if rate:
+            vf.append(f"fps={rate * speed:g}")
     af = []
     if speed and speed != 1.0 and not mute and not audio_only:
         af.append(f"atempo={speed}")
