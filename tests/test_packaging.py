@@ -483,6 +483,56 @@ class TestPackagingMetadata:
             )
         assert problems == []
 
+    def test_pkgbuild_offers_the_cli_tools_the_enrichments_look_for(self):
+        """The 2026-10-10 enrichments each added a binary, and one of them was
+        undeclared - so `discover_hosts`' mDNS half refused with a reason
+        nobody could act on, which is the same defect the transposer test above
+        exists for.
+
+        The pairs are read from the **module's own source**, so a skill that
+        stops looking for a binary drops out of the requirement (and a test
+        asserting about a mechanism that is gone fails loudly). The package
+        names come out of both images' matrices, which carry pacman's own file
+        database: `/usr/bin/avahi-browse` is in **avahi** on GNOME and Plasma
+        alike, `/usr/bin/pdffonts` and `/usr/bin/pdfinfo` in **poppler**, `ip`
+        in **iproute2**, `fwupdmgr` in **fwupd**.
+
+        **Offered, never required.** Every one of these degrades to an answer
+        that names the missing tool — that is what the enrichment tests assert —
+        so a hard dependency would make an optional answer an install-time
+        requirement. The three that are already hard `depends` (`sane`,
+        `usbutils`, `smartmontools`) are checked only for presence.
+        """
+        depends = _pkgbuild_array("depends")
+        optdepends = _pkgbuild_array("optdepends")
+        # binary -> (package that ships it, the module that looks for it)
+        wanted = {
+            "avahi-browse": ("avahi", "skills/discover_hosts.py"),
+            "pdffonts": ("poppler", "skills/read_document.py"),
+            "pdfinfo": ("poppler", "skills/read_document.py"),
+            "ip": ("iproute2", "skills/network_check.py"),
+            "fwupdmgr": ("fwupd", "skills/firmware_updates.py"),
+        }
+        # Already hard dependencies, and correctly so: the skill's primary
+        # path is the one that uses it.
+        already = {"ip": "iproute2", "fwupdmgr": "fwupd"}
+        problems = []
+        for binary, (package, module) in wanted.items():
+            source = REPO_ROOT / "usr/lib/shani-chronoa/shani_chronoa" / module
+            if not source.exists():
+                continue
+            if f'"{binary}"' not in source.read_text():
+                continue        # this skill no longer looks for it
+            if package in depends:
+                continue        # required, which is stronger than offered
+            if package not in optdepends:
+                problems.append(
+                    f"{binary!r} is what {module} looks for and the PKGBUILD "
+                    f"offers no optdepend for {package!r} (the package both "
+                    f"images ship it in), so the skill refuses with a reason "
+                    f"nobody can act on; optdepends is {optdepends}")
+        assert problems == [], "\n".join(problems)
+
     def test_pkgbuild_offers_a_pitch_transposer_without_requiring_it(self):
         """The singing path, which sox cannot do and nothing used to offer.
 
