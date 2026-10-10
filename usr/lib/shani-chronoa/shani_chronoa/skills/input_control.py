@@ -23,7 +23,7 @@ elsewhere.
 Backend detection is honest about the display server. Wayland does NOT
 permit synthetic input from a plain client without compositor cooperation,
 so on Wayland we only accept wtype (requires a compositor speaking the
-input-method protocol) or dotool (requires a running dotoold daemon) -
+input-method protocol) or ydotool (requires a running ydotoold daemon) -
 both opt-in. On X11 we use xdotool's XTEST extension, which is the only
 backend this host can actually prove end-to-end. If no backend is available
 the skill refuses rather than guessing.
@@ -66,7 +66,7 @@ def _detect_backend() -> Optional[tuple[str, list[str]]]:
 
     - Wayland: a plain client has no generic synthetic-input permission.
       `wtype` requires a compositor that speaks the input-method protocol;
-      `dotool` requires a running `dotoold` daemon. Both are opt-in and are
+      `ydotool` requires a running `ydotoold` daemon. Both are opt-in and are
       only accepted when the session is actually Wayland.
     - X11 (or an unknown session with a DISPLAY): `xdotool` uses the XTEST
       extension, which is the only backend verified end-to-end on this host.
@@ -82,8 +82,8 @@ def _detect_backend() -> Optional[tuple[str, list[str]]]:
         # Wayland: no generic synthetic-input permission for plain clients.
         if shutil.which("wtype"):
             return ("wtype", ["wtype"])
-        if shutil.which("dotool"):
-            return ("dotool", ["dotool"])
+        if shutil.which("ydotool"):
+            return ("ydotool", ["ydotool"])
         # Neither ships on the Shanios images; the desktop portal does, on GNOME and Plasma
         # alike (see shani_chronoa/portal.py) - it asks the person once in a system dialog.
         return ("portal", [])
@@ -92,9 +92,9 @@ def _detect_backend() -> Optional[tuple[str, list[str]]]:
     # X11 (or unknown session with a DISPLAY): xdotool via XTEST.
     if display and shutil.which("xdotool"):
         return ("xdotool", ["xdotool"])
-    # dotool also works on X11 if its daemon is running.
-    if shutil.which("dotool"):
-        return ("dotool", ["dotool"])
+    # ydotool also works on X11 if its daemon is running.
+    if shutil.which("ydotool"):
+        return ("ydotool", ["ydotool"])
     return None
 
 
@@ -127,14 +127,48 @@ def _build_command(backend: tuple[str, list[str]], action: str, params: dict) ->
             return prefix + ["-c", params["button"]]
         if action == "type":
             return prefix + ["-M", params["text"]]
-    elif name == "dotool":
-        # Syntax per dotool(1); unverified on this host (no dotoold daemon).
+    elif name == "ydotool":
+        # **All three of these were wrong, and the backend was dead with
+        # them.** The module called a binary named `dotool`, which does not
+        # exist - Arch's `ydotool` package (1.0.4-2) installs `ydotool` and
+        # `ydotoold(8)` - so `shutil.which("dotool")` returned None on every
+        # machine and this branch was unreachable code on a system that had
+        # the tool installed.
+        #
+        # The commands were wrong too, checked against the man page rather
+        # than against the name:
+        #
+        # | this built | ydotool(1) actually takes |
+        # |------------|---------------------------|
+        # | `move X Y`        | `mousemove [-a\|--absolute] X Y` |
+        # | `click BUTTON`    | `click [-d ms] [-r\|--repeat N] [button...]` |
+        # | `type -- TEXT`    | `type [-D ms] [-d ms] [-f file] "text"` |
+        #
+        # - **`--absolute` is not optional for us.** These params are screen
+        #   coordinates, and without it `mousemove` moves by a *relative*
+        #   delta - so a click at (400,300) would land 400,300 from
+        #   wherever the pointer already was.
+        # - **`click` does repeat.** The comment below this table said it did
+        #   not, and built a repeat form only for xdotool; ydotool's `click`
+        #   has `-r/--repeat N` in the same release.
+        # - **`type` has no `--`.** The text is a positional argument, and
+        #   passing `--` would type the literal string "--".
+        #
+        # Still unverified by execution: ydotool needs a `ydotoold` daemon
+        # over `/dev/uinput`, and there is neither on this dev box.
         if action == "move":
-            return prefix + ["move", str(params["x"]), str(params["y"])]
+            return prefix + ["mousemove", "--absolute",
+                             str(params["x"]), str(params["y"])]
         if action == "click":
-            return prefix + ["click", params["button"]]
+            cmd = prefix + ["click"]
+            if params.get("count", 1) > 1:
+                cmd += ["--repeat", str(params["count"])]
+            # `0xC0` is mouse-down followed by mouse-up - a complete click.
+            # Without the bit mask ydotool sends only the press.
+            cmd.append(f"0xC0:{params['button']}")
+            return cmd
         if action == "type":
-            return prefix + ["type", "--", params["text"]]
+            return prefix + ["type", params["text"]]
     return None
 
 
@@ -155,7 +189,7 @@ def _run_action(action: str, params: dict, *, description: str) -> str:
     if backend is None:
         return (
             "Input control is enabled but no input-injection backend is "
-            "available on this host (need xdotool on X11, or wtype/dotool on "
+            "available on this host (need xdotool on X11, or wtype/ydotool on "
             "Wayland). Install one and ensure your session exposes it."
         )
 
@@ -230,8 +264,11 @@ def _run_click_pointer(arguments: dict) -> str:
     params = {"button": button}
     if count > 1:
         params["count"] = count
-    # xdotool click --repeat N B ; wtype/dotool click does not repeat, so we
-    # build the repeat form only for xdotool.
+    # Only `wtype -c` lacks a repeat flag, so the count is passed to the
+    # backends that have one and dropped for the one that does not. (The old
+    # comment here said ydotool could not repeat either; `ydotool click -r N`
+    # can, per its own man page - the module was calling a binary that did
+    # not exist, so nothing had ever checked.)
     return _run_action("click", params, description=f"clicked {button}")
 
 

@@ -652,6 +652,134 @@ _PACKAGE_HINTS = {
     "systemd-analyze": "systemd",
     "xdg-settings": "xdg-utils",
     "last": "util-linux",
+
+    # --- 74 entries, settled by `commands[].package` in both image
+    # matrices, 2026-10-10 -------------------------------------------
+    # `tools/audit_missing_tool_hints.py` walks the AST for every
+    # `tool_missing()`/`which()` call in the package and reports the ones
+    # with no hint here. It found **103**, and `curl` among them - the
+    # single most-used download path in this package answering a missing
+    # `curl` with "On Arch it comes from the 'the package that provides
+    # it' package". These 74 are the ones the matrices name outright.
+    "adb": "android-tools",
+    "avahi-browse": "avahi",
+    "balooctl6": "baloo",
+    "bc": "bc",
+    "bootctl": "systemd",
+    "btrfs": "btrfs-progs",
+    "busctl": "systemd",
+    "bwrap": "bubblewrap",
+    "compsize": "compsize",
+    "coredumpctl": "systemd",
+    "crontab": "cronie",
+    "curl": "curl",
+    "ddcutil": "ddcutil",
+    "delv": "bind",
+    "dmesg": "util-linux",
+    "du": "coreutils",
+    "ethtool": "ethtool",
+    "ffmpeg": "ffmpeg",
+    "ffplay": "ffmpeg",
+    "ffprobe": "ffmpeg",
+    "firewall-cmd": "firewalld",
+    "fusermount": "fuse2",
+    "gio": "glib2",
+    "gjs": "gjs",
+    "gnome-control-center": "gnome-control-center",
+    "gpspipe": "gpsd",
+    "gst-launch-1.0": "gstreamer",
+    "iostat": "sysstat",
+    "ip": "iproute2",
+    "iptables": "iptables",
+    "iw": "iw",
+    "kcmshell6": "kcmutils",
+    "kdeconnect-cli": "kdeconnect",
+    "kscreen-doctor": "libkscreen",
+    "liquidctl": "liquidctl",
+    "localsearch": "localsearch",
+    "loginctl": "systemd",
+    "lpinfo": "cups",
+    "lpoptions": "cups",
+    "lscpu": "util-linux",
+    "lspci": "pciutils",
+    "lsusb": "usbutils",
+    "magick": "imagemagick",
+    "mpstat": "sysstat",
+    "mtr": "mtr",
+    "nft": "nftables",
+    "nmap": "nmap",
+    "nvidia-smi": "nvidia-utils",
+    "orca": "orca",
+    "paplay": "libpulse",
+    "pdffonts": "poppler",
+    "pdfimages": "poppler",
+    "plocate": "plocate",
+    "qrencode": "qrencode",
+    "rsync": "rsync",
+    "sane-find-scanner": "sane",
+    "setxkbmap": "xorg-setxkbmap",
+    "shani-chronoa": "?",
+    "shani-deploy": "shani-deploy",
+    "shutdown": "systemd-sysvcompat",
+    "systemd-inhibit": "systemd",
+    "systemsettings": "systemsettings",
+    "tailscale": "tailscale",
+    "tcpdump": "tcpdump",
+    "tesseract": "tesseract",
+    "timedatectl": "systemd",
+    "tldr": "tealdeer",
+    "usb-devices": "usbutils",
+    "who": "coreutils",
+    "whois": "whois",
+    "wl-copy": "wl-clipboard",
+    "wl-paste": "wl-clipboard",
+    "xdg-user-dir": "xdg-user-dirs",
+    "xprop": "xorg-xprop",
+
+    # --- 17 more, confirmed against the Arch package API (2026-10-10) --------
+    # The two matrices do not carry these (they name only binaries the images
+    # actually have), so each was queried directly at
+    # `archlinux.org/packages/search/json/?name=<pkg>` and the repo checked.
+    "aplay": "alsa-utils",
+    "arecord": "alsa-utils",
+    "arp-scan": "arp-scan",
+    "checkupdates": "pacman-contrib",
+    "cpupower": "cpupower",
+    "gatttool": "bluez",
+    "gst-launch": "gst-plugins-base",
+    "ping6": "iputils",
+    "tshark": "wireshark-cli",
+    "ufw": "ufw",
+    "wmctrl": "wmctrl",
+    "wtype": "wtype",
+    "xclip": "xclip",
+    "xsel": "xsel",
+    "yt-dlp": "yt-dlp",
+    "ydotool": "ydotool",
+    "xdotool": "xdotool",
+
+    # **`ydotool` was `dotool` until 2026-10-10, and there is no such
+    # binary.** Arch's `ydotool` 1.0.4-2 installs `ydotool` and
+    # `ydotoold(8)`; `shutil.which("dotool")` returned None on every machine,
+    # so `input_control`'s ydotool branch was unreachable on a system that
+    # had the tool installed. Found by `tools/audit_missing_tool_hints.py`
+    # listing a binary nothing can resolve.
+    #
+    # **Deliberately NOT given a package**, because naming one would be the
+    # confident wrong answer this table exists to avoid - these are not in an
+    # Arch package at all on either image:
+    #
+    #   `llama-server` `llama-quantize` `llama-perplexity` `llama-imatrix`
+    #       - the llama.cpp the setup wizard downloads into the user's home
+    #   `whisper-cli` `whisper-server` `whisper.cpp`
+    #       - ditto; `whisper-cpp` is an `optdepend` no image profile installs
+    #   `piper-tts` `RHVoice-test` `parakeet-cli`
+    #       - voices and ASR models the wizard installs
+    #   `shani-chronoa-lab-network`
+    #       - this project's own launcher, in this very package
+    #   `xset` `xwd`
+    #       - X11-only, absent from both matrices, and Shanios is Wayland
+
 }
 
 
