@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**214 skills in 24 groups.** Each is a named, schema-typed module; the model
+**216 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**84 of 214 are consent-gated and 16 are destructive.**
+**84 of 216 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -51,6 +51,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `compression_savings` | How much space btrfs compression is saving | needs `filesystems-sense-enabled` |
 | `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
 | `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
+| `cpu_per_core` | Which processor cores are busy right now | — |
 | `data_usage` | Data used | — |
 | `discover_hosts` | Who is on this network right now | — |
 | `disk_activity` | How hard the disks are working right now | needs `storage-sense-enabled` |
@@ -166,6 +167,7 @@ The small things a person asks for most.
 | `calculate` | Calculation | — |
 | `convert_color` | Colour codes | — |
 | `convert_units` | Convert units | — |
+| `download_file` | Download a file from a web address | — |
 | `encode_text` | Encode or decode text | — |
 | `explain_command` | Explain a command | — |
 | `find_emoji` | Find an emoji | — |

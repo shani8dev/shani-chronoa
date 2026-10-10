@@ -487,6 +487,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "process_detail": ("System", "What one running process is waiting on"),
     # Read-only: cpupower frequency-info reports, and changes nothing.
     "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),
+    "cpu_per_core": ("System", "Which processor cores are busy right now"),
+    # Downloading writes a new file and replaces nothing, so it is ungated by
+    # precedent with `convert_document`.
+    "download_file": ("Everyday tools", "Download a file from a web address"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),
