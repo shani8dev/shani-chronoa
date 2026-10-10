@@ -248,10 +248,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "move_or_copy_file": ("Files", "Move or copy"),
     "delete_file": ("Files", "Delete"),
     "open_file": ("Files", "Open a file"),
-    # Disk usage by kind. Not "Storage" and not a duplicate of the `storage`
-    # sense: that reports filesystems and their room, and this walks a tree and
-    # groups it by what the files *are* - video, audio, image, archive.
-    "space_by_type": ("Files", "Break disk usage down by kind of file"),
     "list_processes": ("Processes and windows", "Running processes"),
     "kill_process": ("Processes and windows", "Stop a process"),
     "list_windows": ("Processes and windows", "Open windows"),
@@ -540,12 +536,27 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: reads a bounded 512-byte head. Never renames or moves.
     "identify_file": ("Files", "What this file really is, whatever its name says"),
     # Cuts across directories on purpose, and says its category is a guess.
-    "space_by_type": ("Files", "What is eating my disk, by kind of file"),
+    # Read-only: it walks and groups by suffix, and deletes and moves nothing.
+    #
+    # **This key was entered twice, with two different labels, and the duplicate
+    # was silently killing one of them.** Python resolves a duplicate dict key to
+    # the last one, so "What is eating my disk, by kind of file" was dead with no
+    # error in either direction and the table looked correct - the defect
+    # `capabilities.py`'s own note above records for `browse`, found here by
+    # `python3 -m pyflakes` rather than by reading. One key, one label, and the
+    # comment keeps both halves' information.
     # Writes (on `apply`), but defaults to a dry run and never prompts or
     # reverse-applies. `--forward` and `--batch` are asserted on the argv.
     "apply_patch": ("Files", "Apply a .patch/.diff file to files here"),
-    # Read-only: walks and groups by suffix. Nothing deleted or moved.
+    # Read-only: walks and groups by suffix. Nothing deleted or moved. It is not
+    # the filesystems sense: that reports filesystems and their room, and this
+    # walks a tree and groups it by what the files *are* - video, audio, image,
+    # archive - and says the category is a guess, because an extension is a
+    # claim rather than a fact.
     "space_by_type": ("Files", "Where the space goes, by kind of file"),
+    # Read-only: reports modes, never chmods (a mutation asserting "Permissions
+    # changed to 0600" fails 1 test).
+    "permission_audit": ("Security", "What other users on this machine can read or write"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated

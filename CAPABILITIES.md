@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**240 skills in 24 groups.** Each is a named, schema-typed module; the model
+**241 skills in 25 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 240 are consent-gated and 17 are destructive.**
+**89 of 241 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -436,6 +436,12 @@ Capture and describe the screen.
 | Skill | What it does | Before it runs |
 |---|---|---|
 | `screenshot` | Screenshot | needs `vision-sense-enabled` |
+
+## Security
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `permission_audit` | What other users on this machine can read or write | — |
 
 ## Sounds and recordings
 
