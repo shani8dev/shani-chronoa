@@ -491,6 +491,13 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Downloading writes a new file and replaces nothing, so it is ungated by
     # precedent with `convert_document`.
     "download_file": ("Everyday tools", "Download a file from a web address"),
+    # **Ungated, by `move_or_copy_file`'s precedent.** It writes into the
+    # destination folder, so it is in the WRITE family rather than READ_ONLY -
+    # but it copies files a person named and never deletes, which is exactly
+    # what `move_or_copy_file` already does without a consent key. The
+    # dangerous half (deleting at the destination) is refused outright
+    # rather than gated, so there is no switch that turns it on.
+    "sync_folder": ("Files", "Sync two folders, showing what would change first"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),

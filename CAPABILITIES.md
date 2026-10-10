@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**216 skills in 24 groups.** Each is a named, schema-typed module; the model
+**217 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**84 of 216 are consent-gated and 16 are destructive.**
+**84 of 217 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -128,6 +128,7 @@ Read, write, move, archive and undo files.
 | `read_video` | Read a video's length, size, and format | — |
 | `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
 | `search_file_contents` | Search inside files | — |
+| `sync_folder` | Sync two folders, showing what would change first | — |
 | `trash_file` | Move a file or folder to the trash, recoverably | **asks first, always** · needs `file-delete-enabled` |
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
