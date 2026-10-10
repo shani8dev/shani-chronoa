@@ -248,6 +248,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "move_or_copy_file": ("Files", "Move or copy"),
     "delete_file": ("Files", "Delete"),
     "open_file": ("Files", "Open a file"),
+    # Disk usage by kind. Not "Storage" and not a duplicate of the `storage`
+    # sense: that reports filesystems and their room, and this walks a tree and
+    # groups it by what the files *are* - video, audio, image, archive.
+    "space_by_type": ("Files", "Break disk usage down by kind of file"),
     "list_processes": ("Processes and windows", "Running processes"),
     "kill_process": ("Processes and windows", "Stop a process"),
     "list_windows": ("Processes and windows", "Open windows"),
@@ -530,17 +534,18 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: walks and classifies. Never removes a link (asserted by a
     # mutation on the closing sentence).
     "broken_symlinks": ("Files", "Which shortcuts point at nothing"),
-    # A file's name is a claim about its bytes, and the bytes are the evidence -
-    # it sits beside the other Files readers for that reason.
-    "identify_file": ("Files", "What is this file, really"),
     # Read-only: nothing deleted, and no "safe to delete" is claimed for any
     # file (both asserted by a mutation each).
     "stale_files": ("Files", "What is big AND untouched - the deletion candidates"),
     # Read-only: reads a bounded 512-byte head. Never renames or moves.
     "identify_file": ("Files", "What this file really is, whatever its name says"),
+    # Cuts across directories on purpose, and says its category is a guess.
+    "space_by_type": ("Files", "What is eating my disk, by kind of file"),
     # Writes (on `apply`), but defaults to a dry run and never prompts or
     # reverse-applies. `--forward` and `--batch` are asserted on the argv.
     "apply_patch": ("Files", "Apply a .patch/.diff file to files here"),
+    # Read-only: walks and groups by suffix. Nothing deleted or moved.
+    "space_by_type": ("Files", "Where the space goes, by kind of file"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
     "disk_activity": ("System", "How hard the disks are working right now"),
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
