@@ -6606,3 +6606,49 @@ Both image matrices exist in the tree now — GNOME (`shani-install-media/test-e
 **Where this left the harness.** `shani-testbed` gained `slot-tests/chronoa-cli-formats.sh` and its self-test `tests/chronoa-cli-formats-results.sh`, which settle on Arch the four output shapes the Ubuntu dev box could not run. **Run for real on `@blue`: 14 pass, 0 fail, rc=0**, and it measured the two facts this repo had been guessing — `arping -D` on an unanswered address **exits 0** (so rc=0 means *no duplicate*, the opposite of the guess), and `avahi-browse`'s service-type lines with both binaries at `/usr/sbin`. The rule above about a missing command being a slot run rather than a workaround is the lesson that produced the file.
 
 **Still unmeasured on Arch:** `compsize` (btrfs compression ratio) and `bootctl` (EFI boot entries) are both open on the matrix and absent on the dev box, and both are in `chronoa-cli-formats.sh`'s presence list waiting for a run that exercises them.
+
+## The ninth enrichment, and the marker that would have named the wrong slot (2026-10-10, later)
+
+`boot_report` now reports **which EFI entry the firmware will boot by default**,
+because on a blue-green machine "what will my machine boot into if I do nothing?"
+has two answers that can disagree — what `shani-deploy` intends (which
+`snapshot_status` reports) and what the firmware is pointed at. Nothing read the
+second, and `bootctl list` is the only place it exists.
+
+**The measurement corrected the implementation, which is the whole argument for
+doing it this way round.** `shani-testbed`'s `chronoa-cli-formats.sh` ran it on a
+real `@blue` slot, and this systemd's `bootctl` **has no JSON output** at all
+(`--json` is refused with *"Unknown argument to --json= switch"* — three
+invocations were tried and all three were wrong before the help text was
+captured instead of guessing a fourth). The prose list carries **three different
+markers that are not synonyms**:
+
+```
+title: shanios-green (Candidate) (not reported/new)
+title: shanios-blue (Active) (default) (not reported/new)
+ tries: 3 left; 0 done
+```
+
+`(Active)` is what is running now, `(default)` is what boots next, and
+`(Candidate)` is the *other side of an auto-tries pair* — which here is green
+while the default is blue. **The first version of the parser keyed on
+`(Candidate)` and would have named the wrong slot on the very machine the format
+was measured on.** They are read apart now, the `tries` line is reported
+(auto-tries is the safety net someone asks about after a failed boot), and an
+unmarked entry set says UNKNOWN rather than defaulting to the first row, which
+is ordered by sort-key and not by preference. 9 tests, and the mutation that
+restores the original bug fails four of them.
+
+`compsize` (btrfs compression) was measured in the same run and **exits 1 with
+"Not btrfs"** — nspawn's `/` is an overlay, so the honest result is a SKIP naming
+the environmental cause. A real boot or `--volatile` would measure it; until
+then nothing here answers "how much is compression saving me", and the entry in
+`chronoa-cli-formats.sh` is what stands in its place.
+
+**Four harness bugs the same runs found in the slot-test itself**, each recorded
+because each is the shape that produces a confident wrong verdict: a FAIL with
+no cause in its message (now prints stderr, and environmental is a SKIP), an
+`else` merged onto a `res` line by an edit so an assertion silently never ran
+while the summary still counted its results, two commands missing from the
+presence list so a run could not say whether they were on the image, and a
+truncated capture that left the parser writer completing a fixture by hand.
