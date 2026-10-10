@@ -22,6 +22,8 @@ an archive that silently omits unreadable files is worse than one that fails.
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import tarfile
 import zipfile
 from pathlib import Path
@@ -31,6 +33,10 @@ from shani_chronoa.skills import Skill
 
 _MAX_ENTRIES = 20000
 _MAX_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB of content
+#: 7z reads the whole tree before it writes the first byte, and a large one
+#: takes minutes; the sandbox's own ceiling for a slow skill is what this
+#: mirrors rather than a number chosen here.
+_TIMEOUT = 300
 
 SCHEMA = {
     "type": "function",
@@ -58,7 +64,7 @@ SCHEMA = {
                 },
                 "format": {
                     "type": "string",
-                    "description": "'zip' or 'tar.gz'. Defaults to zip.",
+                    "description": "'zip', 'tar.gz' or '7z'. Defaults to zip.",
                 },
             },
         },
@@ -107,8 +113,8 @@ def _run(arguments: dict) -> str:
     if action not in ("create", "list", "extract"):
         return f"Action must be create, list or extract, not {action!r}."
     fmt = (arguments.get("format") or "zip").strip().lower()
-    if fmt not in ("zip", "tar.gz", "targz", "tar"):
-        return f"Format must be zip or tar.gz, not {fmt!r}."
+    if fmt not in ("zip", "tar.gz", "targz", "tar", "7z"):
+        return f"Format must be zip, tar.gz or 7z, not {fmt!r}."
     is_tar = fmt.startswith("tar")
 
     try:
@@ -127,7 +133,7 @@ def _run(arguments: dict) -> str:
         except files.PathProblem as exc:
             return str(exc)
         return _extract(source, dest, is_tar)
-    return _create(source, (arguments.get("destination") or "").strip(), is_tar)
+    return _create(source, (arguments.get("destination") or "").strip(), is_tar, fmt)
 
 
 def _list(archive: Path, is_tar: bool) -> str:
@@ -196,10 +202,57 @@ def _extract(archive: Path, dest: Path, is_tar: bool) -> str:
     return f"Extracted {count} file(s) from {archive.name} into {dest}."
 
 
-def _create(source: Path, destination: str, is_tar: bool) -> str:
+def _create_7z(source: Path, target: Path, entries: list) -> str:
+    """`7z a` the same files the tar and zip branches would.
+
+    **The same contract `extract_archive` measured**: `7z` exits 0 on success
+    and 1 on a non-fatal warning, and anything 2+ is fatal. The round-trip in
+    `chronoa-cli-formats.sh` (`@blue`, 2026-10-10) used exactly this form -
+    `7z a -t7z <archive> <paths...>` - and both halves of that skill are
+    verified against it rather than against a remembered invocation.
+
+    **The members are added by name, not by glob**, and `-w` points the
+    temporary directory at the target's parent: 7z writes its scratch beside
+    the archive by default, and a full `/tmp` is a failure that reads as a
+    broken archive.
+    """
+    if shutil.which("7z") is None:
+        return ("7z is not installed, so a .7z archive cannot be written here "
+                "(the 7zip package provides it). Nothing was written.")
+    argv = ["7z", "a", "-t7z", "-w" + str(target.parent), str(target)]
+    for entry in entries:
+        argv.append(str(entry))
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True,
+                              timeout=_TIMEOUT, check=False)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        _discard(target)
+        return f"7z did not finish ({exc}). Nothing was left behind."
+    if proc.returncode not in (0, 1):
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        _discard(target)
+        return (f"7z refused to write it: {detail[-1] if detail else f'exit {proc.returncode}'} "
+                f"Nothing was left behind.")
+    if not target.exists() or target.stat().st_size == 0:
+        return (f"7z exited {proc.returncode} but wrote nothing, so the archive "
+                f"was NOT created.")
+    return (f"Created {target} ({files.human_size(target.stat().st_size)}), "
+            f"{len(entries)} file(s) as 7z.")
+
+
+def _discard(target: Path) -> None:
+    """Remove a half-written archive, the way the tar and zip branch does."""
+    try:
+        if target.exists():
+            target.unlink()
+    except OSError:
+        pass
+
+
+def _create(source: Path, destination: str, is_tar: bool, fmt: str) -> str:
     if not destination:
         return "No destination was given, so there is nowhere to write the archive."
-    suffix = ".tar.gz" if is_tar else ".zip"
+    suffix = ".tar.gz" if is_tar else (".7z" if fmt == "7z" else ".zip")
     target = Path(files.resolve(destination).as_posix())
     if target.suffix == "":
         target = target.with_name(target.name + suffix)
@@ -226,6 +279,8 @@ def _create(source: Path, destination: str, is_tar: bool) -> str:
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
+        if fmt == "7z":
+            return _create_7z(source, target, entries)
         if is_tar:
             with tarfile.open(target, "w:gz") as t:
                 for e in entries:
