@@ -194,8 +194,24 @@ def enabled_units() -> "list[dict]":
     return out
 
 
-def service_exposure(units: "list[dict]") -> "list[dict]":
+#: Where a system unit file can live, in the order `systemd-analyze security`
+#: needs them: the administrator's copy wins over the package's. A constant
+#: rather than two inline literals because a reader - and a test - has to be
+#: able to say which directories this searches.
+_UNIT_DIRS = ("/etc/systemd/system", "/usr/lib/systemd/system")
+
+
+def service_sandboxing(units: "list[dict]") -> "list[dict]":
     """`systemd-analyze security --offline` for each enabled system service: 0 (tight) .. 10 (no sandboxing).
+
+    **Renamed from `service_exposure`, because the old name was a lie.** The
+    number is systemd's own count of sandboxing options in the unit file -
+    `ProtectSystem`, `PrivateTmp`, `NoNewPrivileges` and friends - and it says
+    nothing about what reaches the service over the network, what it can read,
+    or whether the program inside is careful. "Exposure" reads as
+    attack surface; measured here it is a hardening checklist. The old name
+    shipped a confident answer to a question nobody asked, in the one field a
+    reader would use to decide what to harden.
 
     Offline mode reads the unit file, so no boot is needed. The score only
     counts systemd's own sandboxing options - AppArmor and the program's own
@@ -210,15 +226,19 @@ def service_exposure(units: "list[dict]") -> "list[dict]":
         if u["scope"] != "system" or not name.endswith(".service") or "@" in name or name in seen:
             continue
         seen.add(name)
-        path = next((f"{d}/{name}" for d in ("/etc/systemd/system", "/usr/lib/systemd/system")
+        path = next((f"{d}/{name}" for d in _UNIT_DIRS
                      if os.path.isfile(f"{d}/{name}")), None)
         if not path:
             continue
         text = run(["systemd-analyze", "security", "--offline=true", "--no-pager", path], timeout=20)
+        # systemd's own wording is "Overall exposure level for <unit>: 9.4
+        # EXPOSED", and the field keeps its key because that *is* what the
+        # tool prints - the rename is of this function's output name, not of
+        # systemd's vocabulary.
         m = re.search(r"Overall exposure level for \S+: ([\d.]+) (\S+)", text)
         if m:
-            out.append({"unit": name, "exposure": float(m.group(1)), "rating": m.group(2)})
-    return sorted(out, key=lambda x: -x["exposure"])
+            out.append({"unit": name, "sandboxing": float(m.group(1)), "rating": m.group(2)})
+    return sorted(out, key=lambda x: -x["sandboxing"])
 
 
 def packages() -> dict:
@@ -2007,10 +2027,10 @@ def suggestions(matrices: "list[dict]", builds: dict, owners: "Optional[dict]" =
                     f"{v['severity'] or 'unrated'} {v['type'] or ''}; {v['installed']} installed; "
                     f"{', '.join(v['cves'][:3])} - verify against upstream before acting", prof, sev // 4)
         # 9. services with no systemd sandboxing at all (report only - the policy is light hardening)
-        for e in m.get("service_exposure", [])[:8]:
-            if e["exposure"] >= 9.0:
-                add("review", e["unit"], "enabled service with no systemd sandboxing (exposure >= 9)",
-                    f"systemd-analyze security --offline: {e['exposure']} {e['rating']}", prof, 18)
+        for e in m.get("service_sandboxing", [])[:8]:
+            if e["sandboxing"] >= 9.0:
+                add("review", e["unit"], f"enabled service with no systemd sandboxing ({e['sandboxing']:.1f})",
+                    f"systemd-analyze security --offline: {e['sandboxing']} {e['rating']}", prof, 18)
         # 10. the catalog (opinion)
         for capability, pkgs, why in CATALOG:
             if not any(p in have for p in pkgs):
@@ -2367,7 +2387,9 @@ def write_markdown(path: str, data: dict) -> None:
     for f in SURFACES:
         ideas = [i for i in data["ideas"] if i["surface"] == f][:8]
         if ideas:
-            L += [f"### {f}", ""] + [f"- **{i['category']} / {i['intent']}** (score {i['score']}): "
+            L += [f"### {f}", ""] + [f"- **{i['category']} / {i['intent']}** "
+                                      f"(category weight {i['category_weight']}, not a priority - see "
+                                      f"AGENTS.md): "
                                       + ", ".join(f"`{c}`" for c in i["commands"][:10]) for i in ideas] + [""]
 
     L += ["## Top candidates", "",
@@ -2488,7 +2510,7 @@ const K=D.calibration||{};
 const fill=(id,k)=>[...new Set(R.map(r=>r[k]))].sort().forEach(v=>$(id).insertAdjacentHTML("beforeend",`<option>${esc(v)}</option>`));
 fill("cat","category");fill("int","intent");fill("saf","safety");
 [...new Set(R.flatMap(r=>r.fits))].sort().forEach(v=>$("srf").insertAdjacentHTML("beforeend",`<option>${esc(v)}</option>`));
-D.ideas.slice(0,24).forEach(i=>{const el=document.createElement("div");el.innerHTML=`<b>${esc(i.surface)}: ${esc(i.category)} · ${esc(i.intent)}</b> <span class="mut">score ${i.score}</span><br><span class="mut">${esc(i.commands.slice(0,8).join(", "))}</span>`;
+D.ideas.slice(0,24).forEach(i=>{const el=document.createElement("div");el.innerHTML=`<b>${esc(i.surface)}: ${esc(i.category)} · ${esc(i.intent)}</b> <span class="mut">category weight ${i.category_weight}</span><br><span class="mut">${esc(i.commands.slice(0,8).join(", "))}</span>`;
 el.onclick=()=>{$("srf").value=i.surface;$("cat").value=i.category;$("int").value=i.intent;$("cand").checked=true;draw();$("q").scrollIntoView({behavior:"smooth"})};$("ideas").append(el)});
 let sk="score",dir=-1;
 function draw(){const q=$("q").value.toLowerCase(),f=$("srf").value,c=$("cat").value,i=$("int").value,s=$("saf").value,cd=$("cand").checked,j=$("js").checked;
@@ -2716,9 +2738,9 @@ def main() -> int:
             for f in r["open_surfaces"] or ["skill"]:
                 groups[(f, r["category"], r["intent"])].append(r)
     ideas = sorted(({"surface": f, "category": c, "intent": i,
-                     "score": sum(sorted((r["score"] for r in rs), reverse=True)[:5]) // (2 if i == "other" else 1),
+                     "category_weight": sum(sorted((r["score"] for r in rs), reverse=True)[:5]) // (2 if i == "other" else 1),
                      "commands": [r["command"] for r in sorted(rs, key=lambda r: (-r["score"], r["command"]))]}
-                    for (f, c, i), rs in groups.items()), key=lambda x: -x["score"])
+                    for (f, c, i), rs in groups.items()), key=lambda x: -x["category_weight"])
     ifaces = interfaces(files, used_text)
     ossurf = os_surfaces(files, used_text, commands, [e["type"] for e in inventory.get("events", [])])
     profile = ""
@@ -2743,7 +2765,7 @@ def main() -> int:
             "chronoa_sources_not_found": sorted(set(NOT_FOUND)),
             "os_surfaces": ossurf, "calibration": calibration(rows), "broken": broken_references(files),
             "enabled_units": enabled_units(),
-            "service_exposure": service_exposure(enabled_units()),
+            "service_sandboxing": service_sandboxing(enabled_units()),
             "python_imports": _missing_python_imports(),
             "packages": {n: {"version": v["version"], "explicit": v["explicit"], "groups": v["groups"],
                              "required_by": v["required_by"][:12], "shani": n in shani,

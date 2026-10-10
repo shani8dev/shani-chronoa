@@ -1101,6 +1101,22 @@ handling. **`open_surfaces` measures calls, not answers.** Also note `ideas[].sc
 is a category-size number, not a value one: every entry in a big category ties
 at 25, so ranking by it surfaces `lur-command` and `gendict`.
 
+> **Both of those column names were fixed 2026-10-10, and the fix was measured
+> rather than argued.** `ideas[].score` is now `ideas[].category_weight`, counted
+> against the matrix in this tree: of **382 ideas, 8 tie at exactly 25** - every
+> one an `inspect` intent in one of the two biggest categories - and **94 score
+> 0**. A number with a tie at the top and a floor at zero is ranking how *big* a
+> category is, so both renderers now say "category weight" and the markdown says
+> in as many words that it is **not a priority**. `service_exposure` became
+> `service_sandboxing` for the same reason: the number is systemd's count of its
+> own sandboxing options (`systemd-analyze security --offline`), which says
+> nothing about what reaches the service over the network - and "exposure" is the
+> word a reader would use to decide what to harden. The field keeps systemd's own
+> vocabulary for the *value*, because that is genuinely what the tool prints;
+> the rename is of what this tree calls it. `tests/test_cli_matrix_names.py`
+> drives the parser against a real `systemd-analyze` line and asserts the tie
+> from the matrix on disk.
+
 Two skills were built from a matrix pass on 2026-10-03 after that check, both on
 `/proc`/stdlib rather than the flagged binary, both verified against the real
 thing: `json_query` (`jq` was the flagged command; `analyze_table` already reads
