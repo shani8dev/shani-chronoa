@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**229 skills in 24 groups.** Each is a named, schema-typed module; the model
+**234 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**86 of 229 are consent-gated and 17 are destructive.**
+**89 of 234 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -51,6 +51,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `check_internet` | Is the internet working? | — |
 | `check_port` | Whether a host accepts connections on a port | — |
 | `check_updates` | Check for waiting package updates | — |
+| `cloud_files` | What is in this machine's cloud storage remotes | — |
 | `compression_savings` | How much space btrfs compression is saving | needs `filesystems-sense-enabled` |
 | `connect_wifi` | Join a WiFi network | needs `wifi-connect-enabled` |
 | `cpu_frequency` | The CPU governor, its speed, and its hardware range | — |
@@ -69,6 +70,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `lab_network_list` | List the lab networks built on this machine | needs `network-provision-enabled` |
 | `lab_network_status` | Check what a lab network can actually reach | needs `network-provision-enabled` |
 | `list_wifi_networks` | WiFi networks | — |
+| `log_files` | Which logs are biggest, still growing, and unrotated | — |
 | `login_history` | Who logged in recently | needs `sessions-sense-enabled` |
 | `machine_capabilities` | What this machine can actually do | — |
 | `my_ip_address` | IP address | — |
@@ -159,6 +161,7 @@ Hardware, peripherals, sensors and their state.
 | `driver_status` | Whether this machine can build a kernel driver | — |
 | `find_device` | Make a lost watch or band buzz so you can find it | needs `bluetooth-gatt-enabled` |
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
+| `ir_remote` | Send or receive infrared remote-control codes | needs `ir-remote-enabled` |
 | `nfc` | Read an NFC tag, or write a link to a sticker | needs `nfc-enabled` |
 | `phone` | Find, ping or send a file to your paired phone | needs `phone-control-enabled` |
 | `phone_remote` | Press the phone camera shutter, media keys, or type on the phone | needs `phone-remote-enabled` |
@@ -275,6 +278,21 @@ Theme, wallpaper, scaling and the screen's own look.
 | `set_wallpaper` | Change the desktop wallpaper | needs `appearance-control-enabled` |
 | `toggle_night_light` | Turn the blue-light filter on or off | needs `appearance-control-enabled` |
 
+## Apps
+
+Launch, list and find applications.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `container` | Run and drive containers | needs `container-control-enabled` |
+| `default_apps` | Which app opens a kind of file, and the default browser | needs `default-apps-enabled` |
+| `install_app` | Install and remove apps | needs `app-install-enabled` |
+| `list_apps` | List installed applications | — |
+| `list_containers` | Distroboxes and containers | needs `containers-sense-enabled` |
+| `list_vms` | Virtual machines | — |
+| `open_application` | Open an app | — |
+| `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
+
 ## Sound
 
 Play, record, describe and edit audio.
@@ -303,19 +321,6 @@ Find, move and close what is open.
 | `list_processes` | Running processes | — |
 | `list_windows` | Open windows | — |
 | `press_key` | Press a key | needs `input-control-enabled` |
-
-## Apps
-
-Launch, list and find applications.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `default_apps` | Which app opens a kind of file, and the default browser | needs `default-apps-enabled` |
-| `install_app` | Install and remove apps | needs `app-install-enabled` |
-| `list_apps` | List installed applications | — |
-| `list_containers` | Distroboxes and containers | needs `containers-sense-enabled` |
-| `list_vms` | Virtual machines | — |
-| `open_application` | Open an app | — |
 
 ## Pointer and keyboard
 
