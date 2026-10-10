@@ -559,6 +559,7 @@ _PACKAGE_HINTS = {
     "unar": "unarchiver",
     "lsar": "unarchiver",
     "arj": "arj",
+    "lsof": "lsof",
     "nc": "openbsd-netcat",
     "nethogs": "nethogs",
     "bandwhich": "bandwhich",
