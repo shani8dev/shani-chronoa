@@ -405,7 +405,9 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "airplane_mode": ("Devices", "Report the radios, or turn airplane mode on or off"),
     "charger_info": ("Power and screen", "Say what is charging this machine, and how fast"),
     "firmware_updates": ("System", "List firmware updates for this machine's devices"),
-    "extract_archive": ("Files", "Unpack a tar or zip archive"),
+    "extract_archive": ("Files", "Unpack a tar, zip, 7z, rar or cab archive"),
+    # Read-only: it opens the archive and writes nothing.
+    "list_archive": ("Files", "List what is inside an archive, without extracting it"),
     "trash_file": ("Files", "Move a file or folder to the trash, recoverably"),
     "set_theme": ("Appearance", "Switch the desktop between light and dark"),
     "desktop_setting": ("Appearance", "Read or change a desktop setting (animations, clock, cursor, touchpad...)"),

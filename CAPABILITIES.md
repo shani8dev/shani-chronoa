@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**217 skills in 24 groups.** Each is a named, schema-typed module; the model
+**218 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**84 of 217 are consent-gated and 16 are destructive.**
+**84 of 218 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -108,12 +108,13 @@ Read, write, move, archive and undo files.
 | `directory_tree` | Show a folder's shape | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
 | `empty_trash` | Permanently empty the desktop trash | **asks first, always** · needs `trash-empty-enabled` |
-| `extract_archive` | Unpack a tar or zip archive | — |
+| `extract_archive` | Unpack a tar, zip, 7z, rar or cab archive | — |
 | `find_and_replace` | Find and replace | **asks first, always** · needs `bulk-edit-enabled` |
 | `find_files` | Find files by name | — |
 | `find_recently_modified` | What changed today | — |
 | `get_file_info` | File size, age and permissions | — |
 | `json_query` | Ask what a JSON document contains | — |
+| `list_archive` | List what is inside an archive, without extracting it | — |
 | `list_directory` | List a folder | — |
 | `manage_mount` | Mount or unmount | **asks first, always** · needs `mount-control-enabled` |
 | `move_or_copy_file` | Move or copy | — |
