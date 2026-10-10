@@ -251,7 +251,64 @@ class TestAgainstTheRealRegistry:
         from shani_chronoa.skills import discover_skills
         tools, _ = discover_skills()
         strays = [c.tool for c in find_capabilities(tools) if c.group == capabilities.OTHER]
-        assert strays == [], f"ungrouped built-ins: {strays}"
+        # **A skill file that exists but is not registered in `_GROUPS` is
+        # in-progress work by another session, not a defect in this one.**
+        # Measured 2026-10-10: with four unregistered modules present (three
+        # from concurrent sessions plus one mid-build by a subagent) this test
+        # went red; with the same files moved aside it went green with the same
+        # commit, so the cause is the tree, not the change. The message names
+        # the files so a reader can tell the two apart in one look instead of
+        # bisecting their own diff.
+        assert strays == [], (
+            f"ungrouped built-ins: {strays} - a skill module exists that "
+            f"capabilities._GROUPS does not list. If it is yours, add it; if "
+            f"it is not, it is another session's work in progress and this "
+            f"failure is not about your change.")
+
+    def test_a_label_table_has_no_duplicate_key(self):
+        """A duplicate key is a dead label, and only pyflakes has been catching it.
+
+        Python resolves a duplicate dict key to the last one, so two rows for
+        one tool mean the first label is unreachable with **no error in either
+        direction** - AGENTS.md records this happening to `browse` and to
+        `space_by_type`, where three entries for one skill left the table
+        looking correct while two labels were dead. Reading the dict cannot see
+        it (the runtime object has one key per name), so this parses the source
+        and counts the keys the way the interpreter will.
+        """
+        import ast
+        import pathlib
+
+        source = pathlib.Path(capabilities.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        tables = {}
+        for node in tree.body:
+            targets = []
+            if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+                targets = [node.targets[0].id]
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                targets = [node.target.id]
+            for name in targets:
+                if name not in ("_GROUPS", "GATED", "GATE_NAMES"):
+                    continue
+                value = node.value if isinstance(node, ast.Assign) else node.value
+                if not isinstance(value, ast.Dict):
+                    continue
+                seen = {}
+                for key in value.keys:
+                    if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+                        continue
+                    seen[key.value] = seen.get(key.value, 0) + 1
+                tables[name] = [k for k, n in seen.items() if n > 1]
+
+        assert tables, "the label tables were not found in the source"
+        for name, duplicates in sorted(tables.items()):
+            assert not duplicates, (
+                f"{name} has {len(duplicates)} key(s) written twice "
+                f"({', '.join(sorted(duplicates))}); the last one wins and the "
+                f"earlier label is dead with no error anywhere - pyflakes names "
+                f"it, and this test now does too"
+            )
 
     def test_the_pointer_controls_are_grouped_together(self):
         from shani_chronoa.skills import discover_skills
