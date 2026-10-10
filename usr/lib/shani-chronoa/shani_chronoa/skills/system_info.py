@@ -24,8 +24,10 @@ reader cannot distinguish from a failure.
 from __future__ import annotations
 
 import logging
+import shutil
 import os
 import socket
+import subprocess
 from pathlib import Path
 
 from shani_chronoa.skills import Skill
@@ -127,10 +129,68 @@ def _memory() -> str:
 
 
 def _cpus() -> str:
+    """How many cores this machine has, and what they are.
+
+    **`os.cpu_count()` is a count and nothing else** - the previous whole
+    answer was "cpus: 8 logical", which cannot distinguish an 8-core desktop
+    from a 4-core laptop with two threads each, and those are different
+    machines for every model-sizing decision Chronoa makes. `lscpu` reads the
+    kernel's own topology and names the silicon.
+
+    Measured here, so the fields are the real ones:
+
+        Architecture:  x86_64
+        CPU(s):        8
+        Vendor ID:     GenuineIntel
+        Model name:    11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz
+        Thread(s) per core:   2
+        Core(s) per socket:   4
+        Socket(s):     1
+
+    **Absent is UNKNOWN, never a count from `os`.** On a machine without
+    `lscpu` the old line stays, because a number with no provenance is worse
+    than one that says where it came from.
+    """
     count = os.cpu_count()
-    if not count:
-        return "cpus: unknown (os.cpu_count() reported nothing)"
-    return f"cpus: {count} logical"
+    fallback = (f"cpus: {count} logical" if count
+                else "cpus: unknown (os.cpu_count() reported nothing)")
+    if shutil.which("lscpu") is None:
+        return fallback + " (lscpu is not installed, so core and socket topology is UNKNOWN)"
+    try:
+        proc = subprocess.run(["lscpu"], capture_output=True, text=True,
+                              timeout=15, check=False)
+    except (subprocess.TimeoutExpired, OSError):
+        return fallback + " (lscpu did not answer, so topology is UNKNOWN)"
+    if proc.returncode != 0:
+        return fallback + " (lscpu failed, so topology is UNKNOWN)"
+
+    # Keys are the left column of a `Key:  value` table; the value is
+    # everything after the first colon, because "Model name" holds spaces and
+    # a split on whitespace would cut the CPU's name in half.
+    fields: "dict[str, str]" = {}
+    for line in (proc.stdout or "").splitlines():
+        key, sep, value = line.partition(":")
+        if sep and key.strip():
+            fields.setdefault(key.strip(), value.strip())
+
+    name = fields.get("Model name") or fields.get("Model")
+    arch = fields.get("Architecture")
+    cores, sockets, threads = (fields.get("Core(s) per socket"),
+                               fields.get("Socket(s)"),
+                               fields.get("Thread(s) per core"))
+    physical = ""
+    if cores and sockets and threads:
+        physical = (f", {cores} core(s) x {sockets} socket(s) x "
+                    f"{threads} thread(s)")
+    elif cores and sockets:
+        physical = f", {cores} core(s) x {sockets} socket(s)"
+    parts = [f"cpus: {fields.get('CPU(s)') or count or 'unknown'} logical"
+             + physical]
+    if arch:
+        parts.append(f"arch: {arch}")
+    if name:
+        parts.append(f"cpu: {name}")
+    return "; ".join(parts)
 
 
 def _session() -> str:

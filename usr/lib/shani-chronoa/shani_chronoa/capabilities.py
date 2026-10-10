@@ -156,6 +156,9 @@ GATED: dict[str, str] = {
     # (mounts and real room), so it follows that sense's switch - measured on a
     # slot, compsize walks extents and reports the ratio.
     "compression_savings": "filesystems-sense-enabled",
+    # Disk activity follows the storage sense: the same subject that sense
+    # reports, so it wears the same consent rather than opening a new switch.
+    "disk_activity": "storage-sense-enabled",
     "security_status": "security-sense-enabled",
     "list_containers": "containers-sense-enabled",
     "boot_report": "boots-sense-enabled",
@@ -477,6 +480,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # The 2026-10-07 matrix skills.
     "snapshot_status": ("System", "Can this machine roll back, and which slot is it on"),
     "compression_savings": ("System", "How much space btrfs compression is saving"),
+    "disk_activity": ("System", "How hard the disks are working right now"),
     "security_status": ("System", "Secure Boot, TPM and firewall status"),
     "list_containers": ("Apps", "Distroboxes and containers"),
     "list_vms": ("Apps", "Virtual machines"),

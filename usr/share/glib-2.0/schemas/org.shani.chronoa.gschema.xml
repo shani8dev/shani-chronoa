@@ -639,7 +639,12 @@
       <summary>Let Chronoa list rollback points</summary>
       <description>Lists btrfs snapshots and which subvolume is currently booted, which is what makes a rollback possible. Read-only - it never creates or deletes one. On by default: it reads filesystem metadata only.</description>
     </key>
-    <key name="sessions-sense-enabled" type="b">
+        <key name="ups-sense-enabled" type="b">
+      <default>true</default>
+      <summary>Let Chronoa report whether the machine is on mains or on a UPS</summary>
+      <description>Reads /sys/class/power_supply for hardware the kernel sees (type "UPS") and NUT's own upsc for charge, remaining runtime, load and voltages. On by default with the other machine-state set: it is a hardware fact, the sysfs half needs no binary, and a machine with no UPS is reported as having none rather than as a fault. An UPS that is configured but cannot be read reports UNKNOWN, never "the power is fine" - an unreachable UPS is not a healthy one.</description>
+    </key>
+<key name="sessions-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa see who else is on this machine</summary>
       <description>Reports who is logged in and which processes run as root outside the init system's own service tree. Off by default: this reports other people's presence on the machine rather than the machine's own hardware, so it waits to be asked for. `git-sense-enabled` is off for the same class of reason.</description>

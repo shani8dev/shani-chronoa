@@ -1002,6 +1002,42 @@ a *reason* for the UNKNOWN that turned out to be false, and the version before
 it failed senses whose legitimate readings are all one or two digits. A green
 line with an invented explanation is worth less than an admitted SKIP.
 
+**A `ups` sense, and the reason the power sense could never have grown one (2026-10-10).**
+Shanios moved its UPS daemon from apcupsd to NUT, and nothing on this side knew: the
+`power` sense reads `/sys/class/power_supply/*` and keeps only `type == "Battery"`, so a
+UPS - which the kernel reports as `type == "UPS"` - was filtered out **by design**. A machine
+with a UPS was indistinguishable from a desktop, and the one question a UPS exists to answer
+("how long do I have?") had no answer anywhere in this app. Registry **51 → 52**.
+
+  Two sources, answering different questions: `/sys/class/power_supply` (`type == "UPS"`)
+  needs no binary and no daemon and reports what the kernel's driver sees; NUT's `upsc`
+  reports charge, runtime, load and voltages but only when NUT is actually monitoring
+  something - which on a fresh install it deliberately is not (shani-settings ships
+  `ups.conf` with no device section, and `nut-scanner -U` is what fills one in).
+
+  **The failure this sense exists not to have.** "No UPS is connected" and "I could not find
+  out" are opposite claims, and on a UPS the second is the dangerous one - an unreachable UPS
+  is indistinguishable from a dead one, which is exactly why NUT's own `DEADTIME` treats
+  silence as on-battery. So every unreadable path reports UNKNOWN with its reason named. My
+  first version got this wrong twice and the tests caught both: it treated a readable-but-empty
+  `power_supply` as "could not ask" (an absence dressed as a failure), and it silently preferred
+  one source when sysfs and `upsc` disagreed - which is how a machine on mains comes to be
+  reported as on battery. The disagreement is named now, not resolved quietly.
+
+  **What is deliberately not read:** `/etc/nut/upsd.users` holds the credential that can force
+  a UPS power-down, and `ups.conf`'s device section names the port and driver. The sense reads
+  `upsmon.conf` for one thing only - whether a MONITOR line exists - and a test asserts the
+  credential file is never opened.
+
+  **One invariant `test_sense_manifest` already owned caught this sense too:** the TTL was 15s
+  against a 30s poll, so the fact would have expired for 15 seconds of every cycle. On this
+  sense that is the difference between "the power is fine" and "nobody has looked lately".
+
+  `ups-sense-enabled` is registered, so the Settings → Senses switch appears automatically -
+  that panel derives its rows from `discover_senses()` plus the consent table, which is why a
+  new sense cannot fall into the `heard-sound` / `calendar_edit` trap of having a key no user
+  can reach. Verified: 52 senses in the registry, 52 with a consent key, none unreachable.
+
 ## Surfaces added 2026-10-01: six event types, post-conditions, "Open with"
 
 Found by `tools/cli_matrix.py` (see below), which reads Chronoa's own registries

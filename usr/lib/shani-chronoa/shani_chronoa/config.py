@@ -142,6 +142,12 @@ _SENSE_CONSENT_KEYS = {
     # is what catches it: it writes the key through the real config and asks
     # whether a fresh one honours it.
     "kernellog": "kernellog-sense-enabled",
+    # Whether the machine is on mains or on a UPS battery, and how long is left.
+    # Reads /sys/class/power_supply (type "UPS") plus NUT's own upsc. On by
+    # default with the other machine-state set: it is a hardware fact, it needs
+    # no binary for the sysfs half, and an absent UPS is reported as absent
+    # rather than as a fault. NOT a reading of the user's world.
+    "ups": "ups-sense-enabled",
     "sessions": "sessions-sense-enabled",
     "snapshots": "snapshots-sense-enabled",
     "coredumps": "coredumps-sense-enabled",
