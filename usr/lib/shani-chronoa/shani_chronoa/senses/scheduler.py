@@ -238,6 +238,101 @@ def consent_sense_names() -> "list[str]":
     return sorted(table) if isinstance(table, dict) else []
 
 
+class _SenseTimedOut(Exception):
+    """A sense ran past its budget. Raised in the *polling* thread, not the
+    sense's own - the sense's thread is abandoned still running, because there
+    is no safe way to kill it.
+
+    `seconds` is the budget that was exceeded, so the message a person reads
+    names the number the sense was allowed rather than the time it happened to
+    be abandoned at.
+    """
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__(f"no answer within {seconds:.0f}s")
+        self.seconds = seconds
+
+
+#: Floor on a sense's wall-clock budget. A sense declaring a fast interval still
+#: gets this long to do real work: the slowest legitimate senses here are a
+#: couple of seconds of OCR and a package-database read, and killing one of
+#: those for being 0.5s over its own schedule would turn a working sense into an
+#: intermittent one.
+SENSE_BUDGET_FLOOR = 30.0
+
+#: Ceiling on the same. A sense polling every ten minutes does not get ten
+#: minutes to hang - that is a stall wearing a schedule.
+SENSE_BUDGET_CEILING = 120.0
+
+
+def budget_for(sense) -> float:
+    """How long `sense` may run before its result is dropped, in seconds.
+
+    The sense's **own `poll_interval`** is the bound, not a number chosen here.
+    Two reasons it has to be that one and not a constant:
+
+    - The scheduler already reasons in it. `poll_due()` stamps `_last_poll` after
+      the run specifically because stamping before it "would make `poll_interval`
+      mean 'interval between *starts*' for a sense slower than its own interval,
+      so a 2s OCR at a 30s interval would run back-to-back forever". A sense that
+      cannot finish inside its own interval is therefore already defined, in this
+      module, as a sense that is too slow.
+    - A constant cannot serve both a 2s audio sense and a 10-minute snapshot
+      check, and picking one number silently decides which of them is allowed to
+      be slow.
+
+    Floored and capped around it, because a fast interval must not truncate real
+    work and a slow interval must not license a long hang.
+    """
+    interval = sense.poll_interval or 0.0
+    return max(SENSE_BUDGET_FLOOR, min(interval, SENSE_BUDGET_CEILING))
+
+
+def _run_with_budget(name: str, sense, arguments: dict):
+    """Run `sense.run`, abandoning it if it outlives its budget.
+
+    **Why a worker thread and not `signal.alarm`.** The obvious port of ECC's
+    `observe.sh` - `signal.alarm(8)` to "self-terminate before the async hook 10s
+    timeout can orphan us" - does not work here: `signal.alarm` can only be armed
+    on the **main** thread, and the scheduler runs on its own. It would either do
+    nothing or take down the whole application.
+
+    So the budget is a join with a timeout, which bounds the *wait* rather than
+    the *work*. That distinction is the honest limit of this fix and is worth
+    being exact about: **the sense's thread is abandoned, not killed.** A sense
+    stuck in a blocking read keeps its thread and its file descriptor; what stops
+    is everything downstream of it. That is a real cost and it is a much smaller
+    one than what it replaces - measured, one hung sense previously left
+    `poll_due()` blocked forever, so all ~50 senses went unpolled for the life of
+    the process.
+
+    A result that arrives after the budget is **discarded, not stored**. Collecting
+    it late would mean a percept appearing with a timestamp from before it was
+    produced, and a store write racing the sense that follows. ECC's rule for the
+    same situation is the right one: drop the event rather than block the caller.
+
+    An exception inside the sense is re-raised here, on the polling thread, so the
+    caller's existing `except Exception` continues to handle it exactly as before.
+    """
+    seconds = budget_for(sense)
+    box: dict = {}
+
+    def _work() -> None:
+        try:
+            box["result"] = sense.run(arguments)
+        except BaseException as exc:  # propagated below, on this thread's terms
+            box["error"] = exc
+
+    worker = threading.Thread(target=_work, name=f"chronoa-sense-{name}", daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise _SenseTimedOut(seconds)
+    if "error" in box:
+        raise box["error"]
+    return box.get("result")
+
+
 class AmbientScheduler:
     """Polls ambient-capable senses on their declared intervals.
 
@@ -426,7 +521,21 @@ class AmbientScheduler:
         with self._lock:
             self.polls += 1
         try:
-            result = sense.run(dict(self._arguments.get(name, {})))
+            result = _run_with_budget(name, sense, dict(self._arguments.get(name, {})))
+        except _SenseTimedOut as exc:
+            # A timeout is a failure like any other, and it goes through
+            # `_note_failure` so the senses' own failure tracking sees it. What it
+            # is *not* is a crash: the scheduler continues to the next sense,
+            # which is the entire point. Measured before this existed: one sense
+            # that neither raised nor returned left `poll_due()` blocked forever
+            # and every other sense unpolled for the life of the process.
+            self._note_failure(name, exc)
+            # `:g`, not `:.0f`: a 0.5s budget would print "timed out after 0s",
+            # which is a number that reads as a rounding error rather than the
+            # bound the sense was actually given.
+            return PollResult(name, False, None,
+                              f"timed out after {exc.seconds:g}s; the result was "
+                              f"dropped, not waited for")
         except Exception as exc:  # noqa: BLE001 - an unattended loop must survive
             self._note_failure(name, exc)
             return PollResult(name, False, None, f"{type(exc).__name__}: {exc}")

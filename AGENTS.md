@@ -10123,6 +10123,74 @@ statements together on one line, so `tools.py` → `outcome_model` → `learning
 raises `SyntaxError` and **every** import of the package fails. Verified against
 a repaired copy outside the tree, never by editing their file.
 
+## Meeting notes have never once worked, and this is how it stayed hidden (2026-10-11)
+
+Asked whether the 1000-char hearing cap applies to meeting transcription. It does
+not - `MAX_TRANSCRIPT_CHARS` is read at **exactly one site**,
+`senses/hearing.py:355`, and only ever in `_transcript_percept`. The meeting path
+has its own limits, all different: `NOTES_MAX_CHARS = 12000`,
+`MAX_MEETING_SECONDS = 7200`, `recordings.MAX_SECONDS = 1800`. A meeting
+transcript is **sectioned** at 12000 characters and every section is summarised,
+so the whole meeting is used - measured on a 48,889-character transcript: **5
+sections, all summarised**.
+
+Checking that by running it found something much bigger than the question.
+
+### `meeting.notes()` raised on every call, and nothing said so
+
+    TypeError: LocalLLM.__new__() got an unexpected keyword argument 'config'
+
+Two defects on consecutive lines, and the second is why it survived:
+
+    engine = local_llm.LocalLLM          # __new__ takes (model_key,) alone
+    engine(config=config, transport=transport).chat(...)   -> TypeError
+    except TypeError:
+        engine(config=config).chat(...)                    -> TypeError, uncaught
+
+The `except TypeError` handler was **the same wrong call without `transport`**,
+so it re-raised the identical error outside any handler - which is why no message
+ever said "no local model is configured". `.chat()` exists only on `OllamaLLM`;
+`chat_message()` is the interface every backend here has.
+
+**`distill.py`'s `_ask_chat_message` documents this exact bug in full** - a first
+version called `.chat()`, llama.cpp and the cloud chain raised, and a machine
+with a configured provider reported "no language model is configured" while the
+key sat right there. This is the **second instance of it** in the tree.
+
+### The reason the suite stayed green, which is the part worth keeping
+
+The test's fake engine was shaped like the **call**, not like the backend:
+
+    class _Engine:
+        def __init__(self, config=None, transport=None): pass
+        def chat(self, messages, stream=False, **kw): ...
+
+It encoded the bug and agreed with it for the whole of its life. Now
+`__init__(model_key="")` plus an async `chat_message()`, and three guards pin the
+contract: notes actually come back, the constructor is not given `config` or
+`transport` (checked against `LocalLLM`'s **real** signature, not a fake's), and
+`.chat()` raises if it is ever used.
+
+**The transferable rule: a fake shaped like the call rather than like the thing
+being called tests the bug and passes.** Both defects were found only by driving
+the real `notes()` with a backend copied from `OpenAICompatibleLLM`'s actual
+signature - `def chat_message(self, messages, tools=None, stream=False)` is
+`async`, and `LocalLLM.__new__(cls, model_key="")` is the constructor the two
+other call sites (`app/brain.py`, `distill.py`) already use.
+
+The coroutine is driven with `asyncio.run` in a helper that **refuses loudly if a
+loop is already running** - a coroutine created and never awaited is the failure
+this file already records for `app.py`'s `async def` handlers, where the whole
+chat pipeline quietly became dead code.
+
+`config` and `transport` are still accepted by `notes()` because three callers
+pass them, but no `def chat(` in this package takes either, so they are no longer
+forwarded to anything. Recorded rather than silently dropped.
+
+One pre-existing failure left alone and verified by restoring the file to HEAD:
+`test_a_silent_room_is_reported_as_clean` expects `wav="/tmp/meeting.wav"` and
+gets `None`, a `capture()` recorder-stub matter unrelated to notes.
+
 ## Voicebox: the recogniser loops, and the guard could not see the form it emits (2026-10-11)
 
 `harness-study/voicebox` is `jamiepine/voicebox` — a local-first voice studio
@@ -10179,6 +10247,16 @@ is it thanks for watching"* — the question survives, the artefact does not.
 11 tests, 4 mutations all failing the file: the sequence pass removed (4), stop
 at the threshold (2), threshold lowered to 3 (2), the collapse not wired into
 `clean_transcription` at all (3).
+
+**A third path, found by the same question and deliberately left.**
+`meeting.transcribe` goes through `recordings.segments_for`, which also returns
+raw engine text with no collapse. It is a different severity and so a different
+decision: the segments are **summarised by the local LLM** before anything reaches
+a model, so a loop costs context rather than being forwarded as a fact - and the
+one place that would catch it (`recordings.segments_for`) is shared with the
+`recordings` skill, where collapsing a transcript someone asked to read is a
+change to what they are shown. Recorded rather than fixed, because the fix wants
+a decision about whether a transcript a person reads may be shortened.
 
 **Also measured, and taken as a difference rather than a gap:** their CLI makes
 text normalisation an **opt-in `--normalize` flag**, and their backends carry a
@@ -10325,3 +10403,69 @@ Two mutations first reported **survivors**, and both were my tests not reaching
 the code they claimed: the tail test wrote records far under the 4 MiB byte
 budget so the seek path was never taken, and the no-log test took the wrong
 branch. Both fixed in the test, not in the set.
+
+## ECC, third pass: a sense that never answered stopped every sense (2026-10-11)
+
+From `../harness-study/ecc` a third time, into
+`skills/continuous-learning-v2/hooks/observe.sh`. Its comment states the rule:
+
+> `signal.alarm(8)` - self-terminate **before** the async hook 10s timeout can
+> orphan us (#2278)
+
+and, on the scrubber it guards: *"Linear-time secret matcher. Bounded
+quantifiers and a fixed set of auth schemes (instead of a generic
+`[A-Za-z]+\s+` that overlapped the value class) prevent the catastrophic
+backtracking that pegged python at 100% CPU (#2278)."* Verified by reading the
+file itself rather than a summary: the scrubber exists in **two** copies (the
+parse-error fallback path and the main capture path), both carrying the same
+alarm.
+
+**Chronoa had the hole that alarm exists to close.** `AmbientScheduler.poll()`
+called `sense.run(...)` guarded only by `except Exception` - which catches a
+sense that *raises* and does nothing whatever about one that *hangs*. Measured:
+a sense whose `run` blocked on `threading.Event().wait()` left `poll_due()`
+blocked forever, and the healthy sense registered next to it was **never
+polled**. One hung sense stopped the entire ambient layer for the life of the
+process, which is every sense in it. The near-miss is recorded in this file
+already - `kernel_log` drains `/dev/kmsg` non-blocking because a blocking read
+"waits for a message that may never come and burns the whole skill budget" - but
+that was one instance fixed by hand, not the general defence.
+
+`_run_with_budget()` runs the sense in a worker and joins with a timeout. The
+budget is the sense's **own `poll_interval`**, floored at 30s and capped at 120s,
+because `poll_due()` already defines a sense slower than its own interval as one
+that is too slow ("would make `poll_interval` mean 'interval between *starts*'
+for a sense slower than its own interval"). A constant would silently decide
+which of a 2s audio sense and a 10-minute snapshot check may be slow.
+
+**Three decisions worth knowing before changing this:**
+
+- **`signal.alarm` does not port.** It can only be armed on the **main** thread
+  and the scheduler is not on it - it would either do nothing or take down the
+  whole application. That is why this is a join rather than an alarm.
+- **The sense's thread is abandoned, not killed.** There is no safe way to kill
+  it. A sense stuck in a blocking read keeps its thread and its fd; what stops
+  is everything downstream of it. That is a real cost and a much smaller one
+  than the ~50 senses it replaces.
+- **A late result is discarded, not stored.** Collecting it would mean a percept
+  with a timestamp from before it was produced, and a store write racing the
+  sense that follows.
+
+A timeout goes through `_note_failure`, so the senses' own failure tracking sees
+it, and returns `ok=False` with the budget named - `:g`, not `:.0f`, so a 0.25s
+budget does not print "timed out after 0s".
+
+Two of my own defects on the way: the first `_read_tail`-style mistake recurred
+here as an unconditional `partition` dropping a valid record (in the *other*
+fix), and the first mutation run **timed out at 300s** because with the budget
+removed the tests blocked on the calling thread - which proves the mutation is
+caught but cannot be observed. The hang is bounded at 45s now, with the reason
+written next to it: an infinite wait makes a broken build hang until the runner
+kills it, so the mutation it exists to catch is reported as a timeout rather than
+a failure.
+
+`tools/mutations/sense_budget.py`: **7 mutations, 6 caught, 0 survivors, 1
+equivalent** (445s). The equivalent is kept and documented - no sense in the
+suite raises a `BaseException`, so narrowing the worker's `except
+BaseException` to `except Exception` reaches the same outcome for every input
+supplied, and the wider clause is the deliberate choice.
