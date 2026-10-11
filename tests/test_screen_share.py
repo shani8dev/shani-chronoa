@@ -137,9 +137,17 @@ def test_the_icon_exists_in_adwaita():
 
 
 def test_check_start_and_stop_all_go_through_execute_tool(dispatched):
+    """**Pressed, not called.** `surface._run(...)` is what a first version did.
+
+    It passed with `surface._run` renamed, which is not a test of a button - and
+    this repo has recorded the dead-control defect five times. Emitting
+    `clicked` measures the wiring rather than the behaviour behind it.
+    """
     page, surface = _build()
-    for action in ("status", "start", "stop"):
-        surface._run(action)
+    mine = [b for b in _buttons(page) if b.get_label() in ("Check", "Start", "Stop")]
+    assert len(mine) == 3, [b.get_label() for b in _buttons(page)]
+    for action_button in mine:
+        action_button.emit("clicked")
         _pump()
     assert [call[1].get("action") for call in dispatched] == ["status", "start", "stop"], dispatched
     for name, _arguments, origin in dispatched:

@@ -41,7 +41,8 @@ from gi.repository import Adw, Gtk
 Adw.init()
 
 from shani_chronoa import file_index, meeting
-from shani_chronoa.gui.surfaces import meetings, my_files
+from shani_chronoa.gui.surfaces import (meetings, my_files,  # noqa: E402
+                                     routines, screen_share)
 
 
 class Config:
@@ -181,6 +182,38 @@ elif case == "meetings_empty":
     page._refresh_list()
     say(texts=texts(page), buttons=buttons(page))
 
+elif case == "routines_listed":
+    # Three routines, one of them named with a bare ampersand - which is how
+    # `common.row`'s escaping was found: `Adw.ActionRow` parses its title as
+    # Pango markup, so "weather & news" was a parse error and an empty label.
+    # **Seed where the app actually reads, not beside the work directory.**
+    # `_run` points `XDG_DATA_HOME` at `<tmp>/data`, and `routines._path()`
+    # resolves through `files.data_home()` from that variable. My first version
+    # wrote beside `sys.argv[2]` and the panel saw an empty store - so the test
+    # asserted the empty state while believing it had listed three routines.
+    root = pathlib.Path(os.environ["XDG_DATA_HOME"])
+    store = root / "shani-chronoa"
+    store.mkdir(parents=True, exist_ok=True)
+    import json as _json
+    (store / "routines.json").write_text(_json.dumps({
+        "good morning": {"request": "weather and my calendar", "phrases": []},
+        "weather & news": {"request": "forecast and headlines", "phrases": []},
+        "wrap up": {"request": "summarise today", "phrases": ["end the day"]},
+    }))
+    page = routines.build(App())
+    say(words=texts(page), buttons=buttons(page),
+        has_three_runs=buttons(page).count("Run") == 3)
+
+elif case == "routines_empty":
+    page = routines.build(App())
+    say(words=texts(page), buttons=buttons(page),
+        says_no_routines=any("No routines yet" in t for t in texts(page)))
+
+elif case == "screen_share_controls":
+    page = screen_share.build(App())
+    say(words=texts(page), buttons=buttons(page),
+        has_check_and_stop=all(b in buttons(page) for b in ("Check", "Start", "Stop")))
+
 elif case == "registry":
     from shani_chronoa.gui import surfaces
     available = surfaces.available_surfaces()
@@ -201,7 +234,7 @@ def broadway():
     if daemon is None or not runtime:
         pytest.skip("no gtk4-broadwayd or no XDG_RUNTIME_DIR, so no headless display")
     base = pathlib.Path(runtime)
-    number = next((n for n in range(40, 120)
+    number = next((n for n in range(40, 2620)
                    if not (base / f"broadway{n + 1}.socket").exists()), None)
     if number is None:
         pytest.skip("no free Broadway display number")
@@ -417,3 +450,47 @@ class TestBothAreReachable:
             assert out["targets"][name] == "settings:privacy", (
                 f"{name} -> {out['targets'][name]!r}; both switches are Privacy "
                 "rows, so a gear anywhere else opens a page of unrelated things")
+
+class TestTheNewSurfacesAreReadable:
+    """**Looked at, not merely built.**
+
+    Both panels already have unit tests that assert what the code returns. These
+    build them in a subprocess on a private Broadway display and read the words a
+    person would see - the difference between "the widget was constructed" and
+    "the panel says something". The repo has recorded that distinction more than
+    once: a width test passed while the organ strip rendered as one run-on
+    string.
+    """
+
+    def test_a_listed_routine_says_what_it_asks_for(self, broadway, tmp_path):
+        out = _run(broadway, "routines_listed", tmp_path)
+        assert out["has_three_runs"], out["buttons"]
+        words = "\n".join(out["words"])
+        assert "good morning" in words
+        assert "weather and my calendar" in words, (
+            "a row that shows the phrase and not the request reads as one that works")
+        assert "say:" in words
+
+    def test_a_routine_named_with_an_ampersand_renders(self, broadway, tmp_path):
+        """The node of the matter: `Adw.ActionRow` parses its title as Pango.
+
+        Measured - `set_title("weather & news")` fails to parse and empties the
+        label, which is how `common.row`'s escaping was found. A panel rendering
+        `weather &amp; news` in the source is libadwaita showing `weather & news`.
+        """
+        out = _run(broadway, "routines_listed", tmp_path)
+        words = " ".join(out["words"])
+        assert "weather" in words and "news" in words, words
+        assert "forecast and headlines" in words
+
+    def test_an_empty_store_says_there_is_nothing(self, broadway, tmp_path):
+        out = _run(broadway, "routines_empty", tmp_path)
+        assert out["says_no_routines"], out["words"]
+
+    def test_screen_share_has_all_three_controls(self, broadway, tmp_path):
+        out = _run(broadway, "screen_share_controls", tmp_path)
+        assert out["has_check_and_stop"], out["buttons"]
+        words = " ".join(out["words"])
+        assert "Can this machine share?" in words
+        # The 90-second probe is the reason this panel exists in the shape it does.
+        assert "takes a while" in words, words

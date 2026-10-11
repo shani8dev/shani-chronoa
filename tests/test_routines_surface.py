@@ -66,6 +66,70 @@ def _texts(widget, out=None):
     return out
 
 
+def _entries(widget, out=None):
+    """Every Gtk.Entry in the tree, in the order the panel builds them."""
+    if out is None:
+        out = []
+    if isinstance(widget, Gtk.Entry):
+        out.append(widget)
+    child = widget.get_first_child()
+    while child is not None:
+        _entries(child, out)
+        child = child.get_next_sibling()
+    return out
+
+
+def _walk_for(widget, visit):
+    visit(widget)
+    child = widget.get_first_child()
+    while child is not None:
+        _walk_for(child, visit)
+        child = child.get_next_sibling()
+    return None
+
+
+def _rows(page, title: str):
+    """The `Adw.ActionRow` with this title, of which there must be exactly one."""
+    from gi.repository import Adw
+    found = []
+    _walk_for(page, lambda w: found.append(w) if isinstance(w, Adw.ActionRow) else None)
+    rows = [r for r in found if r.get_title() == title]
+    assert len(rows) == 1, [r.get_title() for r in found]
+    return rows[0]
+
+
+def _fill(page, row_title: str, text: str) -> None:
+    """Type into the entry inside the row with this title."""
+    for entry in _entries(_rows(page, row_title)):
+        entry.set_text(text)
+        return
+    raise AssertionError(f"no entry inside the {row_title!r} row")
+
+
+def _press(page, label: str) -> None:
+    """Click the button with this label. **Pressing, never calling the method.**
+
+    Every earlier version of these tests called `surface._save_new(...)` and
+    `surface._delete(...)` directly, and passed with the buttons unmoused to
+    anything - the dead-control defect this repo has recorded five times, in the
+    tests that exist to catch it. Walking to the widget is the only way to
+    measure the wiring rather than the behaviour behind it.
+    """
+    for widget in _buttons(page):
+        if widget.get_label() == label:
+            widget.emit("clicked")
+            return
+    raise AssertionError(f"no button labelled {label!r}")
+
+
+def _press_first_icon(page, icon_name: str) -> None:
+    for widget in _buttons(page):
+        if widget.get_icon_name() == icon_name:
+            widget.emit("clicked")
+            return
+    raise AssertionError(f"no icon button {icon_name!r}")
+
+
 def _buttons(widget, out=None):
     if out is None:
         out = []
@@ -268,8 +332,16 @@ def test_run_submits_the_request_as_if_typed(store):
     window = _Window()
     page, surface = _build(_App(window))
 
-    surface._run("weather and my calendar")
+    # **Press the button; do not call the method.** `surface._run(...)` is what a
+    # first version of this test did, and it passed with the Run button's
+    # `clicked` handler deleted outright - the dead-control defect this repo has
+    # recorded five times, in the test that exists to catch it. `emit("clicked")`
+    # is the only way to measure the wiring rather than the behaviour behind it.
+    run = [b for b in _buttons(page) if b.get_label() == "Run"]
+    assert len(run) == 1, [b.get_label() for b in _buttons(page)]
+    run[0].emit("clicked")
     _pump()
+
     # The request is handed to the window, not run by the panel itself.
     assert window.submitted == ["weather and my calendar"], window.submitted
     # And the row says what happened, so the press is not silent.
@@ -300,15 +372,20 @@ def test_run_with_nothing_saved_says_that(store):
 
 def test_saving_a_routine_puts_it_in_the_store_and_on_the_page(store):
     page, surface = _build()
-    surface._save_new("good morning", "weather and my calendar")
-    assert routines.load() == {"good morning": {"request": "weather and my calendar"}}
+    _fill(page, "Name", "good morning")
+    _fill(page, "Asks for", "weather and my calendar")
+    _press(page, "Save")
+    assert routines.load() == {"good morning": {"request": "weather and my calendar"}}, (
+        "the Save button is not wired, so the panel reads as if it saved")
     assert "good morning" in "\n".join(t for t in _texts(page) if t)
     assert "Say it, or open this page" in "\n".join(t for t in _texts(page) if t)
 
 
 def test_a_routine_needs_both_a_name_and_a_request(store):
     page, surface = _build()
-    surface._save_new("", "")
+    _fill(page, "Name", "")
+    _fill(page, "Asks for", "")
+    _press(page, "Save")
     assert routines.load() == {}
     assert "needs a name and a request" in "\n".join(t for t in _texts(page) if t)
 
@@ -317,8 +394,10 @@ def test_deleting_removes_it_from_the_store_and_the_page(store):
     routines.save_all({"good morning": {"request": "weather", "phrases": []},
                        "wrap up": {"request": "summarise today", "phrases": []}})
     page, surface = _build()
-    surface._delete("good morning")
-    assert list(routines.load()) == ["wrap up"]
+    # The delete control is an icon button, so it is pressed by its icon name.
+    _press_first_icon(page, "user-trash-symbolic")
+    assert list(routines.load()) == ["wrap up"], (
+        "the Delete button is not wired, so nothing is deleted")
     assert "Deleted" in "\n".join(t for t in _texts(page) if t)
 
 
