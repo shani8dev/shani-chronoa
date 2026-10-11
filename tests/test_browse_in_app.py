@@ -917,3 +917,165 @@ def test_the_permission_handler_is_actually_connected():
         "the handler is never attached, so no page can reach it: %r" % connected)
     assert "script-dialog" in connected, (
         "the control: the sibling connection really is there")
+
+
+# --- a dead web process was reported as "Unsupported result type" (2026-10-11) ---
+#
+# The third instance of the same shape: a way for the page to stop answering that
+# the answer does not name. Measured by really killing the web process of a real
+# WebView with `terminate_web_process()`:
+#
+#     web-process-terminated         -> `terminated-by-api`
+#     get_is_web_process_responsive -> **True**
+#     the next evaluate_javascript  -> **"Unsupported result type"**
+#
+# browser-use's `crash_watchdog.py` dispatches a `BrowserErrorEvent` carrying the
+# URL and whether it was the agent's own tab. The transferable part is that a
+# crash is a **first-class event naming the page**, not a silent death.
+
+
+class _FakeReason:
+    def __init__(self, nick):
+        self.value_nick = nick
+
+
+def _termination_handler_class():
+    import inspect
+
+    from shani_chronoa.gui import browser
+
+    return next(v for v in vars(browser).values()
+                if inspect.isclass(v) and hasattr(v, "_on_web_process_terminated"))
+
+
+def test_a_dead_web_process_is_recorded_with_its_own_reason():
+    cls = _termination_handler_class()
+    stub = _StubWindow()
+    stub.web_process_deaths = []
+
+    for nick in ("crashed", "exceeded-memory-limit", "terminated-by-api"):
+        cls._on_web_process_terminated(stub, None, _FakeReason(nick))
+
+    assert stub.web_process_deaths == [
+        "crashed", "exceeded-memory-limit", "terminated-by-api"]
+
+
+def test_a_restarted_process_is_not_reported_as_a_crash(web_allowed,
+                                                        no_provider,
+                                                        monkeypatch):
+    """**The distinction the three reasons exist for.** `terminated-by-api` is a
+    deliberate process replacement and is not a fault; calling it a crash is the
+    false alarm this repo has recorded repeatedly in other shapes."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_web_process_deaths",
+                        lambda *a, **k: ["terminated-by-api"])
+
+    note = browser_driver.page_death_note()
+
+    assert "crash" not in note.lower(), (
+        "a deliberate restart reported as a crash: %r" % note)
+    assert "restarted" in note, note
+
+
+def test_the_three_reasons_are_told_apart(web_allowed, no_provider, monkeypatch):
+    """Running out of memory and crashing are different facts, and a driver that
+    cannot say which will retry a page that will only die again."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_web_process_deaths",
+                        lambda *a, **k: ["exceeded-memory-limit"])
+
+    note = browser_driver.page_death_note()
+
+    assert "memory" in note, note
+    assert "crash" not in note.lower(), note
+
+
+def test_no_deaths_means_no_note(web_allowed, no_provider, monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_web_process_deaths",
+                        lambda *a, **k: [])
+
+    assert browser_driver.page_death_note() == ""
+
+
+def test_web_process_responsiveness_is_not_used_as_a_health_signal():
+    """**The measured trap, pinned.** WebKit relaunches the web process, so this
+    property answers `True` a moment after the page was destroyed. A liveness
+    check built on it reports a healthy browser that cannot be read."""
+    import ast
+    import inspect
+    import textwrap
+
+    cls = next(v for v in vars(__import__(
+        "shani_chronoa.gui.browser", fromlist=["x"])).values()
+        if inspect.isclass(v) and hasattr(v, "pending_web_process_deaths"))
+
+    # Parsed, not grepped: the docstring quotes the measurement that produced this
+    # rule, so a substring check finds the very name it forbids. Third time this
+    # session, and the reason this repo's own guidance is "assert on the shape of
+    # an interface, not its text".
+    for method in (cls._on_web_process_terminated, cls.pending_web_process_deaths,
+                   cls.clear_web_process_deaths):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(method)))
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+        forbidden = {"is_web_process_responsive",
+                     "get_is_web_process_responsive"}
+        assert not ((names | attrs) & forbidden), (
+            "%s consults a liveness probe that answers True on a dead page"
+            % method.__name__)
+
+
+#: Every signal `_build_webview` is expected to connect, and why. One list, so
+#: the next watchdog inherits the reachability guard rather than needing it
+#: written again - the gap that let the `web-process-terminated` connection be
+#: deleted with the whole file still green.
+EXPECTED_WEBVIEW_SIGNALS = {
+    "load-changed": "navigation and failures",
+    "load-failed": "a page that would not load",
+    "notify::title": "the window title follows the page",
+    "create": "a new window the page asked for",
+    "decide-policy": "navigations are checked before they are made",
+    "script-dialog": "a JavaScript dialog pauses the page instead of wedging it",
+    "permission-request": "a page's asks for the microphone etc. are refused",
+    "web-process-terminated": "a dead web process is reported as one",
+}
+
+
+def test_every_watchdog_this_module_claims_is_actually_connected():
+    """**The general form of a gap this suite walked into twice.**
+
+    Every behavioural test here calls its handler directly, so a build in which
+    the signal was never connected passes all of them - the rule this repository
+    records as "a test that calls the function is not a test that the skill is
+    reachable", and the way `scan_archive.py` and `guardrail.py` both shipped.
+
+    The connection is read from `_build_webview`'s AST rather than its text, so
+    this cannot match the prose above it. The control is that the same scan finds
+    the long-standing connections, so a parse that silently finds nothing cannot
+    pass.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from shani_chronoa.gui import browser
+
+    cls = next(v for v in vars(browser).values()
+               if inspect.isclass(v) and hasattr(v, "_build_webview"))
+    src = textwrap.dedent(inspect.getsource(cls._build_webview))
+    connected = set()
+    for node in ast.walk(ast.parse(src)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "connect" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            connected.add(node.args[0].value)
+
+    missing = sorted(set(EXPECTED_WEBVIEW_SIGNALS) - connected)
+    assert not missing, (
+        "connected but not really: %s - %s. A handler nothing connects is a "
+        "module that passes every behavioural test while the feature is dead."
+        % (missing, [EXPECTED_WEBVIEW_SIGNALS[m] for m in missing]))

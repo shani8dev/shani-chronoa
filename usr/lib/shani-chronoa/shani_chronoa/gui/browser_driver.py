@@ -139,11 +139,12 @@ def _evaluate(script: str, timeout: float = 15.0) -> str:
         # answers, and it is the one the model must be told about: every script
         # this module runs goes through here, so this is the single place where
         # "the page would not answer" can name its cause.
-        note = dialog_note()
+        note = dialog_note() + page_death_note()
         raise RuntimeError("%s%s" % (exc, note)) from exc
     # The page answered, so it is not paused: forget any dialog from before.
     try:
-        _main(lambda w: (w.clear_dialogs(), w.clear_permission_asks()), 5.0)
+        _main(lambda w: (w.clear_dialogs(), w.clear_permission_asks(),
+                         w.clear_web_process_deaths()), 5.0)
     except Exception:  # noqa: BLE001 - clearing is best-effort
         pass
     return text
@@ -161,6 +162,43 @@ def pending_dialogs(timeout: float = 5.0):
         return _main(lambda w: w.pending_dialogs(), timeout) or []
     except Exception:  # noqa: BLE001 - an unreadable window says nothing
         return []
+
+
+#: The three ways WebKit reports a dead web process, in words. They are
+#: deliberately kept apart: `terminated-by-api` is a deliberate restart and is
+#: **not a fault**, and reporting it as a crash is the false alarm this repo has
+#: recorded repeatedly in other shapes.
+_DEATH_WORDS = {
+    "crashed": "the page's own process crashed",
+    "exceeded-memory-limit": "the page's own process ran out of memory",
+    "terminated-by-api": "the page's own process was restarted",
+}
+
+
+def pending_web_process_deaths(timeout: float = 5.0):
+    """Why the page's process died, or `[]` if none is known."""
+    try:
+        return _main(lambda w: w.pending_web_process_deaths(), timeout) or []
+    except Exception:  # noqa: BLE001 - an unreadable window says nothing
+        return []
+
+
+def page_death_note() -> str:
+    """Say the page died, and how, instead of "Unsupported result type".
+
+    Ported in shape from `harness-study/browser-use`'s `crash_watchdog.py`, which
+    dispatches a `BrowserErrorEvent(error_type='TargetCrash', ...)` carrying the
+    URL and whether it was the tab the agent was driving. The transferable part is
+    that **a crash is a first-class event naming the page**, not a silent death -
+    which is also what makes it worth reporting when the page was not the one
+    being driven.
+    """
+    deaths = pending_web_process_deaths()
+    if not deaths:
+        return ""
+    said = ", ".join(dict.fromkeys(
+        _DEATH_WORDS.get(d, "the page's own process ended (%s)" % d) for d in deaths))
+    return (" The page cannot be read because %s." % said)
 
 
 def pending_permission_asks(timeout: float = 5.0):

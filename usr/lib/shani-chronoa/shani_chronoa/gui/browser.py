@@ -50,7 +50,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
-import sys
 import urllib.parse
 from importlib import import_module
 
@@ -116,8 +115,9 @@ def _permission_name(request) -> str:
     generic "something", because an unknown permission that arrives under a
     friendlier label is the failure this whole method exists to prevent.
     """
-    webkit = sys.modules.get("gi.repository.WebKit")
-    if webkit is None:
+    try:
+        webkit = import_module("gi.repository.WebKit")
+    except Exception:  # noqa: BLE001 - no WebKit, so no permissions either
         return "a browser permission"
     cls = type(request)
     name = cls.__name__
@@ -382,6 +382,9 @@ class BrowserWindow(Gtk.Window):
         # What pages have asked this browser for, and the answer Chronoa
         # gave. See `_on_permission_request`.
         self.permission_asks = []
+        # Why the page's own process died, when it did. See
+        # `_on_web_process_terminated`.
+        self.web_process_deaths = []
         #: Set by `gui/browser_driver.py` only while the model is driving this
         #: window: a callable `url -> reason` ("" to allow). The person's own
         #: typing and clicking are never gated - see the module docstring.
@@ -550,6 +553,7 @@ class BrowserWindow(Gtk.Window):
         view.connect("decide-policy", self._on_decide_policy)
         view.connect("script-dialog", self._on_script_dialog)
         view.connect("permission-request", self._on_permission_request)
+        view.connect("web-process-terminated", self._on_web_process_terminated)
         return view
 
     def _on_script_dialog(self, _view, dialog) -> bool:
@@ -592,6 +596,51 @@ class BrowserWindow(Gtk.Window):
         # this list is read by the driver, not kept as a history.
         del self.dialogs[:-4]
         return True
+
+    def _on_web_process_terminated(self, _view, reason) -> None:
+        """Record why the page's own process died.
+
+        **Measured 2026-10-11**, by really killing the web process of a real
+        `WebKit.WebView` with `terminate_web_process()`:
+
+            web-process-terminated -> `terminated-by-api`
+            get_is_web_process_responsive() -> **True**
+            the next evaluate_javascript -> **"Unsupported result type"**
+
+        Two things fall out of that, and both are why this method exists.
+
+        **The liveness probe cannot detect this.** WebKit relaunches the web
+        process, so `get_is_web_process_responsive()` answers `True` a moment
+        after the page was destroyed - a probe built on it would report the
+        browser healthy while nothing on it can be read.
+
+        **The failure names nothing.** `Unsupported result type` is the library's
+        way of saying the evaluation produced no JavaScript result, and it does
+        not say *why*. Without this the driver reports that sentence about a page
+        that no longer exists.
+
+        The reason is kept rather than collapsed, because the three are different
+        facts: a renderer **crashed**, one **ran out of memory**, and one was
+        **restarted by the browser**. The last is not a fault at all and must not
+        be reported as one - it is what a deliberate process replacement looks
+        like. This is the same rule `audio.py` follows in recording *why* a
+        recording stopped, and the same one `fmdsp` hit in recording why a filter
+        was wrong.
+        """
+        nick = ""
+        try:
+            nick = reason.value_nick
+        except Exception:  # noqa: BLE001 - an unnamed death is still a death
+            logging.debug("could not name a web-process death", exc_info=True)
+        self.web_process_deaths.append(nick or "unknown")
+        del self.web_process_deaths[:-4]
+
+    def pending_web_process_deaths(self):
+        """Why the page's process died since the last clear, oldest first."""
+        return list(self.web_process_deaths)
+
+    def clear_web_process_deaths(self) -> None:
+        self.web_process_deaths.clear()
 
     def _on_permission_request(self, _view, request) -> bool:
         """Refuse what a page asks for, and record that it asked.
