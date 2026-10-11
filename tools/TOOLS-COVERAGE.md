@@ -104,6 +104,7 @@ that cannot see what an unprivileged read produces.**
 | `dns_lookup` | `delv` | the DNSSEC verdict (", fully validated") |
 | `disk_layout` | `lsblk --json` | **how the disk is partitioned** — see below |
 | `binary_hardening` | `readelf -W` | **whether a binary is hardened** — see below |
+| `autostart_entries` | `.desktop` files, `systemctl --user`, `crontab` | **what starts by itself** — see below |
 | `disk_activity`, `cpu_per_core`, `cpu_frequency`, `inspect_binary`, `process_detail`, `download_file`, `sync_folder`, `check_port`, `list_archive`, `extract_archive`, `vcs_status` | `iostat`, `mpstat`, `cpupower`, `readelf`, `/proc`, `curl`, `rsync`, `nc`, stdlib+7z, stdlib+7z, `git`/`svn`/`hg` | — |
 
 ### `disk_layout`, and why `lsblk` and not the partition tools (2026-10-11)
@@ -308,3 +309,54 @@ which has its own backend chain (`grim`, then `gnome-screenshot`, then
 `spectacle`, then XWD) - so there is **no gap to fill here** and the measurement
 above is the reason to leave it alone. Building a second capture skill against
 a portal that is not on the image would have been the confidently-wrong answer.
+
+### `autostart_entries`: three of the four ways a machine runs something unasked (2026-10-11)
+
+`list_services` covers systemd **system** units. The other three surfaces had no
+answer anywhere in the tree, and the question behind them is the one a person
+asks when something is running that they did not start.
+
+**It is also the gap Chronoa caused itself.** `application.py`'s `_sync_autostart()`
+creates and removes an entry in `~/.config/autostart` when the auto-start setting
+is toggled — so the app *wrote* autostart entries and nothing here could *read one
+back*. The setting and its effect were never visible together.
+
+Four measured facts off a real `@blue` slot, each of which is a way a confident
+wrong answer gets produced:
+
+- **`OnlyShowIn=GNOME;Unity;` is a list.** Read as a boolean it matches the
+  desktops it excludes. `NotShowIn=KDE;GNOME;Cinnamon;` is the opt-out the first
+  is not, and both present together suppresses everywhere.
+- **`Hidden=true`** is a fact *in the file*, so it is decidable with no outside
+  information — which is exactly why it must not be lumped with the entries that
+  need the desktop.
+- **`Type=Link` has no `Exec` of its own**, and **Chronoa's own autostart entry is
+  a `Type=Link` symlink**. A row built from `Exec` prints an empty column for the
+  single entry a person most wants to see.
+- **`XDG_CURRENT_DESKTOP` is unset in a slot**, so the filter cannot be applied.
+  Measured on `@blue`: **7 start, 0 suppressed, 9 cannot be told** — a third
+  verdict, because guessing the desktop would produce 16 confident wrong answers.
+
+**One thing deliberately *not* parsed.** Timers were going to come from
+`systemctl --user list-timers`, whose first column is a *timestamp* — column 0
+reads `Mon` as a timer's name. It could not be measured (a slot has no user
+session bus to produce a row at all), so rather than pick a column index without
+seeing the output, both halves read `list-unit-files`, whose `NAME STATE PRESET`
+shape *was* measured. A timer that exists only as a scheduled trigger and not as
+an enabled unit file is therefore not listed; that limit is stated in the module
+rather than hidden behind a parser nobody ran.
+
+**The user directory is resolved through `files.config_home()`** — the same
+function the app uses, not a literal `~/.config/autostart`. They agree today, but
+the app honours `XDG_CONFIG_HOME` and a literal does not, so a user whose config
+lives elsewhere would be shown an empty directory while the entry Chronoa wrote
+sat in it. Verified on the image with `XDG_CONFIG_HOME` pointed elsewhere.
+
+34 tests, 10 mutations caught. One survivor was a test that could not fail: the
+`Type=Link` row test recomputed the fallback string itself, so it asserted on its
+own expression while the mutated line in `_describe()` stayed green. `_what_for()`
+is now the one place that decides, and the test calls it.
+
+**The audit count is unchanged at 79, and honestly so:** this skill reads
+`.desktop` files and `systemctl`, neither of which any `shani-tools*` package
+ships. The survey asks what those three packages provide that nothing calls.
