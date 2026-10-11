@@ -3,6 +3,11 @@ tests/__pycache__/
 usr/**/__pycache__/
 usr/**/*.pyc
 
+# Scratch state for tools/mutate.py's redirected XDG_* directories, so a
+# mutation run does not write into the developer's real home. Regenerated on
+# every run; nothing here is a result.
+build/
+
 # Packaging moved to shani-pkgbuilds (shani-chronoa/PKGBUILD there); a local
 # copy of pkg/ here is a stale duplicate of a tree this repo no longer owns.
 pkg/

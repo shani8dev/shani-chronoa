@@ -4143,7 +4143,84 @@ session's new skills (`lan_phone`, `screen_to_phone`), and one of them says so i
 its own message: *"if it is not, it is another session's work in progress and
 this failure is not about your change."*
 
-## oh-my-openagent's hashline: an edit whose `old_string` was re-typed (2026-10-11)
+## oh-my-openagent's expect-sabotage: the mutation harness, in the repository (2026-10-11)
+
+Third pass over `harness-study/oh-my-openagent`, into
+`script/qa/desktop/linux/expect-sabotage.ts`. It verifies a *single*
+deliberately-failing scenario, and its own comment states the rule:
+
+> A failing run is not a successful negative control unless the intended opt-in
+> check failed **and** both the process and fixture directory were cleaned up.
+
+Chronoa's `AGENTS.md` carries the same rule from the other side - *"a negative
+control that cannot fail is not a control"* - and the enforcement has been a
+harness written into `/tmp`, run by hand, and lost. **Eight existed in one session
+on 2026-10-11 and two had already been wiped by a restart when this was written.**
+Every commit this session made that says "N of N mutations confirmed to fail" was
+citing evidence that no longer existed - including five of its own.
+
+`tools/mutate.py` is that rule as a tool, and `tools/mutations/` holds the sets.
+**48 mutations across four sets, all caught from a clean checkout:**
+
+    python3 tools/mutate.py            # every set
+    python3 tools/mutate.py edit_file  # one by name
+
+Six rules the runner enforces, each of which cost a green run against unmutated
+code before it was written down:
+
+- **Every anchor must occur exactly once**, asserted *before* the write. A
+  `str.replace` that silently matched nothing has twice produced a mutation
+  reported as a survivor. A *pair* of anchors is applied in order with the same
+  check, for the two loops that are not adjacent and must change together.
+- **The file is restored in a `finally`**, so a crash, timeout or kill leaves the
+  tree as it found it.
+- **The verdict is read from the summary line, never the return code** - this box
+  segfaults at GTK teardown *after* the summary, and a `-11` read as a test result
+  would fail every GTK file.
+- **A mutation is "caught" only when a named witness fails**, and a whole-file
+  red for another reason is reported as a survivor *and* names what failed. The
+  first run of this found exactly that: a witness named a base id while the
+  suite's ids were parametrized, so five tests were failing for the right reason
+  and the run said "survivor". Witnesses now match as a prefix of a parametrized
+  id, with a `[` guard so `test_foo` does not match `test_foo_bar`.
+- **A set that raises on a rotated anchor still prints the tally** - a set whose
+  anchor rots is a result to fix, not an abort that loses the other sets' answers.
+- **Nothing here is packaged.** `tools/` is the maintenance surface, as
+  `cli_matrix.py` and `task_eval.py` already are.
+
+**And the harness is itself subject to the rule**, in
+`tests/test_mutation_harness_can_fail.py`: it reports caught for a mutation a
+test really covers and survivor for one nothing covers, it **refuses a mutation
+whose anchor does not exist**, it reports a mutation that broke the code under a
+witness name that matches nothing, and it leaves a fixture tree byte-identical
+afterwards - which is `expect-sabotage.ts`'s cleanup half, for a harness whose
+fixture is a source file. `TestNoSetIsLeftBehind` runs all four sets and fails if
+any reports a survivor, so a set cannot rot quietly into being unused.
+
+**Two of my own harness defects, both caught by running it.** The runner resolved
+its mutation sets from its own location rather than the working directory, so the
+self-test's temp tree was ignored and it silently tested production data; and a
+bare `exec` of the runner raised `NameError: __file__`, which made the harness
+look unimportable. Both fixed, both recorded in the test.
+
+**What is not claimed.** Five earlier mutation sets - `goal_edits` (13), `clip`
+(11), `maps` (12), `ir_remote` (14) and `fm_radio` (10) - were in `/tmp` and are
+gone. They were **not reconstructed from memory**, because a mutation set
+rebuilt from what the author remembers is not evidence; it is the same shape as
+the comment that lied about a Butterworth filter. Their claims stand in their
+commits and are not re-runnable from a checkout, which is the cost of the
+practice this change ends. `tools/mutate.py --list` is the honest inventory of
+what a fresh clone can re-verify.
+
+`build/` is now gitignored, for the runner's redirected `XDG_*` directories - a
+mutation run must not write into the developer's real home, which is the same
+rule `XDG_STATE_HOME` already carries in the test suite.
+
+Verified: **48 mutations, 48 caught, 0 survivors**; 8 self-tests; 248 passed
+across the mutation, edit, stale, finite, location, goal and packaging suites;
+0 stray `.pyc`; 0 real-state-dir writes.
+
+
 
 Second pass over `harness-study/oh-my-openagent`, into
 `packages/hashline-core/src/autocorrect-replacement-lines.ts`. Its
