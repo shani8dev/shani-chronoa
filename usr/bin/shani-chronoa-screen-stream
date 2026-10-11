@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - share this screen with a paired phone, over Bluetooth.
+
+The phone shares its network over Bluetooth (tethering), this computer joins it
+as `bnep0`, and Chrome on the phone opens a page served on that address - so the
+picture travels over Bluetooth and nothing is reachable from Wi-Fi, because the
+server binds the Bluetooth address and nothing else.
+
+It is a separate process for the reason `usr/bin/shani-chronoa-overlay` is one:
+the ScreenCast portal's Request/Response round trip is a GLib main loop, and a
+skill runs in a sandboxed child with no main loop of its own. The implementing
+module is `shani_chronoa/screen_stream.py`.
+
+Runs standalone. `--check` reports whether this machine could do it at all
+without starting anything, which is what the skill asks first.
+"""
+
+import os
+import sys
+
+# See usr/bin/shani-chronoa for why this is usr/lib/shani-chronoa, not just
+# dirname(dirname(__file__)) - the package lives one directory deeper, and the
+# launcher script bug that got the same expression wrong shipped for months
+# before anyone ran the script itself.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa import screen_stream  # noqa: E402
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if args and args[0] == "--check":
+        # "Could it work here, at all?" without touching the portal or the
+        # screen. A skill asks this first so it can name the missing binary
+        # rather than the portal's own refusal, which says nothing about what
+        # to install.
+        gst, why = screen_stream.gstreamer_ready()
+        host = screen_stream.bluetooth_address()
+        print(f"gstreamer={gst}/{why}")
+        print(f"bluetooth_address={host or 'none'}")
+        print(f"port={screen_stream.PORT}")
+        return
+    screen_stream.main()
+
+
+if __name__ == "__main__":
+    main()

@@ -336,6 +336,22 @@ class PrivacyPage:
              "never a bank card or a transit pass, which rewriting would break. Most laptops have "
              "no NFC reader at all, and that is reported as having none.",
              "reading or writing an NFC tag is refused while this is off"),
+            ("Let Chronoa find phones on the same Wi-Fi", "lan-phone-enabled",
+             "Off: Chronoa neither announces this computer on the local network nor listens "
+             "for devices announcing themselves, so it cannot tell you a phone is here. Its "
+             "own switch, separate from the phone link's, because this is a broadcast: "
+             "anything on the network may answer, and the devices that do are named with "
+             "their addresses. Discovery only - pairing is not written yet, so a phone "
+             "found this way can be listed and not used.",
+             "finding a phone on this network is refused while this is off"),
+            ("Let Chronoa share this screen with a phone", "screen-share-enabled",
+             "Off: Chronoa cannot ask the desktop to share the screen, and cannot serve a "
+             "picture of it to a phone. Its own switch, separate from the phone link's, "
+             "because this is the widest thing here - wider than a file, since it is "
+             "everything on screen. The desktop always shows its own Share screen dialog, "
+             "which only you can answer; this switch does not skip it. The picture goes "
+             "over the Bluetooth network, so it is not on Wi-Fi.",
+             "asking the desktop to share the screen is refused while this is off"),
             ("Let Chronoa send and receive infrared", "ir-remote-enabled",
              "Off: Chronoa cannot send an infrared code through an IR device here, nor receive a "
              "code from a remote. Its own switch, separate from the NFC one, because infrared "

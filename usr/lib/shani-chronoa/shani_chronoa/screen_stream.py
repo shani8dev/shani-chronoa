@@ -37,9 +37,47 @@ PORT = 8090
 WIDTH, HEIGHT, FPS, BITRATE = 640, 360, 8, 400_000
 
 
+def gstreamer_ready() -> "tuple[bool, str]":
+    """(can encode here, why not) - without starting anything.
+
+    A skill asks this first so it can name the missing **package** rather than
+    the portal's own refusal, which says nothing anybody can act on. The same
+    reason `files._PACKAGE_HINTS` exists.
+    """
+    try:
+        import gi
+        gi.require_version("Gst", "1.0")
+        from gi.repository import Gst
+    except (ImportError, ValueError) as exc:
+        return False, (f"the GStreamer bindings are not here ({exc}); "
+                       f"gstreamer and gst-plugins-good provide them")
+    Gst.init(None)
+    needed = ("pipewiresrc", "vp8enc", "webmmux")
+    missing = [e for e in needed
+               if Gst.ElementFactory.find(e) is None]
+    if missing:
+        return False, (f"gstreamer has no {', '.join(missing)}; "
+                       f"gst-plugins-base, gst-plugins-good and "
+                       f"gst-plugins-bad provide them")
+    return True, ""
+
+
 def bluetooth_address() -> Optional[str]:
-    """This computer's IPv4 address on a Bluetooth network (bnep*), or None."""
-    out = subprocess.run(["ip", "-4", "-o", "addr", "show"], capture_output=True, text=True).stdout
+    """This computer's IPv4 address on a Bluetooth network (bnep*), or None.
+
+    `ip` answers from the kernel's own table and is on both images, so unlike
+    `socket.connect` this sends nothing. The timeout is not decoration: this is
+    the **only** `subprocess.run` in the shipped tree without one, and a hung
+    child here would hang the caller indefinitely with nothing to recover it -
+    the invariant AGENTS.md records was "zero subprocess.run without a
+    timeout", and this broke it silently for as long as the module was dead.
+    """
+    try:
+        out = subprocess.run(["ip", "-4", "-o", "addr", "show"], capture_output=True,
+                             text=True, timeout=10, check=False).stdout
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.info("ip addr show did not answer: %s", exc)
+        return None
     m = re.search(r"^\d+:\s+(bnep\d+)\s+inet\s+([\d.]+)/", out, re.M)
     return m.group(2) if m else None
 

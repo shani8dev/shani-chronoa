@@ -559,6 +559,16 @@
       <summary>Let Chronoa tune an FM radio receiver</summary>
       <description>When true, Chronoa may tune a USB radio receiver (an RTL-SDR dongle) plugged into this computer, scan the FM band and play a station. Off by default. A laptop has no FM radio of its own, so without a dongle this is reported as having no receiver rather than as failing. No station names are invented: a scan reports frequencies.</description>
     </key>
+    <key name="lan-phone-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa find phones on the same Wi-Fi network</summary>
+      <description>When true, Chronoa may announce this computer on the local network and listen for devices announcing themselves, using the KDE Connect protocol directly - so it works without KDE Connect or GSConnect installed. Off by default. This is a broadcast on the local network, so anything on it can answer, and the devices that answer are named with their addresses. Discovery only: pairing is not implemented yet, so a phone found this way can be listed and not used. See the lan_phone tool's own answer for what that means.</description>
+    </key>
+    <key name="screen-share-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa share this screen with a phone</summary>
+      <description>When true, Chronoa may ask the desktop to share the screen and serve the picture to a paired phone over the Bluetooth network. Off by default. This is the widest thing Chronoa can do here - wider than a file, because it is everything on screen - so it gets its own switch rather than riding on the phone link's. The desktop always shows its own "Share screen" dialog, which only the person can answer; this switch does not skip it. The picture goes over Bluetooth, so it is not on Wi-Fi.</description>
+    </key>
     <key name="ir-remote-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa send and receive infrared remote-control codes</summary>
