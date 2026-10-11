@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -50,12 +51,25 @@ class PortalError(Exception):
 
 
 def keysym_for(token: str) -> int:
-    t = token.strip()
-    if t.lower() in KEYSYMS:
-        return KEYSYMS[t.lower()]
-    if len(t) == 1:
-        cp = ord(t)
+    """The X keysym for a character or a named key.
+
+    **The single-character test comes first and uses the *unstripped* token,
+    and that ordering is the fix for a bug this box found by running it.**
+    Stripping first turned a space into `""`, which is not length 1 and is not
+    in `KEYSYMS` either - so `type_text("test message")` raised
+    `ValueError: ' ' is not a key name` **before a single keystroke was sent**.
+    `KEYSYMS` has always contained `"space": 0x20`; the strip meant it could
+    never be reached. Every single-word probe typed fine, which is why this
+    survived: `ZZPORTALMARK` and `zzdirect` both went through, and the failure
+    looked like "the portal does not work on this desktop" rather than "the
+    portal cannot type a space".
+    """
+    if len(token) == 1:
+        cp = ord(token)
         return cp if (0x20 <= cp <= 0x7E or 0xA0 <= cp <= 0xFF) else 0x01000000 + cp
+    t = token.strip().lower()
+    if t in KEYSYMS:
+        return KEYSYMS[t]
     raise ValueError(f"{token!r} is not a key name")
 
 
@@ -154,6 +168,34 @@ def method_signature(iface: str, method: str) -> str:
     return _SIGNATURES[(iface, method)]
 
 
+def pointer_position():
+    """`(x, y)` of the pointer right now, or `None` when it cannot be read.
+
+    **The portal has no "where is the pointer" method**, and `move()` needs
+    one: the only drivable motion method is the *relative* one, so reaching an
+    absolute point means sending the difference from here.
+
+    Reading it through X is not a shortcut around the compositor - it is the
+    compositor's own pointer, mirrored. Measured on this desktop: every motion
+    the portal was asked to perform showed up in this reading, to the pixel,
+    including the ones that proved the method was relative.
+    """
+    try:
+        out = subprocess.run(["xdotool", "getmouselocation", "--shell"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    found = {}
+    for line in out.splitlines():
+        key, _, value = line.partition("=")
+        if key in ("X", "Y"):
+            try:
+                found[key] = int(value)
+            except ValueError:
+                return None
+    return (found["X"], found["Y"]) if "X" in found and "Y" in found else None
+
+
 class RemoteInput:
     """A RemoteDesktop session for one burst of input; `with RemoteInput() as ri: ri.keysym(...)`."""
 
@@ -220,6 +262,71 @@ class RemoteInput:
         for _ in range(count):
             self.client.call(RD_IFACE, "NotifyPointerButton", "(oa{sv}iu)", (self.session, {}, code, 1))
             self.client.call(RD_IFACE, "NotifyPointerButton", "(oa{sv}iu)", (self.session, {}, code, 0))
+
+    def move(self, x: float, y: float) -> None:
+        """Put the pointer at an **absolute** position on the screen.
+
+        Without this, `click()` is a click wherever the pointer already happens
+        to be, which is the same "success" a click 900px away would report.
+
+        **`NotifyPointerMotion` is the RELATIVE method, and calling it with a
+        pair of absolute coordinates moves the pointer by that much.** This is
+        not a rounding bug - it is a different method, and it is why a whole
+        session's worth of correctly-placed clicks did nothing:
+
+            pointer at      asked for      pointer ended at
+            (688, 1079)     (214, 874)     (902, 1079)     688 + 214
+            (902, 1079)     (600, 400)     (1502, 1079)    902 + 600
+
+        y never moved because it was already clamped at the bottom edge of a
+        1080-tall screen, so every "click on a sidebar row" was really a click
+        **at the bottom of the screen**, and it reported itself delivered.
+
+        The portal's own introspection is the authority, and it carries both:
+
+            NotifyPointerMotion(in o, in a{sv}, in d dx, in d dy)
+            NotifyPointerMotionAbsolute(in o, in a{sv}, in u stream,
+                                        in d x, in d y)
+
+        **The absolute method exists and cannot be used to drive.** It takes a
+        **`stream`** - an InputCapture session id - and the portal answers
+        `Failed: Invalid position (0)` for a literal 0. It is for a client
+        that has opened an input capture, not for one that wants a click.
+
+        So the fix is to send the **difference** from where the pointer
+        already is, which is the whole of what the relative method is.
+        Measured, four targets, every one exact: (214,874) (600,400)
+        (1200,300) (214,874).
+        """
+        here = pointer_position()
+        if here is None:
+            # PortalError, not ui_driver's GuiUnavailable: ui_driver imports
+            # this module, so importing back would be circular - and the
+            # driver wraps this anyway.
+            raise PortalError(
+                "the portal can only move the pointer relatively, and the "
+                "pointer's present position cannot be read, so there is no "
+                "way to say where it should go. Refusing rather than nudging "
+                "it by the coordinates as if they were a delta.")
+        self.client.call(RD_IFACE, "NotifyPointerMotion", "(oa{sv}dd)",
+                        (self.session, {}, float(x - here[0]),
+                         float(y - here[1])))
+
+    def scroll(self, dx: float = 0.0, dy: float = 0.0) -> None:
+        """Wheel. `dy` is clicks, positive **down**, matching `NotchClass`.
+
+        **`NotifyPointerScroll` is not a method this portal has.** Introspecting
+        `org.freedesktop.portal.RemoteDesktop` lists `NotifyPointerAxis` and
+        `NotifyPointerAxisDiscrete`, and a grep for the name the code was using
+        returns **0** - so every scroll through this route was a D-Bus call to a
+        method that does not exist, on a path whose whole job is to make the
+        failure visible.
+
+        `NotifyPointerAxis` takes the same `(oa{sv}dd)` and its `dx`/`dy` are
+        relative scroll amounts, which is what a wheel notch is.
+        """
+        self.client.call(RD_IFACE, "NotifyPointerAxis", "(oa{sv}dd)",
+                         (self.session, {}, float(dx), float(dy)))
 
 
 def bind_global_shortcut(shortcut_id: str, description: str, preferred: str,

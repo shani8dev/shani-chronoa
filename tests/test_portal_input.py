@@ -227,3 +227,111 @@ def test_only_a_held_shortcut_ends_listening_on_release():
     app._listening = False
     ChronoaApplication._end_listening_now(app)
     assert ended == [1], "nothing to end when not listening"
+
+
+# --- every method named here has to exist on a real portal ------------------------
+#
+# Two method names in this file were invented against a real interface and cost a
+# whole session of work: `NotifyPointerScroll`, which the portal does not have at
+# all (it has `NotifyPointerAxis` / `NotifyPointerAxisDiscrete`), and
+# `NotifyPointerMotion` used as if it were absolute when it is the *relative*
+# method. Nothing about either is checkable by reading - the call is well formed
+# and the code is correct-looking. Only the interface itself knows.
+
+#: `gdbus introspect --session --dest org.freedesktop.portal.Desktop
+#: --object-path /org/freedesktop/portal/desktop --recurse`, restricted to
+#: `org.freedesktop.portal.RemoteDesktop`, on this machine (2026-10-11).
+#: Recorded rather than introspected live, so the suite needs no session bus and
+#: no portal to hold the one method name that was wrong.
+REMOTE_DESKTOP_METHODS = {
+    "ConnectToEIS", "CreateSession", "NotifyKeyboardKeycode",
+    "NotifyKeyboardKeysym", "NotifyPointerAxis", "NotifyPointerAxisDiscrete",
+    "NotifyPointerButton", "NotifyPointerMotion", "NotifyPointerMotionAbsolute",
+    "NotifyTouchDown", "NotifyTouchMotion", "NotifyTouchUp", "SelectDevices",
+    "Start",
+}
+
+
+def test_every_remote_desktop_method_called_actually_exists() -> None:
+    import re
+    from shani_chronoa import portal
+
+    source = Path(portal.__file__).read_text()
+    called = set(re.findall(r'RD_IFACE,\s*"([A-Za-z]+)"', source))
+
+    assert called, "the scan found nothing, so it would pass whatever the code did"
+    unknown = called - REMOTE_DESKTOP_METHODS
+    assert not unknown, (
+        "%s %s not on org.freedesktop.portal.RemoteDesktop - a well-formed call "
+        "to a method the portal does not have fails at run time, on the one "
+        "route that is supposed to make failures visible"
+        % (sorted(unknown), "is" if len(unknown) == 1 else "are"))
+
+
+def test_move_sends_the_difference_from_where_the_pointer_is(monkeypatch) -> None:
+    """**The relative method is the only drivable one, so `move` sends a delta.**
+
+    Measured on this desktop, `NotifyPointerMotion(214, 874)` with the pointer
+    at (688, 1079) left it at (902, 1079) - and y never moved at all, because it
+    was already clamped at the bottom edge of the screen. So every "click on a
+    sidebar row" was a click *at the bottom of the screen*, reported delivered.
+    """
+    from shani_chronoa import portal
+
+    class _Client:
+        GLib = None
+
+        def call(self, _iface, method, _sig, args):
+            self.calls.append((method, args))
+
+    client = _Client()
+    client.calls = []
+    monkeypatch.setattr(portal, "pointer_position", lambda: (688, 1079))
+
+    ri = portal.RemoteInput(client=client)
+    ri.session = "/session/1"
+    ri.move(214.0, 874.0)
+
+    assert client.calls == [("NotifyPointerMotion",
+                             ("/session/1", {}, -474.0, -205.0))], client.calls
+
+
+def test_move_refuses_rather_than_nudging_when_the_pointer_cannot_be_read(
+        monkeypatch) -> None:
+    """Sending the coordinates as if they were a delta is the original bug."""
+    from shani_chronoa import portal
+
+    class _Client:
+        GLib = None
+
+        def call(self, *_a):
+            raise AssertionError("a motion was sent with nowhere to move from")
+
+    monkeypatch.setattr(portal, "pointer_position", lambda: None)
+
+    ri = portal.RemoteInput(client=_Client())
+    ri.session = "/session/1"
+
+    with pytest.raises(portal.PortalError, match="relatively"):
+        ri.move(214.0, 874.0)
+
+
+def test_scroll_uses_the_axis_method_the_portal_actually_has(monkeypatch) -> None:
+    """`NotifyPointerScroll` is not a method. It was called anyway, and the call
+    was well formed, which is why only running it could have told."""
+    from shani_chronoa import portal
+
+    class _Client:
+        GLib = None
+
+        def call(self, _iface, method, _sig, args):
+            self.calls.append((method, args))
+
+    client = _Client()
+    client.calls = []
+    ri = portal.RemoteInput(client=client)
+    ri.session = "/session/1"
+
+    ri.scroll(0.0, -4.0)
+
+    assert client.calls == [("NotifyPointerAxis", ("/session/1", {}, 0.0, -4.0))]
