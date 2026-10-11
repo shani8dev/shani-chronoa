@@ -103,6 +103,19 @@ MUTATIONS = [
                "setter changes nothing observable",
     },
 
+    # -- 3b. the jump on the Brain page says it goes somewhere --------------
+    {
+        "file": _W,
+        "old": '    row.append(Gtk.Image.new_from_icon_name("go-next-symbolic"))\n',
+        "new": "",
+        "label": "**the lost affordance, restored**: the Brain page's jump "
+                 "renders as unstyled words again",
+        # This was added, verified by render, and then silently lost when another
+        # session committed the file from an earlier state. Nothing failed,
+        # because nothing asserted it - which is why this entry exists.
+        "expect": ["test_a_flat_jump_button_still_says_it_goes_somewhere"],
+    },
+
     # -- 4. the panel's name does not collide --------------------------------
     {
         "file": _R,

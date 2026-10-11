@@ -584,6 +584,43 @@ class TestTheVoidCarriesAMark:
         assert b"#3584e4" in setup_wizard._ORB_MARK_SVG, (
             "the mark is not Chronoa's blue, so it is not the app's own orb")
 
+    def test_a_flat_jump_button_still_says_it_goes_somewhere(self):
+        """**The Brain page's jump, which was lost once to a concurrent commit.**
+
+        "Use a model on this computer" is a wired `Gtk.Button` - it goes to the
+        model picker. Styled `flat`, it renders as unstyled words and sat
+        underneath the Next button looking exactly like a dead label. That is the
+        "minor UI glitch during model installation" that got reported, and the
+        chevron is what makes the difference.
+
+        **It was added, verified by render, and then silently lost** when another
+        session committed the file from an earlier state. Nothing failed, because
+        nothing asserted it. This is that assertion: a `flat` button's label alone
+        is not an affordance.
+        """
+        page = _wizard_navigation_page("brain")
+        jump = None
+        for widget in _walk(page):
+            if not isinstance(widget, Gtk.Button):
+                continue
+            said = [l.get_text() or "" for l in _walk(widget)
+                    if isinstance(l, Gtk.Label)]
+            if any("Use a model on this computer" in text for text in said):
+                jump = widget
+                break
+        assert jump is not None, (
+            "the Brain page's jump to the model picker is gone")
+        # The child is a box with a label and an arrow, not a bare label.
+        child = jump.get_child()
+        assert isinstance(child, Gtk.Box), (
+            f"the jump's child is {type(child).__name__}, not a label-plus-arrow "
+            f"row, so it renders as unstyled words")
+        arrows = [w for w in _walk(child) if isinstance(w, Gtk.Image)]
+        assert arrows, (
+            "the jump carries no arrow, so it reads as a dead label")
+        assert jump.get_tooltip_text(), (
+            "the jump says where it goes only by its label")
+
     def test_the_rule_is_what_hides_it_on_a_long_page(self):
         """**The over-fix, and it is the dangerous direction.** A mark drawn over
         a page that already fills the window sits on top of a row. The rule above
