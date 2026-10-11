@@ -35,8 +35,17 @@ def _button(box):
 
 
 def _status(box):
-    labels = [c for c in _kids(box) if isinstance(c, Gtk.Label)]
-    return labels[0] if labels else None
+    """The card's status line, read by the name it was given - not by position.
+
+    The first label on a card is its **title**, so reading positionally reads the
+    model's name back and every assertion about the status line passes against
+    the wrong widget. This is the same mistake the production helper made, and
+    it is why the test agreed with the bug for two commits.
+    """
+    for child in _kids(box):
+        if isinstance(child, Gtk.Label) and child.get_name() == "status":
+            return child
+    return None
 
 
 class _App:
@@ -130,9 +139,11 @@ def test_a_switch_loads_the_model_and_says_which_one_ran(monkeypatch):
         time.sleep(0.01)
     from gi.repository import GLib as _G
 
+    # **Drain the loop, then assert the sentence.** A polling loop whose only
+    # exit condition is a string that can no longer appear just times out and
+    # asserts nothing - which is how this test stayed green while the status line
+    # it claimed to check had changed under it.
     for _ in range(50):
-        if _status(box) and _status(box).get_text() == "On this machine":
-            break
         _G.MainContext.default().iteration(False)
 
     assert ("use", "qwen3-8b") in calls, (
@@ -141,6 +152,36 @@ def test_a_switch_loads_the_model_and_says_which_one_ran(monkeypatch):
     assert ("service",) in calls, (
         "the model was pointed at but the service was never restarted, so the "
         "new model is not the one answering")
+    said = _status(box).get_text() if _status(box) else ""
+    assert "answering with it now" in said, (
+        "the card did not say the switch happened; it said %r, which is the "
+        "*installed* label and is what a switch that did nothing also said" % said)
+
+
+def test_a_kind_with_no_service_is_chosen_and_says_it_was_not_switched():
+    """**The other half.** A voice or vision model has no service to restart, so
+    pressing "Use it" writes a setting and nothing more. The first version
+    returned `ok: True` and left the status at "On this machine" - success
+    reported, no change shown, which is the shape this repo records as a control
+    that cannot be observed to have done anything.
+    """
+    from shani_chronoa.gui.surfaces import models
+
+    box = _card(_voice_card())
+    models._apply_switch_result(
+        box, _voice_card(),
+        {"ok": True, "switched": False,
+         "why": "chosen - voice will use it next time it is needed"})
+    said = _status(box).get_text() if _status(box) else ""
+    assert "next time it is needed" in said, (
+        "a choice that took effect next time said %r, which does not distinguish "
+        "it from a switch that happened now" % said)
+    assert "answering with it now" not in said, said
+
+
+def _voice_card():
+    return {"key": "en_lessac", "label": "Piper Lessac", "size": 6e7,
+            "kind": "voice", "installed": True, "chosen": False}
 
 
 def test_a_switch_the_quality_gate_refuses_is_reported_not_swallowed(monkeypatch):

@@ -245,6 +245,11 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
                                card["kind"]) if text]
     box.append(Gtk.Label(label=" · ".join(parts), xalign=0))
     status = Gtk.Label(xalign=0, wrap=True)
+    # **Named, so the switch can find it without guessing by position.** The card
+    # has three labels before its button - title, size-and-kind, and this one -
+    # and taking the first meant the switch wrote to the **title**: pressing
+    # "Use it" renamed the card to its own result. Measured.
+    status.set_name("status")
     box.append(status)
     # What it costs this machine to run, and why it is or is not the default.
     # `_needs_label_text` owns the *decision* to render a line, not just the
@@ -599,15 +604,25 @@ def _switch(app: Any, card: Dict[str, Any], box: Gtk.Widget,
 
                 verdict = local_llm.use(key)
                 if not verdict.get("promote"):
-                    return {"ok": False,
+                    return {"ok": False, "switched": False,
                             "why": verdict.get("why") or "the quality gate refused"}
                 why = local_llm.start_service()
                 if why:
-                    return {"ok": False, "why": why}
-                return {"ok": True, "why": ""}
-            return {"ok": True, "why": "setting written"}
+                    return {"ok": False, "switched": False, "why": why}
+                return {"ok": True, "switched": True, "why": ""}
+            # **Not a switch, and it must not say it is.** These kinds have no
+            # service to restart - `stt_server`, `local_vision` and `local_embed`
+            # expose no `start_service`/`stop_service` - so the engine they run
+            # is *selected* on its next use, not now. Returning success with the
+            # status line left at "On this machine" made pressing "Use it" report
+            # success and show no change at all, which is the shape this repo
+            # records as a control that cannot be observed to have done anything.
+            _pick(getattr(box, "_app", None) or _config_only(), card)
+            return {"ok": True, "switched": False,
+                    "why": "chosen - %s will use it next time it is needed"
+                           % card["kind"]}
         except Exception as exc:  # noqa: BLE001 - reported below, never raised
-            return {"ok": False, "why": str(exc)}
+            return {"ok": False, "switched": False, "why": str(exc)}
 
     def done():
         box._switching = False
@@ -632,15 +647,19 @@ def _card_button(box: Gtk.Widget):
 
 
 def _first_button_status(box: Gtk.Widget):
-    """The status label sitting above the button, by position rather than name.
+    """The card's status label, by the name it was given at build time.
 
-    Boxes are walked rather than held in a map because the card is a flat layout
-    built once and a reference would be a second thing to keep in step.
+    **By position it is wrong, and the failure is invisible.** The card has three
+    labels before its button - title, size-and-kind, and this one - so "the first
+    label" is the **title**, and a switch that writes to it overwrites the model's
+    name with its own result. Measured: pressing "Use it" renamed the card.
+    `_card` names this label and this reads the name; a card without one yields
+    `None`, which every caller already treats as "no status line to update".
     """
-    from gi.repository import Gtk
-
-    seen = [c for c in _children(box) if isinstance(c, Gtk.Label)]
-    return seen[0] if seen else None
+    for child in _children(box):
+        if isinstance(child, Gtk.Label) and child.get_name() == "status":
+            return child
+    return None
 
 
 def _children(box: Gtk.Widget):
@@ -668,10 +687,17 @@ def _apply_switch_result(box: Gtk.Widget, card: Dict[str, Any],
                          result: Dict[str, Any]) -> None:
     status = _first_button_status(box)
     if result.get("ok"):
+        # **Two sentences for two different facts.** "Switched" means the engine
+        # answers differently *now*; "chosen" means it will, the next time it is
+        # needed. Writing "On this machine" here was the *installed* label, so a
+        # switch that happened and one that did not read the same.
         if status is not None:
-            status.set_text("On this machine")
+            status.set_text("Switched - answering with it now."
+                            if result.get("switched") else
+                            result.get("why") or "Chosen.")
             status.remove_css_class("dim-label")
-        _pick(getattr(box, "_app", None) or _config_only(), card)
+        if result.get("switched"):
+            _pick(getattr(box, "_app", None) or _config_only(), card)
         return
     if status is not None:
         status.set_text("Switch failed: %s" % result.get("why"))
