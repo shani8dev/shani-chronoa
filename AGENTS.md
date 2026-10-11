@@ -4143,7 +4143,79 @@ session's new skills (`lan_phone`, `screen_to_phone`), and one of them says so i
 its own message: *"if it is not, it is another session's work in progress and
 this failure is not about your change."*
 
-## The finite check was two copies, then three, then four — and the grep found them (2026-10-11)
+## oh-my-openagent's boulder-state: a run that stopped said "in progress" (2026-10-11)
+
+`harness-study/oh-my-openagent` (OmO — an OpenCode plugin harness, cloned this
+session; `packages/boulder-state`). 7,491 TypeScript files, and one mechanism in it
+names a defect Chronoa had with no name for it. From its own notes:
+
+> `completeBoulder` is the only completion transition, so a work whose session
+> died abnormally would stay `active` forever (#8413).
+
+**Chronoa had the identical hole.** A run mid-`advance` when the process died keeps
+`phase=RUNNING` with a frozen `updated_at`, and the panel rendered
+`_PHASE_WORD[RUNNING]` — "in progress" — forever. Measured before the change,
+through the real store and the real panel: **a run last touched 30 days ago still
+said "in progress - 1 of 2 steps"**. Nothing in the tree aged it out; the word
+"stale" appears once in the panel and is about a stale *card*, not a stale run.
+
+**Taken, with the four rules that make it safe.** Boulder demotes an `active` work
+to `paused` and stamps `stale_since`; its readers are unchanged; `selectActiveWork`
+returns a stamped work to `active` and drops the stamp; and "a work with no activity
+evidence at all is stale". All four are in `goals.reconcile_stale_runs`:
+
+- only RUNNING runs are considered — `AWAITING` may legitimately be weeks old, and
+  `PENDING` has not started;
+- a run already stamped is left exactly as it is, so re-stamping cannot move a
+  run's stopped-time forward on every refresh;
+- nothing stale means nothing written — the same objects come back, so a store
+  write happens only when something changed;
+- a threshold of zero or less is ignored, because it would mark every live run as
+  stopped the instant it was created.
+
+**The part that is Chronoa's own, and the reason `Phase` was not reused.**
+`Phase.AWAITING` means "parked, somebody outside has to answer", which is not what a
+dead run is, and a new `Phase` would ripple through `_PHASE_WORD`, `LIVE`,
+`manage_goals` and every reader. So the stamp rides on a new `stale_since` field,
+`phase` stays RUNNING, and only the sentence changes. Boulder draws the same line
+between its `paused` status and its `stale_since` stamp.
+
+**And the trap the write itself sets, which is the reason for `save(stamp=False)`.**
+`GoalStore.save` stamps `updated_at` — which is the *activity* signal the demotion
+reads — so writing a demotion would reset it and the card would read "last moving in
+the last hour" about a run dead for a month. Measured without the switch. `advance`
+is the opposite: it *is* activity, so it stamps, and it clears the stamp because
+resuming a run is the same operation as starting one.
+
+**A corrupt file took the whole store down, and the new tests found it.**
+`from_json` passed `created_at`/`updated_at` straight through, so
+`"created_at": "yesterday"` made `_last_activity` raise `TypeError` — and
+`GoalStore.list` raises on the first bad row, so the panel reported *"the goal
+store could not be read"* for **every run in it**. `_stored_number` now coerces to
+0.0, which is "no activity evidence", which the reconciliation already treats as
+stale — so a broken timestamp demotes one run instead of blanking the panel.
+
+**Two of my own tests could not fail, and the mutation run is what said so.** The
+"only `updated_at` counts" survivor was witnessed by a run with *both* timestamps
+zero, which the mutation leaves unchanged — the real witness is a run whose
+`updated_at` field was lost but whose `created_at` is recent, which `from_json`
+actually produces. And the zero-threshold witness was a 30-day-dead run, which a
+zero threshold also stamps; the live case is the one that can tell them apart. Both
+were mine, both are fixed, and both are recorded in the harness.
+
+**One consolidation, caught in the same session.** `_stored_number` was written with
+its own copy of the finite test — a **fifth** copy, in the same commit that
+consolidated the other four — and `test_no_third_copy_exists_anywhere` noticed on the
+first sweep. It uses `sysfs.finite` now. The grep is the reason this is caught within
+an hour rather than in six months.
+
+`tests/test_stale_goal_runs.py` — 34 tests, **12 of 12 mutations confirmed to fail,
+0 survivors**, covering the predicate, the four safety rules, the persisted stamp,
+the `stamp=False` write, `advance`'s two halves, and the corrupt-file path. 295
+passed across the goal, finite-check, location, diff, capability, senses, cpu, media
+and surface suites; 0 stray `.pyc`; 0 real-state-dir writes.
+
+
 
 The pass above added `senses/location.py`'s finite-number test by reading
 `skills/media_control.py`, **which already had the identical three lines**. So the

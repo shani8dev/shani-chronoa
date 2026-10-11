@@ -33,6 +33,98 @@ from typing import Callable, NamedTuple, Optional
 
 logger = logging.getLogger(__name__)
 
+#: How long a run may sit in RUNNING without any save before it is declared
+#: stopped rather than in progress. **oh-my-openagent's
+#: `OMO_BOULDER_STALE_WORK_THRESHOLD_MS`, default 6h**, renamed for this module
+#: and reached the same way: an environment variable, so a person debugging a
+#: run can watch it go stale in minutes without editing code.
+#:
+#: Six hours is not arbitrary - it is longer than any single step's tool timeout
+#: (the slowest is `_SLOW_TOOLS`' 300s) by a wide margin, so a run that is
+#: genuinely stepping itself is never at risk. It is short enough that a run
+#: abandoned overnight is noticed the next morning rather than next month.
+STALE_RUN_THRESHOLD_SECONDS = 6 * 3600
+
+
+def _stale_threshold() -> float:
+    """The threshold, from the environment if it names a positive number.
+
+    A value that is not a positive number falls back to the default rather than
+    to zero: a threshold of 0 would make every run stale the instant it was
+    created, which is the same failure as no threshold at all - it would report
+    a live run as stopped.
+    """
+    import os
+
+    raw = os.environ.get("CHRONOA_GOAL_STALE_SECONDS", "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return float(STALE_RUN_THRESHOLD_SECONDS)
+    return value if value > 0 else float(STALE_RUN_THRESHOLD_SECONDS)
+
+
+def _last_activity(run: "GoalRun") -> float:
+    """When this run was last known to be moving.
+
+    **The newest of `created_at` and `updated_at`, and 0.0 when neither.**
+    `updated_at` is stamped by every `GoalStore.save`, and the panel saves after
+    every step, so a live run has a recent one. A run from an older build - which
+    `from_json` defaults to 0.0 - has **no activity evidence at all**, and
+    boulder's rule for exactly that case is that it is stale: *"a work with no
+    activity evidence at all is stale."* Returning 0.0 rather than `created_at`
+    alone is what makes that rule expressible without a second branch.
+    """
+    return max(run.created_at or 0.0, run.updated_at or 0.0)
+
+
+def reconcile_stale_runs(runs: "list[GoalRun]", now: float = 0.0,
+                         threshold: Optional[float] = None) -> "list[GoalRun]":
+    """Stamp every RUNNING run that has stopped moving.
+
+    **oh-my-openagent's `reconcileStaleWorks`, and the defect it closes:**
+    `boulder-state`'s own notes say *"`completeBoulder` is the only completion
+    transition, so a work whose session died abnormally would stay `active`
+    forever (#8413)"* - and Chronoa had the identical hole with no name for it.
+    A run mid-`advance` when the process died keeps `phase=RUNNING` with a frozen
+    `updated_at`, and the panel rendered "in progress" forever. Measured: a run
+    last touched 30 days ago still said "in progress".
+
+    Four rules, each copied because each is the part that makes it safe:
+
+    - **Only RUNNING runs.** AWAITING is "parked, somebody outside has to
+      answer" and may legitimately be weeks old; COMPLETED and FAILED are
+      settled. Touching either would rewrite a settled state.
+    - **A run already stamped is left exactly as it is.** Re-stamping would move
+      `stale_since` forward on every refresh, so a run that stopped last week
+      would appear to have stopped today.
+    - **Nothing stale means nothing written.** The list comes back with the same
+      objects, so a caller can diff and a store write only happens when
+      something actually changed.
+    - **A threshold of zero or less is ignored** by falling back to the default,
+      because it would mark a live run as stopped.
+
+    The caller decides what a stamped run *means*; this only stamps. That split
+    is boulder's own - `selectActiveWork` returns a `stale_since` work to active
+    and drops the stamp, and here `advance` does the same, so resuming a run is
+    the same operation as starting it.
+    """
+    limit = _stale_threshold() if threshold is None else threshold
+    if limit <= 0:
+        limit = float(STALE_RUN_THRESHOLD_SECONDS)
+    if now <= 0:
+        now = time.time()
+    out = []
+    for run in runs:
+        if run.phase is not Phase.RUNNING or run.stale_since:
+            out.append(run)
+            continue
+        if now - _last_activity(run) < limit:
+            out.append(run)
+            continue
+        out.append(run._replace(stale_since=now))
+    return out
+
 
 class Phase(Enum):
     """Where a goal (or a task, or the run itself) is.
@@ -91,6 +183,25 @@ class GoalRun(NamedTuple):
     created_at: float = 0.0
     updated_at: float = 0.0
     results: dict = {}
+    #: When this run was found stopped mid-plan without having finished, or 0.
+    #:
+    #: **oh-my-openagent's `boulder-state` (#8413), and the exact defect it
+    #: names: "`completeBoulder` is the only completion transition, so a work
+    #: whose session died abnormally would stay `active` forever."** Chronoa had
+    #: the same hole with no name for it: a run mid-`advance` when the process
+    #: died keeps `phase=RUNNING` and a frozen `updated_at`, and the panel
+    #: rendered `_PHASE_WORD[RUNNING]` - "in progress" - forever. Measured: a run
+    #: last touched 30 days ago still said "in progress", with nothing anywhere
+    #: in the tree to age it out.
+    #:
+    #: The stamp is the demotion, and it is separate from `phase` on purpose.
+    #: `Phase.AWAITING` means "parked, somebody outside has to answer", which is
+    #: not what a dead run is; a new Phase would ripple through `_PHASE_WORD`,
+    #: `LIVE`, `manage_goals` and every reader. Boulder uses `paused` plus a
+    #: `stale_since` stamp and leaves its readers alone, and that is the shape
+    #: here: `phase` stays RUNNING, the stamp says it stopped, `advance` clears
+    #: it, and the word a person reads changes.
+    stale_since: float = 0.0
     #: What a person changed by hand, newest last, as `(variable_name, at)`
     #: pairs. **This is the half open-intelligent-ui contributed** (see
     #: `describe_edits`): its route panel lets a person remove stops and add
@@ -121,6 +232,7 @@ class GoalRun(NamedTuple):
             "results": dict(self.results),
             "edits": [list(e) for e in self.edits],
             "removed": [dict(s._asdict()) for s in self.removed],
+            "stale_since": self.stale_since,
         })
 
     @classmethod
@@ -137,10 +249,11 @@ class GoalRun(NamedTuple):
             id=data["id"], goal=data["goal"], phase=Phase(data["phase"]),
             steps=steps, index=data.get("index", 0),
             awaiting_reason=data.get("awaiting_reason", ""),
-            created_at=data.get("created_at", 0.0),
-            updated_at=data.get("updated_at", 0.0),
+            created_at=_stored_number(data.get("created_at")),
+            updated_at=_stored_number(data.get("updated_at")),
             results=dict(data.get("results", {})),
             edits=tuple(tuple(e) for e in data.get("edits", ())),
+            stale_since=_stored_number(data.get("stale_since")),
             removed=tuple(
                 PlannedStep(
                     thought=r["thought"], tool_name=r["tool_name"],
@@ -155,6 +268,31 @@ def _state_path(root: Path, run_id: str) -> Path:
     return Path(root) / f"{run_id}.json"
 
 
+def _stored_number(value: object) -> float:
+    """A timestamp read off disk, or 0.0 when it is not one.
+
+    **A hand-edited or truncated file can hold a string here, and 0.0 is the only
+    honest reading.** `"created_at": "yesterday"` passed straight through before
+    this, and `max(created_at, updated_at)` then raised `TypeError` inside
+    `_last_activity` - so a corrupt file took the *whole store* down rather than
+    one run, because `GoalStore.list` raises on the first bad row and the panel
+    reports "the goal store could not be read" for every run in it.
+
+    0.0 rather than the current time on purpose: it means "no activity evidence",
+    which `reconcile_stale_runs` already treats as stale, so a file with a broken
+    timestamp is demoted rather than looked young forever.
+
+    The finite test is `sysfs.finite`, the one implementation - this was a fifth
+    copy of it, written in the same session that consolidated the other four, and
+    `test_no_third_copy_exists_anywhere` is what noticed.
+    """
+    from shani_chronoa import sysfs
+
+    if not sysfs.finite(value):
+        return 0.0
+    return float(value)
+
+
 class GoalStore:
     """The durable half: a directory of one-file-per-run checkpoints.
 
@@ -167,8 +305,22 @@ class GoalStore:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def save(self, run: GoalRun) -> GoalRun:
-        run = run._replace(updated_at=time.time())
+    def save(self, run: GoalRun, stamp: bool = True) -> GoalRun:
+        """Write one run. `stamp=False` writes it exactly as it is.
+
+        **Why the switch exists:** `updated_at` is the *activity* signal
+        `reconcile_stale_runs` reads, and stamping it on the write that records
+        a run has stopped would erase the only evidence of when it stopped
+        moving. Measured without it: a run last touched 30 days ago was
+        demoted correctly, and the very save that recorded the demotion reset
+        `updated_at` to now - so the card read "last moving in the last hour"
+        about a run that had been dead for a month.
+
+        `stamp=True` is the default and every existing caller keeps it: a step
+        that ran *is* activity, and the panel's run loop relies on the stamp.
+        """
+        if stamp:
+            run = run._replace(updated_at=time.time())
         path = _state_path(self.root, run.id)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(run.to_json(), encoding="utf-8")
@@ -451,7 +603,8 @@ def describe_edits(run: GoalRun) -> str:
             "those steps back unless they ask.)")
 
 
-def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str]) -> GoalRun:
+def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str],
+            now: float = 0.0) -> GoalRun:
     """One forward step of the run.
 
     `execute` runs one step against the settled variables and returns the
@@ -459,6 +612,9 @@ def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str]) -> GoalRu
     not failed - that is a task for outside, and the state says so. An
     `execute` that raises fails the run rather than killing the queue: a
     queue that loses parked runs on one bad step is not durable.
+
+    `now` is injectable so a test can prove the *timestamps* rather than
+    measuring how long a step took; it defaults to the clock.
     """
     if run.phase in (Phase.COMPLETED, Phase.FAILED):
         return run
@@ -476,7 +632,13 @@ def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str]) -> GoalRu
     results = {**run.results, step.variable_name: output}
     index = run.index + 1
     phase = Phase.COMPLETED if index >= len(run.steps) else Phase.RUNNING
-    return run._replace(phase=phase, index=index, results=results)
+    # **A step that runs clears the stamp**, which is boulder's
+    # "`selectActiveWork` returns a `stale_since` work to `active` and drops the
+    # stamp". Resuming a run is the same operation as starting one, so there is
+    # no separate `resume` to call and no way to resume a run into a state that
+    # still says it stopped.
+    return run._replace(phase=phase, index=index, results=results,
+                        stale_since=0.0, updated_at=now if now > 0 else time.time())
 
 
 # ---------------------------------------------------------------------------

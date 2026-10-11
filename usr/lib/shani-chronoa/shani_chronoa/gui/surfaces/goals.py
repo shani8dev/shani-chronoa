@@ -47,6 +47,46 @@ _PHASE_WORD = {
 LIVE = (goals.Phase.PENDING, goals.Phase.RUNNING)
 
 
+def _when(at: float) -> str:
+    """`at` as a sentence a person reads, not a timestamp they parse.
+
+    Relative, because "30 days ago" answers the question the card is asking and
+    an absolute epoch second does not. The threshold for the demotion is six
+    hours, so anything reaching here is hours or more old - "just now" would be
+    a run that has not been reconciled at all.
+    """
+    import time
+
+    seconds = max(0.0, time.time() - (at or 0.0))
+    if seconds < 3600:
+        return "in the last hour"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} hour(s) ago"
+    return f"{int(seconds // 86400)} day(s) ago"
+
+
+def _phase_sentence(run: goals.GoalRun) -> str:
+    """The card's subtitle: what this run is doing, honestly.
+
+    **A run stamped stale is not "in progress", and saying it is the whole
+    defect.** oh-my-openagent's `boulder-state` (#8413) is exactly this - a work
+    whose session died stays `active` forever - and Chronoa had it unnamed: the
+    measured case was a run last touched 30 days ago rendering as "in progress".
+
+    The word changes but the *phase* does not: `Phase.AWAITING` means "parked,
+    somebody outside has to answer", which is not what a stopped run is. So the
+    stamp rides on `run.stale_since` and only the sentence reflects it - the
+    same separation boulder draws between its `paused` status and its
+    `stale_since` stamp.
+    """
+    word = _PHASE_WORD[run.phase]
+    steps = f"{min(run.index, len(run.steps))} of {len(run.steps)} steps"
+    if run.stale_since and run.phase is goals.Phase.RUNNING:
+        return (f"stopped here {_when(run.stale_since)} - it was last moving "
+                f"{_when(run.updated_at or run.created_at)}, {steps}")
+    return f"{word} - {steps}"
+
+
 def open_runs(store: Optional[goals.GoalStore] = None) -> List[goals.GoalRun]:
     """Saved runs that are not finished, newest first. [] when none or unreadable."""
     try:
@@ -96,6 +136,26 @@ class _GoalsSurface:
             self._body.append(self.status_recorder.row(
                 common.STATUS_ATTENTION, "The goal store could not be read", str(exc)))
             return
+        # **Age out the runs that stopped without finishing, then save only those.**
+        # This is the panel's half of the boulder-state transfer: the store keeps
+        # `stale_since` and this is where it is first written, because refresh is
+        # the only thing that runs on every open of the panel.
+        #
+        # **A reconciliation that fails is not a failed panel.** A read-only disk
+        # still has to show the person their goals; it just cannot record the
+        # demotion, so the next refresh tries again. Swallowing it here is the
+        # opposite of the `_run_error` rule above - that one reports a store
+        # failure on a *click*, because a button that did nothing and said so is
+        # the defect. This runs unprompted, so there is no click to answer for.
+        try:
+            reconciled = goals.reconcile_stale_runs(runs)
+            for before, after in zip(runs, reconciled):
+                if after is before:
+                    continue          # nothing changed, nothing written
+                self.store.save(after, stamp=False)
+            runs = reconciled
+        except Exception:  # noqa: BLE001 - a demotion must never blank the panel
+            logger.warning("could not reconcile stale goal runs", exc_info=True)
         live = [r for r in runs if r.phase not in (goals.Phase.COMPLETED, goals.Phase.FAILED)]
         waiting = [r for r in runs if r.phase == goals.Phase.AWAITING]
         if not runs:
@@ -116,8 +176,7 @@ class _GoalsSurface:
             self._body.append(self._card(run))
 
     def _card(self, run: goals.GoalRun) -> Gtk.Widget:
-        group = common.group(run.goal, f"{_PHASE_WORD[run.phase]} - "
-                                       f"{min(run.index, len(run.steps))} of {len(run.steps)} steps")
+        group = common.group(run.goal, _phase_sentence(run))
         group.add_css_class("goal-card")
         for i, step in enumerate(run.steps):
             done = i < run.index
