@@ -759,3 +759,161 @@ def test_a_window_that_cannot_be_reached_is_not_a_clean_page(web_allowed,
     monkeypatch.setattr(browser_driver.browser_bridge, "on_main", unreachable)
 
     assert browser_driver.pending_dialogs() == []
+
+
+# --- a page could ask for the microphone and nobody was watching (2026-10-11) ---
+#
+# browser-use's `permissions_watchdog.py` is 43 lines and **grant-only**: it calls
+# `Browser.grantPermissions` for whatever the profile lists, never denies, never
+# asks, never reports. That is the opposite of what a consent architecture wants,
+# so nothing was taken from it directly.
+#
+# What was taken is the shape: permissions are an **explicit, listable set**, not
+# an implicit default. Chronoa connected no `permission-request` handler at all,
+# so every decision belonged to whatever the platform did on its own - and none
+# of it reached the person or the driver, so a refusal and a grant looked
+# identical from inside the app.
+
+
+class _FakeAsk:
+    """Stands in for a `WebKit.PermissionRequest` without needing a WebView."""
+
+    def __init__(self, class_name, domain=None):
+        type(self).__name__  # the real signal names its own type; mirror that
+        self.__class__ = type(class_name, (_FakeAsk,), {})
+        self.denied = False
+        self._domain = domain
+
+    def deny(self):
+        self.denied = True
+
+
+def _handler_class():
+    import inspect
+
+    from shani_chronoa.gui import browser
+
+    return next(v for v in vars(browser).values()
+                if inspect.isclass(v) and hasattr(v, "_on_permission_request"))
+
+
+class _StubWindow:
+    permission_asks = []
+
+
+def test_a_permission_request_is_refused_and_recorded():
+    """The ask is recorded *and* refused - a record alone changes nothing."""
+    cls = _handler_class()
+    stub = _StubWindow()
+    stub.permission_asks = []
+    ask = _FakeAsk("NotificationPermissionRequest")
+
+    handled = cls._on_permission_request(stub, None, ask)
+
+    assert ask.denied, "the page's request was left to whatever the platform does"
+    assert handled is True, (
+        "returning False runs WebKit's default handler, which on a machine "
+        "with a working permission store can answer yes")
+    assert stub.permission_asks == ["desktop notifications"], stub.permission_asks
+
+
+def test_a_refusal_is_the_handler_answer_and_not_the_default():
+    """**Returning False is the dangerous value**, and it is not obvious from
+    reading - `False` reads as "not handled, carry on", which is exactly what
+    lets the platform decide."""
+    import inspect
+
+    cls = _handler_class()
+    body = inspect.getsource(cls._on_permission_request)
+
+    assert "return True" in body, "the handler must answer True - it handled it"
+
+
+def test_what_was_asked_for_is_named_for_a_person(web_allowed, no_provider):
+    stub = _StubWindow()
+    stub.permission_asks = []
+
+    cases = {
+        "NotificationPermissionRequest": "desktop notifications",
+        "GeolocationPermissionRequest": "your location",
+        "ClipboardPermissionRequest": "the clipboard",
+    }
+    for class_name, expected in cases.items():
+        cls = _handler_class()
+        got = cls._on_permission_request(stub, None, _FakeAsk(class_name))
+        assert got is True
+        assert stub.permission_asks[-1] == expected, (
+            "%s was named %r" % (class_name, stub.permission_asks[-1]))
+
+
+def test_a_permission_nobody_has_heard_of_keeps_its_own_name():
+    """**The control, and the reason the helper is written this way.** Folding an
+    unknown request into a friendly label is how a capability you never audited
+    arrives wearing a name you did audit."""
+    cls = _handler_class()
+    stub = _StubWindow()
+    stub.permission_asks = []
+
+    cls._on_permission_request(stub, None, _FakeAsk("TelepathyPermissionRequest"))
+
+    assert stub.permission_asks == ["Telepathy"], (
+        "an unknown request was renamed into something familiar: %r"
+        % stub.permission_asks)
+
+
+def test_the_driver_says_what_was_refused(web_allowed, no_provider, monkeypatch):
+    """A page whose microphone was refused has a button that does nothing, and
+    "the driver clicked it and nothing happened" is the ambiguity this repo has
+    recorded several times."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_permission_asks",
+                        lambda *a, **k: ["the microphone"])
+
+    note = browser_driver.permission_note()
+
+    assert "the microphone" in note, note
+    assert "refused" in note, note
+    assert "will not work" in note, (
+        "the note must connect the refusal to the dead control: %r" % note)
+
+
+def test_no_refusals_means_no_note(web_allowed, no_provider, monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_permission_asks", lambda *a, **k: [])
+
+    assert browser_driver.permission_note() == ""
+
+
+def test_the_permission_handler_is_actually_connected():
+    """**Calling the handler proves nothing about it being reached.**
+
+    Every test above invokes `_on_permission_request` directly, so a build in
+    which the signal was never connected would pass all of them - which is this
+    repository's own recorded rule ("a test that calls the function is not a test
+    that the skill is reachable"), and the way `scan_archive.py` and
+    `guardrail.py` both shipped.
+
+    Parsed rather than grepped, so it cannot match its own prose; and the control
+    is the neighbouring `script-dialog` connection, which really is there.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    cls = next(v for v in vars(__import__(
+        "shani_chronoa.gui.browser", fromlist=["x"])).values()
+        if inspect.isclass(v) and hasattr(v, "_build_webview"))
+    src = textwrap.dedent(inspect.getsource(cls._build_webview))
+    connected = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) \
+                and node.func.attr == "connect" and node.args \
+                and isinstance(node.args[0], ast.Constant):
+            connected.add(node.args[0].value)
+
+    assert "permission-request" in connected, (
+        "the handler is never attached, so no page can reach it: %r" % connected)
+    assert "script-dialog" in connected, (
+        "the control: the sibling connection really is there")

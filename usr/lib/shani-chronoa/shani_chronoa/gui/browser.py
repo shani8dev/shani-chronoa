@@ -50,6 +50,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import re
+import sys
 import urllib.parse
 from importlib import import_module
 
@@ -102,6 +103,59 @@ _WEBKIT_NAMESPACES = ("6.0", "5.0", "4.1")
 _WEBKIT = None
 _WEBKIT_VERSION = ""
 _WEBKIT_TRIED = False
+
+
+def _permission_name(request) -> str:
+    """What a page is asking for, in words a person would use.
+
+    **Named from the request's own type, never guessed from a string.** The
+    subclasses are the library's vocabulary and they are exact:
+    `UserMediaPermissionRequest` really is the microphone/camera, and
+    `WebsiteDataAccessPermissionRequest` really is cookies and storage. An
+    unrecognised request is reported by its class name rather than folded into a
+    generic "something", because an unknown permission that arrives under a
+    friendlier label is the failure this whole method exists to prevent.
+    """
+    webkit = sys.modules.get("gi.repository.WebKit")
+    if webkit is None:
+        return "a browser permission"
+    cls = type(request)
+    name = cls.__name__
+    if name.endswith("PermissionRequest"):
+        name = name[:-len("PermissionRequest")]
+    else:
+        return name
+    # A single type covering several very different things, split by its own
+    # accessors rather than by a hard-coded ordering.
+    try:
+        if name == "UserMedia":
+            if webkit.user_media_permission_is_for_audio_device(request):
+                return "the microphone"
+            if webkit.user_media_permission_is_for_video_device(request):
+                return "the camera"
+            if webkit.user_media_permission_is_for_display_device(request):
+                return "the screen"
+            return "the microphone or camera"
+        if name == "WebsiteDataAccess":
+            domain = request.get_requesting_domain() or "this site"
+            return "cookies and stored data for %s" % domain
+        if name == "Geolocation":
+            return "your location"
+        if name == "Notification":
+            return "desktop notifications"
+        if name == "Clipboard":
+            return "the clipboard"
+        if name == "PointerLock":
+            return "control of the pointer"
+        if name == "MediaKeySystem":
+            return "protected media playback"
+        if name == "XR":
+            return "an immersive device"
+        if name == "DeviceInfo":
+            return "device information"
+    except Exception:  # noqa: BLE001 - a name we cannot refine is still a name
+        logging.debug("could not refine a permission name", exc_info=True)
+    return name
 
 
 class BrowserUnavailable(RuntimeError):
@@ -325,6 +379,9 @@ class BrowserWindow(Gtk.Window):
         # JavaScript dialogs seen since `clear_dialogs()`; see
         # `_on_script_dialog` for why they are recorded and not dismissed.
         self.dialogs = []
+        # What pages have asked this browser for, and the answer Chronoa
+        # gave. See `_on_permission_request`.
+        self.permission_asks = []
         #: Set by `gui/browser_driver.py` only while the model is driving this
         #: window: a callable `url -> reason` ("" to allow). The person's own
         #: typing and clicking are never gated - see the module docstring.
@@ -492,6 +549,7 @@ class BrowserWindow(Gtk.Window):
         view.connect("create", self._on_create)
         view.connect("decide-policy", self._on_decide_policy)
         view.connect("script-dialog", self._on_script_dialog)
+        view.connect("permission-request", self._on_permission_request)
         return view
 
     def _on_script_dialog(self, _view, dialog) -> bool:
@@ -534,6 +592,58 @@ class BrowserWindow(Gtk.Window):
         # this list is read by the driver, not kept as a history.
         del self.dialogs[:-4]
         return True
+
+    def _on_permission_request(self, _view, request) -> bool:
+        """Refuse what a page asks for, and record that it asked.
+
+        **This is a consent boundary, and it was being decided elsewhere.**
+        Chronoa connected no `permission-request` handler at all, so every
+        decision - microphone, camera, location, desktop notifications, the
+        clipboard - belonged to whatever the platform did on its own, and
+        **none of it was reported to the person or to the driver**. A refusal and
+        a grant look identical from inside the app.
+
+        Measured on this box, a page calling `getUserMedia({audio:true})`:
+
+            no handler        -> `DENIED NotAllowedError`
+            handler denying   -> `DENIED NotAllowedError`, signal fires as
+                                 `UserMediaPermissionRequest`
+
+        So the default already denies *here*, and that is not the argument for
+        this method. The argument is that the answer should be **Chronoa's, and
+        visible**: a machine with a working permission store can answer
+        differently, the page still cannot tell the person either way, and a
+        decision this product does not make should not be one it silently
+        inherits. Refusing is also the posture the rest of the codebase takes -
+        53 consent-gated senses, an egress ledger, and a browser whose navigations
+        are checked before they are made.
+
+        The ask is recorded because a refused microphone is a page feature that
+        will simply not work, and "this page's microphone button does nothing" is
+        otherwise indistinguishable from a broken driver - which is the same
+        confusion as the Web Speech API measurements already in this repo, where
+        clicking an inert control reported success.
+        """
+        name = _permission_name(request)
+        self.permission_asks.append(name)
+        del self.permission_asks[:-8]
+        try:
+            request.deny()
+        except Exception:  # noqa: BLE001 - a refusal we cannot deliver must not
+            # leave the default handler to grant it, so fall through to True
+            # below rather than returning False.
+            logging.warning("could not deny a %s request", name, exc_info=True)
+        # True: handled, and refused. Returning False would run WebKit's default
+        # handler - which on some platforms consults a permission store and can
+        # answer yes.
+        return True
+
+    def pending_permission_asks(self):
+        """What pages have asked this browser for since the last clear."""
+        return list(self.permission_asks)
+
+    def clear_permission_asks(self) -> None:
+        self.permission_asks.clear()
 
     def pending_dialogs(self):
         """The JavaScript dialogs raised since the last :meth:`clear_dialogs`."""

@@ -143,7 +143,7 @@ def _evaluate(script: str, timeout: float = 15.0) -> str:
         raise RuntimeError("%s%s" % (exc, note)) from exc
     # The page answered, so it is not paused: forget any dialog from before.
     try:
-        _main(lambda w: w.clear_dialogs(), 5.0)
+        _main(lambda w: (w.clear_dialogs(), w.clear_permission_asks()), 5.0)
     except Exception:  # noqa: BLE001 - clearing is best-effort
         pass
     return text
@@ -161,6 +161,31 @@ def pending_dialogs(timeout: float = 5.0):
         return _main(lambda w: w.pending_dialogs(), timeout) or []
     except Exception:  # noqa: BLE001 - an unreadable window says nothing
         return []
+
+
+def pending_permission_asks(timeout: float = 5.0):
+    """What pages have asked this browser for, or `[]` if none are known."""
+    try:
+        return _main(lambda w: w.pending_permission_asks(), timeout) or []
+    except Exception:  # noqa: BLE001 - an unreadable window says nothing
+        return []
+
+
+def permission_note() -> str:
+    """What a page asked for and was refused, so a dead control has a reason.
+
+    A page whose microphone was refused has a button that does nothing, and
+    "the driver clicked it and nothing happened" is the exact ambiguity this
+    repository has now recorded several times over. **Saying which permission was
+    refused turns a mysterious inert control into a known one** - the page feature
+    is gone because Chronoa refused it, not because the click missed.
+    """
+    asks = pending_permission_asks()
+    if not asks:
+        return ""
+    shown = ", ".join(dict.fromkeys(asks))
+    return (" This page asked for %s; Chronoa refused. Anything on the page that"
+            " needs it will not work." % shown)
 
 
 def dialog_note() -> str:
@@ -915,6 +940,7 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
         what = value.get("label") or value.get("tag") or "the element"
         said = f"Clicked {what!r}" + (f" ({selector})" if selector else f" at ({x}, {y})") + "."
         said += _what_appeared(before_controls, page_controls(timeout))
+        said += permission_note()
         followed = _describe_load(load, "It opened")
         if followed.startswith("Error"):
             _say(f"the click on {what!r} led somewhere the network policy refuses", refused=True)
