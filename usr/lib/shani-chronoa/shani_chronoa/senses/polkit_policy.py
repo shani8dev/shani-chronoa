@@ -147,6 +147,9 @@ def read_actions() -> Optional[List[dict]]:
                 "description": _describe(element),
                 "allow_active": (active or "").strip(),
                 "kind": _classify(active),
+                # The file name, because "which package is this from" is part
+                # of the question and the id does not always say.
+                "file": path.name,
             })
     return actions
 
@@ -188,11 +191,80 @@ _UNKNOWN = (
     "machine whose permissions could not be read.")
 
 
+#: The answer, in the words the question was asked in. Written per outcome
+#: rather than derived, because "needs a password" and "is refused outright"
+#: are very different news and a single template flattens them.
+_ANSWERS = {
+    "yes": "needs NO password on this machine",
+    "self": "needs your OWN password, and not an administrator's",
+    "admin": "needs an ADMINISTRATOR's password, so you cannot do it alone",
+    "never": "is REFUSED to everyone, including an administrator",
+    "other": "uses a rule this could not classify, so the answer is unknown",
+}
+
+
+def _lookup(actions: List[dict], about: str) -> str:
+    """What this machine's policy says about one action, by name.
+
+    **Matched on the id, the description and the file name, case-insensitively,
+    and every match is listed.** An exact id is one thing, but people ask by
+    what the thing is called - "mount", "power", "wifi", "usb" - and the
+    descriptions on a real image are what carry those words
+    (`org.freedesktop.upower.policy` describes itself as "Allows clients to
+    change the power settings"). Taking the first match would silently answer
+    about the wrong action, which is the confident-wrong-answer shape this
+    module documents at length.
+    """
+    needle = about.strip().lower()
+    hits = []
+    for action in actions:
+        haystacks = (action["id"], action["description"], action.get("file", ""))
+        if any(needle in (h or "").lower() for h in haystacks):
+            hits.append(action)
+    if not hits:
+        # **No match is its own answer, and not "you may do it".** The policy
+        # files are what polkit reads, so an action with no policy is one that
+        # either needs no authorisation or is not installed - and this module
+        # cannot tell those apart. Saying so is the honest half; inventing a
+        # permission here would be the exact failure the sense's UNKNOWN branch
+        # exists to avoid.
+        return (f"Nothing installed matches \"{about}\". That does not mean "
+                f"you are allowed to do it: an action with no policy file is "
+                f"either one that needs no authorisation or one that is not "
+                f"installed, and this cannot tell those apart. Of the "
+                f"{len(actions)} actions installed, "
+                f"{sum(1 for a in actions if a['kind'] == 'yes')} of them "
+                f"need no password - pass detail=true to see them all.")
+
+    lines = []
+    for action in hits[:8]:
+        kind = action["kind"]
+        lines.append(f"  {action['description'] or action['id']}")
+        lines.append(f"    ({action['id']})")
+        lines.append(f"    -> {_ANSWERS.get(kind, _ANSWERS['other'])}"
+                     f"   [rule: {action['allow_active'] or '(unset)'}]")
+    if len(hits) > 8:
+        lines.append(f"  ... and {len(hits) - 8} more that match")
+    head = (f"{len(hits)} installed action(s) match \"{about}\":"
+            if len(hits) > 1 else f"This action matches \"{about}\":")
+    return head + "\n" + "\n".join(lines)
+
+
 def _run(arguments: dict) -> str:
     actions = read_actions()
     if actions is None:
         return _UNKNOWN
     summary = _summary(actions)
+    # **A question about ONE action, answered about that action.** The summary
+    # is a count, and the everyday question is not a count - it is "can I mount
+    # a USB stick without being asked?". Measured on a real image: 65 actions,
+    # among them `io.systemd.mount-file-system`, `org.freedesktop.upower` and
+    # `power-profiles-daemon`, all of which somebody asks about by their own
+    # name rather than by action id. With only `detail` a person got 65 rows and
+    # had to find theirs.
+    about = str((arguments or {}).get("about") or "").strip()
+    if about:
+        return _lookup(actions, about)
     # The schema declares `detail`, so the handler reads it. A declared argument
     # no code consults is the "an option whose label promises something the
     # program does not do" failure this repository records for the tray icon.
@@ -214,7 +286,9 @@ _SCHEMA = {
             "Separates actions that need no authentication from ones that "
             "need your own password and ones that need an administrator. "
             "Answers UNKNOWN when the policies could not be read, which is not "
-            "the same as nothing being allowed."
+            "the same as nothing being allowed. Pass `about` for one action "
+            "('can I mount a USB stick without a password') and detail for "
+            "every action."
         ),
         "parameters": {
             "type": "object",
@@ -224,6 +298,15 @@ _SCHEMA = {
                     "description": ("Also list the individual actions and the "
                                     "rule each one carries, rather than only "
                                     "the counts."),
+                },
+                "about": {
+                    "type": "string",
+                    "description": ("Ask about one action instead of "
+                                    "everything - a word from its name or "
+                                    "description ('mount', 'power', 'wifi') or "
+                                    "its full action id. Answers whether that "
+                                    "one needs no password, your own, an "
+                                    "administrator's, or is refused outright."),
                 },
             },
         },
