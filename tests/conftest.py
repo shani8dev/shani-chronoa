@@ -4,7 +4,7 @@ Environment (recorded):
   - venv:            /tmp/chronoa-test-venv
                      (created with: python3 -m venv --system-site-packages /tmp/chronoa-test-venv)
   - deps:            /tmp/chronoa-test-venv/bin/pip install pytest httpx
-  - run command:     cd /home/shrinivaskumbhar/Documents/shani/shani-chronoa && \\
+  - run command:     cd <repo root> && \\
                        PYTHONDONTWRITEBYTECODE=1 /tmp/chronoa-test-venv/bin/python \\
                        -m pytest tests/ -v -p no:cacheprovider
                      (-p no:cacheprovider keeps pytest from writing .pytest_cache into the repo)
@@ -190,17 +190,31 @@ def fake_wpctl(tmp_path, monkeypatch):
 
 @pytest.fixture
 def mock_launch_uri(monkeypatch):
-    """Record calls to Gio.AppInfo.launch_default_for_uri instead of opening a browser."""
+    """Record calls to Gio.AppInfo.launch_default_for_uri* instead of opening a browser.
+
+    **Both forms, and the async one is why this note exists.** `gui/blocks.py`
+    opens a clicked reply link with `launch_default_for_uri_async`, so the
+    synchronous call this fixture used to patch left the real path uncovered: a
+    test that emitted `activate-link` on a real label ran the real async
+    launcher and **opened a browser on the person's desktop**, which happened
+    during the 2026-10-11 link work. The async form takes a completion callback
+    rather than returning, so the fake records the URI and never calls back -
+    which is honest, because "it was asked for" is what a test can observe.
+    """
     calls: list = []
 
     def _fake(uri, context):
         calls.append(uri)
         return True
 
+    def _fake_async(uri, context=None, cancellable=None, callback=None, user_data=None):
+        calls.append(uri)
+
     import gi
     gi.require_version("Gio", "2.0")
     from gi.repository import Gio
     monkeypatch.setattr(Gio.AppInfo, "launch_default_for_uri", _fake)
+    monkeypatch.setattr(Gio.AppInfo, "launch_default_for_uri_async", _fake_async)
     return calls
 
 

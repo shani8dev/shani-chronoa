@@ -7,6 +7,7 @@ ran. So every assertion here constructs a real `SettingsWindow` against a real
 `Gtk.Application` and walks the constructed tree.
 """
 
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -29,7 +30,12 @@ _HARNESS = textwrap.dedent(
     import gi
     gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
     from gi.repository import Gtk, Adw, GLib
-    sys.path.insert(0, '/home/shrinivaskumbhar/Documents/shani/shani-chronoa/usr/lib/shani-chronoa')
+    # Derived from this file, never an absolute path: a hardcoded
+    # /home/<developer>/... made this subprocess unrunnable on any other
+    # machine, and nothing noticed because it always worked here. Found by
+    # tests/test_repo_hygiene.py's personal-path guard.
+    # Passed as an argument because `__file__` is `<string>` under `python3 -c`.
+    sys.path.insert(0, sys.argv[1])
     from shani_chronoa.config import ChronoaConfig
 
     class App(Gtk.Application):
@@ -142,7 +148,8 @@ def built(tmp_path_factory, compiled_schema_dir):
     env["GSETTINGS_SCHEMA_DIR"] = str(compiled_schema_dir)
     env["GSETTINGS_BACKEND"] = "keyfile"
     proc = subprocess.run(
-        [sys.executable, "-c", _HARNESS],
+        [sys.executable, "-c", _HARNESS,
+         str(pathlib.Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chronoa")],
         capture_output=True, text=True, timeout=120, env=env, cwd=str(work),
     )
     payload = None

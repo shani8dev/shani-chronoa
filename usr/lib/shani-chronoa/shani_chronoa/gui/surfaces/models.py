@@ -70,8 +70,14 @@ def _cards(config=None) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for spec, label, _ram in local_llm.TIERS:
+        # The tuple's third field is a legacy RAM hint, kept in step by hand and
+        # already out of date against `local_llm.REQUIRES`, which carries the
+        # measured requirement **and** what this machine would actually decode
+        # it at. This card reads that one; `_ram` was discarded here, so a card
+        # could never say why a tier was refused.
         out.append({"kind": "llm", "key": spec.key, "label": label,
-                    "size": spec.size_bytes, "installed": local_llm.verify(spec.key)})
+                    "size": spec.size_bytes, "installed": local_llm.verify(spec.key),
+                    "requires": _llm_requirements(spec.key)})
     for key, spec in stt_provision.MODELS.items():
         out.append({"kind": "stt", "key": key,
                     "label": f"{key.split('-')[0].title()} ({key})",
@@ -137,6 +143,91 @@ def _matches(card: Dict[str, Any], needle: str) -> bool:
         or n in card["kind"].lower()
 
 
+def _llm_requirements(key: str) -> Dict[str, Any]:
+    """What a tier needs from this machine, and what it would get here.
+
+    Everything on the card comes from `local_llm`'s own table rather than from
+    a sentence written here, so a tier that is refused names **the number it is
+    short by** instead of "not recommended". Four facts, all measured rather
+    than guessed:
+
+    * `cpu` / `ram` / `vram` - what the tier declares.
+    * `reads` - bytes one generated token actually reads. Equal to the download
+      size for a dense model and a fraction of it for a mixture-of-experts, so
+      this is the number that explains why a bigger tier can be faster.
+    * `tps` - what this machine would decode at, or None when no server is
+      answering. **None means "not measured"**, never a guess.
+    * `missing` - `requirements_met`'s own reasons, so the card cannot disagree
+      with the code that picks the default.
+    """
+    from shani_chronoa import local_llm
+
+    need = local_llm.REQUIRES.get(key)
+    if need is None:
+        return {}
+    met, missing = local_llm.requirements_met(key)
+    return {
+        "cpu": need.get("cpu", 0),
+        "ram": need.get("ram", 0),
+        "vram": need.get("vram", 0),
+        "min_tps": need.get("min_tps", local_llm.MIN_USABLE_TPS),
+        "reads": local_llm.bytes_per_token(key),
+        "tps": local_llm.expected_decode_tps(key),
+        "measured": need.get("measured", True),
+        "usable": met,
+        "missing": [m for m in (missing if isinstance(missing, list) else [missing]) if m],
+    }
+
+
+def _requirement_text(card: Dict[str, Any]) -> str:
+    """The one line under an LLM card: what it needs, and what this box gives it.
+
+    Rendered from `_llm_requirements`, so there is no second copy of the table to
+    fall behind. Every part is conditional on being known - a tier with no RAM
+    requirement contributes no RAM clause rather than "0 GB".
+    """
+    req = card.get("requires") or {}
+    if not req:
+        return ""
+    parts: List[str] = []
+    if req.get("ram"):
+        parts.append(f"{req['ram']:g} GB RAM")
+    if req.get("vram"):
+        parts.append(f"{req['vram']:g} GB VRAM")
+    if req.get("cpu"):
+        parts.append(f"{req['cpu']:g} CPU cores")
+    reads = req.get("reads")
+    if reads:
+        # What one token reads, which is the download size for a dense model and
+        # a fraction of it for an MoE - the reason a 30B can out-run an 8B.
+        parts.append(f"reads {_size_text(reads)} per token")
+    if req.get("tps"):
+        qualifier = "" if req.get("measured", True) else "about "
+        parts.append(f"{qualifier}{req['tps']:.1f} tok/s here")
+    head = "Needs " + ", ".join(parts) if parts else ""
+    if not head:
+        return ""
+    if req.get("missing"):
+        return head + ". Not the default here: " + req["missing"][0]
+    return head + ". Fast enough to be the default on this machine."
+
+
+def _needs_label_text(card: Dict[str, Any]) -> str:
+    """The requirement line for this card, or "" when it should not draw one.
+
+    Only LLM cards carry requirements: a speech card does not become more
+    demanding because a text model is, and "Needs 2 CPU cores" under a Piper
+    voice would be a claim nobody checked.
+
+    Named separately from `_requirement_text` so *whether* to render is as
+    testable as *what* to render. See `_card` for why that separation earned its
+    keep.
+    """
+    if card.get("kind") != "llm":
+        return ""
+    return _requirement_text(card)
+
+
 def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
     """One model, as a box a FlowBox can lay out in columns."""
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_top=8,
@@ -154,6 +245,18 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
     box.append(Gtk.Label(label=" · ".join(parts), xalign=0))
     status = Gtk.Label(xalign=0, wrap=True)
     box.append(status)
+    # What it costs this machine to run, and why it is or is not the default.
+    # `_needs_label_text` owns the *decision* to render a line, not just the
+    # text: a first version decided here, and the mutation that stopped the
+    # label being appended left every test green - the tests all called the text
+    # function and none of them called the card.
+    needs = _needs_label_text(card)
+    if needs:
+        needs_label = Gtk.Label(label=needs, xalign=0, wrap=True)
+        needs_label.add_css_class("dim-label")
+        # Long on the narrow layouts, so the cap the layout contract requires.
+        needs_label.set_max_width_chars(48)
+        box.append(needs_label)
 
     def refresh() -> None:
         installed = card["installed"]

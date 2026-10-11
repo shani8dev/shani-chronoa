@@ -30,6 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable, Optional
 
+from shani_chronoa import hardware_profile
 from shani_chronoa import files, model_service
 from shani_chronoa.stt_provision import ModelSpec, _install, file_matches, install_verified
 
@@ -127,7 +128,7 @@ def server_args() -> "list[str]":
     # the Vulkan build picks the GPU by itself; the CPU build has nothing to pick
     return ["-m", str(model_dir() / MODEL.filename), "--listen-ip", model_service.HOST,
             "--listen-port", str(model_service.PORTS[INSTANCE]), "--mmap",
-            "-t", str(max(1, (os.cpu_count() or 2) - 1))]
+            "-t", str(hardware_profile.physical_cores())]
 
 
 def provision(gpu: bool, progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> Path:

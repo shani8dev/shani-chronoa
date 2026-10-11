@@ -1,0 +1,148 @@
+"""The Models panel says what each tier needs from *this* machine.
+
+The request behind this was "show cpu + ram + gpu/vram per model, not just
+size", and the reason it was not already there is in the code: `_cards()` read
+`for spec, label, _ram in local_llm.TIERS:` and threw the RAM figure away, and
+nothing else from `local_llm.REQUIRES` reached a card. So a person choosing a
+model saw a download size and nothing about whether their machine could use it.
+
+**Every number on the card is read from `local_llm`, never written here.**
+That is the whole claim of the test: a card is rendered from the same table and
+the same functions that choose the default, so the panel cannot say a tier is
+fine while the code refuses it.
+
+Measured against the tier table on this box (i7-1165G7, 4 cores, no GPU), the
+panel renders:
+
+    Medium (1.1 GB)      Needs 2 CPU cores, reads 1.1 GB per token, 9.8 tok/s here.
+                         Fast enough to be the default on this machine.
+    Very large (4.7 GB)  Needs 16 GB RAM, 2 CPU cores, reads 5.0 GB per token,
+                         2.2 tok/s here. Not the default here: 5 tok/s (this
+                         machine decodes at 2.2)
+    Mixture of experts   Needs 20 GB RAM, 4 CPU cores, reads 2.2 GB per token,
+                         about 4.9 tok/s here. Not the default here: a measured
+                         decode rate (this tier's bytes-per-token is estimated,
+                         not measured)
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr" / "lib" / "shani-chronoa"))
+
+from shani_chronoa import local_llm  # noqa: E402
+from shani_chronoa.gui.surfaces import models as surface  # noqa: E402
+
+
+def _llm_cards():
+    return [c for c in surface._cards() if c["kind"] == "llm"]
+
+
+def _card(key):
+    for card in _llm_cards():
+        if card["key"] == key:
+            return card
+    raise AssertionError(f"no LLM card for {key!r}")
+
+
+class TestEveryCardStatesWhatItNeeds:
+    def test_every_llm_card_carries_a_requirements_row(self):
+        """A tier with no row in `REQUIRES` would render a card that says
+        nothing about the machine - which is the shape the request was about."""
+        cards = _llm_cards()
+        assert cards, "the panel has no LLM cards at all"
+        for card in cards:
+            assert card.get("requires"), f"{card['key']} has no requirements row"
+
+    def test_the_row_names_ram_cpu_and_what_one_token_reads(self):
+        for card in _llm_cards():
+            req = card["requires"]
+            assert "ram" in req and "cpu" in req and "reads" in req, (
+                f"{card['key']}: {sorted(req)}")
+            assert req["reads"] > 0, f"{card['key']} reads nothing per token"
+
+    def test_a_moe_tier_reads_less_than_it_stores(self):
+        """**The fact that makes a big tier worth considering at all.** The 30B
+        stores 17.3 GB and activates a fraction of it, so one token reads ~2.2 GB
+        - less than the 8B's 4.7 GB. A card that printed only the download size
+        would rank them the wrong way round."""
+        moe = _card("qwen3-30b-a3b")
+        dense = _card("qwen3-8b")
+        assert moe["requires"]["reads"] < dense["requires"]["reads"]
+        assert moe["requires"]["reads"] < moe["size"]
+
+    def test_the_card_text_names_the_units_and_the_shortfall(self):
+        text = surface._requirement_text(_card("qwen3-14b"))
+        assert "GB RAM" in text and "CPU cores" in text
+        assert "per token" in text
+        assert "tok/s here" in text
+        assert "Not the default here:" in text, (
+            "a refused tier must say why on the card, not just omit a check mark")
+
+    def test_a_usable_tier_says_so_rather_than_saying_nothing(self):
+        """The other direction: silence reads as a defect, and a panel where
+        every line ends in a complaint trains people to ignore them."""
+        text = surface._requirement_text(_card("qwen3-1.7b"))
+        assert "default on this machine" in text
+        assert "Not the default" not in text
+
+    def test_the_shortfall_is_the_number_not_a_verdict(self):
+        """`requirements_met`'s own reasons, so the card cannot disagree with the
+        code that picks the default."""
+        met, missing = local_llm.requirements_met("qwen3-30b-a3b")
+        assert not met
+        text = surface._requirement_text(_card("qwen3-30b-a3b"))
+        assert missing[0][:24] in text, (
+            f"card says {text!r}, the code's reason is {missing[0]!r}")
+
+    def test_an_estimated_speed_is_never_written_without_saying_so(self):
+        text = surface._requirement_text(_card("qwen3-30b-a3b"))
+        assert "about " in text, (
+            "the 30B's bytes-per-token comes from its architecture, not a "
+            "decode here; the card must not print that number bare")
+
+
+class TestOnlyModelsSayAnything:
+    def test_the_card_decides_to_draw_the_line_from_the_same_function(self):
+        """**Why `_needs_label_text` exists.** The renderer used to decide for
+        itself, and the mutation that stopped the label being appended left
+        every test in this file green - they all called the *text* function and
+        none called the card. The decision is now a pure function the card calls,
+        so it can be asserted without a display."""
+        for card in _llm_cards():
+            assert surface._needs_label_text(card) == surface._requirement_text(card)
+
+    def test_no_other_kind_grows_a_requirement_line(self):
+        """A speech card does not become more demanding because a text model is,
+        and 'Needs 2 CPU cores' under a Piper voice would be a claim nobody
+        checked."""
+        for card in surface._cards():
+            if card["kind"] != "llm":
+                assert surface._requirement_text(card) == "", (
+                    f"{card['kind']}/{card['key']} renders a requirement line")
+
+
+# **What this file does not do, and the mutations that proved it.**
+#
+# It never builds the card. A first version tried, in-process, and segfaulted -
+# GDK picks its display backend at GTK init and no fixture can change it
+# afterwards, which is why this repository drives real windows through a
+# subprocess rather than in pytest.
+#
+# That is not stylistic: with `_card` unbuilt, these mutations all left this
+# file green.
+#
+#   * the label is never appended to the box
+#   * the label is constructed with an empty string
+#   * the shortfall clause is dropped
+#
+# **All three are now caught by `tests/test_models_card_really_shows_the_line.py`**,
+# which builds the card on a private Broadway display in a subprocess. What this
+# file verifies is the **text** and the **decision to render**, both pure
+# functions; what that one verifies is that GTK puts the result on screen.
+# Together they cover the whole path, and neither file pretends to cover the
+# other's half.

@@ -27,6 +27,12 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
+try:  # httpx is the app's HTTP client; the CLI paths must still import without it
+    import httpx
+except ImportError:  # pragma: no cover - exercised only on a stripped install
+    httpx = None  # type: ignore[assignment]
+
+from shani_chronoa import hardware_profile
 from shani_chronoa import ctxfit, files
 from shani_chronoa.stt_provision import ModelSpec, _install
 
@@ -60,12 +66,23 @@ TIERS = (
                "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
                "the quality step; reliable tool calls, still CPU-viable",
                _QWEN.format(repo="Qwen3-8B-GGUF", rev="7c41481f57cb95916b40956ab2f0b139b296d974")),
-     "Very large (4.7 GB) - the first size where replies are markedly better", 16),
+     "Very large (4.7 GB) - the first size where replies are markedly better", 999),
     (ModelSpec("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf", 9_001_752_960,
                "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
                "near-desktop-class reasoning; slow on a CPU",
                _QWEN.format(repo="Qwen3-14B-GGUF", rev="530227a7d994db8eca5ab5ced2fb692b614357fd")),
-     "Huge (8.4 GB) - for machines with room; slow without a graphics card", 24),
+     "Huge (8.4 GB) - for machines with room; slow without a graphics card", 999),
+    # A 30B mixture-of-experts: 17.3 GiB on disk, ~3.3B of 30.5B parameters
+    # active per token, so it READS a fraction of what it stores. That is what
+    # makes it fast enough on modest hardware - see REQUIRES' `active_bytes`.
+    # `active_bytes` there is an estimate from the architecture, not a
+    # measurement; tests/test_model_requirements.py pins that this tier must not
+    # become a default until it has been corrected from a real decode.
+    (ModelSpec("qwen3-30b-a3b", "Qwen3-30B-A3B-Q4_K_M.gguf", 18_556_685_824,
+               "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
+               "a 30B that reads like a 3B; the size that works on small machines",
+               _QWEN.format(repo="Qwen3-30B-A3B-GGUF", rev="e4d4bafdfb96a411a163846265362aceb0b9c63a")),
+     "Mixture of experts (17.3 GB) - reads a fraction of what it stores", 999),
 )
 SPECS = {spec.key: spec for spec, _label, _ram in TIERS}
 
@@ -90,8 +107,179 @@ def ram_gb() -> float:
     return 8.0
 
 
+def effective_bandwidth() -> Optional[float]:
+    """This machine's effective memory bandwidth in bytes/s, or None.
+
+    **Measured, never assumed.** Decode is bandwidth-bound - each generated
+    token reads the whole weight set - so a live server's own
+    `predicted_per_second` times the loaded weights *is* the machine's effective
+    bandwidth, and the same figure predicts any other model on that machine.
+
+    That is why this is worth measuring rather than reading from a datasheet: a
+    Threadripper's 8 channels of DDR5 and this laptop's 2 of DDR4 show up
+    directly, and a `nvidia-smi` VRAM figure would not answer it at all.
+
+    **And the prediction it makes is checked against a real decode**, which is
+    the only thing separating this from a plausible story. Measured 2026-10-11
+    on this box (i7-1165G7, 8 cores, no CUDA/Vulkan/SYCL), the 8B's server on
+    8791 and nothing else running:
+
+    | tier | reads/token | predicted | measured |
+    |---|---|---|---|
+    | Qwen3-1.7B-Q4_K_M | 1.03 GiB | 15.8 tok/s | 6.81 tok/s |
+    | Qwen3-8B-Q4_K_M   | 4.68 GiB | **3.5 tok/s** | **3.69 tok/s** |
+
+    The 8B is within 5%. The 1.7B is predicted too high, and *that* is the
+    finding rather than a failure of the formula: a small model is not
+    bandwidth-saturated, so it moves less memory per second than the hardware
+    can, and the true figure is better read from a larger one. That is why the
+    cache below keeps the **largest** measurement rather than the first.
+
+    The first 8B measurement here read **0.20 tok/s** and was wrong for reasons
+    worth keeping: two llama-servers were running (the 1.7B on 8765 and the 8B
+    on 8791, seven threads each, on eight cores) with 732 MiB of free RAM.
+    Pausing one with SIGSTOP was not enough either - this is a shared desktop,
+    and GNOME, Firefox, Slack and two editor sessions are always resident.
+    "Measured on a real machine" means measured with nothing else competing, and
+    a bandwidth figure taken under contention is a number about the contention.
+
+    **The probe generates real tokens, and it has to.** `n_predict: 1` returns
+    `predicted_per_second: 1000000.0` - llama.cpp dividing a single millisecond
+    token - which would report every machine as infinitely fast. Sixteen tokens
+    costs under two seconds at the slowest tier and averages the timing out.
+
+    Returns None when no server is answering, because a bandwidth guessed from a
+    part number is a number about a chip rather than about this machine, and the
+    caller must then say "not measured" rather than assume a fast one.
+    """
+    if httpx is None:
+        return None
+    global _BANDWIDTH_CACHE, _BANDWIDTH_MODEL
+    # Re-probe when the loaded model changes. Caching purely per process meant
+    # the figure belonged to whichever model happened to be loaded at startup -
+    # and on this box that is the 1.7B, which reports the machine at 7 GiB/s
+    # when it will do 17. A model change is a deliberate act, so it is the one
+    # moment worth spending a four-second decode on.
+    current = _loaded_model_path()
+    if _BANDWIDTH_CACHE is not None and _BANDWIDTH_MODEL == current:
+        return _BANDWIDTH_CACHE
+    try:
+        props = httpx.get(f"http://{HOST}:{PORT}/props", timeout=3).json() or {}
+    except Exception:  # noqa: BLE001 - no server, no measurement
+        return None
+    path = str(props.get("model_path") or "")
+    try:
+        weights = os.path.getsize(path) if path else 0
+    except OSError:
+        weights = 0
+    if not weights:
+        return None
+    try:
+        body = httpx.post(
+            f"http://{HOST}:{PORT}/completion",
+            json={"prompt": "Count:", "n_predict": 16, "temperature": 0.0},
+            timeout=30).json() or {}
+    except Exception:  # noqa: BLE001 - a server that cannot answer is unmeasured
+        return None
+    timings = body.get("timings") or {}
+    generated = float(timings.get("predicted_n") or 0)
+    tps = float(timings.get("predicted_per_second") or 0)
+    # Guard the single-token artefact directly rather than trusting n_predict:
+    # a rate above ~1000 tok/s is not a decode on any hardware this runs on.
+    if tps <= 0 or generated < 4 or tps > 1000:
+        return None
+    measured = weights * tps
+    # **Keep the largest figure seen, not the first.** Measured twice on one box
+    # within minutes, nothing else running:
+    #
+    #   Qwen3-1.7B-Q4_K_M  6.81 tok/s x 1.03 GiB =  7.03 GiB/s
+    #   Qwen3-8B-Q4_K_M    3.69 tok/s x 4.68 GiB = 17.29 GiB/s
+    #
+    # Both are "the same machine", and they disagree by 2.5x. The reason is
+    # that a small model is not bandwidth-*saturated* - it is bound by
+    # per-token compute and latency instead, so it moves less memory per second
+    # than the hardware can. A big one is, so it reports the machine's real
+    # figure. Caching the first measurement therefore locked in whichever model
+    # happened to be loaded, and every prediction for a *larger* model was
+    # built on an underestimate.
+    #
+    # The maximum is the better estimate for one reason: a non-saturated model
+    # can only under-report, never over-report. It is still this machine's own
+    # number rather than a part number - which is the property that makes it
+    # worth measuring, since a Threadripper's 8 DDR5 channels show up directly
+    # and an `nvidia-smi` figure would not answer the question at all.
+    if _BANDWIDTH_CACHE is None or measured > _BANDWIDTH_CACHE:
+        _BANDWIDTH_CACHE = measured
+    # The path we already fetched, not a third `/props` round trip: the panel
+    # asks per card, and this ran three GETs for one measurement before.
+    _BANDWIDTH_MODEL = current or (os.path.realpath(path) if path else None)
+    return _BANDWIDTH_CACHE
+
+
+#: Measured once per *model*, not once per process: the probe generates real
+#: tokens and the model list asks for it once per card, so re-probing on every
+#: card would be a decode per card. `_BANDWIDTH_MODEL` is the path the cached
+#: figure came from; a different one means re-measure.
+_BANDWIDTH_CACHE: Optional[float] = None
+_BANDWIDTH_MODEL: Optional[str] = None
+
+
+def _loaded_model_path() -> Optional[str]:
+    """The GGUF the running server has loaded, or None.
+
+    Read from the server's own `/props`, and through `realpath` because that
+    field is the **symlink** (`current.gguf`), so the same model reported under
+    two names would look like two models and re-probe on every card. The same
+    trap is recorded in `tests/test_routines_live.py`'s skip, which took three
+    attempts to get right.
+    """
+    if httpx is None:
+        return None
+    try:
+        props = httpx.get(f"http://{HOST}:{PORT}/props", timeout=3).json() or {}
+    except Exception:  # noqa: BLE001 - no server, no path
+        return None
+    path = str(props.get("model_path") or "")
+    if not path:
+        return None
+    try:
+        return os.path.realpath(path)
+    except OSError:
+        return path
+
+
+def expected_decode_tps(key: str, bandwidth: Optional[float] = None) -> Optional[float]:
+    """Tokens per second `key` would decode at here, or None when unmeasured.
+
+    The bytes one token reads - `bytes_per_token`, which is the ACTIVE set for a
+    mixture-of-experts and the whole file for a dense model - divided into the
+    machine's effective bandwidth. None - never a guess - when the bandwidth is
+    unknown, because a predicted speed quoted as though it were measured is the
+    confident wrong answer this repo keeps recording.
+    """
+    per_token = bytes_per_token(key)
+    if not per_token:
+        return None
+    if bandwidth is None:
+        bandwidth = effective_bandwidth()
+    if not bandwidth:
+        return None
+    return bandwidth / per_token
+
+
+def _fits_in_memory() -> bool:
+    """Whether a live server is answering, so speed can be measured at all."""
+    return effective_bandwidth() is not None
+
+
 def recommended(ram: Optional[float] = None) -> str:
-    """The default for this much RAM: 0.6B under 6 GB, 1.7B otherwise (4B is offered, never defaulted)."""
+    """The default for this much RAM, at CPU decode rates.
+
+    0.6B under 6 GB, 1.7B otherwise. Everything above stays at `999` - offered,
+    never defaulted on a CPU - because decode is bandwidth-bound: the 1.7B
+    measures ~15 tok/s on 8 cores here, which puts a 4B near 6.7, an 8B near 3.3
+    and a 14B near 1.8. `recommended_for_machine()` is what a GPU unlocks.
+    """
     ram = ram_gb() if ram is None else ram
     pick = [spec.key for spec, _label, need in TIERS if ram >= need]
     return pick[-1]
@@ -858,12 +1046,28 @@ def _context_arg() -> str:
     return "8192"
 
 
+def physical_cores() -> int:
+    """This machine's physical cores - the value llama.cpp's `-t` wants.
+
+    The implementation, the measurement and the reasoning live in
+    `hardware_profile.physical_cores`, because four launchers in this package
+    need the same number and a second copy of the table is a table that will
+    disagree with the first one. Re-exported here so the module that starts the
+    server reads its own knob without reaching sideways.
+
+    Measured on this box: `-t 4` gives 3.73 tok/s and `-t 8` gives 2.32 - the
+    old `os.cpu_count() - 1` was 7, in between, losing about a third.
+    """
+    return hardware_profile.physical_cores()
+
+
 def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     """The llama-server command line for this machine: GPU offload only when a GPU is listed."""
     devices = gpu_devices() if devices is None else devices
     args = ["-m", str(current_link()), "--host", HOST, "--port", str(PORT), "--jinja",
             "-c", _context_arg() if devices else "8192", "--no-webui"]
-    args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(max(1, (os.cpu_count() or 2) - 1))]
+    # Physical cores, measured - see `physical_cores`. Not `os.cpu_count() - 1`.
+    args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(physical_cores())]
     return args
 
 
@@ -876,11 +1080,190 @@ def write_env(devices: "Optional[list[str]]" = None) -> Path:
 
 
 def recommended_for_machine() -> str:
-    """By RAM on a CPU; with a GPU listed, the 4B model is the default from 8 GB."""
-    key = recommended()
-    if gpu_devices() and ram_gb() >= 8:
-        return "qwen3-4b"
-    return key
+    """The default for THIS machine, from memory AND decode speed.
+
+    **A RAM gate alone is not enough, and the first version got this wrong.**
+    `recommended()` came back `qwen3-14b` on a CPU-only box with 30 GB of RAM -
+    a model whose decode is ~1.8 tok/s there. Decode is memory-bandwidth bound:
+    every generated token reads the whole weight set, so tok/s x weights is the
+    machine's effective bandwidth and the same figure predicts any other model.
+
+    That is also why "is there a GPU" is the wrong question. A Threadripper 7980X
+    has 8 channels of DDR5 against this laptop's 2 of DDR4 - roughly 86-129 GiB/s
+    of effective bandwidth here's 15.4 - so a 14B runs at 10-15 tok/s there and
+    1.8 here. Gating on the GPU would tell a Threadripper owner to run a 1.7B on
+    a machine that handles a 14B comfortably, which is under-serving exactly the
+    users with the hardware to use it.
+
+    So: **does it fit**, and **will it decode fast enough**. The speed is
+    measured from a live decode when one is running, and when it cannot be
+    measured the answer stays at the tier whose speed is known on a modest CPU
+    rather than assuming a bigger machine. The tiers are *offered* either way -
+    this picks a default, not a permission.
+    """
+    if not _fits_in_memory():              # no server to measure against
+        return recommended()
+    # **A decode rate is not evidence it picks the right skill.** On a machine
+    # with no GPU the default is capped at the largest tier with a measured
+    # `tools/task_eval.py` score, because a reply that arrives and a reply that
+    # uses the right tool are different claims and only one has been measured
+    # above the 1.7B. With a GPU the decode is comfortable and the ceiling lifts.
+    for key in reversed(list(SPECS)):      # largest first
+        if not _may_default(key):
+            continue
+        met, _missing = requirements_met(key)
+        if met:
+            return key
+    return recommended()
+
+
+#: What each tier needs to be a *default*, rather than merely offered.
+#: `cpu`, `ram` and `vram` are the machine's budgets in the units their own
+#: readers report; `min_tps` is the decode rate below which a turn takes long
+#: enough to be annoying.
+#:
+#: `active_bytes` is the field the whole table turns on, and it is the accounting
+#: edge0's paper is about: **peak memory tracks the parameter count, but decode
+#: cost tracks the ACTIVE set.** A dense model reads its whole weight file once
+#: per generated token, so `active_bytes` is the file size. A mixture-of-experts
+#: model routes each token to a few experts, so it reads a fraction of the file -
+#: Qwen3-30B-A3B stores 17.3 GiB and touches ~3.3B of its 30.5B parameters, which
+#: is why a 30B decodes here at a few GiB per token and a 14B dense does not.
+#:
+#: `None` means "the whole file", which is every tier above the fold.
+#:
+#: `eval` is the tier's measured score on `tools/task_eval.py` - right tool and
+#: right arguments, 62 cases, scored and never executed. **A decode rate is not
+#: this.** It says a reply arrives; it says nothing about whether the model calls
+#: the right skill, which is the whole of what an assistant does. So a tier with
+#: no `eval` may be the default on a machine with a GPU whose decode rate is
+#: comfortable, and may not be the default on a CPU-only machine, where the
+#: 1.7B is the ceiling. Those are the only two numbers in the tree with an eval
+#: behind them: 0.6B 44/62, 1.7B 56/62 - and the 4B has never been run.
+#:
+#: **This is the rule the 2026-10-11 measurement nearly broke.** With the
+#: bandwidth model corrected, the 4B predicts 7.4 tok/s here and clears
+#: `min_tps` on its own, so `recommended_for_machine()` started returning it -
+#: promoting the CPU default to a model whose task performance has never been
+#: measured, on a speed figure. The speed figure was the excuse; the eval is the
+#: evidence, and only one of the two had been measured.
+REQUIRES: Dict[str, Dict[str, float]] = {
+    "qwen3-0.6b": {"cpu": 2, "ram": 0, "vram": 0, "min_tps": 5.0,
+                   "active_bytes": None, "eval": "44/62"},
+    "qwen3-1.7b": {"cpu": 2, "ram": 0, "vram": 0, "min_tps": 5.0,
+                   "active_bytes": None, "eval": "56/62"},
+    "qwen3-4b": {"cpu": 2, "ram": 8, "vram": 0, "min_tps": 5.0, "active_bytes": None},
+    "qwen3-8b": {"cpu": 2, "ram": 16, "vram": 0, "min_tps": 5.0, "active_bytes": None},
+    "qwen3-14b": {"cpu": 4, "ram": 24, "vram": 0, "min_tps": 5.0, "active_bytes": None},
+    # A 30B that reads ~2 GiB per token. `ram` is the real budget (the weights
+    # must be somewhere), but `active_bytes` is what decides whether it is fast
+    # enough to be a default on a modest machine - which is the whole point.
+    # `measured` is False because the figure comes from the architecture
+    # (3.3B of 30.5B parameters active), not from a decode on this machine. An
+    # unmeasured figure must not make a tier the DEFAULT: `requirements_met`
+    # refuses it, so the tier is offered and the speed is reported as an
+    # estimate. Flip this to True with the measured number once a real decode
+    # has been run - which is the whole point of the flag.
+    "qwen3-30b-a3b": {"cpu": 4, "ram": 20, "vram": 0, "min_tps": 5.0,
+                      "active_bytes": 2_200_000_000, "measured": False},
+}
+
+#: Tokens per second below which a model is offered but not defaulted. Derived,
+#: not picked from feel: `MAX_TURN_SECONDS` is 600, and a spoken reply is wanted
+#: inside ~20 s, so 5 tok/s leaves the model well inside the turn budget while
+#: keeping a reply's first sentence audible.
+MIN_USABLE_TPS = 5.0
+
+
+def bytes_per_token(key: str) -> Optional[int]:
+    """What one generated token actually reads for `key`, or None.
+
+    `active_bytes` when the tier declares it, otherwise the whole file. This is
+    the number decode speed and memory *pressure* both follow, and the two differ
+    for a mixture-of-experts.
+    """
+    spec = SPECS.get(key)
+    if spec is None or not spec.size_bytes:
+        return None
+    declared = REQUIRES.get(key, {}).get("active_bytes")
+    return int(declared) if declared else spec.size_bytes
+
+
+def _may_default(key: str) -> bool:
+    """Whether `key` may be the default here, on evidence rather than on speed.
+
+    **A decode rate is not evidence it picks the right skill.** It says a reply
+    arrives; it says nothing about whether the model calls the right tool, which
+    is the whole of what an assistant does. So a tier may be the default if
+    either
+
+    * it carries a measured `tools/task_eval.py` score - `eval` in the table, of
+      which exactly two tiers have one (0.6B 44/62, 1.7B 56/62); or
+    * **this machine decodes it at twice `min_tps`** - the one case where the
+      speed figure is large enough to be its own argument.
+
+    Both halves are needed. The first is what keeps a machine with comfortable
+    hardware from being handed an unmeasured model; the second is what stops that
+    becoming a blanket "never above 1.7B" rule that would under-serve a
+    Threadripper.
+
+    Measured on this laptop, and the reason the second half exists: the 4B
+    predicts **7.4 tok/s against a 5.0 floor** - 1.48x, a reply that arrives and
+    nothing more - so it stays offered and not defaulted, which is what
+    `tests/test_setup_wizard.py` asserts and what the 2026-10-11 bandwidth
+    correction nearly broke. A 14B on a 7980X decodes at 12-15, which is
+    2.4-3.0x and is a different statement.
+
+    A GPU machine lifts the ceiling entirely: the weights are not coming off
+    DRAM, so the decode is comfortable by construction.
+    """
+    if gpu_devices():
+        return True
+    need = REQUIRES.get(key)
+    if need is None:
+        return True
+    if need.get("eval"):
+        return True
+    tps = expected_decode_tps(key)
+    return bool(tps and tps >= 2.0 * need.get("min_tps", MIN_USABLE_TPS))
+
+
+def requirements_met(key: str) -> "tuple[bool, list[str]]":
+    """Whether this machine can run `key` as a default, and what it is short of.
+
+    Returns `(met, missing)` where `missing` names each unmet requirement in the
+    units the machine reports, so the panel can say *"needs 20 GB of RAM, this
+    machine has 25.9"* rather than a bare "not recommended".
+    """
+    need = REQUIRES.get(key)
+    if need is None:
+        return True, []
+    missing: "list[str]" = []
+    ram = ram_gb()
+    cores = os.cpu_count() or 1
+    gpu = bool(gpu_devices())
+    if ram < need.get("ram", 0):
+        missing.append(f"{need['ram']:g} GB of RAM (this machine has {ram:.1f})")
+    if cores < need.get("cpu", 0) and not gpu:
+        missing.append(f"{need['cpu']:g} CPU cores (this machine has {cores})")
+    if not need.get("measured", True):
+        # The bytes-per-token figure is an estimate from the architecture, so
+        # everything computed from it is an estimate too. Offering the tier is
+        # fine - the panel says "estimated" - but making it the default on a
+        # number nobody measured is the confident wrong answer this repo keeps
+        # recording.
+        missing.append("a measured decode rate (this tier's bytes-per-token is "
+                       "estimated, not measured)")
+        return (not missing), missing
+    tps = expected_decode_tps(key)
+    if tps is None:
+        # Unmeasured is not a pass. The tier stays offerable but is never the
+        # default, and the caller says so rather than assuming a fast machine.
+        missing.append("a measured decode rate (no local model is answering)")
+    elif tps < need.get("min_tps", 0):
+        missing.append(f"{need['min_tps']:g} tok/s (this machine decodes at "
+                       f"{tps:.1f})")
+    return (not missing), missing
 
 
 _RULES_PREFIX = "The user's standing rules for you"
@@ -892,6 +1275,12 @@ _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.S)
 #: for `browse` this way and Chronoa showed the markup to the person as its reply.
 _XML_FUNCTION = re.compile(r"<function=([\w.\-]+)>(.*?)</function>", re.S)
 _XML_PARAMETER = re.compile(r"<parameter=([\w.\-]+)>(.*?)</parameter>", re.S)
+#: The wrapper a chat template puts around an XML call. Matched only to *widen*
+#: a span that already became a call - see `_widen`. Deliberately plain ASCII: a
+#: zero-width-space variant looks defensible, is unmeasured, and would be the
+#: first thing to be "fixed" by intuition - which is precisely what the captured
+#: fixture in `tests/test_text_tool_calls_recovered.py` exists to prevent.
+_TOOL_CALL = re.compile(r"<\u200b?tool_call>.*?</\u200b?tool_call>", re.S)
 
 
 def _xml_value(raw: str, schema: dict):
@@ -907,6 +1296,83 @@ def _xml_value(raw: str, schema: dict):
             return text
         return value
     return text
+
+
+def _xml_parameters(body: str, props: dict):
+    """Every ``<parameter=key>value</parameter>`` in a function block, or None.
+
+    **None means the block was not wholly parameter pairs** - which is a
+    refusal, not a tolerance. A partial parse calls the tool with the arguments
+    that happened to match and silently discards the rest, so the model gets
+    confidently wrong input and never learns: the local 1.7B's reply to a
+    timezone question is
+
+        <function=get_datetime>
+        <parameter=tz>Europe/Madrid</parameter>
+        the user is in Spain
+        </function>
+
+    and before this, `the user is in Spain` vanished while the call ran anyway.
+    Taken from edge0's `_parse_arguments`, which is stricter than this was for
+    the same reason.
+    """
+    args = {}
+    pos = 0
+    for match in _XML_PARAMETER.finditer(body):
+        if body[pos:match.start()].strip():
+            return None
+        key = match.group(1)
+        args[key] = _xml_value(match.group(2), props.get(key) or {})
+        pos = match.end()
+    if body[pos:].strip():
+        return None
+    return args
+
+
+def _widen(spans, text: str) -> list:
+    """Consumed spans grown to the `<tool_call>` wrapper around them, if any.
+
+    Without this the wrapper is left behind empty - the recovered reply becomes
+    `"I'll open the site.\\n<tool_call>\\n\\n</tool_call>"`, which is the very
+    complaint `tests/test_text_tool_calls_recovered.py` opens with: markup
+    shown to the person as a reply. Only a wrapper that actually *contains* a
+    consumed span grows, so a second, unconsumed call in the same turn keeps its
+    own.
+    """
+    out = []
+    for start, end in spans:
+        for wrapper in _TOOL_CALL.finditer(text):
+            if wrapper.start() <= start and end <= wrapper.end():
+                start, end = wrapper.start(), wrapper.end()
+                break
+        out.append((start, end))
+    return out
+
+
+def _without(text: str, spans) -> str:
+    """`text` with every consumed span cut out and the rest joined.
+
+    **A recovered call used to wipe the whole reply.** Measured before this:
+    "Let me check that for you." + the call + "That is the current time."
+    became content `""` - the person watched a tool run and the assistant's own
+    words disappear, unmentioned and unlogged, because the only content the
+    transcript had was the string this used to overwrite.
+
+    Only the spans that actually became a call are removed. A block whose name
+    was not offered, or whose arguments did not parse whole, stays in the text -
+    it is the evidence of what the model actually wrote, and `text_tool_call()`
+    reads that text to tell a person the model called something that does not
+    exist. Shape from edge0's `_split`.
+    """
+    out = []
+    pos = 0
+    for start, end in sorted(spans):
+        if start < pos:          # overlapping match; the first one owns it
+            continue
+        out.append(text[pos:start])
+        pos = end
+    out.append(text[pos:])
+    return "".join(out).strip()
 
 
 def _redact(messages: "list[dict]") -> "list[dict]":
@@ -1050,6 +1516,7 @@ def recover_tool_calls(message: dict, tools) -> dict:
         return message
     offered = {(t.get("function") or {}).get("name") for t in tools}
     calls = []
+    consumed = []
     schemas = {(t.get("function") or {}).get("name"): (t.get("function") or {}).get("parameters") or {}
                for t in tools}
     for match in _XML_FUNCTION.finditer(content):
@@ -1057,14 +1524,18 @@ def recover_tool_calls(message: dict, tools) -> dict:
         if name not in offered:
             continue
         props = (schemas.get(name) or {}).get("properties") or {}
-        args = {key: _xml_value(value, props.get(key) or {})
-                for key, value in _XML_PARAMETER.findall(match.group(2))}
+        args = _xml_parameters(match.group(2), props)
+        if args is None:
+            continue
         calls.append({"id": f"recovered-{len(calls)}", "type": "function",
                       "function": {"name": name, "arguments": json.dumps(args)}})
+        consumed.append(match.span())
     if calls:
         logger.info("Recovered %d tool call(s) the model wrote as XML text", len(calls))
-        return {**message, "content": "", "tool_calls": calls}
-    blocks = [m.group(1) for m in (list(_TOOL_TAG.finditer(content)) or list(_JSON_FENCE.finditer(content)))]
+        return {**message, "content": _without(content, _widen(consumed, content)),
+                "tool_calls": calls}
+    scanner = _TOOL_TAG if _TOOL_TAG.search(content) else _JSON_FENCE
+    blocks = [(m.group(1), m.span()) for m in scanner.finditer(content)]
     if not blocks:
         # A reply that is nothing but the call as a bare JSON object (or one per
         # line) - seen live 2026-10-08: `{"name": "browse", "parameters": {...}}`
@@ -1073,9 +1544,16 @@ def recover_tool_calls(message: dict, tools) -> dict:
         stripped = content.strip()
         lines = [l.strip() for l in stripped.splitlines() if l.strip()]
         if stripped.startswith("{") and stripped.endswith("}"):
-            blocks = [stripped] if _is_json(stripped) else (
-                lines if all(l.startswith("{") and l.endswith("}") and _is_json(l) for l in lines) else [])
-    for block in blocks:
+            # Either way the *whole* reply was calls, so the whole reply is the
+            # consumed span - there is no prose to preserve in this branch.
+            if _is_json(stripped):
+                blocks = [(stripped, (0, len(content)))]
+            elif lines and all(l.startswith("{") and l.endswith("}") and _is_json(l)
+                               for l in lines):
+                blocks = [(l, (0, len(content))) for l in lines]
+            else:
+                blocks = []
+    for block, span in blocks:
         try:
             obj = json.loads(block)
         except ValueError:
@@ -1085,10 +1563,12 @@ def recover_tool_calls(message: dict, tools) -> dict:
         if name in offered and isinstance(args, dict):
             calls.append({"id": f"recovered-{len(calls)}", "type": "function",
                           "function": {"name": name, "arguments": json.dumps(args)}})
+            consumed.append(span)
     if not calls:
         return message
     logger.info("Recovered %d tool call(s) the model wrote as text", len(calls))
-    return {**message, "content": "", "tool_calls": calls}
+    return {**message, "content": _without(content, _widen(consumed, content)),
+            "tool_calls": calls}
 
 
 def _short(text: str, limit: int) -> str:

@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
+from shani_chronoa import hardware_profile
 from shani_chronoa import files, model_service
 from shani_chronoa.stt_provision import ModelSpec, file_matches, install_verified
 
@@ -125,7 +126,7 @@ def server_args(key: str, devices: "Optional[list[str]]" = None) -> "list[str]":
     args = ["-m", str(model_dir() / m.model.filename), "--mmproj", str(model_dir() / m.mmproj.filename),
             "--host", model_service.HOST, "--port", str(model_service.PORTS[INSTANCE]),
             "-c", str(CONTEXT), "--no-webui", "--sleep-idle-seconds", str(IDLE_SECONDS)]
-    args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(max(1, (os.cpu_count() or 2) - 1))]
+    args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(hardware_profile.physical_cores())]
     return args
 
 

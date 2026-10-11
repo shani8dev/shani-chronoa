@@ -78,6 +78,55 @@ def _vulkan_devices(summary: str) -> list:
     return [d for d in devices if d["name"] or d["type"]]
 
 
+#: Where the kernel describes the CPU. A module constant rather than a literal
+#: inside `physical_cores`, so a test can point it at a synthetic tree and prove
+#: the counting rule instead of only proving it runs against this machine.
+CPU_SYSFS = "/sys/devices/system/cpu"
+
+
+def physical_cores() -> int:
+    """This machine's **physical** cores, not its threads.
+
+    The reason this is a function and not `os.cpu_count()` is that llama.cpp's
+    `-t` is the single biggest lever on CPU decode speed and the obvious value
+    for it is the wrong one. Measured with `llama-bench` on this i7-1165G7
+    (4 cores, 8 threads), `Qwen3-8B-Q4_K_M`, quiet box, `-r 2`:
+
+    | `-t` | 3 | **4** | 5 | 6 | 8 |
+    |---|---|---|---|---|---|
+    | decode tok/s | 3.23 | **3.73** | 3.70 | 3.62 | 2.32 |
+    | prompt tok/s | 16.2 | 19.7 | 18.8 | 19.9 | 19.0 |
+
+    **`-t 8` is 1.61x slower than `-t 4`.** SMT siblings share execution ports,
+    so a second thread per core adds contention and no throughput for a workload
+    that is already bandwidth-bound. Prompt processing is far less sensitive,
+    which is why this looked like a decode-only problem.
+
+    Four launchers here passed `os.cpu_count() - 1` - **7 on this box** - and
+    were throwing away that difference on every start. llama.cpp's own maintainer
+    put it plainly in ggml-org/llama.cpp#34 ("speed with command line config -t
+    4. If use -t 8, half speed"), and the upstream performance-tuning docs name
+    incorrect thread settings as "the #1 cause of slow inference".
+
+    Read from sysfs rather than `lscpu`, because `lscpu` is a binary a minimal
+    image may not have and this repository answers from the kernel wherever it
+    can (the same reason `skills/system_info.py` does). Falls back to
+    `os.cpu_count()` when sysfs is unreadable, which is the old behaviour and no
+    worse.
+    """
+    groups = set()
+    try:
+        for entry in os.listdir(CPU_SYSFS):
+            if not entry.startswith("cpu") or not entry[3:].isdigit():
+                continue
+            with open(os.path.join(CPU_SYSFS, entry, "topology",
+                                   "thread_siblings_list"), encoding="utf-8") as handle:
+                groups.add(handle.read().strip())
+    except OSError:
+        groups = set()
+    return len(groups) if groups else max(1, os.cpu_count() or 1)
+
+
 class HardwareProfile:
     """Hardware detection and model selection."""
 
@@ -111,9 +160,15 @@ class HardwareProfile:
             self.ram_mb = 4096  # Default fallback
 
     def _detect_cpu(self) -> None:
-        """Detect CPU core count."""
+        """Detect CPU core count.
+
+        **Physical cores, not threads** - `os.cpu_count()` on a machine with SMT
+        reports twice the cores, and every llama.cpp launcher in this package
+        wants the smaller number. See `physical_cores` for the measurement that
+        decided it.
+        """
         try:
-            self.cpu_cores = os.cpu_count() or 4
+            self.cpu_cores = physical_cores()
         except Exception:
             self.cpu_cores = 4
 

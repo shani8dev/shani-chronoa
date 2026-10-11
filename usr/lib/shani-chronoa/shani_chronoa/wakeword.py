@@ -42,6 +42,7 @@ from typing import Callable, List, Optional
 # recorder read the same microphone, and a second copy of the argv drifted from
 # this one silently (its rate was a literal). Asserted by
 # tests/test_capture_argv_agreement.py.
+from shani_chronoa import hardware_profile
 from shani_chronoa.audio import _stream_capture_cmd
 from shani_chronoa.vad import calibrate_noise_floor, rms
 
@@ -270,7 +271,8 @@ class WakeWordListener:
             prompt = self._phrase[:1].upper() + self._phrase[1:] + "."
             result = subprocess.run(
                 [self._whisper, "-m", self._model_path, "-f", path, "-l", "en",
-                 "-nt", "-np", "-t", str(min(4, os.cpu_count() or 1)), "--prompt", prompt],
+                 "-nt", "-np", "-t", str(hardware_profile.physical_cores()),
+                 "--prompt", prompt],
                 capture_output=True, text=True, timeout=_TRANSCRIBE_TIMEOUT,
             )
             return result.stdout.strip() if result.returncode == 0 else ""

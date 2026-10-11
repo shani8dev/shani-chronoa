@@ -23,7 +23,13 @@ XML = ("I'll open the site.\n<tool_call>\n<function=browse>\n<parameter=action>\
 
 def test_the_xml_form_becomes_a_real_call_with_typed_arguments():
     out = recover_tool_calls({"role": "assistant", "content": XML}, TOOLS)
-    assert out["content"] == "" and len(out["tool_calls"]) == 1
+    # The prose survives. This assertion said `content == ""` until 2026-10-11,
+    # so it pinned the defect rather than the claim: the fixture's own first line
+    # is "I'll open the site.", and a person watching a browser open never saw
+    # it, because recovery overwrote the whole reply. Shape from edge0's
+    # `_split`, which cuts only the spans that became calls.
+    assert out["content"] == "I'll open the site."
+    assert len(out["tool_calls"]) == 1
     call = out["tool_calls"][0]["function"]
     assert call["name"] == "browse"
     assert json.loads(call["arguments"]) == {"action": "navigate", "url": "https://blazedemo.com/",
@@ -61,3 +67,161 @@ def test_a_reply_that_is_only_a_json_call_is_run():
 def test_an_answer_that_quotes_json_is_left_alone():
     text = 'The site sent back {"name": "browse", "parameters": {}} which is odd.'
     assert recover_tool_calls({"role": "assistant", "content": text}, TOOLS)["content"] == text
+
+
+#: One tool, one string parameter. A named constant rather than the nested
+#: literal repeated per test: written out three times it was wrong once, and a
+#: `SyntaxError` in the guard is the least of what a hand-kept copy costs.
+TZ_TOOLS = [{"type": "function", "function": {
+    "name": "get_datetime",
+    "parameters": {"type": "object", "properties": {"tz": {"type": "string"}}}}}]
+
+
+class TestRecoveryKeepsWhatItDidNotConsume:
+    """**A recovered call must not delete the assistant's own words.**
+
+    Measured 2026-10-11 against the shape the fixture above already carried:
+    every one of these lost its prose entirely and logged nothing, because the
+    only copy was the string the old code overwrote with `""`.
+
+        "Let me check that for you." + call + "That is the current time."
+          -> content "" , the tool runs, two sentences vanish
+
+    The person watches a browser open and hears nothing, which is
+    indistinguishable from the assistant going quiet mid-sentence.
+    """
+
+    def test_prose_before_and_after_the_call_survives(self):
+        text = ("Let me check that for you.\n"
+                "<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n</function>\n</tool_call>\n"
+                "That is the current time.")
+        out = recover_tool_calls({"role": "assistant", "content": text}, TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1
+        assert out["content"] == "Let me check that for you.\n\nThat is the current time."
+
+    def test_the_empty_wrapper_is_not_left_behind(self):
+        """The complaint this file opens with, one layer down.
+
+        Cutting only the `<function>` span left `"<tool_call>\\n\\n</tool_call>"`
+        in the reply - markup shown to the person as a reply, which is the exact
+        thing `XML`'s own header says this recovery exists to stop.
+        """
+        out = recover_tool_calls({"role": "assistant", "content": XML}, TOOLS)
+        assert "tool_call" not in out["content"]
+        assert "<function" not in out["content"]
+
+    def test_a_reply_that_is_only_the_call_is_still_empty(self):
+        out = recover_tool_calls({"role": "assistant", "content":
+                                  "<tool_call>\n<function=get_datetime>\n"
+                                  "<parameter=tz>\nUTC\n</parameter>\n</function>\n</tool_call>"},
+                                 TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1
+        assert out["content"] == ""
+
+    def test_fenced_json_keeps_the_prose_around_it(self):
+        text = ("Here it is:\n```json\n"
+                '{"name": "get_datetime", "arguments": {"tz": "UTC"}}\n```\nAnything else?')
+        out = recover_tool_calls({"role": "assistant", "content": text}, TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1
+        assert out["content"] == "Here it is:\n\nAnything else?"
+        assert "```" not in out["content"]
+
+    def test_json_inside_a_tool_call_wrapper_keeps_its_prose(self):
+        """The JSON path with a wrapper around it, which is the real shape.
+
+        **This does not make `_widen` load-bearing, and the mutation run proved
+        it.** The first version of this docstring said it did. `_TOOL_TAG` and
+        `_JSON_FENCE` both match the *whole* `<tool_call>...</tool_call>`
+        wrapper, so the span they hand over already contains the tags and
+        widening it is a no-op; every consumed span on the JSON path is either
+        already-widened or `(0, len(content))`. `_widen` earns its keep only in
+        the XML branch, where `_XML_FUNCTION` matches the inner
+        `<function=...>` alone - and removing it there fails five tests.
+
+        The call is kept on both paths so the invariant reads the same in both,
+        and this test stays because the prose surviving is a real claim whatever
+        makes it true.
+        """
+        text = ("One moment.\n<tool_call>\n"
+                '{"name": "get_datetime", "arguments": {"tz": "UTC"}}\n'
+                "</tool_call>\nThat is it.")
+        out = recover_tool_calls({"role": "assistant", "content": text}, TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1
+        assert out["content"] == "One moment.\n\nThat is it."
+
+    def test_two_calls_and_the_prose_between_them(self):
+        text = ("One moment.\n<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nUTC\n</parameter>\n</function>\n</tool_call>\n"
+                "And the other one.\n<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n</function>\n</tool_call>")
+        out = recover_tool_calls({"role": "assistant", "content": text}, TZ_TOOLS)
+        assert len(out["tool_calls"]) == 2
+        assert out["content"] == "One moment.\n\nAnd the other one."
+
+    def test_a_reply_with_no_call_is_untouched(self):
+        text = "It is about four in the afternoon."
+        assert recover_tool_calls({"role": "assistant", "content": text},
+                                 TZ_TOOLS) == {"role": "assistant", "content": text}
+
+
+class TestAFunctionBlockMustParseWhole:
+    """**A partial parse is a confident wrong answer.**
+
+    `_XML_PARAMETER.findall` took the pairs that matched and ignored the rest, so
+    a block carrying one usable argument and one line of prose produced a *real
+    tool call* with the prose silently discarded. Nothing downstream can tell
+    that apart from a clean parse. edge0's `_parse_arguments` refuses instead,
+    and the refusal here means the text stays put - which is also what
+    `text_tool_call()` reads to tell a person the model wrote something odd.
+    """
+
+    def test_stray_text_between_parameters_is_refused(self):
+        text = ("<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n"
+                "the user is in Spain\n</function>\n</tool_call>")
+        out = recover_tool_calls({"role": "assistant", "content": text},
+                                TZ_TOOLS)
+        assert not out.get("tool_calls"), (
+            "a block with prose between its parameters was acted on anyway - "
+            "the model gets called with the arguments that happened to parse "
+            "and never learns the rest was dropped")
+        assert "the user is in Spain" in out["content"]
+
+    def test_a_block_that_is_whole_still_works(self):
+        """**The control.** Without this the refusal above cannot fail."""
+        text = ("<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n</function>\n</tool_call>")
+        out = recover_tool_calls({"role": "assistant", "content": text},
+                                TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1
+        assert json.loads(out["tool_calls"][0]["function"]["arguments"]) == {"tz": "Europe/Madrid"}
+
+    def test_stray_text_IN_THE_MIDDLE_is_refused_too(self):
+        """The case the trailing check cannot see, so this is what makes the
+        *between*-pairs check load-bearing rather than redundant.
+
+        The refusal above is two checks - stray text before the first pair or
+        between pairs, and stray text after the last. A fixture whose junk is
+        only trailing is caught by the second, so removing the first leaves it
+        green; that is exactly what the mutation run found.
+        """
+        text = ("<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nUTC\n</parameter>\n"
+                "the user is in Spain\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n"
+                "</function>\n</tool_call>")
+        out = recover_tool_calls({"role": "assistant", "content": text}, TZ_TOOLS)
+        assert not out.get("tool_calls"), (
+            "junk between two valid parameters was ignored and the call ran - "
+            "the model receives a parameter it never wrote in that order")
+
+    def test_whitespace_between_parameters_is_not_stray_text(self):
+        text = ("<tool_call>\n<function=get_datetime>\n"
+                "<parameter=tz>\nUTC\n</parameter>\n\n"
+                "<parameter=tz>\nEurope/Madrid\n</parameter>\n</function>\n</tool_call>")
+        out = recover_tool_calls({"role": "assistant", "content": text},
+                                TZ_TOOLS)
+        assert len(out["tool_calls"]) == 1, (
+            "a blank line between parameters was treated as stray prose - the "
+            "real template emits them, which is why the check is on stripped text")

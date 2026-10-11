@@ -12,7 +12,8 @@ network rather than silently installing nothing.
 import os
 import sys
 
-sys.path.insert(0, "/home/shrinivaskumbhar/Documents/shani/shani-chronoa/usr/lib/shani-chronoa")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]
+                      / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import stt_provision as sp  # noqa: E402
 

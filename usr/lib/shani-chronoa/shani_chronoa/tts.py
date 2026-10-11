@@ -38,6 +38,7 @@ import shutil
 import tempfile
 from typing import Optional
 
+from shani_chronoa import hardware_profile
 from shani_chronoa import files
 
 logger = logging.getLogger(__name__)
@@ -312,7 +313,7 @@ class PiperTTS:
                 # Up to 4 threads. Measured 2026-10-08 on an 8-thread laptop CPU:
                 # 2 -> 4 cut a call from 10.9 s to 9.7 s (load 5.5 s -> 3.4 s);
                 # 8 was slower again (11.3 s), the extra threads being hyperthreads.
-                f"--num-threads={min(4, os.cpu_count() or 2)}",
+                f"--num-threads={hardware_profile.physical_cores()}",
                 f"--output-filename={output_file}",
                 # the text is the one positional argument; a leading '-' would be read as an option
                 text.lstrip("- ") or "."]

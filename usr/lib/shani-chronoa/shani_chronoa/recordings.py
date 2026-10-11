@@ -28,6 +28,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
+from shani_chronoa import hardware_profile
 from typing import List, NamedTuple, Optional
 
 MAX_SECONDS = 1800
@@ -97,7 +99,7 @@ def transcribe(wav: Path, language: str = "auto") -> List[Segment]:
     binary, model = whisper_model()
     out = wav.with_suffix("")
     proc = subprocess.run([binary, "-m", model, "-f", str(wav), "-l", language, "-oj", "-of", str(out), "-np",
-                           "-t", str(max(1, min(4, (os.cpu_count() or 2) - 1)))],
+                           "-t", str(hardware_profile.physical_cores())],
                           capture_output=True, text=True, timeout=3600)
     data_file = out.with_suffix(".json")
     if proc.returncode != 0 or not data_file.is_file():

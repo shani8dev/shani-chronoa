@@ -24,6 +24,7 @@ from array import array
 from pathlib import Path
 from typing import Callable, List, Optional, Sequence
 
+from shani_chronoa import hardware_profile
 from shani_chronoa import files, model_service
 from shani_chronoa.stt_provision import ModelSpec, file_matches, install_verified
 
@@ -64,7 +65,7 @@ def server_args() -> "list[str]":
     return ["-m", str(model_dir() / MODEL.filename), "--embedding", "--pooling", "mean",
             "--host", model_service.HOST, "--port", str(model_service.PORTS[INSTANCE]),
             "-c", str(CONTEXT), "-b", str(CONTEXT), "-ub", str(CONTEXT), "--no-webui",
-            "-ngl", "0", "-t", str(max(1, min(4, (os.cpu_count() or 2) - 1)))]
+            "-ngl", "0", "-t", str(hardware_profile.physical_cores())]
 
 
 def provision(progress: Optional[Callable[[int, int], None]] = None, config=None, transport=None) -> Path:
