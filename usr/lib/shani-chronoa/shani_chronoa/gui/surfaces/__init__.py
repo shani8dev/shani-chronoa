@@ -122,6 +122,10 @@ SURFACE_IDS = (
     # deciding to call `lan_phone` - there was no way to see what was on the
     # network, or to learn that pairing is specified and not written.
     "phone_link",
+    # And the app-driver: whether a mouse and a keyboard can reach a
+    # window on *this* desktop. The answer was four measured facts kept
+    # in prose, and the panel asks each of them rather than claiming one.
+    "driving",
     # This machine
     "senses",
     "models",
@@ -132,7 +136,15 @@ SURFACE_IDS = (
     # features exist". Until 2026-10-11 six background watchers started at
     # startup with a written `stop()` that **nothing in the tree called**, and
     # none of them was named anywhere on screen.
-    "background",
+    #
+    # **`processes`, not `background`.** The panel was first written as
+    # `background.py`, which collides with `shani_chronoa.background` - the module
+    # that owns the inventory it draws. `from shani_chronoa.gui.surfaces import
+    # background` inside it resolved to **itself**, so `background.inventory` did
+    # not exist and the whole layout suite came back as errors. The same shape as
+    # `calendar.py` shadowing the stdlib: a name is not just a label, and a
+    # collision is not visible until something imports by it.
+    "processes",
     # What Chronoa knows
     "memory",
     "learning",
@@ -143,6 +155,10 @@ SURFACE_IDS = (
     # you could say "good morning" and have it work, and no screen listed the
     # ones you had, named their trigger phrases, or showed what each asks for.
     "routines",
+    # This computer's screen on a paired phone. The skill shipped the whole
+    # pipeline and reached no GUI at all - the sixth dead module the "who calls
+    # this" scan has found here.
+    "screen_share",
     # What Chronoa is, function by function. First in its section on purpose:
     # it is the answer to "what is this thing", which is the question a person
     # has before any of the others.
