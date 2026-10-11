@@ -42,7 +42,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa import pipewire
@@ -233,7 +233,47 @@ def _cameras() -> List[dict]:
     return found
 
 
-def _set_camera(enable: bool) -> dict:
+def _select(cameras: "List[dict]", device: "Optional[str]") -> "tuple[list, str]":
+    """The cameras a named `device` refers to, and a reason if there are none.
+
+    **A name that matches nothing is a refusal, never an empty action.** The
+    schema advertises `device` as "Camera name or /dev/videoN ... Omit to apply
+    to every camera", and the first version of that promise had no reader at all
+    - `_set_camera` acted on every camera whatever was passed, so a user asking
+    to disable the external webcam alone had *every* camera disabled and was
+    told the right thing had happened. On a privacy action that is the bad
+    direction for a dead control to be wrong in.
+
+    The three spellings are matched because all three are what a person or a
+    model supplies: the node (`video0`), the path (`/dev/video0`) and the
+    driver's own name, which may carry a version and needs a substring match
+    (`UVC Camera (046d:0825)` is what `/sys/class/video4linux/video0/name`
+    reads, and a user says "logitech").
+    """
+    if not device:
+        return cameras, ""
+    wanted = device.strip()
+    # **The blank check is on the stripped value, not on the argument.** With
+    # `if not device` alone, a `device` of `"  "` falls through to the matcher,
+    # where `"" in "any name"` is True for every camera - so the omission works
+    # by an accident of substring semantics that holds today and is one edit
+    # away from silently selecting nothing. A whitespace-only value is the
+    # omission, and it is checked as such rather than relied upon.
+    if not wanted:
+        return cameras, ""
+    lowered = wanted.lower()
+    matched = [c for c in cameras
+               if c["node"] == wanted or c["path"] == wanted
+               or c["name"].lower() == lowered
+               or lowered in c["name"].lower()]
+    if not matched:
+        known = ", ".join(f"{c['name']} ({c['path']})" for c in cameras)
+        return [], (f"No camera matches {wanted!r}. This machine has: {known}. "
+                    "Nothing was changed.")
+    return matched, ""
+
+
+def _set_camera(enable: bool, device: "Optional[str]" = None) -> dict:
     # Turning a camera *off* is protective and is never gated: a user who asks
     # for it is the consent, and gating it would mean the one action nobody
     # objects to is the one an assistant cannot take. Turning one *on* is the
@@ -266,6 +306,9 @@ def _set_camera(enable: bool) -> dict:
             "machine has no camera the kernel knows about, which is different "
             "from a camera that exists but could not be reached."
         ), "changed": [], "unsupported": []}
+    cameras, unmatched = _select(cameras, device)
+    if unmatched:
+        return {"text": unmatched, "changed": [], "unsupported": []}
     # The kernel's disable file is 1 = DISABLED, so  must write 0.
     # Inverted, this skill would switch a camera ON when asked to disable it.
     value = "0" if enable else "1"
@@ -386,7 +429,13 @@ def _run(arguments: dict) -> str:
     if action in ("mute_mic", "unmute_mic"):
         result = _mute_mic(action == "mute_mic")
     elif action in ("disable_camera", "enable_camera"):
-        result = _set_camera(action == "enable_camera")
+        # **The `device` argument, which the schema has always advertised.**
+        # Passing it here rather than dropping it is what makes the control
+        # real: `test_no_dead_schema_parameters` flags the first version of
+        # this call, because a parameter the handler never reads is a control
+        # the model can move to no effect.
+        result = _set_camera(action == "enable_camera",
+                             arguments.get("device"))
     elif action == "blank_screen":
         result = _blank_screen()
     else:

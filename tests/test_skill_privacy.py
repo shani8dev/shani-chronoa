@@ -365,3 +365,163 @@ class TestDispatch:
         assert skill.schema["type"] == "function"
         assert skill.schema["function"]["name"] == "set_privacy"
         assert callable(skill.run)
+
+
+class TestTheDeviceArgumentSelectsOneCamera:
+    """`device` has been in `set_privacy`'s schema since the skill was written,
+    and no handler ever read it.
+
+    `_set_camera` acted on **every** camera whatever was passed, so the answer
+    to "turn off my external webcam and leave the built-in one alone" was both
+    cameras disabled and a reply saying the right thing had happened. A dead
+    control on a privacy action is the wrong direction to fail in: it does the
+    opposite of protecting.
+
+    Found by `test_no_dead_schema_parameters`, which is what the class is here
+    for - the audit and the fix belong together, or the next dead parameter has
+    no reason to be believed.
+    """
+
+    def _cams(self, tmp_path, monkeypatch):
+        # Both start at "1" = already disabled, so a write of the same value
+        # would be invisible to a `read_text() == "1"` assertion. That is why
+        # the untouched camera is asserted against the fixture's own starting
+        # value and the selected one is asserted by what `changed` reports.
+        root = _v4l(tmp_path, {
+            "video0": ("Integrated Camera: Integrated C", "1"),
+            "video1": ("HD Pro Webcam C920", "1"),
+        })
+        monkeypatch.setattr(privacy, "_VIDEO4LINUX", root)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: True)
+        return root
+
+    def test_a_named_camera_leaves_the_others_alone(self, tmp_path,
+                                                    monkeypatch):
+        root = self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, "HD Pro Webcam C920")
+        assert [c["path"] for c in result["changed"]] == ["/dev/video1"]
+        assert (root / "video1" / "disable").read_text().strip() == "1"
+        assert (root / "video0" / "disable").read_text().strip() == "1"
+        assert "HD Pro Webcam C920" in result["text"]
+
+    def test_the_node_name_selects(self, tmp_path, monkeypatch):
+        self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, "video0")
+        assert [c["path"] for c in result["changed"]] == ["/dev/video0"]
+
+    def test_the_device_path_selects(self, tmp_path, monkeypatch):
+        self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, "/dev/video1")
+        assert [c["path"] for c in result["changed"]] == ["/dev/video1"]
+
+    def test_a_substring_of_the_driver_name_selects(self, tmp_path,
+                                                    monkeypatch):
+        """`/sys/class/video4linux/videoN/name` reads `UVC Camera (046d:0825)`
+        and a person says "logitech", so a substring is what has to match.
+        """
+        root = self._cams(tmp_path, monkeypatch)
+        (root / "video1" / "name").write_text("UVC Camera (046d:0825)\n")
+        result = privacy._set_camera(False, "uvc")
+        assert [c["path"] for c in result["changed"]] == ["/dev/video1"]
+
+    def test_a_name_that_matches_nothing_refuses_and_changes_nothing(
+            self, tmp_path, monkeypatch):
+        """The empty action is the dangerous one: nothing disabled, reported as
+        if it had been.
+
+        **Asserted on `changed` and on the files**, not on the sentence, because
+        a plausible refusal with a camera switched off underneath it is exactly
+        the failure this class documents.
+        """
+        root = self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, "NoSuchCam")
+        assert result["changed"] == []
+        assert (root / "video0" / "disable").read_text().strip() == "1"
+        assert (root / "video1" / "disable").read_text().strip() == "1"
+        assert "No camera matches" in result["text"]
+        assert "Nothing was changed" in result["text"]
+
+    def test_the_refusal_names_what_this_machine_has(self, tmp_path,
+                                                     monkeypatch):
+        self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, "NoSuchCam")
+        assert "Integrated Camera: Integrated C (/dev/video0)" in result["text"]
+        assert "HD Pro Webcam C920 (/dev/video1)" in result["text"]
+
+    def test_omitting_the_device_still_means_every_camera(self, tmp_path,
+                                                          monkeypatch):
+        """The omission must keep its meaning once the promise is honoured.
+
+        Otherwise the fix has swapped one dead control for a different wrong
+        answer - a `device=""` that disables nothing at all.
+        """
+        self._cams(tmp_path, monkeypatch)
+        result = privacy._set_camera(False, None)
+        assert sorted(c["path"] for c in result["changed"]) == [
+            "/dev/video0", "/dev/video1"]
+
+    def test_an_empty_string_is_the_omission_not_a_miss(self, tmp_path,
+                                                        monkeypatch):
+        """A model sends `device=""` for "none", which must not become "match
+        nothing" and refuse.
+
+        **And it must not work by accident.** The first version matched with
+        `"" in name`, which is True for every camera - so the omission held by
+        an accident of substring semantics, one edit away from selecting
+        nothing at all. Stripping first and testing the stripped value is what
+        makes it deliberate.
+        """
+        self._cams(tmp_path, monkeypatch)
+        assert len(privacy._set_camera(False, "")["changed"]) == 2
+
+    def test_a_whitespace_value_is_the_omission(self, tmp_path, monkeypatch):
+        """The same accident, from the value nobody thinks to send.
+
+        `"  "` selected every camera through `"" in name`, which is the point
+        at which a reader discovers the omission was never a decision.
+        """
+        self._cams(tmp_path, monkeypatch)
+        assert len(privacy._set_camera(False, "   ")["changed"]) == 2
+
+    def test_a_match_selected_for_enabling_is_still_consent_gated(
+            self, tmp_path, monkeypatch):
+        root = self._cams(tmp_path, monkeypatch)
+        monkeypatch.setattr(privacy.ChronoaConfig, "sense_allowed",
+                            lambda self, s: False)
+        result = privacy._set_camera(True, "HD Pro Webcam C920")
+        assert result["changed"] == []
+        assert (root / "video1" / "disable").read_text().strip() == "1"
+        assert "Refusing to enable a camera" in result["text"]
+
+    def test_it_reaches_the_handler_from_the_dispatch_path(self, tmp_path,
+                                                           monkeypatch):
+        """Through `_run`, not through `_set_camera`.
+
+        The defect was a *call site* that dropped the argument, so a test of the
+        helper alone is the "a helper can be correct and still be unreachable"
+        shape - and it stayed green for as long as the parameter was unread.
+
+        **Asserted on which cameras the reply names as changed.** The first
+        version of this assertion checked that the selected camera's name
+        appears and that both are still listed, both of which the *defect*
+        satisfies - a write to every camera names every camera in its report.
+        """
+        root = self._cams(tmp_path, monkeypatch)
+        out = privacy._run({"action": "disable_camera",
+                            "device": "HD Pro Webcam C920"})
+        assert "disabled: HD Pro Webcam C920." in out
+        assert "Integrated Camera" not in out.split("disabled:")[1].split(
+            "To undo")[0], (
+            "the reply names a camera that was not selected, so the argument "
+            "is still being dropped at the call site")
+        assert len(privacy._cameras()) == 2
+        assert (root / "video1" / "disable").read_text().strip() == "1"
+
+    def test_a_wrong_device_from_the_dispatch_path_refuses(self, tmp_path,
+                                                           monkeypatch):
+        root = self._cams(tmp_path, monkeypatch)
+        out = privacy._run({"action": "disable_camera", "device": "nope"})
+        assert "No camera matches" in out
+        assert (root / "video0" / "disable").read_text().strip() == "1"
+        assert (root / "video1" / "disable").read_text().strip() == "1"
