@@ -1900,6 +1900,39 @@ def scroll(app: str, title: str, direction: str = "down", amount: int = 3,
     `direction` is `"up"`, `"down"`, `"left"` or `"right"`; `amount` is notches.
     X11 wheel buttons are 4/5 (up/down) and 6/7 (left/right), which is why this is
     a named mapping rather than a number a caller passes.
+
+    **This function's default path cannot run where `xdotool` is absent**, which
+    is both this dev box and every ShaniOS image - measured, neither command
+    matrix carries the binary, so `find_window` refuses at once with
+    *"xdotool is not installed"*. That is the window lookup, not the wheel: pass
+    `window_id` to reach `_scroll_notch` without it. The lookup needs its own
+    non-X11 route and that is a design question, not a bug here.
+
+    **Delivery is measured, and the measurement is in `verify_scroll.py`** at this
+    repo's root, certified and repeatable: *"DELIVERED: 324 word(s) moved against
+    a noise floor of 27 - the wheel reached the window under it."* Exit 0.
+
+    `tests/test_portal_input.py` pins the contract - that the notch becomes a
+    `NotifyPointerAxis` call with the right signs, and that the name this used to
+    call (`NotifyPointerScroll`) is not a method the portal has at all - which is
+    deterministic and runs in CI. It says nothing about whether the event reaches
+    the window, and AGENTS.md carried that as an open item for as long as nobody
+    had used a pane that certainly scrolls. Now one has been used.
+
+    **It is a script and not a test**, for the same reason `render_ui.py` is:
+    `_hermetic_env` redirects `HOME`, the Screenshot portal writes to the real
+    one, and every live capture in a test here comes back empty - so a test can
+    only skip, and a skip reads as coverage.
+
+    **Its verdict is judged against the screen's own noise floor, not a fixed
+    number**, and that took two attempts. The first version printed *"the pane
+    moved"* while its own control - run afterwards - reported **more** words
+    changing with no wheel at all, a confident verdict its own control had already
+    invalidated. The second fixed the constant but took the floor over the whole
+    screen, where a session streaming in one corner rated 413 while the pane
+    being scrolled was static. Both are the "a check that fails for its own
+    reasons" failure, and the script now returns 2 - *not measured* - rather than
+    guessing when the wheel cannot be told from repaint.
     """
     wheel = {"up": 4, "left": 6, "right": 7, "down": 5}
     if wheel.get(direction) is None:
