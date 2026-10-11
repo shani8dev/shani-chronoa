@@ -687,8 +687,12 @@ class AudioPlayer:
         Returns False when this playback did not get to finish on its own -
         interrupted by `stop()`, or superseded by a newer `play_bytes`. The
         distinction matters because playback runs in a worker thread
-        (`app._speak` uses `run_in_executor`) and the async bridge does not
-        serialise those calls, so two replies really can overlap. `self._proc`
+        (`speech.SpeechQueue` gives synthesis and playback a thread each) and
+        the async bridge does not serialise those calls, so two replies really
+        can overlap. This paragraph used to cite `app._speak`, which is not what
+        runs and, as of 2026-10-11, is not called at all - `SpeechQueue`
+        replaced it, and `tests/test_stale_cross_references.py` checks that a
+        caller has not come back. `self._proc`
         names only the newest one, which used to leave the older subprocess
         running with nothing able to reach it: `stop()` found the newer
         process, the older voice kept talking over the new turn, and it ran to

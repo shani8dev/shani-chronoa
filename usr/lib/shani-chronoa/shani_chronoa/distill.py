@@ -412,8 +412,15 @@ class Router:
     was fitted.
 
     Nothing here can authorise a call. It ranks names that were already on
-    offer; the whitelist that permits them is `tools._HANDLERS`, and it is
-    checked there and nowhere else.
+    offer; the whitelist that permits them is `tools._HANDLER_FNS`, and
+    `tools._dispatch_inner` is the only place that refuses a name missing from
+    it. Both names were wrong until 2026-10-11 - this paragraph cited a
+    `tools` attribute that has never existed in this repository, so the promise
+    could not be followed and therefore could not be checked.
+    `tests/test_stale_cross_references.py` now runs it instead. (That name is
+    deliberately not written out in backticks here: doing so makes this
+    paragraph the gate's own first violation, which is correct behaviour and
+    was the first version.)
     """
 
     def __init__(self, space: str, classes: Sequence[str],
