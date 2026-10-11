@@ -363,6 +363,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # The action half, gated separately and destructively: `cleanup_report`
     # only ever reads, and a report you cannot act on is the gap this closes.
     "cleanup_apply": ("Files", "Clear caches and unused Flatpak runtimes"),
+    # Finds junk by name (editor swap, OS metadata, leftover installers) and is
+    # read-only. It is not `space_by_type`: that groups by *kind of file* across
+    # a tree, and this looks for names that are junk whatever they contain.
+    "temp_files": ("Files", "Find junk, temporary and leftover files by name"),
     "bluetooth_devices": ("Devices", "Bluetooth devices"),
     "vpn_control": ("System", "VPN connections"),
     # Packet-level work, beside the interface counters and the neighbour table
@@ -504,7 +508,8 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "dns_lookup": ("System", "Look a name up in DNS, or read its mail, name or certificate records"),
     "whois_lookup": ("System", "Look up who a domain or address is registered to"),
     "capture_packets": ("System", "Watch the packets crossing an interface"),
-    "ui_elements": ("Pointer and keyboard", "Press buttons, fill fields and open menus in other apps"),
+    "ui_elements": ("Pointer and keyboard",
+                   "Press buttons, fill fields and open menus in other apps, and drive them visible"),
     "android_device": ("Devices", "Battery, screenshot, apps and files of a phone connected with adb"),
     "qr_code": ("Everyday tools", "Read a QR code or barcode, or make a QR code"),
     # The 2026-10-07 matrix skills.
@@ -586,7 +591,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "list_vms": ("Apps", "Virtual machines"),
     # The actuator half of both siblings: the read skills list what exists,
     # these two start and drive it.
-    "container": ("Apps", "Run and drive containers"),
+    "container": ("Apps", "Run containers and nspawn machines"),
     "vm": ("Apps", "Run and drive a virtual machine"),
     "boot_report": ("System", "Why booting is slow, and whether it shut down cleanly"),
     "disk_health": ("Devices", "Drive health and disk encryption"),
@@ -712,6 +717,8 @@ GATE_NAMES: dict[str, str] = {
     "file-edit-enabled": "Let Chronoa edit your files",
     "git-sense-enabled": "Git working trees",
     "sessions-sense-enabled": "Who is on this machine",
+    "monitoring-sense-enabled": "Who is capturing on this machine",
+    "comms-typing-enabled": "Let Chronoa type into chat and mail windows",
     # The Settings sense rows' own titles, so Help sends people to a row that exists.
     "snapshots-sense-enabled": "Rollback points",
     "security-sense-enabled": "Firmware security",

@@ -27,6 +27,7 @@ import pytest
 import pathlib
 import subprocess
 import sys
+import time
 import textwrap
 
 
@@ -112,12 +113,35 @@ def row_titles(tmp_path_factory):
         XDG_CONFIG_HOME=str(tmp_path_factory.mktemp("config")),
         XDG_STATE_HOME=str(tmp_path_factory.mktemp("state")),
     )
-    proc = subprocess.run(
-        [sys.executable, "-c", _HARNESS], capture_output=True, text=True, env=env, timeout=120
-    )
-    for line in proc.stdout.splitlines():
-        if line.startswith("RESULT"):
-            return json.loads(line[len("RESULT") :])["titles"]
+    for attempt in range(2):
+        proc = subprocess.run(
+            [sys.executable, "-c", _HARNESS], capture_output=True, text=True, env=env, timeout=120
+        )
+        for line in proc.stdout.splitlines():
+            if line.startswith("RESULT"):
+                payload = json.loads(line[len("RESULT"):])
+                # The harness reports a failure *in* its RESULT line, so a bare
+                # `["titles"]` here raises KeyError and hides the reason it was
+                # given - a check that fails for its own reasons and is then
+                # believed. Read the payload first, then fail with both halves.
+                if "error" in payload:
+                    # One retry: this is a module-scoped fixture whose failure
+                    # costs three tests, and a GUI subprocess that could not
+                    # initialise under heavy load is a fact about the machine,
+                    # not about the settings window. A second failure is a real
+                    # one and is reported as such.
+                    if attempt == 0:
+                        time.sleep(2)
+                        continue
+                    pytest.fail(
+                        f"the settings window harness reported an error twice: "
+                        f"{payload['error']}\nstderr:\n{proc.stderr}"
+                    )
+                return payload["titles"]
+        if attempt == 0:
+            time.sleep(2)
+            continue
+        break
     pytest.fail(
         "the settings window did not report its rows.\n"
         f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"

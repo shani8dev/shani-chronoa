@@ -45,7 +45,19 @@ class _FakePath:
     """A PATH holding a chosen set of binaries, on top of the real one."""
 
     def __init__(self, monkeypatch, bindir):
-        monkeypatch.setenv("PATH", f"{bindir}:{os.environ['PATH']}")
+        # **PATH is the bindir and nothing else.** This box has both `wtype`
+        # and `ydotool` really installed, and the fixture's own fakes are
+        # invisible next to them: `_only(bindir, "ydotool")` deletes the *fake*
+        # wtype, but `shutil.which("wtype")` still resolves `/usr/bin/wtype`,
+        # so `_detect_backend` returns wtype and the assertion about ydotool
+        # fails on a machine that has wtype installed. Measured here.
+        #
+        # Leaving `/usr/bin:/bin` on the list does not help - that is where the
+        # real binaries live. The whole point of the fixture is that the module's
+        # `which()` sees exactly the binaries the test describes; otherwise every
+        # assertion about which backend is chosen is a statement about the host's
+        # packages. `shutil.which` needs only PATH, so an isolated one is enough.
+        monkeypatch.setenv("PATH", str(bindir))
 
 
 @pytest.fixture

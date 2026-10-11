@@ -8,6 +8,17 @@ Two backends are probed, honestly distinguished by display server:
 - **X11**: `xclip` and `xsel`. On this host `DISPLAY` is set, so this is
   the exercisable path.
 
+**The two backends take different argv, and one shared spelling broke
+Wayland completely.** Every call site built `[tool, "-selection",
+"clipboard", "-o"]` - xclip's form - for whichever tool the probe returned,
+so on Wayland they ran `wl-paste -selection clipboard -o` and got
+*"invalid option -- 'o'"* (`wl-paste --help` has neither flag; it takes
+`--no-newline` / `--type`). Wayland is ShaniOS's own session type, so
+`get_clipboard` reported "The clipboard is empty." for a clipboard that had
+just been written, and the post-condition then verified the read it had
+failed - a failed round trip reporting a successful write as broken.
+`_read_argv` / `_write_argv` are the one place each session's flags live.
+
 The probe is by `shutil.which`, not by guessing from `XDG_SESSION_TYPE`
 alone: a session can report one type while still having the other toolset
 installed, and reporting "Wayland clipboard" when `wl-copy` is absent would
@@ -55,6 +66,43 @@ def _detect_backend() -> Optional[Tuple[str, str, str]]:
     return None
 
 
+def _read_argv(backend: "tuple[str, str, str]") -> "list[str]":
+    """The argv that READS this session's clipboard.
+
+    **The argv is per-backend, and it was not.** All three call sites built
+    `[tool, "-selection", "clipboard", "-o"]` - xclip's form - for whichever
+    tool `_detect_backend` happened to return, so on **Wayland** they ran
+    `wl-paste -selection clipboard -o` and got *"invalid option -- 'o'"*.
+    `wl-paste --help` has no `-o` and no `-selection`; it takes
+    `--no-newline` / `--type`. Wayland is ShaniOS's own session type, so the
+    whole skill was unreadable there - and the post-condition verified the read
+    it had just failed, so `set_clipboard` reported a failed round trip for a
+    write that had succeeded.
+
+    Measured on this box: `wl-paste --help` lists `-n/--no-newline`,
+    `-l/--list-types`, `-p/--primary`, `-t/--type`, `-s/--seat`. xclip and xsel
+    share `-selection clipboard -o`, which is why one tuple covered both of
+    those and neither of the Wayland pair.
+    """
+    session, _write, read = backend
+    if session == "wayland":
+        return [read, "--no-newline"]
+    return [read, "-selection", "clipboard", "-o"]
+
+
+def _write_argv(backend: "tuple[str, str, str]") -> "list[str]":
+    """The argv that WRITES this session's clipboard, input on stdin.
+
+    The same defect on the other side: `wl-copy -selection clipboard` is not a
+    form `wl-copy` accepts either. `wl-copy` reads the text on stdin and takes
+    `--type` for the MIME type; xclip takes `-selection clipboard`.
+    """
+    session, write, _read = backend
+    if session == "wayland":
+        return [write, "--type", "text/plain;charset=utf-8"]
+    return [write, "-selection", "clipboard"]
+
+
 def _run_get_clipboard(_arguments: dict) -> str:
     backend = _detect_backend()
     if backend is None:
@@ -66,7 +114,7 @@ def _run_get_clipboard(_arguments: dict) -> str:
     session, _write, read_tool = backend
     try:
         result = subprocess.run(
-            [read_tool, "-selection", "clipboard", "-o"],
+            _read_argv(backend),
             capture_output=True, text=True, timeout=5,
         )
     except FileNotFoundError:
@@ -101,7 +149,7 @@ def _run_set_clipboard(arguments: dict) -> str:
         # returned the value. DEVNULL has no reader to block, so the parent sees
         # the real exit status as soon as the direct child is gone.
         result = subprocess.run(
-            [write_tool, "-selection", "clipboard"],
+            _write_argv(backend),
             input=text.encode("utf-8"),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -169,7 +217,7 @@ def _verify_clipboard_written(arguments: dict, tool: "str | None" = None):
     _session, _write_tool, read_tool = backend
     try:
         completed = subprocess.run(
-            [read_tool, "-selection", "clipboard", "-o"],
+            _read_argv(backend),
             capture_output=True, text=True, timeout=5, check=False,
         )
     except (subprocess.SubprocessError, OSError) as exc:

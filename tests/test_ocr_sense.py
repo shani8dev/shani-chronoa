@@ -176,6 +176,14 @@ def test_missing_tesseract_is_refused_rather_than_raised(tmp_path, monkeypatch, 
 
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+    # **Both lookups have to be neutralised, not just the PATH one.**
+    # `resolve_tesseract` falls back to a fixed `FALLBACK_TESSERACT` path, so
+    # emptying PATH is not "no tesseract" on a machine that has the binary there
+    # - measured here, where `/usr/bin/tesseract` exists and `/usr/share/
+    # tessdata` does not: the sense correctly answered "tesseract has no
+    # language data" and this test wanted "not installed". The sense was right
+    # and the fixture was describing a machine that does not exist.
+    monkeypatch.setattr(ocr_mod, "FALLBACK_TESSERACT", str(tmp_path / "no-tesseract"))
     monkeypatch.setattr(ocr_mod, "FALLBACK_TESSDATA_DIR", str(tmp_path / "no-tessdata"))
 
     result = ocr_mod.run({"path": str(_image(tmp_path))})
