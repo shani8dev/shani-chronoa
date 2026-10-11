@@ -10237,6 +10237,27 @@ statements together on one line, so `tools.py` → `outcome_model` → `learning
 raises `SyntaxError` and **every** import of the package fails. Verified against
 a repaired copy outside the tree, never by editing their file.
 
+## Screen share: the sixth dead module, and it needed a worker, not a button (2026-10-11)
+
+Second pass of the same audit: **15 of 186 modules are referenced by no GUI, no
+skill and no sense.** `phone_screen` needs an Android app that does not exist
+here, `bluez_battery` is plumbing that feeds bluez so GNOME and Plasma draw it.
+One is neither: `skills/screen_to_phone.py`, driving a module
+(`screen_stream.py`) that was **fully built and reached by nothing** - the same
+"who calls this" scan that has found five dead modules here. `gui/surfaces/screen_share.py`
+is the page it could be used from.
+
+**It goes through `tools.execute_tool`, not a copy** - the gate
+(`screen-share-enabled`), the sandbox and the audit origin are the chat path's.
+**The probe takes up to 90 seconds** (the launcher's `--check` imports GStreamer
+and reads the kernel's address table), so every action runs on a worker and
+reports on an idle, and the answer is shown **in full**: a truncated label would
+remove exactly the part naming the missing package.
+
+Three mutations, all failing the file: bypassing the gate to call the skill
+directly, dropping the origin so an unattended action reads as a typed one, and
+swallowing a refusal.
+
 ## The Routines surface, and the row that escaped nothing in either field (2026-10-11)
 
 Asked for the GUI for needed things, so the audit ran before the build: **all 57
@@ -10802,3 +10823,53 @@ exercised and not only the shapes fixture. The real-GGUF tests skip and say so
 without the variable - the convention `test_ctxfit.py`'s parity test already set,
 and deliberately **no** `Path.home()` fallback, because the suite redirects HOME
 per test and a path resolved at fixture time is the scratch directory.
+
+## airllm's chunked cross-entropy, and a 297x win on the inference path (2026-10-11)
+
+Second pass over `harness-study/airllm`, into `air_llm/airllm/chunked_ce.py` - the
+file the first pass never opened:
+
+> *Fused linear-cross-entropy that never materialises `[N, vocab]` logits. ...
+> This walks the vocabulary in chunks, keeps a running log-sum-exp, and recomputes
+> the same chunks in backward to get `d_hidden`.*
+
+Chronoa computes no cross-entropy, but the **discipline** transfers exactly, and
+it had a target here. `vectorise()` allocated a `_N_FEATURES`-wide list, filled
+it, normalised it into a *second* such list, and every caller then called
+`_active()` to walk all 16,384 slots looking for the handful that were set. Its
+own docstring described the trade as deliberate: *"the 16384-wide list is built
+once per example and then read sparsely"*.
+
+Measured on this machine's own log before the change:
+
+| | 19,103 examples |
+|---|---|
+| `_active(vectorise(features(r)))` | **54.7 s** |
+| `active_vector(features(r))` | **0.18 s** |
+
+And `predict_proba()` - the live inference path, called on every tool call - paid
+1.43 ms for a shape whose sparse form was the answer all along.
+
+`learning.active_vector()` builds it directly from the set of distinct indices:
+`sqrt(number of distinct indices)` is the norm, and the pairs come back sorted by
+index. **297x faster, byte-identical output.**
+
+Equivalence was checked two ways rather than assumed, and the second is the one
+that matters: **all 577 distinct feature sets in the real log** compare equal, plus
+hand-built cases including hash collisions. That last one is a real trap - two
+feature names hashing to the same index are *one* column at 1.0, not 2.0, so a
+sparse implementation that counts occurrences rather than distinct indices
+normalises differently and passes every input that happens not to collide. The
+test searches 4,000 probes for a collision to prove the case exists at all.
+
+Three more decisions in it, each with a mutation behind it:
+
+- **The norm is `sqrt(distinct columns)`, never `sqrt(occurrences)`.** The
+  collision test is what catches it; without it the bug is invisible.
+- **The order is by index, so the output is deterministic.** `collapse()` keys a
+  dict on the tuple - *"11,590 examples carry only 344 distinct vectors"* - so a
+  set's iteration order would silently break the 34x dedup the whole layer rests
+  on, while every value-level assertion still passed.
+- **`vectorise()` is kept**, for the tests that pin `active_vector` against it and
+  for any caller that genuinely wants the dense form. Both hot call sites
+  (`load()` and `predict_proba()`) now take the sparse route.
