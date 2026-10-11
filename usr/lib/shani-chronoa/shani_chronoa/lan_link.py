@@ -95,6 +95,13 @@ DEVICE_ID = re.compile(r"^[a-zA-Z0-9_-]{32,38}$")
 
 #: A datagram is small: the spec's own implementation caps it at 8 KiB, and an
 #: identity packet is a few hundred bytes.
+#: The largest frame a peer may send on the TCP channel. 4 MiB is far past any
+#: packet this protocol defines - the biggest is a share request's filename - and
+#: far below "enough to hurt". It exists because the read buffer had **no bound
+#: at all**: a peer sending `{"a":1}` and no newline filled it until memory ran
+#: out, and nothing in the loop noticed.
+MAX_LINE_BYTES = 4 * 1024 * 1024
+
 _MAX_DATAGRAM = 8 * 1024
 
 IDENTITY_TYPE = "kdeconnect.identity"
@@ -693,6 +700,15 @@ class Link:
         A partial line is kept back rather than parsed, because a packet split
         across two reads is ordinary on a stream and parsing half of one would
         either raise or, worse, succeed with half an object.
+
+        **The buffer is bounded, and it was not.** A peer that sends `{"a":1}`
+        without ever sending a newline filled this without limit: the `while`
+        loop kept appending and nothing ever partitioned it. Maze-Connect's
+        `FrameParser` makes the same point with a length prefix - their version
+        checks the cap *before* buffering, which needs a prefix to check, and
+        this protocol's frames are newline-delimited so there is nothing to check
+        first. What is available here is the bound itself: once the buffer
+        exceeds it, no well-formed packet is on its way and the link is refused.
         """
         while "\n" not in self._buffer:
             if time.monotonic() >= deadline:
@@ -706,6 +722,14 @@ class Link:
                 self._buffer += self._tls.read().decode("utf-8", "replace")
             except ssl.SSLWantReadError:
                 continue
+            if len(self._buffer) > MAX_LINE_BYTES:
+                # Not a truncation. A peer claiming a frame larger than any
+                # packet this protocol defines is not a peer whose next byte
+                # makes the buffer make sense, and silently dropping the
+                # overflow would leave a buffer now holding half of two things.
+                raise RuntimeError(
+                    f"the peer sent {len(self._buffer)} bytes without a frame "
+                    f"boundary, past the {MAX_LINE_BYTES}-byte limit")
         whole, _, partial = self._buffer.partition("\n")
         self._buffer = partial
         return [l for l in whole.split("\n") if l.strip().startswith("{")] if whole else []

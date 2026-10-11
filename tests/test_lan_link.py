@@ -244,3 +244,104 @@ class TestTheSkillSurface:
         out = lan_phone._run({"action": "status", "_config": self._config()})
         assert str(lan_link.UDP_PORT) in out
         assert "not implemented" in out or "not written" in out
+
+
+
+def _deadline() -> float:
+    """Five seconds from now - enough for the bound to fire, short enough that a
+    missing one fails a test rather than hanging a suite."""
+    import time
+    return time.monotonic() + 5.0
+
+class TestTheReadBufferIsBounded:
+    """**A peer that never sends a newline used to fill this until memory ran out.**
+
+    `Link._lines` accumulates into `self._buffer` and partitions on `\\n`. A peer
+    sending `{"a":1}` and no newline, forever, grew it without limit: nothing in
+    the loop checked a size, because every packet the protocol defines is small
+    and well-formed and the loop had only ever seen those.
+
+    Maze-Connect's `FrameParser` makes the same point better - it checks a length
+    prefix *before* buffering any payload - but that needs a prefix to check, and
+    these frames are newline-delimited so there is nothing to inspect first. What
+    carries over is the bound itself.
+    """
+
+    def _link(self, chunk=b"more bytes"):
+        """A Link whose socket and TLS layer are already primed.
+
+        Built by hand rather than connected: the point is the buffer bound, and a
+        real socket would test the network instead.
+
+        **`chunk` must be non-empty, and the first version of this fixture used
+        `b""`** - which makes `_pump` raise "the peer closed the link" and the
+        loop break *before* it ever reaches the size check. Two tests then
+        "passed" by not exercising the bound at all, which is the
+        can't-fail-control trap in its purest form: the assertion existed, the
+        path to it did not.
+        """
+        link = lan_link.Link("127.0.0.1")
+        link._buffer = "x" * (lan_link.MAX_LINE_BYTES + 10)
+
+        class _Tls:
+            def read(self):
+                return b""
+
+            def write(self, data):
+                pass
+
+        class _Raw:
+            def settimeout(self, seconds):
+                pass
+
+            def recv(self, size):
+                return chunk
+
+        link._tls, link._raw = _Tls(), _Raw()
+        link._outgoing = type("_B", (), {"pending": 0, "read": lambda s: b""})()
+        link._incoming = type("_B", (), {"write": lambda s, d: None})()
+        return link
+
+    def test_an_endless_frame_with_no_boundary_is_refused(self):
+        with pytest.raises(RuntimeError) as caught:
+            # **A finite deadline, so a removed bound fails rather than hangs.**
+            # With `1e9` the loop spins until memory or patience runs out, and a
+            # mutation that times out CI reads as a broken suite rather than as
+            # the break it is. With the bound present the raise comes on the
+            # first iteration, so this never ends the loop.
+            self._link()._lines(deadline=_deadline())
+        assert "boundary" in str(caught.value)
+        assert str(lan_link.MAX_LINE_BYTES) in str(caught.value), (
+            "the refusal must name the limit, or a person reading it cannot tell "
+            "whether the limit is theirs or the peer's")
+
+    def test_it_refuses_rather_than_truncating(self):
+        """Truncating would leave the buffer holding half of two things and the
+        next parse reading a spliced-together packet - which is how a length or
+        delimiter attack becomes an injection.
+        """
+        link = self._link()
+        with pytest.raises(RuntimeError):
+            link._lines(deadline=_deadline())
+
+    def test_a_normal_packet_still_works(self):
+        """**The control.** A bound that refuses ordinary traffic is worse than
+        no bound, and a test that only feeds absurd input cannot see it."""
+        link = self._link()
+        # **A trailing newline, because that is what makes it a complete line.**
+        # The first version of this test omitted it and set deadline=1e9, so the
+        # read loop waited forever for a boundary that was never coming and the
+        # test hung rather than failed - which looks like a slow test and reads as
+        # a broken fixture, and is neither: it is a correct loop given a wrong
+        # input.
+        link._buffer = '{"type": "kdeconnect.ping", "body": {}}\n'
+        assert link._lines(deadline=_deadline()) == [
+            '{"type": "kdeconnect.ping", "body": {}}']
+        assert link._buffer == "", "the consumed line was not dropped"
+
+    def test_the_limit_is_a_limit_not_a_feeling(self):
+        """The number is a declared constant, so a test can pin it and a reader
+        can find why it is that number."""
+        assert lan_link.MAX_LINE_BYTES == 4 * 1024 * 1024
+        assert lan_link.MAX_LINE_BYTES > 1024 * 1024, (
+            "smaller than 1 MiB would refuse a legitimate multi-packet read")
