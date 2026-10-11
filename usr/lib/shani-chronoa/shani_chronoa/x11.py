@@ -435,7 +435,25 @@ class Display:
     # -- input --------------------------------------------------------------
 
     def move(self, x: int, y: int) -> None:
-        """Move the pointer. Absolute, and it is the *cursor*, not a target."""
+        """Move the pointer. Absolute, and it is the *cursor*, not a target.
+
+        **Correct, and measured inert on this box.** The XTEST extension is
+        advertised (`XQueryExtension` answers present, and `XFIXES` alongside it),
+        the call returns, `XFlush` runs - and the pointer does not move:
+
+            pointer before            : (731, 731)
+            after move(400, 300)      : (731, 731)
+            after move(700, 500)      : (731, 731)
+
+        Which is the same fact AGENTS.md records from the other side, as
+        JDK-8280990: *XTEST events never leave the X server*. Here they do not
+        even reach the X server's own recorded pointer, which is what a
+        Wayland-secure Xwayland looks like from inside.
+
+        **So a caller must not treat this as delivered.** `xtest_delivers()` below
+        asks the question, and a route that uses XTEST should check it first
+        rather than report a motion it did not observe.
+        """
         XTST.XTestFakeMotionEvent(self._d, X11.XDefaultScreen(self._d),
                                    int(x), int(y), 0)
         X11.XFlush(self._d)
@@ -620,6 +638,47 @@ def unavailable_reason() -> str:
                 "exists for Xwayland, so this may mean there is no X11 route "
                 "here at all" % (os.environ.get("DISPLAY") or "(unset)", exc))
     return ""
+
+
+def xtest_delivers(display: "Display | None" = None) -> bool:
+    """Whether synthesised input actually reaches this display server.
+
+    **A self-test, because rc=0 is not evidence.** Measured here: `move()` returns
+    without error, `XFlush` runs, and the pointer is exactly where it was. The
+    XTEST extension is advertised, so "is it installed" is not the question -
+    whether the server honours it is.
+
+    Probes with a motion that must land at a *different* point and reads the
+    pointer back. Deliberately restores the original position, because the
+    cursor belongs to whoever is sitting at the machine.
+    """
+    own = display or Display()
+    try:
+        before = own.pointer()
+        if before is None:
+            return False
+        # A point that is guaranteed not to be where the pointer already is.
+        target = (0, 0) if before[:2] != (0, 0) else (max(1, before[0] - 1),
+                                                      max(1, before[1] - 1))
+        own.move(*target)
+        after = own.pointer()
+        if before[:2] != after[:2]:
+            # It moved - put it back before anyone notices.
+            own.move(*before[:2])
+            return True
+        # It may have moved somewhere else rather than not at all, so try one
+        # more before concluding: a server that needs two events is not absent.
+        own.move(*target)
+        after = own.pointer()
+        if before[:2] != after[:2]:
+            own.move(*before[:2])
+            return True
+        return False
+    except XError:
+        return False
+    finally:
+        if display is None:
+            own.close()
 
 
 def available() -> bool:

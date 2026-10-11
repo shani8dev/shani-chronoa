@@ -125,3 +125,46 @@ def test_no_display_is_a_refusal_not_an_empty_result():
     with pytest.raises(x11.XError):
         x11.Display(":nonexistent-display-42")
     assert x11.Display.__module__ == "shani_chronoa.x11"
+
+
+def test_xtest_delivery_is_asked_of_the_server_not_assumed():
+    """**A route that uses XTEST must check before it claims a motion.**
+
+    Measured here: `move()` returns without error, `XFlush` runs, the XTEST
+    extension is advertised by `XQueryExtension` - and the pointer does not move.
+    That is the same fact AGENTS.md records from the other side as JDK-8280990,
+    "XTEST events never leave the X server", seen here as they not reaching even
+    the server's own recorded pointer.
+
+    This test does not assert which way it answers - that is a fact about the
+    machine, and a test pinned to one answer fails on the other. It asserts the
+    question is *answerable* and answered the same way twice.
+    """
+    from shani_chronoa import x11
+
+    first = x11.xtest_delivers()
+    second = x11.xtest_delivers()
+    assert first == second, (
+        "the XTEST self-test gave two answers on one machine (%r then %r), so it "
+        "is not measuring anything" % (first, second))
+
+
+def test_the_xtest_self_test_restores_where_the_pointer_was():
+    """**The cursor belongs to whoever is sitting at the machine.** A self-test
+    that leaves the pointer at the origin has just moved their mouse, which is
+    not what a probe does."""
+    from shani_chronoa import x11
+
+    try:
+        display = x11.Display()
+    except x11.XError:
+        pytest.skip("no X server here")
+    with display:
+        before = display.pointer()
+        if before is None:
+            pytest.skip("the pointer could not be read")
+        x11.xtest_delivers(display)
+        after = display.pointer()
+    assert after[:2] == before[:2], (
+        "the self-test moved the pointer from %r to %r and left it there"
+        % (before[:2], after[:2]))
