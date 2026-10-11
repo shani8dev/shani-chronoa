@@ -414,6 +414,69 @@ def sample_sentence() -> str:
 #: inside `build_window` meant the only ids that existed were the ones a wizard
 #: that was already open had created, so the one caller whose job is to *open*
 #: it was the one that could not ask.
+#: **Chronoa's orb, embedded as SVG bytes.**
+#:
+#: It used to be `Gtk.Image.new_from_icon_name("shani-chronoa")`, and that is a
+#: *theme lookup*: it needs the icon in an `XDG_DATA_DIRS` that is on the path.
+#: Measured, it does not resolve from a plain checkout - the render came back as
+#: GTK's missing-image placeholder, **a gear**, which is how "some page had a gear
+#: icon" got reported. Shipping `usr/share/icons/hicolor/scalable/apps/` is right
+#: for an installed system and useless for the tree the wizard is developed in.
+#:
+#: `Gtk.Svg.new_from_bytes` + `Gtk.Picture` renders vector bytes with no file and
+#: no compiled `GResource` (there is none in this repo), so the mark is identical
+#: in the app, in a render and in a test. Sized in the SVG itself rather than
+#: `set_pixel_size`, because a `Gtk.Picture` reports the paint's own size.
+_ORB_MARK_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="112" height="112" '
+    b'viewBox="0 0 112 112">'
+    b'<circle cx="56" cy="56" r="48" fill="#3584e4" fill-opacity="0.85"/>'
+    b'<rect x="48" y="30" width="16" height="34" rx="8" fill="#ffffff"/>'
+    b'<path d="M38 62a18 18 0 0 0 36 0" fill="none" stroke="#ffffff" '
+    b'stroke-width="7" stroke-linecap="round"/>'
+    b'<path d="M56 80v12M46 92h20" fill="none" stroke="#ffffff" '
+    b'stroke-width="7" stroke-linecap="round"/>'
+    b'</svg>'
+)
+
+
+def _void_has_room(adjustment) -> bool:
+    """Whether a page's content is shorter than its window, so there is a void.
+
+    **`upper <= page_size` is the no-scrollbar case**, but it is also what an
+    *unallocated* scroller reports - `upper` and `page_size` are both 0 before
+    the widget has ever been laid out, and `0 <= 0 + 1` is true. Measured: the
+    first version of this showed the mark on **all sixteen pages**, including
+    `review`, whose content demands 1029px of a 620px window, because the page
+    had been built and never shown.
+
+    So a page that has never been measured is not a page with room in it, and
+    the answer is False rather than a guess in either direction.
+    """
+    if adjustment.get_page_size() <= 1:
+        return False
+    return adjustment.get_upper() <= adjustment.get_page_size() + 1
+
+
+def _orb_mark():
+    """The mark that fills a wizard page's void. A picture, never a control.
+
+    Imports its own, because `Gtk` is imported inside `build_window` on purpose -
+    this module is imported by the MCP server and the CLI, which may run on a
+    machine with no display at all.
+    """
+    from gi.repository import GLib, Gtk
+
+    svg = Gtk.Svg.new_from_bytes(GLib.Bytes.new(_ORB_MARK_SVG))
+    picture = Gtk.Picture.new_for_paintable(svg)
+    picture.set_can_shrink(False)
+    # A picture of the app is not a control: it must never take a click, or the
+    # space above a button becomes a dead target.
+    picture.set_can_target(False)
+    picture.set_focusable(False)
+    return picture
+
+
 _SETUP_PAGES = [
     ("welcome", "Welcome"), ("mode", "Mode"), ("cloud-keys", "Cloud keys"),
     ("brain", "Brain"), ("model-picker", "Model"), ("ears", "Ears"),
@@ -612,14 +675,41 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # natural width (a 900px child measured 900). It is left out rather than
         # left in with a comment claiming it works.
         scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
-        # Clamped, because the window can be resized or maximised and nothing
-        # else bounds it: rendered at 1280px every row ran edge to edge, a
-        # 30-character subtitle sat 1,800px from its switch, and the Next button
-        # floated half a screen below the choice it confirms. The clamp only
-        # caps; at the 560px default it changes nothing.
         clamp = Adw.Clamp(maximum_size=WIZARD_MAX_WIDTH, tightening_threshold=WIZARD_MAX_WIDTH)
         clamp.set_child(box)
         scroller.set_child(clamp)
+
+        # **The void gets a mark, and only when there is one.**
+        #
+        # Measured against the 620px default window, and reported as "minor UI
+        # glitches during model/voice installation": four of the sixteen pages
+        # have far less content than the window - `ears` 270px, `brain` 84px,
+        # `mode` 316px, `model-picker` 470px - so between the last row and the
+        # pinned action there was 150 to 536px of nothing. Holding a button at
+        # the bottom is right (see the footer note below); leaving half a screen
+        # of plain nothing above it is what reads as broken.
+        #
+        # It is drawn **over the scroller**, not appended to the content, because
+        # the content is what a page's caller fills in after this returns - an
+        # appended mark would land in the middle of a page that later adds rows.
+        # And it is shown only when the content cannot scroll, so on the eleven
+        # pages that fill or overflow the window it is absent rather than drawn
+        # over a row. `upper <= page_size` is the no-scrollbar case read off the
+        # adjustment: fewer pixels of content than the window has room for.
+        mark = _orb_mark()
+        mark.set_halign(Gtk.Align.CENTER)
+        mark.set_valign(Gtk.Align.END)
+        mark.set_margin_bottom(24)
+        overlay = Gtk.Overlay()
+        overlay.set_child(scroller)
+        overlay.add_overlay(mark)
+
+        def _mark_follows_the_void(adjustment) -> None:
+            mark.set_visible(_void_has_room(adjustment))
+
+        for signal in ("changed", "value-changed"):
+            scroller.get_vadjustment().connect(signal, _mark_follows_the_void)
+        _mark_follows_the_void(scroller.get_vadjustment())
 
         # **The action row is pinned below the scroller, not appended to the
         # content.** It used to be the last children of `box`, which put it at
@@ -637,7 +727,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                          halign=Gtk.Align.CENTER, margin_top=6, margin_bottom=18,
                          margin_start=18, margin_end=18)
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-        outer.append(scroller)
+        outer.append(overlay)
         outer.append(footer)
 
         p = Adw.NavigationPage(title=title, tag=tag)
@@ -1358,6 +1448,56 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         box.append(wrapping(
             "Ollama is running on this computer, so Chronoa uses it - "
             "nothing to download."))
+    elif b["up"]:
+        box.append(wrapping(
+            f"llama-server is answering on this computer"
+            + (f" with {b['active']}" if b.get("active") else "")
+            + ", so nothing needs downloading."))
+    elif b.get("installed"):
+        # **"Downloaded" and "answering" are different questions, and this page
+        # asked only the second while presenting its answer as the first.**
+        # Measured on a real machine with 1.1 GB and 5 GB of models on disk and
+        # `llama-server` stopped: the page read "Nothing is set up to answer
+        # yet." - which sent someone to the download flow for models already
+        # sitting in their home directory. `is_up()` is the service; `installed()`
+        # is the disk, and the branch above never looked at the disk.
+        names = ", ".join(b["installed"])
+        box.append(wrapping(
+            f"{len(b['installed'])} model(s) are already on this computer "
+            f"({names}). Nothing is answering yet, because the local model "
+            f"service is not running."))
+        start = Gtk.Button(label="Start the model service",
+                           css_classes=["pill"], halign=Gtk.Align.START)
+
+        def _start(*_a):
+            start.set_sensitive(False)
+            start.set_label("Starting...")
+            import threading
+
+            def work():
+                from shani_chronoa import local_llm
+
+                problem = local_llm.start_service()
+
+                def done():
+                    start.set_sensitive(True)
+                    start.set_label(
+                        "Start the model service" if problem
+                        else "Started - the model is answering")
+                    if problem:
+                        started.set_text("Could not start it: %s" % problem)
+                    return False
+                from gi.repository import GLib
+
+                GLib.idle_add(done)
+
+            threading.Thread(target=work, daemon=True).start()
+
+        start.connect("clicked", _start)
+        started = wrapping("")
+        started.add_css_class("dim-label")
+        box.append(start)
+        box.append(started)
     else:
         box.append(wrapping("Nothing is set up to answer yet."))
     n = Gtk.Button(label=f"Next: {_titles.get('ears', 'Ears')}",
