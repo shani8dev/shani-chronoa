@@ -568,9 +568,11 @@ class Link:
     ServerHello out.
     """
 
-    def __init__(self, host: str, timeout: float = 20.0):
+    def __init__(self, host: str, timeout: float = 20.0,
+                 tcp_port: int = UDP_PORT):
         self.host = host
         self.timeout = timeout
+        self.tcp_port = tcp_port
         self._raw: Optional[socket.socket] = None
         self._tls = None
         self._incoming: "Optional[ssl.MemoryBIO]" = None
@@ -598,7 +600,7 @@ class Link:
     def connect(self) -> "Link":
         """TCP -> plaintext identity -> TLS -> our full identity."""
         import ssl
-        self._raw = socket.create_connection((self.host, UDP_PORT),
+        self._raw = socket.create_connection((self.host, self.tcp_port),
                                              timeout=self.timeout)
         self._incoming, self._outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
         self._tls = self._context().wrap_bio(self._incoming, self._outgoing,
@@ -709,7 +711,8 @@ class Link:
         return [l for l in whole.split("\n") if l.strip().startswith("{")] if whole else []
 
 
-def send_file(host: str, path, timeout: float = 120.0) -> "tuple[bool, str]":
+def send_file(host: str, path, tcp_port: int = UDP_PORT,
+              timeout: float = 120.0) -> "tuple[bool, str]":
     """Push a file to a paired peer. `(sent, why-not)`.
 
     **The shape is a listening socket, not a connection we make.** The spec's
@@ -747,7 +750,12 @@ def send_file(host: str, path, timeout: float = 120.0) -> "tuple[bool, str]":
         listener.close()
         return False, f"could not open a port to send from ({exc})"
 
-    link, why = _link(host, timeout=timeout)
+    # **The port the caller names, exactly as `identity_exchange` does.** The
+    # first version dialled UDP_PORT here while `send_file` was the only caller
+    # that knew better, so a peer on any other control port - including a test's
+    # fake one - came back as `ConnectionRefusedError` rather than as "the wrong
+    # port", which reads as the peer being down.
+    link, why = _link(host, timeout=timeout, tcp_port=tcp_port)
     if link is None:
         listener.close()
         return False, why
@@ -818,9 +826,10 @@ def _human(size: int) -> str:
     return f"{size:.1f} GB"
 
 
-def _link(host: str, timeout: float = 20.0) -> "tuple[Optional[Link], str]":
+def _link(host: str, timeout: float = 20.0,
+          tcp_port: int = UDP_PORT) -> "tuple[Optional[Link], str]":
     """A connected Link, or (None, why-not). The one entry point everything uses."""
-    link = Link(host, timeout=timeout)
+    link = Link(host, timeout=timeout, tcp_port=tcp_port)
     try:
         link.connect()
         return link, ""
