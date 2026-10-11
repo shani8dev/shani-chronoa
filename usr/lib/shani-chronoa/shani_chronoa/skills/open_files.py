@@ -8,6 +8,15 @@ file whose space cannot be reclaimed, there is no way to find out which.
 
 `lsof` answers all three, and it is the only thing on either image that does.
 
+**But not the lock, and this file does not answer it either - `file_locks`
+does.** Measured on a descriptor this skill was pointed at: lsof prints the
+lock as two trailing characters on the FD (`171ur`, where `u` is the open
+mode and the second `r` is *a read lock on part of the file* - lsof's own
+FD-column vocabulary, `R`/`W` being whole-file). The parser keeps the raw
+string and never decodes it, and the per-`(command, name)` dedupe then drops
+the row carrying it, so the word "lock" does not appear in the answer at
+all. `/proc/locks` is the table that answers it directly.
+
 **Measured on the dev box (lsof 4.95), not guessed:**
 
     COMMAND    PID             USER  FD   TYPE             DEVICE SIZE/OFF    NODE NAME

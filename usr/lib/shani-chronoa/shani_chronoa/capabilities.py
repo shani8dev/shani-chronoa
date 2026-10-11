@@ -542,6 +542,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "bandwidth_to_host": ("System", "How fast this machine talks to another machine"),
     # Read-only: lsof with a filter. Never a kill flag, asserted on the argv.
     "open_files": ("System", "Which programs have a file or socket open"),
+    # Read-only: /proc/locks, no binary and no privilege. Beside `open_files`
+    # because the two are asked together - "why won't this save" is answered
+    # by the lock table and "who has it open" by lsof, and lsof prints the
+    # lock as a suffix this parser does not decode.
+    "file_locks": ("System", "Who holds a file lock, and on what"),
     # Read-only: `sar` reading /var/log/sa. No -f, no -o (asserted on argv).
     "system_history": ("System", "What this machine was doing earlier today"),
     # Read-only: rclone listremotes/size/lsf only. `_FORBIDDEN` is enforced in
