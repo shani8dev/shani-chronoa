@@ -233,7 +233,8 @@ def build(app: Any = None) -> Gtk.Widget:
             return
         found = list(streams)
         if not found:
-            status.set_label("Nothing is playing or recording audio right now.")
+            status.set_label("Nothing is playing or recording audio right now - "
+                            "a quiet machine and not a failure.")
             stream_rows.append(_Row("What is playing",
                                     "no application has an audio stream open"))
             return
