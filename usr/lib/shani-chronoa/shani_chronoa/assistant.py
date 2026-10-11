@@ -22,13 +22,13 @@ TTL instead of surviving for the session.
 `build_messages()` returns a plain copy of `_history` and every prompt is
 byte-for-byte what it was before the senses layer existed.
 """
+from shani_chronoa.guardrail import as_argument_object
 from shani_chronoa import permissions
 from shani_chronoa import provenance
 
 import asyncio
 import contextvars
 import functools
-import json
 import re
 import logging
 import time
@@ -936,22 +936,19 @@ class Assistant:
                     return over
                 function = call.get("function", {})
                 name = function.get("name", "")
-                arguments = function.get("arguments", {})
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments) if arguments.strip() else {}
-                    except json.JSONDecodeError as exc:
-                        # Never run a tool with arguments the model did not
-                        # give: running it with {} did whatever the defaults
-                        # do (sayri hands a small model its own error back
-                        # instead). The model sees why, with the call's id.
-                        validation_misses += 1
-                        self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
-                                      f"ERROR: the arguments for {name} were not valid JSON ({exc.msg} at "
-                                      f"position {exc.pos}); nothing ran. Call it again with valid JSON."})
-                        if validation_misses >= MAX_VALIDATION_MISSES:
-                            return self._malformed_stop(validation_misses)
-                        continue
+                arguments, unparsed = as_argument_object(function.get("arguments", {}))
+                if arguments is None:
+                    # Never run a tool with arguments the model did not give:
+                    # running it with {} did whatever the defaults do (sayri
+                    # hands a small model its own error back instead). The
+                    # model sees why, with the call's id.
+                    validation_misses += 1
+                    self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":
+                                  f"ERROR: {unparsed} for {name}; nothing ran. "
+                                  f"Call it again with valid JSON."})
+                    if validation_misses >= MAX_VALIDATION_MISSES:
+                        return self._malformed_stop(validation_misses)
+                    continue
                 if not isinstance(arguments, dict):
                     validation_misses += 1
                     self._record({"role": "tool", "tool_call_id": call.get("id", ""), "content":

@@ -116,6 +116,7 @@ import httpx
 
 from shani_chronoa import egress, usage as usage_mod
 from shani_chronoa.redaction import redactor
+from shani_chronoa.guardrail import as_argument_object
 from shani_chronoa.skills import is_valid_schema
 
 logger = logging.getLogger(__name__)
@@ -627,17 +628,29 @@ class AnthropicLLM:
                     blocks.append({"type": "text", "text": msg["content"]})
                 for i, call in enumerate(tool_calls):
                     fn = call.get("function", {})
-                    arguments = fn.get("arguments", {})
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except json.JSONDecodeError:
-                            arguments = {}
+                    name = fn.get("name", "")
+                    arguments, why = as_argument_object(fn.get("arguments", {}))
+                    if arguments is None:
+                        # **Not `{}`.** A malformed `arguments` string used to
+                        # become `{}` here, so the next turn acted as though the
+                        # tool had been called with nothing at all and the
+                        # model's own words were gone - measured: `{broken`,
+                        # `[]`, `null`, `"text"`, `42` and `None` all did this.
+                        # Anthropic also refuses a non-object `input`, so this
+                        # was an API error as well as a silent one.
+                        #
+                        # The `tool_use` id survives - the call did happen - and
+                        # the reason travels beside it, so history shows both
+                        # the call and that its arguments were unusable.
+                        logger.info("tool call %s has unusable arguments: %s",
+                                    name, why)
+                        blocks.append({"type": "text",
+                                       "text": f"[tool call to {name} ignored - {why}]"})
                     blocks.append({
                         "type": "tool_use",
-                        "id": call.get("id") or f"{fn.get('name', 'tool')}_{i}",
-                        "name": fn.get("name", ""),
-                        "input": arguments,
+                        "id": call.get("id") or f"{name or 'tool'}_{i}",
+                        "name": name,
+                        "input": arguments if isinstance(arguments, dict) else {},
                     })
                 out.append({"role": "assistant", "content": blocks})
             elif role == "tool":

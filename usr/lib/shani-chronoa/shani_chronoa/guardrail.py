@@ -32,6 +32,7 @@ time it is inconvenient.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Optional
 
@@ -124,6 +125,62 @@ def _type_of(schema: dict) -> "tuple[type, ...] | None":
 
 def _describe(path: str) -> str:
     return path or "the arguments"
+
+
+def as_argument_object(raw) -> "tuple[Optional[dict], str]":
+    """A tool call's `arguments` as a dict, or `("" , why not)`.
+
+    **The question that comes before every other one here.** `check()` assumes
+    it is handed a dict; this is the function that makes that assumption true
+    rather than true-by-luck, and it is the one place the two spellings of
+    `arguments` stop being two problems.
+
+    Two shapes arrive, both legitimate: the OpenAI wire form, where
+    `arguments` is a **JSON string**, and several clients' already-decoded
+    **dict**. Both normalise to a dict.
+
+    **Measured on the cloud path before this existed**, through the real
+    `AnthropicLLM._history_to_anthropic`, with `test_server.py`'s exact
+    parametrisation from edge0:
+
+        arguments in        what reached the tool
+        '{"expression":"2+2"}'  {'expression': '2 + 2'}   correct
+        {'expression': '2 + 2'} {'expression': '2 + 2'}   correct
+        {broken                  {}                       <- the defect
+        []                       []
+        null                     None
+        "text"                   'text'
+        42                       42
+        None                     None
+        ""                       {}
+
+    Six shapes ran a tool with something that is not an argument object, and a
+    malformed one **silently became `{}`** - the call ran with every default,
+    and nothing anywhere said the model's arguments had been dropped. `[]`,
+    `42` and `None` also reach the Anthropic API as a non-object `input`, which
+    is refused at the far end with a message about a field rather than about the
+    model's reply.
+
+    So: normalise, and **refuse anything that is not an object**. `""` is the
+    one honest `{}` - a model that lists no arguments means no arguments. Note
+    that edge0's test asserts the caller's payload is *not* mutated, which is
+    the property that keeps this usable inside a history rebuild.
+    """
+    if isinstance(raw, dict):
+        return raw, ""
+    if isinstance(raw, str) and not raw.strip():
+        return {}, ""
+    if not isinstance(raw, str):
+        return None, (f"the arguments were {type(raw).__name__}, not a JSON "
+                      f"object; nothing ran")
+    try:
+        decoded = json.loads(raw)
+    except ValueError as exc:
+        return None, (f"the arguments were not valid JSON ({exc}); nothing ran")
+    if not isinstance(decoded, dict):
+        return None, (f"the arguments were {json.dumps(decoded)[:48]}, not a "
+                      f"JSON object; nothing ran")
+    return decoded, ""
 
 
 def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
