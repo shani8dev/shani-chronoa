@@ -578,6 +578,16 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # by precedent with `get_file_info` and `explain_command`.
     "inspect_binary": ("System", "What a program is, and what it needs to run"),
     "binary_hardening": ("System", "Whether a program has the protections that make it safe to run"),
+    # Not a duplicate of the `gpu` sense, which reports the *kernel* driver from
+    # sysfs. This one answers whether OpenGL is actually hardware accelerated or
+    # has fallen back to software - which only the renderer string says, and a
+    # machine with a healthy `i915` and a `llvmpipe` fallback is the exact case
+    # that reads as fine everywhere else.
+    "graphics_stack": ("System", "Whether the graphics are hardware accelerated or falling back to software"),
+    # Not a duplicate of `data_usage` (vnstat: cumulative, includes yesterday)
+    # or `bandwidth_to_host` (iperf3: to one named host, needs a server there).
+    # This is the question in between - which program is moving bytes now.
+    "network_activity": ("System", "What is using this machine's network right now, per program"),
     "process_detail": ("System", "What one running process is waiting on"),
     # Read-only: cpupower frequency-info reports, and changes nothing.
     "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),

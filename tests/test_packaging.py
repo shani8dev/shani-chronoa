@@ -523,6 +523,18 @@ class TestPackagingMetadata:
             # was the only thing keeping it on the machine. elfutils is a
             # different package and ships the `eu-*` spellings.
             "readelf": ("binutils", "skills/binary_hardening.py"),
+            # graphics_stack needs the renderer string, which only glxinfo
+            # reports - the kernel driver in sysfs does not say whether Mesa
+            # fell back to llvmpipe. Measured: `/usr/bin/glxinfo is owned by
+            # mesa-utils 9.0.0-7`, while `/usr/lib/dri/i915_dri.so` is owned by
+            # `mesa` - so the package is mesa-utils, and naming `mesa` here
+            # would promise a package that does not ship the binary.
+            "glxinfo": ("mesa-utils", "skills/graphics_stack.py"),
+            # network_activity reads per-program rates with nethogs. The
+            # interface half needs no binary at all, so this optdepend decides
+            # only whether the skill can name programs - and it names its own
+            # package rather than saying "not installed".
+            "nethogs": ("nethogs", "skills/network_activity.py"),
         }
         # Already hard dependencies, and correctly so: the skill's primary
         # path is the one that uses it.

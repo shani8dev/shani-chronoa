@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**246 skills in 24 groups.** Each is a named, schema-typed module; the model
+**248 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 246 are consent-gated and 17 are destructive.**
+**89 of 248 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -64,6 +64,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `dissect_traffic` | Dissect traffic into protocol fields | needs `packet-capture-enabled` |
 | `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
 | `firmware_updates` | List firmware updates for this machine's devices | — |
+| `graphics_stack` | Whether the graphics are hardware accelerated or falling back to software | — |
 | `inspect_binary` | What a program is, and what it needs to run | — |
 | `interface_counters` | How much traffic each interface has carried | — |
 | `lab_network_create` | Build an isolated lab network with named subnets | needs `network-provision-enabled` |
@@ -76,6 +77,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `machine_capabilities` | What this machine can actually do | — |
 | `my_ip_address` | IP address | — |
 | `neighbour_table` | Which addresses on this link have answered, and which never have | — |
+| `network_activity` | What is using this machine's network right now, per program | — |
 | `open_files` | Which programs have a file or socket open | — |
 | `open_settings` | Open the system Settings at a page | — |
 | `permission_audit` | What other users on this machine can read or write | — |
