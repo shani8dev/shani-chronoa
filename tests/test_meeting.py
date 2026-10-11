@@ -32,15 +32,32 @@ class _Recorder:
         self._stop_epoch = 0
         self.started_with = {}
         self._thread = None
+        self.wav = None
 
     def start_auto_stop(self, on_done, max_seconds, silence_seconds, on_level=None):
         self.started_with = {"max_seconds": max_seconds,
                              "silence_seconds": silence_seconds}
+        import tempfile
         import types
+        import wave
+        if self._produces:
+            # **A real file at the path it hands back.** `AudioRecorder` writes
+            # one at a `mkstemp` path; the first version handed back a literal
+            # that nobody created, which was harmless while `capture()` passed
+            # the path straight through - and is not harmless now that the
+            # capture is kept, because the keeper cannot see a file that is not
+            # there and reports `wav=None` for a recording that *should* have
+            # succeeded.
+            self.wav = tempfile.mktemp(suffix=".wav", prefix="chronoa-rec-")
+            with wave.open(self.wav, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(b"\0" * 3200)
         self._thread = types.SimpleNamespace(join=lambda timeout=None: None)
         # fire synchronously: the real one fires from its thread, and the
         # generation discipline is tested where it lives (audio's own suite)
-        on_done("/tmp/meeting.wav" if self._produces else None)
+        on_done(self.wav if self._produces else None)
         return True
 
     def auto_stop_reason(self):
@@ -81,7 +98,11 @@ class TestTheEndStatusIsHonest:
     def test_a_silent_room_is_reported_as_clean(self):
         result = M.capture(recorder=_Recorder(produces_wav=True, reason="silence"))
         assert result.why == M.END_SILENCE
-        assert result.wav == "/tmp/meeting.wav"
+        # **Kept, not left in the temp dir.** `test_meeting_keeps_it.py` owns
+        # the move itself; what belongs here is that a *successful* capture
+        # still reports a path at all.
+        assert result.wav, result
+        assert M.recordings_dir() in pathlib.Path(result.wav).parents, result.wav
         assert result.stopped_cleanly
 
     def test_a_dead_child_is_not_reported_as_clean(self):
@@ -272,7 +293,6 @@ class TestAPathFromTheModel:
     def test_a_path_from_a_test_is_coerced(self, tmp_path):
         """**The control.** Coercing everything to Path would make both tests
         pass while nothing worked."""
-        import pathlib
         target = tmp_path / "a.wav"
         target.write_bytes(b"RIFFnot really")
         out, why = M.transcribe(target)

@@ -96,6 +96,12 @@ if case == "my_files_indexed":
     (root / "sub" / "btrfs.md").write_text("rollback needs two boots\n")
     file_index.index_directory(root, embed=False)
     page = my_files.build(App(**{"file-index-enabled": True}))
+    # **Point the panel at the directory it indexed.** `_directory()` defaults
+    # to `$HOME`, and `status(root=)` is confined to the directory it is given,
+    # so refreshing first would ask about `$HOME` and find nothing - the panel
+    # would answer "nothing is indexed" over an index this very case just built.
+    # That is also what the panel *should* do, and it is asserted elsewhere.
+    page.path_entry.set_text(str(root))
     page._refresh_status()
     hits, how = file_index.search(str(root), "wifi box", limit=8, embed=False)
     page._show_hits(hits, how, "wifi box")
@@ -107,6 +113,7 @@ elif case == "my_files_no_hits":
     (root / "a.txt").write_text("the wifi box drops the link\n")
     file_index.index_directory(root, embed=False)
     page = my_files.build(App(**{"file-index-enabled": True}))
+    page.path_entry.set_text(str(root))
     page._refresh_status()
     page._show_no_hits("a phrase nobody wrote", "keyword only")
     say(texts=texts(page))
@@ -115,6 +122,24 @@ elif case == "my_files_nothing_indexed":
     page = my_files.build(App(**{"file-index-enabled": True}))
     page._refresh_status()
     say(texts=texts(page), buttons=buttons(page))
+    # no path here: this case is the *empty* answer, and `$HOME` is not indexed
+
+elif case == "my_files_two_directories":
+    base = pathlib.Path(sys.argv[2])
+    notes, work = base / "notes", base / "work"
+    for directory, body in ((notes, "the wifi box drops the link"),
+                            (work, "the wifi box is in the office")):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "note.txt").write_text(body)
+    db = file_index._connect()
+    file_index.index_directory(notes, embed=False, db=db)
+    file_index.index_directory(work, embed=False, db=db)
+    page = my_files.build(App(**{"file-index-enabled": True}))
+    page.path_entry.set_text(str(notes))
+    page._refresh_status()
+    hits, how = file_index.search(str(notes), "wifi box", embed=False, db=db)
+    say(texts=texts(page), hits=len(hits),
+        paths=[h["path"].replace(str(base) + "/", "") for h in hits])
 
 elif case == "my_files_consent_off":
     page = my_files.build(App(**{"file-index-enabled": False}))
@@ -348,6 +373,31 @@ class TestTheMeetingsPanel:
         out = _run(broadway, "meetings_consent_off", tmp_path)
         assert "meeting-20261011-090000" in shown(out), shown(out)
         assert "Transcribe" in clicked(out), clicked(out)
+
+
+class TestTheCountAndTheResultsAgree:
+    """The defect these two tests exist for: the panel's count and its search
+    described different directories, so neither could be checked against the
+    other.
+
+    Measured before the fix, with two directories indexed: the status row read
+    `2 file(s) under <the shared parent>` over a search that returned one file
+    from `notes` - including the file in `work`, which was never asked about.
+    """
+
+    def test_the_count_names_the_directory_the_search_answers_from(self, broadway, tmp_path):
+        out = _run(broadway, "my_files_two_directories", tmp_path)
+        assert "error" not in out, out.get("error")
+        joined = squashed_text(out)
+        assert "1file(s)under" in joined, joined
+        assert "/notes" in joined, joined
+        # **and the results are the same directory's**
+        assert out["paths"] == ["notes/note.txt"], out["paths"]
+
+    def test_a_hit_from_the_other_directory_is_not_returned(self, broadway, tmp_path):
+        out = _run(broadway, "my_files_two_directories", tmp_path)
+        assert "work/note.txt" not in squashed_text(out), squashed_text(out)
+        assert "work/note.txt" not in out["paths"], out["paths"]
 
 
 class TestBothAreReachable:
