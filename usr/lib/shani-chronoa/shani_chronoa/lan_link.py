@@ -626,9 +626,20 @@ class Link:
         """A TLS context presenting our own identity, and accepting theirs.
 
         `CERT_NONE` is right here and only here: an *unpaired* peer's certificate
-        is accepted, and once paired the fingerprint is pinned by the phone. The
-        pinning is not something this side implements yet, so the honest reading
-        of `CERT_NONE` is that we do not verify, not that verification passed.
+        is accepted, and once paired the fingerprint is pinned. The pinning is
+        not something this side implements yet.
+
+        **The version is pinned, and that is not pedantry.** A protocol whose
+        whole security story is "TLS protects the payload" has exactly one
+        surface, and a version downgrade is the way to reach it - an active
+        attacker who can strip the TLS 1.3 offer from a ClientHello gets the
+        weaker handshake and the weaker guarantees that go with it.
+        Maze-Connect pins `min == max` to 1.3 and says "no TLS 1.2 fallback,
+        ever, on either stack"; Python's default is `MINIMUM_SUPPORTED`, which
+        on this interpreter is 1.2.
+
+        Both ends are ours - the protocol speaks to `chronoa-cast`, which is this
+        project's own app - so there is no legacy peer to be compatible with.
         """
         import ssl
         cert, key = _our_certificate()
@@ -637,6 +648,8 @@ class Link:
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         context.load_cert_chain(str(cert), str(key))
         context.verify_mode = ssl.CERT_NONE
+        context.minimum_version = ssl.TLSVersion.TLSv1_3
+        context.maximum_version = ssl.TLSVersion.TLSv1_3
         return context
 
     def connect(self, target: Optional[str] = None) -> "Link":

@@ -465,3 +465,54 @@ class TestACorruptCertificateRefuses:
         assert lan_link._our_certificate(directory=directory) == (cert, key), (
             "a certificate that loads was refused - the check is now a blanket "
             "refusal rather than a check")
+
+
+class TestTheTlsVersionIsPinned:
+    """**Python's default allows a downgrade to TLS 1.2**, which on this
+    interpreter is `MINIMUM_SUPPORTED`. A protocol whose whole security story is
+    "TLS protects the payload" has exactly one surface, and a version downgrade is
+    the way to reach it: an attacker who can strip the TLS 1.3 offer from a
+    ClientHello gets the weaker handshake and everything that comes with it.
+
+    Maze-Connect pins `min == max` to 1.3 and states "no TLS 1.2 fallback, ever,
+    on either stack". Both ends here are ours - the protocol speaks to
+    `chronoa-cast`, this project's own app - so there is no legacy peer to stay
+    compatible with, which is the only reason the pin is free.
+    """
+
+    def _context(self, tmp_path):
+        import subprocess
+        directory = tmp_path / "kdeconnect"
+        directory.mkdir()
+        cert, key = directory / "tls.pem", directory / "tls.key"
+        done = subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", str(key),
+             "-out", str(cert), "-days", "3650", "-nodes", "-subj", "/CN=" + "a" * 32],
+            capture_output=True, check=False)
+        if done.returncode != 0:
+            pytest.skip("openssl is not here, so there is no certificate to load")
+        original = lan_link._our_certificate
+        lan_link._our_certificate = lambda directory=None: (cert, key)
+        try:
+            return lan_link.Link("127.0.0.1")._context()
+        finally:
+            lan_link._our_certificate = original
+
+    def test_min_and_max_are_both_thirteen(self, tmp_path):
+        context = self._context(tmp_path)
+        assert context.minimum_version == context.maximum_version, (
+            "a range, not a pin: a peer may still negotiate down")
+        assert context.minimum_version.name == "TLSv1_3"
+
+    def test_it_is_not_the_library_default(self, tmp_path):
+        """**The control.** `ctx.minimum_version` left alone is the interpreter
+        default, so this is what proves the pin is the code's doing rather than
+        the platform's."""
+        import ssl
+        plain = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context = self._context(tmp_path)
+        assert context.minimum_version != plain.minimum_version, (
+            "the context is just the default, so nothing was pinned")
+        assert plain.minimum_version.name != "TLSv1_3", (
+            "this interpreter already defaults to 1.3, so the pin is untested "
+            "here - the claim would be vacuous")
