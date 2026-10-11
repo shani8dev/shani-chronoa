@@ -40,6 +40,7 @@ from typing import Optional
 
 from shani_chronoa import hardware_profile
 from shani_chronoa import files
+from shani_chronoa.tts_text import normalize_for_speech
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +378,26 @@ class PiperTTS:
         until = getattr(self, "_degraded_until", 0.0)
         if until and now < until:
             return False
+        # Normalisation belongs here, beside the timbre pass, because it is the
+        # *other* step that is not an engine: whichever engine speaks this line,
+        # the units and amounts were rewritten first. Applying it inside
+        # `_synthesize` would put it four times in one file, once per engine,
+        # which is how a normaliser comes to disagree with itself.
+        #
+        # A failure here is never a lost reply. If the normaliser raises, the raw
+        # text goes to the engine: an engine that says "42 K E M slash H" is
+        # better than no engine at all, and a voice line nobody hears is the
+        # worse outcome.
+        try:
+            text, rewrites = normalize_for_speech(text)
+        except Exception as exc:  # noqa: BLE001 - a normaliser must not cost a reply
+            logger.warning("Text left as the model wrote it: %s", exc)
+        else:
+            for change in rewrites:
+                logger.debug("Spoken as: %s", change)
+            if rewrites:
+                logger.info("Normalised %d spelling(s) for speech", len(rewrites))
+
         ok = self._synthesize(text, output_file)
         if ok:
             skipped = self.apply_timbre(output_file)
