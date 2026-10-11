@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import secrets
-import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -180,20 +179,30 @@ def pointer_position():
     the portal was asked to perform showed up in this reading, to the pixel,
     including the ones that proved the method was relative.
     """
+    # **Asked of the X server, not of `xdotool`.** This read is what
+    # `RemoteInput.move()` depends on - the portal moves the pointer
+    # *relatively*, so an absolute request has to be turned into a difference,
+    # and the difference needs the present position. Measured: with `xdotool`
+    # absent from the machine, this returned `None`, `move()` refused with "the
+    # pointer's present position cannot be read", and **every pointer route in the
+    # driver - click, glide, and the wheel - stopped dead at one line.** The
+    # server was reachable the whole time.
+    #
+    # `XQueryPointer` is the compositor's own pointer mirrored, exactly as the
+    # `xdotool` reading was; it just does not need a binary that is not
+    # installed. `x11.Dialog` is imported lazily because importing it here would
+    # make the portal module depend on libX11, which is not present everywhere an
+    # X server is.
     try:
-        out = subprocess.run(["xdotool", "getmouselocation", "--shell"],
-                             capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.SubprocessError):
+        from shani_chronoa import x11
+
+        with x11.Display() as display:
+            where = display.pointer()
+    except Exception:  # noqa: BLE001 - unreadable is not "at the origin"
         return None
-    found = {}
-    for line in out.splitlines():
-        key, _, value = line.partition("=")
-        if key in ("X", "Y"):
-            try:
-                found[key] = int(value)
-            except ValueError:
-                return None
-    return (found["X"], found["Y"]) if "X" in found and "Y" in found else None
+    if where is None:
+        return None
+    return (where[0], where[1])
 
 
 class RemoteInput:
