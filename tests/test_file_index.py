@@ -476,3 +476,81 @@ class TestADegenerateQueryVector:
             f"a query with no vocabulary matched {len(hits)} file(s) - a "
             f"near-uniform embedding has cosine ~0.5 with everything, and the "
             f"similarity floor is 0.28")
+
+
+class TestTheWalkSkipsTheMachinesOwnHoard:
+    """**Measured before the fix:** indexing a home-shaped tree walked into
+    `.cache/`, stat-ed a 4 GiB model file and a 64 MiB log, and filled the report
+    with "not text" lines about package caches - so the answer to "index my notes"
+    was a wall of noise about the machine's own cache, and the walk examined 5
+    files to find the 1 a person wanted.
+
+    `temp_files` bounds the same walk for the same reason. `.local/share` is the
+    debatable skip - a person may keep notes there - and it is skipped because it
+    is also where Chronoa's own state, Flatpak apps and Trash live. `path=`
+    subdirectories are still skipped, and that is recorded rather than assumed.
+    """
+
+    def _home(self, tmp_path):
+        home = tmp_path / "home"
+        (home / "notes").mkdir(parents=True)
+        (home / "notes" / "todo.txt").write_text("buy coffee")
+        (home / ".cache" / "llm").mkdir(parents=True)
+        (home / ".cache" / "llm" / "model.gguf").write_bytes(b"M" * 4096)
+        (home / ".cache" / "pkg").mkdir(parents=True)
+        (home / ".cache" / "pkg" / "x.tar.zst").write_bytes(b"P" * 2048)
+        (home / ".local" / "share").mkdir(parents=True)
+        (home / ".local" / "share" / "big.log").write_text("x" * 4096)
+        (home / "project").mkdir()
+        (home / "project" / "README.txt").write_text("the readme")
+        (home / "project" / "node_modules").mkdir()
+        (home / "project" / "node_modules" / "dep.txt").write_text("a dependency")
+        (home / "project" / "__pycache__").mkdir()
+        (home / "project" / "__pycache__" / "x.txt").write_text("bytecode neighbour")
+        return home
+
+    def test_the_write_and_pycache_neighbours_are_left_alone(self, tmp_path):
+        home = self._home(tmp_path)
+        found = sorted(str(p).replace(str(home) + "/", "")
+                       for p in F._walk(home, []))
+        assert found == ["notes/todo.txt", "project/README.txt"], found
+
+    def test_the_report_has_no_cache_noise(self, tmp_path):
+        home = self._home(tmp_path)
+        report = F.index_directory(home, embed=False)
+        assert report["problems"] == [], report["problems"]
+        assert report["indexed"] == 2, report
+        assert report["examined"] == 2, (
+            f"{report['examined']} files examined to find 2 - the walk is still "
+            f"entering the cache")
+
+    def test_a_named_directory_still_has_its_subdirectories_skipped(self, tmp_path):
+        """The skip is on the *component*, so `~/projects/.cache` is skipped too -
+        a build cache in a checked-out project is the machine's, not the person's.
+        """
+        home = tmp_path / "home"
+        (home / "projects" / "app").mkdir(parents=True)
+        (home / "projects" / "app" / "main.py").write_text("print(1)")
+        (home / "projects" / "app" / ".cache").mkdir()
+        (home / "projects" / "app" / ".cache" / "o.txt").write_text("an object file")
+        (home / "projects" / "app" / "notes.txt").write_text("real notes")
+        found = sorted(str(p).replace(str(home) + "/", "")
+                       for p in F._walk(home, []))
+        assert found == ["projects/app/main.py", "projects/app/notes.txt"], found
+
+    def test_the_walk_stops_and_says_so_rather_than_never_ending(self, tmp_path):
+        """The bound `temp_files` uses for the same walk: a home directory can
+        hold millions of files and an index that runs for an hour without
+        finishing is one nobody runs twice.
+        """
+        home = tmp_path / "many"
+        home.mkdir()
+        for index in range(F.WALK_CEILING + 5):
+            (home / f"f{index}.txt").write_text("note")
+        report = F.index_directory(home, embed=False)
+        assert report["indexed"] <= F.WALK_CEILING, (
+            "more was indexed than the ceiling allows")
+        # the report says so rather than silently stopping
+        assert report.get("truncated"), (
+            "the walk stopped without saying it had - a partial index presented "
+            "as a complete one is the confident-wrong-answer shape")

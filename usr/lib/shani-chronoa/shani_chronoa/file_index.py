@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import pathlib
 import sqlite3
 import subprocess
@@ -61,6 +62,31 @@ MAX_FILE_BYTES = 32 * 1024 * 1024
 #: and *says so*, because a half-read file reported as fully indexed is a lie
 #: about what was searched.
 MAX_EMBED_CHARS = 8192
+
+#: Directories a person's notes are never in, and that a home directory is full
+#: of. **Measured need, not tidiness:** indexing a home-shaped tree walked into
+#: `.cache/`, stat-ed a 4 GiB model file and a 64 MiB log, and filled the report
+#: with hundreds of "not text" lines about package caches - so the answer to
+#. "index my notes" was a wall of noise about the machine's own cache.
+#:
+#. `.local/share` is the debatable one: a person *may* keep notes there. It is
+#. skipped because it is also where Chronoa's own state, Flatpak apps, Trash and
+#. the model cache live, and a walker that cannot tell those apart from a person's
+#. notes is better off saying "name the directory". `path=` overrides all of this -
+#. the caller names a directory, and this list applies to subdirectories of it.
+SKIP_DIRS = frozenset({
+    ".cache", ".local", ".mozilla", ".thunderbird", ".thumbnails", ".trash",
+    "Trash", ".steam", ".wine", ".gradle", ".ollama", ".ollama-models",
+    "__pycache__", "node_modules", ".venv", "venv", ".tox", ".mypy_cache",
+    ".ruff_cache", ".pytest_cache", ".git", ".svn", ".hg", ".cargo",
+    ".rustup", ".npm", ".nvm", ".docker", ".var", ".snapd", ".java",
+    ".adobe", ".gvfs", ".dbus",
+})
+
+#: Above this the walk stops and says so, as `temp_files` does: a home directory
+#. can hold millions of files and an index run that never ends is one nobody runs
+#. twice. The bound is on how much tree is examined, not on what is found.
+WALK_CEILING = 60000
 
 #: How many files go to the embedding server in one call. A batch is one HTTP
 #: request; 32 files at ~8k characters is well inside a body but large enough that
@@ -161,6 +187,34 @@ def _which(binary: str) -> bool:
         return False
 
 
+def _walk(root: pathlib.Path, problems: List[str]):
+    """Files under `root`, skipping the cache/data directories by name.
+
+    A generator rather than a list so a truncated walk does not first materialise
+    every path in a tree it is about to abandon.
+
+    `SKIP_DIRS` is applied to the *component* name, not to a path prefix, so
+    `~/.cache` and `~/projects/.cache` are both skipped - the first because it is
+    the machine's, the second because a build cache in a checked-out project is
+    the machine's too.
+    """
+    stack = [pathlib.Path(root)]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = sorted(current.iterdir())
+        except OSError as exc:
+            problems.append(f"{current.name}: {exc}")
+            continue
+        for entry in entries:
+            if entry.is_dir() and not entry.is_symlink():
+                if entry.name in SKIP_DIRS:
+                    continue
+                stack.append(entry)
+                continue
+            yield entry
+
+
 def _fingerprint(path: pathlib.Path, mtime: float, size: int) -> str:
     digest = hashlib.sha256(f"{path}:{mtime}:{size}".encode()).hexdigest()
     return digest
@@ -203,7 +257,17 @@ def index_directory(root, progress=None, embed=True, db=None):
         # `MAX_EMBED_CHARS` texts is held at once - bounded by the chunk size,
         # which is small next to `MAX_FILE_BYTES`.
         pending: List[dict] = []
-        for path in sorted(root.rglob("*")):
+        examined = 0
+        truncated = False
+        for path in _walk(root, problems):
+            examined += 1
+            if examined > WALK_CEILING:
+                # **Stops and says so.** A home directory can hold millions of
+                # files, and an index that runs for an hour without finishing is
+                # one nobody runs twice. `temp_files` bounds the same walk for the
+                # same reason.
+                truncated = True
+                break
             # **A symlink is reported, not silently skipped.** The first version
             # had `if not path.is_file() or path.is_symlink(): continue`, which
             # made the confinement check below unreachable for exactly the things
@@ -325,6 +389,7 @@ def index_directory(root, progress=None, embed=True, db=None):
                   "added": added, "updated": updated, "skipped": skipped,
                   "embedded": embed and db.execute(
                       "SELECT COUNT(*) FROM docs WHERE vector IS NOT NULL").fetchone()[0] > 0,
+                  "truncated": truncated, "examined": examined,
                   "problems": problems}
         return report
     finally:
@@ -411,6 +476,47 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
     finally:
         if owns:
             db.close()
+
+
+def status(db=None) -> dict:
+    """What the index currently holds, without reading anybody's file.
+
+    `{indexed, embedded, root, newest}`.
+
+    **This exists because a search panel cannot tell "nothing matched" from
+    "nothing was ever indexed" without it**, and those are opposite answers: the
+    first is about the query, the second is a thing to fix with one button.
+    `search()`'s empty result is the same either way, so a caller holding only
+    `search()` would have had to run a reindex to find out — which is a slow,
+    side-effecting way to ask a question.
+
+    `root` is the directory the indexed files share, because the panel has to
+    name *what* is indexed. `None` when there is nothing, which is a real answer
+    rather than a failure.
+
+    A missing or unreadable index is `{indexed: 0}` and no exception: this is
+    what a panel calls on open, before anything exists.
+    """
+    owns = db is None
+    try:
+        db = db or _connect()
+        rows = db.execute(
+            "SELECT path, vector IS NOT NULL, indexed FROM docs").fetchall()
+    except (sqlite3.Error, OSError) as exc:
+        logger.info("the file index could not be read: %s", exc)
+        return {"indexed": 0, "embedded": 0, "root": None, "newest": 0.0}
+    finally:
+        if owns and db is not None:
+            db.close()
+
+    parents = sorted({str(pathlib.Path(row[0]).parent) for row in rows})
+    root = str(pathlib.Path(os.path.commonpath(parents))) if parents else None
+    return {
+        "indexed": len(rows),
+        "embedded": sum(1 for row in rows if row[1]),
+        "root": root,
+        "newest": max((row[2] or 0.0 for row in rows), default=0.0),
+    }
 
 
 def _fts_pattern(query: str) -> str:

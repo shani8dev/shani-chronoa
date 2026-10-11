@@ -45,6 +45,10 @@ SETTINGS_TARGETS = {
     "phone": "privacy",
     "daemon": "privacy",
     "memory": "privacy",
+    # Both are shut by default and both switches are Privacy rows, so a gear
+    # here goes where the person can actually turn them on.
+    "my_files": "privacy",
+    "meetings": "privacy",
     "triggers": "tool-activity",
     "skills": "tool-activity",
     "voice": "voice",
@@ -106,6 +110,12 @@ def all_surfaces() -> "Surfaces":
 SURFACE_IDS = (
     # Conversation
     "conversations",
+    # Your own files, searchable, and the meetings it has recorded. Both were
+    # skills with no panel at all until 2026-10-11: reachable only by a model
+    # deciding to call them, which is the wrong shape for a box and the wrong
+    # shape for a transcript somebody wants to read again.
+    "my_files",
+    "meetings",
     # This machine
     "senses",
     "models",

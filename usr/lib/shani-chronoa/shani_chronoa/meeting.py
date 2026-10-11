@@ -28,6 +28,8 @@ the machine; that is the reason to use this rather than the alternative.
 from __future__ import annotations
 
 import logging
+import pathlib
+import shutil
 import time
 from typing import List, NamedTuple, Optional
 
@@ -92,6 +94,129 @@ def _sentence(why: str, seconds: float) -> str:
     }.get(why, f"ended after {where}")
 
 
+def recordings_dir():
+    """Where a meeting is kept, beside Chronoa's other state.
+
+    **It used to have nowhere.** `capture()` took whatever path the recorder
+    handed back, and `AudioRecorder` writes with `tempfile.mkstemp` — so every
+    meeting landed in `/tmp`. On a ShaniOS install `/tmp` is cleared on reboot
+    (and `/var`, which the temp dir is under, is tmpfs by the image's own fstab),
+    which means an hour of microphone was thrown away by the next restart. The
+    thing this feature exists to produce was the thing it deleted.
+
+    Resolved per call and never at import, like every other data path in this
+    tree: an import-time constant would point the test suite at the real
+    `~/.local/state`, which has already happened to the percept store.
+    """
+    from shani_chronoa import files
+    path = files.state_home() / "shani-chronoa" / "meetings"
+    path.mkdir(parents=True, exist_ok=True)
+    # 0700 on the directory itself. `mkdir(mode=...)` applies to the leaf only
+    # when `parents=True`, and leaves an already-created directory exactly as it
+    # was, so the mode is set separately — the same reasoning `egress.py` records.
+    try:
+        path.chmod(0o700)
+    except OSError as exc:                     # a read-only home is not a fatal error
+        logger.info("could not tighten %s: %s", path, exc)
+    return path
+
+
+def _capture_time(path: pathlib.Path) -> "tuple[int, float, str]":
+    """Sort key: the capture time in the name, then the mtime, then the name.
+
+    **The name, not the mtime.** `_keep()` names a file `meeting-%Y%m%d-%H%M%S`
+    because two captures in the same second must not collide, which makes the
+    name the capture time *by construction*. The mtime is when the file was
+    last written, which a plain `cp` changes, which `tar` preserves to the
+    second for every file in a backup, and which a restore puts back from a
+    machine whose clock differed. Sorting on it and calling the result "newest
+    first" is a claim about something the shelf does not know.
+
+    The mtime and the name are still kept as tiebreakers so two files with an
+    unparseable name - a hand-renamed recording, say - still order stably
+    instead of falling back to directory order.
+    """
+    name = path.name
+    stamp = name[len("meeting-"):-len(".wav")] if name.startswith("meeting-") else ""
+    try:
+        # `time.mktime`, not `struct_time.timestamp()`: `strptime` returns a
+        # `struct_time`, which has no such method, and the stamp is local time
+        # because `_keep` wrote it with `time.strftime` on a `time.localtime`.
+        parsed = int(time.mktime(time.strptime(stamp, "%Y%m%d-%H%M%S")))
+    except (TypeError, ValueError):
+        parsed = 0
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return (parsed, mtime, name)
+
+
+def list_recordings() -> "List[dict]":
+    """Every meeting on this machine, newest first, as `{"path", "name", "bytes",
+    "when"}`.
+
+    Read off the directory rather than kept in an index: a meeting is a file,
+    and a list of meetings that disagrees with the files is a list of lies.
+
+    Newest first is decided by `_capture_time`, which is why that is a function
+    rather than `stat().st_mtime` inline.
+    """
+    try:
+        entries = sorted(recordings_dir().glob("meeting-*.wav"),
+                         key=_capture_time, reverse=True)
+    except OSError as exc:
+        logger.info("could not list meetings: %s", exc)
+        return []
+    out = []
+    for path in entries:
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        out.append({"path": str(path), "name": path.name, "bytes": size,
+                    "when": path.name[len("meeting-"):-len(".wav")]})
+    return out
+
+
+def _keep(wav: Optional[str]) -> Optional[str]:
+    """Move a finished capture out of the temp dir and give it a real name.
+
+    The recorder's path is used as the source, never the destination: a rename
+    across filesystems is a copy, and `/tmp` and `$XDG_STATE_HOME` are on
+    different ones here more often than not, so `shutil.move` rather than
+    `os.replace`. If the move fails the original path is handed back **with its
+    bytes intact** rather than a meeting that was lost to a rename — a temp file
+    that will be cleared is better than no file to point at.
+    """
+    if not wav:
+        return None
+    source = pathlib.Path(wav)
+    try:
+        source = pathlib.Path(wav).resolve()
+    except OSError:
+        pass
+    if not source.is_file():
+        return None
+    stamp = time.strftime("%Y%m%d-%H%M%S",
+                          time.localtime(source.stat().st_mtime))
+    target = recordings_dir() / f"meeting-{stamp}.wav"
+    # Two meetings inside the same second would collide, and a second one
+    # silently overwriting an hour of somebody's meeting is the worst outcome
+    # this function could have.
+    counter = 2
+    while target.exists():
+        target = recordings_dir() / f"meeting-{stamp}-{counter}.wav"
+        counter += 1
+    try:
+        shutil.move(str(source), str(target))
+    except OSError as exc:
+        logger.warning("could not move %s into place (%s); the recording is "
+                       "still at the temporary path and will be cleared", wav, exc)
+        return str(source)
+    return str(target)
+
+
 def capture(timeout: float = MAX_MEETING_SECONDS, recorder=None,
             on_level=None) -> MeetingResult:
     """Record a meeting to a WAV file. Returns how it ended.
@@ -135,7 +260,11 @@ def capture(timeout: float = MAX_MEETING_SECONDS, recorder=None,
         recorder._auto_stop_thread.join(timeout=timeout + 30)
 
     seconds = time.monotonic() - started
-    return MeetingResult(wav=outcome["wav"], seconds=seconds, why=outcome["why"])
+    # **Into the state dir, or nowhere.** The recorder hands back a temp path
+    # and the system clears those; see `recordings_dir()` for why this is the
+    # difference between an hour of microphone kept and an hour discarded.
+    kept = _keep(outcome["wav"])
+    return MeetingResult(wav=kept, seconds=seconds, why=outcome["why"])
 
 
 def _reason_from_recorder(recorder) -> str:
