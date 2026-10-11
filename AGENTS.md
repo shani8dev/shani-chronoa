@@ -10629,3 +10629,56 @@ Three things building this taught, each the same shape as the last three passes:
   every hit at `if not row or row[0] not in titles` and returns an empty list,
   which reads exactly like the code being broken. The fixture builds through
   `active_path()`/`new_session()` now, with the reason written next to it.
+
+## AirLLM: residency and runnability are different questions (2026-10-11)
+
+`harness-study/airllm` (`lyogavin/airllm`, cloned this session). Its one-line
+thesis: *"AirLLM only ever keeps one layer on the GPU at a time, so the VRAM you
+need depends on the model's layer size - not its total size."*
+
+Chronoa was telling a machine short on RAM **"20 GB of RAM (this machine has
+6.0)"** - which, on a card that also says *"reads 2.2 GB per token"*, reads as
+"cannot run". For the tier where the two numbers diverge most that is the wrong
+reading, and the divergence is in our own table:
+
+| tier | `ram` | `reads` (per token) |
+|---|---|---|
+| `qwen3-8b` | 16 GB | 4.68 GiB (dense: the file *is* the working set) |
+| `qwen3-30b-a3b` | **20 GB** | **2.05 GiB** (MoE: ~10x apart) |
+
+`bytes_per_token()` already computed the right number - the module's own docstring
+says it is *"the number decode speed and memory pressure both follow, and the two
+differ for a mixture-of-experts"* - and the refusal never used it.
+
+The RAM reason now names what the figure is **for** when the per-token cost fits:
+
+> 20 GB of RAM to keep every weight resident (this machine has 6.0). Each
+> generated token only reads 2.05 GiB, which fits, so this is a residency limit
+> and not a cap on whether it runs.
+
+Two rules this keeps, both for the same reason:
+
+- **When the per-token cost does *not* fit, the plain sentence is kept.**
+  `qwen3-14b` reads 9 GiB per token; telling a 6 GB box that is "not a cap on
+  whether it runs" is a softer claim than the truth, which is the same defect in
+  the other direction.
+- **It claims no decode rate.** Nobody here has measured a larger-than-RAM model
+  on a small box, and `ram / active_bytes` is a ratio of two unrelated quantities
+  rather than a tok/s. A refusal that invents a number is the confident wrong
+  answer the sentence exists to avoid, and the mutation set carries a mutation
+  for it.
+
+**Not applicable from the same repo, recorded so nobody re-derives them** (full
+table in `../harness-study/HARVEST-AIRLLM.md`): the layer-streaming mechanism is
+unnecessary because llama.cpp mmaps and the OS already pages a too-big model; the
+per-expert streaming idea is already `active_bytes`; and AirLLM's *"never force
+fp16, it overflows to inf/NaN"* has no target here because `server_args()` passes
+no dtype at all.
+
+**The one thing worth copying later is not a mechanism.** `max_pinned_layer_bytes
+= 2 GB` with its comment - pinned memory cannot be paged out, so with prefetching
+two in flight a ~17GB layer would lock ~34GB of RAM *"for a copy that is dwarfed
+by the disk read anyway"*, and it falls back to pageable rather than failing - is
+the discipline for any "keep this hot" branch added here later: bound a
+non-reclaimable cost by the size of what needs it, state the number that
+justified the bound, and always have the fallback.

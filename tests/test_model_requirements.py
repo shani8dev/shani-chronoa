@@ -374,3 +374,73 @@ class TestTheMissingListNamesWhatIsShort:
         met, missing = local_llm.requirements_met("qwen3-14b")
         assert met is False
         assert any("tok/s" in m for m in missing), missing
+
+
+class TestResidencyIsNotRunnability:
+    """A machine short on RAM was told *"20 GB of RAM (this machine has 6.0)"*,
+    which reads as "cannot run". airllm's whole thesis is that this is the wrong
+    reading: `air_llm/airllm/airllm_base.py` says *"AirLLM only ever keeps one
+    layer on the GPU at a time, so the VRAM you need depends on the model's layer
+    size - not its total size"*, which is how a 70B runs in 4 GB.
+
+    Chronoa's own `bytes_per_token()` already computes the comparable number -
+    what one generated token actually reads, the whole file for a dense model and
+    a fraction of it for a mixture-of-experts. The tier where those two diverge
+    most is `qwen3-30b-a3b`: `ram=20` and `active_bytes` of 2.05 GiB, so a 6 GB
+    box is short of the *resident* figure while its per-token cost fits with room
+    to spare. The card shows both numbers and still led with the residency one as
+    a requirement.
+    """
+
+    def test_a_short_of_residence_but_not_of_per_token_says_which_limit_it_is(
+            self, monkeypatch):
+        _Measured(monkeypatch, 16.5, ram=6.0, cores=24, gpu=False)
+        met, missing = local_llm.requirements_met("qwen3-30b-a3b")
+        assert met is False
+        reason = missing[0]
+        assert "resident" in reason, reason
+        assert "2.05 GiB" in reason, reason
+        # The distinction itself, which is the whole point of the sentence.
+        assert "not a cap on whether it runs" in reason, reason
+
+    def test_a_dense_tier_names_the_regime_too(self, monkeypatch):
+        """The clause is not MoE-only. A dense model's per-token cost is the whole
+        file, so the same arithmetic applies - which is what keeps the sentence
+        uniform rather than a special case for one tier."""
+        _Measured(monkeypatch, 16.5, ram=6.0, cores=24, gpu=False)
+        _met, missing = local_llm.requirements_met("qwen3-8b")
+        assert "resident" in missing[0], missing[0]
+        assert "4.68 GiB" in missing[0], missing[0]
+
+    def test_a_tier_whose_per_token_cost_does_not_fit_keeps_the_plain_reason(
+            self, monkeypatch):
+        """The other direction, so the new clause is not simply always on. When one
+        generated token reads more than the machine has, "not the default" is not
+        enough of a warning and the residency sentence would be a softer claim
+        than the truth."""
+        _Measured(monkeypatch, 16.5, ram=6.0, cores=24, gpu=False)
+        _met, missing = local_llm.requirements_met("qwen3-14b")
+        assert "resident" not in missing[0], missing[0]
+        assert "24 GB of RAM" in missing[0] and "6.0" in missing[0], missing[0]
+
+    def test_the_reason_never_claims_a_decode_rate(self, monkeypatch):
+        """Nobody here has measured a model larger than RAM on a small box. An
+        invented tok/s is the confident wrong answer this file keeps recording, so
+        the sentence is deliberately silent on speed and says what it *does*
+        know: the per-token figure, which is arithmetic and not a measurement."""
+        _Measured(monkeypatch, 16.5, ram=6.0, cores=24, gpu=False)
+        _met, missing = local_llm.requirements_met("qwen3-30b-a3b")
+        assert "tok/s" not in missing[0], missing[0]
+
+    def test_a_machine_with_room_gives_no_ram_reason_at_all(self, monkeypatch):
+        """With room the clause does not fire, which is what keeps the "short of
+        residence" reading specific to machines that are short of it.
+
+        This tier is never `met` here - its bytes-per-token is estimated, not
+        measured - so the claim is about the *absence of a RAM reason*, not about
+        the overall verdict. An earlier version of this test asserted
+        `met is True` and was asserting something the table already rules out.
+        """
+        _Measured(monkeypatch, 16.5, ram=64.0, cores=24, gpu=False)
+        _met, missing = local_llm.requirements_met("qwen3-30b-a3b")
+        assert not any("GB of RAM" in m for m in missing), missing

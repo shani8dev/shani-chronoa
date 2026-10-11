@@ -1243,7 +1243,40 @@ def requirements_met(key: str) -> "tuple[bool, list[str]]":
     cores = os.cpu_count() or 1
     gpu = bool(gpu_devices())
     if ram < need.get("ram", 0):
-        missing.append(f"{need['ram']:g} GB of RAM (this machine has {ram:.1f})")
+        # **Residency and runnability are different questions, and naming the
+        # difference is what airllm's whole thesis is.** `air_llm/airllm/
+        # airllm_base.py`: *"AirLLM only ever keeps one layer on the GPU at a
+        # time, so the VRAM you need depends on the model's layer size - not its
+        # total size"* - which is how a 70B runs in 4 GB. Chronoa's own
+        # `bytes_per_token()` already computes the comparable number: what one
+        # generated token actually reads, which is the whole file for a dense
+        # model and a fraction of it for a mixture-of-experts.
+        #
+        # Before this, a machine short on RAM was told *"20 GB of RAM (this
+        # machine has 6.0)"* - which reads as "cannot run". Measured, that is the
+        # wrong reading for the tier where the two numbers diverge most:
+        # `qwen3-30b-a3b` declares `ram=20` and `active_bytes` of 2.05 GiB, so a
+        # 6 GB box is short of the *resident* figure while its per-token cost
+        # fits with room to spare. The card shows both numbers and still led with
+        # the residency one as a requirement.
+        #
+        # The sentence now says what the RAM figure is *for* and gives the
+        # per-token number beside it. It deliberately does **not** claim a decode
+        # rate: nobody here has measured a >RAM model on a 6 GB box, and an
+        # invented tok/s is the confident wrong answer this file keeps recording.
+        # It also does not say "it runs", only that this is a residency limit
+        # rather than a cap on whether it runs - which follows from the
+        # arithmetic, not from a measurement.
+        active = bytes_per_token(key)
+        active_gib = None if active is None else active / (1024 ** 3)
+        if active_gib is not None and active_gib <= ram:
+            missing.append(
+                f"{need['ram']:g} GB of RAM to keep every weight resident "
+                f"(this machine has {ram:.1f}). Each generated token only reads "
+                f"{active_gib:.2f} GiB, which fits, so this is a residency limit "
+                f"and not a cap on whether it runs.")
+        else:
+            missing.append(f"{need['ram']:g} GB of RAM (this machine has {ram:.1f})")
     if cores < need.get("cpu", 0) and not gpu:
         missing.append(f"{need['cpu']:g} CPU cores (this machine has {cores})")
     if not need.get("measured", True):
