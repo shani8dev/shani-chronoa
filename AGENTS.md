@@ -447,6 +447,11 @@ rather than writing in a generic format.
   design boundary that makes this an "actual task-doing assistant" safe to
   run LLM-issued commands through, not an accident to "simplify" away.
 - 🚫 **Never**: delete or skip a failing test to make a build/CI pass — fix the underlying code, not the test. A red test is signal; silencing it destroys the signal, not the bug.
+- 🚫 **Never** run `git checkout <dir>`, `git checkout .`, `git stash`, `git stash pop`, `git reset --hard` or `git clean` **anywhere in this repository**. Another session is committing here continuously — it landed `polkit_policy`, `thread_activity`, `graphics_stack` and `autostart_entries` in a single afternoon — and every one of those commands reverts *their* uncommitted work along with yours. Measured cost (2026-10-11): `git checkout -- usr/lib/shani-chronoa/shani_chronoa/` was run to test "is this failure pre-existing", and it reverted the whole package, including `pipewire.py`'s uncommitted `list_streams` and `skills/recording.py`'s `streams` action. Both had to be re-created. **A path operation in a shared tree is a destructive operation.**
+  - To ask "is this failure mine or pre-existing": copy **only your own files** to a temp directory, restore **only those** afterwards (`cp`, never `git`), and restore them from your own copy. Never scope the restore wider than the files you changed.
+  - To measure at HEAD: `git show HEAD:<path> > /tmp/x.py` and swap that **one file**, then swap your copy back. A test run that needs a wider revert than one file is a test run whose conclusion does not need those files.
+  - Back up your own files outside the tree *before* any swap, and keep the backup until the work is committed — this file already records a record lost to a rollback that way, and this is the destructive version.
+
 
 *Maintenance note: this file is well past 300 lines. Keep new entries
 terse and current-state; consider a dated `AUDIT-HISTORY.md` split (the
@@ -4359,7 +4364,10 @@ Third gap round (function level and reverse direction, same day):
 - Checked clean: no setting in the UI that nothing reads (the three hits are
   read by the wizard and the organ strip); session grants are listed and
   revocable in Settings > Approvals; the remaining store functions without UI
-  are plumbing, or `goals.py`, which is unwired on purpose (no producer yet).
+  are plumbing. **`goals.py` was listed here as "unwired on purpose (no producer
+  yet)" until 2026-10-11 and was false** — `skills/manage_goals.py` produces
+  runs, the Goals panel consumes them, and a person can edit a saved plan's
+  steps with the model told what changed.
 Pre-existing failures seen in this pass, all failing on untouched HEAD too:
 `test_config_gsettings.py::test_api_key_defaults_are_empty_not_quoted`,
 `test_slash_menu_opens.py::test_typing_a_slash_opens_the_menu...` (flaky, 1/2).
@@ -8714,3 +8722,605 @@ the sequence `read, raise, press` rather than asserting each happened, and the
 poll-interval test captures the sleep delays instead of stubbing `sleep` to a
 no-op, which is what made the interval invisible. **117 pass** across the three
 driver suites.
+
+## open-intelligent-ui: a plan a person can correct, and the model being told (2026-10-11)
+
+Studied `harness-study/open-intelligent-ui` (ChatGPT's *Intelligent UI*
+reproduced with OpenUI — the model streams a component DSL and the app renders a
+map, photos and an editable itinerary). Full write-up:
+**`../harness-study/HARVEST-OIU.md`**. Two things transferred, one did not.
+
+**Not taken: generative UI.** A model-emitted widget DSL is a second rendering
+path beside 21 individually-tested typed panels, and it widens what a model can
+*cause* past the fixed whitelist — the boundary AGENTS.md's own Boundaries
+section rules out. Recorded as a design decision, not a gap.
+
+**Taken: the edit round-trip.** Its route panel lets a person remove stops and
+add suggestions, that state is saved with the message, and the next turn rewrites
+it as a sentence the model reads:
+
+```ts
+return content.slice(0, at) + (edits.length
+    ? `\n\n(User's edits to this route: ${edits.join("; ")}.)` : "");
+```
+
+> Route edits: an earlier answer may end with "(User's edits to this route: …)".
+> Treat that edited route as the current one in follow-ups.
+
+Without that, a plan a person corrected is indistinguishable from one the model
+wrote whole, and a model asked to continue re-adds what was taken out.
+
+**What Chronoa already had, and this file had wrong.** `goals.py`,
+`skills/manage_goals.py` (producer), `gui/surfaces/goals.py` (consumer) and
+`tests/test_goals_wired.py` were all wired — while three places in this file
+said `goals.py` was "unwired on purpose (no producer yet)". **All three are
+corrected above.** The stale label is the "a stale 'dead' label is worse than a
+missing 'live' one" failure in a new place, and it was found by reading the
+module's own docstring, not by running it.
+
+**What was actually missing:** the Goals panel's only destructive control was
+"Remove this goal", so one wrong step meant discarding a whole plan and asking
+again. Built now, all in `goals.py` plus the panel:
+
+- `remove_step(run, variable_name, now)` and
+  `move_step(run, variable_name, to_index, now)` — both return `(run, why-not)`.
+- `downstream_of` — the **transitive** closure of what stops being runnable.
+- `GoalRun.edits` — what a person changed by hand, persisted, newest last.
+- `describe_edits(run)` — the sentence, appended by `manage_goals`' `list`,
+  which is the only place a model ever reads a saved plan.
+
+**The constraint open-intelligent-ui never faces:** a `PlannedStep` names a
+`variable_name` other steps depend on, so removing one can orphan a later one.
+The refusal names what is in the way and says "Nothing was removed", and it
+covers the whole downstream set rather than the direct dependents — **which is
+what my own tests caught**: the first version used direct dependents, and
+`test_the_refusal_names_every_dependent` failed on `$c`, because removing `$a`
+from `a → b → c → d` parks all three and naming only `$b` sends the person back
+for a second refusal and a third.
+
+Verified end to end through the real dispatch (a sandboxed child reading the
+store), save three steps, remove the last by hand, then:
+
+```
+g1  [running]  plan a trip  (0/2 steps)
+
+(A person edited this plan by hand: removed $c. Treat the edited plan as the one
+they want, and do not put those steps back unless they ask.)
+```
+
+`tests/test_goal_edits.py` (26), **12 of 12 mutations confirmed to fail**. Two
+of those first survived and both are the recorded traps in new clothes:
+
+- Deleting `line += goals.describe_edits(run)` from `manage_goals.describe` left
+  the suite **green**, because the tests asserted `goals.describe_edits`
+  directly — the "patch the name where it is read, not where it is re-exported"
+  rule. `TestTheSkillReportsTheEdits` now drives the skill's own `describe`.
+- Walking the built panel found no controls, because the test saved the run
+  *after* the refresh and the panel renders on refresh, not on save.
+
+**Not taken: the prompt generated from one spec.** `generateSystemPrompt({library:
+spec})` keeps the model's menu and the prose rules from disagreeing, but Chronoa
+already has the working half — `_GROUPS` labels, a generated `CAPABILITIES.md`,
+and `test_capabilities_doc.py` — and the failure mode this session actually hit
+was "a skill landed and four hand-kept lists are not updated yet", which the
+tests correctly report. Generating more prose would not have caught it.
+
+## Model tiers: what a machine can run is bytes-per-token, not RAM or a GPU (2026-10-11)
+
+Three designs for "which model does this machine get", and the first two were
+wrong in opposite directions. **Both are now pinned by
+`tests/test_model_requirements.py`.**
+
+1. **RAM only** — `recommended()` returned `qwen3-14b` on a CPU-only box with
+   30 GB of RAM, where it decodes at ~2 tok/s. *Fitting* and *being usable* are
+   different questions.
+2. **`gpu_devices()`** — correct for a laptop, wrong for a workstation: a
+   Threadripper 7980X's 8 channels of DDR5 are on the order of **86–129 GiB/s**
+   of effective bandwidth where this i7-1165G7 measures **16.5**, so a 14B runs
+   at 1.8 tok/s here and 10–15 there. A GPU gate would tell that machine to run
+   a 1.7B.
+3. **bytes-per-token against measured bandwidth** — what it is now.
+
+`local_llm.effective_bandwidth()` measures it from a live decode rather than a
+datasheet: `predicted_per_second × model_path size`. Two traps it had to learn:
+
+- **`n_predict: 1` returns `predicted_per_second: 1000000.0`** — llama.cpp
+  dividing a single millisecond token. The probe generates 16 tokens and the
+  reader refuses any rate above 1000 tok/s outright, so an artefact cannot become
+  a machine's measured bandwidth.
+- **`os` was patched globally** by the first test fixture, changing `cpu_count`
+  for everything else in the process. A shim now.
+
+**`REQUIRES` carries the table the panel needs** — `cpu`, `ram`, `vram` and
+`min_tps` per tier, so a refusal can say *"16 GB of RAM (this machine has 6.0)"*
+instead of "not recommended". And one field the whole thing turns on:
+
+**`active_bytes`** — what one generated token actually reads. A dense model reads
+its whole file. **A mixture-of-experts reads a fraction of it**, and that is
+edge0's central accounting: peak memory tracks the parameter count, decode cost
+tracks the *active* set. `Qwen3-30B-A3B-Q4_K_M` stores 17.3 GiB and activates
+~3.3B of 30.5B parameters, so it reads ~2 GiB per token — which is why a 30B can
+decode at 8 tok/s on this laptop while a 14B dense manages 2.
+
+**An estimate is never a default.** `active_bytes` for the 30B comes from the
+architecture, not a decode on this machine, so `REQUIRES[...]["measured"]` is
+`False` and `requirements_met()` refuses it — with the reason named. The tier is
+offered and its speed is shown as an estimate; flipping the flag after measuring
+makes it the default, and a mutation that re-adds the GPU gate fails three of
+these tests.
+
+MMD
+echo "recorded"; echo; echo "=== final state ==="; PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/test_model_requirements.py -q --tb=no 2>&1 | tail -1; git status --short | head -8
+
+## Model tiers: what a machine can run is bytes-per-token, not RAM or a GPU (2026-10-11)
+
+Three designs for "which model does this machine get", and the first two were
+wrong in opposite directions. **Both are now pinned by
+`tests/test_model_requirements.py`.**
+
+1. **RAM only** — `recommended()` returned `qwen3-14b` on a CPU-only box with
+   30 GB of RAM, where it decodes at ~2 tok/s. *Fitting* and *being usable* are
+   different questions.
+2. **`gpu_devices()`** — correct for a laptop, wrong for a workstation: a
+   Threadripper 7980X's 8 channels of DDR5 are on the order of **86-129 GiB/s**
+   of effective bandwidth where this i7-1165G7 measures **16.5**, so a 14B runs
+   at 1.8 tok/s here and 10-15 there. A GPU gate would tell that machine to run
+   a 1.7B.
+3. **bytes-per-token against measured bandwidth** — what it is now.
+
+`local_llm.effective_bandwidth()` measures it from a live decode rather than a
+datasheet: `predicted_per_second x model_path size`. Two traps it had to learn:
+
+- **`n_predict: 1` returns `predicted_per_second: 1000000.0`** — llama.cpp
+  dividing a single millisecond token. The probe generates 16 tokens and the
+  reader refuses any rate above 1000 tok/s outright, so an artefact cannot become
+  a machine's measured bandwidth.
+- **`os` was patched globally** by the first test fixture, changing `cpu_count`
+  for everything else in the process. A shim now.
+
+**`REQUIRES` carries the table the panel needs** — `cpu`, `ram`, `vram` and
+`min_tps` per tier, so a refusal can say *"16 GB of RAM (this machine has 6.0)"*
+instead of "not recommended". And one field the whole thing turns on:
+
+**`active_bytes`** — what one generated token actually reads. A dense model reads
+its whole file. **A mixture-of-experts reads a fraction of it**, and that is
+edge0's central accounting: peak memory tracks the parameter count, decode cost
+tracks the *active* set. `Qwen3-30B-A3B-Q4_K_M` stores 17.3 GiB and activates
+~3.3B of 30.5B parameters, so it reads ~2 GiB per token — which is why a 30B can
+decode at 8 tok/s on this laptop while a 14B dense manages 2.
+
+**An estimate is never a default.** `active_bytes` for the 30B comes from the
+architecture, not a decode on this machine, so `REQUIRES[...]["measured"]` is
+`False` and `requirements_met()` refuses it — with the reason named. The tier is
+offered and its speed is shown as an estimate; flipping the flag after measuring
+makes it the default, and a mutation that re-adds the GPU gate fails three of
+these tests.
+
+### …and `safeUrl`: a reply's links are clickable, and they open in Chronoa's own browser
+
+The second transfer, and the one that closed a gap the first pass did not see.
+OIU's `safeUrl` renders `https:` and `http:` and returns undefined for
+everything else, so a URL a model emits is either a link a person can follow or
+text. Chronoa's `markdown_lite.to_pango` supported bold, italic, code, fences
+and tables and **no links at all** — `[example](https://example.org)` rendered
+as those literal characters and a bare URL was dead text. Safe by omission, and
+every answer lost its URLs.
+
+`markdown_lite.safe_url` is the same allowlist in Python, and `to_pango` now
+renders `[label](url)` and bare addresses as `<a>` elements. A destination
+outside the allowlist keeps its words and loses its link.
+
+**The click goes to Chronoa's own browser** (`_ensure_browser_window` +
+`load_url`), not the system's: sending a reply's links elsewhere would move the
+person out of the conversation they are reading, and out of that window's egress
+checks, activity strip and stop button. The system handler is the fallback only,
+for a machine with no WebKitGTK.
+
+**Three defects were found, and all three were in the spoken path** — which is
+the one that matters most, because Chronoa speaks every reply:
+
+| defect | measured |
+|---|---|
+| `_SPOKEN_LINK` stopped at the first `)` | `[Foo](…/wiki/Foo_(bar))` spoken as `Foo)`; `[x](javascript:alert(1))` as `x) link.` |
+| trailing punctuation was swallowed by `\S+` | `see (https://x.org/a) ok` spoken as `see (link ok` |
+| a URL inside a code span ate the closing backtick | ``run `curl https://x.org/a` please`` spoken as ``run `curl link please`` |
+
+Wikipedia addresses carry a real parenthesis, so the character cannot be banned
+from a URL: both regexes now allow one level of nesting, and the trim decides
+what the *address* is while the punctuation stays in the sentence. A URL inside
+code is reduced to "link" as well, per this file's own measurement of 205,654
+bytes of audio for one address against 67,080 for the word.
+
+**Two of my mistakes here, both the shape that recurs:**
+
+- **I opened the person's browser while verifying this.** The first version put
+  the allowlist check and `Gio.AppInfo.launch_default_for_uri` in one function,
+  so exercising it meant emitting `activate-link` on a real label — which ran
+  the real launcher and opened browsers on the desktop. The decision
+  (`blocks.link_target`) is separate from the launch
+  (`blocks.show_in_own_browser`) now, and **a handler that cannot be tested
+  without causing the thing it does is a handler nobody should be testing by
+  hand.**
+- `launch_default_for_uri` is **synchronous and blocks**; the handler runs on
+  the GTK main loop, so it uses `launch_default_for_uri_async`.
+
+`tests/test_reply_links.py` (22) plus `tests/test_markdown_lite.py` (now 138
+with the new classes). The in-app path is asserted with a stub application whose
+`_ensure_browser_window` returns a recorder, and every "emit" test patches the
+launcher so **nothing is ever opened** — the in-app test raises if the system
+handler is reached.
+
+### The Web Speech API: measured absent from the engine that runs our pages
+
+Asked where `SpeechRecognition` / `speechSynthesis` could be useful here. **They
+are not usable, for two independent reasons, and the first is a measurement.**
+
+**WebKitGTK implements none of it.** Measured on this box - WebKitGTK 6.0
+(WebKit 2.52.6), the engine behind `gui/browser.py` - by evaluating JavaScript
+in a real `WebKit.WebView` over **`http://127.0.0.1`**, a *secure context*:
+
+| in the same page | |
+|---|---|
+| `navigator.mediaDevices` | **object**  <- the control |
+| `navigator.mediaDevices.getUserMedia` | **true** |
+| `SpeechRecognition` | **undefined** |
+| `webkitSpeechRecognition` | **undefined** |
+| `speechSynthesis` | **undefined** |
+| `SpeechSynthesisUtterance` | **undefined** |
+| `speechSynthesis.getVoices()` | 0 |
+
+**The control is what makes that table worth reading.** The first run reported
+`mediaDevices` undefined as well - on a `data:` URL, because `isSecureContext`
+was false - which is indistinguishable from a probe that cannot see anything.
+Re-running over localhost made `mediaDevices` appear while every speech entry
+stayed undefined. WebKit is Safari's engine; Safari never shipped
+`SpeechRecognition`, and WebKitGTK has implemented neither half.
+
+**And even where it does exist it is the wrong shape for this project.**
+Chromium's `SpeechRecognition` streams microphone audio to a cloud service.
+Chronoa is local-first with 53 consent-gated senses, and `cloud_voice.CloudSTT`
+sits behind **both** `cloud-stt-enabled` and privacy mode. A page's own Web
+Speech would move a microphone stream off the machine with no consent key at all
+- precisely what `egress` exists to record. The one idea on that page worth
+keeping is MDN's **on-device** recognition (`SpeechRecognition.available()` /
+`.install()`, behind the `on-device-speech-recognition` Permissions-Policy),
+which *would* fit; it is still absent here, so it is a "if the engine ever gets
+it", not a plan. `SpeechRecognitionPhrase`'s contextual biasing is also the idea
+whisper.cpp's initial prompt already is.
+
+**What does follow is a limitation, not a feature.** `browse` clicks controls on
+real pages, and every page feature built on this API is **inert in the in-app
+browser**: Voice Search's mic button, Wikipedia's "Listen to article", web
+transcription sites, accessibility read-aloud widgets. `browse` would click the
+mic, the page would do nothing, and the driver would report success - the same
+"a click that lands on something inert reports success" failure recorded several
+times above. **The remedy is not the Web Speech API but the browser knowing the
+page lacks it**: there is already a JS seam (`browser.py:705`,
+`evaluate_javascript` -> `VISIBLE_TEXT_JS`), and a `page_capabilities()` probe
+beside it would let `browse` say *"this page's voice search cannot work in this
+browser"* instead of clicking a dead button. Not built - it is small, and it
+wants doing on a machine where such a page can be shown.
+
+### …and the third: the OpenStreetMap cache, and "a missing result" is data
+
+`maps.py` hits Nominatim, FOSSGIS's OSRM and Overpass. All three ask for the
+same thing in their usage policies - a valid User-Agent, one request per second,
+**no heavy use** - and `maps.py`'s own docstring already spelled out the first
+two (`netjson`'s named UA, `_polite`'s cross-process flock). The third was
+missing: every identical "where is Shaniwar Wada" was a fresh request, held a
+second by the lock, and the answer was the same answer.
+
+`maps._cached_get` now sits in front of the single `_get` seam - a `sha256` of
+the URL plus **sorted** params, a day TTL, 500 entries with the oldest evicted
+by mtime, all under `0700` in the user's own state dir. **The line worth
+copying is one of open-intelligent-ui's comments:**
+
+> A missing article is a real answer (cached); any other failure is retried next
+> time.
+
+`netjson.get_json` already raises on a transport failure and returns a body
+otherwise, so the distinction was there - the cache only had to respect it.
+Nominatim's "does not know this place" is `[]`, a body like any other, so asking
+about a typo twice costs one request; a 500 from OSRM writes nothing, so the next
+call retries. **A cache is not a memoised outage.**
+
+Details taken for the same reason: **mtime** for eviction (each skill call is its
+own sandboxed child, so an in-memory order would be wrong every time), a
+**version field** so a bad format is invalidated by a constant rather than by
+deleting a directory a running process may be reading, and a **hash** for the
+key so a filename never carries somebody's search words. A cache hit produces
+**no egress record**, because nothing left the machine.
+
+**What it exposed in this repo's own tests:** `test_maps_skill.py`'s `osm`
+fixture did not isolate `XDG_STATE_HOME`, so the cache wrote real entries into
+the developer's `~/.local/state` during the suite - and
+`test_a_network_failure_names_the_service_and_the_error` then failed, because a
+cached answer from an earlier test was served during a simulated outage. That is
+`triggers_dir()`/`rules_file()`'s reason in a new place. The fixture isolates now.
+
+`tests/test_maps_cache.py` — 21 tests, **12 of 12 mutations confirmed to fail**.
+
+**Not taken:** a cache for `browse`/`webtext` (the person asked to see *that*
+page now, which is a different question), and `Cache-Control` headers (Chronoa is
+the client, not the origin). Chronoa's User-Agent story was already better than
+this repo's.
+
+### …and the fourth: `markdown_lite.clip`, because a slice draws a box
+
+open-intelligent-ui's `pinEmoji` takes **one grapheme or the default** - `Intl.Segmenter`,
+then Extended_Pictographic - "so a word or letter from the model can't overflow the
+pin". Chronoa's version of the problem was a hard slice: `summary[:57] + "..."` in
+`blocks.py`'s tool card and `body[:80]` in `phone.py`'s message preview.
+
+Python 3 strings are code points, so a surrogate pair is never split - but
+"👨‍👩‍👧‍👦" is **seven** code points held together by ZWJ, and `('e' + U+0301)[:1]`
+is `'e'` with the accent gone. Measured: `'Family photo 👨‍👩‍👧‍👦'[:i+2]` ends in
+U+200D. Each case draws the "missing glyph" box in text a model wrote.
+
+`markdown_lite.graphemes` and `markdown_lite.clip(width)` now cut on a cluster
+boundary and count **columns**, ellipsis included. The stdlib has no grapheme
+segmenter, so `_joins` is built from the characters that cannot *start* a cluster -
+the half that matters for a truncation - and the approximation is stated in the
+docstring rather than implied. Both call sites use `clip`, and `phone.py`'s preview
+became a named `_preview()` because the only way to test the inline expression was
+to build the whole panel.
+
+**Five things the tests got wrong first, each found by running:**
+
+- a cluster's width is **one measurement, not a sum** - `_display_width` sums a
+  code point at a time, so the family emoji measured 11 columns (four emoji at 2,
+  three ZWJ at 1) instead of 2, and a string that fitted was clipped anyway;
+- `_stranded` flagged **correct** output - it treated any trailing combining mark
+  as stranded, and `'café...'` ends in one legitimately. The failure is a *leading*
+  mark whose base was cut. A control that fails on correct output is the same
+  defect as one that cannot fail;
+- a grep test **matched its own comment** - `assert "[:57]" not in blocks.py`
+  matched the docstring explaining why the slice was removed, the trap this file
+  has already recorded once;
+- the mutation survived **twice for padding** - `[:57]` only strands a joiner when
+  the cluster straddles the cut, and padding with prose left the emoji whole. The
+  offset is asserted now;
+- **counting ZWJs passes the wrong case** - `count("\\u200d") % 3 == 0` passes when
+  a slice keeps all three joiners and drops only the last emoji, which is exactly
+  what `[:57]` does.
+
+`tests/test_clip.py` - 33 tests, **11 of 11 mutations confirmed to fail**. Four
+joining rules were untested at first and three of them were removed without a
+single test failing; `TestGraphemes` asserts each directly.
+
+### Application streams: the half that was missing (2026-10-11)
+
+**"Listen to this meeting and transcribe it" needed one thing nobody had: a list of
+the audio an *application* is carrying.** The graph could show it, and the driver
+could not point at it.
+
+`pipewire._devices()` matches `media.class` **exactly** to `Audio/Source` and
+`Audio/Sink`, so an app's `Stream/Output/Audio` node was never in any list -
+`list_inputs()` returned microphones, `list_outputs()` speakers, and a running
+application's audio was neither. Measured, `pw-dump` through the module's own
+`_graph_nodes()` showed `media.class='Stream/Output/Audio' node.name='pw-play'
+media.name='/tmp/tone.wav'` while a tone played.
+
+**New `pipewire.list_streams()`**, and it measures rather than asserts:
+
+| what | measured |
+|---|---|
+| `pw-record --target=<stream node name>` | **-27.4 dBFS** of real audio, 6.02 s, from a name `list_streams()` reported |
+| `pw-record --target=<the sink node>` | 11.9 s captured, **all zeros** |
+
+So the route is **per-application stream**, not "record the system output" - the
+obvious recipe produces silence. The `AudioStream` type carries `node.name` (what
+`--target` takes), `direction`, `media.name`, and a `recordable` flag.
+
+**Only `Stream/Output` is recordable.** `Stream/Input` is the app *consuming*
+audio - its own microphone - and is already what `list_inputs()` is for. Offering
+it as a capture target would be a dead control, so `recordable` is False and
+`recording action=streams` says "this app's own microphone" instead of handing
+over a name that cannot work.
+
+**`media.name` is the label, not `node.name`.** The latter is the binary - a
+Chromium stream's is "chromium", which tells a person nothing about the call -
+and `media.name` is what said `/tmp/tone.wav`. `node.name` is the fallback,
+because `pw-play` had no `nick` and no `description` either.
+
+**Wired as `recording action=streams`, reachable and advertised** through the real
+dispatch path, and **behind `heard-sound`**. A stream list is a list of what is
+playing: `media.name` measured a filename here and would read a meeting title on
+a real desktop. Reading a node name is not listening, but the names are about the
+user's world in exactly the way the microphone is, so the same switch covers it.
+Verified in all three states by execution: consent off refuses by name, a quiet
+machine reports itself quiet ("a quiet machine and not a failure"), a playing
+application is listed as "1 of 1 can be captured ... (capture as: pw-play)".
+
+**7 tests, 7 mutations, 6 caught** and one *deliberate* survivor planted as a
+no-op control, to prove the runner can tell a real break from nothing.
+
+### From the CLI matrices: three candidates, and two were already answered
+
+Asked to add skills from `chronoa-matrix.json`. **`open_surfaces` measures calls,
+not answers** - this file has warned about that before and the warning held here.
+
+| command | verdict |
+|---|---|
+| `quota` / `repquota` | **Genuine gap** ("df says there's room but I can't write"), installed on both images via `shani-storage`. **Missing on this dev box** - a slot run, not a parser written from memory. |
+| `lstopo` / `hwloc-info` | **Already answered**: `system_info._cpus()` shells `lscpu` and falls back to `/proc/cpuinfo` with an honest `topology is UNKNOWN`. |
+| `mokutil` | **Corrects this file.** It records `mokutil` as "server profile only, so no desktop image ships a tool". The matrix measures `pulled_in_by=['shani-core']` on the **GNOME** image, and here `mokutil --sb-state` answered **`SecureBoot disabled`, rc 0, unprivileged** - while `driver_dev._secure_boot_state` reads `/sys/firmware/efi/efivars` (root-only 0400) and reports UNKNOWN. Enriching `driver_status` to ask `mokutil` first is the change this measurement points at; not made yet, because the efivarfs reading is the one this file already measured on a real boot and the two need agreeing. |
+
+`pkcheck` was tried and its only flags are `--enable-internal-agent`,
+`--list-temp`, `--revoke-temp` - I guessed `--list-actions` and it was **refused
+with `Unexpected argument`**, which is the "a contract you cannot measure is a
+contract you do not have" trap again. Left alone rather than guessed at twice.
+
+## llama.cpp was given the wrong thread count, in six places, and it cost a third of the speed (2026-10-11)
+
+`server_args()` passed `os.cpu_count() - 1` as llama.cpp's `-t`. On this
+i7-1165G7 (4 cores, 8 threads) that is **7**. Measured with `llama-bench`, quiet
+box, `Qwen3-8B-Q4_K_M`, pure decode, `-r 2`:
+
+| `-t` | 3 | **4** | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|
+| decode tok/s | 3.23 | **3.73** | 3.70 | 3.62 | 2.50 | 2.32 |
+| prompt tok/s | 16.2 | 19.7 | 18.8 | 19.9 | 19.0 |
+
+**`-t 8` is 1.61x slower than `-t 4`,** and the value the code chose sat in the
+worst part of the curve - about a third of the available speed, thrown away on
+every server start, for the life of the product. Confirmed end to end: the
+server answers 3.58 tok/s at `-t 4`.
+
+Not a private discovery. ggerganov in ggml-org/llama.cpp#34: *"speed with
+command line config -t 4. If use -t 8, half speed"*. The upstream
+performance-tuning page: incorrect thread settings are *"the #1 cause of slow
+inference"*. Discussion #394: keep threads at or below the **actual** cores.
+
+**Six call sites had the line**, which is why this is a property and not a patch:
+
+| module | binary | how it hid |
+|---|---|---|
+| `local_llm` | llama-server | `-t cpu_count()-1` = 7 |
+| `local_vision` | llama-server | same |
+| `imagegen` | stable-diffusion.cpp | same |
+| `local_embed` | llama-server | `min(4, ...)` |
+| `recordings` | whisper.cpp | `min(4, ...)` |
+| `wakeword` | whisper.cpp | `min(4, ...)` |
+| `tts` | piper | `min(4, ...)` |
+
+**The `min(4, ...)` four looked correct on this box.** `min(4, 7)` is 4, which
+happens to be the physical core count here - so a value right by accident on the
+machine you tested on is the one that is wrong everywhere else, and on a
+16-thread machine it is half the cores. Measured: restoring
+`min(4, cpu_count()-1)` in `local_embed` leaves the argv test **green**, because
+the module still returns `-t 4` here. Only a source-level guard catches it, so
+`tests/test_llama_threads_are_physical_cores.py` has one.
+
+`hardware_profile.physical_cores()` counts unique
+`thread_siblings_list` groups from sysfs rather than shelling to `lscpu` (a
+binary a minimal image may lack, and the reason `skills/system_info.py` reads
+the kernel). Fallback is `os.cpu_count()`, never zero: `0` becomes `-t 0`,
+which llama-server rejects, so an unreadable `/sys` would leave the machine with
+**no server at all** rather than a slow one.
+
+**Two levers that did NOT work, so nobody re-derives them:** `GGML_CPU_REPACK=1`
+is 3.52 against a 3.61 baseline (no gain - the workload is memory-bound, not
+GEMM-bound); and this Debian build has **no `-tb`/`--threads-batch`** flag
+(newer upstream only), so batch threads are not reachable here. OpenMP and BLAS
+are not linked, so the 2-3x OpenBLAS figure in most write-ups never applied
+here in the first place.
+
+**The bandwidth model had a 2.5x error, and the first 8B measurement was wrong
+twice.** Measured minutes apart on the same box: 1.7B 6.81 tok/s x 1.03 GiB =
+**7.03 GiB/s**, 8B 3.69 x 4.68 = **17.29 GiB/s**. A small model is not
+bandwidth-*saturated* - it is bound by per-token compute - so it moves less
+memory per second than the hardware can, and caching whichever measurement
+arrived first locked in a figure 2.5x too low for every prediction about a
+larger model. `effective_bandwidth()` now keeps the **largest** figure seen, and
+re-probes when the loaded model changes (keyed on the realpath, because
+`/props` reports the **symlink**). Validated rather than argued: predicted
+**3.5 tok/s** for the 8B, measured **3.69**.
+
+The first 8B reading was **0.20 tok/s**, and it was wrong: two llama-servers
+(7 threads each on 8 cores) with 732 MiB free. Pausing one with SIGSTOP was not
+enough either - this is a shared desktop. "Measured on a real machine" means
+measured with nothing else competing, and a bandwidth figure taken under
+contention is a number about the contention.
+
+**What actually buys a bigger model is fewer bytes per token**, which is why
+`active_bytes` is the load-bearing column: `Qwen3-30B-A3B` reads ~2.2 GB/token
+against the 8B's 4.7 GB, so it decodes *faster* than a model a third its size.
+21 + 9 + 5 tests; 12 of 13 thread mutations caught, the survivor documented in
+the file.
+
+## open-intelligent-ui, fifth pass: the three-state pattern, and a regression I shipped (2026-10-11)
+
+Studied the rest of `harness-study/open-intelligent-ui` (map.tsx, root.tsx,
+`useStreetRoute`, `useDialog`, `response-theme`, the two proxy routes). Write-up
+in **`../harness-study/HARVEST-OIU.md`**, sections 1-4 already recorded; this is
+the fifth.
+
+### Already here, verified rather than assumed
+
+Three of the remaining ideas were checked and **found already implemented** — each
+recorded so nobody re-derives them:
+
+- **`userMoved.current`** ("stop auto-behaviour once the person has taken over"):
+  `widgets.py`'s `_note_position` + `_scroll_to_end` do this, and better — the
+  position is recorded *before* the content changes (measured: taken after the
+  fact, a first reply that made the transcript 3000px tall arrived with the view
+  at the top), there is a `STICKY_PX` tolerance and a `_follow_generation`, and
+  following resumes when the person scrolls back to the bottom by hand.
+- **`reducedMotion()`**: `gui/style.py` carries `.reduce-motion` rules for every
+  animation the sheet declares.
+- **`safeUrl`'s "one grapheme or the default"**: shipped last pass as
+  `markdown_lite.clip`.
+
+### Taken: the three-state pattern — and it exposed a shipped regression
+
+`useStreetRoute` returns **`undefined` while loading, `null` when the request
+failed, and points otherwise**, so a caller cannot confuse them. Chronoa's goal
+run loop had one state and a comment claiming otherwise:
+
+```python
+except Exception:  # noqa: BLE001 - shown by the refresh, not raised
+    logger.warning(...)
+```
+
+**That comment is true of a step failing** — `goals.advance` already converts a
+step exception into `phase=FAILED`, and the panel renders `_PHASE_WORD[FAILED]`
+as "failed - n of m steps". Measured: the first version of the tests asserted the
+opposite, ran, and got `WARNING goals.py ... failed at step a` plus an empty
+`_run_error` — the failure had been handled one layer down all along.
+
+What *was* silent is a **store** failure: `load`/`save` raising leaves the run
+exactly as it was, so the refresh shows it unchanged and the person presses a
+button that does nothing. `run()` now records why it stopped, separately from the
+phase, and `_card` renders it on the run's own card.
+
+### The regression, and the reason no test caught it
+
+While building `drop_step` (last pass) I **replaced the body of `remove` rather
+than adding beside it**, so "Remove this goal" was left calling
+`self.remove(run.id)` with no `remove` method. A concurrent session committed it.
+Measured on the built surface: `hasattr(surface, 'remove')` -> **False**,
+`surface.remove('r1')` -> **AttributeError**.
+
+**No test failed, because no test clicked it.** The tests drove `drop_step`
+directly — this repo's own "a test that calls the function is not a test that the
+skill is reachable" rule, missed by one entry point out of two.
+`TestTheGoalLevelRemoveStillWorks` closes it, and the mutation that re-deletes
+the method is confirmed to fail it.
+
+Two mistakes of mine in the same pass, both worth the recording:
+
+- a `python3 str.replace` patch dropped the closing `"""` of `run()`'s docstring,
+  producing `SyntaxError: unterminated string literal` — the documented trap, and
+  it took `ast.parse` plus a cumulative `"""` count to find. `py_compile` on the
+  edited file catches it in one command; the script had run `pyflakes`, which
+  does not.
+- the test file was reverted underneath me by the concurrent session's commit,
+  and my next edits were a patchwork against a file that no longer held what I
+  thought it held. Reset to HEAD and rebuilt rather than continuing to edit over it.
+
+`tests/test_goal_edits.py` - 35 tests, **13 of 13 mutations confirmed to fail**.
+
+### open-intelligent-ui, sixth pass: nothing new taken, and why that is the finding
+
+Read the rest of the repo (`page.tsx`, `layout.tsx`, all 219 lines of `map.tsx`,
+`vector-basemap.ts`, the generated library spec). **No sixth transfer**, recorded
+in `../harness-study/HARVEST-OIU.md` section 7 with the evidence, because a
+transfer invented to justify another pass is the "confident wrong answer" shape
+this file keeps recording.
+
+Each remaining idea was checked against the code and found present:
+
+| OIU | Chronoa already |
+|---|---|
+| `starters` — short label carrying a longer prompt | `SuggestionBar`, built from the **live** registry so an unloaded skill is never offered, ellipsised, and clicking *fills* rather than submits so the suggestion stays editable |
+| the streaming-readiness gate — `(!streaming \\|\\| !!stop.emoji)`, so `-1` mid-stream cannot move a map | no such hazard: tool arguments arrive already-parsed, and partial markdown was measured safe |
+| `routeKind`'s four states, with "loading" among them | the status line naming a running tool (`add_tool_call`'s docstring) |
+| lazy-load + raster fallback | `browser.is_available()` / `unavailable_reason()`, and `maps.py`'s OSRM/Overpass choices |
+| design tokens | `STATE_PALETTE`, 11.61:1 light / 13.88:1 HighContrast / 17.58:1 settings |
+
+The one structural difference worth naming: OUI can put a loading state in the
+same widget that will hold the answer, because the token stream goes straight
+into the page. Chronoa's skills are subprocesses returning a string. A mid-run
+progress mechanism would be a real design decision, not a harvest item, and it is
+left as one.

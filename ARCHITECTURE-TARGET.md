@@ -514,7 +514,7 @@ Paths are relative to `usr/lib/shani-chronoa/shani_chronoa/`.
 | Model router | 🟡 | `model_choice.py` (one model per job), cloud fallback chain in `cloud_llm.py`, and every backend reachable behind one `chat_message()` interface (llama.cpp, Ollama, Anthropic's native adapter, OpenAI, Gemini, Groq, OpenRouter, opencode-zen, keyless gateways) - but no routing per request by difficulty |
 | Context manager | ✅ | see Attention |
 | Prompt manager | ✅ | `user_prompts.py`; rules go in the head system message, changing percepts in the last user message |
-| Task planner | 🟡 | `planmode.py` is look-but-don't-touch, not a planner; `todo_list` tracks steps |
+| Task planner | 🟡 | `goals.py` **is** a planner now (2026-10-11): a model saves a plan through `manage_goals`, the Goals panel steps it, a person can remove and reorder steps and is told nothing was lost, and a parked run resumes. Still 🟡 because priorities and a self-replanning loop are absent, and the *planning* itself is the model's `manage_goals` call rather than a decomposition inside the loop |
 | Agent runtime | ✅ | `assistant.py` tool loop with streaming, `loops.py` |
 | Tool router | ✅ | `tool_select.py`, `tools.py`, plus a distilled student (`distill.py`) that may only re-rank and narrow names already on offer - it cannot add a skill, and `distill.fallback()` will not run one without arguments or one that deletes something |
 | MCP | ✅ (server) | `mcp.py`, `shani-chronoa-mcp` |
@@ -694,6 +694,11 @@ real version of it.
 7. **Task planner** (Brain, Motivation). Break a request into `todo_list`
    steps, run them one at a time with plan mode for the look-only steps, and
    resume after a restart. A goal manager is this plus priorities.
+   **Mostly built (2026-10-11):** `goals.py` holds the plan, `manage_goals`
+   saves it, the Goals panel steps it and lets a person remove or reorder a step
+   with the model told what changed. What is left is priorities, a
+   re-planning path when a step fails, and decomposition *inside* the turn
+   rather than through a separate skill call — see `../harness-study/HARVEST-OIU.md`.
 8. **Confidence and a judge** (Taste). A cheap self-check pass on the local
    model for actions above a risk level, and "I'm not sure" when it fails.
    Measure the latency cost first on CPU; it may need to be opt-in.

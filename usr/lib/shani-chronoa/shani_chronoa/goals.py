@@ -100,6 +100,17 @@ class GoalRun(NamedTuple):
     #: plan a person trimmed looks exactly like one the model wrote whole, and a
     #: model asked to continue simply re-adds what was taken out.
     edits: tuple = ()
+    #: The steps a person took out, exactly as they were, newest last.
+    #: **open-intelligent-ui dims a removed stop rather than deleting it**
+    #: (`travel.css`: `.tv-stop.is-removed { opacity: .45 }` over its photo, time,
+    #: title and description), so the person keeps seeing what they removed and
+    #: can put it back. Chronoa threw the step away entirely - and a step dropped
+    #: by mistake had no route back at all.
+    #:
+    #: `edits` is what the *model* is told; this is what the *person* is shown.
+    #: Two fields on purpose: one is a sentence, the other is state to restore
+    #: from, and merging them would lose the step itself.
+    removed: tuple = ()
 
     def to_json(self) -> str:
         return json.dumps({
@@ -109,6 +120,7 @@ class GoalRun(NamedTuple):
             "created_at": self.created_at, "updated_at": self.updated_at,
             "results": dict(self.results),
             "edits": [list(e) for e in self.edits],
+            "removed": [dict(s._asdict()) for s in self.removed],
         })
 
     @classmethod
@@ -129,6 +141,13 @@ class GoalRun(NamedTuple):
             updated_at=data.get("updated_at", 0.0),
             results=dict(data.get("results", {})),
             edits=tuple(tuple(e) for e in data.get("edits", ())),
+            removed=tuple(
+                PlannedStep(
+                    thought=r["thought"], tool_name=r["tool_name"],
+                    tool_arguments=r.get("tool_arguments", {}),
+                    variable_name=r["variable_name"],
+                    depends_on=tuple(r.get("depends_on", ())),
+                ) for r in data.get("removed", [])),
         )
 
 
@@ -297,6 +316,69 @@ def remove_step(run: GoalRun, variable_name: str, now: float = 0.0
         steps=steps, index=index, phase=phase,
         results={k: v for k, v in run.results.items() if k != variable_name},
         edits=run.edits + ((variable_name, now),),
+        # **Kept, not deleted.** open-intelligent-ui dims a removed stop so the
+        # person still sees what they took out; Chronoa threw it away, and a
+        # step dropped by mistake had no way back at all. Measured before this
+        # landed: `run.removed` did not exist, and the only route back from a
+        # mis-click was to ask the model to plan the whole goal again.
+        removed=run.removed + (next(s for s in run.steps
+                                    if s.variable_name == variable_name),),
+        updated_at=now,
+    ), ""
+
+
+def restore_step(run: GoalRun, variable_name: str, now: float = 0.0
+                 ) -> "tuple[GoalRun, str]":
+    """(run, why-not). Puts a removed step back, or refuses.
+
+    **The other half of the dimmed row, and the part that makes it useful.** A
+    control that puts something back is the only reason "I removed the wrong
+    step" is recoverable.
+
+    It refuses rather than duplicating: a second step with the same
+    `variable_name` would make every `depends_on` that names it ambiguous about
+    which one it means, which is the "a plan whose steps cannot see their
+    inputs" failure this module exists to refuse.
+    """
+    if any(s.variable_name == variable_name for s in run.steps):
+        return run, f"${variable_name} is already in this plan, so nothing was restored."
+    kept = [s for s in run.removed if s.variable_name == variable_name]
+    if not kept:
+        return run, (f"there is no removed step named ${variable_name}, so nothing "
+                     "was restored.")
+    step = kept[-1]
+    # **Restored to a position where its dependencies still run first.** Putting
+    # it back at the end is wrong exactly when it matters: `$c` depends on `$b`,
+    # so appending it behind the remaining steps runs it before its input is
+    # produced and it parks forever. Measured on `a -> b -> c` with `$c`
+    # removed: the first version restored it as `['a', 'c', 'b']`.
+    #
+    # A removed step's dependents cannot have been removed - that is what
+    # `remove_step` refuses - so they are all present and all want to be after
+    # it. The safe spot is after the last thing it needs and before the first
+    # thing that needs it.
+    order = [s.variable_name for s in run.steps]
+    last_dep = max((order.index(name) for name in step.depends_on if name in order),
+                   default=-1)
+    first_dependent = min((i for i, other in enumerate(run.steps)
+                           if variable_name in other.depends_on),
+                          default=len(order))
+    spot = min(max(last_dep + 1, 0), first_dependent, len(order))
+    steps = list(run.steps)
+    steps.insert(spot, step)
+    # A run can be COMPLETED *because* its last step was taken out
+    # (`remove_step` sets exactly that). Restoring the step has to re-open it,
+    # or the restored step is a step nothing will ever run - the same silence
+    # this function exists to undo. Measured: a one-step run removed to `[]`
+    # becomes COMPLETED, and restoring it stayed COMPLETED.
+    phase = run.phase
+    if phase is Phase.COMPLETED and step.variable_name not in run.results:
+        phase = Phase.RUNNING
+    return run._replace(
+        steps=tuple(steps),
+        removed=tuple(s for s in run.removed if s.variable_name != variable_name),
+        index=min(run.index, len(steps)),
+        phase=phase,
         updated_at=now,
     ), ""
 

@@ -19,6 +19,14 @@ import sys
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 
+import gi  # noqa: E402
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk  # noqa: E402
+
+Adw.init()
+
 from shani_chronoa import goals as G  # noqa: E402
 
 
@@ -243,6 +251,10 @@ class TestThePanelShowsTheRefusal:
                 self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
                 self.running = False
                 self._notice = ""
+                # `_run_error` is part of the panel's contract now, and the
+                # doubles that skip it fail on the first refresh. Set here so
+                # the double cannot drift from the thing it is standing in for.
+                self._run_error = {}
                 self.refresh()
 
         return _Surface()
@@ -353,3 +365,299 @@ class TestThePanelShowsTheRefusal:
         assert any("$b" in t for t in per_step), (
             f"the step that has not run yet lost its remove control too, so "
             f"there is no way to correct the rest of the plan: {per_step}")
+
+
+class TestTheGoalLevelRemoveStillWorks:
+    """A method a later edit deleted, and a commit shipped.
+
+    `drop_step` was written by *replacing* the body of `remove` rather than
+    being added beside it, so "Remove this goal" was left calling a method that
+    no longer existed. Measured on the built surface before the fix:
+    `hasattr(surface, 'remove')` -> **False**, and
+    `surface.remove('r1')` -> **AttributeError**.
+
+    **No test failed, because no test clicked it.** The tests drove `drop_step`
+    directly - which is this repo's "a test that calls the function is not a
+    test that the skill is reachable" rule, missed by one entry point. Two
+    methods, one entry point each, and this class is the other one.
+    """
+
+    def _surface(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(G, "store_root", lambda: tmp_path / "goals")
+        from shani_chronoa.gui.surfaces import goals as panel
+
+        class _Surface(panel._GoalsSurface):
+            def __init__(self):
+                self._app = None
+                self.store = G.GoalStore(G.store_root())
+                self.executor = G.tool_executor()
+                self.status_recorder = panel.common.StatusRecorder()
+                self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                self.running = False
+                self._notice = ""
+                self._run_error = {}
+                self.refresh()
+
+        return _Surface()
+
+    def _text(self, widget) -> str:
+        out, stack = [], [widget]
+        while stack:
+            node = stack.pop()
+            for getter in ("get_title", "get_subtitle", "get_text"):
+                try:
+                    value = getattr(node, getter)()
+                except Exception:  # noqa: BLE001 - not every widget has each
+                    value = None
+                if isinstance(value, str) and value:
+                    out.append(value)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        return " ".join(out)
+
+    def test_the_goals_remove_method_exists(self, tmp_path, monkeypatch):
+        """The panel calls `self.remove` for every goal-level remove button, so a
+        missing method is a button that raises, not one that is absent."""
+        surface = self._surface(tmp_path, monkeypatch)
+        assert hasattr(surface, "remove"), (
+            "the Goals panel calls self.remove for every 'Remove this goal' "
+            "button, and the method is gone")
+
+    def test_it_deletes_the_run(self, tmp_path, monkeypatch):
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b"))
+        surface.store.save(run)
+        assert [r.id for r in surface.store.list()] == ["r1"]
+        surface.remove(run.id)
+        assert surface.store.list() == [], "the run survived its removal"
+
+    def test_a_removal_names_what_went(self, tmp_path, monkeypatch):
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b"))
+        surface.store.save(run)
+        surface.refresh()
+        surface.remove(run.id)
+        assert "Removed the goal" in self._text(surface._body), (
+            "a removal that says nothing reads as a click that did nothing")
+
+    def test_a_removed_goals_error_is_dropped_too(self, tmp_path, monkeypatch):
+        """An error for a run that no longer exists must not outlive it."""
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b"))
+        surface.store.save(run)
+        surface._run_error[run.id] = "OSError: boom"
+        surface.remove(run.id)
+        assert surface._run_error == {}
+
+
+class TestARemovedStepStaysVisibleAndComesBack:
+    """open-intelligent-ui dims a removed stop rather than deleting it.
+
+    `travel.css`:
+    ```css
+    .tv-stop.is-removed > .tv-photo, .tv-stop.is-removed .tv-stop-time,
+    .tv-stop.is-removed .tv-stop-title, .tv-stop.is-removed .tv-stop-description
+        { opacity: .45; }
+    ```
+    Its route panel also has an add/remove *toggle*, so a stop can go back.
+
+    Chronoa's `remove_step` deleted the row outright, which the data half fixed
+    (`GoalRun.removed`) and these tests pin: a step taken out is still listed,
+    it is visibly not a live step, and there is a control that puts it back.
+    """
+
+    def _surface(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(G, "store_root", lambda: tmp_path / "goals")
+        from shani_chronoa.gui.surfaces import goals as panel
+
+        class _Surface(panel._GoalsSurface):
+            def __init__(self):
+                self._app = None
+                self.store = G.GoalStore(G.store_root())
+                self.executor = G.tool_executor()
+                self.status_recorder = panel.common.StatusRecorder()
+                self._body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                self.running = False
+                self._notice = ""
+                self._run_error = {}
+                self.refresh()
+
+        return _Surface()
+
+    def _labels(self, widget) -> "list[str]":
+        out, stack = [], [widget]
+        while stack:
+            node = stack.pop()
+            for getter in ("get_title", "get_subtitle", "get_text"):
+                try:
+                    value = getattr(node, getter)()
+                except Exception:  # noqa: BLE001 - not every widget has each
+                    value = None
+                if isinstance(value, str) and value:
+                    out.append(value)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        return out
+
+    def _tooltips(self, widget) -> "list[str]":
+        out, stack = [], [widget]
+        while stack:
+            node = stack.pop()
+            try:
+                tip = node.get_tooltip_text()
+            except Exception:  # noqa: BLE001
+                tip = None
+            if tip:
+                out.append(tip)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        return out
+
+    def test_the_step_is_kept_in_the_run(self, tmp_path, monkeypatch):
+        """Data first: the step must survive `remove_step` for anything to draw."""
+        run = run_with(chain("a", "b", "c"))
+        updated, why = G.remove_step(run, "c", now=1.0)
+        assert why == ""
+        assert [s.variable_name for s in updated.steps] == ["a", "b"]
+        assert [s.variable_name for s in updated.removed] == ["c"], (
+            "the removed step was thrown away, so there is nothing to draw and "
+            "nothing to put back")
+
+    def test_a_removed_step_is_drawn_but_dimmed(self, tmp_path, monkeypatch):
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        updated, why = G.remove_step(run, "c", now=1.0)
+        surface.store.save(updated)
+        surface.refresh()
+        labels = self._labels(surface._body)
+        assert any("removed" in t for t in labels), (
+            f"a removed step is not shown at all, so the person cannot see what "
+            f"they took out: {labels}")
+
+    def test_a_removed_row_is_not_a_live_row(self, tmp_path, monkeypatch):
+        """Dimmed *and* marked, because opacity alone is a one-dimension cue."""
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        updated, _why = G.remove_step(run, "c", now=1.0)
+        surface.store.save(updated)
+        surface.refresh()
+        rows = []
+        stack = [surface._body]
+        while stack:
+            node = stack.pop()
+            title = getattr(node, "get_title", lambda: None)()
+            if isinstance(title, str) and "removed" in title:
+                rows.append(node)
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+        assert rows, "no row is marked removed"
+        for row in rows:
+            assert row.get_opacity() < 1.0, (
+                "the removed row is at full opacity, so a dim alone does not "
+                "distinguish it from a live step")
+            assert "(removed)" in (row.get_title() or ""), (
+                "the row is dimmed but does not say so in words")
+
+    def test_there_is_a_way_back(self, tmp_path, monkeypatch):
+        """The point of the dimmed row: a step removed by mistake is recoverable
+        without planning the whole goal again."""
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        updated, _why = G.remove_step(run, "c", now=1.0)
+        surface.store.save(updated)
+        surface.refresh()
+        tips = self._tooltips(surface._body)
+        assert any("back" in t for t in tips), (
+            f"a removed step offers no way back: {tips}")
+        # The button's tooltip, which is what a sighted user sees. The
+        # `AccessibleProperty.LABEL` carries "Restore step c" and that is a
+        # different string — asserting the wrong one of the two is a test that
+        # passes on a label nobody reads.
+        assert any("$c" in t and "back" in t for t in tips), tips
+
+    def test_restoring_through_the_panel_puts_it_back(self, tmp_path, monkeypatch):
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        updated, _why = G.remove_step(run, "c", now=1.0)
+        surface.store.save(updated)
+        surface.refresh()
+        surface.restore_step(updated, updated.removed[0])
+        saved = surface.store.load(run.id)
+        assert [s.variable_name for s in saved.steps] == ["a", "b", "c"], (
+            "the panel's restore control did not put the step back")
+        assert saved.removed == (), "the step is still marked removed after restore"
+
+    def test_restore_names_the_refusal(self, tmp_path, monkeypatch):
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        surface.store.save(run)
+        surface.restore_step(run, run.steps[0])
+        # `refresh()` draws a notice and then clears it, by design — it is a
+        # one-shot, and the method calls refresh on its way out. So the rendered
+        # body after the call is the assertion, and a *second* refresh has
+        # nothing left to draw. The first version of this test read the `_notice`
+        # attribute after it had already been cleared and passed on nothing.
+        assert "$a is already in this plan" in " ".join(self._labels(surface._body)), (
+            "restoring a step that is already there said nothing useful")
+
+    def test_the_drop_notice_says_it_can_come_back(self, tmp_path, monkeypatch):
+        """A removal that reads as final is a removal nobody will question."""
+        surface = self._surface(tmp_path, monkeypatch)
+        run = run_with(chain("a", "b", "c"))
+        surface.store.save(run)
+        surface.drop_step(run, run.steps[2])
+        # Rendered by the method's own refresh; a second one would draw nothing.
+        rendered = " ".join(self._labels(surface._body))
+        assert "dimmed" in rendered and "put back" in rendered, (
+            f"the removal notice does not say the step can be restored: "
+            f"{rendered!r}")
+
+    def test_every_subset_restores_to_the_original_order(self):
+        """The property that makes restore trustworthy rather than lucky.
+
+        Take out any prefix of the tail, in order, then put it all back: the
+        result must be the original plan, with every dependency before its user.
+        """
+        original = chain("a", "b", "c", "d")
+        run = run_with(original)
+        for name in ("d", "c", "b"):          # reverse: each is a leaf when taken
+            updated, why = G.remove_step(run, name, now=1.0)
+            assert why == "", why
+            run = updated
+        for name in ("b", "c", "d"):
+            updated, why = G.restore_step(run, name, now=2.0)
+            assert why == "", why
+            run = updated
+        assert [s.variable_name for s in run.steps] == ["a", "b", "c", "d"]
+        assert run.removed == ()
+        settled = [s.variable_name for s in run.steps]
+        for i, step in enumerate(run.steps):
+            for dep in step.depends_on:
+                assert dep in settled[:i], (
+                    f"${step.variable_name} was restored before ${dep}")
+
+    def test_a_json_round_trip_keeps_the_removed_step(self):
+        run = run_with(chain("a", "b", "c"))
+        updated, _why = G.remove_step(run, "c", now=1.0)
+        back = G.GoalRun.from_json(updated.to_json())
+        assert [s.variable_name for s in back.removed] == ["c"]
+        restored, why = G.restore_step(back, "c", now=2.0)
+        assert why == ""
+        assert [s.variable_name for s in restored.steps] == ["a", "b", "c"]
+
+    def test_an_old_run_without_the_field_loads(self):
+        """The store is on disk; a run saved before the field existed must not
+        become unreadable."""
+        raw = ('{"id":"old","goal":"g","phase":"running","steps":['
+               '{"thought":"t","tool_name":"x","tool_arguments":{},'
+               '"variable_name":"a"}],"index":0}')
+        run = G.GoalRun.from_json(raw)
+        assert run.removed == ()

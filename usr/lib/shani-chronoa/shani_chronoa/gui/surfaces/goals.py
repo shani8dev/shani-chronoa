@@ -69,6 +69,14 @@ class _GoalsSurface:
         set_content(common.scrolled(self._body))
         self.running = False
         self._notice = ""
+        #: Why the last step of each run failed, by run id. Absent means the last
+        #: attempt either succeeded or was never made.
+        #:
+        #: A *store* failure was silent: `load`/`save` raising left the run
+        #: exactly as it was, so the refresh showed it unchanged and the person
+        #: pressed a button that did nothing. A *step* failure never was — see
+        #: `run`'s docstring.
+        self._run_error: dict = {}
         self.refresh()
 
     # -- drawing --------------------------------------------------------------
@@ -146,6 +154,50 @@ class _GoalsSurface:
             else:
                 _add(group, row)
 
+        # **Removed steps are drawn, dimmed, with a way back.**
+        # `travel.css`: `.tv-stop.is-removed { opacity: .45 }` over its photo,
+        # time, title and description — open-intelligent-ui dims a removed stop
+        # rather than deleting it, so the person keeps seeing what they took out
+        # and can put it back. Chronoa threw it away, and a step removed by
+        # mistake had no route back at all: the only recovery was to ask the
+        # model to plan the whole goal again.
+        #
+        # The dim is the accessible form: opacity *and* the words "removed",
+        # because colour or fade alone is the one-dimension cue this repo's
+        # `test_window_ux` already refuses elsewhere.
+        for step in run.removed:
+            row = common.row(f"{step.thought or step.tool_name} (removed)",
+                             f"{step.tool_name} -> ${step.variable_name}",
+                             suffix=Gtk.Image.new_from_icon_name("edit-undo-symbolic"))
+            try:
+                row.set_opacity(0.45)
+                row.set_sensitive(False)
+            except Exception:  # noqa: BLE001 - a styling miss must not break the row
+                logger.debug("could not dim the removed-step row", exc_info=True)
+            _add(group, row)
+            back = Gtk.Button(icon_name="edit-undo-symbolic")
+            back.add_css_class("flat")
+            back.set_tooltip_text(f"Put the step ${step.variable_name} back")
+            back.update_property(
+                [Gtk.AccessibleProperty.LABEL],
+                [f"Restore step {step.variable_name} of {run.goal}"])
+            back.connect("clicked", lambda _b, r=run, s=step: self.restore_step(r, s))
+            holder = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
+            holder.set_hexpand(True)
+            holder.append(back)
+            holder.set_halign(Gtk.Align.END)
+            _add(group, holder)
+
+        # **A store failure, on the card.** A run whose step raised is handled
+        # one layer down (`goals.advance` -> `Phase.FAILED`, already drawn). This
+        # is the other case: `load`/`save` raising leaves the run unchanged, so
+        # nothing else about it moved and this is the only place the person could
+        # learn why the button did nothing.
+        stuck = self._run_error.get(run.id)
+        if stuck:
+            _add(group, common.row("Could not step this goal",
+                                   stuck + " The step stopped here; nothing was skipped."))
+
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END)
         actions.set_margin_top(6)
         if run.phase == goals.Phase.AWAITING:
@@ -180,24 +232,48 @@ class _GoalsSurface:
     # -- actions --------------------------------------------------------------
 
     def run(self, run_id: str, to_the_end: bool, on_done=None) -> None:
-        """Step a run forward off the main loop, saving after every step."""
+        """Step a run forward off the main loop, saving after every step.
+
+        **A store failure is shown, not only logged.** The comment this replaced
+        said "shown by the refresh, not raised", and that is true of a *step*
+        failing — `goals.advance` turns a step exception into `Phase.FAILED` and
+        this panel already draws `_PHASE_WORD[FAILED]` as "failed - n of m
+        steps". Measured by writing the tests the wrong way round first: they
+        asserted a step exception reached `_run_error`, and running them produced
+        `WARNING goals.py ... failed at step a` with an empty map.
+
+        What *was* silent is a **store** failure: `self.store.load` or `.save`
+        raising leaves the run exactly as it was, so the refresh shows it
+        unchanged and the person presses a button that does nothing.
+
+        open-intelligent-ui's `useStreetRoute` returns three states — `undefined`
+        while loading, `null` when the request failed, points otherwise — so a
+        caller cannot confuse them. Same distinction here, and it is drawn on the
+        run's own card rather than only in the log.
+        """
         if self.running:
             return
         self.running = True
         self.refresh()
 
         def work() -> None:
+            failure = ""
             try:
                 run = self.store.load(run_id)
                 while run is not None and run.phase in LIVE:
                     run = self.store.save(goals.advance(run, self.executor))
                     if not to_the_end:
                         break
-            except Exception:  # noqa: BLE001 - shown by the refresh, not raised
+            except Exception as exc:  # noqa: BLE001 - put on the card, not raised
                 logger.warning("goal %s could not be advanced", run_id, exc_info=True)
+                failure = f"{type(exc).__name__}: {exc}"[:200]
 
             def finish() -> bool:
                 self.running = False
+                if failure:
+                    self._run_error[run_id] = failure
+                else:
+                    self._run_error.pop(run_id, None)
                 self.refresh()
                 if on_done is not None:
                     on_done()
@@ -212,6 +288,32 @@ class _GoalsSurface:
             self.store.resume(run_id, text.strip())
         self.refresh()
 
+    def remove(self, run_id: str) -> None:
+        """Delete a saved goal.
+
+        **This was deleted once and shipped.** `drop_step` was written by
+        replacing the body of this method rather than being added beside it, so
+        "Remove this goal" was left calling `self.remove` with no such method —
+        `AttributeError` on every click, found only by building the panel and
+        calling it. No test caught it, because no test clicked it. Two methods,
+        one entry point each.
+        """
+        label = self._label(run_id)
+        try:
+            goals._state_path(self.store.root, run_id).unlink()
+        except OSError as exc:
+            logger.warning("could not remove goal %s: %s", run_id, exc)
+        self._notice = f"Removed the goal {label}."
+        self._run_error.pop(run_id, None)
+        self.refresh()
+
+    def _label(self, run_id: str) -> str:
+        """The goal's description, so a sentence names what went."""
+        for run in self.store.list():
+            if run.id == run_id:
+                return str(run.goal)
+        return run_id
+
     def drop_step(self, run: goals.GoalRun, step: goals.PlannedStep) -> None:
         """Take one step out of a plan, and say so when it cannot be.
 
@@ -220,6 +322,11 @@ class _GoalsSurface:
         sentence is what the row would otherwise be missing. The store is
         re-read rather than patched from the stale card, so two clicks in a row
         cannot drop two steps on the strength of one.
+
+        The step is **kept**, not deleted — open-intelligent-ui dims a removed
+        stop (`.tv-stop.is-removed { opacity: .45 }`) rather than removing it, so
+        the person can see what they took out and put it back with
+        `restore_step`.
         """
         import time
 
@@ -229,7 +336,25 @@ class _GoalsSurface:
             self._notice = why
             logger.info("goal %s: step %s not removed: %s", run.id, step.variable_name, why)
         else:
-            self._notice = f"Removed ${step.variable_name} from {run.goal}."
+            self._notice = (f"Removed ${step.variable_name} from {run.goal}. It is "
+                            "still listed, dimmed, and can be put back.")
+            self.store.save(updated)
+        self.refresh()
+
+    def restore_step(self, run: goals.GoalRun, step: goals.PlannedStep) -> None:
+        """Put a step back, and say so when it cannot be.
+
+        The reason the dimmed row is worth drawing at all: without a way back, a
+        step removed by mistake meant planning the whole goal again.
+        """
+        import time
+
+        current = self.store.load(run.id) or run
+        updated, why = goals.restore_step(current, step.variable_name, now=time.time())
+        if why:
+            self._notice = why
+        else:
+            self._notice = f"Put ${step.variable_name} back in {run.goal}."
             self.store.save(updated)
         self.refresh()
 

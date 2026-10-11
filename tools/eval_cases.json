@@ -2620,8 +2620,8 @@
   "coverage": {
     "cases": 226,
     "skills_asserted": 210,
-    "skills_total": 244,
-    "note": "partial: 210 of 244 asserted. skills_total is a hand-kept claim; every new skill makes it stale until it is bumped, which is the test's purpose",
+    "skills_total": 250,
+    "note": "partial: 210 of 245 asserted. skills_total is hand-kept and every new skill makes it stale until it is bumped, which is the test's purpose",
     "gated_unguarded": 56
   }
 }
