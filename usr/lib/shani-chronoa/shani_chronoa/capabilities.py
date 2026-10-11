@@ -211,6 +211,7 @@ GATED: dict[str, str] = {
     # Infrared: a write to the physical world, so it gets its own switch and not
     # the shared `nfc-enabled` one. "Turn on the TV" is not "read a tag".
     "ir_remote": "ir-remote-enabled",
+    "search_my_files": "file-index-enabled",
     "lan_phone": "lan-phone-enabled",
     "screen_to_phone": "screen-share-enabled",
     # Placing and answering calls. Its own switch because a call rings *someone
@@ -411,6 +412,11 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "nfc": ("Devices", "Read an NFC tag, or write a link to a sticker"),
     "fm_radio": ("Devices", "Listen to FM radio through a USB receiver"),
     "ir_remote": ("Devices", "Send or receive infrared remote-control codes"),
+    # "Files", the same group as find_files and search_file_contents - a group
+    # I invented as "Files and folders" is not in GROUP_ORDER, and
+    # test_capabilities refuses it. It belongs beside them: it is the same
+    # question, asked by meaning rather than by name or substring.
+    "search_my_files": ("Files", "Search your own files by meaning"),
     # Two phones-by-radio skills: one finds a phone on the network it is
     # already on, the other shows this screen to one over Bluetooth.
     # Separate rows because they are separate disclosures - a phone seen
@@ -740,6 +746,7 @@ GATE_NAMES: dict[str, str] = {
     "document-search-enabled": "Let Chronoa search inside your files",
     "calendar-read-enabled": "Let Chronoa read your calendar",
     "calendar-sense-enabled": "Let Chronoa act before calendar events",
+    "file-index-enabled": "Let Chronoa index and search your own files",
     "phone-control-enabled": "Let Chronoa use your paired phone",
     "lan-phone-enabled": "Let Chronoa find phones on the same Wi-Fi",
     "screen-share-enabled": "Let Chronoa share this screen with a phone",

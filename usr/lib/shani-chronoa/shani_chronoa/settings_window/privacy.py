@@ -336,6 +336,18 @@ class PrivacyPage:
              "never a bank card or a transit pass, which rewriting would break. Most laptops have "
              "no NFC reader at all, and that is reported as having none.",
              "reading or writing an NFC tag is refused while this is off"),
+            ("Let Chronoa index and search your own files", "file-index-enabled",
+             "Off: Chronoa neither reads your files nor keeps an index, so nothing "
+             "about them can be searched. On: 'search_my_files' reads a directory "
+             "you name, keeps an index of its text and PDFs, and answers searches "
+             "by meaning - or by keyword when the 146 MB embedding model is not "
+             "installed, and it says which. Its own switch, separate from the "
+             "document-search one, because that asks the desktop's own index "
+             "(tracker3, Baloo) for files it has already catalogued, while this "
+             "builds one of your own for a directory that index may never have "
+             "looked at. A file it cannot read - a binary, an encrypted PDF, one "
+             "with no permission - is named in the report, not skipped quietly.",
+             "indexing your files is refused while this is off"),
             ("Let Chronoa find phones on the same Wi-Fi", "lan-phone-enabled",
              "Off: Chronoa neither announces this computer on the local network nor listens "
              "for devices announcing themselves, so it cannot tell you a phone is here. Its "

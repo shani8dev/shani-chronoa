@@ -569,6 +569,11 @@
       <summary>Let Chronoa share this screen with a phone</summary>
       <description>When true, Chronoa may ask the desktop to share the screen and serve the picture to a paired phone over the Bluetooth network. Off by default. This is the widest thing Chronoa can do here - wider than a file, because it is everything on screen - so it gets its own switch rather than riding on the phone link's. The desktop always shows its own "Share screen" dialog, which only the person can answer; this switch does not skip it. The picture goes over Bluetooth, so it is not on Wi-Fi.</description>
     </key>
+    <key name="file-index-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa index and search your own files by meaning</summary>
+      <description>When true, Chronoa may read a directory's text files and PDFs, embed them with the small local embedding model, and keep an index you can search. Off by default, and it stays off until you name a directory - the index is only ever built for a path you asked about. The embedding model is a 146 MB download; without it the search still works, but only by keyword, and it says so rather than returning results that look semantic. Files that cannot be read - a binary, an encrypted PDF, one with no permission - are named in the report instead of being skipped quietly.</description>
+    </key>
     <key name="ir-remote-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa send and receive infrared remote-control codes</summary>
