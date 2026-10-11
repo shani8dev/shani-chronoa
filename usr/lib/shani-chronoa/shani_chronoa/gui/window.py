@@ -52,6 +52,24 @@ logger = logging.getLogger(__name__)
 CHAT_TAG = "chronoa-chat"
 
 
+def _surface_title(name: str) -> str:
+    """A page's title from its own registry entry, not a hand-kept list.
+
+    `available_surfaces()` yields `(TITLE, ICON, build)` - index 0 is the title
+    and index 1 is the icon. A first version read index 1, so every wrapped page
+    was titled with its own icon name (`audio-input-microphone-symbolic` as a
+    window title), and the test caught it on the first run.
+    """
+    from shani_chronoa.gui.surfaces import available_surfaces
+
+    fallback = name.replace("_", " ").capitalize()
+    try:
+        entry = available_surfaces().get(name)
+        return str(entry[0]) if entry else fallback
+    except Exception:  # noqa: BLE001 - a title is not worth failing over
+        return fallback
+
+
 def _broken_page(name: str, exc: BaseException) -> "Adw.NavigationPage":
     """The page a panel shows when it could not be built.
 
@@ -1537,16 +1555,30 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # Read from `available_surfaces()` rather than a kept list, so the next
         # surface works the day it is added and not the day someone remembers.
         if page_id in available_surfaces():
-            self._set_panels_visible(True)
-            # `select` moves the row highlight and returns True, which is
-            # the whole of what this method can honestly claim. **Building
-            # the surface is `_show_surface`, and it ends with its own
-            # `select`, so calling it here as well runs select twice and
-            # `_content_view.push` receives a bare Gtk.Box** - measured.
-            # Landing on the page properly needs that pair reconciled in
-            # `_show_surface`, which is a change to the sidebar's contract
-            # and not to this branch.
-            self._sidebar_page.select(page_id)
+            # **Measured 2026-10-11, on a real `ChronoaWindow`:** this branch
+            # used to open the sidebar and mark the row, and return True:
+            #
+            #     show_page("listening") -> True
+            #     "listening" in _surface_pages -> **False**   (never built)
+            #     show_content=False, collapsed=False          (chat still up)
+            #
+            # So the Listening button's `pages.show(...)` returned success and
+            # left the person on the conversation with the sidebar open. The row
+            # was highlighted, which is what made it read as *almost* working.
+            #
+            # The comment that used to sit here said calling `_show_surface` as
+            # well would "run select twice and push a bare Gtk.Box". **Both
+            # halves are wrong**: `SidebarPage.select` only adds and removes the
+            # `selected` CSS class on rows, and pushes nothing - so there is no
+            # double-select and nothing to push a bare box into. The real cost of
+            # the deferral was that a header button and a sidebar row had two
+            # different answers to "where this page is", and only one of them
+            # arrived.
+            #
+            # `_show_surface` is now the single path: push, mark the row, put the
+            # content on top. That is what a sidebar row's own `on_open` calls, so
+            # a button and a click finally agree.
+            self._show_surface(page_id)
             return True
         return False
 
@@ -1856,6 +1888,24 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             except Exception as exc:
                 logger.error("Panel %r could not be built", name, exc_info=True)
                 page = _broken_page(name, exc)
+            # **A surface may build a plain widget rather than a page.**
+            # `Adw.NavigationView.push` takes `Adw.NavigationPage` and raises
+            # `TypeError: Expected Adw.NavigationPage, but got
+            # gi.repository.Gtk.Box` on anything else - measured, and it is why
+            # the Listening button could not be pointed at `_show_surface`: a
+            # comment claimed two `select` calls would collide and a bare box
+            # would be pushed, and the second half of that turned out to be the
+            # real one while the first was invented.
+            #
+            # Wrapped here rather than in each surface, because a surface that
+            # builds a `Gtk.Box` is not wrong on its own - only the split view
+            # has an opinion, and only here is that opinion held. Anything that
+            # already *is* a page is pushed as it is, so a surface that sets its
+            # own title or tag keeps it.
+            if not isinstance(page, Adw.NavigationPage):
+                wrapper = Adw.NavigationPage(title=_surface_title(name))
+                wrapper.set_child(page)
+                page = wrapper
             self._surface_pages[name] = page
         # Panels are pushed, so they need a way back that does not depend on the
         # sidebar being open - on a narrow window it is a collapsed drawer.
