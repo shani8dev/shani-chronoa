@@ -309,15 +309,30 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
             if vectors:
                 used_embeddings = True
                 want = local_embed.normalise(vectors[0])
-                scored = []
-                for path, blob in db.execute(
-                        "SELECT path, vector FROM docs WHERE vector IS NOT NULL"):
-                    score = local_embed.similarity(want,
-                                                    local_embed.from_blob(blob))
-                    if score >= SIMILARITY_FLOOR:
-                        scored.append((score, path))
-                scored.sort(reverse=True)
-                vector_hits = [p for _s, p in scored[:limit * 4]]
+                # **A query with no direction must not run the vector half.**
+                # The first version of this guard tested `any(want)`, which only
+                # catches an all-zero vector - and a *uniform* one, which is what
+                # a degenerate embedding returns for text outside its vocabulary,
+                # sails straight through: cosine ~0.5 with every non-orthogonal
+                # document, comfortably past the floor. Measured: with the guard
+                # written that way, "quantum tunnelling apparatus" returned both
+                # files in the index.
+                #
+                # What actually carries information is *spread*: a real embedding
+                # has some dimensions far above the rest, and a degenerate one has
+                # none. So the guard is on the spread, not on "is anything
+                # non-zero".
+                spread = (max(want) - min(want)) if want else 0.0
+                if spread > 1e-6:
+                    scored = []
+                    for path, blob in db.execute(
+                            "SELECT path, vector FROM docs WHERE vector IS NOT NULL"):
+                        score = local_embed.similarity(want,
+                                                        local_embed.from_blob(blob))
+                        if score >= SIMILARITY_FLOOR:
+                            scored.append((score, path))
+                    scored.sort(reverse=True)
+                    vector_hits = [p for _s, p in scored[:limit * 4]]
 
         # Reciprocal rank, the merge `conversation_store` uses: a file found by
         # both is worth more than one found by either, and neither list's

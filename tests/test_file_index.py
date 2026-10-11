@@ -226,3 +226,189 @@ class TestTheReportCountsWhatItCouldNotRead:
         assert report["skipped"] >= 2, "an unreadable file was not counted"
         named = [p for p in report["problems"] if "blob.bin" in p]
         assert named, "the unreadable file was skipped without being named"
+
+
+# --- the semantic half, which this box cannot run ----------------------------
+#
+# `local_embed` is a 146 MB download and a llama.cpp server, and this machine has
+# no CUDA, so every test above has exercised keyword-only. That left the whole
+# vector path - the reciprocal-rank merge, SIMILARITY_FLOOR, the blob round trip -
+# at zero coverage on the one box where the work is done.
+#
+# So the embedder is faked here. **And the first fake was too stupid to test what
+# it was testing**: a plain bag-of-words gives "router" and "wifi" orthogonal
+# vectors, so the synonym case - the only reason an embedding model exists - could
+# not be demonstrated at all, and the test asserting it failed. What replaced it
+# is a bag-of-words over *synonym groups*, so "router" and "wifi" land on the same
+# dimension the way a real embedding puts them close. That is enough to test the
+# merge honestly; it is not a model and does not pretend to be one.
+
+#: Synonym groups, in the shape a real embedding approximates: words that mean
+#: nearly the same thing sit close together.
+SYNONYMS = (
+    ("wifi", "router", "network", "link"),
+    ("btrfs", "snapshot", "rollback"),
+    ("slot", "green", "blue"),
+    ("coffee", "groceries", "food"),
+)
+
+def _bag_of_words(text, groups):
+    """A unit vector over *synonym groups*, not over raw words.
+
+    `router` and `wifi` count into the same dimension, which is what makes the
+    synonym test meaningful. A vector that counts only exact words is
+    indistinguishable from keyword search, and a test that appears to cover the
+    semantic half while exercising a second copy of the keyword half is worse
+    than no test at all.
+    """
+    counts = [0.0] * len(groups)
+    low = text.lower()
+    for index, group in enumerate(groups):
+        counts[index] = sum(float(low.count(w)) for w in group)
+    norm = sum(c * c for c in counts) ** 0.5
+    if norm == 0:
+        # **Zero, not uniform.** The first version returned a uniform vector for
+        # "no vocabulary overlap", and a uniform vector has cosine ~0.5 with every
+        # non-orthogonal document - so "quantum tunnelling apparatus" matched the
+        # wifi notes. That was an artefact of this fake rather than of `search`:
+        # a real embedding model never returns "every direction equally" for a
+        # nonsense query, it returns something with structure. Zero is the honest
+        # answer for "no information", and `search` guards against it.
+        return [0.0] * len(groups)
+    return [c / norm for c in counts]
+
+
+@pytest.fixture
+def semantic(monkeypatch, tmp_path):
+    """Index with a deterministic stand-in for the embedding model."""
+    from shani_chronoa import local_embed
+
+    def fake_embed(texts, kind=None, timeout=30.0, transport=None):
+        if not texts:
+            return []
+        return [_bag_of_words(t, SYNONYMS) for t in texts]
+
+    monkeypatch.setattr(local_embed, "configured", lambda: True)
+    monkeypatch.setattr(local_embed, "embed", fake_embed)
+    root = tmp_path / "docs"
+    root.mkdir()
+    (root / "network.txt").write_text(
+        "The wifi box in the study drops the network link every evening.")
+    (root / "ops.txt").write_text(
+        "The btrfs rollback needs a second green slot for the router.")
+    (root / "shopping.txt").write_text("Groceries: coffee and oat milk.")
+    db = F._connect(tmp_path / "sem.sqlite3")
+    F.index_directory(root, embed=True, db=db)
+    return root, db
+
+
+class TestTheSemanticHalf:
+    def test_a_vector_is_actually_written(self, semantic):
+        root, db = semantic
+        rows = db.execute("SELECT COUNT(*) FROM docs WHERE vector IS NOT NULL").fetchone()
+        assert rows[0] == 3, "no vectors were written, so the semantic half is dead"
+
+    def test_the_blob_round_trips(self, semantic):
+        root, db = semantic
+        from shani_chronoa import local_embed
+        blob = db.execute("SELECT vector FROM docs LIMIT 1").fetchone()[0]
+        vector = local_embed.from_blob(blob)
+        assert len(vector) > 0 and abs(sum(vector) - 1.0) < 0.001, (
+            "the stored vector is not unit length, so similarity is not bounded")
+
+    def test_a_synonym_is_found_that_keyword_would_miss(self, semantic):
+        """**The claim of the whole feature.** The file says "wifi box"; the query
+        says "router network". No word is shared, so a keyword search returns
+        nothing while a vector search finds it - and that is exactly the case the
+        embedding model exists for.
+        """
+        root, db = semantic
+        hits, how = F.search(root, "router", embed=True, db=db)
+        assert hits, "the query found nothing at all"
+        assert "embedding" in how, f"answered as keyword-only: {how!r}"
+        assert any("network.txt" in h["path"] for h in hits), (
+            f"router did not find the wifi file: {[h['path'] for h in hits]}")
+
+    def test_the_answer_says_it_searched_by_meaning(self, semantic):
+        root, db = semantic
+        _hits, how = F.search(root, "router", embed=True, db=db)
+        assert "keyword and embedding" in how, how
+
+    def test_hybrid_beats_either_alone(self, semantic):
+        """**The control on the merge.** Reciprocal rank must rank a file found by
+        *both* lists above one found by only one - otherwise the merge is
+        decoration and the second list is noise.
+        """
+        root, db = semantic
+        # "btrfs slot" appears verbatim in ops.txt, and shares words with it
+        hits, _how = F.search(root, "btrfs slot", embed=True, db=db)
+        assert hits and "ops.txt" in hits[0]["path"], (
+            f"the file with both words was not first: {[h['path'] for h in hits]}")
+
+    def test_a_file_below_the_floor_is_not_returned(self, semantic):
+        """`SIMILARITY_FLOOR` is what stops every file in the index being "about"
+        every query. A flooring bug would return the shopping list for a btrfs
+        question and read as a clever match.
+        """
+        root, db = semantic
+        hits, _how = F.search(root, "btrfs rollback", embed=True, db=db)
+        assert not any("shopping.txt" in h["path"] for h in hits), (
+            "an unrelated file passed the similarity floor")
+
+    def test_a_file_that_shares_no_words_is_still_findable_by_meaning(self, semantic):
+        """The other direction from the floor: the floor must not be so high that
+        it only admits exact keyword matches, which would make the vector half
+        cosmetic."""
+        root, db = semantic
+        hits, _how = F.search(root, "router", embed=True, db=db)
+        assert any("network.txt" in h["path"] for h in hits)
+
+    def test_a_query_the_index_cannot_answer_still_returns_a_labelled_empty(self, semantic):
+        root, db = semantic
+        hits, how = F.search(root, "quantum tunnelling apparatus", embed=True, db=db)
+        assert not hits
+        assert "keyword and embedding" in how, (
+            "with the embedder present, an empty answer must still say which "
+            "search produced it")
+
+
+class TestADegenerateQueryVector:
+    """**What the `any(want)` guard is actually for**, and why the mutation that
+    removed it passed 27 tests first.
+
+    With the synonym-group fake, an empty bag returns *zeros*, so a zero query
+    scores 0 against every document and `SIMILARITY_FLOOR` rejects them all - the
+    guard is redundant and removing it changes nothing. The case it exists for is
+    a *near-uniform* vector, which is what a degenerate real embedding can return
+    for text with no vocabulary overlap: cosine ~0.5 with every non-orthogonal
+    document, comfortably past the floor, so a nonsense query matches everything.
+
+    The first version of the fake returned a uniform vector and a test found
+    "quantum tunnelling apparatus" returning the wifi notes. This is that test,
+    kept, because a guard whose only motivating case is gone is a guard nobody can
+    tell is load-bearing.
+    """
+
+    def test_a_uniform_query_vector_matches_nothing(self, monkeypatch, tmp_path):
+        from shani_chronoa import local_embed
+
+        def uniform_embed(texts, kind=None, timeout=30.0, transport=None):
+            # A degenerate model: every text gets "every direction equally",
+            # which has cosine ~0.5 with any real document.
+            return [[1.0 / 3.0] * 3 for _ in texts]
+
+        monkeypatch.setattr(local_embed, "configured", lambda: True)
+        monkeypatch.setattr(local_embed, "embed", uniform_embed)
+
+        root = tmp_path / "docs"
+        root.mkdir()
+        (root / "a.txt").write_text("the wifi box drops the network link")
+        (root / "b.txt").write_text("the btrfs rollback needs a green slot")
+        db = F._connect(tmp_path / "u.sqlite3")
+        F.index_directory(root, embed=True, db=db)
+
+        hits, _how = F.search(root, "quantum tunnelling apparatus", embed=True, db=db)
+        assert not hits, (
+            f"a query with no vocabulary matched {len(hits)} file(s) - a "
+            f"near-uniform embedding has cosine ~0.5 with everything, and the "
+            f"similarity floor is 0.28")
