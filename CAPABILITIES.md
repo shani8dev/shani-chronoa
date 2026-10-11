@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**256 skills in 24 groups.** Each is a named, schema-typed module; the model
+**257 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**93 of 256 are consent-gated and 17 are destructive.**
+**93 of 257 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -283,6 +283,22 @@ Brightness, theme, power state, night light.
 | `set_screensaver` | Change when the screen blanks and locks | needs `idle-timeout-enabled` |
 | `set_sleep_inhibit` | Hold the machine awake for a bounded time | needs `sleep-inhibit-enabled` |
 
+## Processes and windows
+
+Find, move and close what is open.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `arrange_window` | Minimize, maximize, move or resize a window | — |
+| `close_window` | Close a window | **asks first, always** · needs `window-close-enabled` |
+| `focus_window` | Focus a window | — |
+| `kill_process` | Stop a process | **asks first, always** · needs `process-kill-enabled` |
+| `list_processes` | Running processes | — |
+| `list_windows` | Open windows | — |
+| `oom_score` | Who the kernel would kill if memory ran out | — |
+| `press_key` | Press a key | needs `input-control-enabled` |
+| `process_cost` | What is using the CPU or the disk | — |
+
 ## Sound
 
 Play, record, describe and edit audio.
@@ -328,21 +344,6 @@ Launch, list and find applications.
 | `list_vms` | Virtual machines | — |
 | `open_application` | Open an app | — |
 | `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
-
-## Processes and windows
-
-Find, move and close what is open.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `arrange_window` | Minimize, maximize, move or resize a window | — |
-| `close_window` | Close a window | **asks first, always** · needs `window-close-enabled` |
-| `focus_window` | Focus a window | — |
-| `kill_process` | Stop a process | **asks first, always** · needs `process-kill-enabled` |
-| `list_processes` | Running processes | — |
-| `list_windows` | Open windows | — |
-| `press_key` | Press a key | needs `input-control-enabled` |
-| `process_cost` | What is using the CPU or the disk | — |
 
 ## Pointer and keyboard
 

@@ -258,6 +258,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "delete_file": ("Files", "Delete"),
     "open_file": ("Files", "Open a file"),
     "list_processes": ("Processes and windows", "Running processes"),
+    # Beside list_processes and process_cost: both answer "what is running and
+    # what is it costing", and this one answers the question that follows when
+    # something disappears - who the kernel would kill, and whether it has.
+    "oom_score": ("Processes and windows", "Who the kernel would kill if memory ran out"),
     # Beside list_processes because it is the same subject asked a different
     # way: that one is a snapshot of what is running, this one is what each
     # program is COSTING - time-weighted CPU, memory, page faults and disk.
