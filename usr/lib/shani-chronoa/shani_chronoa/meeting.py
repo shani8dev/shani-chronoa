@@ -399,7 +399,14 @@ def _drive_one_section(backend, messages, section: int, of: int):
     anything, and that is the honest reading rather than a parameter quietly
     kept alive by being passed to a function that cannot take it.
     """
-    reply = _run_coroutine_sync(backend.chat_message(messages, tools=None))
+    try:
+        reply = _run_coroutine_sync(backend.chat_message(messages, tools=None))
+    except Exception as exc:
+        # `section`/`of` exist for this sentence. With five sections, "the local
+        # model could not be reached" does not say which part of a two-hour
+        # meeting is missing - and they are unused otherwise, which is how the
+        # first version shipped them.
+        raise RuntimeError(f"section {section} of {of}: {exc}") from exc
     return _reply_text(reply)
 
 
