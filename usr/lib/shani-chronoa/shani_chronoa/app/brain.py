@@ -154,7 +154,8 @@ class BrainMixin:
         """
         if self._ollama_available or isinstance(self.llm, CloudLLMChain):
             return
-        if self.privacy.is_local_only or not self.config.cloud_fallback_enabled:
+        shut = self._cloud_gate_reason()
+        if shut:
             # **Name every backend and its own reason.** This said only "no
             # Ollama", on a machine where Ollama was never the default and
             # llama.cpp is - so a person reading the log could not tell that the
@@ -220,6 +221,101 @@ class BrainMixin:
         self.llm = cloud_llm
         if self.assistant:
             self.assistant.llm = cloud_llm
+
+    def _cloud_gate_reason(self) -> str:
+        """Why the cloud route is shut, or "" when it is open.
+
+        **One answer, read by both paths.** The startup fallback had this inline,
+        interleaved with the log line it existed to produce - so a *choice* to use
+        the cloud could not ask the same question, and would have had to
+        re-derive it. Re-deriving is how the two came to disagree, which is the
+        lesson `model.py`'s `_selected_engine` records from the other side.
+        """
+        if self.privacy.is_local_only and not self.config.cloud_fallback_enabled:
+            return "privacy mode is on and cloud fallback is off"
+        if self.privacy.is_local_only:
+            return "privacy mode is on - nothing leaves this machine"
+        if not self.config.cloud_fallback_enabled:
+            return ("cloud fallback is off; turn on 'Use the free cloud gateways "
+                    "when no local model answers' in Settings")
+        return ""
+
+    def select_llm(self, what: str) -> str:
+        """Switch the answering engine now: ``"local"`` or ``"cloud"``.
+
+        "" on success, or the sentence naming which gate shut.
+
+        **This did not exist, and it is why the Models panel could not offer a
+        cloud model.** `_maybe_enable_cloud_fallback` runs once at startup and
+        returns early when `isinstance(self.llm, CloudLLMChain)` - so a machine
+        that started on llama.cpp and was switched to the cloud *by the toggle*
+        had no way back except restarting, and a machine that started on the cloud
+        never reconsidered at all. The toggle flips the fallback on and off; it
+        cannot answer "use this one instead".
+
+        `self.assistant.llm` is set as well as `self.llm` because the assistant
+        holds its own reference and reads that one on every request - which is the
+        same pair `_toggle_cloud_fallback` already has to keep in step.
+        """
+        want = (what or "").strip().lower()
+        if want not in ("local", "cloud"):
+            return "%r is not a choice; use 'local' or 'cloud'" % (what,)
+        reason = self._cloud_gate_reason()
+        if want == "cloud" and reason:
+            return reason
+        try:
+            if want == "local":
+                from shani_chronoa import local_llm
+
+                chosen = local_llm.LocalLLM()
+            else:
+                api_keys = self.config.cloud_llm_api_keys()
+                # Registered with redactor here for the same reason the startup
+                # path does it: a key that reaches the sanitiser's cache is a key
+                # that cannot leak into a prompt, and skipping it makes that
+                # redaction a silent no-op.
+                for provider_id, key_value in api_keys.items():
+                    redactor.register(f"cloud_llm_{provider_id}", key_value)
+                from shani_chronoa.cloud_llm import (
+                    BYOK_PROVIDER_ORDER, CUSTOM_ID, DEFAULT_PROVIDER_ORDER,
+                    CloudLLMChain)
+                from shani_chronoa.cloud_llm import custom_provider
+
+                custom_url = self.config.get("custom-llm-base-url", "")
+                custom_model = self.config.get("custom-llm-model", "")
+                order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
+                if custom_provider(custom_url, custom_model) is not None:
+                    order = (CUSTOM_ID,) + order
+                chosen = CloudLLMChain(provider_ids=order, api_keys=api_keys,
+                                       custom_base_url=custom_url,
+                                       custom_model=custom_model)
+                if not chosen.is_available():
+                    return ("no cloud provider is reachable: the free gateways are "
+                            "rate-limited or down, and no API key is configured for "
+                            "any of the ones that need one")
+        except Exception as exc:  # noqa: BLE001 - reported, never raised
+            return f"could not switch to {want}: {type(exc).__name__}: {exc}"
+
+        self.llm = chosen
+        if self.assistant:
+            self.assistant.llm = chosen
+        logger.warning("answering engine switched to %s (%s)", want,
+                       type(chosen).__name__)
+        return ""
+
+    def current_llm_kind(self) -> str:
+        """``"cloud"``, ``"local"``, or ``"none"`` - which engine is holding the
+        turn, read from the object rather than from a setting.
+
+        A setting cannot answer this: the engine is *selected*, and the selection
+        is re-decided at startup and by the fallback, so `cloud-fallback-enabled`
+        being true says nothing about what is answering now.
+        """
+        from shani_chronoa.cloud_llm import CloudLLMChain
+
+        if self.llm is None:
+            return "none"
+        return "cloud" if isinstance(self.llm, CloudLLMChain) else "local"
 
     def _toggle_cloud_fallback(self, _action: Gio.SimpleAction, _param: object) -> None:
         """Toggle the free-cloud-LLM opt-in and react immediately, same as toggle-privacy."""
