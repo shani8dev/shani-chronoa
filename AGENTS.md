@@ -870,7 +870,7 @@ genuinely absent rather than a defect:
 
 | file | why |
 |---|---|
-| `test_browser_window_probe.py` (7) | WebKitGTK is not installed (`require_version` fails for both 6.0 and 4.1); the file's own message says it "proves nothing" in that case |
+| ~~`test_browser_window_probe.py` (7)~~ **no longer environmental — the row was stale (corrected 2026-10-11)** | it said "WebKitGTK is not installed (`require_version` fails for both 6.0 and 4.1)". Measured: **`WebKit 6.0` resolves** (`WebKit-6.0.typelib` present; 4.1 is only refused because 6.0 is already loaded, which is not the same as missing), and the file now runs **7 passed, 2 skipped**. `xdotool`, `grim` and `tesseract` are likewise all present. This row is the shape of a list that stops asking why — it is corrected rather than deleted so the next reader sees that "environmental" is a claim to re-measure |
 | `test_setup_extras.py` (6) | `ConsentRequired` - model downloads are gated shut in this environment. Verified pre-existing on the **unmodified** tree |
 | `test_sandbox_seccomp.py` (2), `test_sandbox_profiles_live.py` (1) | Landlock and seccomp need the real kernel; AGENTS.md already says so |
 | `test_sense_idle.py` (3) | real clock and real X resources, headless |
@@ -2229,11 +2229,40 @@ lives. `check_destination` appeared in the discarded-result scan and is
 correct: it returns `None` and raises on refusal, so `_guard()` fails closed.
 
 **Still unwired, genuinely candidate.** `run_from_file`, `webkit_version`,
-`known_organ`, `page_titles`, `install_hint`, `pending_count`, `price`,
+`known_organ`, `page_titles`, `pending_count`, `price`,
 `collapse`, `capability_for`, `summarize_*` siblings, `from_url`,
-`save_record`, `lab_network_namespace`, `encode_rejection`,
-`describe_captured`, `remember_from_turn`, `tempo_map` / `apply_contour` /
+`save_record`, `lab_network_namespace`,
+`describe_captured`, `tempo_map` / `apply_contour` /
 `within`.
+
+**Re-measured 2026-10-11, and two entries had gone stale in the dangerous
+direction.** `install_hint` (`routes.py`) and `remember_from_turn`
+(`senses/memory.py`) now each have a non-test caller; the other sixteen still
+have none. A stale "dead" label is the direction that destroys work, so the
+list is corrected rather than left to be trusted — but note it still rots, and
+the scan has to be re-run rather than believed.
+
+**`encode_rejection` is unwired on purpose, and that was worth proving rather
+than assuming.** It has no production caller, which reads like the dead-code
+class above. It is not: `permissions.parse_reply` splits the reason off a
+denial, `decide()` files it in `_reasons`, and the *next* attempt is answered
+by `permits()` with it attached. Measured through a real `delete_file` dispatch
+with a presenter built the way a real one is (`ask_bridge.make_event()`):
+
+    1st refusal : 'The user did not allow delete_file. Nothing was done.'
+    2nd refusal : '... says deny_session. The user said: never in /home,
+                   use the trash Do something else instead, or ask ...'
+
+The terse first refusal is the design — the question is not put twice — and the
+reason reaches the model where it can act on it. The shipped `notify-send`
+presenter returns `"allow"`/`"deny"` action keys and structurally cannot collect
+a reason, so the encoder has no caller by construction. **My first probe drove
+the presenter with a bare string, `ask_bridge` rejected it ("returned str, not
+an event"), and the reason came back absent — a confident wrong answer produced
+entirely by the probe.** `tests/test_approval_ux.py::test_the_reason_reaches_the_model_on_the_refusal`
+already covered this; the lesson is that I should have run the existing test
+before building a probe of my own.
+
 
 **All 154 schema keys are read** — there is no unwired setting in this
 repository. Worth recording as a clean result.
@@ -4160,20 +4189,53 @@ Every commit this session made that says "N of N mutations confirmed to fail" wa
 citing evidence that no longer existed - including five of its own.
 
 `tools/mutate.py` is that rule as a tool, and `tools/mutations/` holds the sets.
-**48 mutations across four sets, all caught from a clean checkout:**
 
-    python3 tools/mutate.py            # every set
+    python3 tools/mutate.py            # every set (minutes)
     python3 tools/mutate.py edit_file  # one by name
+    python3 tools/mutate.py --list     # the honest inventory
+    python3 tools/mutate.py --check-anchors   # seconds, no tests run
 
-Six rules the runner enforces, each of which cost a green run against unmutated
-code before it was written down:
+**Eleven sets, 129 anchors** - `activity`, `clip`, `edit_file`, `finite`,
+`fm_radio`, `goal_edits`, `ir_remote`, `location`, `maps`, `stale`, and
+`file_locks` from a concurrent session. Every anchor still matches the code.
+
+**The five sets that were lost to a restart have been rebuilt — from the
+committed tests and code, not from memory.** `goal_edits`, `clip`, `maps`,
+`ir_remote` and `fm_radio` were `/tmp` files whose evidence this file said was
+gone, and the honest remedy was to re-derive them where every claim is checked
+against something real: the runner asserts each anchor occurs exactly once in
+the *current* source and that a named witness fails, so a set that drifts from
+the code is an error rather than a silent survivor. Writing them found
+**eleven witnesses that could not fail**, which is the real return on the work:
+
+- `test_the_approximation_is_stated` asserted only `"_joins" in dir(M)`. It
+  now asserts the docstring actually says `approximation` and `stdlib`, read
+  off `_joins.__doc__` so a comment in the test cannot satisfy it — **a claim
+  about the code's own limits was the exact shape of the `fmdsp` comment that
+  caused a real bug.**
+- `test_the_trailer_space_is_doubled` asserted against `I.RC6_TRAILER_SPACE`,
+  the module's **own constant**, so the constant could be halved and the test
+  stayed green. It now pins the published literal. Writing that assertion
+  **failed**: it said `889` is not `2 × 444 = 888`, which is right — RC-6's
+  trailer is 889 µs, not the arithmetic of two half-periods, and a number that
+  looks derivable and is not is this file's own `privilege`/`mokutil` lesson.
+- `test_the_carrier_is_the_rc6_one_and_not_nec` pinned the constants but never
+  touched the code that *chooses* one, so an RC-6 frame written at the NEC
+  carrier was green. Now the skill's own `_run` is driven and its output
+  checked.
+- Nothing tested `_run`'s carrier choice at all, and nothing fed a capture
+  **longer** than a frame or a leader of the wrong width — so two refusals had
+  no witness. Both now do.
+
+Seven rules the runner enforces, each of which cost a green run against
+unmutated code before it was written down:
 
 - **Every anchor must occur exactly once**, asserted *before* the write. A
   `str.replace` that silently matched nothing has twice produced a mutation
   reported as a survivor. A *pair* of anchors is applied in order with the same
   check, for the two loops that are not adjacent and must change together.
-- **The file is restored in a `finally`**, so a crash, timeout or kill leaves the
-  tree as it found it.
+- **The file is restored in a `finally`**, so a crash or a timeout leaves the
+  tree as it was found.
 - **The verdict is read from the summary line, never the return code** - this box
   segfaults at GTK teardown *after* the summary, and a `-11` read as a test result
   would fail every GTK file.
@@ -4187,6 +4249,8 @@ code before it was written down:
   anchor rots is a result to fix, not an abort that loses the other sets' answers.
 - **Nothing here is packaged.** `tools/` is the maintenance surface, as
   `cli_matrix.py` and `task_eval.py` already are.
+- **One run at a time, and a killed run says so.** See below; this is the rule
+  the harness broke itself.
 
 **And the harness is itself subject to the rule**, in
 `tests/test_mutation_harness_can_fail.py`: it reports caught for a mutation a
@@ -4194,8 +4258,7 @@ test really covers and survivor for one nothing covers, it **refuses a mutation
 whose anchor does not exist**, it reports a mutation that broke the code under a
 witness name that matches nothing, and it leaves a fixture tree byte-identical
 afterwards - which is `expect-sabotage.ts`'s cleanup half, for a harness whose
-fixture is a source file. `TestNoSetIsLeftBehind` runs all four sets and fails if
-any reports a survivor, so a set cannot rot quietly into being unused.
+fixture is a source file.
 
 **Two of my own harness defects, both caught by running it.** The runner resolved
 its mutation sets from its own location rather than the working directory, so the
@@ -4203,22 +4266,105 @@ self-test's temp tree was ignored and it silently tested production data; and a
 bare `exec` of the runner raised `NameError: __file__`, which made the harness
 look unimportable. Both fixed, both recorded in the test.
 
-**What is not claimed.** Five earlier mutation sets - `goal_edits` (13), `clip`
-(11), `maps` (12), `ir_remote` (14) and `fm_radio` (10) - were in `/tmp` and are
-gone. They were **not reconstructed from memory**, because a mutation set
-rebuilt from what the author remembers is not evidence; it is the same shape as
-the comment that lied about a Butterworth filter. Their claims stand in their
-commits and are not re-runnable from a checkout, which is the cost of the
-practice this change ends. `tools/mutate.py --list` is the honest inventory of
-what a fresh clone can re-verify.
+## The harness corrupted the repository, and the two rules that were missing (2026-10-11)
 
-`build/` is now gitignored, for the runner's redirected `XDG_*` directories - a
+**A `finally` restores a file. It does not cover `SIGKILL`, and it does not cover
+two runs at once** — and the harness had neither a lock nor any record of what
+it had changed.
+
+Measured, in this session, on this repository's own source: a mutation run
+started before a session boundary **was still alive** when the next one began.
+Each run held its own copy of the original, so restoring one clobbered the other.
+Killing both left **two mutations stuck applied**:
+
+| file | stuck mutation | read as |
+|---|---|---|
+| `skills/fm_radio.py` | the discriminator's phase wrap deleted | stereo never worked |
+| `fmdsp.py` | the lowpass's zero at Nyquist dropped | 34 837x too high at 0.99 fs |
+
+Both restored by targeted reverse replace — **never a path operation** — and
+both verified byte-identical to HEAD afterwards. A concurrent session's
+uncommitted work in five other files was untouched, which is the whole reason
+for the rule.
+
+**Two rules, both tested, and the second is the half a `finally` cannot do:**
+
+- **`_Lock`** — `O_EXCL` on a file holding the owner's pid. A second run is
+  **refused and the refusal names the pid**, so a person can tell which run to
+  wait for or stop (`--wait` if they would rather block). A lock whose owner is
+  gone is taken over **and says so**, because taking it silently is the same
+  class as silently deleting a rotated anchor.
+- **`_JOURNAL`** — each file's pre-run text is written *before* the first
+  mutation and removed in the same `finally` that restores. So a killed run
+  leaves a **claim that the tree is not in its committed state**, and the next
+  run puts it back and prints which files it recovered. Clearing the journal
+  before restoring would leave a window in which the tree is restored and the
+  journal still says otherwise — and a run killed in that window recovers
+  nothing, which is the entire failure the journal exists to catch.
+
+Both live in `build/mutate/`, which `build/` already ignores.
+
+**Both were then verified on the real thing, not a fixture, within the hour.**
+A concurrent session started its own `mutate.py history` run while this one was
+mid-flight and **was refused, naming the holder** — which is the lock doing its
+job against a real invocation rather than a synthetic one. This run was then
+killed, and **the other run recovered its stuck mutation automatically and
+printed what it had restored.** Nothing noticed either event; that is what a
+mechanism that works looks like, and it is the opposite of the two stuck
+mutations an hour earlier.
+
+**`RUN_TIMEOUT` was 900 s, and that was a bug in the other direction.** A
+mutation that turns a bounded wait into an unbounded one does not fail — it
+*hangs* — and 900 s per mutation turns an eight-mutation set into two hours of
+nothing. The first version of the lock mutation did exactly that (`if False:`
+instead of the deadline test, so the loop spins on `FileExistsError` forever),
+and it was found by killing the run rather than by any check. Now 300 s, four
+times the slowest real set.
+
+**Three things this found about the checks themselves, all of which were
+assertions that could not fail:**
+
+- **The cheap rot check read files a run was mutating.** `test_no_anchor_has_rot`
+  reported four anchors as rotted in sets that had run green minutes earlier —
+  because it read `fm_radio.py` and `fmdsp.py` *while a run had them
+  rewritten*. A check that reads the files a run is mutating cannot tell a
+  mutation from an edit. The check now lives in the runner as
+  `--check-anchors`, under the same lock, reusing `_apply`'s own rule instead of
+  restating it.
+- **`test_the_runner_lists_its_sets` named four sets in a tuple**, so the five
+  added later sat in the repository with the test claiming to be the inventory
+  and not mentioning them. A hand-kept list of what a directory already knows is
+  a list that rots. It reads the directory now, and also checks the reverse
+  direction: every listed set names a test file that exists.
+- **`test_a_stale_lock_is_taken_over_and_says_so` passed while proving nothing.**
+  `_Lock.__init__` resolves `STATE_DIR` when the object is built, and the test
+  never pointed it at the fixture — so the lock was taken in the repository's
+  `build/` and the stale file it wrote was never read. The assertion that caught
+  it is now `lock.path == state / "run.lock"`.
+
+**The expensive half can no longer run every time, and pretending otherwise is
+how it went missing.** The inventory was under two minutes with four sets and is
+over ten with eleven, and `fm_radio` alone synthesises 200 kS/s of signal per
+mutation. `TestNoSetIsLeftBehind.test_every_set_runs_clean` ran it in the
+default suite, where it quietly outgrew `_run`'s 600 s cap — so the guarantee
+was gone and the test reported a **timeout**, which is a failure about something
+else entirely. It is now marked `slow` and excluded from the default run
+(`pytest -m slow` to include it); the anchor check is the half that runs always,
+and it costs under a second.
+
+`tools/mutations/harness.py` aims the harness at itself, so "the harness cannot
+lie" is a claim with witnesses. **That is safe to run** because `run_set`
+restores the file it mutated and the journal covers `tools/mutate.py` too.
+
+**What is not claimed.** That the *full* inventory is green right now: the last
+clean end-to-end figure was **48 mutations, 48 caught** across four sets, and the
+five rebuilt sets have each been run individually and clean. `--list` and
+`--check-anchors` are the two things a fresh clone can verify in seconds; the
+full run is the slow, deliberate half.
+
+`build/` is gitignored for the runner's redirected `XDG_*` directories - a
 mutation run must not write into the developer's real home, which is the same
 rule `XDG_STATE_HOME` already carries in the test suite.
-
-Verified: **48 mutations, 48 caught, 0 survivors**; 8 self-tests; 248 passed
-across the mutation, edit, stale, finite, location, goal and packaging suites;
-0 stray `.pyc`; 0 real-state-dir writes.
 
 
 
@@ -9743,6 +9889,83 @@ method with the normaliser forced to raise, and the companion test asserts the
 rewritten text *does* reach the engine, so neither passes against a call site
 that ignores the normaliser entirely.
 
+## VoxCPM, third pass: the repo is exhausted, and the gate it implied found two rotted citations (2026-10-11)
+
+Second and third passes over `harness-study/voxcpm`. The engine stays rejected
+for the measured reason in the section above. Reading what is left settles it:
+`utils/` holds **only** `text_normalize.py` (already taken), `timestamps/` is a
+179-line adapter over the optional `stable-whisper`, `conf/` is fine-tuning
+hyperparameters, and `audio_vae_v2.py` / `scalar_quantization_layer.py` /
+`modules/` are pure `torch.nn`. **There is no third transfer, and inventing one
+to justify another pass is the confident-wrong-answer shape this file records.**
+
+What did come out of it was a different finding, and it is in the same class as
+the `_speak` note: a citation that no longer resolves.
+
+**`distill.py`'s `Router` promised something it could not be checked against.**
+> "Nothing here can authorise a call. It ranks names that were already on offer;
+> the whitelist that permits them is `tools._HANDLERS`, and it is checked there
+> and nowhere else."
+
+**`_HANDLERS` does not exist in this repository** — measured, not read: the only
+occurrence anywhere is that sentence. The whitelist is `tools._HANDLER_FNS`
+(**255 entries**, counted) and the check is `_dispatch_inner`'s
+`_HANDLER_FNS.get(name)` → `"Unknown tool"`. So the *promise* held; the
+*citation* was unfollowable, and a promise nobody can check is a promise nobody
+can rely on. It now names both real symbols, and
+`test_the_router_docstring_whitelist_promise_is_true_at_runtime` **runs** the
+claim instead of asserting it (an unlisted name is refused: `ran=False`,
+`UNVERIFIED`).
+
+**`audio.py`'s `play_file` cited `app._speak` — a method with no caller at all.**
+Verified over the whole package: **no `._speak` attribute access and no
+`getattr(x, "_speak")` anywhere.** `speech.SpeechQueue` (a synth thread and a
+playback thread) replaced it; the conclusion the paragraph draws — two replies
+can overlap, so `stop()` needs the newest process — is still true, and now says
+what actually runs.
+
+### The gate, and the four bugs that shaped it
+
+`tests/test_stale_cross_references.py` asserts no comment or docstring cites a
+symbol that does not exist. Writing it was four bugs in a row, each of which is
+the same lesson this file already keeps stating:
+
+- **The first version could not have caught the bug it was written for.** `app`
+  is a **package** (`app/`) with no `app.py`, so the resolver skipped `app._speak`
+  and reported "1 violation" for a tree with two. A check that silently skips
+  the case it exists for is worse than no check.
+- **The second reported 68 violations on a tree with none.** `_defined_names`
+  used `ast.walk`, which descends into function bodies, so a **local variable**
+  named `config` in `senses/ocr.py` made `config` look like a name that file
+  defined; the class-member branch then fired, found no class `config`, and
+  flagged a correct citation. **That single bug was all 68.**
+- **Subpackages were invisible.** `sing._verify_sung` is `skills/sing.py`, and a
+  package's `__init__.py` is filed under `__init__`, not under the package name
+  — so `skills._USER_SKILLS_DIR` and `triggers._ensure_state_dir` both
+  "failed". Both are now indexed the way Python imports them.
+- **One control failed to bite, and it was the important one.** Citing a module
+  that was *deleted* — the commonest rot — was skipped, because "no module
+  matches" was treated as undecidable. A **lowercase-initial** part is written
+  the way a module is imported, so a missing one is a deletion; an
+  **uppercase-initial** part is a class, which may live anywhere.
+
+Undecidable cases are skipped, not failed, and the two that needed a real
+decision are a **documented two-entry allowlist**: `a11y_client` (prose names
+"shani-testbed", and `../shani-testbed/lib/a11y_client.py` exists) and
+`downloads_watchdog` (prose says "ported from browser-use"). Removing either
+entry makes the gate fire again, so the allowlist is not a blank cheque.
+
+**The gate caught this paragraph's own author.** The first `distill.py` fix
+explained the rotted citation by quoting it in backticks — making the fix its
+own first violation, which is correct behaviour. The name is now written without
+backticks, and the docstring says why.
+
+**The stale tree is currently unimportable**, which is the other session's
+in-flight work and recorded rather than touched: `learning.py:1566` runs two
+statements together on one line, so `tools.py` → `outcome_model` → `learning.py`
+raises `SyntaxError` and **every** import of the package fails. Verified against
+a repaired copy outside the tree, never by editing their file.
+
 ## open-intelligent-ui, sixth pass: nothing new taken, and why that is the finding
 
 Read the rest of the repo (`page.tsx`, `layout.tsx`, all 219 lines of `map.tsx`,
@@ -9819,3 +10042,64 @@ Three rules it keeps, each for a reason:
 `tools/mutations/activity.py`: **4 mutations, 4 caught, 0 survivors, 0
 equivalent.** The two that matter are the fold itself (`total` → `measured`) and
 `unmeasured → 0`, each of which leaves the panel reading perfectly healthy.
+
+## ECC, second pass: the history that survives a restart (2026-10-11)
+
+From `../harness-study/ecc` again. Its `skill-run-tracker` + `cost-tracker` pair
+turned on a detail that is easy to miss and that Chronoa had wrong: **the durable
+record and the per-request read were two different things, and the fast one read
+the empty one.**
+
+`weights_from_tracker(tracker)` read `tracker.get_calls()` - the tracker's **ring**,
+which is `deque(maxlen=100)` held in *this process's* memory and which
+`ToolTracker.__init__` never hydrates from the log. So the learned tool multipliers
+were `{}` until a hundred calls had accumulated in the current process. Measured:
+a fresh `ToolTracker` over a directory holding 150 recorded calls answered
+`get_calls() == []` and `weights_from_tracker() == {}`, while `learning.load()` read
+all 150 from the same file. **Every restart discarded the whole history for the
+hot-path advisory** - and on this machine the log is 18.9 MB / 19,103 lines / 14k+
+verdicts, so "100 calls in this process" is a small fraction of one session.
+
+It is the outcome `tool_select._tracker()`'s own docstring says it exists to
+prevent, reached by a route it did not consider:
+
+    a fresh `ToolTracker()` would be an empty history - learning from nothing
+    and concluding every tool is unproven
+
+**The ring was deliberately not fixed instead.** `settings_window/activity`
+renders those rows marked `live=True` - "this process ran it" - so hydrating them
+would make that panel claim a process executed calls it never saw. Two readers
+want two different things, and the ring keeps the narrower, truer one. So the
+durable history gets its own read: `_durable_records()` seeks the **tail** of the
+log (the log is append-only and unbounded, so the newest records are the ones a
+rate cares about), capped at `HISTORY_LIMIT = 2000`, and cached per
+`(size, mtime)` exactly as `load()` already does. Measured on the real log:
+**16.3 ms** to seek and parse the tail, **~0.1 ms** for the cached read, and
+**115 tools** get a learned weight after a restart instead of zero.
+
+Three of my own defects on the way, each caught by running rather than reading:
+
+- The first `_read_tail` `partition`ed at the first newline **unconditionally**,
+  so it dropped a valid record whenever the whole file fitted in the byte budget.
+  A one-record log read back zero records and every weight vanished - the bug
+  being fixed, reintroduced inside its own reader.
+- The first version of `test_a_history_larger_than_the_limit...` asserted
+  `"old_tool" not in weights`, which is false: with 2,430 records and a 2,000
+  limit, 430 head records go and 1,970 `old_tool` stay. A green-looking
+  assertion about which records survived.
+- The first version of the no-log test pointed `log_file` at an *absent file*,
+  which raises inside `stat()` and never reaches the `except` it was written to
+  test - so the mutation it guards survived until the tracker's `log_file` was
+  made to raise outright.
+
+`tools/mutations/history.py`: **5 mutations, 4 caught, 0 survivors, 1
+equivalent.** The equivalent one is kept and documented: dropping the seek's first
+byte and dropping the partial line it landed in reach the same set of records,
+because a record missing its opening `{` does not parse and the reader already
+skips unparseable lines. It looks like a defect and is not one, which is exactly
+why it is written down rather than deleted.
+
+Two mutations first reported **survivors**, and both were my tests not reaching
+the code they claimed: the tail test wrote records far under the 4 MiB byte
+budget so the seek path was never taken, and the no-log test took the wrong
+branch. Both fixed in the test, not in the set.

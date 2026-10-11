@@ -476,3 +476,215 @@ def test_list_capabilities_is_no_longer_sent_for_free():
     names = [t.get("name") or t.get("function", {}).get("name")
              for t in select_tools("set a 5 minute timer", tools.TOOLS)]
     assert "list_capabilities" not in names, names
+
+
+class TestTheDurableHistorySurvivesARestart:
+    """`weights_from_tracker` read the tracker's *ring*, which is the
+    tracker's this-process memory and starts empty on every launch. So the
+    learned tool multipliers were `{}` until a hundred calls had accumulated in
+    the current process - measured, a fresh tracker over a directory holding
+    150 recorded calls answered `get_calls() == []` and
+    `weights_from_tracker() == {}`, while `learning.load()` read all 150 from
+    the same file. Every restart threw the whole history away for the hot-path
+    advisory, which is the outcome `tool_select._tracker()`'s own docstring
+    says it exists to prevent, reached by a route it did not consider.
+
+    The ring is deliberately left alone: `settings_window/activity` renders
+    those rows marked `live=True` - "this process ran it" - and hydrating them
+    would make that panel claim a process executed calls it never saw. Two
+    readers want two different things.
+    """
+
+    @staticmethod
+    def _log(tmp_path: Path, plan):
+        from shani_chronoa import tool_tracking
+        writer = tool_tracking.ToolTracker(log_dir=tmp_path)
+        for tool, verdict in plan:
+            writer.record_call(tool, {"n": tool}, "ok", 1.0, verdict=verdict)
+        return tool_tracking.ToolTracker(log_dir=tmp_path)   # the restart
+
+    def test_a_restart_keeps_the_learned_weights(self, tmp_path):
+        tracker = self._log(tmp_path, [("get_datetime", "verified")] * 20
+                                     + [("get_datetime", "failed")] * 5)
+        weights = learning.weights_from_tracker(tracker)
+        assert "get_datetime" in weights, weights
+        # 20 of 25 verified, shrunk towards neutral by PRIOR_STRENGTH.
+        assert weights["get_datetime"] > 1.0, weights["get_datetime"]
+
+    def test_the_ring_stays_process_local(self, tmp_path):
+        """The other half of the same fix, and the reason the ring was not
+        simply hydrated: the live panel claims those calls happened here."""
+        tracker = self._log(tmp_path, [("get_datetime", "verified")] * 20)
+        assert tracker.get_calls() == [], "the ring must stay this-process"
+        assert learning.weights_from_tracker(tracker), "the weights must not"
+
+    def test_a_history_larger_than_the_limit_comes_from_the_end(self, tmp_path):
+        """The log is unbounded; the weights are per-tool rates. Taking the
+        tail rather than the head is what keeps a 19 MB log from being a
+        200,000-record parse on every selection.
+
+        Read through a **fresh** tracker, not the one that wrote: the writer's
+        ring still holds the last hundred calls, so a writer-side read would
+        pass against the original bug and prove nothing about the restart this
+        is about.
+        """
+        from shani_chronoa import tool_tracking
+        writer = tool_tracking.ToolTracker(log_dir=tmp_path)
+        for i in range(learning.HISTORY_LIMIT + 400):
+            writer.record_call("old_tool", {"i": i}, "ok", 1.0, verdict="failed")
+        # The newest calls are for a tool the head does not mention.
+        for i in range(30):
+            writer.record_call("new_tool", {"i": i}, "ok", 1.0, verdict="verified")
+        restarted = tool_tracking.ToolTracker(log_dir=tmp_path)
+        assert restarted.get_calls() == [], "this must be a restart, not the writer"
+        weights = learning.weights_from_tracker(restarted)
+        assert "new_tool" in weights, sorted(weights)
+        assert weights["new_tool"] > 1.0, weights["new_tool"]
+        # The tail is bounded, and it is the *newest* end: of 2430 records the
+        # read holds exactly `HISTORY_LIMIT`, so 430 head records are gone.
+        # `old_tool` still appears because it occupies the 1,970 before the
+        # newest 30 - asserting it absent would be asserting something false,
+        # which is the "a green-looking assertion" trap in a new place.
+        assert len(learning._durable_records(restarted)) == learning.HISTORY_LIMIT
+        dropped = (learning.HISTORY_LIMIT + 400 + 30
+                   - len(learning._durable_records(restarted)))
+        assert dropped == 430, dropped
+        # And the head really is what went: weights over the whole file are not
+        # the weights over the tail, which is what proves the trim happened.
+        import shani_chronoa.learning as L
+        whole = L.weights_from_records(
+            L._read_tail(restarted.log_file, 10 ** 9, 10 ** 12))
+        assert whole["old_tool"] != weights["old_tool"], "the tail was not trimmed"
+
+    def test_a_corrupt_line_is_skipped_rather_than_fatal(self, tmp_path):
+        from shani_chronoa import tool_tracking
+        writer = tool_tracking.ToolTracker(log_dir=tmp_path)
+        writer.record_call("keep_me", {}, "ok", 1.0, verdict="verified")
+        with writer.log_file.open("a") as fh:
+            fh.write("not json\n{}\n[1,2]\n")
+        weights = learning.weights_from_tracker(writer)
+        assert "keep_me" in weights, weights
+
+    def test_a_half_written_last_line_does_not_break_the_read(self, tmp_path):
+        """A seek lands mid-record. Half a JSON object is a skipped line, and a
+        silent one at that."""
+        from shani_chronoa import tool_tracking
+        writer = tool_tracking.ToolTracker(log_dir=tmp_path)
+        writer.record_call("whole", {}, "ok", 1.0, verdict="verified")
+        with writer.log_file.open("a") as fh:
+            fh.write('{"tool_name": "cut_in_hal')     # no newline, no close
+        weights = learning.weights_from_tracker(writer)
+        assert "whole" in weights, weights
+        assert "cut_in_hal" not in weights, weights
+
+    def test_an_unchanged_log_is_not_reparsed(self, tmp_path):
+        """The one property that makes this safe on a hot path: a `stat` and a
+        dict hit, not a re-parse. Measured on the real 19 MB log, 16.3 ms to
+        parse and ~0.1 ms for the cached read."""
+        from shani_chronoa import tool_tracking
+        writer = tool_tracking.ToolTracker(log_dir=tmp_path)
+        writer.record_call("get_datetime", {}, "ok", 1.0, verdict="verified")
+        learning._HISTORY_CACHE.clear()
+        first = learning._durable_records(writer)
+        assert first
+        calls = []
+        original = learning._read_tail
+        learning._read_tail = lambda *a, **k: (calls.append(1), original(*a, **k))[1]
+        try:
+            second = learning._durable_records(writer)
+        finally:
+            learning._read_tail = original
+        assert second == first
+        assert calls == [], "the cache did not hold: the log was re-parsed"
+
+    def test_a_tracker_with_no_log_falls_back_to_its_ring(self, tmp_path):
+        """None means "no durable history", which is a different answer from
+        "an empty one" - a tracker pointed at a directory that never wrote has
+        no log, and its ring is then the whole history it has."""
+        class RingOnly:
+            def __init__(self):
+                from shani_chronoa import tool_tracking
+                self._t = tool_tracking.ToolTracker(log_dir=tmp_path)
+            def get_calls(self):
+                return self._t.get_calls()
+
+        holder = RingOnly()
+        holder._t.record_call("from_ring", {}, "ok", 1.0, verdict="verified")
+        # Point the holder at a log that does not exist.
+        holder.log_file = tmp_path / "nowhere" / "tool_calls.log"
+        weights = learning.weights_from_tracker(holder)
+        assert "from_ring" in weights, weights
+
+    def test_an_unreadable_registry_is_still_an_empty_answer(self, tmp_path):
+        """The other direction: a tracker whose ring raises and which has no
+        readable log must answer `{}`, not an exception - advice must never be
+        the reason a tool fails."""
+        class Devoid:
+            log_file = tmp_path / "absent.log"
+            def get_calls(self):
+                raise RuntimeError("the log is unreadable")
+
+        assert learning.weights_from_tracker(Devoid()) == {}
+
+    def test_a_log_larger_than_the_byte_budget_reads_from_the_end(self, tmp_path):
+        """The other half of the tail contract, and the reason the mutation
+        about the partial line survived the first run: the limit test wrote
+        records far under `_HISTORY_TAIL_BYTES`, so the seek path was never
+        taken and that check could not fail. Driven directly at the boundary
+        instead, which is where the seek actually lands mid-record.
+        """
+        from shani_chronoa import learning
+        # Pad each record past a few kilobytes so a small budget still holds
+        # several whole records - and so the seek lands inside one of them.
+        pad = "x" * 2000
+        for i in range(40):
+            (tmp_path / f"r{i}.json").write_text("{}")
+        lines = []
+        for i in range(40):
+            lines.append('{"tool_name": "t%02d", "args": {"pad": "%s"}, '
+                         '"verdict": "verified"}' % (i, pad))
+        log = tmp_path / "tool_calls.log"
+        log.write_text("\n".join(lines) + "\n")
+
+        # The whole file, for what the answer should be.
+        whole = learning._read_tail(log, 1000, 10 ** 9)
+        assert len(whole) == 40, len(whole)
+
+        # A budget that cuts into the middle: every record kept must be whole,
+        # and the newest ones must be there.
+        budgeted = learning._read_tail(log, 1000, 12 * 1024)
+        assert budgeted, "nothing was read back"
+        assert all("tool_name" in r for r in budgeted), "a partial line survived"
+        assert budgeted[-1]["tool_name"] == "t39", budgeted[-1]
+        assert budgeted[0]["tool_name"] < "t39", budgeted[0]
+        # And it read strictly less than the whole file, or the budget did not
+        # bind and this test is not testing the seek at all.
+        assert len(budgeted) < 40, len(budgeted)
+
+    def test_a_tracker_that_cannot_name_its_log_falls_back_to_the_ring(self, tmp_path):
+        """`None` and `[]` are different answers.
+
+        None means "no durable history", so the ring is the history it has. `[]`
+        means "an empty history" - a statement that nothing has ever worked. The
+        second mutation in the set returned the second for the first, and the
+        first version of this test reached neither branch: it pointed
+        `log_file` at an absent file, which raises inside `stat()` and never
+        reaches the `except` that was mutated.
+        """
+        from shani_chronoa import tool_tracking
+
+        class CannotNameItsLog:
+            """A tracker whose `log_file` raises - the shape a tracker with no
+            log directory at all has, as opposed to one whose log is missing."""
+            def __init__(self):
+                self._t = tool_tracking.ToolTracker(log_dir=tmp_path)
+            @property
+            def log_file(self):
+                raise RuntimeError("no log directory")
+            def get_calls(self):
+                return self._t.get_calls()
+
+        holder = CannotNameItsLog()
+        holder._t.record_call("from_ring", {}, "ok", 1.0, verdict="verified")
+        weights = learning.weights_from_tracker(holder)
+        assert "from_ring" in weights, weights

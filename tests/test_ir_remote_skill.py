@@ -170,9 +170,20 @@ class TestRc6:
 
     def test_the_carrier_is_the_rc6_one_and_not_nec(self):
         """NEC is 38 kHz and RC-6 is 36 kHz, and a receiver tuned to one does
-        not hear the other."""
+        not hear the other.
+
+        **The constants alone were not a witness.** This test read `CARRIER_NEC`
+        and `CARRIER_RC6` and never touched the code that *chooses* one, so a
+        mutation that wrote an RC-6 frame at the NEC carrier left it green. The
+        file the skill actually emits is asserted too.
+        """
         assert I.CARRIER_NEC == 38000
         assert I.CARRIER_RC6 == 36000
+        text = I.to_irctl_file(I.rc6_encode(0, 0x0C, 0x00), I.CARRIER_RC6)
+        assert text.splitlines()[0] == "carrier 36000", (
+            f"an RC-6 frame was written at the NEC carrier: {text[:60]!r}")
+        nec = I.to_irctl_file(I.nec_encode(0x12, 0x34), I.CARRIER_NEC)
+        assert nec.splitlines()[0] == "carrier 38000", nec.splitlines()[0]
 
     def test_a_nec_frame_is_not_an_rc6_frame(self):
         assert I.rc6_decode(I.nec_encode(0x12, 0x34)) is None
@@ -184,11 +195,93 @@ class TestRc6:
             I.rc6_encode(14, 0x01, 0x00)
 
     def test_the_trailer_space_is_doubled(self):
+        """The doubled space is what tells a decoder the data field has begun.
+
+        **The first version asserted against the module's own constants and could
+        not fail** - `timings[5 + 6] == ("space", I.RC6_TRAILER_SPACE)` holds for
+        any value of `RC6_TRAILER_SPACE`, so the constant could be halved and the
+        test stayed green. The published arithmetic is pinned instead, rebuilt
+        from the spec the same way `NEC_FRAME_US` is.
+        """
         timings = I.rc6_encode(0, 0x0C, 0x00)
-        # After the 3 mode bits the trailer is a burst then a doubled space,
-        # which is what tells a decoder the data field has begun.
+        # After the 3 mode bits the trailer is a burst then a doubled space.
         assert timings[4 + 6] == ("pulse", I.RC6_TRAILER_PULSE)
         assert timings[5 + 6] == ("space", I.RC6_TRAILER_SPACE)
+        # The literals, rebuilt the same way `NEC_FRAME_US` is. **889, not
+        # 2 x 444 = 888** - the first version of this asserted the product and
+        # failed, because the RC-6 spec's trailer is 889 us rather than the
+        # arithmetic of two 444 us half-periods. That is the shape this repo
+        # records for `privilege` and `mokutil`: a number that looks derivable
+        # and is not, so it is pinned as published.
+        assert I.RC6_TRAILER_PULSE == 444
+        assert I.RC6_TRAILER_SPACE == 889, (
+            f"the trailer space is {I.RC6_TRAILER_SPACE}, not the published "
+            f"889 - a decoder cannot tell where the data begins")
+
+
+class TestTheDecoderRefusesRatherThanGuesses:
+    """**The refusals are the load-bearing half, and two of them had no witness.**
+
+    `nec_decode` returns None for anything that is not a NEC frame, and the
+    reasons it must are three: the wrong length, the wrong leader, and the wrong
+    protocol. Only the first was tested with an input that could fail.
+    """
+
+    def test_a_frame_that_is_too_long_is_refused(self):
+        """**This had no witness.** The length check was `!=`, and the only test
+        fed a frame two timings *short* - which the `len(timings) != 2 + 2 * 32`
+        check refuses before the arithmetic is reached, so widening the total's
+        tolerance changed nothing anybody measured."""
+        timings = I.nec_encode(0x04, 0x08)
+        assert I.nec_decode(timings + [("space", 560)]) is None, (
+            "a capture longer than a NEC frame was read as one with extra bits")
+
+    def test_a_leader_of_the_wrong_width_is_refused(self):
+        """**And this had no witness either.** `_match(timings[0][1],
+        NEC_LEADER_PULSE)` was the only thing standing between an RC-6 header and
+        a NEC read, and both refusal tests fed something the `!= "pulse"` check
+        already caught."""
+        timings = I.nec_encode(0x12, 0x34)
+        # RC-6's header pulse is 2666 us, not NEC's 9000.
+        assert I.nec_decode([("pulse", 2666)] + timings[1:]) is None, (
+            "a 2666us leader was read as NEC's 9000us one")
+
+
+class TestTheToolActuallyEmitsTheRightCarrier:
+    """**`_run`'s carrier choice had no witness at all.**
+
+    The constants were pinned and `to_irctl_file` was tested directly, but nothing
+    drove the tool's own encode path - so `carrier = CARRIER_RC6` could become
+    `CARRIER_NEC` and an RC-6 frame would be written at a frequency no RC-6
+    receiver hears, with the suite green.
+    """
+
+    def _encode(self, monkeypatch, protocol):
+        class _Config:
+            def get_bool(self, key, default=False):
+                return True
+
+        monkeypatch.setattr(I, "ChronoaConfig", _Config)
+        return I._run({"action": "encode", "protocol": protocol,
+                       "address": 0x00, "command": 0x0C})
+
+    def test_an_rc6_frame_is_written_at_36000(self, monkeypatch):
+        out = self._encode(monkeypatch, "rc-6")
+        assert "carrier 36000" in out, (
+            f"an RC-6 frame was written at the wrong carrier: {out[:120]!r}")
+
+    def test_a_nec_frame_is_written_at_38000(self, monkeypatch):
+        out = self._encode(monkeypatch, "nec")
+        assert "carrier 38000" in out, out[:120]
+
+    def test_the_frame_round_trips_from_the_tools_own_output(self, monkeypatch):
+        """The emitted file parses back to the same frame, which is the only
+        thing that makes the carrier line worth emitting."""
+        out = self._encode(monkeypatch, "nec")
+        body = out.split("\n\n", 1)[1] if "\n\n" in out else out
+        timings = I.parse_irctl_text(body)
+        decoded = I.nec_decode(timings)
+        assert decoded is not None and decoded[:2] == (0x00, 0x0C), decoded
 
 
 class TestIrctlFile:

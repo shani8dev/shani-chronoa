@@ -1475,21 +1475,137 @@ def weights_from_records(records: Iterable) -> Dict[str, float]:
 
 
 def weights_from_tracker(tracker: Optional[object] = None) -> Dict[str, float]:
-    """The same, from the live `ToolTracker`.
+    """The same, from a `ToolTracker`'s **durable** history.
 
     Takes the tracker as an argument rather than importing the singleton, so the
     caller decides whose history it is: a test with a temporary log, or the real
     one. A module-level import of the singleton would make this untestable and
     would read another process's history by accident.
+
+    **Why this reads the log and not `get_calls()`.** The ring is the tracker's
+    *this-process* memory and starts empty on every launch, so reading it made
+    the learned weights `{}` until a hundred calls had accumulated in the current
+    process - on a machine whose log held 14,000. Measured: a fresh tracker over
+    a directory with 150 recorded calls answered `get_calls() == []` and
+    `weights_from_tracker() == {}`, while `load()` read all 150 from the same
+    file. So every restart silently discarded the entire history for the
+    hot-path advisory, which is exactly what `tool_select._tracker()`'s own
+    docstring says it exists to prevent:
+
+        a fresh `ToolTracker()` would be an empty history - learning from
+        nothing and concluding every tool is unproven
+
+    The restart produced the same outcome the docstring guards against, through
+    a route it did not consider.
+
+    The ring is deliberately *not* changed instead. `settings_window/activity`
+    renders those rows marked `live=True` - "this process ran it" - so hydrating
+    them would make that panel claim a process executed calls it never saw. Two
+    readers want two different things, and the ring keeps the narrower one.
+
+    The log is unbounded, so this is the same per-revision cache `load()` uses:
+    a hot-path caller re-parses only when the file's size and mtime moved. A
+    tracker with no readable log falls back to the ring, which is the whole
+    history for a tracker pointed at a directory that never wrote one.
     """
     if tracker is None:
         return {}
-    try:
-        records = tracker.get_calls()
-    except Exception:
-        logger.debug("could not read the tool history", exc_info=True)
-        return {}
+    records = _durable_records(tracker)
+    if records is None:
+        try:
+            records = tracker.get_calls()
+        except Exception:
+            logger.debug("could not read the tool history", exc_info=True)
+            return {}
     return weights_from_records(records)
+
+
+#: How many recent calls the learned weights are computed from. The log is
+#: unbounded and the weights are per-tool rates with a `PRIOR_STRENGTH` shrink,
+#: so a few thousand carries the whole usable signal and a few hundred thousand
+#: is parsing time for a rounding error. `load()`'s own `WINDOW` is the same
+#: argument made for the trained model.
+HISTORY_LIMIT = 2000
+
+#: How much of the end of the log one read looks at. Records average well over
+#: a kilobyte once arguments and results are in, so 4 MiB is more than
+#: `HISTORY_LIMIT` calls and far less than the 19 MB log this was measured on.
+_HISTORY_TAIL_BYTES = 4 * 1024 * 1024
+
+#: `path -> ((size, mtime), records)`, keyed the way `_EXAMPLE_CACHE` is keyed.
+#: The hot path is one `stat`; a re-parse happens only when the log moved.
+_HISTORY_CACHE: Dict[str, Tuple[Tuple[int, float], List[dict]]] = {}
+
+
+def _read_tail(path, limit: int, byte_budget: int) -> List[dict]:
+    """The most recent `limit` JSON records from the end of `path`.
+
+    Seeks rather than reading: the log is append-only and unbounded, so the
+    records a weight cares about are the newest and the file can be far larger
+    than the part that matters. A partial first line - the seek landed mid-record
+    - is dropped rather than parsed, because half a JSON object is a skipped
+    line and a silent one at that.
+    """
+    try:
+        with open(path, "rb") as handle:
+            size = handle.seek(0, 2)
+            handle.seek(0)
+            chunk = handle.read()
+            if size > byte_budget:
+                # The budget cut inside a record, so re-read from that offset and
+                # drop whatever partial line the seek landed in: half a JSON
+                # object is a skipped line, and a silent one at that.
+                handle.seek(size - byte_budget)
+                chunk = handle.read()
+                if chunk.startswith(b"\n"):
+                    chunk = chunk[1:]
+                else:
+                    _, _, chunk = chunk.partition(b"\n")
+    except OSError:
+        return []
+    lines = chunk.decode("utf-8", "replace").splitlines()[-limit:]
+    out: List[dict] = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(record, dict) and record.get("tool_name"):
+            out.append(record)
+    return out
+
+
+def _durable_records(tracker) -> Optional[List[dict]]:
+    """The tracker's on-disk history, or None when there is no readable log.
+
+    None means "no durable history", which is a different answer from "an empty
+    one": a tracker pointed at a directory that never wrote has no log, and its
+    ring is then the whole history it has.
+    """
+    try:
+        path = tracker.log_file
+    except Exception:
+        return None
+    key = str(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    cached = _HISTORY_CACHE.get(key)
+    if cached is not None and cached[0] == (stat.st_size, stat.st_mtime):
+        return cached[1]
+    records = _read_tail(path, HISTORY_LIMIT, _HISTORY_TAIL_BYTES)
+    try:
+        # Re-stat after the read: the log is append-only and another process may
+        # have written between the two, so cache the revision actually read.
+        stat = path.stat()
+        _HISTORY_CACHE[key] = ((stat.st_size, stat.st_mtime), records)
+    except OSError:
+        pass
+    return records
 
 
 def reorder(ranked: Sequence[Tuple], learned: Optional[Dict[str, float]] = None,

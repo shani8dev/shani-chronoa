@@ -174,8 +174,21 @@ class TestGraphemes:
 
         Recorded so the next reader does not assume a full UAX #29
         implementation, and so the known limits are where they can be found.
+
+        **The first version of this asserted `"_joins" in dir(M)` and could not
+        fail** - which is the same defect as the `fmdsp` comment that claimed a
+        settled mathematical result and caused a real bug by being read as one.
+        A claim about the code's own limits wants a witness, so the docstring
+        itself is asserted. It is read off `_joins.__doc__` rather than out of
+        the file, so a comment in this test cannot satisfy it.
         """
         assert "_joins" in dir(M)
+        docstring = (M._joins.__doc__ or "").lower()
+        for word in ("approximation", "stdlib"):
+            assert word in docstring, (
+                f"{word!r} is no longer in _joins' docstring. The approximation "
+                "is a claim about what this code is NOT, and a claim nobody "
+                "checks is the shape of the comment that broke fmdsp.")
 
 
 class TestTheCallersUseIt:

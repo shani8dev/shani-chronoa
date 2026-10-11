@@ -467,6 +467,13 @@ def pytest_configure(config):
         "markers",
         "holds_organs: this test leaves a body activity open on purpose - it is "
         "the subject of the test, not a leak")
+    config.addinivalue_line(
+        "markers",
+        "slow: takes minutes, not seconds, and is excluded from the default run "
+        "(`pytest -m slow` to include it). The mutation harness's full "
+        "inventory is what needed this: under two minutes with four sets, over "
+        "ten with eleven, and a test that quietly outgrew its own timeout "
+        "reports a failure about something else entirely.")
 
 
 @pytest.fixture(autouse=True)

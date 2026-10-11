@@ -40,8 +40,8 @@ code before it was written down:
    count is asserted before the write, and a *pair* of anchors is applied in
    order with the same check - two loops that are not adjacent and must change
    together, where mutating one alone is a no-op.
-2. **The file is restored in a `finally`.** A crash, a timeout or a kill leaves
-   the tree exactly as it was found.
+2. **The file is restored in a `finally`.** A crash or a timeout leaves the tree
+   exactly as it was found.
 3. **The verdict is read from the summary line, never the return code.** This box
    segfaults at GTK teardown *after* the summary is written, so a return code of
    -11 is a crash on the way out and not a test result.
@@ -52,6 +52,10 @@ code before it was written down:
    does not hide the rest.
 6. **Nothing here is packaged.** `tools/` is the repo's maintenance surface, the
    same as `cli_matrix.py` and `task_eval.py`.
+7. **One run at a time, and a killed run says so.** Rules 2 and 7 are both about
+   leaving the tree alone, and both were measured the hard way - see `_Lock` and
+   `_JOURNAL` below for what two overlapping runs did to this repository's own
+   source.
 """
 
 from __future__ import annotations
@@ -93,10 +97,152 @@ def sets() -> "dict[str, Path]":
     return {path.stem: path for path in sorted(directory.glob("*.py"))
             if not path.stem.startswith("_")}
 
+
+#: `build/` is already gitignored for the XDG redirections, and it is the only
+#: writable place here, so the lock and the journal live beside each other.
+STATE_DIR = ROOT / "build" / "mutate"
+
+
+class _Busy(Exception):
+    """Another run holds the tree."""
+
+
+class _Lock:
+    """One mutation run at a time, and a stale lock says whose.
+
+    **This exists because two runs corrupted this repository's own source, and
+    the harness is supposed to be the thing that cannot do that.** A `finally`
+    restores a file; two runs each holding a *different* copy of the original
+    means the second restore overwrites the first run's mutation with pre-run
+    text, or the first restore lands while the second run is mid-mutation and
+    silently reverts a live edit. Measured here: a run started before a session
+    boundary was still alive when the next one started, and killing both left
+    **two mutations stuck applied** to `fm_radio.py` and `fmdsp.py` - the phase
+    wrap deleted and the Nyquist zero dropped - which read as a defect somebody
+    had just introduced.
+
+    The lock is `O_EXCL` on a file holding the owner's pid, so a crashed run is
+    distinguishable from a live one rather than deadlocking the next attempt.
+    """
+
+    def __init__(self, timeout: float = 0.0):
+        self.timeout = timeout
+        self.path = STATE_DIR / "run.lock"
+        self.held = False
+
+    def _stale(self) -> bool:
+        """True when the lock's owner is gone, so the next run can take it."""
+        try:
+            pid = int(self.path.read_text(encoding="utf-8").split()[0])
+        except (OSError, IndexError, ValueError):
+            return True
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        return False
+
+    def __enter__(self) -> "_Lock":
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        deadline = time.time() + self.timeout
+        while True:
+            try:
+                handle = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                                 0o600)
+            except FileExistsError:
+                if self._stale():
+                    # A crashed run left this. Say so rather than deleting it
+                    # quietly - the file records who died holding the tree.
+                    print(f"  NOTE: taking over a stale lock from pid "
+                          f"{self.path.read_text(encoding='utf-8').strip()}",
+                          file=sys.stderr)
+                    self.path.unlink(missing_ok=True)
+                    continue
+                if time.time() >= deadline:
+                    owner = self.path.read_text(encoding="utf-8").strip()
+                    raise _Busy(
+                        f"another mutation run holds the tree ({owner}). Wait "
+                        f"for it, or stop it by that pid. Two runs at once "
+                        f"overwrite each other's restore.")
+                time.sleep(1.0)
+                continue
+            with os.fdopen(handle, "w") as out:
+                out.write(f"{os.getpid()}\n")
+            self.held = True
+            return self
+
+    def __exit__(self, *exc) -> None:
+        if self.held:
+            self.path.unlink(missing_ok=True)
+            self.held = False
+
+
+#: Which files are currently mutated, and what they were before.
+#:
+#: A `finally` cannot run on `SIGKILL`, so a killed run leaves the tree mutated
+#: and the next run - or the next person - has no way to tell a mutation from an
+#: edit. This writes each file's pre-run text *before* the first mutation, and
+#: removes the entry in the same `finally` that restores. A journal left behind
+#: is therefore a **claim that the tree is not in its committed state**, which is
+#: exactly what `restore_pending()` reports.
+JOURNAL = STATE_DIR / "mutated.json"
+
+
+def _journal_write(originals: "dict[Path, str]") -> None:
+    import json
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {str(path.relative_to(ROOT)): text
+               for path, text in originals.items()}
+    JOURNAL.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _journal_clear() -> None:
+    JOURNAL.unlink(missing_ok=True)
+
+
+def restore_pending() -> "list[str]":
+    """Files a previous run mutated and did not put back."""
+    import json
+    if not JOURNAL.exists():
+        return []
+    try:
+        return sorted(json.loads(JOURNAL.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return ["(the journal itself is unreadable)"]
+
+
+def _recover_stale_journal() -> "list[str]":
+    """Put back what a killed run left mutated, and say what it did.
+
+    Called under the lock, so nothing else is holding a copy of these files.
+    """
+    recovered = []
+    for name in restore_pending():
+        path = ROOT / name
+        if not path.is_file():
+            recovered.append(f"{name} (no longer on disk; skipped)")
+            continue
+        import json
+        try:
+            original = json.loads(JOURNAL.read_text(encoding="utf-8"))[name]
+        except (KeyError, OSError, ValueError):
+            recovered.append(f"{name} (no entry in the journal; skipped)")
+            continue
+        path.write_text(original, encoding="utf-8")
+        recovered.append(name)
+    _journal_clear()
+    return recovered
+
 #: How long one test run may take before it is declared a timeout rather than a
-#: result. A mutation run is only ever against one test file, so a generous
-#: ceiling is a safety net and not a budget anybody tunes.
-RUN_TIMEOUT = 900
+#: result. **This was 900 s and that was a bug in the other direction**: a
+#: mutation that turns a bounded wait into an unbounded one does not fail, it
+#: hangs, and 900 s per mutation turns an eight-mutation set into two hours of
+#: nothing. The real cost was paid finding that out — a `harness` mutation
+#: replacing the lock's deadline test with `if False:` spun until it was killed.
+#: A mutation run is only ever against one test file; the slowest here
+#: (`fm_radio`, which synthesises 200 kS/s of signal per mutation) takes about
+#: 40 s, so 300 s is a ceiling four times the worst case rather than a budget.
+RUN_TIMEOUT = 300
 
 #: The environment a test run needs. `PYTHONDONTWRITEBYTECODE` is here because
 #: this repo records two packaging tests failing on bytecode a probe left behind;
@@ -205,6 +351,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
 
     caught = 0
     survivors = []
+    equivalent = []
     originals = {}
     for entry in mutations:
         target = ROOT / entry["file"]
@@ -212,6 +359,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
         old, new = entry["old"], entry["new"]
         pairs = list(zip(old, new)) if isinstance(old, list) else [(old, new)]
         try:
+            _journal_write(originals)
             _apply(target, pairs)
             if verbose:
                 print(f"  MUTATED: {entry['label']}")
@@ -219,6 +367,11 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
         finally:
             for path2, text in originals.items():
                 path2.write_text(text, encoding="utf-8")
+            # **Only once the files are back.** Clearing first would leave a
+            # window where the tree is restored and the journal still claims
+            # otherwise - and a run killed in that window recovers nothing,
+            # which is the exact failure this journal exists to catch.
+            _journal_clear()
 
         hit = [t for t in entry["expect"] if _witness_hit(t, failed)]
         missed = [t for t in entry["expect"] if t not in hit]
@@ -230,16 +383,29 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
                 print(f"    -> caught by {', '.join(hit)}{extra}")
                 if missed:
                     print(f"    -> NOT caught by {', '.join(missed)}")
-        else:
-            survivors.append((entry["label"], summary,
-                              sorted(_unexplained(failed, entry["expect"]))))
+            continue
+
+        # **An equivalent mutant is kept and reported, never counted as coverage
+        # and never hidden.** A mutation no test can reach is not evidence that
+        # the code is guarded - it is a statement that the guard has no witness.
+        # This repo's own practice is to record those with the reason, and a
+        # runner that only has "caught" and "survivor" forces the author to
+        # choose between lying and deleting, which is how a documented equivalent
+        # mutant becomes an undocumented missing one.
+        if entry.get("equivalent"):
+            equivalent.append((entry["label"], entry.get("why", "")))
             if verbose:
-                print(f"    -> SURVIVOR  ({summary})")
-                unexplained = _unexplained(failed, entry["expect"])
-                if unexplained:
-                    print(f"       failed for another reason: {unexplained}")
+                print(f"    -> equivalent mutant, kept: {entry.get('why', '')}")
+            continue
+
+        unexplained = _unexplained(failed, entry["expect"])
+        survivors.append((entry["label"], summary, unexplained))
+        if verbose:
+            print(f"    -> SURVIVOR  ({summary})")
+            if unexplained:
+                print(f"       failed for another reason: {unexplained}")
     return {"set": name, "count": len(mutations), "caught": caught,
-            "survivors": survivors}
+            "survivors": survivors, "equivalent": equivalent}
 
 
 def main(argv=None) -> int:
@@ -253,6 +419,15 @@ def main(argv=None) -> int:
                         help="only the final tally")
     parser.add_argument("--keep-going", action="store_true",
                         help="run every set even when one raises")
+    parser.add_argument("--wait", type=float, default=0.0, metavar="SECONDS",
+                        help="wait this long for another run to finish instead of "
+                             "refusing (default: refuse immediately)")
+    parser.add_argument("--check-anchors", action="store_true",
+                        help="check every mutation's anchor still matches the code, "
+                             "without running a single test. This is the cheap "
+                             "half of a run (see rule 2) and the half that can "
+                             "be done every time: it reads the files, so it "
+                             "takes the same lock a real run does.")
     args = parser.parse_args(argv)
 
     available = sets()
@@ -273,44 +448,113 @@ def main(argv=None) -> int:
     started = time.time()
     totals = {"count": 0, "caught": 0}
     all_survivors = []
+    all_equivalent = []
     failures = []
-    for name in wanted:
-        if not args.quiet:
-            print(f"=== {name} ===")
-        try:
-            result = run_set(name, available[name], verbose=not args.quiet)
-        except Exception as exc:  # noqa: BLE001 - one bad set must not lose the rest
-            failures.append((name, exc))
-            print(f"  ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
-            if not args.keep_going:
-                # **The tally is still printed.** A set that raises on a rotated
-                # anchor is a result, not an abort: the other sets' answers are
-                # still true and a run that prints nothing reads as "nothing ran".
-                print()
-                _report(totals, all_survivors, failures, started)
-                return 1
-            continue
-        if result.get("empty"):
-            print(f"  {name} has no mutations")
-            continue
-        totals["count"] += result["count"]
-        totals["caught"] += result["caught"]
-        all_survivors.extend((name,) + s for s in result["survivors"])
+    try:
+        lock = _Lock(timeout=args.wait)
+        lock.__enter__()
+    except _Busy as busy:
+        print(str(busy), file=sys.stderr)
+        return 2
+    try:
+        if args.check_anchors:
+            return _check_anchors(wanted, available)
+        # **A killed run's leftovers are put back here, before anything is
+        # mutated again** - so a tree that is not in its committed state is
+        # repaired by the next run rather than being read as somebody's edit.
+        recovered = _recover_stale_journal()
+        if recovered:
+            print("  RECOVERED a previous run's mutations that were never put "
+                  "back (it was killed): " + ", ".join(recovered))
+        for name in wanted:
+            if not args.quiet:
+                print(f"=== {name} ===")
+            try:
+                result = run_set(name, available[name], verbose=not args.quiet)
+            except Exception as exc:  # noqa: BLE001 - one bad set must lose neither
+                failures.append((name, exc))
+                print(f"  ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
+                if not args.keep_going:
+                    # **The tally is still printed.** A set that raises on a
+                    # rotated anchor is a result, not an abort: the other sets'
+                    # answers are still true, and a run that prints nothing reads
+                    # as "nothing ran".
+                    print()
+                    _report(totals, all_survivors, failures, started, all_equivalent)
+                    return 1
+                continue
+            if result.get("empty"):
+                print(f"  {name} has no mutations")
+                continue
+            totals["count"] += result["count"]
+            totals["caught"] += result["caught"]
+            all_survivors.extend((name,) + s for s in result["survivors"])
+            all_equivalent.extend((name,) + e for e in result.get("equivalent", []))
+    finally:
+        lock.__exit__(None, None, None)
 
     if not args.quiet:
         print()
-    _report(totals, all_survivors, failures, started)
+    _report(totals, all_survivors, failures, started, all_equivalent)
     return 1 if (all_survivors or failures) else 0
 
 
-def _report(totals, survivors, failures, started) -> None:
+def _check_anchors(wanted, available) -> int:
+    """Every mutation's anchor still matches the code. No tests are run.
+
+    **This is the cheap half of a run, and it is the half that can happen every
+    time.** The expensive half - every mutation still caught - took under two
+    minutes with four sets and over ten with eleven, so leaving it in the default
+    suite put it past its own timeout: the guarantee went missing and the test
+    reported a failure about something else entirely.
+
+    It reuses `_apply`'s own rule rather than restating it. A second copy of
+    "occurs exactly once" is a second thing to be wrong, and the two would
+    disagree about a tree that is fine.
+    """
+    rotted = []
+    checked = 0
+    for name in wanted:
+        namespace = {}
+        exec(compile(available[name].read_text(encoding="utf-8"),
+                     str(available[name]), "exec"), namespace)
+        for entry in namespace.get("MUTATIONS") or []:
+            target = ROOT / entry["file"]
+            if not target.is_file():
+                rotted.append(f"{name}: {entry['label']} -> "
+                              f"{entry['file']} does not exist")
+                continue
+            text = target.read_text(encoding="utf-8")
+            old, new = entry["old"], entry["new"]
+            pairs = list(zip(old, new)) if isinstance(old, list) else [(old, new)]
+            for i, (before, _after) in enumerate(pairs, 1):
+                checked += 1
+                count = text.count(before)
+                if count != 1:
+                    rotted.append(
+                        f"{name}: {entry['label']} - anchor {i} of {len(pairs)} "
+                        f"occurs {count} times in {entry['file']}, not once")
+    if rotted:
+        print("a mutation set's anchor has rotted. Fix the set or the code it "
+              "aimed at - do not delete the set:\n" + "\n".join(rotted))
+        return 1
+    print(f"{len(wanted)} set(s), {checked} anchors, all still match the code")
+    return 0
+
+
+def _report(totals, survivors, failures, started, equivalent=()) -> None:
     print(f"{totals['count']} mutations, {totals['caught']} caught, "
-          f"{len(survivors)} survivors  ({time.time() - started:.0f}s)")
+          f"{len(survivors)} survivors, {len(equivalent)} equivalent  "
+          f"({time.time() - started:.0f}s)")
     for name, label, summary, failed in survivors:
         print(f"  SURVIVOR [{name}] {label}")
         print(f"          {summary}")
         if failed:
             print(f"          failed for another reason: {failed}")
+    for name, label, why in equivalent:
+        print(f"  EQUIVALENT [{name}] {label}")
+        if why:
+            print(f"          {why}")
     for name, exc in failures:
         print(f"  ERROR [{name}] {type(exc).__name__}: {exc}")
 
