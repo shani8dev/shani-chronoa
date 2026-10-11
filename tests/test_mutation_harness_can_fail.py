@@ -123,11 +123,23 @@ class TestTheHarnessCanFail:
         """**The control.** A mutation nothing covers must be reported as one,
         or "all mutations caught" means nothing at all."""
         self._fixture(tmp_path)
+        # **The mutation now parses, and that is the fix.** It used to replace a
+        # docstring line with `"""A fixture.` - an unterminated string literal, so
+        # the fixture was a SyntaxError and pytest aborted with "1 error during
+        # collection". The run reported SURVIVOR for *that*, and this control
+        # asserted "SURVIVOR" appeared - so it passed without ever exercising what
+        # it claims to: that a mutation nothing covers is reported as one. A
+        # control that cannot fail for its own reason is the same defect as a test
+        # that cannot fail.
+        #
+        # `TOTAL` is the one constant the fixture asserts nothing about - the
+        # function it tests does not read it - so changing it breaks nothing
+        # observable and *is* an uncovered mutation.
         name = _write_fixture_set(tmp_path, [{
             "file": "usr/lib/fixture_module.py",
-            "old": '"""A fixture with one invariant for the harness to break."""\n',
-            "new": '"""A fixture.\n',
-            "label": "a docstring nobody tests",
+            "old": "TOTAL = 3\n",
+            "new": "TOTAL = 4\n",
+            "label": "a constant no test reads",
             "expect": ["test_a_test_that_does_not_exist"],
         }])
         out = _run(name, cwd=tmp_path)

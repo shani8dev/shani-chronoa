@@ -107,3 +107,59 @@ def test_the_voice_style_choice_is_on_the_voice_page(rows):
     window = rows["__window__"]
     titles = [n.get_title() for n in _walk(window) if isinstance(n, Adw.ComboRow)]
     assert "Voice" in titles, f"no Voice style row; combo rows found: {titles}"
+
+
+class TestTheModelCanBeStartedFromHere:
+    """**The reported gap, in a person's words:** "when shifting to that Kilo
+    APIs, needs button to run the model etc".
+
+    The presence row said *Free the model* and *Asleep* and nothing else. Cycles
+    are fine when the caller can see the state - and the state here is "the model
+    is off because the cloud fallback answered instead", which the row does not
+    show. So a person who wanted their local model back had to press a button
+    labelled with the opposite of what they wanted, three times.
+
+    **The cycle was not removed.** `Asleep` means "stop it *and* do not start it
+    again to answer the next question", which no pair of Run/Stop buttons can
+    express. Dropping it to fit two buttons would have removed a capability to fix
+    a different one.
+    """
+
+    def _row(self, rows):
+        for widget in _walk(rows["__window__"]):
+            if (isinstance(widget, Adw.ActionRow)
+                    and "Right now" in (widget.get_title() or "")):
+                return widget
+        pytest.fail("the 'Right now' row is not in the Settings window")
+
+    def test_the_row_has_both_a_run_and_a_free(self, rows):
+        buttons = [b.get_label() for b in _walk(self._row(rows))
+                   if isinstance(b, Gtk.Button)]
+        assert "Run the model" in buttons, (
+            f"no way to start the model from the one page about models: {buttons}")
+        assert "Free the model" in buttons, (
+            f"the control that releases it went missing: {buttons}")
+
+    def test_the_run_button_is_not_just_drawn(self, rows):
+        """**Presence is not wiring.** A button with no handler is the dead-control
+        class this repo records four times - the orb shipped that way - so the
+        handler is checked, not the label.
+        """
+        from shani_chronoa.settings_window import window as module
+        assert hasattr(module.SettingsWindow, "_run_model"), (
+            "the Run button has no handler in the class, so it draws and does "
+            "nothing")
+
+    def test_both_run_off_the_main_loop(self, rows):
+        """A `systemctl --user start` on the GTK thread is a frozen window, and
+        `start_service` waits for a cold start that takes seconds. Asserted by
+        reading the source for the thread, because the freeze is otherwise only
+        visible to a person.
+        """
+        import inspect
+
+        from shani_chronoa.settings_window import window as module
+        for name in ("_run_model", "_cycle_presence"):
+            source = inspect.getsource(getattr(module.SettingsWindow, name))
+            assert "threading.Thread" in source, (
+                f"{name} does its systemctl work on the main loop")

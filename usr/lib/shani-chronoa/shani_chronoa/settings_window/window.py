@@ -407,6 +407,47 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _run_model(self, button: Gtk.Button, row: Adw.ActionRow) -> None:
+        """Start the local model server now, and say what happened.
+
+        **Why this is a button and not part of the cycle.** A cycle whose label is
+        the *next* action is fine when the caller can see the current state; it is
+        not fine when the model is off and the person's question is "why is nothing
+        answering locally" - at which point pressing a button that says "Free the
+        model" three times to get back to Ready is a puzzle.
+
+        Off the main loop for the same reason as the cycle: `start_service()` is a
+        `systemctl --user start` and the server takes seconds to answer, so a cold
+        start on the GTK thread is a frozen window. And it **re-reads** the state
+        afterwards rather than reporting the request - "Started" and "is answering"
+        are different claims, and only the second is worth showing.
+        """
+        from shani_chronoa import local_llm, presence
+        row.set_subtitle("Working...")
+        button.set_sensitive(False)
+
+        def work() -> None:
+            problem = local_llm.start_service()
+            answering = local_llm.is_up()
+
+            def done() -> bool:
+                now = presence.detect(local_llm.is_up)
+                if problem:
+                    row.set_subtitle(f"Could not start it: {problem}")
+                elif answering:
+                    row.set_subtitle(now.detail())
+                else:
+                    row.set_subtitle(
+                        "It was started but is not answering yet - give it a "
+                        "moment and ask something.")
+                button.set_sensitive(True)
+                return False
+
+            GLib.idle_add(done)
+
+        threading.Thread(target=work, daemon=True,
+                         name="start-local-model").start()
+
     def _model_choices(self, group, title: str, subtitle: str, keys,
                        installed, on_pick, config=None) -> None:
         """Pick a model from the ones that exist, rather than only typing one.
@@ -685,14 +726,32 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         # It belongs here because it is a fact about the *model*, and a person
         # looking at a model list is the person who knows whether they want it
         # resident.
+        # **Two buttons, not one cycle, and the second one is the fix.** The
+        # cycle said "Free the model" and "Asleep" and nothing else, so a person
+        # who had released the model - or whom the cloud fallback had moved off it
+        # - had no way to bring it back from here. Measured, this was the reported
+        # gap: "when shifting to that Kilo APIs, needs button to run the model."
+        # The cycle stays for the third state it alone can express (Asleep: stop
+        # it *and* do not answer the next question by starting it again), because
+        # dropping it to fit two buttons would have removed a capability to fix a
+        # different one.
         presence_row = Adw.ActionRow(
             title="Right now",
             subtitle="A loaded model costs about as much memory as it is large.")
+        run_button = Gtk.Button(label="Run the model", valign=Gtk.Align.CENTER)
+        run_button.set_tooltip_text(
+            "Start llama-server now, instead of waiting for the next question.")
+        run_button.connect("clicked",
+                           lambda _b: self._run_model(run_button, presence_row))
+        presence_row.add_suffix(run_button)
         button = Gtk.Button(label="Free the model", valign=Gtk.Align.CENTER)
+        button.set_tooltip_text(
+            "Stop it now (Free), then stop it and do not start it again (Asleep).")
         button.connect("clicked", lambda _b: self._cycle_presence(button, presence_row))
         presence_row.add_suffix(button)
         group.add(presence_row)
         self._presence_row = presence_row
+        self._run_model_button = run_button
 
         # What is actually in effect, and why. A tier that guesses should look
         # like a guess, not be presented as a decision.

@@ -49,6 +49,7 @@ SETTINGS_TARGETS = {
     # here goes where the person can actually turn them on.
     "my_files": "privacy",
     "meetings": "privacy",
+    "phone_link": "privacy",
     "triggers": "tool-activity",
     "skills": "tool-activity",
     "voice": "voice",
@@ -116,15 +117,32 @@ SURFACE_IDS = (
     # shape for a transcript somebody wants to read again.
     "my_files",
     "meetings",
+    # The phone over this computer's own LAN link (`lan_link`) and over
+    # Bluetooth both live here. The LAN one had one reachable path: a model
+    # deciding to call `lan_phone` - there was no way to see what was on the
+    # network, or to learn that pairing is specified and not written.
+    "phone_link",
     # This machine
     "senses",
     "models",
     "machine",
+    # Everything Chronoa left running, and the button that stops each one. Placed
+    # with "This machine" on purpose: it is the panel a person opens when the
+    # machine feels slow, and it answers "what is it holding" - not "what
+    # features exist". Until 2026-10-11 six background watchers started at
+    # startup with a written `stop()` that **nothing in the tree called**, and
+    # none of them was named anywhere on screen.
+    "background",
     # What Chronoa knows
     "memory",
     "learning",
     "voice",
     "listening",
+    # One phrase that stands for a whole request. A skill since 2026-10-02, and
+    # reachable only by a phrase you had to already remember until 2026-10-11:
+    # you could say "good morning" and have it work, and no screen listed the
+    # ones you had, named their trigger phrases, or showed what each asks for.
+    "routines",
     # What Chronoa is, function by function. First in its section on purpose:
     # it is the answer to "what is this thing", which is the question a person
     # has before any of the others.

@@ -2,6 +2,120 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## The force stop, the reaper, and a model nobody could start (2026-10-11)
+
+Reported in a person's words: *"it needs a force stop button - manually blocking
+those processes for beginners could be a headache, otherwise they face heavy
+resource usage"*, and *"when shifting to that Kilo APIs, needs button to run the
+model etc"*. Both were **measured gaps, not feature requests**, and the second
+one is the same defect the first is.
+
+### Six background watchers were started and could not be stopped
+
+`app/application.py` starts the incoming-call watcher, the message watcher, the
+file-sharing receiver, the watch companion, the phone-keyboard service and the
+Bluetooth music remote **unconditionally**, at startup. Each is written with a
+`stop()`. Two scans:
+
+| scan | result |
+|---|---|
+| the tree, for calls to those `stop()`s | **none** |
+| `gui/` and `app/tray.py`, for the six by name | **no hit** |
+
+So a machine could hold a Bluetooth link, a watch connection or a microphone open
+for as long as the app ran, with quitting as the only lever - on a machine
+somebody is gaming or streaming on, that is not a lever. This is the dead-code
+class this file records four times, in the shape that costs.
+
+`background.py` is the inventory, read **off the live application object** rather
+than a hand-kept list, so adding a component cannot silently drop it. The surface
+is "What's running", with a Stop per row and a **Stop everything** that asks
+first and names what it takes. Two rules it is held to: a row with a dead Stop
+button says *why there is no stop* instead of rendering one, and a row only reads
+"stopped" when the component itself confirmed - `presence.py`'s Settings control
+already does that, and this does the same.
+
+### The child supervisor could see a hung child and had nothing to do about it
+
+`check_heartbeats` reports `DISCONNECTED` - "alive but silent past the budget:
+hung" - and its own docstring says *"waiting longer for a hung one is
+pointless"*. **Every caller in the tree only reads that status.** A detector with
+no reaper is the control-nothing-reaches class again.
+
+Measured on this box, the cost of the whole shape: a `llama-server` up
+**7h36m holding 1.09 GB**, and two `whisper-cli` runs up **44 and 2 minutes on
+3-4 second WAVs holding 4.7 GB each**. Killing four PIDs took available memory
+from **9 GB to 18 GB**. Those two were *not* Chronoa's children - they were this
+agent's own measurement runs - and no supervisor could have reached them, because
+a process may only signal its own descendants. But a hung child of Chronoa's own
+was already visible to the supervisor and nothing acted on it.
+
+`reap_hung()` closes that loop: terminate, a bounded grace, then SIGKILL. Guarded
+two ways, and **both guards are load-bearing** - it re-probes immediately before
+the signal (a pid that already belongs to a stranger must not be signalled), and
+only a *tracked* child with a pid is ever signalled (a stand-in must not take
+down whatever happens to be at that number).
+
+**The re-probe guard is asserted on the log, not on a kill.** Its removal is
+otherwise unobservable: `os.kill` on a dead pid raises OSError, which the reaper
+already caught, so `reap_hung()` returns the same empty list either way. The
+guard's value is that it declines *before* trying, and the only place that shows
+is the sentence it logs.
+
+### The model could be released but not started
+
+`presence.py` and `settings_window` had a working cycle - Ready, "Letting go of
+the model", Asleep - which calls `local_llm.start_service/stop_service`. What it
+could not do is **start** one: the button said "Free the model" and "Asleep" and
+nothing else, and the state that matters here ("the model is off because the
+cloud fallback answered instead") is not shown on the row. A person who wanted
+their local model back had to press a button labelled with the opposite of what
+they wanted, three times.
+
+**"Run the model" is added, and the cycle was not removed.** `Asleep` means "stop
+it *and* do not start it again to answer the next question", which no pair of
+Run/Stop buttons can express; dropping it to fit two buttons would have removed a
+capability to fix a different one. It runs off the main loop like the cycle, and
+**re-reads** the state afterwards - "Started" and "is answering" are different
+claims and only the second is worth showing.
+
+`tests/test_what_is_running.py` (19) and `tests/test_settings_text_fields.py`
+(3 more, 7 in the file). **Seven of the first twelve mutations in the set were
+defects in the set, not in the code**, and four of them were mutations aimed at
+nothing: replacing a whole guard with a bare `continue` made the reaper a no-op,
+which the real-kill test already caught, so they said nothing about the pid or
+the state filter they claimed to test. Two more were *equivalent* - the failed
+stop's `self.running = True` is redundant on the first call, and `stop is None`
+rows already land in `refused`, so both witnesses had to be built before the
+mutation could break anything. That is the recorded "a control that cannot fail"
+trap, hit five times in one file.
+
+### And the mutation runner reported a broken mutation as a **survivor**
+
+Three of those seven were mutations that produced code which **could not parse** -
+one had its replacement indented one level too far, giving `IndentationError:
+unexpected indent`. pytest aborted with *"1 error during collection"* and exit 2,
+and `_failures`' parser looked only for the words *" passed"* or *" failed"* -
+**neither of which appears in that sentence.** So the run reported
+`(no summary)` and counted the mutation as a survivor: it read as *"the tests did
+not catch this"*, when the truth is *"nothing was measured at all"*.
+
+That is OmO's #8850 from the other side, and it is the same error the exit-code
+protocol fixes in `verification.py` - **a check that could not run is not a check
+that found nothing.** `_failures` now raises `MutationDidNotParse` for a run with
+no summary, so it is reported as an error rather than as a survivor, and "error
+during collection" is named separately from "pytest produced no summary".
+
+The fourth was worse in a way only running it showed: the re-probe guard's witness
+passed `pid=os.getpid()`, on the reasoning that the guard declines before any
+signal - which is exactly what it does *while the guard is present*. Remove the
+guard and the reaper SIGTERMs the pytest process, so the run dies with no output
+and the mutation is unmeasurable. **A fixture that kills the runner it is being
+measured by cannot measure anything.** It tracks a throwaway `sleep` now, and
+asserts it is still alive afterwards, so the guard's absence is observable from
+outside: alive means it worked, dead means it did not.
+
+
 before editing, and follow the verification steps before calling any change
 done.
 

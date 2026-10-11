@@ -107,6 +107,14 @@ class _Busy(Exception):
     """Another run holds the tree."""
 
 
+class MutationDidNotParse(Exception):
+    """A mutation produced code that cannot be collected.
+
+    Raised rather than returned as "no summary", so it is reported as an
+    **error** and not as a survivor - see `_failures` for the measurement.
+    """
+
+
 class _Lock:
     """One mutation run at a time, and a stale lock says whose.
 
@@ -287,7 +295,29 @@ def _failures(test_file: str) -> tuple:
     failed = {line.split("::")[-1].split(" ")[0]
               for line in text.splitlines() if line.startswith("FAILED")}
     summary = [l for l in text.splitlines() if " passed" in l or " failed" in l]
-    return failed, (summary[-1] if summary else "(no summary)")
+
+    # **A collection error is not a survivor, and it is not "no summary" either.**
+    # Measured here: a mutation whose replacement was indented one level too far
+    # produced `IndentationError: unexpected indent`, pytest aborted with
+    # "1 error during collection" and exit 2 - and this function's parser looked
+    # only for " passed" / " failed", neither of which appears in that sentence.
+    # So the run reported the mutation as a **survivor**, which is the worst
+    # possible answer: it reads as "the tests did not catch this", when the truth
+    # is "this mutation did not parse and nothing was measured at all".
+    #
+    # That distinction is exactly OmO's #8850 in the other direction - a checker
+    # that could not run is not a checker that found nothing, and the only way to
+    # tell them apart is to notice the case and say so.
+    if not summary:
+        errored = [l for l in text.splitlines()
+                   if "error during collection" in l or " error in " in l
+                   or "errors" in l and "passed" not in l]
+        if errored:
+            raise MutationDidNotParse(errored[-1].strip())
+        raise MutationDidNotParse(
+            "pytest produced no summary - the run neither passed nor failed, so "
+            "nothing was measured")
+    return failed, summary[-1]
 
 
 def _witness_hit(expect: str, failed: set) -> bool:

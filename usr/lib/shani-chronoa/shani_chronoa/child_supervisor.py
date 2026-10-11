@@ -18,10 +18,12 @@ part that runs.
 """
 
 import logging
+import os
+import signal
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +131,70 @@ class ChildSupervisor:
         """
         if self._children.pop(name, None) is not None:
             logger.debug("Stopped tracking %r", name)
+
+    def reap_hung(self, grace: float = 5.0) -> List[str]:
+        """Kill the children that are hung, and return which ones.
+
+        **The half that was missing, and the reason this method exists at all.**
+        `check_heartbeats` reports `DISCONNECTED` and its own docstring says
+        "waiting longer for a hung one is pointless" - but every caller in the tree
+        only *reads* that status, and nothing terminates a wedged child. A detector
+        with no reaper is the control-nothing-reaches class this repo records four
+        times, and the cost is what a beginner actually sees: a `pw-record` or a
+        `whisper-cli` holding the microphone and a gigabyte or two for as long as the
+        app runs, with no way to end it short of quitting.
+
+        Measured on this box on 2026-10-11, the shape of the waste: two `whisper-cli`
+        runs up 44 and 2 minutes on 3-4 second WAVs held **4.7 GB each**, and killing
+        four PIDs took available memory from 9 GB to 18 GB. Those were not Chronoa's
+        children and no supervisor could have reached them - a process may only signal
+        its own descendants - but `check_heartbeats` was already able to *see* a hung
+        one of Chronoa's own and had nothing to do about it.
+
+        Guarded two ways, both because pid reuse is real:
+
+        - the child is **re-probed immediately before the signal**, so one that died
+          on its own in the meantime is not signalled. Killing a pid the supervisor
+          has not re-confirmed is how a supervisor kills a stranger.
+        - only a child the supervisor is *tracking* is ever signalled, so a stand-in
+          in a test cannot take an unrelated process down. A pid-less child is left
+          alone for the same reason: there is nothing to signal.
+        """
+        reaped: List[str] = []
+        for status in self.check_heartbeats():
+            if status.state is not ChildState.DISCONNECTED:
+                continue
+            child = self._children.get(status.name)
+            if child is None or child.pid is None:
+                continue
+            # Re-probe: it may have exited between the check and here.
+            if child.probe() is not None:
+                logger.info("%r exited on its own before it could be reaped",
+                            status.name)
+                continue
+            logger.warning(
+                "%r is hung past its %.1fs budget (pid %s); terminating it",
+                status.name, child.stall_after or 0.0, child.pid)
+            try:
+                os.kill(child.pid, signal.SIGTERM)
+            except OSError as exc:
+                logger.warning("could not terminate %r (pid %s): %s",
+                               status.name, child.pid, exc)
+                continue
+            deadline = time.monotonic() + max(grace, 0.0)
+            while time.monotonic() < deadline:
+                if child.probe() is not None:
+                    break
+                time.sleep(0.1)
+            else:
+                try:
+                    os.kill(child.pid, signal.SIGKILL)
+                    logger.warning("%r ignored SIGTERM; killed it", status.name)
+                except OSError as exc:
+                    logger.warning("could not kill %r (pid %s): %s",
+                                   status.name, child.pid, exc)
+            reaped.append(status.name)
+        return reaped
 
     def update_heartbeat(self, name: str) -> bool:
         """Record proof of life for a tracked child; False (and a warning) for a name never tracked.
