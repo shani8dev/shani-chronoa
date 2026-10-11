@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**250 skills in 24 groups.** Each is a named, schema-typed module; the model
+**256 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 250 are consent-gated and 17 are destructive.**
+**93 of 256 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -64,6 +64,7 @@ Processes, packages, updates, containers, vms, disks, network.
 | `disk_usage` | Report filesystem and directory space use | — |
 | `dissect_traffic` | Dissect traffic into protocol fields | needs `packet-capture-enabled` |
 | `dns_lookup` | Look a name up in DNS, or read its mail, name or certificate records | — |
+| `file_locks` | Who holds a file lock, and on what | — |
 | `firmware_updates` | List firmware updates for this machine's devices | — |
 | `graphics_stack` | Whether the graphics are hardware accelerated or falling back to software | — |
 | `inspect_binary` | What a program is, and what it needs to run | — |
@@ -149,6 +150,7 @@ Read, write, move, archive and undo files.
 | `read_video` | Read a video's length, size, and format | — |
 | `search_documents` | Search inside your files with the desktop's own index | needs `document-search-enabled` |
 | `search_file_contents` | Search inside files | — |
+| `search_my_files` | Search your own files by meaning | needs `file-index-enabled` |
 | `space_by_type` | Where the space goes, by kind of file | — |
 | `stale_files` | What is big AND untouched - the deletion candidates | — |
 | `sync_folder` | Sync two folders, showing what would change first | — |
@@ -178,10 +180,12 @@ Hardware, peripherals, sensors and their state.
 | `find_device` | Make a lost watch or band buzz so you can find it | needs `bluetooth-gatt-enabled` |
 | `fm_radio` | Listen to FM radio through a USB receiver | needs `fm-radio-enabled` |
 | `ir_remote` | Send or receive infrared remote-control codes | needs `ir-remote-enabled` |
+| `lan_phone` | Find phones on the same Wi-Fi network | needs `lan-phone-enabled` |
 | `nfc` | Read an NFC tag, or write a link to a sticker | needs `nfc-enabled` |
 | `phone` | Find, ping or send a file to your paired phone | needs `phone-control-enabled` |
 | `phone_remote` | Press the phone camera shutter, media keys, or type on the phone | needs `phone-remote-enabled` |
 | `print_queue` | The print queue, and cancelling a job | needs `print-control-enabled` |
+| `screen_to_phone` | Show this screen on a phone | needs `screen-share-enabled` |
 | `temperatures` | Temperatures and fan speeds | needs `hwmon-sense-enabled` |
 | `toggle_bluetooth` | Turn the Bluetooth adapter on or off | needs `bluetooth-control-enabled` |
 | `toggle_wifi` | Turn the Wi-Fi radio on or off | needs `radio-control-enabled` |
@@ -279,6 +283,22 @@ Brightness, theme, power state, night light.
 | `set_screensaver` | Change when the screen blanks and locks | needs `idle-timeout-enabled` |
 | `set_sleep_inhibit` | Hold the machine awake for a bounded time | needs `sleep-inhibit-enabled` |
 
+## Sound
+
+Play, record, describe and edit audio.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `audio_output` | Switch speakers, headphones and microphones | — |
+| `get_volume` | Check the volume | — |
+| `media_control` | Play, pause and skip media | — |
+| `meeting` | Record a meeting and write notes | needs `meeting-enabled` |
+| `set_mic_mute` | Mute or unmute the microphone input | needs `mic-control-enabled` |
+| `set_mute` | Mute and unmute | — |
+| `set_volume` | Change the volume | — |
+| `sing` | Sing a line aloud | — |
+| `speak` | Speak a reply aloud | — |
+
 ## Appearance
 
 Theme, wallpaper, scaling and the screen's own look.
@@ -309,21 +329,6 @@ Launch, list and find applications.
 | `open_application` | Open an app | — |
 | `vm` | Run and drive a virtual machine | needs `vm-control-enabled` |
 
-## Sound
-
-Play, record, describe and edit audio.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `audio_output` | Switch speakers, headphones and microphones | — |
-| `get_volume` | Check the volume | — |
-| `media_control` | Play, pause and skip media | — |
-| `set_mic_mute` | Mute or unmute the microphone input | needs `mic-control-enabled` |
-| `set_mute` | Mute and unmute | — |
-| `set_volume` | Change the volume | — |
-| `sing` | Sing a line aloud | — |
-| `speak` | Speak a reply aloud | — |
-
 ## Processes and windows
 
 Find, move and close what is open.
@@ -337,6 +342,7 @@ Find, move and close what is open.
 | `list_processes` | Running processes | — |
 | `list_windows` | Open windows | — |
 | `press_key` | Press a key | needs `input-control-enabled` |
+| `process_cost` | What is using the CPU or the disk | — |
 
 ## Pointer and keyboard
 

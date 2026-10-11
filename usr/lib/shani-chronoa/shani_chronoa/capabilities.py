@@ -258,6 +258,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "delete_file": ("Files", "Delete"),
     "open_file": ("Files", "Open a file"),
     "list_processes": ("Processes and windows", "Running processes"),
+    # Beside list_processes because it is the same subject asked a different
+    # way: that one is a snapshot of what is running, this one is what each
+    # program is COSTING - time-weighted CPU, memory, page faults and disk.
+    "process_cost": ("Processes and windows", "What is using the CPU or the disk"),
     "kill_process": ("Processes and windows", "Stop a process"),
     "list_windows": ("Processes and windows", "Open windows"),
     "focus_window": ("Processes and windows", "Focus a window"),

@@ -175,6 +175,126 @@ class TestLsmsAreNotAScore:
         assert "LSMs active:" not in content
 
 
+class TestAnAbsentLsmActiveIsNotAnEmptyOne:
+    """**Measured on this machine: `/sys/kernel/security/lsm_active` does not
+    exist.** The directory holds `apparmor evm ima integrity lockdown lsm tpm0`
+    and nothing else, so the reader records no `active` key at all.
+
+    The renderer tested `not lsms.get("active")`, which is also true when the
+    key is *absent* - so the sense printed "no LSM is active: a configured LSM
+    is not an enforcing one without a policy attached" on a machine with
+    Landlock, AppArmor, IMA and EVM all loaded. That is the exact collapse
+    `read_lsms`'s own docstring claims to have fixed, reintroduced one function
+    later, and it is the failure this whole repo records: an unreadable answer
+    rendered as a confident empty one.
+    """
+
+    def _machine(self, kernel, monkeypatch):
+        """This box's real securityfs: seven configured, no `lsm_active`, four
+        of them with a runtime directory."""
+        monkeypatch.setattr(security, "_EFIVARS", kernel.parent / "no-efi")
+        monkeypatch.setattr(security, "read_tpm", lambda: None)
+        monkeypatch.setattr(security, "read_apparmor",
+                            lambda: {"enabled": "Y", "installed": 167,
+                                     "loaded": None})
+        (kernel / "lsm").write_text(
+            "lockdown,capability,landlock,yama,apparmor,ima,evm\n")
+        for name in ("lockdown", "apparmor", "ima", "evm"):
+            (kernel / name).mkdir()
+        return kernel
+
+    def test_the_reader_records_no_active_key_at_all(self, kernel, monkeypatch):
+        self._machine(kernel, monkeypatch)
+        record = security.read_lsms()
+        assert "active" not in record
+        assert len(record["configured"]) == 7
+
+    def test_an_absent_interface_is_not_reported_as_nothing_active(
+            self, kernel, monkeypatch, granted):
+        self._machine(kernel, monkeypatch)
+        content = security._run({}).content
+        assert "no LSM is active" not in content, (
+            "no LSM is active was reported on a machine with four of them "
+            "loaded, because an absent file was read as an empty one")
+        assert "could not be read" in content
+        assert "no lsm_active interface" in content
+
+    def test_the_metadata_count_is_none_not_zero(self, kernel, monkeypatch, granted):
+        """`len(lsms.get("active", []))` answered 0 for "I could not ask".
+
+        A consumer reading `0` cannot tell it apart from "nothing is
+        enforcing", which is the whole distinction this record exists for.
+        """
+        self._machine(kernel, monkeypatch)
+        metadata = security._run({}).metadata
+        assert metadata["lsms_active"] is None
+        assert metadata["lsms_configured"] == 7
+        assert metadata["lsms_runtime"] == 4
+
+    def test_a_present_and_empty_interface_still_says_nothing_is_active(
+            self, kernel, monkeypatch, granted):
+        """The fix must not have disarmed the other branch.
+
+        Present-and-empty is the state worth warning about, so it has to keep
+        its sentence once the absent case took the other branch.
+        """
+        monkeypatch.setattr(security, "_EFIVARS", kernel.parent / "no-efi")
+        (kernel / "lsm").write_text("lockdown,apparmor\n")
+        (kernel / "lsm_active").write_text("")
+        content = security._run({}).content
+        assert "no LSM is active" in content
+        assert "could not be read" not in content
+        assert security._run({}).metadata["lsms_active"] == 0
+
+    def test_the_runtime_list_names_only_what_exists(self, kernel, monkeypatch):
+        self._machine(kernel, monkeypatch)
+        assert security.read_lsms()["runtime"] == ["apparmor", "evm", "ima",
+                                                   "lockdown"]
+
+    def test_the_runtime_list_is_a_floor_and_says_so(self, kernel, monkeypatch,
+                                                     granted):
+        """Three of the seven have no directory, and that is not evidence.
+
+        securityfs creates an entry only for LSMs that keep runtime state, so
+        `capability`, `landlock` and `yama` are absent here whether or not they
+        are enforcing. Printing "4 of 7" without that would be a confident count
+        about a question the data cannot answer.
+        """
+        self._machine(kernel, monkeypatch)
+        content = security._run({}).content
+        assert "4 of them have a runtime interface" in content
+        assert "a floor, not a count" in content
+        assert "whether or not it is enforcing" in content
+
+    def test_no_runtime_entries_says_nothing_rather_than_counting_zero(
+            self, kernel, monkeypatch, granted):
+        """With nothing instantiated there is no claim to make, and printing
+        "0 of them have a runtime interface" would read as "none is enforcing"
+        - the same absence-shaped claim in a different sentence."""
+        monkeypatch.setattr(security, "_EFIVARS", kernel.parent / "no-efi")
+        monkeypatch.setattr(security, "read_tpm", lambda: None)
+        monkeypatch.setattr(security, "read_apparmor",
+                            lambda: {"enabled": "N", "loaded": None})
+        (kernel / "lsm").write_text("capability,landlock,yama\n")
+        content = security._run({}).content
+        assert "could not be read" in content
+        assert "runtime interface in" not in content
+
+    def test_the_apparmor_half_does_not_depend_on_lsm_active(
+            self, kernel, monkeypatch, granted):
+        """AppArmor appearing in `configured` is enough on its own.
+
+        The AppArmor branch keys on the two lists joined, so it survives the
+        missing `active` half - which is the whole point, because that is the
+        state this kernel is in.
+        """
+        self._machine(kernel, monkeypatch)
+        content = security._run({}).content
+        assert "AppArmor: module enabled" in content
+        assert "167 AppArmor policy file(s) installed" in content
+        assert "undetermined" in content
+
+
 class TestTpm:
     def test_a_present_tpm_is_reported_with_its_version(self, kernel, monkeypatch, granted):
         monkeypatch.setattr(security, "_EFIVARS", kernel.parent / "no-efi")

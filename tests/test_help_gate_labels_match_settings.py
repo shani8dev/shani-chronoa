@@ -120,11 +120,19 @@ def row_titles(tmp_path_factory):
         for line in proc.stdout.splitlines():
             if line.startswith("RESULT"):
                 payload = json.loads(line[len("RESULT"):])
-                # The harness reports a failure *in* its RESULT line, so a bare
-                # `["titles"]` here raises KeyError and hides the reason it was
-                # given - a check that fails for its own reasons and is then
-                # believed. Read the payload first, then fail with both halves.
-                if "error" in payload:
+                # **A payload with no `titles` is the harness failing, not the
+                # settings window.** `out["titles"]` is only assigned inside
+                # `on_startup`, so if that handler never ran - which a busy box
+                # produces, measured here with six CPU burners running - the
+                # harness prints `RESULT{}`. Testing only for `"error"` let that
+                # through to `payload["titles"]` and raised `KeyError: 'titles'`,
+                # which reads as "the window rendered no rows" and is about
+                # three tests' worth of a product that is fine.
+                #
+                # The harness has exactly two honest outcomes - a list of rows,
+                # or a stated error - so the check is for the one it did not
+                # produce, whatever form the failure took.
+                if "titles" not in payload:
                     # One retry: this is a module-scoped fixture whose failure
                     # costs three tests, and a GUI subprocess that could not
                     # initialise under heavy load is a fact about the machine,
@@ -134,8 +142,9 @@ def row_titles(tmp_path_factory):
                         time.sleep(2)
                         continue
                     pytest.fail(
-                        f"the settings window harness reported an error twice: "
-                        f"{payload['error']}\nstderr:\n{proc.stderr}"
+                        "the settings window harness reported no rows twice: "
+                        f"{payload.get('error', payload)!r}\n"
+                        f"rc={proc.returncode}\nstderr:\n{proc.stderr}"
                     )
                 return payload["titles"]
         if attempt == 0:
