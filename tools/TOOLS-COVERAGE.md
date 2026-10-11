@@ -103,6 +103,7 @@ that cannot see what an unprivileged read produces.**
 | `system_history` | `sar` | what the machine was doing *earlier*, which no live reading can say |
 | `dns_lookup` | `delv` | the DNSSEC verdict (", fully validated") |
 | `disk_layout` | `lsblk --json` | **how the disk is partitioned** — see below |
+| `binary_hardening` | `readelf -W` | **whether a binary is hardened** — see below |
 | `disk_activity`, `cpu_per_core`, `cpu_frequency`, `inspect_binary`, `process_detail`, `download_file`, `sync_folder`, `check_port`, `list_archive`, `extract_archive`, `vcs_status` | `iostat`, `mpstat`, `cpupower`, `readelf`, `/proc`, `curl`, `rsync`, `nc`, stdlib+7z, stdlib+7z, `git`/`svn`/`hg` | — |
 
 ### `disk_layout`, and why `lsblk` and not the partition tools (2026-10-11)
@@ -181,6 +182,64 @@ packages. So the count is unchanged at **79** and this work is invisible to it
 question is "what do *these three packages* ship that nothing calls", and the
 honest way to answer it when the gap is elsewhere is to say so here instead of
 letting a skill appear to have closed a shipped-command gap when it did not.
+
+### `binary_hardening`, and the four ways a PIE answer goes wrong (2026-10-11)
+
+`inspect_binary` answers architecture, libraries and interpreter — the
+questions a *broken* executable raises. Nothing answered the one that decides
+whether an unknown download is worth running: **is it hardened?** Five
+properties, each of which turns a class of exploit off: PIE, RELRO, full RELRO
+(`BIND_NOW`), stack canary, no-execute stack.
+
+`eu-elflint` (elfutils) is on the unused list and is the purpose-built tool, but
+it is **absent from this dev box** — so the reader is `readelf -W`, which is
+present on both images and is what the skill's own module docstring names as the
+alternative. Four parsing traps, each measured on a real binary rather than
+inferred, and each of which a parser written from the common case gets wrong:
+
+- **A PIE executable and a shared object are both `DYN`.** Measured:
+  `/bin/ls` is `DYN (Position-Independent Executable file)` and `libc.so.6` is
+  `DYN (Shared object file)`; only the parenthesised text separates them.
+  Asking "is the header word DYN" calls every library a position-independent
+  *executable*.
+- **`Type: EXEC` is the no-PIE case**, and it is common: measured on
+  `/usr/bin/python3` and `/usr/bin/gcc` here. `not PIE` is a real, frequent
+  answer, so the property needs to be able to say no.
+- **A missing `GNU_STACK` segment is not an executable stack.** A `gcc -c`
+  object has no program headers at all; measured, that is `Type: REL` with
+  zero `GNU_STACK` lines. Reporting "NX off" about a file that is not executed
+  yet — and whose next link step sets it — is the confident wrong answer, so
+  "no segment" and "segment without `E`" are kept as different verdicts.
+- **The canary is an UNDEFINED import.** `/bin/ls` carries
+  `__stack_chk_fail@GLIBC_2.4` as `UND`, because the check lives in libc. The
+  obvious `.symtab` route (or requiring a *defined* symbol) misses every
+  dynamically linked binary on Arch.
+
+**Verified on real ShaniOS, through the real dispatch path: 5 pass, 0 fail,
+rc=0**, with each property cross-checked against `readelf` run on that image —
+so the skill cannot agree with itself while being wrong about the machine. The
+three **compiled controls** (`-no-pie`, `-z execstack`, `-c`) SKIP there, for an
+honest named reason: **ShaniOS ships no C compiler**, the same fact
+`chronoa-driver-tools.sh` already measures, and a control that cannot be built is
+a SKIP naming its cause rather than a silent pass.
+
+`27 tests`, **13/13 mutations caught** — two of which had to be re-aimed, and
+both re-aimings are the lesson rather than an inconvenience. A check can only
+fail on a value the data actually takes: the first two targets were aimed at
+`/usr/bin/env`, which measures as **fully hardened**, so a build that decides PIE
+from the header word reaches the same answer and there is nothing to disagree
+with. The controls exist precisely because they are the other value. And the
+relocatable check looked only for the absence of the words "NOT hardened" — a
+crash inside the sandboxed child arrives as a **traceback**, carrying neither
+those words nor a `(dispatch raised` prefix, so a build that could not answer a
+`.o` file *at all* scored as a PASS.
+
+`tests/chronoa-binary-hardening-results.sh` (6/6, each a real discrimination)
+also found a harness defect worth its own note: a probe that raised used to
+**leave the mutated file in place**, so the next scenario mutated an
+already-broken build and reported a `TypeError` as though it were a defect in
+the shipped skill. The restore is now unconditional and happens *before* the
+verdict is judged.
 ## The matrices predate the last depends change (measured 2026-10-10)
 
 **Five commands in `shani-tools-extra` are declared by the PKGBUILD but the

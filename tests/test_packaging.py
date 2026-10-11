@@ -512,6 +512,17 @@ class TestPackagingMetadata:
             "pdfinfo": ("poppler", "skills/read_document.py"),
             "ip": ("iproute2", "skills/network_check.py"),
             "fwupdmgr": ("fwupd", "skills/firmware_updates.py"),
+            # **binutils, not elfutils.** `readelf` is what two skills shell to:
+            # `inspect_binary`, and `binary_hardening` (added 2026-10-11), which
+            # reports whether a binary has PIE, RELRO, full RELRO, a stack canary
+            # and a no-execute stack. Both shipped with it declared nowhere and
+            # worked only by accident - measured on a real @blue install:
+            # `/usr/bin/readelf is owned by binutils 2.47-4`, `Required By:
+            # libmakepkg-dropins sbctl`, and nothing in chronoa requires sbctl.
+            # So one indirect edge that any change to either package could remove
+            # was the only thing keeping it on the machine. elfutils is a
+            # different package and ships the `eu-*` spellings.
+            "readelf": ("binutils", "skills/binary_hardening.py"),
         }
         # Already hard dependencies, and correctly so: the skill's primary
         # path is the one that uses it.

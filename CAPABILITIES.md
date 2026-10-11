@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**244 skills in 24 groups.** Each is a named, schema-typed module; the model
+**246 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 244 are consent-gated and 17 are destructive.**
+**89 of 246 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -45,6 +45,7 @@ Processes, packages, updates, containers, vms, disks, network.
 |---|---|---|
 | `backup_status` | Whether this machine has an off-machine backup, and when | — |
 | `bandwidth_to_host` | How fast this machine talks to another machine | — |
+| `binary_hardening` | Whether a program has the protections that make it safe to run | — |
 | `boot_report` | Why booting is slow, and whether it shut down cleanly | needs `boots-sense-enabled` |
 | `bridge_topology` | Which interfaces are bridges, and what is plugged into them | — |
 | `capture_packets` | Watch the packets crossing an interface | needs `packet-capture-enabled` |
@@ -116,6 +117,7 @@ Read, write, move, archive and undo files.
 | `create_document` | Create a markdown, text, or HTML document | — |
 | `delete_file` | Delete | **asks first, always** · needs `file-delete-enabled` |
 | `directory_tree` | Show a folder's shape | — |
+| `disk_layout` | How this machine's disks are partitioned | — |
 | `duplicate_files` | Which files are stored twice, and how much that wastes | — |
 | `edit_file` | Change one exact piece of text | **asks first, always** · needs `file-edit-enabled` |
 | `empty_directories` | Which directories hold nothing at all | — |

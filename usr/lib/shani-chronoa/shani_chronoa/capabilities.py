@@ -240,6 +240,11 @@ GATED: dict[str, str] = {
 # skill is still discoverable.
 _GROUPS: dict[str, tuple[str, str]] = {
     "list_directory": ("Files", "List a folder"),
+    # How the disks are laid out: physical disks, partitions, filesystems and
+    # what each one is for. Not a duplicate of the `storage`/`filesystems`
+    # senses, which report filesystems and their room - this answers "what is
+    # where on the disk", which is the question you ask before resizing.
+    "disk_layout": ("Files", "How this machine's disks are partitioned"),
     "find_files": ("Files", "Find files by name"),
     "search_file_contents": ("Files", "Search inside files"),
     "read_text_file": ("Files", "Read a text file"),
@@ -572,6 +577,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # Read-only: `readelf` parses the file and never runs it, so it is ungated
     # by precedent with `get_file_info` and `explain_command`.
     "inspect_binary": ("System", "What a program is, and what it needs to run"),
+    "binary_hardening": ("System", "Whether a program has the protections that make it safe to run"),
     "process_detail": ("System", "What one running process is waiting on"),
     # Read-only: cpupower frequency-info reports, and changes nothing.
     "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),
