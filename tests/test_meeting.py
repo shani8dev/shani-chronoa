@@ -220,11 +220,18 @@ class TestALongMeetingIsNotSilentlyTruncated:
         from shani_chronoa import local_llm as _llm
         calls = []
 
+        # **Shaped like the real backend, which is the whole point.** The old
+        # fake took `(config=None, transport=None)` and defined `chat()` - the
+        # signature `notes()` was *calling*, not the one `local_llm.LocalLLM`
+        # actually has. It encoded the bug and let it pass for its whole life:
+        # `LocalLLM.__new__(cls, model_key)` plus an async `chat_message()`, not
+        # a config-taking `chat()`. `TestNotesDrivesTheBackendTheRealWay` pins
+        # that contract explicitly.
         class _Engine:
-            def __init__(self, config=None, transport=None):
+            def __init__(self, model_key=""):
                 pass
 
-            def chat(self, messages, stream=False, **kw):
+            async def chat_message(self, messages, tools=None, stream=False):
                 calls.append(messages[-1]["content"])
                 return {"content": f"summary {len(calls)}"}
 
@@ -281,3 +288,95 @@ class TestAPathFromTheModel:
         out = S._run({"action": "notes", "path": "/tmp/nope.wav", "_config": on})
         assert "could not be read" in out or "no audio" in out, out
         assert "Traceback" not in out
+
+
+class TestNotesDrivesTheBackendTheRealWay:
+    """`notes()` called a backend that does not exist, and its own test agreed.
+
+    Measured before the fix, through the real `notes()`:
+
+        TypeError: LocalLLM.__new__() got an unexpected keyword argument 'config'
+
+    Two defects on two consecutive lines, and the second is why nobody noticed
+    for as long as they did: the constructor was called with `config=` and
+    `transport=`, it takes `(model_key,)` alone, and the `except TypeError`
+    fallback was the *same* wrong call without `transport` - so it raised the
+    identical error outside any handler. `LocalLLM` is
+    `def __new__(cls, model_key="")`, and `chat_message()` is the interface every
+    backend in this package has.
+
+    `distill.py`'s `_ask_chat_message` documents this bug in full - a first
+    version called `.chat()`, which only `OllamaLLM` defines; llama.cpp and the
+    whole cloud chain raised, and a machine with a configured provider reported
+    "no language model is configured" while the key sat right there. This is the
+    second instance of it, so the test is written against the real interface
+    rather than a fake shaped like the call.
+    """
+
+    def _drive(self, monkeypatch, seen, reply):
+        from shani_chronoa import local_llm as _llm
+
+        class _Engine:
+            def __init__(self, model_key=""):
+                seen.append(("__init__", model_key))
+
+            async def chat_message(self, messages, tools=None, stream=False):
+                seen.append(("chat_message", tools))
+                return reply
+
+        monkeypatch.setattr(_llm, "LocalLLM", lambda *a, **k: _Engine(*a, **k))
+
+    def _segments(self, count=3):
+        from shani_chronoa.recordings import Segment
+        return [Segment(float(i), float(i) + 1, "we ship on friday") for i in range(count)]
+
+    def test_it_actually_returns_notes(self, monkeypatch):
+        """The measured defect: every call raised, so notes were never produced."""
+        from shani_chronoa import meeting as _m
+        seen = []
+        self._drive(monkeypatch, seen, {"content": "ship on friday; alice owns it"})
+        note, why = _m.notes(self._segments())
+        assert note, f"notes() returned nothing: {why}"
+        assert "alice owns it" in note
+        assert ("__init__", "") in seen, (
+            f"the backend was not constructed the way `LocalLLM()` is: {seen}")
+        assert ("chat_message", None) in seen, seen
+
+    def test_the_constructor_is_not_given_what_it_cannot_take(self, monkeypatch):
+        """If `config` or `transport` ever reach the constructor again, this fails.
+
+        The old code passed both. `LocalLLM.__new__` takes `model_key` alone, so
+        forwarding them is not a style preference - it is the TypeError.
+        """
+        import inspect
+        from shani_chronoa import local_llm as _llm
+        params = inspect.signature(_llm.LocalLLM).parameters
+        for forbidden in ("config", "transport"):
+            assert forbidden not in params, (
+                f"`notes()` forwards `{forbidden}` to LocalLLM, which does not "
+                "accept it - reconnect this only by fixing LocalLLM, not by "
+                "putting it back")
+
+    def test_it_never_calls_chat(self, monkeypatch):
+        """No `.chat()`: it exists only on `OllamaLLM`.
+
+        A fake that raises when `chat` is used proves the path is not taken,
+        because an implementation that used it would surface immediately rather
+        than falling through to a model that never answers.
+        """
+        from shani_chronoa import meeting as _m
+        from shani_chronoa import local_llm as _llm
+
+        class _Engine:
+            def __init__(self, model_key=""):
+                pass
+
+            def chat(self, *a, **k):
+                raise AssertionError("notes() used .chat() - only OllamaLLM has it")
+
+            async def chat_message(self, messages, tools=None, stream=False):
+                return {"content": "notes from chat_message"}
+
+        monkeypatch.setattr(_llm, "LocalLLM", lambda *a, **k: _Engine())
+        note, why = _m.notes(self._segments())
+        assert "notes from chat_message" in note, why

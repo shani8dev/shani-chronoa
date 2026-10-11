@@ -323,6 +323,86 @@ def transcribe(wav, language: str = "auto", with_speakers: bool = True):
     return segments, ""
 
 
+def _run_coroutine_sync(coro):
+    """Drive one coroutine to a result from code with no event loop.
+
+    `notes()` is called from a bare thread (the skill's child, and the surface's
+    `_background`), so there is no loop to post to and `AsyncBridge` has not
+    been built. A coroutine that is never awaited is *created and discarded* -
+    the exact failure `AGENTS.md` records for `app.py`'s `async def` handlers,
+    where the whole chat pipeline silently became dead code. So it is driven
+    here, explicitly.
+
+    If a loop is already running this is being called from the main loop, which
+    `quick_ask.py` documents as the thing that hangs a GTK handler - that gets a
+    readable refusal rather than `RuntimeError`.
+    """
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is not None:
+        raise RuntimeError(
+            "notes() is being called from inside a running event loop; drive it "
+            "from a worker thread (the surface's `_background`), as it is built to be")
+    return asyncio.run(coro)
+
+
+def _reply_text(reply) -> str:
+    """The model's words, however the backend shaped them.
+
+    `chat_message()` returns a dict whose `content` is normally a string, but a
+    backend that flattened its own blocks into a list must not be stringified -
+    `distill.py`'s `_ask_chat_message` records that a list joined by `str()`
+    "parses as a skill name only by accident".
+    """
+    if not isinstance(reply, dict):
+        return ""
+    content = reply.get("content") or ""
+    if isinstance(content, list):
+        return "".join(str(part.get("text", "")) if isinstance(part, dict) else str(part)
+                       for part in content).strip()
+    return content.strip() if isinstance(content, str) else str(content).strip()
+
+
+def _drive_one_section(backend, messages, section: int, of: int):
+    """One section through the local model, by this codebase's own interface.
+
+    **`chat_message()` is what every backend here has, and `.chat()` is not.**
+    `distill.py`'s `_ask_chat_message` documents that bug in full: a first
+    version called `.chat()`, only `OllamaLLM` defines it, llama.cpp and the
+    whole cloud chain raised `AttributeError`, the loop moved on, and a machine
+    with a configured provider reported "no language model is configured" while
+    the provider sat right there with a key.
+
+    **`meeting.notes()` then shipped the same mistake twice over**, and the
+    second half is why it never surfaced:
+
+        engine = local_llm.LocalLLM          # __new__ takes (model_key,) alone
+        engine(config=config, transport=transport)   -> TypeError
+        except TypeError:
+            engine(config=config).chat(...)          -> TypeError, uncaught
+
+    Both calls passed arguments the constructor does not have, and the
+    `except TypeError` handler was itself the *same* wrong call without
+    `transport` - so the fallback raised the identical error outside any
+    handler. Measured: `notes()` raises
+    `TypeError: LocalLLM.__new__() got an unexpected keyword argument 'config'`
+    on every call, which means the meeting skill's `notes` action has never once
+    produced notes on any machine.
+
+    `config` and `transport` are accepted by `notes()` for its three callers but
+    are **not part of `chat_message()`'s contract** - checked, not assumed: no
+    `def chat(` in this package takes either. They are no longer forwarded to
+    anything, and that is the honest reading rather than a parameter quietly
+    kept alive by being passed to a function that cannot take it.
+    """
+    reply = _run_coroutine_sync(backend.chat_message(messages, tools=None))
+    return _reply_text(reply)
+
+
 def notes(segments, config=None, transport=None):
     """Notes from the segments, or `(None, why-not)`.
 
@@ -351,9 +431,11 @@ def notes(segments, config=None, transport=None):
         piece = transcript[index * NOTES_MAX_CHARS:(index + 1) * NOTES_MAX_CHARS]
         chunks.append(piece)
 
-    engine = local_llm.LocalLLM if hasattr(local_llm, "LocalLLM") else None
-    if engine is None:
+    if not hasattr(local_llm, "LocalLLM"):
         return None, "no local model is configured here, so notes cannot be written"
+    # Built once and shared by every section: one connection pool, one model
+    # load, and the construct-time refusal surfaces before any money is spent.
+    backend = local_llm.LocalLLM()
 
     prompt = (
         "You are writing notes about a meeting from its transcript. "
@@ -370,13 +452,9 @@ def notes(segments, config=None, transport=None):
                 f"Section {index + 1} of {sections} of the transcript:\\n\\n{piece}"},
         ]
         try:
-            reply = engine(config=config, transport=transport).chat(
-                messages, stream=False)
-        except TypeError:
-            reply = engine(config=config).chat(messages, stream=False)
+            text = _drive_one_section(backend, messages, index + 1, sections)
         except Exception as exc:                 # noqa: BLE001
             return None, f"the local model could not be reached ({exc})"
-        text = (reply.get("content") or "").strip() if isinstance(reply, dict) else ""
         if not text:
             return None, "the local model answered with nothing, so no notes"
         notes_text.append(text)
