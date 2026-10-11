@@ -322,6 +322,9 @@ class BrowserWindow(Gtk.Window):
         self._search_url = search_url
         self._home_url = home_url
         self._webview = None
+        # JavaScript dialogs seen since `clear_dialogs()`; see
+        # `_on_script_dialog` for why they are recorded and not dismissed.
+        self.dialogs = []
         #: Set by `gui/browser_driver.py` only while the model is driving this
         #: window: a callable `url -> reason` ("" to allow). The person's own
         #: typing and clicking are never gated - see the module docstring.
@@ -488,7 +491,56 @@ class BrowserWindow(Gtk.Window):
         view.connect("notify::title", self._on_view_title)
         view.connect("create", self._on_create)
         view.connect("decide-policy", self._on_decide_policy)
+        view.connect("script-dialog", self._on_script_dialog)
         return view
+
+    def _on_script_dialog(self, _view, dialog) -> bool:
+        """Record a JavaScript dialog instead of letting it wedge the page.
+
+        **Without this the whole browser stops working**, measured on 2026-10-11
+        in a real `WebKit.WebView`: `alert()` halts the page's script, and every
+        later `evaluate_javascript` - which is how `browser_driver` reads text,
+        finds controls and clicks *anything* - **never calls back at all**. The
+        driver has no timeout path that can tell this from a slow page, so the
+        answer to any request is a silent hang.
+
+        Returning `True` suppresses WebKit's own modal, which is the half that is
+        safe. **The other half - dismissing it - is not reachable from Python
+        here**, and pretending otherwise would trade a hang for a crash:
+
+        | what was tried | measured |
+        |---|---|
+        | `dialog.close()` on an `alert` | **segfault**, main loop dies in the same iteration |
+        | `dialog.close()` on a `confirm` | **segfault**, same |
+        | `confirm_set_confirmed(True)` alone | no crash, and **does not dismiss** - the page stayed wedged |
+        | `dialog.ref()` + `close()` + `unref()` | **segfault** |
+        | the legacy `confirm` signal | **does not exist** in WebKit 6.0 (`unknown signal name`) |
+
+        The control that isolates it: this same handler returning `True` without
+        calling `close()` runs to completion. So the crash belongs to `close()`
+        and not to having a handler.
+
+        So the dialog is recorded and the page stays paused, and `browser_driver`
+        says which dialog is holding it up rather than timing out in silence. The
+        person can still dismiss it in the window.
+        """
+        try:
+            kind = dialog.get_dialog_type().value_nick
+            message = dialog.get_message()
+        except Exception:  # noqa: BLE001 - a dialog we cannot read is still one
+            kind, message = "unknown", ""
+        self.dialogs.append({"type": kind, "message": message})
+        # Keep only the latest few: a page in a loop can raise these freely, and
+        # this list is read by the driver, not kept as a history.
+        del self.dialogs[:-4]
+        return True
+
+    def pending_dialogs(self):
+        """The JavaScript dialogs raised since the last :meth:`clear_dialogs`."""
+        return list(self.dialogs)
+
+    def clear_dialogs(self) -> None:
+        self.dialogs.clear()
 
     def _run_menu_action(self, action) -> None:
         """Run a menu action and close the popover.

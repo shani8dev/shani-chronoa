@@ -633,3 +633,129 @@ def test_a_click_answer_carries_what_appeared(web_allowed, no_provider,
     assert "Clicked 'Book'" in said, said
     assert "Confirm" in said and "Since the click" in said, (
         "the reply never asked what the click produced: %r" % said)
+
+
+# --- a JavaScript dialog used to hang the whole browser (2026-10-11) ------------
+#
+# `gui/browser.py` connected no `script-dialog` handler anywhere. Measured on a
+# real `WebKit.WebView`: `alert()` halts the page's script, and every later
+# `evaluate_javascript` - which is how *everything* here reads text, finds
+# controls and clicks - never calls back at all. So any page that raised a
+# dialog took the driver down with it, and the failure looked like a slow page.
+#
+# Ported in shape from `harness-study/browser-use`'s `popups_watchdog.py`, which
+# keeps each auto-dismissed dialog's message so the model sees the page's own
+# words. Chronoa cannot dismiss these (measured below), so the same rule applies
+# with the sign flipped: the message is the only thing the person has.
+
+
+def test_the_browser_watches_for_javascript_dialogs(web_allowed, no_provider):
+    """A handler is connected, and it is the *modern* signal.
+
+    WebKit 6.0 has no `alert`/`confirm`/`prompt` signals at all - connecting one
+    raises `unknown signal name` (measured) - so this is the only seam there is.
+    """
+    import inspect
+
+    from shani_chronoa.gui import browser
+
+    src = inspect.getsource(browser)
+
+    assert '"script-dialog"' in src, (
+        "nothing is connected, so a page that raises alert() wedges the browser")
+    assert 'connect("confirm"' not in src, (
+        "that signal does not exist in WebKit 6.0 and raises at connect time")
+
+
+def test_a_dialog_is_recorded_and_never_dismissed(web_allowed, no_provider):
+    """**The load-bearing one.** `dialog.close()` segfaults this build.
+
+    Measured four ways: on an `alert` and on a `confirm`, with and without an
+    explicit `ref()`/`unref()` bracket. The control is the same handler returning
+    `True` without calling it, which runs to completion - so the crash belongs to
+    `close()` and not to having a handler.
+
+    A watchdog that fixed the hang by crashing the process would be worse than
+    the hang, so this asserts the *absence* of the only call that can do that.
+    """
+    import ast
+    import inspect
+    import textwrap
+
+    from shani_chronoa.gui import browser
+
+    cls = next(v for v in vars(browser).values()
+               if inspect.isclass(v) and hasattr(v, "_on_script_dialog"))
+    src = textwrap.dedent(inspect.getsource(cls._on_script_dialog))
+
+    # **Parsed, not grepped.** The docstring above quotes the whole measurement
+    # table, so a substring check finds "dialog.close()" in the prose describing
+    # the crash and reports the fix as present. A source check that can match its
+    # own explanation is not a source check - this is the same trap this repo has
+    # recorded twice (a grep matching its own comment, a check matching the sheet
+    # prose it was written about).
+    called = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            called.add(node.func.attr)
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                and node.value.id == "dialog":
+            called.add(node.attr)
+
+    assert "close" not in called, (
+        "close() segfaults WebKitScriptDialog on this WebKit/PyGObject build; "
+        "the dialog must be recorded, not dismissed, not closed")
+    assert "unref" not in called
+    assert "confirm_set_confirmed" not in called, (
+        "it dismisses nothing on its own - measured: the page stayed wedged "
+        "after it")
+
+
+def test_a_read_that_fails_names_the_dialog(web_allowed, no_provider,
+                                           monkeypatch):
+    """A timeout that does not quote the dialog is indistinguishable from a slow
+    page, which is the whole failure."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(
+        browser_driver, "pending_dialogs",
+        lambda *a, **k: [{"type": "alert",
+                          "message": "Your session expires in 5 minutes"}])
+
+    note = browser_driver.dialog_note()
+
+    assert "Your session expires in 5 minutes" in note, note
+    assert "paused" in note, note
+    assert "cannot dismiss" in note, (
+        "the note must not imply Chronoa cleared it: %r" % note)
+
+
+def test_the_note_says_nothing_when_no_dialog_is_holding_the_page(
+        web_allowed, no_provider, monkeypatch):
+    """The control. A note attached to an ordinary failure would train a reader
+    to ignore it."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "pending_dialogs", lambda *a, **k: [])
+
+    assert browser_driver.dialog_note() == ""
+
+
+def test_a_window_that_cannot_be_reached_is_not_a_clean_page(web_allowed,
+                                                             no_provider,
+                                                             monkeypatch):
+    """`[]` means *nothing recorded*, never *the page is fine*.
+
+    A read that cannot reach the window answers `[]` too, so the note is only
+    ever added to a failure and never used to contradict a success - and that is
+    the property, not the return value.
+    """
+    from shani_chronoa.gui import browser_driver
+
+    def unreachable(fn, timeout=15.0):
+        raise RuntimeError("no window")
+
+    monkeypatch.setattr(browser_driver, "_main", unreachable)
+    monkeypatch.setattr(browser_driver.browser_bridge, "on_main", unreachable)
+
+    assert browser_driver.pending_dialogs() == []

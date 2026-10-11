@@ -132,7 +132,58 @@ def _evaluate(script: str, timeout: float = 15.0) -> str:
 
         view.evaluate_javascript(script, -1, None, None, None, done, None)
 
-    return browser_bridge.on_main(work, timeout)
+    try:
+        text = browser_bridge.on_main(work, timeout)
+    except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        # A page paused on a dialog is the commonest reason this read never
+        # answers, and it is the one the model must be told about: every script
+        # this module runs goes through here, so this is the single place where
+        # "the page would not answer" can name its cause.
+        note = dialog_note()
+        raise RuntimeError("%s%s" % (exc, note)) from exc
+    # The page answered, so it is not paused: forget any dialog from before.
+    try:
+        _main(lambda w: w.clear_dialogs(), 5.0)
+    except Exception:  # noqa: BLE001 - clearing is best-effort
+        pass
+    return text
+
+
+def pending_dialogs(timeout: float = 5.0):
+    """The JavaScript dialogs the page is paused on, or `[]` if none are known.
+
+    `[]` means **nothing recorded**, which is not the same as *the page is not
+    paused*: a read that cannot reach the window at all also answers `[]`, so the
+    note below is only ever added to a failure, never used to contradict a
+    success.
+    """
+    try:
+        return _main(lambda w: w.pending_dialogs(), timeout) or []
+    except Exception:  # noqa: BLE001 - an unreadable window says nothing
+        return []
+
+
+def dialog_note() -> str:
+    """Why the page would not answer, when a dialog is the reason.
+
+    **Ported in shape from `harness-study/browser-use`'s `popups_watchdog.py`**,
+    which stores each auto-dismissed dialog's message in the browser session so
+    the model sees it - because a dialog the driver dismissed silently took the
+    page's own words with it. Chronoa cannot dismiss these (measured: see
+    `browser.py`'s `_on_script_dialog`), so the same rule applies with the sign
+    flipped: **the dialog's words are the only thing the person has**, and a
+    timeout that does not quote them is indistinguishable from a slow page.
+    """
+    dialogs = pending_dialogs()
+    if not dialogs:
+        return ""
+    last = dialogs[-1] or {}
+    kind = last.get("type") or "javaScript"
+    message = (last.get("message") or "").strip()
+    return (" The page is paused on a JavaScript {k} dialog{msg}. Chronoa cannot"
+            " dismiss it on this WebKit build - measured, calling close()"
+            " segfaults - so it has to be dismissed in the browser window."
+            ).format(k=kind, msg=" saying {0!r}".format(message) if message else "")
 
 
 def _json(body: str, timeout: float = 15.0) -> Any:
