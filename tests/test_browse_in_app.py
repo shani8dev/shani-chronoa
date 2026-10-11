@@ -500,3 +500,64 @@ def test_a_refusal_is_not_dressed_up_with_the_note(web_allowed, no_provider,
     answer = browser_driver._act("click", {"selector": "#mic"}, 15.0)
 
     assert "NOTE-MARKER" not in answer, answer
+
+
+# --- a control that is covered is not a control you clicked (2026-10-11) --------
+#
+# Ported from `harness-study/browser-use`'s `dom/serializer/paint_order.py`, which
+# marks an element hidden when a later-painted element fully covers it. The
+# existing check catches `display:none`, `visibility:hidden`, `type=hidden` and a
+# zero-size box - it cannot catch a fully laid-out button painted *under*
+# something, which is the failure this session's AGENTS.md records as
+# `WINDOW=1024`: correctly-placed clicks doing nothing because another surface
+# was on top.
+#
+# Asked of `elementFromPoint` at the element's own centre rather than a rectangle
+# union, because the browser already knows the paint order.
+
+
+def test_a_covered_control_is_refused_and_names_what_is_on_top(no_provider):
+    from shani_chronoa.gui import browser_driver
+
+    script = browser_driver._click_script("#btn", 0, 0)
+
+    assert "elementFromPoint" in script, (
+        "nothing asks what is actually on top of the target")
+    assert "covered" in script, "the refusal it produces is not named anywhere"
+
+
+def test_a_control_with_nothing_over_it_is_not_refused():
+    """The control: `elementFromPoint` returning the element **or one of its own
+    children** must not fire. A button's label is a child, and a driver refusing
+    every button with text in it is worse than no check."""
+    from shani_chronoa.gui import browser_driver
+
+    script = browser_driver._click_script("#btn", 0, 0)
+
+    assert "el.contains(top)" in script, (
+        "a child painted over the parent is not coverage, and the script has "
+        "no allowance for it")
+
+
+def test_a_covered_click_says_what_is_in_the_way(web_allowed, no_provider,
+                                                monkeypatch):
+    """The sentence, not the mechanism. "could not click: covered" names the
+    reason and not the thing a person needs."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "_order_button", lambda *a, **k: "")
+    monkeypatch.setattr(browser_driver, "_money_ok", lambda *a, **k: "")
+    monkeypatch.setattr(browser_driver, "_say", lambda *a, **k: None)
+    monkeypatch.setattr(browser_driver, "_point_at", lambda *a, **k: None)
+    monkeypatch.setattr(browser_driver, "_describe_load", lambda *a, **k: "")
+    monkeypatch.setattr(browser_driver, "_challenge_note", lambda: "")
+    monkeypatch.setattr(browser_driver, "_drive", lambda *a, **k: (
+        {"error": "covered", "onTop": "Please wait"}, None))
+
+    said = browser_driver._act("click", {"selector": "#btn", "settle": 0}, 5.0)
+
+    assert "Please wait" in said, said
+    assert "on top of it" in said, said
+    assert "not a hidden element" in said, (
+        "the distinction is the point: the usual hidden check passes it, which "
+        "is why it needed a second one: %r" % said)

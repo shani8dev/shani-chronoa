@@ -570,6 +570,22 @@ def _click_script(selector: str, x: Any, y: Any) -> str:
             "  return {error: 'that element is hidden (it holds a value; it is not something to click), so nothing happened'"
             "    + (btns.length ? '. Its form\\'s button: ' + btns.map(t => JSON.stringify(t)).join(' or ') : '')};"
             "}"
+            # **Covered, not hidden.** The check above catches `display:none`
+            # and a zero-size box; it cannot catch an element that is fully laid
+            # out and painted *under* something. `elementFromPoint` at the
+            # element's own centre reports what is actually on top - the same
+            # question browser-use's `paint_order.py` answers with a rectangle
+            # union, asked of the browser instead, because the browser already
+            # knows the paint order.
+            #
+            # Measured need: this session's AGENTS.md records `WINDOW=1024` -
+            # a native surface covering the point being clicked - and a whole
+            # afternoon of correctly-placed clicks that did nothing.
+            "const cx = bx.left + bx.width / 2, cy = bx.top + bx.height / 2;"
+            "const top = document.elementFromPoint(cx, cy);"
+            "if (top && top !== el && !el.contains(top))"
+            "  return {error: 'covered', onTop: (_controlName(top).slice(0, 80)"
+            "    || top.tagName.toLowerCase())};"
             "el.scrollIntoView({block: 'center', inline: 'center'});"
             "if (el.disabled) return {error: 'the element is disabled'};"
             "el.click();"
@@ -766,6 +782,18 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
         script = _click_script(selector, x, y)
         value, load = _drive(lambda w: _start_script(w, script), settle=settle, timeout=timeout)
         if value.get("error"):
+            # **Covered is its own sentence.** The generic one says "could
+            # not click: covered", which names the mechanism and not the
+            # thing the person needs - what is actually on top. browser-use
+            # answers the same question with a rectangle union in
+            # `paint_order.py`; here `elementFromPoint` tells us directly,
+            # so the reply says what is in the way.
+            if value.get("error") == "covered":
+                on_top = value.get("onTop") or "something else"
+                return (f"Error: did not click: {on_top} is on top of it, so "
+                        f"the click would have gone there instead. This is "
+                        f"not a hidden element - it is covered, which is why "
+                        f"the usual hidden check passes it.")
             return f"Error: could not click: {value['error']}."
         what = value.get("label") or value.get("tag") or "the element"
         said = f"Clicked {what!r}" + (f" ({selector})" if selector else f" at ({x}, {y})") + "."
