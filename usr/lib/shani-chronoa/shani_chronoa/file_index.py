@@ -525,7 +525,7 @@ def _under(path: str, root: pathlib.Path) -> bool:
     return child == root or root in child.parents
 
 
-def status(db=None) -> dict:
+def status(root=None, db=None) -> dict:
     """What the index currently holds, without reading anybody's file.
 
     `{indexed, embedded, root, newest}`.
@@ -537,9 +537,15 @@ def status(db=None) -> dict:
     `search()` would have had to run a reindex to find out — which is a slow,
     side-effecting way to ask a question.
 
-    `root` is the directory the indexed files share, because the panel has to
-    name *what* is indexed. `None` when there is nothing, which is a real answer
-    rather than a failure.
+    `root=` confines it, for the same reason `search()` is confined: with two
+    directories indexed, a panel pointed at one of them must not count the files
+    in the other. The first version reported the whole index, so the number under
+    it and the results under it described different things — the same
+    disagreement `search()` had, reached from the other end.
+
+    `root` in the *result* is the directory the indexed files share, because the
+    panel has to name what is indexed. `None` when there is nothing, which is a
+    real answer rather than a failure.
 
     A missing or unreadable index is `{indexed: 0}` and no exception: this is
     what a panel calls on open, before anything exists.
@@ -556,12 +562,18 @@ def status(db=None) -> dict:
         if owns and db is not None:
             db.close()
 
+    if root is not None:
+        try:
+            confine = pathlib.Path(root).resolve()
+        except OSError:
+            confine = pathlib.Path(root)
+        rows = [row for row in rows if _under(row[0], confine)]
     parents = sorted({str(pathlib.Path(row[0]).parent) for row in rows})
-    root = str(pathlib.Path(os.path.commonpath(parents))) if parents else None
+    shared = str(pathlib.Path(os.path.commonpath(parents))) if parents else None
     return {
         "indexed": len(rows),
         "embedded": sum(1 for row in rows if row[1]),
-        "root": root,
+        "root": shared,
         "newest": max((row[2] or 0.0 for row in rows), default=0.0),
     }
 

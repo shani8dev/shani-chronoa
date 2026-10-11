@@ -12,7 +12,8 @@ place the answer **"nothing is indexed yet"** can be visible without asking.
 apart is a confident wrong answer.** Nothing indexed (fixable with the button on
 this page), consent off (fixable in Settings), and nothing matched (a fact about
 the words). `file_index.search()` returns an empty list for all three, so this
-panel reads `file_index.status()` for the first two and says which one it is.
+panel reads `file_index.status()` for the first two and says which one it is,
+confined to the directory the entry names.
 
 **The panel says which search it ran.** `search()` hands back `(hits, how)` and
 `how` is either "keyword and embedding" or an explanation of why it was
@@ -215,7 +216,7 @@ class _FilesView(Gtk.Box):
                 f"Turn on '{CONSENT_KEY}' in Settings to allow it."))
             return
 
-        state = file_index.status()
+        state = file_index.status(root=self._directory())
         if not state["indexed"]:
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK, NOTHING_INDEXED,
@@ -233,7 +234,9 @@ class _FilesView(Gtk.Box):
                    "routers.")
         self._status_slot.append(self.status_recorder.row(
             common.STATUS_OK, how, ""))
-        if state["root"]:
+        # Only when the entry does not already name it: writing on every
+        # refresh would fight a person halfway through typing a path.
+        if state["root"] and state["root"] != self._directory():
             self._path_entry.set_text(state["root"])
 
     # -- the four answers ----------------------------------------------------
@@ -317,7 +320,7 @@ class _FilesView(Gtk.Box):
         not, and sending someone to reindex because their query was too specific
         is the advice this line exists not to give.
         """
-        state = file_index.status()
+        state = file_index.status(root=self._directory())
         if not state["indexed"]:
             self._present(common.empty_state(
                 "folder-search-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))

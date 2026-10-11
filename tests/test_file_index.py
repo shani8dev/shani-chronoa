@@ -719,3 +719,27 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         assert how.startswith("keyword and embedding"), how
         paths = [h["path"] for h in hits]
         assert paths == [str(base / "notes" / "a.txt")], paths
+
+    def test_status_is_confined_to_the_root_it_is_given(self, tmp_path):
+        """**The panel's count and its results describe the same directory.**
+        `status()` reported the whole index, so with two directories indexed a
+        panel pointed at one of them said how many files were in both - while
+        `search()` underneath it answered only about the one named. Same
+        disagreement `search()` had, reached from the other end.
+
+        Measured before the fix: `2 file(s) under <the shared parent>` over a
+        search that returned only `notes/a.txt`.
+        """
+        notes, work, db = self._two(tmp_path)
+        both = F.status(db=db)
+        assert both["indexed"] == 2, both
+
+        notes_only = F.status(root=notes, db=db)
+        assert notes_only["indexed"] == 1, notes_only
+        assert notes_only["root"] == str(notes), notes_only
+        work_only = F.status(root=work, db=db)
+        assert work_only["indexed"] == 1, work_only
+
+    def test_status_with_no_root_still_reports_everything(self, tmp_path):
+        notes, work, db = self._two(tmp_path)
+        assert F.status(db=db)["indexed"] == 2
