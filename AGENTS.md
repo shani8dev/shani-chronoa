@@ -10237,6 +10237,75 @@ statements together on one line, so `tools.py` → `outcome_model` → `learning
 raises `SyntaxError` and **every** import of the package fails. Verified against
 a repaired copy outside the tree, never by editing their file.
 
+## The Routines surface, and the row that escaped nothing in either field (2026-10-11)
+
+Asked for the GUI for needed things, so the audit ran before the build: **all 57
+gated consent keys have a label** (clean), and **42 of 186 modules are referenced
+by no GUI at all**. Most of those are legitimately backend - engines and helpers.
+One is not: `routines`, which is Siri Shortcuts and Google Assistant routines as a
+saved *request*, reachable **only by a phrase you had to already remember**.
+
+`skills/routines.py` saved one and `routines.expand` ran it, and nothing let a
+person list them, see their trigger phrases, or see what each one asks for.
+`gui/surfaces/routines.py` is that page.
+
+**Run goes through the window's own `submit_text()`**, the same path `--ask=` and
+the desktop entry use, because a routine is a saved *request* the model plans -
+not a saved tool list. A panel that ran it another way would be a second
+implementation of "turn a request into tools", and it would run the request
+*outside* the consent gates.
+
+### `common.row` escaped nothing, in either field, and said it escaped one
+
+Its docstring: *"a model-supplied title goes through `set_markup` after escaping."*
+Measured - **it escaped nothing**:
+
+    set_title("weather & news")   -> Gtk-WARNING: Entity did not end with a
+                                     semicolon; escape ampersand as &amp;
+    set_subtitle("a & b")          -> the same parse error
+
+Both the title *and* the subtitle are Pango markup. An ampersand is an ordinary
+character in a name somebody typed, and **three surfaces had each hand-rolled
+`GLib.markup_escape_text`** before calling the helper that claimed to do it - one
+contract, three workarounds, every new caller left to find out. Both fields are
+escaped in `common.row` now and the three workarounds are removed, because
+escaping in both places double-escapes and a rules file's `&` renders as `&amp;`.
+
+**Two controls of mine could not fail before this was measurable**, both of which
+passed while the escaping was removed:
+
+- comparing `get_label()` - it returns the source string whether or not the text
+  was parsed, so an escaped row and an unescaped one compare equal;
+- a Python `logging` handler - **GLib does not log through Python.**
+
+The measurement that works redirects **fd 2** to a file and looks for Pango's own
+refusal.
+
+### Two bugs found by building the page, not by reading it
+
+- `refresh()` appended a **new add-form on every call**, so a page left open
+  stacked one per refresh. The whole body is rebuilt now, the shape `goals.py`
+  uses - which also avoids `common.clear()` on an `Adw.PreferencesGroup`, which
+  logs *"tried to remove non-child"*.
+- The icon test caught a duplicate: `view-list-ordered-symbolic` was Goals'. It is
+  `appointment-soon-symbolic`, checked against the installed Adwaita theme rather
+  than guessed.
+
+### And the destructive trap, hit once
+
+I ran `git checkout -- senses.py` to undo a control mutation. It is a path
+operation in a shared tree, it silently reverted my own edit to that file, and the
+rule against it exists for exactly that reason. Re-applied by hand, nothing else
+touched, recorded here so the cost is visible.
+
+### Not my failures, proven rather than assumed
+
+12 GUI suites: 3 failures and 95 errors, all the concurrent session's in-flight
+`background.py` (it calls a missing `inventory`), `my_files` and `meetings`. The
+proof is that **`goals` - a long-standing surface - errors identically to
+`routines`**, because the module-scoped fixture builds every surface and raises on
+`background` before reaching any of them.
+
 ## Meeting notes have never once worked, and this is how it stayed hidden (2026-10-11)
 
 Asked whether the 1000-char hearing cap applies to meeting transcription. It does
@@ -10682,3 +10751,54 @@ by the disk read anyway"*, and it falls back to pageable rather than failing - i
 the discipline for any "keep this hot" branch added here later: bound a
 non-reclaimable cost by the size of what needs it, state the number that
 justified the bound, and always have the fallback.
+
+## The cross-check that was never performed (2026-10-11)
+
+edge0's `HARVEST-EDGE0.md` identifies the one place Chronoa does arithmetic on a
+third-party file format and proposes a second, independent derivation of
+`kv_bytes_per_token` from the tensors rather than the metadata, because a test
+written from the same reading as the module agrees with the module whether or not
+the reading is right.
+
+**That work had already landed** - `ctxfit.kv_width_from_shapes` exists, with
+edge0's own reasoning quoted in its docstring. And it had **no caller in `usr/` at
+all**. Documented, unit tested, and never compared against anything: a
+cross-check nobody performs is not a cross-check, and the module could have been
+misreading every convention in the GGUF header for its whole life with nothing
+noticing, because the two routes never met.
+
+`ctxfit.kv_width_disagreement*()` is the meeting, and `local_llm._context_arg()`
+is the caller that logs what it says. On a doctored header, on a CPU-only box:
+
+```
+LOG WARNING llama-server context: the GGUF header and the model's own tensors
+disagree - the GGUF header says the KV width is 384 elements but the K/V
+projection tensors are 192 wide; one of the two readings is wrong, and the header
+is the one being used
+```
+
+Three decisions in it:
+
+- **A disagreement is reported and not acted on.** The header stays the authority
+  because it is the only route that knows about shared caches and hybrid layer
+  patterns; silently switching on one file would trade a visible wrong number for
+  an invisible right one. Pinned by `test_a_disagreement_does_not_change_the_
+  decision` - the returned context is byte-identical either way.
+- **`None` means "could not compare", never "they agree".** A caller reading a
+  None as agreement has a check that passes by not running. `test_no_comparison_
+  is_not_the_same_answer_as_agreement` holds that, including the per-layer
+  `head_count_kv` list case where the shape reader legitimately refuses.
+- **The scoping mistake I made first is pinned by its own test.** The check was
+  wired inside `if info and weights and total:`, and `total` is
+  `total_vram_bytes()` - None on a CPU-only machine. Chronoa's default local
+  brain runs on CPU, so as first wired the check never ran where it matters most,
+  and no test would have failed because they would all have skipped on the
+  missing model anyway. `test_it_runs_on_a_machine_with_no_vram` fails if it is
+  scoped back inside.
+
+`tools/mutations/kv_parity.py`: **4 mutations, 4 caught, 0 survivors, 0
+equivalent**, run with `CHRONOA_KV_PARITY_MODEL` set so the real-file route is
+exercised and not only the shapes fixture. The real-GGUF tests skip and say so
+without the variable - the convention `test_ctxfit.py`'s parity test already set,
+and deliberately **no** `Path.home()` fallback, because the suite redirects HOME
+per test and a path resolved at fixture time is the scratch directory.

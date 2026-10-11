@@ -282,3 +282,85 @@ def gguf_model_info(path) -> Optional[dict]:
         return out or None
     except Exception:  # noqa: BLE001 - a corrupt or foreign file is not fatal here
         return None
+
+
+def metadata_kv_width(model_info: dict) -> Optional[int]:
+    """`head_count_kv x head_dim`, the width `kv_bytes_per_token` works from.
+
+    Kept beside `kv_width_from_shapes` so the two halves of the comparison are
+    read together. `head_count_kv` may be a scalar or a per-layer **list**; a
+    list means the widths differ per layer, which is the case
+    `kv_width_from_shapes` refuses (it returns 0) - so this returns None rather
+    than picking one layer's value and pretending it is the model's.
+    """
+    info = model_info or {}
+    arch = str(info.get("general.architecture") or "")
+    if not arch:
+        return None
+    kv_heads = info.get(f"{arch}.attention.head_count_kv")
+    if isinstance(kv_heads, (list, tuple)):
+        return None
+    heads = _int(info.get(f"{arch}.attention.head_count"))
+    embedding = _int(info.get(f"{arch}.embedding_length"))
+    kv = _int(kv_heads)
+    if not (heads and embedding and kv):
+        return None
+    return kv * (embedding // heads)
+
+
+def kv_width_disagreement_from_shapes(shapes, model_info: dict) -> Optional[str]:
+    """The comparison itself, over shapes a caller already holds.
+
+    Split from `kv_width_disagreement` for the same reason `_read_tail` takes a
+    path and `speech_gate.wait` takes a clock: the interesting part is a function
+    of data a test can supply exactly, and a run against a real GGUF is a second,
+    narrower check that the file-reading half works.
+    """
+    truth = metadata_kv_width(model_info)
+    if truth is None:
+        return None
+    read = kv_width_from_shapes(shapes or ())
+    if not read:
+        return None
+    if read == truth:
+        return None
+    return (f"the GGUF header says the KV width is {truth} elements but the "
+            f"K/V projection tensors are {read} wide; one of the two readings is "
+            f"wrong, and the header is the one being used")
+
+
+def kv_width_disagreement(path, model_info: dict) -> Optional[str]:
+    """A sentence naming the two widths, when the file contradicts the header.
+
+    **The comparison `kv_width_from_shapes` was written for and never got.** The
+    function is documented, tested, and had no caller in `usr/` at all - a second
+    derivation of one quantity that nothing ever compared against the first,
+    which is a cross-check nobody performs.
+
+    It is wired in `local_llm.context_fit()` rather than inside
+    `kv_bytes_per_token` because that function takes a dict, not a path: only a
+    caller holding the file can read the tensors.
+
+    Returns None when the comparison cannot be made - no usable metadata, no
+    readable tensors, a per-layer `head_count_kv`, or fused/grouped attention the
+    shape reader refuses. None means *no comparison*, which is different from
+    *no disagreement*: a caller must not read a None as agreement.
+
+    A disagreement is reported and **not acted on**. The metadata stays the
+    authority for the context decision because it is the only route that knows
+    about shared caches and hybrid layer patterns, and silently switching to the
+    shapes on the strength of one file would trade a visible wrong number for an
+    invisible right one. What changes is that the wrong number is now *sayable*.
+    """
+    truth = metadata_kv_width(model_info)
+    if truth is None or not path:
+        return None
+    try:
+        from gguf import GGUFReader
+
+        shapes = {t.name: [int(d) for d in t.shape]
+                  for t in GGUFReader(str(path)).tensors}
+    except Exception:  # noqa: BLE001 - a foreign file is not fatal here
+        return None
+    return kv_width_disagreement_from_shapes(
+        [(name, shape) for name, shape in sorted(shapes.items())], model_info)

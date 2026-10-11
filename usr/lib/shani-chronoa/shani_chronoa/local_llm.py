@@ -1031,6 +1031,26 @@ def _context_arg() -> str:
         info = ctxfit.gguf_model_info(current_link())
         weights = os.path.getsize(current_link()) if current_link().exists() else 0
         total = ctxfit.total_vram_bytes()
+        # **The cross-check runs whenever a header was read, not only on a GPU.**
+        # It was first wired inside the `if ... and total:` branch below, which
+        # needs `total_vram_bytes()` - and on the CPU-only machine Chronoa's
+        # default local brain runs on that is None, so the check never ran at
+        # all. Comparing two readings of one file needs the file and nothing
+        # else. A disagreement is reported and **not acted on**: the header stays
+        # the authority because it is the only route that knows about shared
+        # caches and hybrid layer patterns, and silently switching on one file
+        # would trade a visible wrong number for an invisible right one. What
+        # changes is that the wrong number is now sayable.
+        if info:
+            try:
+                disagreement = ctxfit.kv_width_disagreement(current_link(), info)
+            except Exception:  # noqa: BLE001 - a check must never cost the fit
+                disagreement = None
+            if disagreement:
+                logger.warning(
+                    "llama-server context: the GGUF header and the model's own "
+                    "tensors disagree - %s", disagreement)
+
         if info and weights and total:
             per_token = ctxfit.kv_bytes_per_token(info) or None
             chosen = ctxfit.context_that_fits(
