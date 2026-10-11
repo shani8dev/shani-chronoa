@@ -132,6 +132,8 @@ _IMPL = {
     "search_documents": "shani_chronoa.skills.search_documents",
     "calendar_events": "shani_chronoa.skills.calendar_events",
     "phone": "shani_chronoa.skills.phone",
+    "lan_phone": "shani_chronoa.skills.lan_phone",
+    "screen_to_phone": "shani_chronoa.skills.screen_to_phone",
     "airplane_mode": "shani_chronoa.skills.airplane_mode",
     "desktop_setting": "shani_chronoa.skills.desktop_setting",
     "set_theme": "shani_chronoa.skills.set_theme",

@@ -4,7 +4,7 @@
     <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="29"/>
     <uses-permission android:name="android.permission.BLUETOOTH"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <application android:label="Chronoa Cast" android:allowBackup="false">
+    <application android:label="Chronoa" android:allowBackup="false">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

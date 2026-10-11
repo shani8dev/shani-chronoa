@@ -42,7 +42,7 @@ public class CastService extends Service {
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel("cast", "Screen sharing", NotificationManager.IMPORTANCE_LOW));
         Notification n = new Notification.Builder(this, "cast").setContentTitle("Sharing screen with your computer")
-                .setContentText("Over Bluetooth. Open Chronoa Cast to stop.").setSmallIcon(android.R.drawable.ic_menu_share)
+                .setContentText("Over Bluetooth. Open Chronoa to stop.").setSmallIcon(android.R.drawable.ic_menu_share)
                 .build();
         startForeground(1, n);
         final String address = intent.getStringExtra("address");
