@@ -246,3 +246,38 @@ class TestALongMeetingIsNotSilentlyTruncated:
         assert f"{len(calls)} sections" in note, (
             "the note does not say how many sections it came from, so a reader "
             "cannot tell the whole meeting was used")
+
+
+class TestAPathFromTheModel:
+    """**A str from `arguments` reached a function typed `Path`.** `notes` takes a
+    `path` from the model, and `meeting.transcribe` declared its parameter as
+    `Path` and trusted the annotation - so the real call passed through to
+    `recordings.segments_for`, which reaches for `src.name`, and the tool answered
+    with `AttributeError: 'str' object has no attribute 'name'` instead of a
+    sentence. Found by running the action, not by reading it.
+    """
+
+    def test_a_string_path_is_a_sentence_not_a_traceback(self):
+        out, why = M.transcribe("/tmp/definitely-not-here.wav")
+        assert out is None
+        assert "could not be read" in why or "no audio" in why
+
+    def test_a_path_from_a_test_is_coerced(self, tmp_path):
+        """**The control.** Coercing everything to Path would make both tests
+        pass while nothing worked."""
+        import pathlib
+        target = tmp_path / "a.wav"
+        target.write_bytes(b"RIFFnot really")
+        out, why = M.transcribe(target)
+        assert out is None and why, "a bogus WAV was accepted"
+
+    def test_a_none_path_is_refused(self):
+        out, why = M.transcribe(None)
+        assert out is None and why
+
+    def test_the_skill_answers_with_the_sentence(self):
+        from shani_chronoa.skills import meeting as S
+        on = type("C", (), {"get_bool": lambda s, k, d=False: True})()
+        out = S._run({"action": "notes", "path": "/tmp/nope.wav", "_config": on})
+        assert "could not be read" in out or "no audio" in out, out
+        assert "Traceback" not in out

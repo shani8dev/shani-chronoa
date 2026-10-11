@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import logging
 import time
-from pathlib import Path
 from typing import List, NamedTuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -169,14 +168,29 @@ def _reason_from_recorder(recorder) -> str:
     return END_CANCELLED if reason == "cancelled" else END_CANCELLED
 
 
-def transcribe(wav: Path, language: str = "auto", with_speakers: bool = True):
-    """`(segments, why-not)` for one recorded meeting."""
+def transcribe(wav, language: str = "auto", with_speakers: bool = True):
+    """`(segments, why-not)` for one recorded meeting.
+
+    `wav` is coerced to a `Path` because the skill hands it a **string** from the
+    model's `path` argument, and `recordings.segments_for` reaches for
+    `src.name` - the first version typed the parameter as `Path` and trust that
+    annotation, so `notes` on a real path raised `AttributeError: 'str' object has
+    no attribute 'name'` instead of answering. A path that is not one is a
+    sentence, never a traceback.
+    """
+    import pathlib
     from shani_chronoa import recordings
+    try:
+        wav = pathlib.Path(wav)
+    except TypeError as exc:
+        return None, f"that is not a path ({exc})"
     try:
         segments = recordings.segments_for(wav, language=language,
                                           with_speakers=with_speakers)
     except recordings.RecordingError as exc:
         return None, str(exc)
+    except OSError as exc:
+        return None, f"that file could not be read ({exc})"
     return segments, ""
 
 
