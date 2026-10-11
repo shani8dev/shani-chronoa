@@ -41,6 +41,11 @@ from gi.repository import GLib, Gtk  # noqa: E402
 
 SURFACE_ID = "listening"
 TITLE = "Listening"
+#: Required by `surfaces.all_surfaces()` (TITLE, ICON, build) - a surface
+#: without one raises AttributeError inside that loop, which takes the
+#: whole registry down rather than just this page. Found by walking the
+#: built window, not by reading the module.
+ICON = "audio-input-microphone-symbolic"
 
 
 def _strip(box: Gtk.Box) -> None:

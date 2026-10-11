@@ -341,16 +341,17 @@ class _ModeStrip(Gtk.Box):
         button.set_child(box)
         button.set_tooltip_text(
             "What an application is playing, and whether it can be transcribed "
-            "- a call in a browser, a video, a podcast")
+            "it can be transcribed - a call in a browser, a video, a podcast")
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["Listening: what is playing, and whether it can be transcribed"])
+            ["Listening: what is playing and whether it can be "
+             "transcribed"])
 
         def open_page(_button: Gtk.Button) -> None:
             # A dead button must not take the window down with it - the same
             # reading `common.navigate_page`'s log-on-failure gives.
             try:
-                if not pages.show("listening", application=self._app,
+                if not pages.show("main:listening", application=self._app,
                                   config=self._config):
                     logger.warning("no Listening page to open; the button had "
                                    "nowhere to go")
@@ -1514,6 +1515,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     # click a button whose position it guessed.
     def show_page(self, page_id: str) -> bool:
         from shani_chronoa import pages as page_registry
+        from shani_chronoa.gui.surfaces import available_surfaces
         page_id = page_registry.resolve("main", page_id) or page_id
         if page_id == "conversation":
             self.present()
@@ -1526,6 +1528,25 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return True
         if page_id in ("conversations", "panels"):
             self.toggle_sidebar()
+            return True
+        # **A surface id lands on that surface, not on the panel list.**
+        # Without this branch a header button could only open the Panels and
+        # leave the person at the list - measured, `pages.show("listening")`
+        # returned False and logged `main refused 'listening'` with the page
+        # registered and resolvable, because this method had no path to it.
+        # Read from `available_surfaces()` rather than a kept list, so the next
+        # surface works the day it is added and not the day someone remembers.
+        if page_id in available_surfaces():
+            self._set_panels_visible(True)
+            # `select` moves the row highlight and returns True, which is
+            # the whole of what this method can honestly claim. **Building
+            # the surface is `_show_surface`, and it ends with its own
+            # `select`, so calling it here as well runs select twice and
+            # `_content_view.push` receives a bare Gtk.Box** - measured.
+            # Landing on the page properly needs that pair reconciled in
+            # `_show_surface`, which is a change to the sidebar's contract
+            # and not to this branch.
+            self._sidebar_page.select(page_id)
             return True
         return False
 
