@@ -395,15 +395,20 @@ def test_a_runaway_transcript_is_capped(monkeypatch, hearing_mod, utterance):
     """A whisper hallucination on a noise burst must not eat the turn's budget."""
     _fake_config(monkeypatch, hearing_mod, allowed=True)
     _fake_recorder(monkeypatch, hearing_mod, audio_path=utterance)
-    _fake_stt(monkeypatch, hearing_mod, text="word " * 2000)
+    # A runaway that is long but **not** a repetition. `"word " * 2000` was the
+    # old fixture, and it no longer reaches this test at all:
+    # `collapse_repetitive_artifacts` reduces it to four characters first, so the
+    # cap never fired and every number below measured nothing while still
+    # passing for the wrong reason. See `TestARepetitionRunawayIsCollapsed`.
+    runaway = " ".join(f"w{i}" for i in range(2000))
+    assert len(runaway) > hearing_mod.MAX_TRANSCRIPT_CHARS
+    _fake_stt(monkeypatch, hearing_mod, text=runaway)
 
     result = hearing_mod.run({})
 
-    # `run()` transcribes and strips, so the cap is measured against the
-    # stripped 9999 chars, not the 10000 the fake was handed.
-    assert result.metadata["chars_dropped"] == 9999 - hearing_mod.MAX_TRANSCRIPT_CHARS
-    assert result.content.count("word") == hearing_mod.MAX_TRANSCRIPT_CHARS // 5
+    assert result.metadata["chars_dropped"] == len(runaway) - hearing_mod.MAX_TRANSCRIPT_CHARS
     assert "[...] (truncated)" in result.content
+    assert len(result.content) < len(runaway)
 
 
 def test_the_loader_registers_the_sense(gsettings_env):
@@ -414,3 +419,37 @@ def test_the_loader_registers_the_sense(gsettings_env):
     assert _sense_problem(senses["hearing"]) == ""
     assert senses["hearing"].is_ambient() is False
     assert senses["hearing"].poll_interval is None
+
+
+class TestARepetitionRunawayIsCollapsed:
+    """The artefact the old cap test was quietly re-purposed for.
+
+    `"word " * 2000` is a runaway *and* a repetition. Two mechanisms now see it,
+    and the collapse runs first - which is the better behaviour, and which meant
+    the cap's own coverage went away without its test saying so.
+    """
+
+    def test_a_repetition_runaway_never_reaches_the_cap(self, monkeypatch, hearing_mod, utterance):
+        _fake_config(monkeypatch, hearing_mod, allowed=True)
+        _fake_recorder(monkeypatch, hearing_mod, audio_path=utterance)
+        _fake_stt(monkeypatch, hearing_mod, text=" ".join(["word"] * 2000))
+
+        result = hearing_mod.run({})
+
+        assert result.metadata["chars_dropped"] == 0, (
+            "the collapse should have caught this first, so the cap has nothing to do")
+        assert "[...] (truncated)" not in result.content, result.content
+        assert result.content.count("word") == 1, result.content
+
+    def test_and_the_cap_still_works_for_a_long_genuine_transcript(
+            self, monkeypatch, hearing_mod, utterance):
+        """The control: the cap is not dead just because the collapse runs first."""
+        runaway = " ".join(f"v{i}" for i in range(2000))
+        assert len(runaway) > hearing_mod.MAX_TRANSCRIPT_CHARS
+        _fake_config(monkeypatch, hearing_mod, allowed=True)
+        _fake_recorder(monkeypatch, hearing_mod, audio_path=utterance)
+        _fake_stt(monkeypatch, hearing_mod, text=runaway)
+
+        result = hearing_mod.run({})
+        assert "[...] (truncated)" in result.content
+        assert result.metadata["chars_dropped"] == len(runaway) - hearing_mod.MAX_TRANSCRIPT_CHARS
