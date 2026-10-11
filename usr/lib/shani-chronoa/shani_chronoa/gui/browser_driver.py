@@ -452,6 +452,34 @@ def _point_at(selector: str, x: Any = None, y: Any = None, timeout: float = 15.0
 # are put to the person through Chronoa's own question dialog, once per site
 # for a few minutes; with nobody to ask, or no answer, they do not happen.
 
+CONTROL_NAME_JS = (
+    "(function (el) {"
+    "  const direct = String(el.innerText || el.value ||"
+    "      el.getAttribute('aria-label') || '').trim();"
+    "  if (direct) return direct;"
+    "  const own = String(el.getAttribute('title') || '').trim();"
+    "  if (own) return own;"
+    "  const image = el.querySelector('img');"
+    "  if (image) {"
+    "    for (const attr of ['alt', 'title', 'aria-label']) {"
+    "      const v = String(image.getAttribute(attr) || '').trim();"
+    "      if (v) return v;"
+    "    }"
+    "  }"
+    "  const svg = el.querySelector('svg');"
+    "  if (svg) {"
+    "    for (const attr of ['aria-label', 'title']) {"
+    "      const v = String(svg.getAttribute(attr) || '').trim();"
+    "      if (v) return v;"
+    "    }"
+    "    const cls = String(svg.getAttribute('class') || '');"
+    "    const icon = (cls.match(/(?:icon|glyph|symbol)[-a-z0-9_]*/) || [''])[0];"
+    "    if (icon) return icon;"
+    "  }"
+    "  return '';"
+    "})"
+)
+
 _PAYMENT_FIELD_JS = (
     "const el = document.querySelector(SEL); if (!el) return {payment: false};"
     "const ac = (el.getAttribute('autocomplete') || '').toLowerCase();"
@@ -459,8 +487,9 @@ _PAYMENT_FIELD_JS = (
     "return {payment: ac.startsWith('cc-') || /card ?number|credit ?card|creditcard|cc-?(num|number|csc|exp)|\\bcvv\\b|\\bcvc\\b|security ?code|card ?(expir|month|year)/i.test(words)};"
 )
 _ORDER_BUTTON_JS = (
+    "const _controlName = " + CONTROL_NAME_JS.strip() + ";"
     "const el = document.querySelector(SEL); if (!el) return {order: false};"
-    "const label = String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim();"
+    "const label = _controlName(el);"
     "return {order: /\\b(pay|purchase|place (your )?order|buy now|complete (purchase|order|payment)|confirm (and )?pay)\\b/i.test(label), label: label.slice(0, 60)};"
 )
 _MONEY_WINDOW_S = 300.0
@@ -505,11 +534,28 @@ def _order_button(selector: str, timeout: float) -> str:
 # --- the fixed page scripts ----------------------------------------------------
 
 
+#: One definition of "what is this control called", shared by every script below.
+#:
+#: **Ported from `harness-study/browser-use`**, whose DOM serializer walks into
+#: an interactive element's descendant `<img>` for `alt`, `title` and
+#: `aria-label`. Without it a control whose only content is an icon has **no
+#: name at all**: `innerText`, `value` and `aria-label` are all empty, so the
+#: reply reads `Clicked ''` and the model can never tell two icon buttons apart.
+#: Measured here before the change: that is exactly what the reply said.
+#:
+#: The fallback order is the same one browser-use uses, plus the element's own
+#: `title` - and it **says when it could not find a name** rather than returning
+#: an empty string, because a blank label is indistinguishable from a control
+#: with nothing to say.
+
+
+
 def _click_script(selector: str, x: Any, y: Any) -> str:
     target = (f"document.querySelector({json.dumps(selector)})" if selector
               else f"document.elementFromPoint({float(x)}, {float(y)})")
     where = json.dumps(selector) if selector else json.dumps(f"({x}, {y})")
-    return (f"const el = {target};"
+    return ("const _controlName = " + CONTROL_NAME_JS.strip() + ";"
+            f"const el = {target};"
             f"if (!el) return {{error: 'nothing matches ' + {where}}};"
             # Clicking a hidden element does nothing, and this used to answer
             # "Clicked '9696'" for a hidden <input> holding a flight number - so a
@@ -528,7 +574,7 @@ def _click_script(selector: str, x: Any, y: Any) -> str:
             "if (el.disabled) return {error: 'the element is disabled'};"
             "el.click();"
             "return {ok: true, tag: el.tagName.toLowerCase(),"
-            " label: String(el.innerText || el.value || el.getAttribute('aria-label') || '').trim().slice(0, 80)};")
+            " label: _controlName(el).slice(0, 80)};")
 
 
 def _type_script(selector: str, text: str, carry_on: bool = False) -> str:
