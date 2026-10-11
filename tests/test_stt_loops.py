@@ -166,3 +166,50 @@ def test_the_existing_behaviour_still_stands():
     # so it survives - I asserted otherwise first, and running it said so.
     assert clean_transcription("a") == ""
     assert clean_transcription("uh") == "uh"
+
+
+# --- the second path, which was a measured second instance ------------------
+
+
+class _FakeEngine:
+    model = "base"
+
+    def __init__(self, text):
+        self._text = text
+
+    def transcribe(self, path):
+        return self._text
+
+
+def test_the_heard_sound_path_collapses_too():
+    """`senses/hearing.py` never called `clean_transcription`.
+
+    A percept is injected into every turn's context while it lives, so an
+    ambient room producing a recogniser loop was a fact about the room on every
+    request. Measured: 239 characters of "thanks for watching" repeated twelve
+    times, forwarded unchanged, while the live-turn path dropped the same text.
+    """
+    from shani_chronoa.senses import hearing
+
+    loop = " ".join(["thanks for watching"] * 12)
+    assert len(loop) == 239
+    out = hearing.transcribe(_FakeEngine(loop), "/tmp/none.wav")
+
+    assert out == "thanks for watching", (
+        f"the loop reached the model as a percept; got {out!r}")
+    assert len(out) < 32, out
+
+
+def test_the_sense_keeps_one_copy_rather_than_dropping_it():
+    """A percept that collapsed to nothing would claim nothing was heard.
+
+    The live-turn path drops known silence phrases because a turn with no speech
+    is "nothing said". A sense's whole subject is what *was* heard, so it reduces
+    the artefact to one copy and leaves the phrase - which is why the collapse
+    lives in one function both paths call rather than the drop living in it.
+    """
+    from shani_chronoa.senses import hearing
+
+    assert hearing.transcribe(_FakeEngine(" ".join(["URL"] * 9)), "/tmp/n.wav") == "URL"
+    assert hearing.transcribe(_FakeEngine("the door just closed"), "/tmp/n.wav") \
+        == "the door just closed"

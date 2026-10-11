@@ -315,6 +315,15 @@ def transcribe(engine_stt: STT, audio_path: str) -> str:
     reasons here, so the caller never has to distinguish "the model vanished
     between the check and the call" from "the engine produced no text", and
     neither reaches the user as a traceback.
+
+    The repetition collapse is applied here too, and **not applying it was a
+    measured second instance of the same defect**. A percept is injected into
+    every turn's context while it lives, so a recogniser loop an ambient room
+    produces - measured at 239 characters of "thanks for watching" repeated
+    twelve times - arrived as a fact about the room on every request, while the
+    live-turn path through `stt.clean_transcription` dropped the identical text.
+    One collapse, two paths, because the loop is the engine's artefact and not
+    the caller's.
     """
     engine = "parakeet-cli" if isinstance(engine_stt, ParakeetSTT) else "whisper.cpp"
     try:
@@ -323,7 +332,7 @@ def transcribe(engine_stt: STT, audio_path: str) -> str:
         raise HearingError(str(e)) from e
     except Exception as e:  # noqa: BLE001 - one bad recording must not raise out of a sense
         raise HearingError(f"{engine} could not transcribe the recording: {e}") from e
-    text = (text or "").strip()
+    text = stt.collapse_repetitive_artifacts((text or "").strip())
     if not text:
         raise HearingError(f"{engine} transcribed the recording to nothing")
     return text
