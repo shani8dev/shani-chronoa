@@ -574,6 +574,11 @@
       <summary>Let Chronoa index and search your own files by meaning</summary>
       <description>When true, Chronoa may read a directory's text files and PDFs, embed them with the small local embedding model, and keep an index you can search. Off by default, and it stays off until you name a directory - the index is only ever built for a path you asked about. The embedding model is a 146 MB download; without it the search still works, but only by keyword, and it says so rather than returning results that look semantic. Files that cannot be read - a binary, an encrypted PDF, one with no permission - are named in the report instead of being skipped quietly.</description>
     </key>
+    <key name="meeting-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa record a whole meeting</summary>
+      <description>When true, Chronoa may open the microphone and hold it for up to two hours, then write a transcript with who said what and notes from the local model. Off by default, and deliberately so: an ordinary spoken turn holds the microphone for twenty seconds, dictation for five minutes, and this for hours - with other people's voices in it. Everything it writes stays on this computer: whisper.cpp transcribes, sherpa-onnx tells voices apart, the local model writes the notes, and nothing is uploaded. A recording that fails part-way is reported as a fragment, never as the whole meeting.</description>
+    </key>
     <key name="ir-remote-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa send and receive infrared remote-control codes</summary>

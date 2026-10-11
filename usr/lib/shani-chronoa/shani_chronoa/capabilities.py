@@ -212,6 +212,7 @@ GATED: dict[str, str] = {
     # the shared `nfc-enabled` one. "Turn on the TV" is not "read a tag".
     "ir_remote": "ir-remote-enabled",
     "search_my_files": "file-index-enabled",
+    "meeting": "meeting-enabled",
     "lan_phone": "lan-phone-enabled",
     "screen_to_phone": "screen-share-enabled",
     # Placing and answering calls. Its own switch because a call rings *someone
@@ -417,6 +418,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # test_capabilities refuses it. It belongs beside them: it is the same
     # question, asked by meaning rather than by name or substring.
     "search_my_files": ("Files", "Search your own files by meaning"),
+    "meeting": ("Sound", "Record a meeting and write notes"),
     # Two phones-by-radio skills: one finds a phone on the network it is
     # already on, the other shows this screen to one over Bluetooth.
     # Separate rows because they are separate disclosures - a phone seen
@@ -747,6 +749,7 @@ GATE_NAMES: dict[str, str] = {
     "calendar-read-enabled": "Let Chronoa read your calendar",
     "calendar-sense-enabled": "Let Chronoa act before calendar events",
     "file-index-enabled": "Let Chronoa index and search your own files",
+    "meeting-enabled": "Let Chronoa record a whole meeting",
     "phone-control-enabled": "Let Chronoa use your paired phone",
     "lan-phone-enabled": "Let Chronoa find phones on the same Wi-Fi",
     "screen-share-enabled": "Let Chronoa share this screen with a phone",

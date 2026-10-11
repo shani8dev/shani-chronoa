@@ -336,6 +336,18 @@ class PrivacyPage:
              "never a bank card or a transit pass, which rewriting would break. Most laptops have "
              "no NFC reader at all, and that is reported as having none.",
              "reading or writing an NFC tag is refused while this is off"),
+            ("Let Chronoa record a whole meeting", "meeting-enabled",
+             "Off: Chronoa will not open the microphone for a meeting, and "
+             "'meeting' says so rather than recording. On: it may hold the "
+             "microphone for up to two hours, then write a transcript with who "
+             "said what and notes from the local model. Its own switch, and off "
+             "by default deliberately - an ordinary spoken turn holds the "
+             "microphone for twenty seconds and dictation for five minutes, "
+             "while this is hours long and has other people's voices in it. "
+             "Everything it writes stays on this computer: whisper.cpp "
+             "transcribes, sherpa-onnx tells voices apart, the local model "
+             "writes the notes, and nothing is uploaded.",
+             "recording a meeting is refused while this is off"),
             ("Let Chronoa index and search your own files", "file-index-enabled",
              "Off: Chronoa neither reads your files nor keeps an index, so nothing "
              "about them can be searched. On: 'search_my_files' reads a directory "
