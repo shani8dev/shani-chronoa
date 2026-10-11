@@ -601,11 +601,27 @@ def display(name: "str | None" = None) -> Display:
     return Display(name)
 
 
-def available() -> bool:
-    """False when there is no X client library or no display to open."""
+def unavailable_reason() -> str:
+    """Why the X route cannot run, or "" when it can.
+
+    **The two halves need opposite fixes**, which is why they are not one
+    sentence: no client library means a package is missing, and no server means
+    a variable is wrong - or that this is a Wayland session with no Xwayland, in
+    which case no amount of installing helps and the portal is the route.
+    """
+    if not _load():
+        return ("no X client library: this machine has neither libX11 nor "
+                "libXtst, and the X route needs both")
     try:
         with Display() as d:
             d.size()
-        return True
-    except XError:
-        return False
+    except XError as exc:
+        return ("no X server at %s: %s. On a Wayland session an X11 client only "
+                "exists for Xwayland, so this may mean there is no X11 route "
+                "here at all" % (os.environ.get("DISPLAY") or "(unset)", exc))
+    return ""
+
+
+def available() -> bool:
+    """False when there is no X client library or no display to open."""
+    return not unavailable_reason()

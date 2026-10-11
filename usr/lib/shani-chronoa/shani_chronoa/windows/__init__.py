@@ -27,7 +27,6 @@ nearby and reporting success.
 from __future__ import annotations
 
 import os
-import shutil
 from dataclasses import asdict, dataclass
 from typing import List, Optional, Tuple
 
@@ -124,10 +123,17 @@ def detect() -> Tuple[Optional[Backend], str]:
             f"this Wayland desktop ({desktop.strip() or 'unnamed'}) has no window "
             "control Chronoa uses - GNOME and Plasma do")
     if os.environ.get("DISPLAY"):
-        if shutil.which("xdotool"):
-            from shani_chronoa.windows.x11 import X11Backend
-            return X11Backend(), ""
-        return None, "this is X11, and xdotool is not installed"
+        # **This gate asked about `xdotool`, which is not on either ShaniOS
+        # image** - so the backend it was gating could never run where it ships,
+        # and said "xdotool is not installed" rather than why. It asks whether
+        # the X route can run now, which is the question the answer is used for.
+        from shani_chronoa import x11
+
+        reason = x11.unavailable_reason()
+        if reason:
+            return None, "this is X11, and " + reason
+        from shani_chronoa.windows.x11 import X11Backend
+        return X11Backend(), ""
     return None, "no display is set - this is a headless login or a service without a desktop"
 
 
