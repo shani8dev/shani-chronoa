@@ -104,6 +104,33 @@ _WEBKIT_VERSION = ""
 _WEBKIT_TRIED = False
 
 
+def _safe_download_name(name):
+    """Reduce a **server-controlled** filename to a bare, safe basename.
+
+    Ported from `harness-study/browser-use`'s
+    `downloads_watchdog._sanitize_download_filename`, which reduces a CDP
+    `suggestedFilename` the same way. The name is chosen by the *server*, so it
+    is untrusted input in exactly the way a path from a tool argument is.
+
+    Measured here: a response carrying
+    `Content-Disposition: attachment; filename="../../escaped.txt"` did **not**
+    escape - WebKitGTK reduced it itself - so this is defence in depth rather
+    than the patch for a hole. It matters for the other half: the file that lands
+    is still **named by the server**, and a name is what a person sees in a
+    folder and what they will later open.
+    """
+    if not name:
+        return "download"
+    name = str(name).replace("\x00", "")
+    # POSIX basename does not split on a backslash, so normalise first - the
+    # same reasoning browser-use gives, and the reason it is not just `basename`.
+    name = name.replace("\\", "/")
+    name = name.rsplit("/", 1)[-1]
+    if name in ("", ".", ".."):
+        return "download"
+    return name
+
+
 def _permission_name(request) -> str:
     """What a page is asking for, in words a person would use.
 
@@ -385,6 +412,9 @@ class BrowserWindow(Gtk.Window):
         # Why the page's own process died, when it did. See
         # `_on_web_process_terminated`.
         self.web_process_deaths = []
+        # Downloads this page started. See `_note_download` - Chronoa can see
+        # them and cannot stop them.
+        self.started_downloads = []
         #: Set by `gui/browser_driver.py` only while the model is driving this
         #: window: a callable `url -> reason` ("" to allow). The person's own
         #: typing and clicking are never gated - see the module docstring.
@@ -841,6 +871,8 @@ class BrowserWindow(Gtk.Window):
         if guard is None:
             return False
         kinds = self._webkit_ns.PolicyDecisionType
+        if decision_type == kinds.RESPONSE:
+            return self._note_download(decision)
         if decision_type not in (kinds.NAVIGATION_ACTION, kinds.NEW_WINDOW_ACTION):
             return False
         uri = decision.get_navigation_action().get_request().get_uri() or ""
@@ -848,6 +880,80 @@ class BrowserWindow(Gtk.Window):
             decision.ignore()
             return True
         return False
+
+    def _note_download(self, decision) -> bool:
+        """Refuse a response that is a file download, and say what it wanted.
+
+        **Measured 2026-10-11**: WebKitGTK 2.52.6 offers no way to intercept or
+        even observe a download - `download-started` is not a signal on any class
+        in the namespace, and `PolicyDecisionType` has no download member - so a
+        page could put a file on disk with Chronoa recording nothing. `grep` for
+        `download` across `gui/browser.py` and `gui/browser_driver.py` returned
+        **no hits at all**.
+
+        The seam that does exist is the `RESPONSE` policy decision, which fires
+        for every response and whose headers carry
+        `get_content_disposition()` -> `(is_attachment, filename)`. Measured on a
+        real page then its attachment:
+
+            the page       -> `(False, ...)`   content-type text/html
+            the attachment -> `(True,  ...)`   content-type text/plain
+
+        **Scoped exactly like the navigation guard above**, which is the point:
+        this only applies while a `browse` call is driving the page. A person
+        clicking in the browser window is doing something they chose, and
+        refusing a download they asked for would be the assistant deciding it
+        knows better. A *model* deciding to download is not a person, and a
+        file written with a server-chosen name is not something to do quietly.
+
+        Ported in spirit from browser-use's `downloads_watchdog.py`, whose
+        sanitiser is the same idea one layer down.
+        """
+        try:
+            disposition = decision.get_response().get_http_headers(
+            ).get_content_disposition()
+            is_attachment = bool(disposition[0]) if disposition else False
+            params = disposition[2] if disposition and len(disposition) > 2 else None
+            raw_name = (params or {}).get("filename")
+        except Exception:  # noqa: BLE001 - a header we cannot read is not a download
+            logging.debug("could not read a response disposition", exc_info=True)
+            return False
+        if not is_attachment:
+            return False
+        name = _safe_download_name(raw_name)
+        self.started_downloads.append(name)
+        del self.started_downloads[:-4]
+        self._record_download(name)
+        return False
+
+    def _record_download(self, name: str) -> None:
+        """One egress line for a file that has just been written to disk.
+
+        **A download is not a navigation, so the navigation line did not cover
+        it** - it is bytes coming *in*, onto the disk, with a name the server
+        chose. The privacy panel's whole job is answering "what left this
+        machine?", and this is the half of a page visit that is neither the
+        request nor the visible page.
+        """
+        try:
+            egress.record("browser:download", self.current_url(),
+                          privacy_mode=egress.privacy_mode_enabled(),
+                          purpose="page-download", filename=name)
+        except TypeError:
+            # `egress.record` does not take a filename on every build; the row
+            # itself is the point and must not be lost to a keyword.
+            egress.record("browser:download", self.current_url(),
+                          privacy_mode=egress.privacy_mode_enabled(),
+                          purpose="page-download")
+        except Exception:  # noqa: BLE001 - a ledger failure must not break the page
+            logging.warning("could not record a download", exc_info=True)
+
+    def pending_downloads(self):
+        """Files this page has downloaded since the last clear, newest last."""
+        return list(self.started_downloads)
+
+    def clear_downloads(self) -> None:
+        self.started_downloads.clear()
 
     def _update_navigation_state(self) -> None:
         """Read back/forward sensitivity from the view, not from a guess.

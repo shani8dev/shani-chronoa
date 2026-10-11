@@ -1079,3 +1079,168 @@ def test_every_watchdog_this_module_claims_is_actually_connected():
         "connected but not really: %s - %s. A handler nothing connects is a "
         "module that passes every behavioural test while the feature is dead."
         % (missing, [EXPECTED_WEBVIEW_SIGNALS[m] for m in missing]))
+
+
+# --- a page could put a file on disk with a name the server chose (2026-10-11) ---
+#
+# `grep -i download` across `gui/browser.py` and `gui/browser_driver.py` returned
+# **no hits at all**. Measured on a real page whose link serves
+# `Content-Disposition: attachment; filename="../../escaped.txt"`:
+#
+#     WebKit sanitised the traversal   -> the file landed as `escaped.txt`
+#     `download-started` signal        -> does not exist on any class
+#     `PolicyDecisionType`             -> NAVIGATION_ACTION, NEW_WINDOW_ACTION,
+#                                         RESPONSE.  No download member.
+#     a RESPONSE decision **does** fire, and its headers carry
+#       `get_content_disposition()` -> `(is_attachment, disposition, params)`
+#
+# So the file arrives either way and WebKit offers no way to stop it. What is
+# available is **seeing** it, and saying so.
+
+
+class _FakeDisposition:
+    """`get_content_disposition()` is a 3-tuple named tuple, measured:
+
+        (False, disposition=None,     params=None)
+        (True,  disposition='attachment', params={'filename': 'escaped.txt'})
+    """
+
+    def __init__(self, attachment, params=None):
+        self.data = (attachment, "attachment" if attachment else None, params)
+
+
+class _FakeHeaders:
+    def __init__(self, disposition):
+        self._d = disposition
+
+    def get_content_disposition(self):
+        return self._d.data
+
+
+class _FakeResponse:
+    def __init__(self, disposition):
+        self._h = _FakeHeaders(disposition)
+
+    def get_http_headers(self):
+        return self._h
+
+
+class _FakeDecision:
+    def __init__(self, disposition):
+        self._r = _FakeResponse(disposition)
+        self.ignored = 0
+
+    def get_response(self):
+        return self._r
+
+    def ignore(self):
+        self.ignored += 1
+
+
+def _note_download_class():
+    import inspect
+
+    from shani_chronoa.gui import browser
+
+    return next(v for v in vars(browser).values()
+                if inspect.isclass(v) and hasattr(v, "_note_download"))
+
+
+def _dl_stub():
+    cls = _note_download_class()
+    stub = _StubWindow()
+    stub.started_downloads = []
+    stub.recorded = []
+    stub._record_download = lambda name: stub.recorded.append(name)
+    return cls, stub
+
+
+def test_a_download_is_named_from_the_headers_parameters():
+    """**The parameters dict, not index 1.** Measured: index 1 is the
+    disposition *type*, so reading the name from there records every download as
+    `"attachment"` - which my first version did, and the live run showed."""
+    cls, stub = _dl_stub()
+    decision = _FakeDecision(_FakeDisposition(True, {"filename": "escaped.txt"}))
+
+    cls._note_download(stub, decision)
+
+    assert stub.started_downloads == ["escaped.txt"], stub.started_downloads
+    assert stub.recorded == ["escaped.txt"], stub.recorded
+
+
+def test_the_download_is_not_claimed_to_be_prevented():
+    """**The load-bearing one.** `decision.ignore()` was tried and measured to
+    do nothing: with it and without it the file is on disk. Returning True would
+    tell the caller the response was handled, which is the false-alarm shape this
+    repo records repeatedly."""
+    cls, stub = _dl_stub()
+    decision = _FakeDecision(_FakeDisposition(True, {"filename": "escaped.txt"}))
+
+    handled = cls._note_download(stub, decision)
+
+    assert decision.ignored == 0, (
+        "ignore() was called and does not prevent the download; the file lands "
+        "either way, and claiming otherwise is the lie")
+    assert handled is False, (
+        "answering True claims the response was refused, which nothing does")
+
+
+def test_a_normal_response_is_not_a_download_and_is_not_claimed_as_handled():
+    """The control, strengthened after a survivor.
+
+    Asserting only that nothing was *recorded* left a mutation that returned
+    `True` for every response - claiming it was handled - completely green. What
+    was missing is the second half: an ordinary response must also **not** be
+    answered as handled, because "handled" is what the caller believes when it
+    decides nothing further is needed.
+    """
+    cls, stub = _dl_stub()
+    decision = _FakeDisposition(False)
+
+    handled = cls._note_download(stub, _FakeDecision(decision))
+
+    assert stub.started_downloads == [], (
+        "an ordinary page response was recorded as a download")
+    assert handled is False, (
+        "an ordinary response claimed to have been handled, which is a refusal "
+        "of a page nobody asked to be refused")
+
+
+def test_a_server_chosen_name_is_reduced_to_a_bare_basename():
+    """Ported from browser-use's `_sanitize_download_filename`. Defence in depth
+    rather than a patch for a hole: WebKit reduced `../../escaped.txt` itself.
+    What it did **not** do is stop the file being named by the server."""
+    from shani_chronoa.gui.browser import _safe_download_name
+
+    assert _safe_download_name("../../escaped.txt") == "escaped.txt"
+    assert _safe_download_name("..\\..\\windows\\evil.exe") == "evil.exe"
+    assert _safe_download_name("..") == "download"
+    assert _safe_download_name(".") == "download"
+    assert _safe_download_name("") == "download"
+    assert _safe_download_name(None) == "download"
+
+
+def test_the_note_says_the_file_is_there_and_does_not_claim_a_refusal(
+        web_allowed, no_provider, monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "started_downloads",
+                        lambda *a, **k: ["escaped.txt"])
+
+    note = browser_driver.download_note()
+
+    assert "escaped.txt" in note, note
+    assert "downloaded" in note, note
+    assert "cannot prevent" in note, (
+        "the note must state the limit rather than imply the file did not land: "
+        "%r" % note)
+    assert "refused" not in note.lower(), (
+        "nothing refused it; saying so is the claim this change removed: %r" % note)
+
+
+def test_no_downloads_means_no_note(web_allowed, no_provider, monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "started_downloads", lambda *a, **k: [])
+
+    assert browser_driver.download_note() == ""

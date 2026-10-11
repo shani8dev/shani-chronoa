@@ -144,7 +144,8 @@ def _evaluate(script: str, timeout: float = 15.0) -> str:
     # The page answered, so it is not paused: forget any dialog from before.
     try:
         _main(lambda w: (w.clear_dialogs(), w.clear_permission_asks(),
-                         w.clear_web_process_deaths()), 5.0)
+                         w.clear_web_process_deaths(),
+                         w.clear_downloads()), 5.0)
     except Exception:  # noqa: BLE001 - clearing is best-effort
         pass
     return text
@@ -173,6 +174,32 @@ _DEATH_WORDS = {
     "exceeded-memory-limit": "the page's own process ran out of memory",
     "terminated-by-api": "the page's own process was restarted",
 }
+
+
+def started_downloads(timeout: float = 5.0):
+    """Files the page downloaded, or `[]` if none is known."""
+    try:
+        return _main(lambda w: w.pending_downloads(), timeout) or []
+    except Exception:  # noqa: BLE001 - an unreadable window says nothing
+        return []
+
+
+def download_note() -> str:
+    """Say the page wrote a file to disk.
+
+    **Chronoa cannot stop this** - measured: `decision.ignore()` on the response
+    leaves the file on disk either way, and WebKitGTK 2.52.6 has no download
+    signal and no download policy type to stop it with. So the sentence does not
+    claim a refusal; it says the file is there, because the person is about to
+    find a file with a server-chosen name in their Downloads and the browser
+    that put it there owes them the connection.
+    """
+    names = started_downloads()
+    if not names:
+        return ""
+    shown = ", ".join(dict.fromkeys(n for n in names if n))
+    return (" This page downloaded %s onto this machine. Chronoa cannot prevent"
+            " downloads here, so delete it if you did not want it." % shown)
 
 
 def pending_web_process_deaths(timeout: float = 5.0):
@@ -979,6 +1006,7 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
         said = f"Clicked {what!r}" + (f" ({selector})" if selector else f" at ({x}, {y})") + "."
         said += _what_appeared(before_controls, page_controls(timeout))
         said += permission_note()
+        said += download_note()
         followed = _describe_load(load, "It opened")
         if followed.startswith("Error"):
             _say(f"the click on {what!r} led somewhere the network policy refuses", refused=True)
