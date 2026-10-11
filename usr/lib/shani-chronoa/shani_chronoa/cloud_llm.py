@@ -544,7 +544,17 @@ class OpenAICompatibleLLM:
         return self.postprocess(message, tools)
 
     async def check_health(self) -> bool:
-        """Best-effort reachability check - lists models, doesn't spend a real request."""
+        """Best-effort reachability check - lists models, doesn't spend a real
+        request.
+
+        **This has no caller, and that is deliberate rather than an omission.**
+        The Model panel already says *"would answer through ... never asked
+        here; availability is per-request"* - so a health probe at startup would
+        answer a question this app has already decided not to ask. A reachability
+        check that runs before any request is spent is the wrong instrument
+        here, and the honest thing is to say so instead of leaving a method
+        named `check_health` that nothing calls.
+        """
         client = await self._get_client()
         try:
             response = await client.get("/models")

@@ -173,7 +173,20 @@ class OllamaLLM:
             return []
 
     async def check_health(self) -> bool:
-        """Check if Ollama server is healthy."""
+        """Check if Ollama server is healthy.
+
+        **This has no caller, and wiring it back in would reintroduce a measured
+        bug.** `is_available()` right below is the one that runs, and its own
+        docstring says why: this form runs on a throwaway event loop, which
+        cached an `AsyncClient` bound to that loop and then broke the next real
+        chat on the app's own loop. The question is identical - a 200 from
+        `/api/version` - so this is not a missing feature but a second
+        implementation of an answered one, in the shape that failed.
+
+        Kept rather than deleted because it is the public surface a caller
+        outside this repo may hold, and the reason is here so the next reader
+        does not wire it in to "fix" something that is not broken.
+        """
         client = await self._get_client()
         try:
             response = await client.get("/api/version")

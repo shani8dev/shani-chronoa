@@ -256,10 +256,12 @@ class AgentProfile:
     def validate_against_profile(self, call: dict) -> bool:
         """Check if a tool call is allowed by this profile.
 
-        Kept as the dict-shaped entry point the module has always had;
-        `SandboxExecutor` calls `refusal_for` directly so that a refusal can
-        carry its reason, but this remains the predicate both share rather than
-        two implementations of the same allowlist.
+        **This has no caller.** `SandboxExecutor` calls `refusal_for` directly
+        so that a refusal can carry its reason rather than only a boolean, and
+        this is the same predicate two lines of it shares - so it is kept as the
+        dict-shaped entry point the module has always had. A name that reads
+        like a security control must not be left looking like an unused one with
+        nothing saying otherwise.
         """
         return self.allows_tool(call.get("tool_name"))
 
