@@ -345,3 +345,123 @@ class TestTheReadBufferIsBounded:
         assert lan_link.MAX_LINE_BYTES == 4 * 1024 * 1024
         assert lan_link.MAX_LINE_BYTES > 1024 * 1024, (
             "smaller than 1 MiB would refuse a legitimate multi-packet read")
+
+
+class TestThePeerIsPinned:
+    """**Any LAN peer used to be able to inject a turn.** The link set
+    `verify_mode = CERT_NONE` - correct for trust-on-first-use - and nothing then
+    checked *who* had completed the handshake. So any laptop on the network that
+    presented any self-signed certificate reached `LanBridge.handle`, and a
+    `kdeconnect.clipboard` packet from it became `gateway.Submit("phone", text)`.
+
+    Maze-Connect names this as a threat row and states the rule: *"every later
+    connection must match the pinned fingerprint exactly; on mismatch, hard-fail"*,
+    and separately *"any unpaired peer could answer for a pairing in progress and
+    have its own link marked trusted"*. The peer's full identity arrives on the
+    link as a matter of course, so the check costs nothing.
+    """
+
+    def test_a_peer_claiming_someone_else_is_refused(self):
+        """`expect_peer` set to one id, the peer answers with another: the link
+        closes and `PeerMismatch` says which two differed."""
+        link = lan_link.Link("127.0.0.1", timeout=5)
+        link.expect_peer = "a" * 32
+        link._peer_reply_body = {"deviceId": "b" * 32}   # read by the stub below
+        link._raw = None
+        closed = []
+
+        class _Recording:
+            def close(self):
+                closed.append(True)
+
+        link._tls = None
+        link._raw = _Recording()
+        with pytest.raises(lan_link.PeerMismatch) as caught:
+            link._check_peer_identity()
+        assert "expected" in str(caught.value) and "answered" in str(caught.value)
+        assert "aaaaaaaaaaaa" in str(caught.value)
+        # **The link must close, not just decline the message.** A peer claiming
+        # to be somebody else is not a peer whose next packet is worth reading,
+        # and leaving the socket open is an invitation. Asserted because a
+        # mutation that removed the `close()` passed every other test here.
+        assert closed, "the link stayed open after an identity mismatch"
+
+    def test_the_pinned_peer_is_accepted_and_recorded(self):
+        link = lan_link.Link("127.0.0.1", timeout=5)
+        link.expect_peer = "a" * 32
+        link._peer_reply_body = {"deviceId": "a" * 32}
+        link._check_peer_identity()
+        assert link.peer_id == "a" * 32
+
+    def test_no_pin_means_no_check(self):
+        """`expect_peer=None` is the pairing flow: nothing is pinned yet and a
+        person is comparing a code on two screens. The link still records who
+        answered, so a caller can pin afterwards."""
+        link = lan_link.Link("127.0.0.1", timeout=5)
+        link._peer_reply_body = {"deviceId": "z" * 32}
+        link._check_peer_identity()
+        assert link.peer_id == "z" * 32
+
+    def test_a_peer_that_sends_no_identity_is_refused(self):
+        """Not identified is worse than mis-identified: there is nothing to
+        compare against, and a peer that will not say who it is has no claim to
+        be let in."""
+        link = lan_link.Link("127.0.0.1", timeout=5)
+        link.expect_peer = "a" * 32
+        link._peer_reply_body = {}
+        with pytest.raises(RuntimeError) as caught:
+            link._check_peer_identity()
+        assert "no identity" in str(caught.value)
+
+    def test_short_ids_are_not_compared_by_accident(self):
+        """The message shows the first twelve characters, so a person can tell
+        which device it is - but two different ids sharing a prefix must still
+        be refused, which is what comparing the whole string does.
+        """
+        link = lan_link.Link("127.0.0.1", timeout=5)
+        link.expect_peer = "a" * 31 + "b"
+        link._peer_reply_body = {"deviceId": "a" * 31 + "c"}
+        with pytest.raises(lan_link.PeerMismatch):
+            link._check_peer_identity()
+
+
+class TestACorruptCertificateRefuses:
+    """**It used to silently regenerate**, which Maze-Connect's threat model
+    names as the failure: *"a corrupt or unreadable key fails startup loudly
+    rather than being silently regenerated, which would invalidate every pairing
+    unnoticed"*. That is not theoretical - a new certificate looks to a paired
+    phone like a different computer, and the pairing vanishes with nothing saying
+    why. This session lost a pairing to exactly that and spent many turns blaming
+    the phone's state machine.
+    """
+
+    def test_a_corrupt_certificate_is_refused_not_regenerated(self, tmp_path):
+        directory = tmp_path / "kdeconnect"
+        directory.mkdir()
+        cert, key = directory / "tls.pem", directory / "tls.key"
+        cert.write_bytes(b"definitely not a certificate")
+        key.write_bytes(b"nor a key")
+        out = lan_link._our_certificate(directory=directory)
+        assert out is None, "a corrupt certificate was accepted"
+        assert cert.read_bytes() == b"definitely not a certificate", (
+            "the corrupt file was overwritten - the pairing is gone and nothing "
+            "says so")
+
+    def test_a_good_certificate_is_still_used(self, tmp_path):
+        """**The control.** Refusing everything would look identical to fixing
+        this - a certificate check that always says no is the same defect in the
+        other direction, and only this test can tell them apart.
+        """
+        import subprocess
+        directory = tmp_path / "kdeconnect"
+        directory.mkdir()
+        cert, key = directory / "tls.pem", directory / "tls.key"
+        done = subprocess.run(
+            ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-keyout", str(key),
+             "-out", str(cert), "-days", "3650", "-nodes", "-subj", "/CN=" + "a" * 32],
+            capture_output=True, check=False)
+        if done.returncode != 0 or not (cert.is_file() and key.is_file()):
+            pytest.skip("openssl is not here, so there is no good certificate to test with")
+        assert lan_link._our_certificate(directory=directory) == (cert, key), (
+            "a certificate that loads was refused - the check is now a blanket "
+            "refusal rather than a check")

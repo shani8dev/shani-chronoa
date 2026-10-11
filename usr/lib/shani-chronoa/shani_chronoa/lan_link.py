@@ -62,6 +62,7 @@ from __future__ import annotations
 
 import json
 import logging
+import pathlib
 import re
 import socket
 import ssl
@@ -452,7 +453,7 @@ def identity_exchange(host: str, tcp_port: int = UDP_PORT, timeout: float = 20.0
         raw.close()
 
 
-def _our_certificate():
+def _our_certificate(directory=None):
     """(cert, key) paths for this computer's KDE Connect TLS identity, or None.
 
     Generated once and cached, because **the phone pairs to a fingerprint** -
@@ -464,7 +465,11 @@ def _our_certificate():
     import subprocess
     from shani_chronoa import files
 
-    directory = files.state_home() / "kdeconnect"
+    # A parameter rather than a constant path, so the corrupt-certificate path
+    # can be tested against a file that is *known* bad. The first version of that
+    # test passed a tmp_path the function ignored, so it corrupted the real one
+    # - a test that damages the developer's pairing to prove the code refuses to.
+    directory = pathlib.Path(directory) if directory else files.state_home() / "kdeconnect"
     cert, key = directory / "tls.pem", directory / "tls.key"
     if cert.is_file() and key.is_file():
         try:
@@ -472,8 +477,21 @@ def _our_certificate():
             context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             context.load_cert_chain(str(cert), str(key))
             return cert, key
-        except (ssl.SSLError, OSError):
-            pass                      # regenerate below; a bad cache is not fatal
+        except (ssl.SSLError, OSError) as exc:
+            # **Refuse, do not regenerate.** The first version fell through and
+            # made a new pair - the failure Maze-Connect's threat model names
+            # outright: "a corrupt or unreadable key fails startup loudly rather
+            # than being silently regenerated, which would invalidate every
+            # pairing unnoticed". Not theoretical here: a regenerated
+            # certificate looks to a paired phone like a *different computer*,
+            # and the pairing vanishes with nothing anywhere saying why. A person
+            # needs "your identity is gone, unpair and re-pair", not a phone that
+            # stopped answering - which is exactly the session we had.
+            logger.warning(
+                "the cached KDE Connect certificate will not load (%s); refusing "
+                "rather than generating a new one, which would silently un-pair "
+                "every device that trusts this one", exc)
+            return None
     try:
         directory.mkdir(parents=True, exist_ok=True)
         done = subprocess.run(
@@ -560,6 +578,16 @@ def _send_pair_true(host: str, timeout: float = 60.0):
         link.close()
 
 
+class PeerMismatch(Exception):
+    """The device that answered is not the one we pinned.
+
+    Raised rather than a plain `RuntimeError` so a caller can tell *this*
+    refusal - a security decision - from a socket that timed out. The two need
+    different sentences: one is "somebody else is on the network", the other is
+    "nothing answered".
+    """
+
+
 class Link:
     """One TLS channel to a KDE Connect peer, driven by hand.
 
@@ -580,6 +608,13 @@ class Link:
         self.host = host
         self.timeout = timeout
         self.tcp_port = tcp_port
+        #: The device id this link must be talking to, or None for the pairing
+        #: flow where nothing is pinned yet and a person is comparing terminals.
+        self.expect_peer: "str | None" = None
+        self._peer_reply_body: "dict | None" = None
+        #: Set by `connect` once the peer has proved to be who we asked for. The
+        #: bridge checks this before turning a packet into a turn.
+        self.peer_id: "str | None" = None
         self._raw: Optional[socket.socket] = None
         self._tls = None
         self._incoming: "Optional[ssl.MemoryBIO]" = None
@@ -604,20 +639,32 @@ class Link:
         context.verify_mode = ssl.CERT_NONE
         return context
 
-    def connect(self) -> "Link":
-        """TCP -> plaintext identity -> TLS -> our full identity."""
+    def connect(self, target: Optional[str] = None) -> "Link":
+        """Establish the link: TCP, plaintext identity, TLS, our full identity.
+
+        **`expect_peer` is the whole of the defence against an impostor.** The
+        link accepts any certificate (`verify_mode = CERT_NONE`, because an
+        unpaired peer is trust-on-first-use by design), so without this the only
+        thing standing between any laptop on the LAN and a turn submitted to the
+        assistant is that it completed a TLS handshake - with any self-signed
+        cert it likes. Maze-Connect names this as a threat row: *"any unpaired
+        peer could answer for a pairing in progress and have its own link marked
+        trusted"*, and the rule it states is *"every later connection must match
+        the pinned fingerprint exactly; on mismatch, hard-fail"*.
+
+        The peer's full identity arrives on this link as a matter of course, so
+        the check costs nothing: compare what it claims against what we pinned,
+        and close if they differ. Pass `expect_peer=None` only for the pairing
+        flow itself, where there is nothing pinned yet and a person is comparing
+        a code on both screens.
+        """
         import ssl
         self._raw = socket.create_connection((self.host, self.tcp_port),
                                              timeout=self.timeout)
         self._incoming, self._outgoing = ssl.MemoryBIO(), ssl.MemoryBIO()
         self._tls = self._context().wrap_bio(self._incoming, self._outgoing,
                                             server_side=True)
-        # **Our short identity goes on the raw socket, not through `_flush`.**
-        # It is deliberately *not* encrypted: the peer will not speak TLS at all
-        # until it has seen it. `_flush` writes into the TLS layer, and pushing
-        # the plaintext identity through here raises `SSLWantReadError` - which
-        # is also what a caller would see if this were reordered, so the two
-        # writes are kept in the order the protocol asks for.
+        # Our short identity goes on the raw socket, not through `_flush`.
         self._raw.sendall((json.dumps(identity_packet(name=_hostname(),
                                                      device_type="desktop"),
                                       separators=(", ", ": ")) + "\n").encode())
@@ -632,7 +679,34 @@ class Link:
             except (ssl.SSLError, OSError) as exc:
                 raise RuntimeError(f"the TLS handshake failed ({exc})") from exc
         self.send(identity_packet(name=_hostname(), device_type="desktop"))
+        self._check_peer_identity()
         return self
+
+    def _check_peer_identity(self) -> "str | None":
+        """Compare the peer's claimed id against the pinned one, and record it.
+
+        Extracted from `connect` for the reason every method in this file is: a
+        check that can only be exercised by completing a real TLS handshake is a
+        check that is never exercised, and this one is the difference between a
+        link that accepts any peer and one that does not.
+
+        Returns the peer's id, or raises. **A mismatch closes the link** rather
+        than merely declining a message: a peer claiming to be somebody else is
+        not a peer whose next packet is worth reading.
+        """
+        reply = self.reply_packet(timeout=self.timeout)
+        body = (reply or {}).get("body") or {}
+        self._peer_reply_body = body
+        peer_id = body.get("deviceId")
+        if not peer_id:
+            raise RuntimeError("the peer sent no identity, so it cannot be "
+                              "identified or pinned")
+        if self.expect_peer is not None and peer_id != self.expect_peer:
+            self.close()
+            raise PeerMismatch(
+                f"expected {self.expect_peer[:12]}…, but {peer_id[:12]}… answered")
+        self.peer_id = peer_id
+        return peer_id
 
     def send(self, packet: dict, target: "Optional[str]" = None) -> None:
         """One JSON line. `target` turns an identity into a reply to that peer."""
@@ -645,12 +719,20 @@ class Link:
         self._flush((json.dumps(out, separators=(", ", ": ")) + "\n").encode())
 
     def reply_packet(self, timeout: "Optional[float]" = None) -> "Optional[dict]":
+        """The next packet the peer sends, or the canned one a test installed.
+
+        `_peer_reply_body` exists so the identity check can be exercised without
+        a handshake; `connect`'s own path always overwrites it from the wire.
+        """
         """The next packet that is not an identity, or None.
 
         Identity packets arrive as part of the handshake and are skipped here, so
         a caller asking about pairing or a plugin gets the answer rather than the
         conversation leading up to it.
         """
+        if getattr(self, "_peer_reply_body", None) is not None:
+            body, self._peer_reply_body = self._peer_reply_body, None
+            return {"id": 1, "type": "kdeconnect.identity", "body": body}
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while time.monotonic() < deadline:
             for line in self._lines(deadline):
@@ -851,9 +933,14 @@ def _human(size: int) -> str:
 
 
 def _link(host: str, timeout: float = 20.0,
-          tcp_port: int = UDP_PORT) -> "tuple[Optional[Link], str]":
-    """A connected Link, or (None, why-not). The one entry point everything uses."""
-    link = Link(host, timeout=timeout, tcp_port=tcp_port)
+          tcp_port: int = UDP_PORT,
+          expect_peer: "Optional[str]" = None) -> "tuple[Optional[Link], str]":
+    """A connected Link, or (None, why-not). The one entry point everything uses.
+
+    `expect_peer` is what makes the link safe to call with: without it the link
+    accepts any peer that completes a handshake.
+    """
+    link = Link(host, timeout=timeout, tcp_port=tcp_port, expect_peer=expect_peer)
     try:
         link.connect()
         return link, ""
