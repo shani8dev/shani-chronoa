@@ -588,6 +588,12 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # or `bandwidth_to_host` (iperf3: to one named host, needs a server there).
     # This is the question in between - which program is moving bytes now.
     "network_activity": ("System", "What is using this machine's network right now, per program"),
+    # Not `list_services`, which is systemd *system* units. Autostart .desktop
+    # files, systemd *user* units and timers, and the crontab are the other
+    # three ways a machine arranges to run something unasked - and Chronoa
+    # writes one of them itself (`_sync_autostart`), so nothing could read back
+    # what its own auto-start setting produced.
+    "autostart_entries": ("System", "What starts on this machine automatically, at login and on a schedule"),
     "process_detail": ("System", "What one running process is waiting on"),
     # Read-only: cpupower frequency-info reports, and changes nothing.
     "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),

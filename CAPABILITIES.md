@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**248 skills in 24 groups.** Each is a named, schema-typed module; the model
+**249 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 248 are consent-gated and 17 are destructive.**
+**89 of 249 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -43,6 +43,7 @@ Processes, packages, updates, containers, vms, disks, network.
 
 | Skill | What it does | Before it runs |
 |---|---|---|
+| `autostart_entries` | What starts on this machine automatically, at login and on a schedule | — |
 | `backup_status` | Whether this machine has an off-machine backup, and when | — |
 | `bandwidth_to_host` | How fast this machine talks to another machine | — |
 | `binary_hardening` | Whether a program has the protections that make it safe to run | — |
