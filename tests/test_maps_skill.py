@@ -53,7 +53,7 @@ class _Cfg:
 
 
 @pytest.fixture
-def osm(monkeypatch):
+def osm(monkeypatch, tmp_path):
     """Replace the network and the config; record every URL requested."""
     state: dict = {"json": [], "calls": [], "senses": {"web"}}
 
@@ -61,6 +61,18 @@ def osm(monkeypatch):
         state["calls"].append((url, params))
         return state["json"]
 
+    # **The state dir is isolated, and that is load-bearing.**
+    # `maps._cached_get` writes its OpenStreetMap cache under
+    # `$XDG_STATE_HOME/shani-chronoa/osm-cache`, resolved per call. Without this
+    # the suite wrote real entries into the developer's own
+    # `~/.local/state`, and `test_a_network_failure_names_the_service_and_the_error`
+    # then failed - a cached answer from an earlier test was served during a
+    # simulated outage, so the failure it asserts could not surface. This is
+    # `triggers_dir()`/`rules_file()`'s reason in a new place, and this file is
+    # where it bit.
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(exist_ok=True)
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_dir))
     monkeypatch.setattr(maps_mod, "_get", fake_get, raising=True)
     monkeypatch.setattr(
         maps_mod, "ChronoaConfig", lambda: _Cfg(state["senses"]), raising=True

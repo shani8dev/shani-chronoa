@@ -32,6 +32,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import GLib, Gtk, Pango  # noqa: E402
 
+from shani_chronoa import markdown_lite  # noqa: E402
 from shani_chronoa import phone as ph  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -117,6 +118,23 @@ def _list() -> Gtk.ListBox:
     lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
     lb.add_css_class("boxed-list")
     return lb
+
+
+def _preview(body: str, width: int = 80) -> str:
+    """A message body as one readable line, cut on a grapheme boundary.
+
+    **`markdown_lite.clip`, not `body[:80]`.** A message body is sender- or
+    model-supplied text, and a hard slice cuts a grapheme cluster — "👨‍👩‍👧‍👦"
+    is seven code points held together by ZWJ, and cutting after the second
+    leaves a ZWJ with no emoji, which draws the missing-glyph box in a row
+    somebody is trying to read. `clip` counts columns, so a CJK-heavy message
+    does not overflow the row either.
+
+    A named function rather than an inline expression, because the only way to
+    test the inline version was to build the whole panel.
+    """
+    line = (body or "(no text)").replace("\n", " ")
+    return markdown_lite.clip(line, width)
 
 
 def _item(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None) -> Gtk.Widget:
@@ -382,7 +400,7 @@ class PhonePanel:
             lb = _list()
             for m in result[:40]:
                 who = ", ".join(self.name_for(a) or a for a in m.addresses) or "(unknown)"
-                preview = (m.body or "(no text)").replace("\n", " ")[:80]
+                preview = _preview(m.body)
                 lb.append(_item(who, f"{_when(m.date)}{'' if m.read else ' - unread'}: {preview}",
                                 _button("Open", lambda m=m, who=who: self.open_thread(m, who))))
             self.threads.append(lb if result else _label("No messages.", dim=True))

@@ -148,6 +148,144 @@ def _get(url: str, params: dict | None = None):
     return get_json(COMPONENT, url, params)
 
 
+# -- the disk cache -------------------------------------------------------------
+
+#: How many answers are kept. Bounded, because this is under the user's own state
+#: directory and an unbounded cache is a disk leak nobody notices until it is
+#: large - and a directory of search words is exactly the kind of thing that
+#: grows quietly for years.
+_CACHE_MAX = 500
+
+#: How long an answer is believed. A day: a place's coordinates are not a live
+#: fact, and every identical "where is Shaniwar Wada" otherwise costs a request
+#: held a second by the politeness lock.
+_CACHE_TTL = 86400.0
+
+#: The on-disk format version. **A bad format is invalidated by bumping this
+#: constant rather than by deleting a directory a running process may be
+#: reading** - a `rm -rf` in a cache-pruning path is how a second skill call
+#: loses the answer it just wrote.
+_CACHE_VERSION = 1
+
+
+def _cache_key(url: str, params: dict | None = None) -> str:
+    """A filename for one request.
+
+    **A hash, so a filename never carries somebody's search words.** "my home",
+    "Dr Smith's clinic" and "where I left the car" would all be both long and
+    visible in a directory listing. `params` are sorted so `?q=x&format=y` and
+    `?format=y&q=x` address one entry rather than two.
+    """
+    import hashlib
+
+    canonical = url + "\x00" + "\x00".join(
+        f"{key}={params[key]}" for key in sorted(params or {}))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+def _cache_dir():
+    from shani_chronoa import files
+    # `ensure_private_dir` is `mkdir` then `chmod`, not `mkdir(mode=...)`: the
+    # mode argument is masked by the umask, so this cache would land at 0775
+    # under the usual 002 and list everybody's search words.
+    directory = files.state_home() / "shani-chronoa" / "osm-cache"
+    files.ensure_private_dir(directory)
+    return directory
+
+
+def _cache_evict(directory, cap: int) -> None:
+    """Drop the oldest entries until at most `cap` of them remain.
+
+    **mtime, and not an in-memory order.** Every skill call is its own sandboxed
+    child process, so an insertion order kept in a module global is empty in
+    every process except the one that made the directory - it would evict
+    nothing and the cap would be a number nobody enforced.
+    """
+    try:
+        entries = sorted(directory.iterdir(), key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return
+    spare = len(entries) - cap
+    if spare <= 0:
+        return
+    for path in entries[:spare]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def _cache_read(path):
+    """The cached body, or None when there is nothing worth serving.
+
+    **A missing article is a real answer, and this is where that is kept true.**
+    open-intelligent-ui's Wikipedia proxy gets it right in one line - a 404 body
+    is cached, any other failure is retried next time - and `netjson.get_json`
+    already draws the same distinction: it *raises* on a transport failure and
+    returns a body otherwise. So an empty list from Nominatim ("does not know
+    this place") is cached, and a 500 from OSRM never reaches this function.
+
+    Everything unreadable is a miss, never a crash: a truncated write, a version
+    from another build, a timestamp a hand-edit turned into a string. A cache is
+    an optimisation, and one that turns any of those into a failed search is
+    worse than no cache.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        entry = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(entry, dict) or entry.get("v") != _CACHE_VERSION:
+        return None
+    at = entry.get("at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return None
+    if time.time() - at > _CACHE_TTL:
+        return None
+    return entry.get("body")
+
+
+def _cache_write(path, body) -> None:
+    """Remember `body`, and keep the directory at `_CACHE_MAX`.
+
+    A write that cannot happen is **not an error** - a read-only disk must still
+    answer a search. The eviction is after the write and outside the same `try`,
+    because a cache that fails to prune should not also fail to store.
+    """
+    try:
+        path.write_text(json.dumps(
+            {"v": _CACHE_VERSION, "at": time.time(), "body": body}),
+            encoding="utf-8")
+    except (OSError, TypeError, ValueError):
+        return
+    _cache_evict(path.parent, _CACHE_MAX)
+
+
+def _cached_get(url: str, params: dict | None = None):
+    """`_get`, answered from disk when this exact request was already made.
+
+    The three upstreams (Nominatim, FOSSGIS's OSRM, Overpass) ask in their usage
+    policies for a valid User-Agent, one request per second and **no heavy use**.
+    The first two were already handled - `netjson`'s named UA and `_polite`'s
+    cross-process lock - and the third was missing: every repeat was a fresh
+    request, held a second by the lock, for an answer that had not changed.
+
+    Wrapping the single `_get` seam rather than changing any of the three call
+    sites is what makes the cache invisible to them, which is the point: a cache
+    every caller has to remember to consult is a cache somebody forgets.
+    """
+    path = _cache_dir() / _cache_key(url, params)
+    body = _cache_read(path)
+    if body is not None:
+        return body
+    body = _get(url, params)
+    _cache_write(path, body)
+    return body
+
+
 _last_call: dict = {}
 
 
@@ -192,7 +330,7 @@ def geocode(name: str, near: tuple | None = None) -> "tuple[float, float, str] |
         lat, lon = near
         params.update(viewbox=f"{lon - 0.5:.4f},{lat + 0.5:.4f},{lon + 0.5:.4f},{lat - 0.5:.4f}", bounded=0)
     _polite("nominatim.openstreetmap.org")
-    hits = _get(NOMINATIM, params)
+    hits = _cached_get(NOMINATIM, params)
     if not isinstance(hits, list) or not hits:
         return f"OpenStreetMap does not know a place called '{name}'."
     h = hits[0]
@@ -323,7 +461,7 @@ def _route(arguments: dict, steps: bool) -> str:
         return ends
     (alat, alon, alabel), (blat, blon, blabel) = ends
     _polite("routing.openstreetmap.de")
-    data = _get(ROUTER.format(mode=mode, coords=f"{alon:.6f},{alat:.6f};{blon:.6f},{blat:.6f}"),
+    data = _cached_get(ROUTER.format(mode=mode, coords=f"{alon:.6f},{alat:.6f};{blon:.6f},{blat:.6f}"),
                 {"overview": "false", "steps": "true" if steps else "false"})
     if not isinstance(data, dict) or data.get("code") != "Ok" or not data.get("routes"):
         why = (data or {}).get("message") or (data or {}).get("code") or "no route"
@@ -380,7 +518,7 @@ def _nearby(arguments: dict) -> str:
         for radius in (3000, 10000):
             query = (f'[out:json][timeout:20];nwr["{k}"="{v}"](around:{radius},{centre[0]:.6f},{centre[1]:.6f});'
                      f"out center tags 60;")
-            data = _get(OVERPASS, {"data": query})
+            data = _cached_get(OVERPASS, {"data": query})
             for el in (data or {}).get("elements", []):
                 lat = el.get("lat", (el.get("center") or {}).get("lat"))
                 lon = el.get("lon", (el.get("center") or {}).get("lon"))
@@ -395,7 +533,7 @@ def _nearby(arguments: dict) -> str:
     else:
         lat, lon = centre
         _polite("nominatim.openstreetmap.org")
-        hits = _get(NOMINATIM, {"q": what, "format": "jsonv2", "limit": 20, "bounded": 1,
+        hits = _cached_get(NOMINATIM, {"q": what, "format": "jsonv2", "limit": 20, "bounded": 1,
                                 "viewbox": f"{lon - 0.08:.4f},{lat + 0.08:.4f},{lon + 0.08:.4f},{lat - 0.08:.4f}"})
         for h in hits if isinstance(hits, list) else []:
             name = h.get("name") or _short(h.get("display_name", ""), 1)

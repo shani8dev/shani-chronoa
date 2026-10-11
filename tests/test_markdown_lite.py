@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.markdown_lite import to_pango  # noqa: E402
+from shani_chronoa.markdown_lite import safe_url  # noqa: E402
 from shani_chronoa.markdown_lite import to_speech  # noqa: E402
 
 # Every tag the module is allowed to emit.
@@ -78,10 +79,25 @@ class TestTheSubset:
 
     def test_a_link_is_not_turned_into_one(self):
         """A clickable target that came from a model is an injection route
-        somewhere the user did not intend."""
+        somewhere the user did not intend.
+
+        **This asserted "no link at all" until 2026-10-11, when the design
+        changed.** Chronoa rendered `[click](https://evil.example)` as literal
+        text, which was safe by omission and cost every answer its URLs. The
+        boundary is now open-intelligent-ui's: a link is rendered only when its
+        scheme is http or https, and a `javascript:`, `file:` or `data:` URL is
+        dropped rather than made clickable. So the injection route this test was
+        written for is still closed - it is just closed by an allowlist rather
+        than by refusing to render links at all.
+
+        The click itself does not open anything: the label emits `activate-link`
+        and the app decides, so a model cannot name a program to run.
+        """
         out = to_pango("[click](https://evil.example)")
-        assert "href" not in out and "<a" not in out
+        assert 'href="https://evil.example"' in out, (
+            f"an http/https link is no longer rendered at all: {out!r}")
         assert "click" in out
+
 
     def test_underscores_inside_a_word_are_not_italic(self):
         assert to_pango("some_file_name_here") == "some_file_name_here"
@@ -387,8 +403,12 @@ class TestBareUrlsAreSpokenAsLink:
             "See link for details.")
 
     def test_a_bare_http_url_becomes_the_word_link(self):
+        # **The full stop is spoken, and it used to be swallowed.** `\S+` ran
+        # past the end of the address into the sentence's punctuation, so the
+        # reply came back a character short of what was written. The trim now
+        # decides what the *address* is and leaves the punctuation in place.
         assert to_speech("The docs are at http://example.com/x.") == (
-            "The docs are at link")
+            "The docs are at link.")
 
     def test_an_email_address_is_not_mangled(self):
         # The lookbehind is what makes this safe. Without it the regex would
@@ -421,3 +441,172 @@ class TestBareUrlsAreSpokenAsLink:
     # no input distinguishes them. Asserting on it would be a test that passes
     # for reasons unrelated to what it names. The rule's *behaviour* is pinned by
     # the six tests above; this note is why one mutation is not caught.
+
+
+class TestSpokenLinksSurviveAParenthesis:
+    """A URL with a `(` in it, which is not the exotic case it sounds like.
+
+    Wikipedia addresses carry one constantly - `Foo_(bar)` - and the regex that
+    reduced a spoken address stopped at the first `)`, so
+    `[Foo](https://en.wikipedia.org/wiki/Foo_(bar))` was spoken as `Foo)` and
+    `[x](javascript:alert(1))` as `x) link.`. Both leave a stray bracket in the
+    audio, and a stray bracket is exactly what a listener hears.
+    """
+
+    def test_a_wikipedia_address_is_spoken_as_its_label(self):
+        assert to_speech("[Foo](https://en.wikipedia.org/wiki/Foo_(bar))") == "Foo"
+
+    def test_a_url_with_a_call_in_it_does_not_leave_a_bracket(self):
+        assert to_speech("A [x](javascript:alert(1)) link.") == "A x link."
+
+    def test_the_same_address_renders_as_one_link_in_the_window(self):
+        out = to_pango("see [Foo](https://en.wikipedia.org/wiki/Foo_(bar)) here")
+        assert out.count("<a ") == 1, f"the nested paren broke the match: {out!r}"
+        assert out.count(")") == 1, f"the closing bracket leaked out: {out!r}"
+
+
+class TestSpokenPunctuationStaysInTheSentence:
+    """The trim decides what the address is; it never decides what the reply says.
+
+    Returning only "link" swallowed the sentence's own punctuation, so
+    `see (https://x.org/a) ok` was spoken `see (link ok` - an unclosed bracket
+    and a dropped one, both audible.
+    """
+
+    def test_a_closing_bracket_of_the_sentence_survives(self):
+        assert to_speech("see (https://x.org/a) ok") == "see (link) ok"
+
+    def test_a_full_stop_survives(self):
+        assert to_speech("Go to https://x.org.") == "Go to link."
+
+    def test_a_comma_survives(self):
+        assert to_speech("Try https://x.org, then https://y.org.") == (
+            "Try link, then link.")
+
+    def test_an_unbalanced_paren_is_the_urls_and_is_kept_quiet(self):
+        # A balanced pair is part of the address, so it is not trimmed - which
+        # is what makes the Wikipedia case work at all.
+        assert to_speech("https://en.wikipedia.org/wiki/Foo_(bar) here") == (
+            "link here")
+
+
+class TestSpokenCodeKeepsItsBackticksPaired:
+    """A URL inside a code span used to eat the closing backtick.
+
+    "run `curl https://x.org/a` please" was spoken "run `curl link please" -
+    one bracket left and its partner gone - because the URL pass matched the
+    backtick as part of the address. Code contents are still spoken, including
+    the command; only the address inside them is reduced, per this module's own
+    measurement of 205 KB of audio for one URL against 67 KB for the word.
+    """
+
+    def test_a_command_with_a_url_in_it_is_spoken_without_brackets(self):
+        assert to_speech("run `curl https://x.org/a` please") == (
+            "run curl link please")
+
+    def test_a_command_without_a_url_is_untouched(self):
+        assert to_speech("run `ls -la` now") == "run ls -la now"
+
+    def test_a_path_in_code_is_still_spoken_in_full(self):
+        assert to_speech("The config is at `/etc/foo.conf`.") == (
+            "The config is at /etc/foo.conf.")
+
+
+class TestTheWindowAndTheVoiceAgree:
+    """Two renderers of one reply, and the reason they are checked together.
+
+    `to_pango` draws it, `to_speech` speaks it. They can drift into describing
+    different sentences, which is the failure this file's own docstring names -
+    so the cases that touch both are asserted side by side.
+    """
+
+    def test_the_spoken_label_is_the_clickable_label(self):
+        reply = "The [Arch wiki](https://wiki.archlinux.org) says so."
+        assert "Arch wiki" in to_pango(reply)
+        assert "Arch wiki" in to_speech(reply)
+
+    def test_a_refused_scheme_is_quiet_in_both(self):
+        reply = "A [x](javascript:alert(1)) link."
+        assert "<a" not in to_pango(reply)
+        assert to_speech(reply) == "A x link."
+
+    def test_a_code_url_is_code_in_the_window_and_a_word_aloud(self):
+        reply = "run `curl https://x.org/a` please"
+        assert "<tt>curl https://x.org/a</tt>" in to_pango(reply)
+        assert to_speech(reply) == "run curl link please"
+
+
+class TestSafeUrl:
+    """The allowlist, from open-intelligent-ui's `safeUrl`.
+
+    It renders `https:` and `http:` and returns undefined for everything else,
+    so a URL a model emits is either a link a person can follow or text. Each
+    refusal below is a way a link is made to read as one host and go to another.
+    """
+
+    @pytest.mark.parametrize("url", [
+        "https://example.org", "http://example.org/a", "HTTPS://EXAMPLE.ORG",
+        "https://en.wikipedia.org/wiki/Foo_(bar)",
+        "https://example.org/a?b=1&c=2#frag",
+    ])
+    def test_an_ordinary_address_is_allowed(self, url):
+        assert safe_url(url) == url
+
+    @pytest.mark.parametrize("url", [
+        "javascript:alert(1)", "JaVaScRiPt:alert(1)", "JAVASCRIPT:alert(1)",
+        "file:///etc/passwd", "data:text/html,<b>x", "vbscript:msgbox(1)",
+        "ftp://example.org/x", "mailto:someone@example.org",
+    ])
+    def test_a_scheme_outside_the_allowlist_is_refused(self, url):
+        assert safe_url(url) is None, f"{url!r} would become a clickable link"
+
+    @pytest.mark.parametrize("url", [
+        "//evil.example/x", "/relative/path", "relative", "",
+        "https://", "https:///nohost",
+    ])
+    def test_something_with_no_host_is_refused(self, url):
+        assert safe_url(url) is None
+
+    def test_a_newline_inside_the_url_is_refused(self):
+        # A URL is one line. A newline is how a link is made to display as one
+        # host and resolve to another.
+        assert safe_url("https://good.example/\nhttps://evil.example") is None
+
+    def test_a_space_inside_the_url_is_refused(self):
+        assert safe_url("https://example.org/a b") is None
+
+    @pytest.mark.parametrize("value", [None, 42, [], {}, b"https://x.org"])
+    def test_a_non_string_is_refused(self, value):
+        assert safe_url(value) is None
+
+
+class TestTheAllowlistReachesTheWindow:
+    """The allowlist is only worth writing if `to_pango` actually consults it."""
+
+    def test_an_allowed_link_is_clickable(self):
+        out = to_pango("[label](https://example.org/x)")
+        assert '<a href="https://example.org/x">label</a>' in out
+
+    def test_an_ampersand_in_a_query_is_escaped_once(self):
+        """The double escape produced `&amp;amp;`, which renders as a literal
+        `&amp;` and sends the browser somewhere other than where it read."""
+        out = to_pango("see https://example.org/a?b=1&c=2 now")
+        assert 'href="https://example.org/a?b=1&amp;c=2"' in out, out
+        assert "amp;amp" not in out
+
+    def test_a_url_in_code_is_not_linkified(self):
+        """A command in backticks is meant to be copied, not clicked."""
+        out = to_pango("run `curl https://x.org/a` please")
+        assert "<a " not in out
+        assert "<tt>curl https://x.org/a</tt>" in out
+
+    def test_a_bare_address_is_linkified_with_its_punctuation_kept(self):
+        assert to_pango("Go to https://x.org.") == (
+            'Go to <a href="https://x.org">https://x.org</a>.')
+
+    def test_a_bracketed_address_keeps_the_sentences_bracket(self):
+        assert to_pango("see (https://x.org/a) ok") == (
+            'see (<a href="https://x.org/a">https://x.org/a</a>) ok')
+
+    def test_a_refused_scheme_keeps_its_words(self):
+        assert to_pango("A [x](javascript:alert(1)) link.") == "A x link."

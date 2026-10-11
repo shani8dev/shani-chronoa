@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from urllib.parse import urlsplit
 from typing import List, Optional, Tuple
 
 _ESCAPES = (("&", "&amp;"), ("<", "&lt;"), (">", "&gt;"))
@@ -80,13 +81,95 @@ _CODE = re.compile(r"`([^`\n]+)`")
 _BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
 
 
+#: `[label](destination)`, with one level of nested parentheses in the
+#: destination because Wikipedia URLs contain a real one (`Foo_(bar)`). **The
+#: same shape `_SPOKEN_LINK` uses, and it was wrong there first** - `[^)]*`
+# stopped at the first `)`, so `[x](javascript:alert(1))` matched
+# `[x](javascript:alert(1` and left a stray bracket in the spoken text.
+_LINK_MD = re.compile(r"\[([^\]]*)\]\(([^()\s]*(?:\([^()\s]*\)[^()\s]*)*)\)")
+
+#: A bare address. The lookbehind keeps `ahttp://x` and an address inside a
+#: longer token intact, and the character class keeps it from running past the
+#: end of the URL into the next word.
+_BARE_URL_MD = re.compile(r"(?<![A-Za-z0-9>\"'])(https?://[^\s<>]+)")
+
+#: A `<tt>` span, held aside so a URL inside backticks stays code. A curl
+#: command in a reply is meant to be copied, not clicked.
+_TT_SPAN = re.compile(r"<tt>[^<]*</tt>")
+
+
+def _md_link(match: "re.Match[str]") -> str:
+    label, destination = match.group(1), unescape(match.group(2))
+    href = safe_url(destination)
+    if href is None:
+        # Not a link this module will make. The label is still worth reading, so
+        # the bracket syntax is dropped and the words kept - which is what
+        # `to_speech` does with the same input, so the two paths agree.
+        return label
+    return f'<a href="{escape(href)}">{label}</a>'
+
+
+def _bare_md_link(match: "re.Match[str]") -> str:
+    whole = match.group(0)
+    # **Unescape first: `_inline` works on already-escaped text**, so the `&` of
+    # a query string is `&amp;` here. Validating and re-escaping that directly
+    # produced `&amp;amp;` in the href - a double escape that renders as a
+    # literal `&amp;` and sends the browser somewhere other than where it read.
+    url = _trim_url_clip(unescape(whole))
+    href = safe_url(url)
+    if href is None:
+        return whole
+    # The trimmed punctuation stays after the link, exactly as it does in the
+    # spoken form: `(https://x.org/a)` is `(link)`, not `(link`.
+    return f'<a href="{escape(href)}">{escape(url)}</a>' + whole[len(escape(url)):]
+
+
+def _trim_url_clip(text: str) -> str:
+    """The URL without the punctuation that belongs to the sentence.
+
+    `see https://x.org.` is a sentence about an address; the full stop is the
+    sentence's. A trailing `)` or `]` is the sentence's when it is **unbalanced**
+    and the URL's when it is not, which is what makes `Foo_(bar)` work.
+    """
+    while text and text[-1] in ".,;:!?'\"’”»":
+        text = text[:-1]
+    while text and text[-1] == ")" and text.count(")") > text.count("("):
+        text = text[:-1]
+    while text and text[-1] == "]" and text.count("]") > text.count("["):
+        text = text[:-1]
+    return text
+
+
+def _links(text: str) -> str:
+    """Markdown links and bare addresses -> `<a>` elements, or plain text.
+
+    A URL is made clickable only through `safe_url`, which is the
+    open-intelligent-ui rule. The spoken path is separate and already handled
+    (`to_speech` turns an address into the word "link", because a URL read aloud
+    is a wall of noise nobody can act on); what matters is that the two agree,
+    and they do - the label is spoken, and here the label is what is clickable.
+    """
+    stash: "List[str]" = []
+
+    def keep(match: "re.Match[str]") -> str:
+        stash.append(match.group(0))
+        return f"\x00TT{len(stash) - 1}\x00"
+
+    text = _TT_SPAN.sub(keep, text)
+    text = _LINK_MD.sub(_md_link, text)
+    text = _BARE_URL_MD.sub(_bare_md_link, text)
+    for index, span in enumerate(stash):
+        text = text.replace(f"\x00TT{index}\x00", span)
+    return text
+
+
 def _inline(text: str) -> str:
     """Apply the inline markers to already-escaped text."""
     text = _CODE.sub(lambda m: f"<tt>{m.group(1)}</tt>", text)
     text = _BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", text)
     text = _ITALIC_STAR.sub(lambda m: f"<i>{m.group(1)}</i>", text)
     text = _ITALIC_UNDER.sub(lambda m: f"<i>{m.group(1)}</i>", text)
-    return text
+    return _links(text)
 
 
 # A pipe table: a header row, then a row of dashes, then the body. Both are
@@ -110,6 +193,164 @@ def _display_width(text: str) -> int:
     would drift out of alignment on the first full-width character.
     """
     return sum(2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+#: The inverse of `escape`, for the one place it is needed: `_inline` works on
+#: already-escaped text, so a link's href has to be read back out of it before it
+#: can be checked. `escape` produces exactly these three entities and nothing
+#: else, so the inverse is exact rather than approximate.
+_UNESCAPES = (("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&"))
+
+
+def unescape(text: str) -> str:
+    for entity, char in _UNESCAPES:
+        text = text.replace(entity, char)
+    return text
+
+
+#: The schemes a link may use. **From open-intelligent-ui's `safeUrl`**
+#: (`src/lib/travel/components.tsx`): it renders `https:` and `http:` and returns
+#: undefined for everything else, so a `javascript:` or `file:` URL a model emits
+#: is dropped rather than made clickable. Chronoa's transcript had no links at
+#: all - safe by omission, and every answer lost its URLs.
+_SAFE_SCHEMES = ("https", "http")
+
+
+def safe_url(value: object) -> "Optional[str]":
+    """The href to put in markup, or None when it is not one to put there.
+
+    Four refusals, each because a link is a thing a person clicks:
+
+    - not a string, or empty once stripped;
+    - a scheme other than http/https - `javascript:`, `data:`, `file:`,
+      `vbscript:`. Case is folded, so `JaVaScRiPt:` does not slip through;
+    - no host, so a scheme-relative `//evil.example/x` would be resolved against
+      whatever the app is showing. A model that emits one has produced a link
+      to somewhere, not a document;
+    - whitespace anywhere in it. A newline is how a link is made to read as one
+      host and go to another.
+    """
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate:
+        return None
+    if any(ch.isspace() for ch in candidate):
+        return None
+    if any(ord(ch) < 0x20 for ch in candidate):
+        return None
+    parsed = urlsplit(candidate)
+    if parsed.scheme.lower() not in _SAFE_SCHEMES:
+        return None
+    if not parsed.netloc:
+        return None
+    return candidate
+
+
+#: The code points that may only ever follow the one they join to. Cutting
+#: between a base character and any of these leaves the second half stranded: a
+#: combining accent on its own, or a ZWJ whose emoji is gone, both render as the
+#: "missing glyph" box.
+_JOINERS = frozenset("\u200d\u20e3\ufe0f\ufe0e")
+_VARIATION_SELECTORS = frozenset(chr(c) for c in range(0xFE00, 0xFE10))
+_SKIN_TONES = frozenset(chr(c) for c in range(0x1F3FB, 0x1F400))
+_REGIONAL = frozenset(chr(c) for c in range(0x1F1E6, 0x1F200))
+
+
+def _joins(previous: str, current: str) -> bool:
+    """Whether `current` continues `previous`'s grapheme cluster.
+
+    **An approximation, and it has to be said so.** The stdlib has no grapheme
+    segmenter; `Intl.Segmenter`, which open-intelligent-ui uses for exactly this
+    ("so a word or letter from the model can't overflow the pin"), is JavaScript.
+    What the stdlib *does* give is the set of characters that cannot start a
+    cluster, and that is the half that matters for a truncation - the failure
+    being prevented is a cut that leaves one of these stranded.
+    """
+    if current in _JOINERS or current in _VARIATION_SELECTORS or current in _SKIN_TONES:
+        return True
+    if unicodedata.combining(current):
+        return True
+    # A ZWJ also joins *forwards*: it consumes the character that follows it, so
+    # "👨\u200d👩" is one cluster and cutting between the ZWJ and the woman leaves
+    # the ZWJ stranded just as before.
+    if previous in _JOINERS:
+        return True
+    # A flag is two regional indicators; cutting between them leaves half a flag.
+    return previous in _REGIONAL and current in _REGIONAL
+
+
+def graphemes(text: str) -> "List[str]":
+    """`text` split into approximate grapheme clusters."""
+    if not text:
+        return []
+    start = 0
+    out: List[str] = []
+    for i in range(1, len(text)):
+        if not _joins(text[i - 1], text[i]):
+            out.append(text[start:i])
+            start = i
+    out.append(text[start:])
+    return out
+
+
+def _cluster_display_width(cluster: str) -> int:
+    """The columns one grapheme cluster takes.
+
+    **A cluster is one glyph, so its width is one measurement, not a sum.**
+    Summing the code points counts a ZWJ sequence as its parts: "👨‍👩‍👧‍👦" came
+    out at 11 columns (four emoji at 2, three ZWJ at 1) instead of 2, and a
+    string that already fitted the slot was clipped anyway. The widest code
+    point is right for every case here - a flag is two wide regional indicators,
+    an accented letter is one narrow base plus a zero-width mark, and a ZWJ
+    sequence is wide throughout except for the joiners.
+    """
+    if not cluster:
+        return 0
+    return max(_display_width(ch) for ch in cluster)
+
+
+def clip(text: str, width: int, ellipsis: str = "...") -> str:
+    """`text` cut to `width` columns, on a grapheme boundary, with an ellipsis.
+
+    **A hard slice leaves broken glyphs, and `str[:n]` is a hard slice.** Cutting
+    "👨‍👩‍👧‍👦" after its second code point leaves a ZWJ with no emoji, and
+    cutting "é" after its first leaves a bare combining acute; both draw the
+    "missing glyph" box. Measured: `('e' + U+0301)[:1]` is `'e'`, and
+    `'…👨‍👩‍👧‍👦…'[:i+2]` ends in U+200D.
+
+    This is open-intelligent-ui's `pinEmoji` problem in a different place: that
+    function takes the first grapheme and only if it is Extended_Pictographic,
+    "so a word or letter from the model can't overflow the pin".
+
+    The ellipsis counts against the budget, so the result is never wider than
+    `width` - which is the point of a clip: the caller is putting this in a slot
+    of that many columns, not asking for a string of that many characters.
+
+    Two things the first version got wrong, both found by the tests: a cluster
+    measured per code point (so a family emoji cost 11 columns and text that
+    fitted was clipped anyway), and an ellipsis that did not fit swallowing the
+    whole budget (a two-column slot got two dots instead of two columns of text).
+    """
+    if width <= 0:
+        return ""
+    if sum(_cluster_display_width(c) for c in graphemes(text)) <= width:
+        return text
+    budget = width - _display_width(ellipsis)
+    if budget < 1:
+        budget = width
+    out: List[str] = []
+    used = 0
+    for cluster in graphemes(text):
+        step = _cluster_display_width(cluster)
+        if used + step > budget:
+            break
+        out.append(cluster)
+        used += step
+    clipped = "".join(out)
+    if clipped and budget < width:
+        clipped += ellipsis
+    return clipped
 
 
 def _cells(line: str) -> List[str]:
@@ -277,16 +518,36 @@ _SPOKEN_ITALIC_UNDER = re.compile(r"(?<![\w_])_([^_\n]+)_(?![\w_])")
 _SPOKEN_BULLET = re.compile(r"^\s*[-*+]\s+(.*)$")
 _SPOKEN_RULE = re.compile(r"^\s*(?:---+|\*\*\*+|___+)\s*$", re.MULTILINE)
 _SPOKEN_HEADING = re.compile(r"^\s*#{1,6}\s+(.*)$", re.MULTILINE)
-_SPOKEN_LINK = re.compile(r"\[([^\]]*)\]\(([^)]*)\)")
+#: A markdown link being reduced to its label. **The same shape `_LINK_MD`
+# uses, and it was wrong here first** - `[^)]*` stopped at the first `)`, so
+# `[Foo](https://en.wikipedia.org/wiki/Foo_(bar))` was spoken as `Foo)` and
+# `[x](javascript:alert(1))` as `A x) link.` Wikipedia addresses carry a real
+# parenthesis, so the character cannot be banned from a URL.
+_SPOKEN_LINK = re.compile(r"\[([^\]]*)\]\(([^()\s]*(?:\([^()\s]*\)[^()\s]*)*)\)")
 
 #: A bare web address, which a model writes unlinked as often as not. The
-#: character before the scheme must not be alphanumeric, or `ahttp://x` and an
-#: address inside a longer token both get mangled.
-_BARE_URL = re.compile(r"(?<![A-Za-z0-9])https?://\S+")
+# character before the scheme must not be alphanumeric, or `ahttp://x` and an
+# address inside a longer token both get mangled. **A backtick is excluded**:
+# `` `curl https://x.org/a` `` used to match the closing backtick as part of the
+# address, so the URL pass ate it and left the code span unpaired.
+_BARE_URL = re.compile(r"(?<![A-Za-z0-9>\"'])https?://[^\s<>`]*")
 
 
 def _say_link(match: "re.Match[str]") -> str:
-    return "link"
+    """A bare address -> the word "link", plus whatever ends the sentence.
+
+    **The trim decides what the address is; it never decides what the reply
+    says.** Returning a bare "link" for the whole match swallowed the sentence's
+    own punctuation, so `see (https://x.org/a) ok` was spoken `see (link ok` -
+    an unclosed bracket *and* a dropped one, both audible. A trailing `)`, `]`,
+    `,` or `.` belongs to the sentence when it is unbalanced, and to the address
+    when it is not, which is what makes `Foo_(bar)` work.
+    """
+    whole = match.group(0)
+    url = _trim_url_clip(whole)
+    if url == whole:
+        return "link"
+    return "link" + whole[len(url):]
 
 
 def _say_table(lines: List[str]) -> "Optional[str]":

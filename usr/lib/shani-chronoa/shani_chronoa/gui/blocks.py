@@ -685,7 +685,12 @@ class ToolCallCard(Gtk.Box):
         row.append(title)
         summary = ", ".join(f"{key}={value}" for key, value in self.arguments.items())
         if len(summary) > 60:
-            summary = summary[:57] + "..."
+            # **`markdown_lite.clip`, not a hard slice.** The arguments are
+            # model-supplied text, and `[:57]` cuts a grapheme cluster: an emoji
+            # argument is seven ZWJ-joined code points and the slice leaves a
+            # stranded ZWJ, which draws the missing-glyph box. The ellipsis is
+            # inside the width, so the hint never grows past what it was.
+            summary = markdown_lite.clip(summary, 60)
         if summary:
             hint = Gtk.Label(label=summary)
             hint.add_css_class("dim-label")
@@ -833,7 +838,121 @@ def widgets_for(text: str, on_tool_open: Optional[Callable] = None) -> List[Gtk.
             label.set_selectable(True)
             label.set_xalign(0.0)
             label.add_css_class("transcript-turn")
+            # **A link that renders clickable but does nothing when clicked is
+            # the dead-control defect**, and the markup alone produces exactly
+            # that: Pango draws the underline and GTK opens nothing on its own.
+            # This handler is what makes the `<a>` real.
+            label.connect("activate-link", _open_uri)
             label.update_property([Gtk.AccessibleProperty.LABEL],
                                   ["Chronoa said: " + str(block.payload)])
             out.append(label)
     return out
+
+
+def link_target(uri: str) -> "tuple[Optional[str], str]":
+    """(url to open, why-not) for a link a person clicked. No side effects.
+
+    **Split out of `_open_uri` so the decision can be tested without opening
+    anything.** The first version put the check and the launch in one function,
+    and the only way to exercise it was to emit `activate-link` on a real label —
+    which ran the real launcher and **opened the person's browser**. A handler
+    that cannot be tested without causing the thing it does is a handler nobody
+    should be testing by hand.
+    """
+    safe = markdown_lite.safe_url(uri)
+    if safe is None:
+        return None, f"a link outside the http/https allowlist was refused: {uri!r}"
+    try:
+        from shani_chronoa import egress
+        egress.record("gui-link", safe, purpose="user-clicked-link")
+    except Exception:  # noqa: BLE001 - the ledger must never block the click
+        logger.debug("could not record the clicked link", exc_info=True)
+    return safe, ""
+
+
+def _app_for(widget: Gtk.Widget):
+    """The application a widget belongs to, or None.
+
+    Walks to the root window and asks it. Returns None rather than raising,
+    because a reply label also exists outside a window — a test, or a widget
+    built for a screenshot — and a link in one of those has no app to open a
+    browser in.
+    """
+    try:
+        root = widget.get_root()
+    except Exception:  # noqa: BLE001 - a detached widget has no root
+        return None
+    if root is None:
+        return None
+    try:
+        return root.get_application()
+    except Exception:  # noqa: BLE001 - not every root is an application window
+        return None
+
+
+def show_in_own_browser(widget: Gtk.Widget, url: str) -> bool:
+    """Open `url` in Chronoa's own browser window. False when there is none.
+
+    **A clicked link belongs in the app's browser, not the system's.** Chronoa
+    ships one (`gui/browser.py`, the window `browse` drives), and sending a
+    reply's links to a separate application would move the person out of the
+    conversation they are reading — and out of the egress checks, the activity
+    strip and the ability to stop it, all of which that window has.
+
+    False means "could not", never "would not": WebKitGTK is an optional
+    dependency, and on a machine without it the caller falls back to the system
+    handler rather than dropping the click.
+    """
+    app = _app_for(widget)
+    if app is None:
+        return False
+    try:
+        from shani_chronoa.gui import browser as browser_mod
+        if not browser_mod.is_available():
+            return False
+        ensure = getattr(app, "_ensure_browser_window", None)
+        if ensure is None:
+            return False
+        window = ensure()
+        if window is None:
+            return False
+        window.load_url(url)
+        window.present()
+        return True
+    except Exception as exc:  # noqa: BLE001 - a browser must not eat the click
+        logger.warning("could not open %s in Chronoa's browser: %s", url, exc)
+        return False
+
+
+def _open_uri(label: Gtk.Label, uri: str) -> bool:
+    """A clicked link in a reply -> Chronoa's browser, or the system's.
+
+    Returns True so GTK considers the link handled. The decision is
+    `link_target`'s and the launch is `show_in_own_browser`'s, so both are
+    testable without a browser appearing.
+
+    `launch_default_for_uri_async` rather than the synchronous form: measured,
+    the synchronous call blocks on this box, and a handler that runs on the GTK
+    main loop cannot afford to wait for a browser to spawn.
+    """
+    safe, _why = link_target(uri)
+    if safe is None:
+        logger.warning("refusing to open a clicked link: %s", uri)
+        return True
+    if show_in_own_browser(label, safe):
+        return True
+
+    def done(_source, result) -> None:
+        try:
+            ok = Gio.AppInfo.launch_default_for_uri_finish(result)
+        except Exception as exc:  # noqa: BLE001 - reported, not raised into GTK
+            logger.warning("could not open %s: %s", safe, exc)
+            return
+        if not ok:
+            logger.info("nothing on this machine handles %s", safe)
+
+    try:
+        Gio.AppInfo.launch_default_for_uri_async(safe, None, None, done)
+    except Exception as exc:  # noqa: BLE001 - reported, not raised into GTK
+        logger.warning("could not start opening %s: %s", safe, exc)
+    return True
