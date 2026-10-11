@@ -4747,6 +4747,29 @@ including the shipped behaviour restored verbatim (a checker that could not
 answer reported as the action failing), which is the strongest kind of mutation:
 it is not a hypothetical, it is the bug.
 
+### And the same package's slash-command detector: already correct, measured rather than assumed
+
+`detector.ts` strips fenced code blocks before reading a leading `/`, on the
+premise that a person pasting a shell snippet should not have its first line read
+as a command. Chronoa's answer is `commands.lookup()`, which requires the slash at
+the **very start of the trimmed buffer** and is called once, at submit - there is
+no per-keystroke detection to be fooled. **Measured, all six cases:**
+
+| the composer holds | lookup | the menu |
+|---|---|---|
+| `/undo` | runs `undo` | opens |
+| `/etc/passwd is on disk` | text | closed |
+| `#!/bin/sh` then `echo hi` | text | closed |
+| `run /undo please` | text | closed |
+| `/1 2 3` | text | closed |
+
+So the defect `removeCodeBlocks` exists for **does not occur here**, and copying
+it would have added a second parser of the same text for a case the one parser
+already answers. Recorded so the next pass does not re-derive it - the sixth pass
+over open-intelligent-ui found the same shape and recorded it the same way:
+**a transfer invented to justify another pass is the confident wrong answer this
+file keeps recording.**
+
 ## Six harness-UI gaps closed (2026-10-07)
 
 Comparing Chronoa's UI against what opencode, cline, Roo-Code, OpenHands and
