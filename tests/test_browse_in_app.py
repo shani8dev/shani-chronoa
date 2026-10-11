@@ -467,6 +467,7 @@ def test_the_click_answer_actually_carries_the_note(web_allowed, no_provider,
             ("_challenge_note", lambda: ""),
             ("_drive", lambda *a, **k: ({"label": "Voice search"}, None)),
             ("_voice_note", lambda label, timeout=15.0: " NOTE-MARKER"),
+              ("page_controls", lambda timeout=15.0: []),
     ):
         monkeypatch.setattr(browser_driver, name, value)
 
@@ -493,6 +494,7 @@ def test_a_refusal_is_not_dressed_up_with_the_note(web_allowed, no_provider,
             ("_start_script", lambda *a, **k: "return 1;"),
             ("_describe_load", lambda *a, **k: "Error: the network policy refuses it."),
             ("_voice_note", lambda label, timeout=15.0: " NOTE-MARKER"),
+              ("page_controls", lambda timeout=15.0: []),
             ("_drive", lambda *a, **k: ({"label": "Voice search"}, None)),
     ):
         monkeypatch.setattr(browser_driver, name, value)
@@ -553,6 +555,7 @@ def test_a_covered_click_says_what_is_in_the_way(web_allowed, no_provider,
     monkeypatch.setattr(browser_driver, "_challenge_note", lambda: "")
     monkeypatch.setattr(browser_driver, "_drive", lambda *a, **k: (
         {"error": "covered", "onTop": "Please wait"}, None))
+    monkeypatch.setattr(browser_driver, "page_controls", lambda *a, **k: [])
 
     said = browser_driver._act("click", {"selector": "#btn", "settle": 0}, 5.0)
 
@@ -561,3 +564,72 @@ def test_a_covered_click_says_what_is_in_the_way(web_allowed, no_provider,
     assert "not a hidden element" in said, (
         "the distinction is the point: the usual hidden check passes it, which "
         "is why it needed a second one: %r" % said)
+
+
+def test_a_click_says_what_appeared_after_it():
+    """browser-use marks any node absent from the previous step's id set with `*`,
+    so the model can see what its action produced. Without the equivalent,
+    `Clicked 'Book'` is the same sentence whether or not the page changed."""
+    from shani_chronoa.gui import browser_driver
+
+    before = ["button|Book the flight", "input|From"]
+    after = ["button|Book the flight", "input|From",
+             "button|Confirm", "button|Receipt"]
+
+    said = browser_driver._what_appeared(before, after)
+
+    assert "Confirm" in said and "Receipt" in said, said
+    assert "Since the click" in said, said
+
+
+def test_a_click_that_changed_nothing_says_rather_than_inventing_it():
+    """The control. Empty is the honest answer: a click can also navigate or
+    change only text, so "nothing appeared" must not read as a failure."""
+    from shani_chronoa.gui import browser_driver
+
+    same = ["button|Book the flight"]
+
+    assert browser_driver._what_appeared(same, same) == ""
+    # and a page that could not be read says nothing at all, not "no controls"
+    assert browser_driver._what_appeared(None, []) == ""
+    assert browser_driver._what_appeared([], None) == ""
+
+
+def test_the_controls_themselves_are_named_not_indexed():
+    """**Names differ from CDP node ids on a page that re-renders.** browser-use
+    keys `is_new` on `backend_node_id`; a framework that rebuilds its DOM hands
+    out fresh ids for the same controls, so ids would report everything as new
+    and the signal would be noise. A tag+name pair survives that."""
+    from shani_chronoa.gui import browser_driver
+
+    assert "innerText" in browser_driver.CONTROLS_JS, (
+        "the fingerprint has to carry the control's name, not only its tag")
+    assert "aria-label" in browser_driver.CONTROLS_JS
+    assert "tagName.toLowerCase()" in browser_driver.CONTROLS_JS
+
+
+def test_a_click_answer_carries_what_appeared(web_allowed, no_provider,
+                                              monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    seen = iter([["button|Book the flight"],
+                 ["button|Book the flight", "button|Confirm"]])
+    monkeypatch.setattr(browser_driver, "page_controls", lambda timeout=15.0: next(seen))
+    for name, value in (
+            ("_order_button", lambda *a, **k: ""),
+            ("_money_ok", lambda *a, **k: ""),
+            ("_say", lambda *a, **k: None),
+            ("_point_at", lambda *a, **k: None),
+            ("_click_script", lambda *a, **k: "return 1;"),
+            ("_start_script", lambda *a, **k: "return 1;"),
+            ("_describe_load", lambda *a, **k: ""),
+            ("_challenge_note", lambda: ""),
+            ("_drive", lambda *a, **k: ({"label": "Book"}, None)),
+    ):
+        monkeypatch.setattr(browser_driver, name, value)
+
+    said = browser_driver._act("click", {"selector": "#book", "settle": 0}, 5.0)
+
+    assert "Clicked 'Book'" in said, said
+    assert "Confirm" in said and "Since the click" in said, (
+        "the reply never asked what the click produced: %r" % said)

@@ -480,6 +480,38 @@ CONTROL_NAME_JS = (
     "})"
 )
 
+#: The interactive controls on the page now, as names. Used to answer **"did
+#: the thing I just did do anything?"** by diffing against a snapshot taken
+#: before it.
+#:
+#: **Ported from `harness-study/browser-use`.** Its DOM serialiser records every
+#: node id after a step and marks any node absent from that previous set with a
+#: `*` prefix, so the model can see what appeared. Chronoa's `browse` had no such
+#: signal: a click reported `Clicked 'Book'` whether or not the page changed, and
+#: this session's AGENTS.md records a click that reported success while the
+#: target's title never moved.
+#:
+#: **A name set, not an id set.** browser-use keys on CDP node ids, which are
+#: stable across a step; a page that re-renders gives fresh ids for the same
+#: control, so ids would report everything as new. A `tag|name` pair survives a
+#: re-render of the same control and only fires for one that is genuinely new.
+CONTROLS_JS = """
+return Array.from(
+  document.querySelectorAll('a, button, input, select, textarea, [role=button], [role=link], [role=textbox]')
+).filter(function (el) {
+  return el.offsetParent !== null && el.getBoundingClientRect().width > 0;
+}).map(function (el) {
+  var n = (function (e) {
+    var d = String(e.innerText || e.value || e.getAttribute('aria-label') || '').trim();
+    if (d) return d;
+    var img = e.querySelector('img');
+    return img ? String(img.getAttribute('alt') || img.getAttribute('title') || '').trim() : '';
+  })(el);
+  return el.tagName.toLowerCase() + '|' + (n || '').slice(0, 40);
+}).filter(Boolean);
+"""
+
+
 _PAYMENT_FIELD_JS = (
     "const el = document.querySelector(SEL); if (!el) return {payment: false};"
     "const ac = (el.getAttribute('autocomplete') || '').toLowerCase();"
@@ -494,6 +526,35 @@ _ORDER_BUTTON_JS = (
 )
 _MONEY_WINDOW_S = 300.0
 _money_allowed: dict = {}
+
+
+def page_controls(timeout: float = 15.0):
+    """The control names on the page now, or `[]` when it cannot be read.
+
+    `[]` means **could not read, not no controls** - the same reading the
+    capability probe gives, and the reason the caller is expected to say nothing
+    rather than report an absence.
+    """
+    found = _json(CONTROLS_JS, timeout)
+    return found if isinstance(found, list) else []
+
+
+def _what_appeared(before, after):
+    """Controls present after and not before, as a short phrase.
+
+    **Evidence, not a verdict.** Something appearing is good evidence that a
+    click did something; nothing appearing is not evidence that it did not,
+    because a click can navigate, change text, open a dialog, or be wrong on a
+    page that reuses its controls. The caller is told which of the two it has.
+    """
+    if before is None or after is None:
+        return ""
+    missing = [c for c in after if c not in before]
+    if not missing:
+        return ""
+    shown = ", ".join(sorted(c.split("|", 1)[-1] or c.split("|", 1)[0]
+                             for c in missing)[:4])
+    return f" Since the click: {shown}."
 
 
 def _host() -> str:
@@ -775,6 +836,11 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
             if refusal:
                 return f"Error: did not click: {refusal}."
         _say(f"clicking {selector or f'({x}, {y})'}")
+        # Snapshot before, so the reply can say what the click produced.
+        # The snapshot is the cheap part - one evaluate against the page -
+        # and it is what turns `Clicked 'Book'` into `Clicked 'Book'; since
+        # the click: Confirmation, Receipt appeared.`
+        before_controls = page_controls(timeout)
         spot = _point_at(selector, x, y, timeout)
         if spot is not None:
             _json(_press_script(spot["x"], spot["y"]), timeout)
@@ -797,6 +863,7 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
             return f"Error: could not click: {value['error']}."
         what = value.get("label") or value.get("tag") or "the element"
         said = f"Clicked {what!r}" + (f" ({selector})" if selector else f" at ({x}, {y})") + "."
+        said += _what_appeared(before_controls, page_controls(timeout))
         followed = _describe_load(load, "It opened")
         if followed.startswith("Error"):
             _say(f"the click on {what!r} led somewhere the network policy refuses", refused=True)
