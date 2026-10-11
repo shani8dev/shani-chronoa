@@ -17,6 +17,7 @@ Adding a key to the schema therefore fails this until someone says where it
 belongs - which is the whole point.
 """
 
+import ast
 import pathlib
 import re
 import sys
@@ -27,6 +28,7 @@ sys.path.insert(0, "usr/lib/shani-chronoa")
 from shani_chronoa.config import _SENSE_CONSENT_KEYS  # noqa: E402
 
 SCHEMA = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml")
+SETTINGS = pathlib.Path("usr/lib/shani-chronoa/shani_chronoa/settings_window")
 
 # Keys the window controls through a GAction, an entry row, or a generated
 # sense switch. Kept as a declared list because the binding is indirect: a
@@ -274,6 +276,9 @@ NOT_EXPOSED = {
 }
 
 
+PRIVACY = SETTINGS / "privacy.py"
+
+
 def _schema_keys():
     return set(re.findall(r'<key name="([^"]+)"', SCHEMA.read_text()))
 
@@ -283,14 +288,44 @@ def _sense_keys():
     return set(_SENSE_CONSENT_KEYS.values())
 
 
+def _privacy_gate_keys():
+    """Every gate key the Privacy page actually renders a row for.
+
+    Read out of `privacy.py` rather than hand-kept, because **a hand-kept list of
+    what the source already knows is a list that rots** - and this one did. Four
+    keys (`file-index-enabled`, `lan-phone-enabled`, `meeting-enabled`,
+    `screen-share-enabled`) shipped with a schema key, a skill reading them and
+    no row on the page, and the suite stayed green while a hand-kept set claimed
+    coverage it did not have.
+
+    The rows are `(label, key, description, refusal)` tuples; the key is the
+    second element. Only a 4-tuple whose second element looks like a gsettings
+    key is taken, so a row is not invented out of an unrelated tuple.
+    """
+    import ast as _ast
+    tree = _ast.parse(PRIVACY.read_text())
+    keys = set()
+    for node in _ast.walk(tree):
+        if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            continue
+        for element in node.elts:
+            if isinstance(element, ast.Tuple) and len(element.elts) == 4:
+                value = element.elts[1]
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*-enabled", value.value):
+                        keys.add(value.value)
+    return keys
+
+
 class TestTheWindowCoversTheSchema:
     def test_the_schema_file_is_readable(self):
         assert SCHEMA.exists(), f"no schema at {SCHEMA}"
         assert _schema_keys(), "the schema declares no keys at all"
 
     def test_every_key_is_accounted_for(self):
+        controlled = CONTROLLED | _privacy_gate_keys()
         unaccounted = sorted(
-            _schema_keys() - _sense_keys() - CONTROLLED - set(NOT_EXPOSED)
+            _schema_keys() - _sense_keys() - controlled - set(NOT_EXPOSED)
         )
         assert not unaccounted, (
             f"these settings exist but the window neither controls them nor "
