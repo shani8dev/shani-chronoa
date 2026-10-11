@@ -10583,3 +10583,49 @@ equivalent** (445s). The equivalent is kept and documented - no sense in the
 suite raises a `BaseException`, so narrowing the worker's `except
 BaseException` to `except Exception` reaches the same outcome for every input
 supplied, and the wider clause is the deliberate choice.
+
+## The harvest said this guard was missing. It exists - and had no test (2026-10-11)
+
+Studying `harness-study`'s existing harvests rather than only new clones, because
+a harvest is a *claim about the tree* and these are dated.
+`HARVEST-2/E-memory-mcp-special.md` records mem0's "threshold gate before
+combining" as a Chronoa gap:
+
+> *"a correctness guard Chronoa's hybrid search lacks (reciprocal rank has no such
+> floor)"*
+
+**The claim is false, and the way it is false is the finding.**
+`conversation_store.MEANING_FLOOR = 0.55` has existed all along, and
+`_by_meaning` applies it at `:717` - inside the candidate path, **before** the
+reciprocal-rank fusion, which is precisely where mem0 applies its gate.
+
+What Chronoa actually lacked was a test. `test_conversation_store.py` has 17 tests
+and none mentions the floor; no other file covers it either. So the guard was real
+and unpinned, which in this repository is the same statement as *the guard might
+not be real* - a floor somebody can delete without turning the suite red is a
+floor nobody has.
+
+`tests/test_search_meaning_floor.py` now pins the contract through a fake `embed`
+whose vectors are normalised word indicators, so cosine similarity is exact
+arithmetic rather than a model output. A message containing **every** keyword of
+the query while being about something else entirely scores 0.38 - past the keyword
+side and below the meaning side - and must be labelled `words`, never
+`words and meaning`. Each test states the number it depends on, so a fixture that
+drifts fails loudly instead of quietly changing what is being tested.
+
+Three things building this taught, each the same shape as the last three passes:
+
+- **A claim in a harvest doc is a claim about the tree, and the tree moves.**
+  Reading this one as a gap would have built a second floor beside the first - the
+  duplicate-guard failure `00-MASTER-BACKLOG.md`'s new banner warns about, in a
+  second document, on the same day.
+- **A witness that cannot fail is the same defect as a witness that always
+  passes.** Two of the four mutations were first named against witnesses that pass
+  for both the fixed and the broken code, and the harness correctly reported
+  "NOT caught by" beside "caught by". Dropping them is what makes the set a
+  control.
+- **A hand-written `.jsonl` is not a session.** `append()` writes the file but
+  does not register it; `list_sessions()` reads the index; `search()` then drops
+  every hit at `if not row or row[0] not in titles` and returns an empty list,
+  which reads exactly like the code being broken. The fixture builds through
+  `active_path()`/`new_session()` now, with the reason written next to it.
