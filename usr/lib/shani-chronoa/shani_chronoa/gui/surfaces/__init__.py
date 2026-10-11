@@ -114,6 +114,7 @@ SURFACE_IDS = (
     "memory",
     "learning",
     "voice",
+    "listening",
     # What Chronoa is, function by function. First in its section on purpose:
     # it is the answer to "what is this thing", which is the question a person
     # has before any of the others.
