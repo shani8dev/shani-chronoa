@@ -510,6 +510,55 @@ def _matrix_packages():
     return packages
 
 
+def _matrix_all_packages() -> "dict[str, set[str]]":
+    """Every package either image attributes a command to.
+
+    **All of them, not the first one seen.** `_matrix_packages` above keys on the
+    command and keeps whichever image was read first, which makes the answer an
+    accident of list order. The two images do not always agree - `pipewire-avb`
+    is `pipewire-audio` on Plasma and `pipewire` on GNOME - and a hint naming one
+    of the two is not wrong, so the agreement test below checks membership.
+    """
+    import json
+
+    root = pathlib.Path(files.__file__).resolve().parents[5]
+    packages: "dict[str, set[str]]" = {}
+    for relative in (
+        "shani-install-media/test-env/mout-plasma/shanios-matrix.json",
+        "shani-install-media/test-env/mout/matrix-gnome.json",
+    ):
+        path = root / relative
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (ValueError, OSError):
+            continue
+        for entry in data.get("commands", []):
+            command = entry.get("command")
+            package = entry.get("package")
+            if command and package and package not in ("", "_", None):
+                packages.setdefault(command, set()).add(package)
+    return packages
+
+
+def test_the_two_images_are_read_as_both_answers_not_the_first():
+    """The reader collects each image's attribution, so a split package cannot
+    turn a correct hint into a failure - or a wrong one into a pass.
+
+    `pipewire-avb` is the one measured disagreement: `pipewire-audio` on Plasma,
+    `pipewire` on GNOME. Either hint is right on one image, so a dict keyed to
+    the first image read decides the case by list order.
+    """
+    packages = _matrix_all_packages()
+    if not packages:
+        pytest.skip("no command matrix in this checkout")
+    assert packages.get("pipewire-avb") == {"pipewire-audio", "pipewire"}, (
+        "the reader is not collecting both images' attributions - it may be "
+        "keying to whichever was read first, which is the accident this "
+        "function exists to remove")
+
+
 def test_every_hint_the_matrix_can_check_agrees_with_it():
     """The authority is pacman's own answer, read off a real image.
 
@@ -517,15 +566,16 @@ def test_every_hint_the_matrix_can_check_agrees_with_it():
     gets nothing - which is the whole failure _PACKAGE_HINTS exists to prevent,
     arriving by a different route.
     """
-    packages = _matrix_packages()
+    packages = _matrix_all_packages()
     if not packages:
         pytest.skip("no command matrix in this checkout - this reads the "
                     "sibling shani-install-media matrices a slot run writes")
     wrong = []
     for binary, claimed in files._PACKAGE_HINTS.items():
         actual = packages.get(binary)
-        if actual and actual != claimed:
-            wrong.append(f"{binary}: hint says {claimed}, matrix says {actual}")
+        if actual and claimed not in actual:
+            wrong.append(f"{binary}: hint says {claimed}, matrix says "
+                         f"{sorted(actual)}")
     assert not wrong, (
         "these package hints disagree with pacman's own command->package "
         "map, so tool_missing() would send someone to a package that does "
