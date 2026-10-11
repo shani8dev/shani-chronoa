@@ -33,6 +33,7 @@ to be ready while a server it never started stays down.
 from __future__ import annotations
 
 import logging
+import threading
 
 from typing import Any, Callable, Dict, List
 
@@ -399,6 +400,160 @@ def _activate(app: Any, card: Dict[str, Any], box: Gtk.Widget,
     _open_setup(app, box)
 
 
+def _engine_box(app: Any) -> Gtk.Widget:
+    """Where the assistant answers from: local, or a cloud provider.
+
+    **Two engines and no way to choose between them was the gap.** Settings held
+    "Run the model", "Free the model" and the cloud fallback switch, in a
+    different window; `model.py` held the free keys; Privacy held the custom
+    server. A person comparing local against cloud had four places to look and one
+    of them reported availability where the other reported selection.
+
+    `select_llm` (the previous commit) is what makes this possible at all: the
+    engine is chosen once at startup and `_maybe_enable_cloud_fallback` never
+    reconsiders, so a switch back from the cloud was a restart.
+
+    **A refusal names its gate, verbatim.** `_cloud_gate_reason` is the same
+    answer the startup path logs, and re-wording it here is exactly how a panel
+    comes to claim a gate is open that the engine says is shut.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                  margin_top=8, margin_bottom=8, margin_start=8, margin_end=8)
+    box.add_css_class("card")
+    heading = Gtk.Label(label="Where the assistant answers from", xalign=0)
+    heading.add_css_class("heading")
+    box.append(heading)
+    summary = Gtk.Label(xalign=0, wrap=True)
+    summary.add_css_class("dim-label")
+    summary.set_max_width_chars(60)
+    box.append(summary)
+
+    def _set_summary(text):
+        summary.set_text(text)
+        summary.remove_css_class("dim-label")
+
+    rows = {}
+
+    def refresh():
+        selected = _app_selected_kind(app)
+        for kind, (button, _idle, in_use_label, note) in rows.items():
+            is_it = kind == selected
+            # **A Button takes `set_label`, not `set_text`** - the GTK3 name for
+            # it, and the first version of this called `set_text` on one, which
+            # raises `AttributeError` on the panel's own construction and so took
+            # the whole Models page down rather than just this row.
+            button.set_label(in_use_label if is_it else "Use it")
+            button.set_sensitive(not is_it)
+            note.set_text("answering now" if is_it else "not answering")
+
+    def choose(kind):
+        def run(_button):
+            _set_summary("Switching to %s..." % kind)
+            threading.Thread(target=lambda: _apply_engine_choice(
+                app, kind, _set_summary, refresh), daemon=True).start()
+        return run
+
+    for kind, title, active_title in (
+            ("local", "Local (llama.cpp)",
+             "Local (llama.cpp) - answering now"),
+            ("cloud", "Cloud - free gateways and your own server",
+             "Cloud - answering now")):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        label = Gtk.Label(label=title, xalign=0)
+        label.set_wrap(True)
+        label.set_hexpand(True)
+        button = Gtk.Button(label="Use it", valign=Gtk.Align.CENTER)
+        button.set_tooltip_text(
+            "Answer with the model on this machine" if kind == "local"
+            else "Answer through the cloud providers - prompts leave this machine")
+        button.connect("clicked", choose(kind))
+        note = Gtk.Label(xalign=0, wrap=True)
+        note.add_css_class("dim-label")
+        row.append(label)
+        row.append(note)
+        row.append(button)
+        box.append(row)
+        rows[kind] = (button, "Use it", "In use", note)
+
+    # **The release control.** `stop_service()` existed and was reachable from
+    # Settings' presence row only, which is a different window from the model
+    # list a person is looking at when they decide they want the memory back.
+    release = Gtk.Button(label="Free the model now", halign=Gtk.Align.START,
+                         css_classes=["pill"])
+    release.set_tooltip_text(
+        "Stop llama-server so its memory is released. It starts again on the "
+        "next question.")
+    release.connect("clicked", lambda _b: threading.Thread(
+        target=lambda: _apply_release(app, _set_summary, refresh),
+        daemon=True).start())
+    box.append(release)
+
+    refresh()
+    return box
+
+
+def _app_selected_kind(app: Any) -> str:
+    """Which engine the app holds, read from its own object.
+
+    **Not a setting.** `cloud-fallback-enabled` being true says nothing about what
+    is answering now, and `local_llm.active()` says which file is loaded, which is
+    a third question. `app.current_llm_kind()` is the app's own answer.
+    """
+    reader = getattr(app, "current_llm_kind", None)
+    if reader is None:
+        return "none"
+    try:
+        return reader() or "none"
+    except Exception:  # noqa: BLE001 - an unreadable app is not "local"
+        return "none"
+
+
+def _apply_engine_choice(app: Any, kind: str, set_summary, refresh) -> None:
+    from gi.repository import GLib
+
+    selector = getattr(app, "select_llm", None)
+    if selector is None:
+        GLib.idle_add(set_summary,
+                      "This panel has no application to switch - open it from "
+                      "the sidebar so the switch can reach the assistant.")
+        return
+    try:
+        why = selector(kind)
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        why = "the switch failed: %s" % (exc,)
+    GLib.idle_add(lambda: (_say_engine_result(why, kind, set_summary), refresh())[1])
+
+
+def _apply_release(app: Any, set_summary, refresh) -> None:
+    from gi.repository import GLib
+
+    from shani_chronoa import local_llm
+
+    try:
+        why = local_llm.stop_service()
+    except Exception as exc:  # noqa: BLE001 - reported, never raised
+        why = "the release failed: %s" % (exc,)
+    GLib.idle_add(lambda: (_say_release_result(why, set_summary), refresh())[1])
+
+
+def _say_engine_result(why: str, kind: str, set_summary) -> None:
+    """One sentence, and the free keys are not repeated in it."""
+    if not why:
+        set_summary("Answering with %s." % kind)
+        return
+    set_summary("Could not switch to %s: %s" % (kind, why))
+    logger.warning("engine switch to %s refused: %s", kind, why)
+
+
+def _say_release_result(why: str, set_summary) -> None:
+    if not why:
+        set_summary("Released the model - its memory is back, and the next "
+                    "question loads it again.")
+        return
+    set_summary("Could not release the model: %s" % why)
+    logger.warning("model release refused: %s", why)
+
+
 def _switch(app: Any, card: Dict[str, Any], box: Gtk.Widget,
             on_changed: Callable) -> None:
     """Switch to this model now, and say what happened.
@@ -584,6 +739,12 @@ def build(app: Any) -> Gtk.Widget:
     search_bar.set_child(search_entry)
     search_bar.connect_entry(search_entry)
     root.append(search_bar)
+
+    # --- which engine answers, above the cards it chooses between -------------
+    # **At the top, because it is the first question.** The panel lists models;
+    # the question a person opens it with is "what am I using, and how do I stop
+    # using that", and neither was answerable here.
+    root.append(_engine_box(app))
 
     # The panel's own health, above the two lists:
     # how many models are installed, how many are

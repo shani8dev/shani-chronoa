@@ -250,3 +250,142 @@ def _card_with(app, card):
     from shani_chronoa.gui.surfaces import models
 
     return models._card(app, card, lambda: None)
+
+
+# --- which engine answers, on the same panel (2026-10-11) ---------------------
+#
+# The engine was chosen once, at startup, and `_maybe_enable_cloud_fallback`
+# returned early when the LLM was already a `CloudLLMChain` - so a machine moved
+# to the cloud by the Settings toggle had no way back but a restart. The panel
+# lists models; it had nothing to say about which of the two engines answers.
+
+
+def _engine_app(kind):
+    app = type("A", (), {})()
+    app.config = type("C", (), {"get": staticmethod(lambda *a, **k: "")})()
+    app.current_llm_kind = lambda self=None, k=kind: k
+    app.select_llm = lambda what: ""
+    return app
+
+
+def _find_card(widget):
+    """The engine section, by the one css class it adds to itself.
+
+    Searching the whole page for one-button boxes finds the model cards too -
+    every card has one - so the section is located first and then walked. **A
+    test that cannot tell the section it is about from the rest of the panel is
+    testing the panel.**
+    """
+
+    for child in _kids(widget):
+        if "card" in (child.get_css_classes() or []):
+            return child
+        deeper = _find_card(child)
+        if deeper is not None:
+            return deeper
+    return None
+
+
+def _engine_rows(page):
+    """The two engine rows of the engine section, by their button labels."""
+    found = {}
+    for row in _kids(_find_card(page) or page):
+        buttons = [c for c in _kids(row) if isinstance(c, Gtk.Button)]
+        if len(buttons) == 1 and buttons[0].get_label() in ("Use it", "In use"):
+            found[buttons[0].get_label()] = buttons[0]
+    return found
+
+
+def test_the_local_engine_offers_nothing_when_it_is_the_one_answering():
+    page = _surface(_engine_app("local"))
+    rows = _engine_rows(page)
+
+    assert "In use" in rows, (
+        "the local engine that is answering did not say so: %r" % list(rows))
+    assert rows["In use"].get_sensitive() is False, (
+        "pressing 'switch' on the engine already answering is a no-op that "
+        "reports success")
+
+
+def test_the_cloud_engine_is_offered_when_local_is_answering():
+    page = _surface(_engine_app("local"))
+    rows = _engine_rows(page)
+
+    assert "Use it" in rows, (
+        "the cloud engine was not offered while local was answering; this was "
+        "the gap - a machine moved to the cloud had no way back but a restart")
+    assert rows["Use it"].get_sensitive() is True
+
+
+def test_both_engines_cannot_say_they_are_answering():
+    """**Five "In use"s was the old defect**, one level up. The same invariant
+    holds here: exactly one engine answers, so exactly one row may claim it."""
+    page = _surface(_engine_app("cloud"))
+    rows = _engine_rows(page)
+
+    # **Exactly one row may claim "In use"** - the other offering to switch is
+    # correct, and asserting otherwise is asserting that a panel with two engines
+    # shows one button. The first version of this test did exactly that.
+    assert "In use" in rows, rows
+    counts = {}
+
+    def rec(widget):
+        for child in _kids(widget):
+            if isinstance(child, Gtk.Button) and child.get_label() == "In use":
+                counts["in use"] = counts.get("in use", 0) + 1
+            rec(child)
+    rec(_find_card(page) or page)
+    assert counts.get("in use") == 1, (
+        "%d rows claimed to be answering; %r" % (counts.get("in use", 0), list(rows)))
+
+
+def test_the_panel_offers_to_release_the_model_it_held_resident():
+    """`stop_service()` existed and was reachable from Settings' presence row
+    only - a different window from the model list a person is looking at when
+    they decide they want the memory back."""
+    from gi.repository import Gtk
+
+    page = _surface(_engine_app("local"))
+    releases = []
+
+    def rec(w):
+        for child in _kids(w):
+            if isinstance(child, Gtk.Button) and child.get_label() == "Free the model now":
+                releases.append(child)
+            rec(child)
+    rec(page)
+
+    assert releases, "the Models panel had no way to release the model"
+    assert releases[0].get_sensitive() is True
+
+
+def _surface(app):
+    from shani_chronoa.gui.surfaces import models
+
+    return models.build(app)
+
+
+def test_a_switch_without_an_application_says_so_rather_than_doing_nothing(monkeypatch):
+    """A bare stub has no `select_llm`. The button is the only control on the row,
+    and a press that does nothing with no explanation is the dead-control shape."""
+    from shani_chronoa.gui.surfaces import models
+
+    said = []
+    models._apply_engine_choice(_App(), "cloud", said.append, lambda: None)
+
+    # The reply is queued on the main loop, because it writes a widget from a
+    # worker thread. With no loop running that is a queue nothing drains, so the
+    # context is turned here - the same thing the switch tests do.
+    import time
+
+    from gi.repository import GLib
+
+    for _ in range(100):
+        if said:
+            break
+        GLib.MainContext.default().iteration(False)
+        time.sleep(0.01)
+
+    assert said, "the switch reported nothing at all"
+    assert "no application" in said[0], (
+        "a panel that cannot switch did not say so: %r" % said)
