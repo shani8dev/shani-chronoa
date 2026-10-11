@@ -96,14 +96,152 @@ _ANNOTATION = re.compile(r"\[[^\]]*\]|\([^)]*(?:music|applause|laugh|noise|silen
                          re.I)
 
 
+#: Consecutive repeats of one token, or of one short *sequence* of tokens,
+#: before the run is treated as a recogniser artefact rather than as speech.
+#: Six, not three: "no, no, no, no, no" is somebody emphatic and has to
+#: survive, and the loops whisper emits when audio trails off are measured in
+#: the dozens - the harness case was "thanks for watching" repeated 40 times.
+REPETITION_RUN = 6
+
+#: Longest repeating unit the character pass looks for. Comfortably above every
+#: phrase whisper loops with ("Subtitles by the Amara.org community" is 36
+#: characters) and short enough that ordinary prose never contains a coincidental
+#: repeat of this length twice over.
+_MAX_REPEAT_UNIT = 60
+
+
+def _token_key(word: str) -> str:
+    """`word` reduced to something two spellings of the same token share.
+
+    Whisper writes the same word with and without punctuation as the loop
+    continues ("URL", "url,", "URL."), so a comparison on the raw string sees
+    three different tokens and calls the run varied.
+    """
+    return re.sub(r"\W+", "", word).lower()
+
+
+def _collapse_token_runs(text: str, min_run: int) -> str:
+    """One copy per run of a single token repeated `min_run`+ times in a row.
+
+    Catches "URL URL URL ..." and, because the comparison ignores punctuation,
+    catches it however the loop punctuates itself.
+    """
+    tokens = text.split()
+    if len(tokens) < min_run:
+        return text
+    kept: "List[str]" = []
+    index = 0
+    while index < len(tokens):
+        key = _token_key(tokens[index])
+        end = index + 1
+        while end < len(tokens) and _token_key(tokens[end]) == key:
+            end += 1
+        kept.append(tokens[index])
+        index = end
+    return " ".join(kept)
+
+
+def _collapse_sequence_runs(text: str, min_run: int) -> str:
+    """One copy per run of a *multi-word* phrase repeated back to back.
+
+    This is the pass that matters for the real artefact. "thanks for watching"
+    repeated six times has **no** two identical adjacent tokens, so the pass
+    above sees nothing and the phrase pass below cannot see it either - the
+    text's period is the phrase *plus its separator*, twenty characters, so a
+    sixfold repeat is only 119 characters and never contains six whole 20-character
+    units. Working in tokens and looking for the smallest period that tiles the
+    run removes the separator from the question entirely.
+
+    Collapsing consumes the **whole** run, not the first `min_run` copies: a run
+    of forty is the same artefact as a run of six, and leaving the tail behind
+    re-emits most of what was just removed.
+    """
+    tokens = text.split()
+    if len(tokens) < min_run:
+        return text
+    kept: "List[str]" = []
+    index = 0
+    while index < len(tokens):
+        collapsed = False
+        for period in range(1, min(len(tokens) - index, 12) + 1):
+            block = tokens[index:index + period]
+            if not block:
+                break
+            repeats = 0
+            while tokens[index + period * repeats:index + period * (repeats + 1)] == block:
+                repeats += 1
+            if repeats >= min_run:
+                kept.extend(block)
+                index += period * repeats
+                collapsed = True
+                break
+        if not collapsed:
+            kept.append(tokens[index])
+            index += 1
+    return " ".join(kept)
+
+
+def _collapse_character_runs(text: str, min_run: int) -> str:
+    """One copy per run of a raw substring repeated `min_run`+ times back to back.
+
+    The pass for text with no word boundaries. A CJK loop ("谢谢观看" repeated)
+    is one unsplit token, so `split()` returns a single element and neither token
+    pass can see a run in it at all.
+
+    Consumes the whole run rather than stopping at `min_run`, and that was a
+    measured bug in the first version: eight repeats of a four-character unit
+    collapsed to *three* copies, because the loop broke out at the threshold and
+    then kept everything after it.
+    """
+    for width in range(2, _MAX_REPEAT_UNIT + 1):
+        index = 0
+        while index + width <= len(text):
+            unit = text[index:index + width]
+            repeats = 0
+            while text[index + width * repeats:index + width * (repeats + 1)] == unit:
+                repeats += 1
+            if repeats >= min_run:
+                text = text[:index] + unit + text[index + width * repeats:]
+                index += width
+            else:
+                index += 1
+    return text
+
+
+def collapse_repetitive_artifacts(text: str, min_run: int = REPETITION_RUN) -> str:
+    """Collapse the loops a recogniser emits when the audio trails off.
+
+    Whisper does not produce garbage by producing a *different* wrong sentence;
+    it produces it by repeating one. The transcript then reads as a very
+    emphatic person, which is the worst possible shape - and `clean_transcription`
+    matches the phrase a loop is built from, so collapsing the loop *first* is
+    what lets a repeated "thanks for watching" be dropped outright rather than
+    forwarded.
+    """
+    if not text or len(text) < min_run * 2:
+        return text
+    text = _collapse_token_runs(text, min_run)
+    text = _collapse_sequence_runs(text, min_run)
+    return _collapse_character_runs(text, min_run)
+
+
 def clean_transcription(text: str) -> str:
     """The words a person said, or '' when whisper produced only noise.
 
     Drops `[BLANK_AUDIO]`, `[music]`, `(applause)`, `*sigh*`, then returns ''
     for whisper's known silence phrases and for anything with fewer than two
     letters - so a cough does not become "Thank you." and a spoken reply.
+
+    **The repetition collapse runs before the hallucination match, and the
+    order is the whole point.** Whisper's failure mode is not a different wrong
+    sentence, it is the same one over and over: the filter below catches
+    "thanks for watching", but measured against the form whisper actually
+    emits when the audio trails off - the phrase six times running - it matched
+    nothing and forwarded all 119 characters of it to the model. Collapsing the
+    loop first reduces it to the one phrase the filter already refuses.
     """
     stripped = " ".join(_ANNOTATION.sub(" ", text or "").split())
+    stripped = collapse_repetitive_artifacts(stripped)
     if len(re.findall(r"\w", stripped)) < 2:
         return ""
     if _HALLUCINATIONS.match(stripped.strip(" .!?,")) or _HALLUCINATIONS.match(stripped):
