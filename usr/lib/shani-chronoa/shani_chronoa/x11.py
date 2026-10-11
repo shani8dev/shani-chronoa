@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import struct
 import logging
 import os
 
@@ -148,9 +149,49 @@ def _declare() -> None:
                                        ctypes.c_int, ctypes.c_ulong]
     XTST.XTestFakeKeyEvent.restype = ctypes.c_int
 
+    X11.XSendEvent.restype = ctypes.c_int
+    X11.XSendEvent.argtypes = [c_void_p, ctypes.c_ulong, ctypes.c_int,
+                               ctypes.c_long, ctypes.POINTER(_XEvent)]
+    X11.XMoveWindow.restype = ctypes.c_int
+    X11.XMoveWindow.argtypes = [c_void_p, ctypes.c_ulong, ctypes.c_int,
+                                ctypes.c_int]
+    X11.XResizeWindow.restype = ctypes.c_int
+    X11.XResizeWindow.argtypes = [c_void_p, ctypes.c_ulong, ctypes.c_uint,
+                                  ctypes.c_uint]
+    X11.XSetInputFocus.restype = ctypes.c_int
+    X11.XSetInputFocus.argtypes = [c_void_p, ctypes.c_ulong, ctypes.c_int,
+                                   ctypes.c_ulong]
+
 
 class XError(RuntimeError):
     """The X server refused, or the call could not be made at all."""
+
+
+#: An `XEvent` is a union of every event type. Only `XClientMessageEvent` is
+#: built here, so the rest of the union is declared as raw bytes - the size is
+#: what matters, because `XSendEvent` copies the whole thing and a buffer that is
+#: short by one byte writes past the end.
+class _ClientMessageEvent(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_int),          # ClientMessage
+        ("serial", ctypes.c_ulong),
+        ("send_event", ctypes.c_int),    # Bool
+        ("display", c_void_p),
+        ("window", ctypes.c_ulong),
+        ("message_type", ctypes.c_ulong),
+        ("format", ctypes.c_int),
+        ("data", ctypes.c_ubyte * 20),
+    ]
+
+
+class _XEvent(ctypes.Union):
+    _fields_ = [("client_message", _ClientMessageEvent),
+                ("padding", ctypes.c_ubyte * 192)]
+
+
+# Xlib's own constants, spelled out rather than imported from a header.
+CLIENT_MESSAGE = 33
+NO_EVENT_MASK = 0
 
 
 class Display:
@@ -414,6 +455,128 @@ class Display:
             raise XError("no keycode maps to keysym 0x%x" % keysym)
         XTST.XTestFakeKeyEvent(self._d, code, 1 if pressed else 0, 0)
         X11.XFlush(self._d)
+
+    # -- the window manager (EWMH) -----------------------------------------
+
+    def _send(self, window: int, message_type: str, data: bytes,
+              mask: int = 0) -> None:
+        """One `XClientMessageEvent`.
+
+        **EWMH is a client-message protocol, not an interface.** Every verb a
+        window manager offers a client - activate, close, change state, move
+        desktop - is a message to the root window saying so, which is why
+        `xdotool` "did" all of it and why none of it needed a permission the X
+        server grants. The message has to be *well formed*: an atom that does not
+        exist, or a 32-bit field holding the wrong width, is silently ignored by
+        the window manager and reported as success by whoever sent it.
+        """
+        event = _XEvent()
+        ctypes.memset(ctypes.byref(event), 0, ctypes.sizeof(event))
+        event.client_message.type = CLIENT_MESSAGE
+        event.client_message.serial = 0
+        event.client_message.send_event = 1  # True: a real client sent it
+        event.client_message.display = self._d
+        event.client_message.window = window
+        event.client_message.message_type = self.atom(message_type)
+        event.client_message.format = 32
+        # Twenty bytes is five 32-bit words, which is all EWMH ever needs.
+        padded = bytes(data).ljust(20, b"\x00")[:20]
+        for i, byte in enumerate(padded):
+            event.client_message.data[i] = byte
+        status = X11.XSendEvent(self._d, self.root(), 0, mask,
+                                ctypes.byref(event))
+        X11.XFlush(self._d)
+        if status == 0:
+            raise XError("the server refused a %s message" % message_type)
+
+    def active_window(self) -> "int | None":
+        """The focused window, or None. `_NET_ACTIVE_WINDOW` is the WM's answer,
+        and 0 means nothing is focused rather than "no such property"."""
+        _kind, _fmt, raw = self._property(self.root(), "_NET_ACTIVE_WINDOW", "WINDOW")
+        if len(raw) < 4:
+            return None
+        value = struct.unpack_from("<L", raw)[0]
+        return value or None
+
+    def desktop_count(self) -> "int | None":
+        _kind, _fmt, raw = self._property(self.root(),
+                                         "_NET_NUMBER_OF_DESKTOPS",
+                                         "CARDINAL")
+        if len(raw) < 4:
+            return None
+        return struct.unpack_from("<L", raw)[0]
+
+    def state(self, window: int, atom: str, on: bool) -> None:
+        """Add or remove one `_NET_WM_STATE`.
+
+        **`(window, 0, atom, 0, 0)` is add and `(window, 1, atom, 0, 0)` is
+        remove.** Getting those two source-argument slots the wrong way round
+        sets the state you meant to clear, and the WM answers nothing either way.
+        """
+        self._send(window, "_NET_WM_STATE",
+                   struct.pack("<LL", 0 if on else 1, 0)
+                   + struct.pack("<L", self.atom(atom))
+                   + struct.pack("<LL", 0, 0))
+
+    def set_state(self, window: int, atoms: "list[str]", on: bool) -> None:
+        """All the atoms of one state, added or removed together.
+
+        Maximized is **two** atoms - vertical and horizontal. Sending one and not
+        the other leaves a window that is maximised in one axis, which is a state
+        nobody asked for and which reads as maximised to anyone who checks only
+        one of the two.
+        """
+        for atom in atoms:
+            self.state(window, atom, on)
+
+    def iconify(self, window: int) -> None:
+        """`WM_CHANGE_STATE` with `IconicState`.
+
+        This is the *polite* route: it tells the WM to hide the window, which is
+        what a user pressing the minimise button does. `XUnmapWindow` would hide
+        it too and leave the WM's own idea of the window unchanged, so the window
+        comes back the next time the WM redraws.
+        """
+        self._send(window, "WM_CHANGE_STATE", struct.pack("<LL", 3, 0))
+
+    def close_window(self, window: int) -> None:
+        """`WM_DELETE_WINDOW`.
+
+        **Asks, does not destroy.** An application can refuse, save its state
+        first, or ask the user - which a window manager honouring the protocol
+        allows, and which is why `windowkill` is a different thing entirely and
+        is not this method.
+        """
+        self._send(window, "WM_DELETE_WINDOW", struct.pack("<LL", 0, 0)
+                   + struct.pack("<LLL", 0, 0, 0))
+
+    def set_desktop(self, window: int, index: int) -> None:
+        self._send(window, "_NET_WM_DESKTOP", struct.pack("<LL", index, 0))
+
+    def move_window(self, window: int, x: int, y: int) -> None:
+        # A direct request rather than a message, because moving is a window
+        # operation and not a protocol the WM has to interpret. On a WM that
+        # reparents clients this can be overridden; that is a property to record,
+        # not a bug to work around.
+        X11.XMoveWindow(self._d, window, int(x), int(y))
+        X11.XFlush(self._d)
+
+    def resize_window(self, window: int, width: int, height: int) -> None:
+        X11.XResizeWindow(self._d, window, int(width), int(height))
+        X11.XFlush(self._d)
+
+    def focus(self, window: int) -> None:
+        """`_NET_ACTIVE_WINDOW` to the root, which is the EWMH way to ask.
+
+        **Sent to the root, not to the window.** The client itself has no way to
+        make itself active - asking is all a client may do, and the WM decides.
+        `XSetInputFocus` is bound but deliberately unused: it forces the X
+        server's focus directly, which a WM that manages focus will immediately
+        undo, and which is the same "do it and see" mistake XTEST makes visible
+        on Wayland.
+        """
+        self._send(self.root(), "_NET_ACTIVE_WINDOW",
+                   struct.pack("<LL", 0, 0) + struct.pack("<LL", window, 0))
 
     def wheel(self, direction: str, amount: int = 3) -> bool:
         """Wheel notches, as button presses 4/5/6/7.
