@@ -48,7 +48,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
-from shani_chronoa.gui.surfaces import background, common  # noqa: E402
+from shani_chronoa import background as running  # noqa: E402  # noqa: F401
+from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ class _Page:
             self.root.remove(child)
             child = following
 
-        found = background.inventory(self.app)
+        found = running.inventory(self.app)
         stoppable = found.stoppable()
 
         if not found.items:
@@ -123,7 +124,20 @@ class _Page:
             if stoppable:
                 self.root.append(self._stop_all_button())
             self.root.append(self._group(found, stoppable))
-        self._set_content(self.root)
+
+        # **A scroller, because this panel is a list and it can outgrow the
+        # window.** Without it a machine with every watcher running cannot reach
+        # the last Stop button on a window shorter than the list - which is the
+        # `inventory` panel bug this file records, in a panel that starts shorter
+        # and grows as more components are added.
+        scroller = Gtk.ScrolledWindow(
+            propagate_natural_width=False,
+            propagate_natural_height=False,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            vexpand=True)
+        scroller.set_child(self.root)
+        self._set_content(scroller)
 
     def _stop_all_button(self) -> Gtk.Widget:
         button = Gtk.Button(label="Stop everything")
@@ -134,14 +148,14 @@ class _Page:
         button.connect("clicked", self._ask_then_stop_all)
         return button
 
-    def _group(self, found: "background.Inventory",
+    def _group(self, found: "running.Inventory",
               stoppable: List[Any]) -> Gtk.Widget:
         group = common.group("Running now", _group_text(found, stoppable))
         for item in found.items:
             group.add(self._row(item))
         return group
 
-    def _row(self, item: background.Running) -> Gtk.Widget:
+    def _row(self, item: "running.Running") -> Gtk.Widget:
         """One running thing: what it holds, and either a Stop or the reason."""
         state = "Running" if item.running else "Stopped"
         button: Optional[Gtk.Button] = None
@@ -169,7 +183,7 @@ class _Page:
 
     # --- stopping -----------------------------------------------------------
 
-    def _stop_one(self, item: background.Running, button: Gtk.Button) -> None:
+    def _stop_one(self, item: "running.Running", button: Gtk.Button) -> None:
         """Stop one thing, off the main loop, reporting what actually happened.
 
         The button is disabled for the duration because a stop that is a
@@ -215,7 +229,7 @@ class _Page:
         dialog.present(self.page.get_root() or self.page)
 
     def _stop_all(self) -> None:
-        found = background.inventory(self.app)
+        found = running.inventory(self.app)
 
         def work() -> None:
             said, refused = found.force_stop_all()
@@ -263,7 +277,7 @@ class _Page:
         self._build()
 
 
-def _group_text(found: "background.Inventory", stoppable: List[Any]) -> str:
+def _group_text(found: "running.Inventory", stoppable: List[Any]) -> str:
     if not found.items:
         return "Nothing is running."
     if not stoppable:

@@ -2,6 +2,77 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## The wizard's void got a mark, and the icon was a gear the first time (2026-10-11)
+
+Reported as *"minor UI glitches during model/voice installation"*, then, looking at
+the rendered pages: *"if void it should have some icon no?"*
+
+**Measured against the 620px default window, four of the sixteen pages have far
+less content than it has room for** - `ears` 270px, `brain` 84px, `mode` 316px,
+`model-picker` 470px - so between the last row and the pinned action there was 150
+to 536px of nothing. Holding the action at the bottom is right, and this file's
+`setup_wizard` comment explains why at length; half a screen of nothing above it
+is what reads as broken.
+
+The void now carries Chronoa's orb. **Three things the first version got wrong,
+all found by running it rather than by reading the diff:**
+
+1. **The icon was a gear.** `Gtk.Image.new_from_icon_name("shani-chronoa")` is a
+   *theme lookup*: it needs `usr/share/icons/hicolor/` on an `XDG_DATA_DIRS` that
+   an installed system has and a checkout does not. The render came back as GTK's
+   missing-image placeholder - **a gear** - which is what "some page had a gear
+   icon" was reporting. The mark is embedded SVG bytes now, drawn through
+   `Gtk.Svg` + `Gtk.Picture`, so it is identical in the app, in a render and in a
+   test, with no file, no theme and no compiled `GResource` (this repo has none).
+2. **The mark appeared on all sixteen pages, including the one that overflows.**
+   `upper <= page_size` is the no-scrollbar case, and it is *also* what an
+   unallocated scroller reports - `upper` and `page_size` are both 0 before the
+   widget has been laid out, and `0 <= 0 + 1` is true. `review`, whose content
+   demands 1029px of a 620px window, got a mark drawn over it. The rule is a
+   named function now, `_void_has_room`, and a page that has never been measured
+   is not a page with room in it.
+3. **The panel's first name collided.** `gui/surfaces/background.py` shadowed
+   `shani_chronoa.background` - the module that owns the inventory the surface
+   draws - so `from shani_chronoa.gui.surfaces import background` inside it
+   resolved to *itself*, `background.inventory` did not exist, and the whole
+   layout suite came back as errors. Renamed to `gui/surfaces/processes.py`. Same
+   shape as `calendar.py` shadowing the stdlib: a name is not just a label.
+
+**And on the Brain page, a jump that read as dead text.** "Use a model on this
+computer" is a wired `Gtk.Button` that goes to the model picker - styled `flat`,
+which in a dark theme renders as unstyled words. So it sat underneath the Next
+button looking exactly like a label nobody connected. The control was never
+broken; the affordance was missing, and the chevron is what makes one - the same
+device this file's welcome rows use, whose own comment says a chevron is not
+decoration.
+
+`tools/mutations/wizard_mark.py` (9). **7 caught, 1 survivor that was my witness
+being wrong, 1 equivalent kept and documented.**
+
+### The mutation runner reported errors as survivors, which is the same bug twice
+
+Two of those nine were reported as survivors for a reason that has nothing to do
+with coverage:
+
+- A mutation that produced an `IndentationError` aborted pytest with *"1 error
+  during collection"* and exit 2. `_failures` looked only for the words
+  *" passed"* or *" failed"*, neither of which is in that sentence - so it printed
+  `(no summary)` and counted the mutation as a survivor.
+- A mutation that broke a module's import gave `27 passed, 101 errors` and no
+  FAILED lines at all, which is again not a survivor: it is a run that could not
+  measure anything.
+
+`_failures` collects `ERROR` lines as well as `FAILED` now, and raises
+`MutationDidNotParse` for a run with no summary. Both are OmO's #8850 in the
+other direction - **a check that could not run is not a check that found
+nothing** - which is the same statement `verification.py`'s exit-code protocol
+made earlier the same day.
+
+The survivor was mine: I had named `test_no_wizard_page_needs_a_sideways_scrollbar`
+as the witness, which only ever builds the *wizard* and so passes. What breaks is
+every test that walks the surfaces.
+
+
 ## The force stop, the reaper, and a model nobody could start (2026-10-11)
 
 Reported in a person's words: *"it needs a force stop button - manually blocking

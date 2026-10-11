@@ -271,14 +271,15 @@ def test_the_new_model_manager_reflows():
 # ---------------------------------------------------------------------------
 
 
-def _wizard_page(tag):
-    """One wizard page's *demand* - the number that decides whether the page
-    needs a horizontal scrollbar.
+_WIZARD_WINDOW = None
 
-    Measured on the child of the page's own `Gtk.ScrolledWindow`, not on the
-    page: a widget that has been allocated 900px will happily report 900px, and
-    reading that as a demand is how this was chased in circles for a while. The
-    demand is what the content *asks* for.
+
+def _build_wizard_window():
+    """The wizard window, or a skip when this machine has no display.
+
+    Built once and cached: `build_window` constructs all sixteen pages, so a walk
+    per query is fifteen sets of wasted widgets and fifteen more chances to be
+    refused on a headless runner.
     """
     from shani_chronoa import setup_wizard
     from shani_chronoa.config import ChronoaConfig
@@ -291,14 +292,12 @@ def _wizard_page(tag):
             pass
 
     built = {}
-    ready = []
     app = Gtk.Application(application_id="dev.shani.auditor",
-                           flags=Gio.ApplicationFlags.NON_UNIQUE)
+                          flags=Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(a):
         built["win"] = setup_wizard.build_window(a, ChronoaConfig())
         built["win"].present()
-        ready.append(True)
         # Two turns: one to build, one so the pages are realised.
         GLib.timeout_add(400, lambda: (app.quit(), False)[1])
 
@@ -311,13 +310,52 @@ def _wizard_page(tag):
     win = built.get("win")
     if win is None:
         pytest.skip("the wizard would not build headless")
-    page = next((n for n in _walk(win)
-                 if isinstance(n, Adw.NavigationPage) and n.get_tag() == tag), None)
-    if page is None:
-        pytest.skip(f"no page called {tag}")
+    return win
+
+
+def _wizard_page(tag):
+    """One wizard page's *demand* - the number that decides whether the page
+    needs a horizontal scrollbar.
+
+    Measured on the child of the page's own `Gtk.ScrolledWindow`, not on the
+    page: a widget that has been allocated 900px will happily report 900px, and
+    reading that as a demand is how this was chased in circles for a while. The
+    demand is what the content *asks* for.
+    """
+    page = _wizard_navigation_page(tag)
     scroller = next((n for n in _walk(page) if isinstance(n, Gtk.ScrolledWindow)), None)
     assert scroller is not None, f"{tag} has no scroller"
     return scroller.get_child()
+
+
+def _wizard_navigation_page(tag):
+    """The `Adw.NavigationPage` itself, rather than what `_wizard_page` returns.
+
+    `_wizard_page` hands back the *content* - the child of the page's own
+    scroller - because that is the widget whose demand decides whether a
+    horizontal scrollbar appears. The mark that fills a short page's void is a
+    **sibling of that scroller**, inside the page, so a test looking for it has to
+    start one level higher. Returning the wrong widget is why the first version
+    of `TestTheVoidCarriesAMark` found no marks at all, on a page that had one.
+    """
+    page = next((n for n in _walk(_wizard_window())
+                 if isinstance(n, Adw.NavigationPage) and n.get_tag() == tag), None)
+    if page is None:
+        pytest.skip(f"no page called {tag}")
+    return page
+
+
+def _wizard_window():
+    """The built wizard window, built once and reused.
+
+    `build_window` constructs all sixteen pages, and the pages are what a walk
+    needs, so building a new window per query is fifteen sets of wasted widgets -
+    and, on a machine with no display, fifteen more chances to be refused.
+    """
+    global _WIZARD_WINDOW
+    if _WIZARD_WINDOW is None:
+        _WIZARD_WINDOW = _build_wizard_window()
+    return _WIZARD_WINDOW
 
 
 import gi  # noqa: E402  - GLib and Gio are used by the harnesses below
@@ -484,3 +522,108 @@ def test_a_suggestion_chip_cannot_be_wider_than_its_window():
         for label in labels:
             assert int(label.get_ellipsize()) != 0, (
                 f"chip label does not ellipsise: {(label.get_label() or '')[:40]!r}")
+
+
+class TestTheVoidCarriesAMark:
+    """**"if void it should have some icon no?"**
+
+    Measured against the 620px default window, four of the sixteen wizard pages
+    have far less content than it has room for - `ears` 270px, `brain` 84px,
+    `mode` 316px, `model-picker` 470px - so between the last row and the pinned
+    action there was 150 to 536px of nothing. A button held at the bottom is
+    right; half a screen of plain nothing above it is what reads as broken.
+
+    Two things the first version got wrong, both caught by running it:
+
+    - it was `Gtk.Image.new_from_icon_name("shani-chronoa")`, which is a **theme
+      lookup**. It does not resolve from a plain checkout - the render came back
+      as GTK's missing-image placeholder, **a gear**, which is what "some page
+      had a gear icon" was reporting. Shipping `usr/share/icons/hicolor/` is
+      right for an installed system and useless for the tree it is developed in.
+      The mark is embedded SVG bytes now, rendered through `Gtk.Svg`, so it is
+      identical in the app, a render and a test.
+    - it appears **only when there is a void**: read off the scroller's
+      adjustment, `upper <= page_size` is the no-scrollbar case. On the eleven
+      pages that fill or overflow the window it is absent rather than drawn over
+      a row, and a mark drawn over content would be worse than the void.
+    """
+
+    def _marks(self, tag):
+        """The marks on a wizard page, and the page they sit on."""
+        page = _wizard_navigation_page(tag)
+        return [w for w in _walk(page)
+                if isinstance(w, Gtk.Picture)], page
+
+    def test_a_short_page_has_a_mark_and_it_is_not_a_control(self):
+        marks, _page = self._marks("ears")
+        assert marks, "the page with the largest void has no mark in it"
+        for mark in marks:
+            assert mark.get_can_target() is False, (
+                "the mark can take a click, so the space above a button became a "
+                "dead target")
+            assert mark.get_focusable() is False, (
+                "the mark is focusable, so a keyboard user stops on a picture")
+            assert isinstance(mark.get_paintable().get() if
+                              hasattr(mark.get_paintable(), "get") else
+                              mark.get_paintable(), object)
+
+    def test_the_mark_is_rendered_from_embedded_bytes(self):
+        """**The gear fix.** A themed lookup is a dependency on `XDG_DATA_DIRS`,
+        and this page is developed in a tree where that path does not exist. The
+        paint is a `Gtk.Svg` and the bytes are in this module.
+        """
+        from shani_chronoa import setup_wizard
+
+        marks, _page = self._marks("ears")
+        assert marks, "no Gtk.Picture on the ears page"
+        paintable = marks[0].get_paintable()
+        assert type(paintable).__name__ == "Svg", (
+            f"the mark is {type(paintable).__name__}, not vector bytes - so it "
+            f"depends on a theme or a file being present")
+        assert setup_wizard._ORB_MARK_SVG.startswith(b"<svg")
+        assert b"#3584e4" in setup_wizard._ORB_MARK_SVG, (
+            "the mark is not Chronoa's blue, so it is not the app's own orb")
+
+    def test_the_rule_is_what_hides_it_on_a_long_page(self):
+        """**The over-fix, and it is the dangerous direction.** A mark drawn over
+        a page that already fills the window sits on top of a row. The rule above
+        is the only thing keeping it off, and this fails when somebody widens it
+        to "always show the mark".
+        """
+        page = _wizard_navigation_page("review")
+        marks = [w for w in _walk(page) if isinstance(w, Gtk.Picture)]
+        assert marks, "the review page has no mark to hide"
+        assert all(m.get_visible() is False for m in marks), (
+            "the mark starts visible on the longest page in the wizard")
+
+
+    def test_the_mark_is_shown_exactly_when_the_content_cannot_scroll(self):
+        """The rule itself, driven with three adjustments.
+
+        **Not through a rendered page, because on a headless box the scroller is
+        never allocated.** A widget that has not been laid out reports
+        `upper = page_size = 0`, and the first version of the rule read that as
+        "room in it" - so the mark appeared on all sixteen pages, `review`'s
+        1029px of content in a 620px window included. Driving the rule directly
+        covers the unlaid-out case, which no screenshot can show.
+        """
+        from shani_chronoa import setup_wizard
+
+        class _Adjust:
+            def __init__(self, upper, page):
+                self._upper, self._page = upper, page
+
+            def get_upper(self):
+                return self._upper
+
+            def get_page_size(self):
+                return self._page
+
+        room = setup_wizard._void_has_room
+        assert room(_Adjust(270, 520)) is True, "a 270px page in a 520px window"
+        assert room(_Adjust(1029, 520)) is False, (
+            "a page that fills the window reported room for a mark")
+        assert room(_Adjust(0, 0)) is False, (
+            "an unallocated scroller reported room, so the mark shows on pages "
+            "that fill the window")
+

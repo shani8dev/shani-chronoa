@@ -292,8 +292,16 @@ def _failures(test_file: str) -> tuple:
         cwd=str(ROOT), timeout=RUN_TIMEOUT,
     )
     text = out.stdout + out.stderr
+    # **Errors are failures.** A run that comes back `27 passed, 101 errors`
+    # and no FAILED lines is a run that could not measure anything, and the
+    # first read of it was "survivor" - "the tests did not catch this", when the
+    # truth is "the tests could not run". pytest prints `ERROR <path>::<name>` for
+    # a fixture that raised during setup, which is exactly what a broken import
+    # produces. Same class as `MutationDidNotParse`: a check that could not run
+    # is not a check that found nothing.
     failed = {line.split("::")[-1].split(" ")[0]
-              for line in text.splitlines() if line.startswith("FAILED")}
+              for line in text.splitlines()
+              if line.startswith(("FAILED", "ERROR"))}
     summary = [l for l in text.splitlines() if " passed" in l or " failed" in l]
 
     # **A collection error is not a survivor, and it is not "no summary" either.**
