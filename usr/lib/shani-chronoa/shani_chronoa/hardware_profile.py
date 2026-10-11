@@ -6,9 +6,76 @@ detection change for different reasons, and config.py had grown to both.
 
 import logging
 import os
+import re
 import subprocess
 
 logger = logging.getLogger(__name__)
+
+#: How long any of the GPU probes may take. **Measured: `vulkaninfo --summary`
+#: takes 971 ms on a real slot**, so 5 s is generous for it - but the old value
+#: was a literal repeated at each call site, and the measured reason for one of
+#: them belonging in a constant is that this pass found the *decision* wrong
+#: rather than the timing.
+_GPU_TIMEOUT = 10
+
+#: The renderers that mean "Vulkan is emulating on the CPU". These are the
+#: spellings Mesa actually emits - measured, `llvmpipe (LLVM 22.1.8, 256 bits)` -
+#: and `PHYSICAL_DEVICE_TYPE_CPU` is the load-bearing signal, because a software
+#: device is *typed* as a CPU by the spec regardless of what it is called.
+_SOFTWARE_RENDERERS = ("llvmpipe", "softpipe", "swrast", "swrast_dri")
+
+
+def _vulkan_devices(summary: str) -> list:
+    """Every device in `vulkaninfo --summary`, as `{name, software}`.
+
+    **Both signals are read, because either alone is wrong.** The renderer name
+    is free-form and version-stamped (`llvmpipe (LLVM 22.1.8, 256 bits)`), while
+    `deviceType = PHYSICAL_DEVICE_TYPE_CPU` is what the Vulkan spec says. A
+    device typed CPU is software whatever it is named; a device not typed CPU is
+    hardware whatever it is called. Matching only the name misses a renamed
+    fallback, and matching only the type misses a CPU-typed device whose name
+    carries no hint.
+
+    Parsed from the **captured** format, in which each device is a `GPU0:`
+    header followed by indented `key = value` lines. A first version read whole
+    lines and would pair `deviceName` with whichever device block happened to
+    be current, which is right by accident until a device omits the key.
+    """
+    devices = []
+    current = None
+    for raw in (summary or "").splitlines():
+        line = raw.strip()
+        if line.endswith(":") and not line.startswith("Device"):
+            # `GPU0:` / `GPU1:` - a device header. `Devices:` and
+            # `VkPhysicalDeviceProperties:` end in a colon too, so only the
+            # bare GPU-index form opens a new device.
+            match = re.fullmatch(r"GPU(\d+):?", line)
+            if match:
+                current = {"name": "", "type": "", "software": False}
+                devices.append(current)
+            continue
+        if current is None or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key == "deviceName":
+            current["name"] = value
+            # Both signals are **sticky-true**: either one marks the device
+            # software, and neither can clear the other. `deviceType` is
+            # authoritative when it says CPU (a device named "Mesa Intel(R) UHD
+            # Graphics 620" is still emulated), and the name still catches a
+            # renamed fallback whose type claims an integrated GPU. Both
+            # asymmetries were found by a test rather than by reading: real
+            # output prints `deviceType` **before** `deviceName`, so a
+            # last-writer-wins flag let the name overrule the type.
+            if any(marker in value.lower() for marker in _SOFTWARE_RENDERERS):
+                current["software"] = True
+        elif key == "deviceType":
+            current["type"] = value
+            if "TYPE_CPU" in value.upper():
+                current["software"] = True
+    return [d for d in devices if d["name"] or d["type"]]
 
 
 class HardwareProfile:
@@ -17,6 +84,9 @@ class HardwareProfile:
     def __init__(self) -> None:
         self.gpu_available: bool = False
         self.gpu_type: str = "none"
+        #: What the probe actually reported, e.g. "Mesa Intel(R) UHD..." or
+        #: "llvmpipe (LLVM 22.1.8, 256 bits)". Empty when nothing answered.
+        self.gpu_name: str = ""
         self.ram_mb: int = 0
         self.cpu_cores: int = 0
         self.profile: str = "auto"
@@ -53,7 +123,7 @@ class HardwareProfile:
             # Check for NVIDIA
             result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=_GPU_TIMEOUT
             )
             if result.returncode == 0 and result.stdout.strip():
                 self.gpu_available = True
@@ -62,16 +132,42 @@ class HardwareProfile:
         except Exception:
             pass
 
-        # Check for Vulkan
+        # **Vulkan: the exit code is not the answer - measured, and this was a
+        # live defect.** On a real ShaniOS @blue slot with a perfectly good
+        # Intel i915 adapter (`card1`, four DP connectors), `vulkaninfo
+        # --summary` exits **0** and its one device is:
+        #
+        #     deviceName = llvmpipe (LLVM 22.1.8, 256 bits)
+        #     deviceType = PHYSICAL_DEVICE_TYPE_CPU
+        #
+        # So asking "did vulkaninfo succeed?" declared a machine that renders
+        # entirely in software to be `gpu_available = True, profile = "gpu"`,
+        # which is what selects the larger model. The question is "is any
+        # reported device an actual GPU", and the device lines say so.
+        #
+        # A software renderer is not a failure either - it is a GPU that is
+        # being emulated - so it is recorded as its own type rather than
+        # dropped, and the caller can tell the two apart.
         try:
             result = subprocess.run(
                 ["vulkaninfo", "--summary"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=_GPU_TIMEOUT
             )
             if result.returncode == 0:
-                self.gpu_available = True
-                self.gpu_type = "vulkan"
-                return
+                devices = _vulkan_devices(result.stdout)
+                hardware = [d for d in devices if not d["software"]]
+                software = [d for d in devices if d["software"]]
+                if hardware:
+                    self.gpu_available = True
+                    self.gpu_type = "vulkan"
+                    self.gpu_name = hardware[0]["name"]
+                    return
+                if software:
+                    # Emulated on the CPU: a real Vulkan stack, no real GPU.
+                    self.gpu_available = False
+                    self.gpu_type = "software"
+                    self.gpu_name = software[0]["name"]
+                    return
         except Exception:
             pass
 
@@ -79,7 +175,7 @@ class HardwareProfile:
         try:
             result = subprocess.run(
                 ["rocm-smi", "--showproductname"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True, text=True, timeout=_GPU_TIMEOUT
             )
             if result.returncode == 0:
                 self.gpu_available = True
