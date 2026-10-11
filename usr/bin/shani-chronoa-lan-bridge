@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Shani Chronoa - drive the assistant from a KDE Connect phone on the same Wi-Fi.
+
+The same shape as `shani-chronoa-bridge` (Telegram, WhatsApp): a thin client that
+turns one channel's messages into `gateway.Submit(gateway, text)` calls. The
+security boundary is unchanged - `gateway.py` is on the session bus, with no port
+and no listener, so this program is a *caller* and never a door.
+
+A separate process because it holds a KDE Connect TLS link open for the life of
+the session, and a GLib main loop of that kind cannot run inside the app.
+"""
+
+import os
+import sys
+
+# See usr/bin/shani-chronoa for why this is usr/lib/shani-chronoa, not just
+# dirname(dirname(__file__)) - the package lives one directory deeper.
+_USR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(_USR_DIR, "lib", "shani-chronoa"))
+
+from shani_chronoa import lan_bridge  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(lan_bridge.main(sys.argv[1:]))
