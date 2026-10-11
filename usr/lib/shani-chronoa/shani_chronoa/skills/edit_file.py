@@ -111,6 +111,142 @@ def _line_numbers(text: str, needle: str) -> "list[int]":
     return out
 
 
+def _tight(text: str) -> str:
+    """`text` with every run of whitespace removed.
+
+    **The comparison, never the edit.** oh-my-openagent's hashline core calls this
+    `stripAllWhitespace` and uses it for `restoreOldWrappedLines`: a model
+    re-typing a block strips trailing spaces, re-wraps, or drops a continuation
+    token, and its transcription is then not the bytes on disk.
+    """
+    return "".join(text.split())
+
+
+def _match_ignoring_whitespace(text: str, old: str) -> "tuple[str, int, int]":
+    """`old` as the file's own bytes, how many times it matches, and where.
+
+    **Line-aligned, and that is the whole reason this is safe.** The match is a
+    run of *whole lines* whose joined tight form equals the needle's, so the span
+    it returns always begins and ends on a line boundary. Matching on characters
+    instead stops wherever the tight characters happen to run out - measured, a
+    needle whose last line ends in `)` matched a span one character short of the
+    newline, and `text.replace(old, new)` then left the original newline behind:
+    the edit came out `...items)\n\n`.
+
+    The retry is only reached when the exact match already failed, and it is
+    O(lines * needle-lines), bounded by the file on one side and
+    `_MAX_NEW_BYTES` on the other.
+
+    **What it returns on ambiguity.** `count > 1` comes back unchanged, so the
+    refusal below names the alternatives exactly as it did before - a span that
+    could be two places is never used, and `replace_all` still means "all of
+    them". The single-match case returns the **file's own span**, which is what
+    makes the replacement exact rather than a normalisation of the model's text.
+
+    A needle shorter than six tight characters is never retried: `return`, `x` or
+    `if` occur everywhere, so a whitespace-insensitive match on one of them is
+    guaranteed ambiguous and the walk would only find it. That is the same floor
+    `restoreOldWrappedLines` uses for a restorable span.
+
+    The offset is what confines the *other* half of the correction: a span of
+    `new_string` can only be put back to the file's bytes if it came from the
+    region being replaced, which is where the model was transcribing from.
+    """
+    if len(_tight(old)) < 6:
+        return old, 0, -1
+    wanted = _tight(old)
+    file_lines = text.split("\n")
+    # The offsets each line starts at, so a run can be sliced as whole lines.
+    starts = []
+    at = 0
+    for line in file_lines:
+        starts.append(at)
+        at += len(line) + 1
+
+    hits = 0
+    first_start = -1
+    first_span = ""
+    for index in range(len(file_lines)):
+        length = 0
+        for end in range(index, len(file_lines)):
+            length += len(_tight(file_lines[end]))
+            if length > len(wanted):
+                break
+            if length == len(wanted):
+                if _tight("\n".join(file_lines[index:end + 1])) == wanted:
+                    hits += 1
+                    if hits == 1:
+                        first_start = starts[index]
+                        first_span = "\n".join(file_lines[index:end + 1])
+                        # Keep the trailing newline the run consumed, so the
+                        # substitution never leaves the original one behind.
+                        if end + 1 < len(file_lines):
+                            first_span += "\n"
+                break
+    if hits != 1:
+        return old, (0 if hits == 0 else hits), -1
+    return first_span, 1, first_start
+
+
+def _restore_kept_lines(region: str, new: str) -> str:
+    """`new` with the lines it quoted put back as the file has them.
+
+    **oh-my-openagent's `restoreOldWrappedLines`, narrowed to where the risk
+    is zero.** That function restores any run of two or more non-blank lines in
+    the replacement whose tight form matches a place in the original exactly
+    once. Chronoa's `new_string` is only the replacement text, not the whole file,
+    so the search is confined to `region` - the bytes being replaced - which is
+    the block the model was transcribing from. A correction can therefore only
+    put back a line that was in the text it was asked to change.
+
+    Three rules, each of which makes the correction unable to invent an edit:
+
+    - **two or more non-blank lines.** One line is not evidence of a quote: it is
+      as likely to be the model's own new text. A run is a transcription.
+    - **six or more tight characters.** `return x` occurs everywhere and a span
+      too short to identify a place cannot be restored to one.
+    - **exactly one place in the region.** Ambiguity is left alone, and the
+      original bytes are used rather than any normalisation of them.
+    """
+    if not region or len(new) < 2:
+        return new
+    region_lines = region.split("\n")
+    where: dict = {}
+    for index in range(len(region_lines)):
+        for length in range(2, min(10, len(region_lines) - index) + 1):
+            span = region_lines[index:index + length]
+            if any(not line.strip() for line in span):
+                continue
+            tight = _tight("".join(span))
+            if len(tight) < 6:
+                continue
+            where.setdefault(tight, []).append((index, length))
+    unique = {k: v[0] for k, v in where.items() if len(v) == 1}
+    if not unique:
+        return new
+
+    out = new.split("\n")
+    start = 0
+    while start < len(out):
+        if not out[start].strip():
+            start += 1
+            continue
+        for length in range(min(10, len(out) - start), 1, -1):
+            span = out[start:start + length]
+            if any(not line.strip() for line in span):
+                continue
+            hit = unique.get(_tight("".join(span)))
+            if hit is None:
+                continue
+            index, _original_length = hit
+            out[start:start + length] = ["\n".join(region_lines[index:index + length])]
+            start += 1
+            break
+        else:
+            start += 1
+    return "\n".join(out)
+
+
 def _run(arguments: dict) -> str:
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
@@ -166,6 +302,29 @@ def _run(arguments: dict) -> str:
         )
 
     count = text.count(old)
+    fuzzy = False
+    if count == 0:
+        # **A second chance, and it is not a guess.** oh-my-openagent's
+        # `restoreOldWrappedLines` exists for the same case: a model re-typing a
+        # block strips trailing whitespace or re-wraps, so its transcription of
+        # `old_string` is not the bytes on disk and the whole edit is refused.
+        # That is the safe answer, and it is a friction the model cannot see past,
+        # because the difference is invisible in the text it wrote.
+        #
+        # So the *match* is retried ignoring whitespace. When exactly one span of
+        # the file tightens to what `old` tightens to, that span's own bytes
+        # become `old` - **the file's bytes, trailing whitespace included** - and
+        # the replacement is exact as before. A span that could be two places is
+        # never used, so the ambiguity this rule exists to refuse still refuses.
+        old, count, offset = _match_ignoring_whitespace(text, old)
+        fuzzy = count == 1
+        if fuzzy:
+            # The same transcription error is in `new_string`: a line the model
+            # meant to keep was re-typed without the file's own whitespace, and
+            # writing it would be a change to a line nobody asked to change.
+            # Confined to the region being replaced, so it can only put back what
+            # was in the text it was asked to change.
+            new = _restore_kept_lines(text[offset:offset + len(old)], new)
     if count == 0:
         return (
             f"{target} does not contain that text, so nothing was edited. "

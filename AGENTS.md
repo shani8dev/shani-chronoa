@@ -4143,7 +4143,72 @@ session's new skills (`lan_phone`, `screen_to_phone`), and one of them says so i
 its own message: *"if it is not, it is another session's work in progress and
 this failure is not about your change."*
 
-## oh-my-openagent's boulder-state: a run that stopped said "in progress" (2026-10-11)
+## oh-my-openagent's hashline: an edit whose `old_string` was re-typed (2026-10-11)
+
+Second pass over `harness-study/oh-my-openagent`, into
+`packages/hashline-core/src/autocorrect-replacement-lines.ts`. Its
+`restoreOldWrappedLines` answers a question Chronoa answers badly: a model
+re-emitting a block it means to leave alone strips trailing spaces, re-wraps, or
+drops a continuation token, so its transcription is not the bytes on disk.
+
+**Chronoa's version of the problem is a refusal, not a spurious diff.**
+`edit_file` requires `old_string` to match exactly - the right rule, because a
+whitespace-tolerant *write* would silently change lines nobody asked to change.
+Measured before this change, a three-line function with trailing whitespace on
+its second line:
+
+    the model's old_string -> exact matches: 0   (the whole edit is REFUSED)
+
+Safe, and a friction the model cannot see past, because the difference is
+invisible in the text it wrote.
+
+**Taken, in two halves, and the second is what makes it honest:**
+
+- **The match.** `_match_ignoring_whitespace` finds the run of *whole lines*
+  whose tight form (whitespace removed) equals the needle's, and returns **the
+  file's own bytes** - trailing whitespace included - so the substitution is
+  still exact. More than one match comes back as `count > 1`, so the existing
+  refusal with its line numbers is unchanged.
+- **The write.** `_restore_kept_lines` puts back, *inside the region being
+  replaced*, the runs the model was quoting. OmO searches the whole original
+  file; narrowing it to the region is what makes it Chronoa's - a correction can
+  only put back what was in the text it was asked to change.
+
+**A line-aligned match, and the bug that proved it.** Matching on *characters*
+stops wherever the tight characters run out - measured, a needle whose last line
+ends in `)` matched a span one character short of the newline, and
+`text.replace(old, new)` left the original newline behind, so a real edit came
+out `...items)\n\n`. The match is a run of whole lines now, and the trailing
+newline the run consumed is kept in the span.
+
+**Two equivalent-mutant traps, both the recorded `str.replace`-that-mutated-
+nothing shape in a new place.** The "a single line is treated as a quote" mutation
+first targeted the region scan alone, then the out scan alone - each is a no-op,
+because a one-line span is only restorable if *both* loops allow it. They are not
+adjacent, so that mutation is now a pair of anchors. And the blank-line witness
+used `"alpha\n\nbeta\n"` for both region and replacement, which leaves the region
+with no usable key at all - the function returns early and the test passes with
+or without the check. The witness is a region holding a real run plus a
+replacement with a blank inside it.
+
+**Four of my own witnesses could not fail, and the mutation run found all four** -
+the short-needle list used a file that contained none of them; the ambiguity
+witness used two runs that differed in *letters*, so there was no ambiguity to
+find; the restorable-span witness used a nine-character run that passes the floor
+anyway; and the boundary case used `return 1` (seven tight characters) instead of
+`return` (exactly six). Each is fixed, and each reason is in the test.
+
+`tests/test_edit_what_the_model_meant.py` — 30 tests, **13 of 13 mutations
+confirmed to fail, 0 survivors**, covering the retry, the ambiguity refusal, the
+line alignment, the trailing newline, the write-side restore, both floors, the
+blank-line rule, the confinement to the region, and the skill end to end
+(a preview writes nothing; an absent string is still refused; `replace_all` still
+means all; an unparseable result is still refused; and a model that copies the
+bytes exactly gets byte-identical behaviour to before). 235 passed across the
+edit, goal, office, capability, senses and file-write suites; 0 stray `.pyc`;
+0 real-state-dir writes.
+
+
 
 `harness-study/oh-my-openagent` (OmO — an OpenCode plugin harness, cloned this
 session; `packages/boulder-state`). 7,491 TypeScript files, and one mechanism in it
