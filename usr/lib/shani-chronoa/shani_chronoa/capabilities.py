@@ -595,6 +595,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     # what its own auto-start setting produced.
     "autostart_entries": ("System", "What starts on this machine automatically, at login and on a schedule"),
     "process_detail": ("System", "What one running process is waiting on"),
+    # One level below that: process_detail reports a single `wchan` for the
+    # whole process, which cannot tell one hot thread from every core shared
+    # evenly - and `list_processes` has the same limit.
+    "thread_activity": ("System", "Which thread of a process is using the CPU, or waiting"),
     # Read-only: cpupower frequency-info reports, and changes nothing.
     "cpu_frequency": ("System", "The CPU governor, its speed, and its hardware range"),
     "cpu_per_core": ("System", "Which processor cores are busy right now"),
