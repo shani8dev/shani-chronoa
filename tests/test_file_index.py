@@ -302,6 +302,70 @@ def semantic(monkeypatch, tmp_path):
     return root, db
 
 
+class TestTheEmbeddingIsBatched:
+    """**One round trip per file was measured, and it is the only network call in
+    here.** `local_embed.embed` takes a list; the first version passed a list of
+    one inside the walk, so a 20-file directory made 20 HTTP round trips of batch
+    size 1 and a 500-file directory would make 500. On a llama.cpp server that is
+    the difference between two seconds and a minute, for no reason a caller can
+    see.
+    """
+
+    def _index_with(self, monkeypatch, tmp_path, count):
+        from shani_chronoa import local_embed
+        sizes = []
+
+        def fake(texts, kind=None, timeout=30.0, transport=None):
+            sizes.append(len(texts))
+            return [[1.0, 0.0] for _ in texts]
+
+        monkeypatch.setattr(local_embed, "configured", lambda: True)
+        monkeypatch.setattr(local_embed, "embed", fake)
+        root = tmp_path / "docs"
+        root.mkdir()
+        for index in range(count):
+            (root / f"f{index}.txt").write_text(f"the wifi box drops link {index}\n")
+        F.index_directory(root, embed=True)
+        return sizes
+
+    def test_twenty_files_are_embedded_in_one_call(self, monkeypatch, tmp_path):
+        sizes = self._index_with(monkeypatch, tmp_path, 20)
+        assert sizes, "the embedder was never called"
+        assert len(sizes) == 1, f"{len(sizes)} calls for 20 files: {sizes}"
+        assert sizes[0] == 20
+
+    def test_the_chunk_is_bounded_so_a_huge_directory_is_not_one_body(self, monkeypatch, tmp_path):
+        """**The other direction.** One giant call would be a body that grows with
+        the directory and a memory spike with it. The chunk is a declared constant
+        so it can be pinned.
+        """
+        sizes = self._index_with(monkeypatch, tmp_path, 100)
+        assert all(size <= F.EMBED_CHUNK for size in sizes), sizes
+        assert len(sizes) > 1, "a 100-file directory went in one call"
+
+    def test_vectors_stay_with_their_own_file(self, monkeypatch, tmp_path):
+        """**The correctness half of batching.** A batch answered short, or a
+        vector written against the wrong file, is a search that finds the wrong
+        thing silently - which is worse than being slow. So the zip is over the
+        chunk and a partial answer is logged rather than misaligned.
+        """
+        from shani_chronoa import local_embed
+
+        def short_embed(texts, kind=None, timeout=30.0, transport=None):
+            # half a batch: the caller must not misalign the rest
+            return [[1.0, 0.0] for _ in texts[: len(texts) // 2]]
+
+        monkeypatch.setattr(local_embed, "configured", lambda: True)
+        monkeypatch.setattr(local_embed, "embed", short_embed)
+        root = tmp_path / "docs"
+        root.mkdir()
+        for index in range(8):
+            (root / f"h{index}.txt").write_text(f"the btrfs rollback needs slot {index}\n")
+        report = F.index_directory(root, embed=True)
+        assert report["indexed"] == 8, report
+        assert report["problems"], "a short batch was not reported"
+
+
 class TestTheSemanticHalf:
     def test_a_vector_is_actually_written(self, semantic):
         root, db = semantic

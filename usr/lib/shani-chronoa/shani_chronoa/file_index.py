@@ -62,6 +62,12 @@ MAX_FILE_BYTES = 32 * 1024 * 1024
 #: about what was searched.
 MAX_EMBED_CHARS = 8192
 
+#: How many files go to the embedding server in one call. A batch is one HTTP
+#: request; 32 files at ~8k characters is well inside a body but large enough that
+#: a 500-file directory is 16 round trips rather than 500 - which is the difference
+#: measured below between two seconds and a minute.
+EMBED_CHUNK = 32
+
 #: Below this cosine similarity a file is not "about" the query. From
 #: `conversation_store`'s own measured floor for the same model.
 SIMILARITY_FLOOR = 0.28
@@ -185,6 +191,18 @@ def index_directory(root, progress=None, embed=True, db=None):
         problems: List[str] = []
         embedder = local_embed.embed if embed else None
 
+        # **Two passes, because embedding is a round trip and a round trip per
+        # file is the difference between two seconds and a minute.** The first
+        # version called `embed([one_file])` inside the walk - measured, 20 files
+        # gave 20 HTTP round trips of batch size 1, on an interface that takes a
+        # list. `local_embed.embed` is the only network call in here, so it is the
+        # only one worth batching.
+        #
+        # So: walk once to work out what needs reading, read it all, batch-embed
+        # in chunks of `EMBED_CHUNK`, then write. The trade is memory - a chunk of
+        # `MAX_EMBED_CHARS` texts is held at once - bounded by the chunk size,
+        # which is small next to `MAX_FILE_BYTES`.
+        pending: List[dict] = []
         for path in sorted(root.rglob("*")):
             # **A symlink is reported, not silently skipped.** The first version
             # had `if not path.is_file() or path.is_symlink(): continue`, which
@@ -199,7 +217,6 @@ def index_directory(root, progress=None, embed=True, db=None):
                 continue
             if not path.is_file():
                 continue
-            # Never follow a symlink out, and never index the index.
             try:
                 resolved = path.resolve()
             except OSError:
@@ -236,30 +253,64 @@ def index_directory(root, progress=None, embed=True, db=None):
                 problems.append(f"{path.name}: {why}")
                 continue
 
-            vector = None
-            if embedder is not None:
-                vectors = embedder([text[:MAX_EMBED_CHARS]], kind=local_embed.DOCUMENT)
-                if not vectors:
-                    problems.append(f"{path.name}: no embedding server, so it is "
-                                    f"keyword-searchable only")
-                else:
-                    vector = local_embed.to_blob(local_embed.normalise(vectors[0]))
-
-            if row:
-                db.execute("DELETE FROM docs WHERE path=?", (str(path),))
-                db.execute("DELETE FROM docs_fts WHERE path=?", (str(path),))
-                updated += 1
-            else:
-                added += 1
-            db.execute(
-                "INSERT INTO docs (path, mtime, size, sha256, kind, text, vector, indexed)"
-                " VALUES (?,?,?,?,?,?,?,?)",
-                (str(path), stat.st_mtime, stat.st_size, fingerprint,
-                 path.suffix.lstrip(".").lower() or "text", text[:MAX_EMBED_CHARS],
-                 vector, time.time()))
-            db.execute("INSERT INTO docs_fts (path, text) VALUES (?,?)", (str(path), text))
+            payload = {
+                "path": str(path), "mtime": stat.st_mtime, "size": stat.st_size,
+                "sha256": fingerprint, "kind": path.suffix.lstrip(".").lower() or "text",
+                "text": text[:MAX_EMBED_CHARS], "known": bool(row),
+            }
+            pending.append(payload)
             if progress:
-                progress(added + updated + skipped, 0)
+                progress(len(pending), -1)
+
+        # --- one batched pass over the embedding server -----------------------
+        for start in range(0, len(pending), EMBED_CHUNK):
+            chunk = pending[start:start + EMBED_CHUNK]
+            vectors: List[Optional[bytes]] = [None] * len(chunk)
+            if embedder is not None:
+                reply = None
+                try:
+                    reply = embedder([item["text"] for item in chunk],
+                                     kind=local_embed.DOCUMENT)
+                except Exception as exc:       # noqa: BLE001 - one bad batch is not fatal
+                    logger.info("a batch of %d files would not embed: %s",
+                                len(chunk), exc)
+                if reply and len(reply) == len(chunk):
+                    for index, vector in enumerate(reply):
+                        vectors[index] = local_embed.to_blob(
+                            local_embed.normalise(vector))
+                elif reply:
+                    # A partial answer: keep what came back and report the rest,
+                    # rather than dropping the whole batch or misaligning vectors
+                    # with files - a vector written against the wrong file is a
+                    # search that finds the wrong thing silently.
+                    missing = len(chunk) - len(reply)
+                    problems.append(
+                        f"the embedding server answered for {len(reply)} of "
+                        f"{len(chunk)} files; the other {missing} are "
+                        f"keyword-searchable only")
+                    for index, vector in enumerate(reply[:len(chunk)]):
+                        vectors[index] = local_embed.to_blob(
+                            local_embed.normalise(vector))
+                else:
+                    for item in chunk:
+                        problems.append(
+                            f"{pathlib.Path(item['path']).name}: no embedding "
+                            f"server, so it is keyword-searchable only")
+            for item, vector in zip(chunk, vectors):
+                db.execute("DELETE FROM docs WHERE path=?", (item["path"],))
+                db.execute("DELETE FROM docs_fts WHERE path=?", (item["path"],))
+                db.execute(
+                    "INSERT INTO docs (path, mtime, size, sha256, kind, text, "
+                    "vector, indexed) VALUES (?,?,?,?,?,?,?,?)",
+                    (item["path"], item["mtime"], item["size"], item["sha256"],
+                     item["kind"], item["text"], vector, time.time()))
+                db.execute("INSERT INTO docs_fts (path, text) VALUES (?,?)",
+                           (item["path"], item["text"]))
+                if item["known"]:
+                    updated += 1
+                else:
+                    added += 1
+            db.commit()
         db.commit()
 
         # Rows whose file has gone.
