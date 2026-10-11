@@ -78,7 +78,16 @@ def _run(arguments: dict) -> str:
         )
 
     try:
-        audio = tts.synthesize_to_bytes(text)
+        # The engine is reachable two ways, and this was the one that did not
+        # reduce markup. `speech.py` runs `markdown_lite.to_speech` per sentence
+        # before it speaks; this skill handed the model's raw string straight
+        # through, so a `speak` call carrying `**` said "asterisk" out loud -
+        # measured on this machine: 146,566 bytes of audio for
+        # "You have **3** updates" against 62,482 for the same sentence
+        # unformatted. The reduction is idempotent, so a text that already came
+        # through the conversation path is unchanged.
+        from shani_chronoa.markdown_lite import to_speech
+        audio = tts.synthesize_to_bytes(to_speech(text))
     except Exception as e:  # noqa: BLE001 - surface any failure as a message
         return f"Could not synthesize speech ({engine}): {e}"
 
@@ -155,7 +164,16 @@ def _verify_spoke(arguments: dict, tool=None):
 
         tts = PiperTTS()
         engine = tts.engine()
-        audio = tts.synthesize_to_bytes(text)
+        # The engine is reachable two ways, and this was the one that did not
+        # reduce markup. `speech.py` runs `markdown_lite.to_speech` per sentence
+        # before it speaks; this skill handed the model's raw string straight
+        # through, so a `speak` call carrying `**` said "asterisk" out loud -
+        # measured on this machine: 146,566 bytes of audio for
+        # "You have **3** updates" against 62,482 for the same sentence
+        # unformatted. The reduction is idempotent, so a text that already came
+        # through the conversation path is unchanged.
+        from shani_chronoa.markdown_lite import to_speech
+        audio = tts.synthesize_to_bytes(to_speech(text))
     except Exception as exc:  # noqa: BLE001 - cannot check is not a pass
         return (False, f"could not re-synthesise the text to check it: "
                        f"{type(exc).__name__}: {str(exc)[:100]}")
