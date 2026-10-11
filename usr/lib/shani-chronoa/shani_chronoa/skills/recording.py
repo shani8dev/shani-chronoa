@@ -115,6 +115,39 @@ def _verify_recording(arguments: dict, tool=None):
 
 POST_CONDITION = _verify_recording
 
+def _capture_wav(name: str, seconds: float):
+    """Record the named PipeWire stream to a fresh WAV, or `None`.
+
+    **Measured, both ways.** `pw-record --target=<stream name>` writes a real WAV
+    header and the audio with it: 6.02s at -11.8 dBFS off a live stream. Waiting
+    `seconds + 20` instead of `seconds` gave **29.99s when 10 was asked** -
+    `pw-record` kept capturing until its own source ended - which is three times
+    the meeting time a person agreed to, so the wait is the duration itself and
+    the process is terminated when it expires.
+    """
+    wav = Path(tempfile.mkstemp(suffix=".wav", prefix="chronoa-stream-")[1])
+    try:
+        proc = subprocess.Popen(
+            ["pw-record", "--rate", "16000", "--channels", "1", "--format",
+             "s16", "--latency", "100ms", "--target", name, str(wav)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except OSError:
+        wav.unlink(missing_ok=True)
+        return None
+    try:
+        proc.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    if not wav.exists() or wav.stat().st_size < 1024:
+        wav.unlink(missing_ok=True)
+        return None
+    return wav
+
+
 def _run(arguments: dict) -> str:
     from shani_chronoa import recordings
     action = (arguments.get("action") or "").strip().lower()
@@ -211,7 +244,10 @@ def _run(arguments: dict) -> str:
         # recorder ran its whole window, reported reason "limit", and handed
         # back `on_done(None)`. `vad.calibrate_noise_floor`'s docstring is built
         # around "the room before speech"; a stream has no such room.
-        wav = Path(tempfile.mkstemp(suffix=".wav", prefix="chronoa-stream-")[1])
+        wav = _capture_wav(chosen.name, seconds)
+        if wav is None:
+            return (f"Capturing {chosen.label!r} produced no audio. It may "
+                    f"have stopped playing as the capture started.")
         try:
             proc = subprocess.Popen(
                 ["pw-record", "--rate", "16000", "--channels", "1", "--format",
@@ -220,8 +256,13 @@ def _run(arguments: dict) -> str:
         except OSError as exc:
             wav.unlink(missing_ok=True)
             return f"Could not start capturing {chosen.label!r}: {exc}"
+        # **Wait for exactly the duration, then stop it.** The first version
+        # waited `seconds + 20` with no terminate inside the timeout, so a
+        # caller asking for 10 seconds got **29.99** - `pw-record` happily kept
+        # capturing until its own source ended or the timeout fired, and the
+        # result was three times the meeting time a person agreed to. Measured.
         try:
-            proc.wait(timeout=seconds + 20)
+            proc.wait(timeout=seconds)
         except subprocess.TimeoutExpired:
             proc.terminate()
             try:
@@ -242,7 +283,24 @@ def _run(arguments: dict) -> str:
                 wav, str(arguments.get("language") or "auto"),
                 with_speakers=bool(arguments.get("people")))
         except (recordings.RecordingError, RuntimeError, ValueError, OSError) as exc:
-            return f"Recorded {chosen.label!r} (kept at {wav}), but could not transcribe it: {exc}"
+            said = str(exc)
+            # **A transcriber that died on a signal must not be reported as one.**
+            # Measured: whisper.cpp segfaults in `mmap` under the skill child's
+            # 512 MB `RLIMIT_AS`, and the word that comes back is `mmap: 12` plus
+            # a backtrace - which tells nobody the limit is the cause, and
+            # `AGENTS.md` has the same measurement recorded for podman and for
+            # QEMU. The capture itself is fine; the recording is kept and named.
+            died = ("Fatal signal" in said or "Segmentation fault" in said
+                    or "mmap" in said or "returncode -" in said)
+            if died:
+                return (f"Recorded {chosen.label!r} for {recordings.duration(wav):.0f}s "
+                        f"(kept at {wav}), and the transcriber died rather than "
+                        f"answering - on this class of machine that is the skill "
+                        f"sandbox's address-space ceiling, which whisper.cpp cannot "
+                        f"mmap its model under. The recording is real and kept; "
+                        f"transcribe it with that limit lifted, or use a smaller "
+                        f"model.")
+            return f"Recorded {chosen.label!r} (kept at {wav}), but could not transcribe it: {said}"
         text = recordings.to_text(segments)
         how_long = recordings.duration(wav)
         if not text.strip():

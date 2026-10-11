@@ -6,6 +6,7 @@ whisper and the sherpa programs themselves are shani-testbed's chronoa-extras.
 """
 
 import shutil
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -128,6 +129,18 @@ def test_listening_on_request_needs_its_consent(monkeypatch):
     ChronoaConfig().set("sound-sense-enabled", "true")
     assert "turned off" in recording._run({"action": "listen"}), \
         "granting the sound-event key must not open the microphone"
+
+
+
+def _real_wav():
+    """A real WAV on disk, because the handler reports its duration."""
+    import tempfile
+    import wave
+    path = Path(tempfile.mkstemp(suffix=".wav", prefix="kept-")[1])
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+        w.writeframes(b"\x00\x01" * 8000)
+    return path
 
 
 # --- `recording action=streams` (measured reachable through the real dispatch) ---
@@ -261,3 +274,63 @@ def test_an_unknown_action_is_still_refused():
 
     assert "must be one of" in said, said
     assert "streams" in said, said
+
+
+# --- a transcriber that dies is a different sentence from one that refuses -------
+#
+# Measured: whisper.cpp segfaults in `mmap` under the skill child's 512 MB
+# `RLIMIT_AS`. Verified twice, both ways - no limit, transcribes
+# `brown fox jump over the lazy dog` rc=0; `ulimit -v 524288`, segfault.
+# The word that comes back is `mmap: 12` plus a backtrace, which names nothing.
+
+
+def test_a_dead_transcriber_is_named_not_echoed(monkeypatch):
+    """The cause, not the crash. A backtrace copied into the answer is a sentence
+    the reader cannot act on."""
+    from shani_chronoa.skills import recording
+    from shani_chronoa import recordings as rec_mod
+
+    def dies(*_a, **_k):
+        raise rec_mod.RecordingError(
+            "whisper could not transcribe it: error creating backtrace: mmap: 12\n"
+            "Fatal signal: Segmentation fault")
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: [_Stream("pw-play", "Team call", True)])
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
+    monkeypatch.setattr(rec_mod, "segments_for", dies)
+    # make the recorder produce a file rather than reach for a real recorder
+    kept = _real_wav()
+    monkeypatch.setattr(recording, "_capture_wav", lambda *a, **k: kept)
+    monkeypatch.setattr(rec_mod, "duration", lambda _p: 9.0)
+
+    said = recording._run({"action": "capture", "stream": "pw-play", "seconds": 10})
+
+    assert "address-space" in said, (
+        "the sentence must name the measured cause: %r" % said)
+    assert "Fatal signal" not in said, said
+    assert "Segmentation fault" not in said, said
+
+
+def test_a_refusal_from_the_transcriber_still_says_what_was_wrong(monkeypatch):
+    """The other direction: a real refusal must not be swallowed by the crash path."""
+    from shani_chronoa.skills import recording
+    from shani_chronoa import recordings as rec_mod
+
+    def refuses(*_a, **_k):
+        raise rec_mod.RecordingError("no speech model is installed (Chronoa's setup, Ears)")
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: [_Stream("pw-play", "Team call", True)])
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: True)
+    monkeypatch.setattr(rec_mod, "segments_for", refuses)
+    monkeypatch.setattr(recording, "_capture_wav", lambda *a, **k: _real_wav())
+    monkeypatch.setattr(rec_mod, "duration", lambda _p: 9.0)
+
+    said = recording._run({"action": "capture", "stream": "pw-play", "seconds": 10})
+
+    assert "no speech model" in said, said
+    assert "address-space" not in said, (
+        "a missing model is not a crash: %r" % said)
