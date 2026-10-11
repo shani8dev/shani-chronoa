@@ -23,6 +23,35 @@ skipped with a warning - a bad user module can never crash the app, the
 MCP server, or the cloud fallback. A user skill with the same name as an
 existing skill replaces that skill's schema and handler, so `TOOLS` always
 holds exactly one schema per unique name.
+
+Declaring a post-condition (optional)
+-------------------------------------
+
+A module may declare `POST_CONDITION` so a change can be *observed* rather
+than asserted - see `verification.py` for why. It is either a callable, or
+an argv list naming a program to run afterwards. **The callable form is
+what every built-in uses (60 of them); the argv form is here for a drop-in
+that has a real program to ask**, and it has an exit-code contract that a
+drop-in author has to follow:
+
+- **exit 0** - the check ran, the effect is there. Reported as verified.
+- **exit 2** - the check ran, the effect is **not** there. Reported as
+  failed, with the last line of stderr quoted as the evidence.
+- **any other exit** - the check could not answer, and is reported as
+  *unverified* naming the code. Use this rather than inventing a code: 3
+  and up for "I could not determine", and let a wrapper that cannot find
+  its own dependency exit 127.
+
+**Exit 1 is not a finding.** It used to be treated as one, because there
+was no contract; a checker using 1 for "I could not tell" had its own
+uncertainty reported to the person as a failure. If your program exits
+non-zero to mean "still working", say 2.
+
+The arguments the skill was called with arrive as
+`CHRONOA_VERIFY_ARGS` in the environment - a `repr()` of the arguments
+dict, e.g. `{'path': '/tmp/a.txt'}`. **Read it defensively**: a checker
+that cannot parse it has not been told what to check, and the honest exit
+for that is a code outside {0, 2}.
 """
 
 import importlib

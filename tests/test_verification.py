@@ -55,12 +55,32 @@ class TestVerdicts:
         assert verification.verify(mod).verdict is Verdict.VERIFIED
 
     def test_failing_command_fails(self, tmp_path, monkeypatch):
+        """**The fixture used to be `['false']`, and exit 1 is not a finding.**
+
+        The argv form had no exit-code contract, so every non-zero exit meant
+        "the effect is absent" - and a checker using 1 for "I could not tell"
+        had its own uncertainty reported to the person as a failure. Exit 2 is
+        now the declared code for "the check ran and the effect is not there",
+        so this uses a command that exits 2. **The claim is unchanged; what the
+        fixture expresses is** - which is the difference between fixing a test to
+        match a new contract and weakening one.
+        """
+        says_absent = tmp_path / "saysabsent"
+        says_absent.write_text(
+            "#!/bin/sh\necho 'the file is not there' >&2\nexit 2\n",
+            encoding="utf-8")
+        says_absent.chmod(0o755)
         mod = _module(
-            tmp_path, "badcmd", "POST_CONDITION = ['false']\ndef run(a):\n    return 'x'\n", monkeypatch
+            tmp_path, "badcmd",
+            f"POST_CONDITION = [{str(says_absent)!r}]\ndef run(a):\n    return 'x'\n",
+            monkeypatch,
         )
         result = verification.verify(mod)
         assert result.verdict is Verdict.FAILED
         assert "VERIFICATION FAILED" in result.suffix
+        assert "the file is not there" in result.suffix, (
+            "the checker's own sentence is the evidence and it is not quoted: "
+            f"{result.suffix!r}")
 
     def test_a_raising_post_condition_does_not_crash_the_action_path(
         self, tmp_path, monkeypatch

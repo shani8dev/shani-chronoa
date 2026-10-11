@@ -406,6 +406,48 @@ machine with a live X session.
 prints a PNG for `main`, `empty`, `settings` and `help`, and takes an optional
 theme argument. It must be run as a script, not imported into a test.
 
+**`render_ui.py panel:<name>` returns `NO NODE` on this box for *every* panel,
+measured 2026-10-11 on unmodified source - including `conversations` and
+`memory`, which have shipped for months.** So a panel that does not render here
+is not a broken panel. Two causes, both found by bisection and both silent:
+
+- **`Gtk.WidgetPaintable` over an `ApplicationWindow` whose child is a
+  `NavigationView` returns a node of `None`.** The window is mapped and fully
+  allocated (measured `1000x724`) throughout, and the *same* paintable over
+  that same `NavigationView` returns a real node. So it is a wrong argument,
+  not a rendering fault - and `NO NODE` points at the display in both
+  directions.
+- **An editable widget has no surface to draw into when snapshotted detached.**
+  Measured side by side in one mapped window: `Gtk.SearchEntry`,
+  `Adw.EntryRow` and `Adw.StatusPage` all return `None`, while a plain
+  `Gtk.Entry` and a `Gtk.Label` both return real nodes. So `my_files` - which
+  uses `Adw.EntryRow` and `Gtk.SearchEntry` because those are the right
+  controls - cannot be photographed this way at any level, and `meetings` can.
+
+The recipe that does work: build the page inside an `Adw.NavigationView`
+(`add()`, **not** `add_content` - libadwaita 1.9 has no such method), present the
+window, and shoot the **deepest level that yields a node** - which is the
+`NavigationView` for some panels and the page's own content box for others, so a
+renderer has to walk down rather than assume one. GTK's pump is
+`MainContext.iteration(False)` on a main context, **not** `Gtk.events_pending`
+(a GTK 3 name that does not exist) and **not**
+`Gdk.Display.get_default_context` (not a method either). Two further measured
+traps: the broadway daemon must be started with `setsid` or it dies with its
+parent shell, `gtk4-broadwayd :N` listens on `broadway(N+1).socket`, and
+`DISPLAY` must be unset or a live X session wins over `GDK_BACKEND=broadway` -
+that last one produced `GDK_IS_DISPLAY (display) failed` on every Adw call while
+the process ran to completion.
+
+**Render, then read the pixels - both of these still bit after the two new
+panels were behaviourally verified.** The shelf's ordering key was the file's
+`mtime`, which is when the file was last *written*, so a `cp` reorders it and
+`tar` preserves every mtime in a backup to the second - a restored shelf is
+arbitrary while it still says "newest first". The capture time is in the file
+name by construction (`meeting-%Y%m%d-%H%M%S`), so that is the key. And a red
+`destructive-action` **Stop** was the loudest thing on a page holding two saved
+recordings, on a control that ends nothing destructively.
+
+
 **A visual regression suite was written, could not be made to fail, and was
 deleted rather than shipped.** The measurements, so nobody re-derives them:
 
@@ -4612,6 +4654,98 @@ as an open item rather than a fix.
   the first **sorted**, **ungated**, non-read-only handler with no required
   arguments (`audio_output` today) — the point being that the claim is about
   argument handling, and a gated tool never gets far enough to exercise it.
+
+
+## oh-my-openagent's comment-checker: the checker that could not answer, and its exit code (2026-10-11)
+
+Eighth pass over `harness-study/oh-my-openagent`, into
+`packages/comment-checker-core`. It is a hook on every `write`, `edit` and
+`multiedit` that runs an **external comment checker** as a subprocess, and its
+`runner.ts` is the part worth reading:
+
+> exit 0 = clean. exit 2 = **the check ran and has findings**. Anything else is
+> returned as a `failure` carrying the exit code and the checker's stderr, "so
+> callers that ignore it keep their behavior; a caller can use it to stop
+> re-running a broken checker" (#8850).
+
+The last sentence is the whole content of the module. A checker that **could not
+start** and a checker that **ran and found something** are not the same event,
+and collapsing them is what leaves a dashboard reporting green across every
+skill - the #2463 failure this file already has a scar for.
+
+### Chronoa's argv post-condition had no exit-code contract at all
+
+`verification.verify()` runs a post-condition after a skill call. Its subprocess
+branch treated **every non-zero exit as "the effect is absent"**. Measured through
+`verification.verify()` before the change, not by reading it:
+
+| the checker prints | exits | was reported as |
+|---|---|---|
+| "I could not determine whether it happened" | 3 | **FAILED**, quoting that sentence as the evidence |
+| "wrapper: checker not installed" | 127 | **FAILED**, quoting it |
+| - | 1 | **FAILED** |
+| (binary absent entirely) | - | UNVERIFIED, correctly |
+
+**The last row is the tell.** The distinction existed one branch away, for the
+binary that is *absent*: `OSError` at spawn gives UNVERIFIED. So the tree could
+distinguish "I could not run it" from "it ran and failed" at spawn, and lost it
+immediately after. A person reading *"VERIFICATION FAILED: I could not determine
+whether it happened"* is being told the action failed by a check that said it
+could not tell.
+
+The contract is now 0 = verified, **2 = the check ran and the effect is absent**,
+and anything else = the checker failing to answer, reported as UNVERIFIED naming
+the code and whatever it printed. **`skills/__init__.py`'s docstring is where a
+drop-in author reads it**, because a contract that lives only in
+`verification.py` is one nobody dropping a module into
+`~/.config/shani-chronoa/skills/` will find - and the trap it has to name is
+that **exit 1 is what every unhappy program returns**, so a drop-in checker would
+naturally use it for "I could not tell".
+
+**Nothing in this repository declares the argv form** - 60 post-conditions,
+every one a callable - so this defines a contract for a documented extension
+point rather than changing shipped behaviour. Two tests did change, both recorded
+in place: `test_verification.py`'s `['false']` fixture, and
+`test_surface_workbench.py`'s `(["false"], "verifies: failed")`. The latter was a
+**second copy of the contract** encoded in a surface test by the argv a shell
+returns for "unhappy" rather than by the code that means something - an author
+reading only that row would have learned that 1 means failed.
+
+### Two more defects fell out of the same change
+
+**`suffix` rendered one fixed sentence for every UNVERIFIED.** "no post-condition
+declared", "the post-condition raised KeyError" and "the checker binary is not
+installed" reached a person as the same fourteen words, in the module whose whole
+purpose is that *I could not determine* is not *false* - so it could not say
+*which* it meant. The no-evidence case keeps the sentence verbatim, because
+`capabilities.py` and `browse.py` both quote it when explaining why a plain
+answer must not carry it.
+
+**And then the change's own hazard, closed in the same commit.** `verdict_from_text`
+recovers a verdict from a plain result string, and it looked for the markers as
+bare substrings. Now that a checker's own words are quoted back to the person, a
+checker printing "route impossible: no gateway answered" would turn its own
+**unverified** verdict into an IMPOSSIBLE one on the way back through - a
+checker's prose deciding the verdict of the check that read it. The markers are
+matched in the shape `suffix` produces them, `(` included.
+
+**The two markers needed two witnesses, not one witness and a hope.** Reverting
+the `FAILED_MARKER` match to a bare substring is caught by the first test;
+reverting `IMPOSSIBLE_MARKER` the same way **passed**, because every IMPOSSIBLE
+string this module produces contains the marker with its parenthesis already.
+They are not equivalent - and the mutation set is what said so.
+
+`CHRONOA_VERIFY_ARGS` - the `repr()` of the skill's arguments, passed to a
+checker in the environment - was **written in two places and read by nothing,
+in this repository or any drop-in**. It is documented now, with the honest
+instruction to read it defensively and exit outside {0, 2} if it cannot be
+parsed: a checker that was not told what to check has not been told what to
+check, and the protocol gives it a way to say so.
+
+`tools/mutations/post_condition.py` - **14 mutations, 14 caught, 0 survivors**,
+including the shipped behaviour restored verbatim (a checker that could not
+answer reported as the action failing), which is the strongest kind of mutation:
+it is not a hypothetical, it is the bug.
 
 ## Six harness-UI gaps closed (2026-10-07)
 
@@ -9965,6 +10099,71 @@ in-flight work and recorded rather than touched: `learning.py:1566` runs two
 statements together on one line, so `tools.py` → `outcome_model` → `learning.py`
 raises `SyntaxError` and **every** import of the package fails. Verified against
 a repaired copy outside the tree, never by editing their file.
+
+## Voicebox: the recogniser loops, and the guard could not see the form it emits (2026-10-11)
+
+`harness-study/voicebox` is `jamiepine/voicebox` — a local-first voice studio
+(MIT, 56k stars), Tauri + FastAPI, 7 TTS engines, Whisper for STT. Cloned
+shallow at `8af7efe`. Read for what a project built around the same problem
+already solved.
+
+**Already here, and in two places better than theirs — checked, not assumed.**
+
+- *Sentence splitting.* `utils/chunked_tts.py` has a 30-entry abbreviation set
+  and splits at sentence → clause → whitespace → hard cut. `speech.py`'s
+  `SentenceBuffer` has the same set **plus** three things it does not:
+  `MIN_SENTENCE_CHARS` ("1." or "Hi." alone sounds clipped), a code fence spoken
+  whole, and single-letter initials treated as abbreviations via `len(w) == 1`.
+  Its `MAX_SENTENCE_CHARS` is their `max_chunk_chars`.
+- *Underscores in tool names.* 232 of 256 tool names contain one, and a person
+  says "set volume". Suspecting a gap, `_words()` turned out to already do
+  `.replace("_", " ")` before tokenising — so the whole 232 are handled.
+
+**Taken: `collapse_repetitive_artifacts`.** Whisper's characteristic failure is
+not a different wrong sentence, it is the right one repeated, and
+`clean_transcription`'s hallucination filter matched only the unrepeated form:
+
+    'thanks for watching'                  -> dropped   (what the regex is for)
+    ' '.join(['thanks for watching'] * 6)  -> 119 chars forwarded to the model
+
+**119 characters of a phrase the code already knew how to refuse**, arriving at
+the model as one emphatic person — and the model then answers it. Voicebox
+collapses loops in two passes for the same reason and notes the failure mode
+their own approach has: smaller refine models truncate real output "to make
+room" for the loop, bigger ones echo it verbatim, so they strip deterministically
+first. The collapse now runs **before** the hallucination filter, which is what
+lets a repeated "thanks for watching" be dropped outright.
+
+**Two bugs in my first version, both of which produced a plausible collapse:**
+
+- **A multi-word phrase defeated both passes.** "thanks for watching" repeated
+  has no two identical adjacent tokens, and its character period is the phrase
+  *plus its separator* — **twenty**, not nineteen — so a sixfold repeat is 119
+  characters and holds only five whole units. It works in tokens now, on the
+  smallest period that tiles the run, which removes the separator from the
+  question entirely.
+- **Stopping at the threshold left most of the run.** Eight repeats of a
+  four-character CJK unit collapsed to **three** copies, because the scan broke
+  once `min_run` was met and then kept the tail. Measured, not reasoned: that
+  is what the first version printed.
+
+The threshold is 6, and `test_rhetorical_repetition_survives` guards it —
+**"no, no, no, no, no" is somebody emphatic**, and a collapse that eats real
+speech is a worse defect than the loop it was written for. The load-bearing
+assertion is the mixed case: *"what time is it" + a sixfold loop → "what time
+is it thanks for watching"* — the question survives, the artefact does not.
+
+11 tests, 4 mutations all failing the file: the sequence pass removed (4), stop
+at the threshold (2), threshold lowered to 3 (2), the collapse not wired into
+`clean_transcription` at all (3).
+
+**Also measured, and taken as a difference rather than a gap:** their CLI makes
+text normalisation an **opt-in `--normalize` flag**, and their backends carry a
+`supports_instruct` capability flag because "Base model drops instruct
+silently" — per-engine text preparation keyed off a declared capability.
+`tts_text.normalize_for_speech` is engine-agnostic by design here, because every
+engine in the cascade is a phoneme front-end that wants the same rewriting, and
+a caller who cannot express the preference should not be asked to.
 
 ## open-intelligent-ui, sixth pass: nothing new taken, and why that is the finding
 

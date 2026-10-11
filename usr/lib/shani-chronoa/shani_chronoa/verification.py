@@ -43,6 +43,30 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 15
 
+#: **The exit-code contract for a post-condition declared as an argv list.**
+#:
+#: It had none, which is the defect: every non-zero exit was "the effect is
+#: absent", so a checker reporting that it could not determine anything was read
+#: as a failure caused by the checker. Two codes carry meaning and everything
+#: else is the checker failing to answer:
+#:
+#: - `0` - the check ran and the effect is present. VERIFIED.
+#: - `2` - the check ran and the effect is absent. FAILED, with the last line of
+#:   stderr as the evidence. **Reserved, because it is the code a checker uses
+#:   when it means something** - and it is what `comment-checker-core` in
+#:   oh-my-openagent reserves, which is where the shape came from.
+#: - anything else - the checker could not answer: 3 and up is a checker with its
+#:   own "I could not determine", 126 is not executable, 127 is not found
+#:   (usually a wrapper whose own dependency is missing), 1 is *not* a finding.
+#:   UNVERIFIED, naming the code and whatever it printed.
+#:
+#: **Nothing in this repository declares the argv form** - 60 post-conditions,
+#: every one a callable - so this defines a contract for the extension point
+#: rather than changing any shipped behaviour. `skills/__init__.py`'s module
+#: docstring is where a drop-in author reads it.
+_EXIT_VERIFIED = 0
+_EXIT_FINDINGS = 2
+
 
 class Verdict(Enum):
     """How much is actually known about whether an action took effect."""
@@ -84,13 +108,30 @@ class Result(NamedTuple):
 
     @property
     def suffix(self) -> str:
-        """The text to append to a skill's own result string."""
+        """The text to append to a skill's own result string.
+
+        **UNVERIFIED now says which of its reasons it is.** It used to render one
+        fixed sentence for all of them, so "this module declares no
+        post-condition", "the post-condition raised KeyError", "the checker
+        binary is not installed" and "nothing this call changed can be checked"
+        reached a person as the same fourteen words. An unreachable thing and a
+        missing one are different facts, and this is the module whose whole
+        purpose is that "I could not determine" is not "false" - so it has to be
+        able to say *which* it was.
+
+        **The no-evidence case keeps the sentence verbatim**, because it is the
+        common one and other modules quote it: `capabilities.py` and
+        `browse.py` both name this exact phrasing when explaining why a plain
+        answer must not carry it.
+        """
         if self.verdict is Verdict.VERIFIED:
             return ""
         if self.verdict is Verdict.FAILED:
             return f" (VERIFICATION FAILED: {self.evidence})"
         if self.verdict is Verdict.IMPOSSIBLE:
             return f" (impossible: {self.evidence})"
+        if self.evidence:
+            return f" (unverified - {self.evidence})"
         return " (unverified - this action reports success but nothing observed it)"
 
 
@@ -115,10 +156,19 @@ def verdict_from_text(text: str) -> Verdict:
     merely failed to declare a post-condition has not been shown to have
     worked, but it also has not been shown to have failed, and treating that as
     success is what this whole module exists to avoid.
+
+    **The markers are matched in the shape `suffix` produces them, not as bare
+    substrings**, because `suffix` now quotes a checker back to the person and a
+    checker's own words are not under this module's control. A checker that
+    printed "VERIFICATION FAILED: the file was there after all" would turn its
+    own *unverified* verdict into a FAILED one on the way back through here - a
+    checker's prose deciding the verdict of the check that read it. The `(` is
+    what distinguishes a suffix this module appended from text a subprocess
+    happened to print.
     """
-    if FAILED_MARKER in (text or ""):
+    if f"({FAILED_MARKER}" in (text or ""):
         return Verdict.FAILED
-    if IMPOSSIBLE_MARKER in (text or ""):
+    if f"({IMPOSSIBLE_MARKER}" in (text or ""):
         return Verdict.IMPOSSIBLE
     return Verdict.UNVERIFIED
 
@@ -214,8 +264,31 @@ def verify(handler_module: str, arguments: Optional[dict] = None, tool: Optional
         )
     except (subprocess.SubprocessError, OSError) as exc:
         return Result(Verdict.UNVERIFIED, f"could not run post-condition: {exc}")
-    if completed.returncode == 0:
+    if completed.returncode == _EXIT_VERIFIED:
         detail = (completed.stdout or "").strip().splitlines()
         return Result(Verdict.VERIFIED, detail[-1] if detail else "")
     detail = (completed.stderr or completed.stdout or "").strip().splitlines()
-    return Result(Verdict.FAILED, detail[-1] if detail else f"exit {completed.returncode}")
+    said = detail[-1] if detail else ""
+    if completed.returncode == _EXIT_FINDINGS:
+        return Result(Verdict.FAILED, said or "the post-condition ran and found none")
+    # **Anything else is the checker failing to answer, not an answer.**
+    #
+    # oh-my-openagent's `comment-checker-core` runs an external checker on every
+    # write and reserves exit 2 for "the check ran and has findings"; every other
+    # non-zero exit is returned as a `failure` carrying the exit code and the
+    # checker's stderr, "so callers that ignore it keep their behavior; a caller
+    # can use it to stop re-running a broken checker" (#8850). The distinction
+    # is the whole content of that module.
+    #
+    # Measured here before the change, through this function and not by reading
+    # it - a checker printing "I could not determine whether it happened" on
+    # stderr and exiting 3 was reported as **FAILED**, with that same sentence
+    # quoted back as the evidence; a wrapper exiting 127 with "checker not
+    # installed" was FAILED too. A person reading either is told the action
+    # failed, by a check that said it could not tell. The missing case was
+    # already handled one line away, for the binary that is *absent*: `OSError`
+    # at spawn gives UNVERIFIED. So the distinction existed at spawn and was
+    # gone immediately after it.
+    return Result(Verdict.UNVERIFIED,
+                  f"the post-condition could not answer (exit "
+                  f"{completed.returncode})" + (f": {said}" if said else ""))

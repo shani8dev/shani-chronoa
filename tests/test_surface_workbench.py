@@ -244,18 +244,32 @@ class TestTheBuild:
 class TestTheWhitelistAndTheDropIns:
     @pytest.mark.parametrize("argv, want", [
         (["true"], "verifies: verified"),
-        (["false"], "verifies: failed"),
+        # **This used to be `(["false"], "verifies: failed")`, and it was a second
+        # copy of the contract** - encoded here, in a surface test, by the argv a
+        # shell returns for "unhappy" rather than by the code that means
+        # something. The argv form has an exit-code contract now: 0 is verified,
+        # **2** is "the check ran and the effect is not there", and anything else
+        # is the checker failing to answer. `['false']` exits 1, which the
+        # contract says is *not* a finding.
+        #
+        # An author reading only this row used to learn that 1 means "failed",
+        # and would then have written a checker using 1 for "I could not
+        # determine" - so its own uncertainty was reported to the person as a
+        # failure. The fixture is rewritten rather than flipped, and all three
+        # directions land on this row now instead of the two it had.
+        (["false"], "verifies: unverified"),
+        (["sh", "-c", "echo 'the thing is not there' >&2; exit 2"], "verifies: failed"),
     ])
     def test_a_drop_in_row_reports_what_verify_returned(self, temp_user_skills_dir,
                                                         argv, want):
-        """The verdict *and* the evidence, both directions.
+        """The verdict *and* the evidence, in all three directions.
 
         `verification.verify()` is the same call `tools.py` makes after every
-        skill call, so a drop-in with a post-condition that exits 0 and one that
-        exits non-zero must land on opposite sides of this row - and the failed
-        one must carry `verify`'s own evidence string, not a word of the panel's
-        own. A row that always said "unverified" would pass a weaker test and be
-        useless.
+        skill call, so a drop-in whose post-condition exits 0, exits 2, and exits
+        a code it could not answer with must land on three different sentences on
+        this row - and each must carry `verify`'s own evidence, not a word of the
+        panel's own. A row that said the same thing twice would pass a weaker
+        test and be useless.
         """
         temp_user_skills_dir.mkdir(parents=True, exist_ok=True)
         module = (temp_user_skills_dir / "checked.py")
@@ -267,9 +281,17 @@ class TestTheWhitelistAndTheDropIns:
         row = next(row for row in page.drop_in_rows() if row.get_title() == "checked")
         subtitle = row.get_subtitle()
         assert want in subtitle, f"{argv} did not reach the row: {subtitle!r}"
+        # Each direction is checked for the thing that identifies it. A direction
+        # carrying only the panel's own word is the weaker case passing.
+        if "exit 2" in " ".join(argv):
+            assert "the thing is not there" in subtitle, (
+                "a finding must carry the checker's own sentence, or the person "
+                "is told only that something was wrong: "
+                + repr(subtitle))
         if argv == ["false"]:
             assert "exit 1" in subtitle, (
-                f"the evidence verify() returned is not on the row: {subtitle!r}")
+                "the evidence verify() returned is not on the row: "
+                + repr(subtitle))
 
     def test_a_drop_in_is_listed_separately_from_the_built_ins(self, temp_user_skills_dir):
         """Even when it takes a built-in's name, it stays a drop-in row.
