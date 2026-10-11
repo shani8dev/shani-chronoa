@@ -656,3 +656,81 @@ class TestNeverRunSkillsAreACountedAbsence:
         assert one[2] > all_[2], (one, all_)
         # and folding `measured` into `total` would show up here
         assert one[0] == 3 and one[1] == 1, one
+
+
+class TestNoToolResultMayEatTheConversation:
+    """A tool result is the one thing in the loop the model reads but the user
+    never typed, and `MAX_HISTORY_MESSAGES` bounds the *count* of messages, not
+    their size. The skills that can return something large each bound themselves -
+    `read_text_file` refuses a file over 512 KiB, `webtext` caps page text at 4,000
+    characters - but that discipline is per-module, so a new skill, a changed one,
+    or an unbounded path in an old one had no floor under it.
+
+    unsloth applies the same shape once, over every result: `_tool_result_max_chars()`.
+    What it prevents here: one skill putting tens of MiB into `_history`, which
+    Ollama *drops* rather than errors on - so the conversation silently loses its
+    earlier turns and nothing says why.
+    """
+
+    def test_a_small_result_is_returned_unchanged(self):
+        from shani_chronoa.assistant import _clip_tool_result
+        small = "the volume is 40%"
+        assert _clip_tool_result(small) is small
+
+    def test_an_oversized_result_says_what_was_dropped(self):
+        """The note is the whole point: a silently truncated result is read as a
+        complete one, which is the confident wrong answer this repo keeps
+        recording."""
+        from shani_chronoa.assistant import MAX_TOOL_RESULT_CHARS, _clip_tool_result
+        out = _clip_tool_result("x" * (MAX_TOOL_RESULT_CHARS * 2))
+        assert len(out) <= MAX_TOOL_RESULT_CHARS + 200, len(out)
+        assert "more characters not shown" in out, out[-200:]
+        assert f"{MAX_TOOL_RESULT_CHARS:,}" in out, out[-200:]
+
+    def test_a_non_string_passes_through_untouched(self):
+        """A skill that answered with something else is a different question, and
+        reformatting it here would be this function inventing a contract."""
+        from shani_chronoa.assistant import _clip_tool_result
+        assert _clip_tool_result(42) == 42
+        assert _clip_tool_result(None) is None
+        assert _clip_tool_result(["a", "b"]) == ["a", "b"]
+
+    def test_the_limit_is_clear_of_every_deliberate_bound(self):
+        """A backstop tighter than a deliberate bound would truncate what a skill
+        was designed to return. 1 MiB is twice `read_text_file`'s 512 KiB."""
+        from shani_chronoa import ctxfit  # noqa: F401  (import path check)
+        from shani_chronoa.assistant import MAX_TOOL_RESULT_CHARS
+        assert MAX_TOOL_RESULT_CHARS >= 512 * 1024 * 2, MAX_TOOL_RESULT_CHARS
+
+    def test_the_note_survives_the_fence(self):
+        from shani_chronoa import provenance
+        from shani_chronoa.assistant import MAX_TOOL_RESULT_CHARS, _clip_tool_result
+        clipped = _clip_tool_result("untrusted page text " * 100000)
+        fenced = provenance.fence(clipped, "web").text
+        assert "more characters not shown" in fenced, \
+            "the truncation note was lost, so the model sees a cut it was never told about"
+
+    def test_the_clip_happens_before_the_fence(self):
+        """The ordering, and it is a security property rather than a style choice.
+
+        Clipped *after* the fence, a cut can take the closing marker with it - and
+        the model is then shown untrusted content with no marker on it, which is
+        the exact hole `provenance` exists to close. Measured: fence-then-clip
+        yields one open marker and zero close markers.
+        """
+        import re
+
+        from shani_chronoa import provenance
+        from shani_chronoa.assistant import _clip_tool_result
+        body = "page text " * 300000
+
+        def markers(text):
+            opens = len(re.findall(r"(?<!end-)untrusted-content-[0-9a-f]+", text))
+            closes = len(re.findall(r"end-untrusted-content-[0-9a-f]+", text))
+            return opens, closes
+
+        # The shipped order.
+        assert markers(provenance.fence(_clip_tool_result(body), "web").text) == (1, 1)
+        # The control: the same clip applied after the fence breaks it.
+        assert markers(_clip_tool_result(provenance.fence(body, "web").text)) == (1, 0), \
+            "the control no longer demonstrates the hole - the fence format changed"

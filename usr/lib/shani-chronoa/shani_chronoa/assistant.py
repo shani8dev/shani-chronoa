@@ -1048,6 +1048,11 @@ class Assistant:
                 # than relying on the model to notice. See provenance.py for
                 # what this does and does not claim.
                 source = Assistant._tool_source(call)
+                # Clipped BEFORE the fence, not after. A cut that landed inside a
+                # fence could take the closing marker with it, and the model would
+                # then be shown untrusted content that reads as trusted - trading a
+                # context problem for the exact hole `provenance` exists to close.
+                result = _clip_tool_result(result)
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""),
                               "content": provenance.fence(
                                   result, source).text},
@@ -1118,6 +1123,45 @@ def _out_of_rounds(text: str, rounds: int) -> str:
     return f"{plain}\n\n{note}" if plain else note
 
 
+#: The most a single tool result may put into the conversation.
+#:
+#: A **backstop, not a policy.** Every skill that can return something large
+#: already bounds itself - `read_text_file` refuses a file over 512 KiB,
+#: `webtext` caps page text at 4,000 characters, `search_file_contents` stops at
+#: 60 matches - but that discipline is per-module, so a new skill, a changed one,
+#: or an unbounded code path in an old one has no floor under it. unsloth applies
+#: the same shape as one function, `_tool_result_max_chars()`, over every tool
+#: result its agent handles.
+#:
+#: 1 MiB is twice the largest deliberate bound here, so the floor is well clear of
+#: anything legitimate and only fires on something genuinely unbounded. What it
+#: prevents: one skill putting 40 MiB into `_history`, which the count-based
+#: `MAX_HISTORY_MESSAGES` has no opinion about and which Ollama *drops* rather
+#: than errors on - so the conversation silently loses its earlier turns.
+MAX_TOOL_RESULT_CHARS = 1024 * 1024
+
+
+def _clip_tool_result(result, limit: int = MAX_TOOL_RESULT_CHARS):
+    """`result` shortened to `limit` characters, with the cut said out loud.
+
+    A silently truncated result is worse than a long one: the model reads a
+    partial answer as a complete one and reasons from it, which is the confident
+    wrong answer this file keeps recording. So the note names what was dropped and
+    what the limit was, and the caller can see the result was cut.
+
+    Non-strings pass through untouched - a skill that answered with something else
+    is a different question and not this function's to reformat.
+    """
+    if not isinstance(result, str) or len(result) <= limit:
+        return result
+    dropped = len(result) - limit
+    return (result[:limit]
+            + f"\n\n[... {dropped:,} more characters not shown. "
+              f"This result was cut at {limit:,} characters to keep the "
+              f"conversation within its context; ask for a narrower request, or "
+              f"a line range, if you need the rest.]")
+
+
 def _run_tool(name, arguments, origin):
     """`execute_tool`, looked up at call time so a test's monkeypatch still applies."""
     return execute_tool(name, arguments, origin=origin)
@@ -1125,6 +1169,8 @@ def _run_tool(name, arguments, origin):
 
 #: Corrections per turn for a call to a tool that is not there, before the
 #: reply is returned as it is.
+
+
 MAX_CALL_CORRECTIONS = 2
 
 

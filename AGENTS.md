@@ -46,6 +46,17 @@ broken; the affordance was missing, and the chevron is what makes one - the same
 device this file's welcome rows use, whose own comment says a chevron is not
 decoration.
 
+**And it was then lost, which is the part worth recording.** The chevron was
+added, the render was read, `Use a model on this computer >` was on screen - and
+a concurrent session committed `setup_wizard.py` from an earlier state. Nothing
+failed, because nothing asserted the affordance; the next render showed the bare
+label again and the report came back as *"re add setup wizard changes i think
+they are not added"*. **A change verified only by looking at a picture is a
+change one commit away from not existing.**
+`test_a_flat_jump_button_still_says_it_goes_somewhere` and its mutation are the
+fix, and both are in the set now.
+
+
 `tools/mutations/wizard_mark.py` (9). **7 caught, 1 survivor that was my witness
 being wrong, 1 equivalent kept and documented.**
 
@@ -10990,3 +11001,46 @@ Three rules it keeps, each with a mutation behind it:
   direction would promise a context the VRAM cannot hold.
 - **When nothing fits, the cheapest tried is returned - never `f16`.** Returning
   `f16` there would claim a quality level the numbers do not support.
+
+## unsloth, second pass: no tool result may eat the conversation (2026-10-11)
+
+Second pass over `harness-study/unsloth`, into `studio/backend/core/inference/
+tools.py` - **23,072 lines**. Most of it is a shell-command safety analyser
+(`_sed_*`, `_redirection_span`, `_unquoted_expansion_indexes`) guarding a generic
+shell tool that Chronoa deliberately does not have and must not grow. Off-limits by
+the repo's own Boundaries section.
+
+One function in it transfers, and it is a one-line answer to a real hole:
+`_tool_result_max_chars()`.
+
+**Chronoa had no floor under a tool result at all.** `MAX_HISTORY_MESSAGES = 40`
+bounds the *count* of messages, not their size, and the path from `_run_tool` to the
+history entry is `provenance.fence(result, source).text` with nothing between.
+Every skill that can return something large bounds itself - `read_text_file` refuses
+a file over 512 KiB, `webtext` caps page text at 4,000 characters,
+`search_file_contents` stops at 60 matches - but that discipline is per-module, so a
+new skill, a changed one, or an unbounded path in an old one had nothing under it.
+
+What that costs: one skill putting tens of MiB into `_history`, which Ollama
+*drops* rather than errors on - so the conversation silently loses its earlier
+turns and nothing on screen says why.
+
+`_clip_tool_result()` now bounds every result at 1 MiB with a note naming what was
+dropped and what the limit was. The floor is **twice the largest deliberate bound**
+(512 KiB), so it is a backstop rather than a policy: it does not truncate anything a
+skill was designed to return, and only fires on something genuinely unbounded.
+
+**The ordering is the part that matters, and it is a security property.** The clip
+runs *before* the fence, not after. Measured both ways on a 2.4 MB page:
+
+    clip-then-fence : (1 open, 1 close)   <- the shipped order
+    fence-then-clip : (1 open, 0 close)   <- the close marker is gone
+
+Clipped after fencing, a cut can take the closing marker with it, and the model is
+then shown untrusted content with no marker on it - trading a context problem for
+the exact hole `provenance` exists to close. `test_the_clip_happens_before_the_fence`
+asserts both directions, so the control demonstrates the hole rather than restating
+the rule.
+
+`tools/mutations/tool_result.py`: 4 mutations, all caught - including the one that
+moves the clip inside the fence.
