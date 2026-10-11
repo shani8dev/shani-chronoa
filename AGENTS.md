@@ -10944,3 +10944,49 @@ Three more decisions in it, each with a mutation behind it:
 - **`vectorise()` is kept**, for the tests that pin `active_vector` against it and
   for any caller that genuinely wants the dense form. Both hot call sites
   (`load()` and `predict_proba()`) now take the sparse route.
+
+## unsloth: the KV cache was a measurement, and it should have been a lever (2026-10-11)
+
+`harness-study/unsloth` (`unslothai/unsloth`, cloned this session - 221 MB, 118k
+lines of core Python). It is the fast-finetuning library and now also a local
+run/train desktop app, so `studio/backend/core/inference/llama_cpp.py` is 42k
+lines of llama.cpp integration - the closest thing in any of these clones to
+Chronoa's `local_llm.py`.
+
+The transfer is one decision. `kv_bytes_per_token` hardcoded `* 2` with a comment
+saying it assumed llama.cpp's f16 default, and `context_that_fits()` walked a
+ladder of *contexts* with the KV cost fixed - so the only way to fit more context
+was to shrink it. unsloth ranks llama.cpp's cache types by bytes per element and
+picks the lightest that fits:
+
+```python
+min(_planned_main_cache_types(cache_type_kv, extra_args, env), key=_kv_bytes_per_elem)
+```
+
+with an exact table - `f32` 4.0, `f16`/`bf16` 2.0, `q8_0` 34/32, `q5_1` 0.75,
+`q5_0` 0.6875, `q4_1` 0.625, `q4_0`/`iq4_nl` 0.5625.
+
+**The KV cache is one of only two things a context decision can trade away** -
+shrink the context, or compress the cache the context is made of - and Chronoa had
+never used the second. `ctxfit` now carries the table, `kv_bytes_per_token()`
+takes the type, and `cache_type_for_context()` walks the ladder
+**best-first** so the first type that fits is also the least lossy one that fits.
+
+Measured on Qwen3-8B's shape, 6 GiB of VRAM and weights taking 90% of it:
+
+| target context | chosen | why |
+|---|---|---|
+| 2048 | `q8_0` | f16 does not fit, `q8_0` does - the context is kept |
+| 4096 | `q5_0` | `q8_0` no longer fits, so the next lighter |
+| 8192 | `q4_0` | nothing lighter exists; cheapest tried |
+
+Three rules it keeps, each with a mutation behind it:
+
+- **`f16` is the default and is unchanged.** The parameter defaults to what the
+  function always did, so anything that fitted before still fits at the same
+  context, and `server_args()` emits **no** `-ctk`/`-ctv` unless the decision
+  actually moved - a machine that fits keeps the exact command line it had.
+- **An unknown type costs the f16 default, not the cheapest.** The unsafe
+  direction would promise a context the VRAM cannot hold.
+- **When nothing fits, the cheapest tried is returned - never `f16`.** Returning
+  `f16` there would claim a quality level the numbers do not support.

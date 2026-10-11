@@ -1107,6 +1107,19 @@ def physical_cores() -> int:
     return hardware_profile.physical_cores()
 
 
+#: The KV-cache type `_context_arg()` settled on, in a one-element list so a
+#: caller can read it after the decision without the two functions sharing a
+#: return type. `f16` is llama.cpp's default and what it stays at whenever the
+#: context fits in it - the lever below only moves when the ladder has already
+#: failed.
+_KV_CACHE_TYPE: "list[str]" = ["f16"]
+
+
+def kv_cache_type() -> str:
+    """The cache type the context decision chose. `f16` before it has run."""
+    return _KV_CACHE_TYPE[0]
+
+
 def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
     """The llama-server command line for this machine: GPU offload only when a GPU is listed."""
     devices = gpu_devices() if devices is None else devices
@@ -1114,6 +1127,12 @@ def server_args(devices: "Optional[list[str]]" = None) -> "list[str]":
             "-c", _context_arg() if devices else "8192", "--no-webui"]
     # Physical cores, measured - see `physical_cores`. Not `os.cpu_count() - 1`.
     args += ["-ngl", "99"] if devices else ["-ngl", "0", "-t", str(physical_cores())]
+    # Only when the decision actually moved off the default. An f16 server gets
+    # no `-ctk`/`-ctv`, so a machine that fits keeps the exact command line it
+    # had before the cache type became a parameter.
+    cache_type = kv_cache_type()
+    if cache_type != "f16":
+        args += ["-ctk", cache_type, "-ctv", cache_type]
     return args
 
 

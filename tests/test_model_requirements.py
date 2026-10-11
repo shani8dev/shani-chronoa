@@ -444,3 +444,118 @@ class TestResidencyIsNotRunnability:
         _Measured(monkeypatch, 16.5, ram=64.0, cores=24, gpu=False)
         _met, missing = local_llm.requirements_met("qwen3-30b-a3b")
         assert not any("GB of RAM" in m for m in missing), missing
+
+
+class TestTheCacheTypeIsALever:
+    """`kv_bytes_per_token` hardcoded `* 2` with a comment saying it assumed
+    llama.cpp's f16 default, and `context_that_fits()` walked a ladder of
+    *contexts* with the KV cost fixed - so the only way to fit more context was to
+    shrink it.
+
+    unsloth treats the same quantity as a budget variable:
+    `min(_planned_main_cache_types(...), key=_kv_bytes_per_elem)`, with an exact
+    bytes-per-element table for every llama.cpp cache type. The KV cache is one of
+    only two things a context decision can trade away - shrink the context, or
+    compress the cache the context is made of - and Chronoa had never used the
+    second.
+    """
+
+    @staticmethod
+    def _info():
+        # Qwen3-8B's shape: 16 KiB of KV per token at f16.
+        return {"general.architecture": "qwen3", "qwen3.block_count": 36,
+                "qwen3.attention.head_count": 32, "qwen3.attention.head_count_kv": 8,
+                "qwen3.embedding_length": 4096}
+
+    def test_f16_is_unchanged_so_the_default_behaviour_is_identical(self):
+        """The parameter defaults to what the function always did. Anything that
+        fitted before still fits, and fits at the same context."""
+        from shani_chronoa import ctxfit
+        base = ctxfit.kv_bytes_per_token(self._info())
+        assert base == ctxfit.kv_bytes_per_token(self._info(), "f16")
+        assert base == 147456, base          # 36 layers x 8 kv heads x 256 x 2 bytes
+
+    def test_the_bytes_table_matches_ggml(self):
+        """Cross-checked against llama.cpp's block sizes, not copied on trust:
+        `q8_0` is 34 bytes for 32 values, `q5_0` 11/16, `q4_0` 9/16."""
+        from shani_chronoa import ctxfit
+        assert ctxfit.cache_bytes_per_elem("f16") == 2.0
+        assert abs(ctxfit.cache_bytes_per_elem("q8_0") - 34 / 32) < 1e-12
+        assert ctxfit.cache_bytes_per_elem("q5_0") == 0.6875
+        assert ctxfit.cache_bytes_per_elem("q4_0") == 0.5625
+
+    def test_an_unknown_type_costs_the_f16_default(self):
+        """The safe direction: over-count the cache rather than promise a context
+        the VRAM cannot hold."""
+        from shani_chronoa import ctxfit
+        assert ctxfit.cache_bytes_per_elem("nonsense") == 2.0
+        assert (ctxfit.kv_bytes_per_token(self._info(), "nonsense")
+                == ctxfit.kv_bytes_per_token(self._info(), "f16"))
+
+    def test_quantising_the_cache_frees_real_room(self):
+        from shani_chronoa import ctxfit
+        base = ctxfit.kv_bytes_per_token(self._info())
+        assert ctxfit.kv_bytes_per_token(self._info(), "q8_0") < base
+        # Fewer bytes, not more: `q4_0` is the most aggressive and the cheapest.
+        assert (ctxfit.kv_bytes_per_token(self._info(), "q4_0")
+                < ctxfit.kv_bytes_per_token(self._info(), "q5_0")
+                < ctxfit.kv_bytes_per_token(self._info(), "q8_0")
+                < base)
+
+    def test_the_lever_stays_down_when_f16_fits(self):
+        """The whole point of the ordering: f16 is the least lossy type, so it is
+        preferred everywhere it fits and the cache is only compressed when the
+        context ladder has already failed."""
+        from shani_chronoa import ctxfit
+        info = self._info()
+        per_token = ctxfit.kv_bytes_per_token(info)
+        weights = int(4.68 * 2 ** 30)
+        for vram_gb in (24, 12, 8, 6):
+            total = int(vram_gb * 2 ** 30)
+            chosen = ctxfit.context_that_fits(weights, total_bytes=total,
+                                              per_token=per_token)
+            assert ctxfit.estimate_fit(weights, chosen, total_bytes=total,
+                                       per_token=per_token).fits, vram_gb
+            # ...so the lever has nothing to do.
+            assert ctxfit.cache_type_for_context(
+                weights, chosen, total_bytes=total,
+                per_token_at_f16=per_token) == "f16", vram_gb
+
+    def test_the_least_lossy_type_that_fits_is_the_one_chosen(self):
+        """The case the whole change is for: weights leave a margin that f16 cannot
+        use and `q8_0` can, so the context is kept and only the cache compresses."""
+        from shani_chronoa import ctxfit
+        info = self._info()
+        per_token = ctxfit.kv_bytes_per_token(info)
+        total = int(6 * 2 ** 30)
+        weights = int(total * 0.90)
+        context = 2048
+        assert not ctxfit.estimate_fit(weights, context, total_bytes=total,
+                                       per_token=per_token).fits
+        assert ctxfit.estimate_fit(
+            weights, context, total_bytes=total,
+            per_token=ctxfit.kv_bytes_per_token(info, "q8_0")).fits
+        assert ctxfit.cache_type_for_context(
+            weights, context, total_bytes=total,
+            per_token_at_f16=per_token) == "q8_0", (
+            "a type worse than q8_0 was chosen when q8_0 already fits")
+
+    def test_when_nothing_fits_the_cheapest_tried_is_returned(self):
+        """Returning `f16` there would claim a quality level the numbers do not
+        support. `ladder[-1]` is the honest answer to "nothing fits"."""
+        from shani_chronoa import ctxfit
+        info = self._info()
+        total = int(6 * 2 ** 30)
+        weights = int(total * 0.97)          # no room for any cache at all
+        chosen = ctxfit.cache_type_for_context(
+            weights, 2048, total_bytes=total,
+            per_token_at_f16=ctxfit.kv_bytes_per_token(info))
+        assert chosen == ctxfit.CACHE_TYPE_LADDER[-1], chosen
+
+    def test_a_machine_with_no_kv_metadata_keeps_the_default(self):
+        """`per_token_at_f16=None` means the header could not be read, which is
+        the "no comparison" case, not a licence to change the cache type."""
+        from shani_chronoa import ctxfit
+        assert ctxfit.cache_type_for_context(
+            int(6 * 2 ** 30), 2048, total_bytes=int(6 * 2 ** 30),
+            per_token_at_f16=None) == "f16"
