@@ -365,6 +365,37 @@ def test_a_local_variable_is_not_mistaken_for_a_defined_name():
     assert "_NETWORKED_SENSES" in _defined_names(_parse(index["config"][0]))
 
 
+def test_every_allowed_external_root_is_still_cited_somewhere():
+    """The allowlist must not outlive the citations that justified it.
+
+    `EXTERNAL_ROOTS` is a hand-kept list, and this repository's own rule is that
+    one rots: `tests/test_mutation_harness_can_fail.py` exists because a test
+    named four mutation sets in a tuple and called itself the inventory. An
+    allowlist entry that no citation uses any more is dead weight - and the
+    failure it hides is worse than the noise: a module *of this package* later
+    taking that name would be silently exempted from the gate, which is the one
+    class of rot the gate exists to catch.
+
+    So each entry has to still be load-bearing. Dropping one fails this test, and
+    so does deleting the citation that justifies it.
+    """
+    index = _module_index()
+    cited = set()
+    for path in SITE.rglob("*.py"):
+        for _lineno, text in _citable_text(path):
+            for cited_name in CITE.findall(text):
+                module_part, _, _attr = cited_name.rpartition(".")
+                cited.add(module_part.split(".")[-1])
+
+    for root in sorted(EXTERNAL_ROOTS):
+        assert root in cited, (
+            f"`{root}` is in EXTERNAL_ROOTS but nothing cites it any more, so the "
+            "entry excuses nothing - and would excuse a future module of ours "
+            "by that name. Remove the entry, or keep the citation.")
+    assert EXTERNAL_ROOTS <= cited, (
+        f"allowlist entries no longer cited: {sorted(EXTERNAL_ROOTS - cited)}")
+
+
 def test_the_router_docstring_whitelist_promise_is_true_at_runtime():
     """`distill.py`'s claim, made executable rather than asserted.
 
