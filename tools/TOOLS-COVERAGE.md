@@ -102,7 +102,85 @@ that cannot see what an unprivileged read produces.**
 | `open_files` | `lsof` | which program has a **file** open — `/proc/net/tcp` has no answer for a file |
 | `system_history` | `sar` | what the machine was doing *earlier*, which no live reading can say |
 | `dns_lookup` | `delv` | the DNSSEC verdict (", fully validated") |
+| `disk_layout` | `lsblk --json` | **how the disk is partitioned** — see below |
 | `disk_activity`, `cpu_per_core`, `cpu_frequency`, `inspect_binary`, `process_detail`, `download_file`, `sync_folder`, `check_port`, `list_archive`, `extract_archive`, `vcs_status` | `iostat`, `mpstat`, `cpupower`, `readelf`, `/proc`, `curl`, `rsync`, `nc`, stdlib+7z, stdlib+7z, `git`/`svn`/`hg` | — |
+
+### `disk_layout`, and why `lsblk` and not the partition tools (2026-10-11)
+
+`storage` reads `/sys/block` and **deliberately discards partitions**
+(`_is_physical()` drops anything with a parent). That filter is right for "how
+many disks and how are they wearing" and it left one question with no answer
+anywhere: **"how is my disk partitioned?"** `filesystems` answers what is
+*mounted*, `storage` answers what is *wearing*, and on a blue-green machine the
+layout itself — which partition holds the slots — is the question somebody has.
+
+**`sgdisk`/`gdisk` are the partition-table tools and both need root.** Measured
+here: `sudo -n sgdisk -p /dev/nvme0n1` answers `sudo: interactive
+authentication is required` and, being under `sudo`, **still exits 0**. An exit
+code of 0 with a refusal on stderr is exactly the contract this file refuses to
+reason about, and the GPT table is the one thing a desktop user cannot read
+unprivileged anyway. `lsblk --json` reads the same kernel tree, needs no
+privilege, and returns the *nested* tree.
+
+Three measurements decided the shape, and each is a thing reading would have got
+wrong:
+
+- **The tree is four levels deep, not three.** Real: `nvme0n1` → `p3`
+  (`crypto_LUKS`) → `dm_crypt-0` → `ubuntu--vg-ubuntu--lv` → `/`. A parser
+  assuming disk → partition → mount reports the root filesystem as *unmounted*.
+- **32 of 33 block devices here are `loop`** (the immutable snap images), so
+  `lsblk`'s raw output buries the answer. They are hidden and **counted** — "1
+  disk" and "1 disk plus 32 loops I did not print" are different claims.
+- **A partition's GPT type GUID is what it was *created* as, not what it holds.**
+  Measured: `nvme0n1p3` carries `0fc63daf-…` — which genuinely **is** "Linux
+  filesystem" — while its `fstype` is `crypto_LUKS`. Printing the GUID beside
+  that reads as a contradiction and is not one, so a disagreeing pair is reported
+  as both, and an *unknown* GUID is printed as the GUID rather than guessed at.
+  Every name in the table was checked against
+  `https://en.wikipedia.org/wiki/GUID_Partition_Table`, and the test asserts the
+  shape of every entry — which caught a genuine transcription error
+  (`…bfd50179dac`, 11 characters where 12 were required).
+
+**Verified on real ShaniOS and on a real firmware boot, separately.** On `@blue`
+through `execute_tool_outcome` (the sandboxed child a model's call uses):
+**10 pass, 0 fail**. The consent grant is confirmed **in a second process**,
+because a grant the writer reads back as `true` and a child does not is
+indistinguishable from one never made — and the probe hit exactly that: the
+check's own first version passed a Python `True` where `ChronoaConfig.set()`
+takes the **string** `"true"` (`value == "true"`), so it wrote `false` and read
+back `False`. The gate was working; the check was writing the opposite of what
+it asked for.
+
+**What nspawn cannot show, stated rather than guessed:** the partition labels.
+Measured on the slot, `nvme0n1` and its three partitions exist while every
+`fstype`, `partlabel` and `parttype` is `None` — the slot's `/dev` is a
+loop-attached image, so the btrfs subvolumes are invisible until a real boot.
+`vmspawn` boots OVMF for real but is **console-only**, so it cannot run `lsblk`
+in the guest. What a real boot *does* settle: the firmware menu reports
+`shanios-blue (Active)` and `shanios-green (Candidate)`, agreeing with what
+`boot_report` independently reads from the slot's own `bootctl list`. Two
+systems, one answer. **`vmspawn`'s TPM does not come up on this dev box**
+(`swtpm: Could not send response: Permission denied`, QMP dropped in feature
+probing, VM exits in 3 s), so the measurement to take is `--tpm=no`; this skill
+needs no TPM.
+
+`38 tests`, **13/13 mutations confirmed to fail** — and one of them exposed a
+test that could not fail: the "no size prints `0 B`" guard asserted the absence
+of `"0 B"` and `"0.0B"` while `_human(0)` renders **`0B`**, so restoring the
+defect left the suite green. The assertion now tests what the function actually
+renders. `shani-testbed`'s `tests/chronoa-disk-layout-results.sh` proves the
+slot-test can go red (5/5), and its first version reported four greens that
+could not have gone red — the probe had no compiled schema, so consent was
+permanently shut and every output assertion was unreachable.
+
+**One honest caveat about the audit number.** `audit_tool_packages.py` counts
+only what the three `shani-tools*` packages ship, and this skill uses **none**
+of them: `lsblk` is `util-linux`, on every image, with no relationship to those
+packages. So the count is unchanged at **79** and this work is invisible to it
+— which is the correct shape of the report rather than a gap in it. The survey's
+question is "what do *these three packages* ship that nothing calls", and the
+honest way to answer it when the gap is elsewhere is to say so here instead of
+letting a skill appear to have closed a shipped-command gap when it did not.
 ## The matrices predate the last depends change (measured 2026-10-10)
 
 **Five commands in `shani-tools-extra` are declared by the PKGBUILD but the
