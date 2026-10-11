@@ -203,6 +203,12 @@ class _ModeStrip(Gtk.Box):
         self._style_chip = self._reply_style_chip()
         self.append(self._style_chip)
         self.append(self._dictate_button())
+        # Beside Dictate on purpose: they are the same question to a
+        # person - "listen to me for a long turn" and "listen to what
+        # is playing" - and the Listening page answers the second.
+        # Two panels away behind a sidebar click is how a capability
+        # nobody finds stays unfound.
+        self.append(self._listening_button())
         self.refresh()
 
     def _chip(self, label: str, icon: str, action: str) -> Gtk.ToggleButton:
@@ -311,6 +317,47 @@ class _ModeStrip(Gtk.Box):
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
             ["Dictate: start one long listening turn"])
+        return button
+
+    def _listening_button(self) -> Gtk.Button:
+        """Open the Listening page: what an application is playing, and whether
+        it can be transcribed.
+
+        **Not a second copy of the page.** It navigates through `pages.show`,
+        the mechanism `navigate_page` uses, so there is one implementation of
+        "where this page is" and not two that can drift.
+        """
+        from shani_chronoa import pages
+
+        button = Gtk.Button()
+        button.add_css_class("mode-chip")
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        image = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic")
+        image.set_pixel_size(13)
+        box.append(image)
+        text = Gtk.Label(label="Listening")
+        text.add_css_class("mode-chip-label")
+        box.append(text)
+        button.set_child(box)
+        button.set_tooltip_text(
+            "What an application is playing, and whether it can be transcribed "
+            "- a call in a browser, a video, a podcast")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Listening: what is playing, and whether it can be transcribed"])
+
+        def open_page(_button: Gtk.Button) -> None:
+            # A dead button must not take the window down with it - the same
+            # reading `common.navigate_page`'s log-on-failure gives.
+            try:
+                if not pages.show("listening", application=self._app,
+                                  config=self._config):
+                    logger.warning("no Listening page to open; the button had "
+                                   "nowhere to go")
+            except Exception:  # noqa: BLE001 - a button is not a crash site
+                logger.warning("could not open the Listening page", exc_info=True)
+
+        button.connect("clicked", open_page)
         return button
 
     # -- the state, read from whoever owns it ---------------------------
@@ -2101,7 +2148,12 @@ def _register_main_pages() -> None:
     page_registry.register(
         "main",
         [("conversation", "Conversation"), ("quick-ask", "Quick ask"),
-         ("conversations", "Saved conversations"), ("panels", "Panels")],
+         ("conversations", "Saved conversations"), ("panels", "Panels"),
+         # Registered here and not only in SURFACE_IDS: the button beside
+         # Dictate calls pages.show("listening"), and it returned False -
+         # found by pressing it, not by reading it. A surface nobody
+         # registered is the sidebar button nobody added.
+         ("listening", "Listening")],
         factory=lambda app, config=None: ChronoaWindow(app),
     )
 
