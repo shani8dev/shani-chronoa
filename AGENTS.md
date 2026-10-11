@@ -4060,7 +4060,89 @@ are now covered: the test asserts the reason is in the rendered text **and** tha
 the blocked row still carries `dialog-warning-symbolic`, and each was confirmed
 to fail when its half is removed.
 
-## The suite, run in chunks because one long run keeps dying (2026-10-07)
+## open-intelligent-ui, seventh pass: two transfers, from four files nobody had opened (2026-10-11)
+
+The sixth pass recorded a negative over `page.tsx`, `layout.tsx`, `map.tsx`,
+`vector-basemap.ts` and the spec — and had not read `src/lib/route/store.ts`,
+`src/lib/travel/map-utils.ts`, `src/lib/prompt-options.ts` or
+`src/lib/library.ts` at all. Going into those found two real defects. Write-up in
+**`../harness-study/HARVEST-OIU.md`** §10; the argument for this file is that the
+first six passes read the files a summary named, and the gap was in the four it
+did not.
+
+**1. `senses/location.py` checked nothing about the coordinates it reads.** OIU's
+`coordinate()` validates a pin a *model* supplied — a real number, finite,
+`|lat| <= 90`, `|lng| <= 180`. Chronoa reads coordinates from *devices*, and
+gpsd's own man page says *"lat, lon: numeric, may be null"*, so its allowed
+shapes include a null. Measured on the real parser before the change:
+
+| gpsd sends | before |
+|---|---|
+| `"lat": 999.0` | ACCEPTED |
+| `"lat": NaN` | ACCEPTED (renders as `nan` in every sentence) |
+| `"lat": "18.5"` | ACCEPTED, coerced |
+| `"lat": true` | ACCEPTED as 1.0 |
+| `"lat": null` | **`TypeError` out of the sense** |
+
+`locate()` and its three consumers (`get_location`, `weather._here`,
+`maps._here`) had no guard, so a TPV with `mode >= 2` and a null lat answered
+"where am I" with a traceback. `mode >= 2` is gpsd's own claim of a fix, and a
+fix is not a position — the "take the service's word for it" failure this file
+records for `privilege` trusting `dpkg-query`, reached from a new direction.
+`_coordinate()` / `_on_the_planet()` refuse all five shapes and name the values
+the device sent; returning `None` rather than raising is what lets `locate()`'s
+loop hand the question to GeoClue. The GeoClue branch has the same check,
+because its regex captures whatever the text says.
+
+**2. The Diff panel's file list was reachable by a pointer only.** OIU's
+`createPinElement` is three lines — `tabIndex = 0`, `role = "button"`, and *both*
+click and keydown (Enter/Space) calling one `onSelect`. Chronoa builds the file
+list as a `Gtk.Box` of `Gtk.Box`es with a `Gtk.GestureClick` each. Measured on
+the built row: `get_focusable()` **False**, `grab_focus()` left `has_focus()`
+**False**, one controller, the GestureClick — while the Accept and Reject buttons
+*inside the same row* were focusable. A keyboard user could act on a file they
+could not select, and selecting is what decides whose diff you are reading.
+
+The scan that found it (`GestureClick` across the tree) returned **one** hit, so
+this is one dead control and not a pattern: every `Gtk.Button` and every
+`Adw.ActionRow`-plus-button in this repo already handles both because GTK does it
+natively. The row is focusable now, claims `GTK_ACCESSIBLE_ROLE_BUTTON`, carries
+an accessible label, and Enter/keypad-Enter/Space call **`_on_click`'s own
+action** rather than a second copy — two copies is how the two drift. The handler
+returns `False` for anything that does not mean "activate", or it would swallow
+every key press in the window.
+
+Two API facts measured on the installed library, not remembered:
+`Gtk.AccessibleProperty.ROLE` does not exist (it is `set_accessible_role`), and
+`get_accessible_property` does not either — the second is this file's own
+recorded probe defect, so the label is asserted by recording `update_property`
+at the class level before construction, the only place the call can be caught.
+
+**Not taken, with reasons in §10.3:** `wikiCache`'s in-flight `Map<string,
+Promise>` (every skill call is its own child process, so a module-level Map is
+empty in the next one), `addStop`'s plain-field allowlist (Python's `to_dict()`
+enforces the same thing structurally), `getStopKey` (`variable_name` is required
+by the schema, so the empty case cannot arise), the *"do not present weather as
+verified"* prompt rule (Chronoa's answer is a control: `NO_TRAFFIC`, provenance
+fencing, the egress panel), and `localPromptOptions` (`tool_select` is already
+per-request).
+
+`tests/test_location_coordinates.py` — 35 tests, **14 of 14 mutations confirmed
+to fail**, including the range check, the type check, the finite check, the
+refusal naming the device's own values, the GeoClue branch, the row's focus, the
+label, the role, the key controller, the over-fix that swallows every key, and
+the mouse path being dropped while the keyboard one was added. The one partial
+is an equivalent mutant by construction: dropping the int check leaves every
+float fix passing, which is what that mutation can reach.
+
+Verified with the other three suites (`weather_location`, `inline_diff_in_chat`,
+`ui_surfaces`) and the established sweep. **7 failures in the sweep are
+pre-existing** and were checked with the sanctioned one-file swap — the same 7
+fail with both of this pass's source files at HEAD. All 7 name the concurrent
+session's new skills (`lan_phone`, `screen_to_phone`), and one of them says so in
+its own message: *"if it is not, it is another session's work in progress and
+this failure is not about your change."*
+
 
 A single full run is not a reliable way to get a number out of this suite on
 this box: over the course of one afternoon it lost its output three ways, and

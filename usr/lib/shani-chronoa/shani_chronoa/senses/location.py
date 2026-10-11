@@ -52,6 +52,58 @@ _SCHEMA = {
 
 Position = Tuple[float, float, Optional[float], str]  # lat, lon, accuracy m, how
 
+#: The Earth, in the units the world uses. **A latitude outside ±90 or a
+#: longitude outside ±180 is not on the planet**, and every source below hands
+#: its numbers over as JSON or as a regex capture, so neither one can be
+#: trusted to have checked. This is open-intelligent-ui's `coordinate()`
+#: (`map-utils.ts`) in the other direction: it validates coordinates a *model*
+#: supplied for a pin, this validates ones a *device* supplied for the machine.
+#: The check is the same, because the failure is the same - a plausible number
+#: that is not a place.
+MAX_LATITUDE = 90.0
+MAX_LONGITUDE = 180.0
+
+
+def _coordinate(value: object) -> "Optional[float]":
+    """`value` as a real, finite, on-the-planet coordinate, or None.
+
+    Four refusals, each because a bad one is worse than an absent one:
+
+    - **not a number at all.** `float("18.5")` happily converts a JSON string
+      and `float(True)` converts a boolean to `1.0`; both are a device saying
+      something this is not. Measured, gpsd's TPV with `"lat": null` (which its
+      own man page allows - *"lat, lon: numeric, may be null"*) raised
+      `TypeError: float() argument must be a string or a real number, not
+      'NoneType'` out of the sense entirely, so a partially-known TPV crashed
+      `get_location`, `weather` and `maps` instead of moving on to GeoClue.
+    - **NaN or an infinity.** `float("NaN")` succeeds, and a NaN latitude
+      renders as `nan` in every sentence this sense writes and as
+      `around:5000,nan,nan` in the Overpass query `maps` builds - which then
+      reads as "no petrol pump near you" rather than as a broken position.
+    - **out of range.** `lat: 999.0` is accepted by nothing here today and is
+      the confident wrong answer this sense exists not to give: it is a
+      *position*, so nothing downstream can tell it was never a place.
+
+    Returning None rather than raising is the point: `locate()` tries its next
+    source on a None, so one malformed answer moves on instead of ending the
+    question.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return float(value)
+
+
+def _on_the_planet(lat: object, lon: object) -> "Optional[Tuple[float, float]]":
+    """(lat, lon) when both are real coordinates, else None."""
+    flat, flon = _coordinate(lat), _coordinate(lon)
+    if flat is None or flon is None:
+        return None
+    if abs(flat) > MAX_LATITUDE or abs(flon) > MAX_LONGITUDE:
+        return None
+    return flat, flon
+
 
 def _from_gpsd() -> "tuple[Optional[Position], str]":
     if not shutil.which("gpspipe"):
@@ -70,8 +122,19 @@ def _from_gpsd() -> "tuple[Optional[Position], str]":
         if msg.get("class") == "DEVICES" and msg.get("devices"):
             devices = True
         if msg.get("class") == "TPV" and (msg.get("mode") or 0) >= 2 and "lat" in msg and "lon" in msg:
-            acc = msg.get("eph") or msg.get("epx")
-            return (float(msg["lat"]), float(msg["lon"]), float(acc) if acc else None, "GPS receiver (gpsd)"), ""
+            # `mode >= 2` is gpsd's own claim that it has a fix, and a fix is
+            # not the same thing as a position - a device can report mode 3
+            # with a lat that is null, a string or off the planet. Taking the
+            # service's word for it is the shape this repo records for
+            # `privilege` trusting dpkg-query and `bluetooth` answering
+            # "0 devices" when bluetoothctl was simply missing.
+            where = _on_the_planet(msg.get("lat"), msg.get("lon"))
+            if where is None:
+                return None, (f"gpsd sent a fix that is not a position "
+                              f"(lat={msg.get('lat')!r}, lon={msg.get('lon')!r})")
+            acc = _coordinate(msg.get("eph")) if msg.get("eph") is not None else None
+            acc = _coordinate(msg.get("epx")) if acc is None else acc
+            return (where[0], where[1], acc, "GPS receiver (gpsd)"), ""
     if out.returncode != 0 and not out.stdout:
         return None, "gpsd is not running"
     return None, "gpsd has a receiver but no fix yet" if devices else "no GPS receiver is attached"
@@ -95,9 +158,14 @@ def _from_geoclue() -> "tuple[Optional[Position], str]":
     if lat is None or lon is None:
         err = (out.stderr.strip().splitlines() or ["no location within the timeout"])[-1]
         return None, f"GeoClue gave no position: {err[:160]}"
+    where = _on_the_planet(lat, lon)
+    if where is None:
+        # GeoClue's `where-am-i` prints whatever its source produced, and a
+        # source can be wrong in a way the regex still captures happily.
+        return None, f"GeoClue gave a position that is not on the planet ({lat}, {lon})"
     m = re.search(r"^\s*Description:\s*(.+)$", text, re.M)
     how = "GNOME location service (GeoClue)" + (f", {m.group(1).strip()}" if m else "")
-    return (lat, lon, num("Accuracy"), how), ""
+    return (where[0], where[1], _coordinate(num("Accuracy")), how), ""
 
 
 def locate() -> "tuple[Optional[Position], str]":

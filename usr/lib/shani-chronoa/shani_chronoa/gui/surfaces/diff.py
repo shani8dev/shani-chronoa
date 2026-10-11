@@ -326,8 +326,8 @@ class _DiffFileItem(Gtk.Box):
         # Stats
         added = sum(1 for h in file.hunks for l in h.lines if l.tag == "+")
         removed = sum(1 for h in file.hunks for l in h.lines if l.tag == "-")
-        stats = f"{added}+ {removed}-"
-        stats_label = Gtk.Label(label=stats, xalign=1.0)
+        stats = f"{added} added, {removed} removed" if (added or removed) else "no changes"
+        stats_label = Gtk.Label(label=f"{added}+ {removed}-", xalign=1.0)
         stats_label.set_halign(Gtk.Align.END)
         stats_label.add_css_class("dim-label")
         stats_label.set_size_request(40, 0)
@@ -360,6 +360,25 @@ class _DiffFileItem(Gtk.Box):
         click.set_button(1)
         click.connect("pressed", self._on_click)
         self.add_controller(click)
+        # **A row that only a mouse can reach is a row a keyboard cannot.**
+        # This is open-intelligent-ui's `createPinElement` (`map-utils.ts`)
+        # exactly: it sets `tabIndex = 0`, `role = "button"`, and wires **both**
+        # `click` and `keydown` (Enter/Space, `preventDefault` on the latter) to
+        # the same `onSelect` - "a focusable pin with a label underneath".
+        # Measured on the built row before this: `get_focusable()` was False,
+        # `grab_focus()` left `has_focus()` False, and the only controller was
+        # the GestureClick. So selecting which file you are looking at was
+        # available to a pointer and to nothing else, while the Accept and
+        # Reject buttons *inside* the row were focusable - a keyboard user
+        # could act on a file they could not choose.
+        self.set_focusable(True)
+        self.set_focus_on_click(True)
+        self.set_accessible_role(Gtk.AccessibleRole.BUTTON)
+        self.update_property([Gtk.AccessibleProperty.LABEL],
+                             [f"{file.path.name}, {stats}"])
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_key)
+        self.add_controller(keys)
         # The pointer cursor used to be requested from CSS (`cursor: pointer`),
         # which GTK4's parser rejects - `No property named "cursor"`, printed on
         # every window build for as long as the rule was there. `set_cursor` is
@@ -390,6 +409,27 @@ class _DiffFileItem(Gtk.Box):
         # signal *is* the press.
         if self.on_select:
             self.on_select(self._file)
+
+    def _on_key(self, controller, keyval: int, keycode: int, state) -> bool:
+        """Enter or Space select this row, the way a click does.
+
+        **One action, two entry points, and the same refusal in both.** The
+        handler is `_on_click`'s own action rather than a second copy of it,
+        because two copies is how the two drift into disagreeing - the whole
+        reason this repo has "one implementation of start listening, not two".
+
+        Returns True (handled) for the two keys that mean "activate", and False
+        for everything else so Tab, the arrows and the shortcuts keep working:
+        a controller that returns True unconditionally would swallow every key
+        press in the panel.
+        """
+        from gi.repository import Gdk
+
+        if keyval not in (Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_space):
+            return False
+        if self.on_select:
+            self.on_select(self._file)
+        return True
 
     @property
     def selected(self) -> bool:
