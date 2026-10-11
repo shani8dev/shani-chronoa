@@ -40,7 +40,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -258,18 +258,67 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
         needs_label.set_max_width_chars(48)
         box.append(needs_label)
 
+    def _in_use() -> bool:
+        """Whether this is the model answering right now, not merely installed.
+
+        **`installed` and `in use` were the same word on this panel.** The button
+        read "Ready" and its tooltip read "In use" for every model that happened to
+        be on disk, while the running server held whichever one it had loaded - so
+        a panel of five installed models showed five "In use"s, which is five
+        claims and at most one true one. Measured here, the answer to "which model
+        am I using" was not on the screen anywhere.
+        """
+        if not card["installed"]:
+            return False
+        if card["kind"] != "llm":
+            # Only the language model has a "running right now" - the other kinds
+            # are read back from the setting they were written to, which is what
+            # they are answered by next time.
+            return bool(card.get("chosen"))
+        try:
+            from shani_chronoa import local_llm
+
+            if local_llm.active() != card["key"]:
+                return False
+        except Exception:  # noqa: BLE001 - unreadable is not "not in use"
+            return False
+        # **Loaded is not answering.** `local_llm.active()` says which file
+        # `current.gguf` points at; whether that is the model answering is a
+        # different question - the LLM is chosen once at startup and
+        # `_maybe_enable_cloud_fallback` never reconsiders, so starting llama-server
+        # afterwards adds an available engine without changing the selected one.
+        # `model.py`'s `_selected_engine` exists for exactly this, and reading the
+        # object rather than re-deriving the condition is its documented lesson.
+        return _answers_locally(app)
+
     def refresh() -> None:
         installed = card["installed"]
+        in_use = _in_use()
         status.set_text("On this machine" if installed else "Not downloaded")
         status.remove_css_class("dim-label")
         if not installed:
             status.add_css_class("dim-label")
-        button.set_label("Ready" if installed else "Set up")
+        # **The label is a claim about now.** "Ready" was a claim about the
+        # disk, and it is what a person reads as "this is the one answering".
+        loaded = installed and _loaded(card)
+        # **"Loaded" and "In use" are two claims**, and conflating them is the
+        # trap `model.py` already recorded: the server can hold a model while the
+        # app answers through a cloud provider chosen at startup.
+        button.set_label(
+            "Set up" if not installed else
+            ("In use" if in_use else ("Loaded" if loaded else "Use it")))
+        button.set_sensitive(installed and not in_use)
         button.set_tooltip_text(
-            "In use" if installed else
-            "Set this one up, then choose it - the setup window opens on its page")
+            "Set this one up, then choose it - the setup window opens on its page"
+            if not installed else
+            ("This is the model answering now" if in_use else
+             ("Downloaded, but the assistant is not answering with it" if loaded
+              else "Switch to this model now: the server restarts with it")))
         icon.set_from_icon_name(
-            "object-select-symbolic" if installed else "folder-download-symbolic")
+            "folder-download-symbolic" if not installed else
+            ("object-select-symbolic" if in_use else
+             ("document-open-recent-symbolic" if loaded
+              else "media-playback-start-symbolic")))
 
     button = Gtk.Button(halign=Gtk.Align.START, css_classes=["pill"])
     icon = Gtk.Image()
@@ -283,6 +332,36 @@ def _card(app: Any, card: Dict[str, Any], on_changed: Callable) -> Gtk.Widget:
     refresh()
     box._chronoa_card = card
     return box
+
+
+def _loaded(card: Dict[str, Any]) -> bool:
+    """Whether the server holds this model's file, whether or not it is used."""
+    if not card["installed"] or card["kind"] != "llm":
+        return False
+    try:
+        from shani_chronoa import local_llm
+
+        return local_llm.active() == card["key"]
+    except Exception:  # noqa: BLE001 - unreadable is not "not loaded"
+        return False
+
+
+def _answers_locally(app: Any) -> bool:
+    """Whether the app is routed to the local server, or somewhere else.
+
+    **False when it cannot be determined**, which is what a bare stub answers - so
+    a card built with no application says "Loaded" and not "In use". That is the
+    honest direction for a claim about *now*: the smaller claim.
+    """
+    llm = getattr(app, "llm", None)
+    if llm is None:
+        return False
+    try:
+        from shani_chronoa.cloud_llm import CloudLLMChain
+
+        return not isinstance(llm, CloudLLMChain)
+    except Exception:  # noqa: BLE001 - an unreadable engine is not a local one
+        return False
 
 
 def _activate(app: Any, card: Dict[str, Any], box: Gtk.Widget,
@@ -315,10 +394,147 @@ def _activate(app: Any, card: Dict[str, Any], box: Gtk.Widget,
     button says so in its own tooltip instead of silently doing nothing.
     """
     if card["installed"]:
-        _pick(app, card)
-        on_changed()
+        _switch(app, card, box, on_changed)
         return
     _open_setup(app, box)
+
+
+def _switch(app: Any, card: Dict[str, Any], box: Gtk.Widget,
+            on_changed: Callable) -> None:
+    """Switch to this model now, and say what happened.
+
+    **There was no switch.** `_pick` wrote `config.set("model", key)` and its own
+    docstring said "Writes the setting and stops there" - so the button answered a
+    person asking "use this one" with a change to what happens *next time*, and
+    kept saying nothing about the change that had not happened. The model a
+    question loads is chosen by `local_llm.use()`, which points `current.gguf` at
+    the file and (re)starts the service; neither was reachable from this panel.
+
+    Measured on this machine during this change: the server answers, the model is
+    pinned, and the panel shows "Ready" - three facts, none of them the one being
+    asked for.
+
+    Off the main loop, because `use()` runs the quality gate (`llama-perplexity`
+    takes seconds) and `start_service()` shells to `systemctl --user`, and a
+    button that freezes the window for seconds while it works is a button nobody
+    presses twice.
+
+    **A refusal is reported, not swallowed.** The gate exists to stop a worse
+    quant replacing a better one, and a panel that ignored its verdict would be
+    the assistant claiming to have switched when it had not.
+    """
+    import threading
+
+    status = _first_button_status(box)
+    if getattr(box, "_switching", False):
+        return
+    box._switching = True
+    button = _card_button(box)
+    if button is not None:
+        button.set_sensitive(False)
+    if status is not None:
+        status.set_text("Switching...")
+        status.remove_css_class("dim-label")
+
+    def work():
+        key = card["key"]
+        try:
+            if card["kind"] == "llm":
+                from shani_chronoa import local_llm
+
+                verdict = local_llm.use(key)
+                if not verdict.get("promote"):
+                    return {"ok": False,
+                            "why": verdict.get("why") or "the quality gate refused"}
+                why = local_llm.start_service()
+                if why:
+                    return {"ok": False, "why": why}
+                return {"ok": True, "why": ""}
+            return {"ok": True, "why": "setting written"}
+        except Exception as exc:  # noqa: BLE001 - reported below, never raised
+            return {"ok": False, "why": str(exc)}
+
+    def done():
+        box._switching = False
+        on_changed()
+        return False
+
+    def body():
+        result = work()
+        # The reply goes back on the main loop because that is where the widget
+        # lives: writing a `Gtk.Label` from a thread is the unsafe half.
+        GLib.idle_add(lambda: (_apply_switch_result(box, card, result), None)[1])
+        GLib.idle_add(done)
+
+    threading.Thread(target=body, daemon=True).start()
+
+
+def _card_button(box: Gtk.Widget):
+    for child in _children(box):
+        if isinstance(child, Gtk.Button):
+            return child
+    return None
+
+
+def _first_button_status(box: Gtk.Widget):
+    """The status label sitting above the button, by position rather than name.
+
+    Boxes are walked rather than held in a map because the card is a flat layout
+    built once and a reference would be a second thing to keep in step.
+    """
+    from gi.repository import Gtk
+
+    seen = [c for c in _children(box) if isinstance(c, Gtk.Label)]
+    return seen[0] if seen else None
+
+
+def _children(box: Gtk.Widget):
+    """The direct children of a GTK4 container, in order.
+
+    **`Gtk.Widget.get_children()` does not exist in GTK4** - it is the GTK3 API,
+    and calling it raises `AttributeError`, which a `getattr` guard silently turns
+    into "no children". This repo has recorded that trap already, in a different
+    helper, and the first version of this function walked into it: the switch
+    worked, the button was never found, and nothing failed.
+
+    The way in is `get_first_child()` + `get_next_sibling()`.
+    """
+    try:
+        out, child = [], box.get_first_child()
+        while child is not None:
+            out.append(child)
+            child = child.get_next_sibling()
+        return out
+    except Exception:  # noqa: BLE001 - an unreadable box contributes nothing
+        return []
+
+
+def _apply_switch_result(box: Gtk.Widget, card: Dict[str, Any],
+                         result: Dict[str, Any]) -> None:
+    status = _first_button_status(box)
+    if result.get("ok"):
+        if status is not None:
+            status.set_text("On this machine")
+            status.remove_css_class("dim-label")
+        _pick(getattr(box, "_app", None) or _config_only(), card)
+        return
+    if status is not None:
+        status.set_text("Switch failed: %s" % result.get("why"))
+        status.remove_css_class("dim-label")
+    logger.warning("could not switch to %s: %s", card.get("key"), result.get("why"))
+
+
+def _config_only():
+    from shani_chronoa.config import ChronoaConfig
+
+    return _StubApp(ChronoaConfig())
+
+
+class _StubApp:
+    """`_pick` reads `app.config`; this carries one without an application."""
+
+    def __init__(self, config):
+        self.config = config
 
 
 def _open_setup(app: Any, widget: Gtk.Widget) -> None:
