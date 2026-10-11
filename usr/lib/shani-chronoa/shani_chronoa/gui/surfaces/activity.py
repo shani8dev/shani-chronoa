@@ -347,6 +347,43 @@ def installed_skills() -> "set[str]":
     return {entry["function"]["name"] for entry in tools.TOOLS}
 
 
+def skill_coverage(records, known=None) -> "tuple[int, int, int]":
+    """`(skills, measured, unmeasured)` - the whole whitelist, split in two.
+
+    **Why this exists, and what the per-skill rows cannot say.**
+    `per_skill()` returns only skills that *have* calls, so a log holding three
+    skills renders three rows and reads as a complete account of skill health.
+    Those three rows are complete for what ran; they say nothing whatever about
+    the other skills, and until now nothing on screen said that either.
+
+    That is the exact shape of a dashboard that goes green when its writer
+    breaks. Every skill folds into "no rows", and "no rows" is indistinguishable
+    from "nothing to report". `total = measured + unmeasured` is the arithmetic
+    that keeps the two apart, so a skill that has never run is a *counted
+    absence* rather than an omission, and `unmeasured` is zero only when every
+    skill in the whitelist has been measured.
+
+    `known` is the universe, read from the registry so it is the real set. When
+    the registry cannot be read the universe is unknown, and this returns
+    `(0, 0, 0)` rather than counting the skills that happened to appear in the
+    log - a number over the wrong denominator is worse than no number, and
+    `installed_skills()` is already the honest answer to "how many are there".
+
+    A skill counts as measured only on a verdict, not on any record: an
+    `unverified` call is most calls, and it says nothing about whether the skill
+    works.
+    """
+    known = installed_skills() if known is None else set(known)
+    if not known:
+        return (0, 0, 0)
+    measured = set()
+    for record in records:
+        tool = record.get("tool_name")
+        if tool in known:
+            measured.add(tool)
+    return (len(known), len(measured), len(known - measured))
+
+
 def per_skill(records, known=None) -> "list[tuple]":
     """`(tool, calls, verified, failed, installed)` per skill, worst rate first.
 
@@ -402,15 +439,31 @@ def _rate_sentence(tool: str, calls: int, verified: int, failed: int,
             f"{verified} verified{gone}")
 
 
+def _coverage_sentence(records, known=None) -> str:
+    """The second half of the "By skill" group's subtitle.
+
+    Separate from `build_summary` because it is the one sentence here that can
+    be empty, and because a caller reading it back is reading a claim about the
+    whole whitelist rather than about the rows under it.
+    """
+    total, measured, unmeasured = skill_coverage(records, known=known)
+    if not total:
+        return ("Worst first, and every rate carries the count it is a "
+                "proportion of.")
+    if unmeasured == 0:
+        return (f"Worst first, and every rate carries the count it is a "
+                f"proportion of. All {total} skills have been measured.")
+    return (f"Worst first, and every rate carries the count it is a "
+            f"proportion of. {unmeasured} of {total} skills have never run "
+            f"here, so this block is what ran, not what works.")
+
+
 def build_summary(records) -> Gtk.Widget:
     """The per-skill block, or nothing at all when there is nothing to say."""
     rows = per_skill(records)
     if not rows:
         return Gtk.Box()
-    group = common.group(
-        "By skill",
-        "Which skills have been earning their place. Worst first, and every "
-        "rate carries the count it is a proportion of.")
+    group = common.group("By skill", _coverage_sentence(records))
     for tool, calls, verified, failed, installed in rows:
         _add(group, common.row(
             tool, _rate_sentence(tool, calls, verified, failed, installed)))

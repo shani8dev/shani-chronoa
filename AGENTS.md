@@ -9662,7 +9662,88 @@ Two mistakes of mine in the same pass, both worth the recording:
 
 `tests/test_goal_edits.py` - 35 tests, **13 of 13 mutations confirmed to fail**.
 
-### open-intelligent-ui, sixth pass: nothing new taken, and why that is the finding
+## VoxCPM: the 2B engine is not a tier, and the text normaliser it implied is (2026-10-11)
+
+`harness-study/voxcpm` is **VoxCPM2**, a tokenizer-free TTS: 2B parameters on a
+MiniCPM-4 backbone, 30 languages, 48 kHz, voice cloning and "voice design"
+(a new voice from a text description). Apache-2.0, 35.4k stars, upstream is
+`OpenBMB/VoxCPM` — there are at least seven forks on GitHub and that is the
+original.
+
+### Not taken: the engine, and the reason is a measurement
+
+VoxCPM needs **CUDA >= 12, PyTorch >= 2.5, ~2B parameters of weights**, and it
+is a diffusion autoregressive model on the GPU. Chronoa's speech path is a
+**four-engine CPU cascade** (Kokoro opt-in, Piper, RHVoice, espeak-ng) whose
+whole design is that it degrades one step at a time and works on every image —
+`AGENTS.md` records Kokoro being *removed* as the default because 6.39 s of wall
+clock for 5.225 s of audio (RTF 1.22) on an i7-1165G7 put ~6 s of silence in
+front of every answer. VoxCPM is two orders of magnitude past that on a machine
+with no CUDA at all, and adding a fifth tier behind a GPU requirement would
+break the property the cascade exists to hold. **A model is not a tier.**
+
+### Taken: the normaliser, which was a measured gap
+
+`src/voxcpm/utils/text_normalize.py` exists because every phoneme front-end
+carries no vocabulary of units. Chronoa had **no text normalisation at all**
+before this — raw model output went to whichever engine won. Measured with
+`espeak-ng -X` on a sentence a language model actually writes:
+
+    It cost $5.00 at 42km/h, i.e. 3 items.
+    -> Unpronouncable? 'km'
+    -> It k'0st d'0l3 f'aIv pOInt z'i@roU z'i@roU at f'o@ti t'u: k,eI'Em sl'aS 'eItS
+
+"**It cost dollar five point zero zero at forty two K E M slash H**" — and
+espeak itself reports `km` as unpronounceable and spells it. Piper and Kokoro are
+no better; they are phoneme front-ends too.
+
+`tts_text.py` now fixes the cases that are *provably* wrong, and only those. It is
+deliberately **not** VoxCPM's implementation, which needs `inflect` and `wetext`
+and is aimed at Chinese text normalisation — this is the English subset against
+the standard library, because a hard dependency for a voice line is not a trade
+this app makes (`sox` is an optdepend for the same reason).
+
+What it does: units (`42km/h`, `8GB`, `100ms`), currency (`$5.00`, `$0.99`,
+`$4.50`), abbreviations, and initialisms (`API` read as "ay-pee" becomes "A P I").
+What it deliberately does **not** do: spell out numbers in general. `3.14`,
+`2026`, `1st`, `53,312` were all measured reading correctly through espeak-ng
+*before* the module was written, and a normaliser that touches more than it fixes
+is one nobody can review. `_LEFT_ALONE` records the words for exactly this
+reason.
+
+Verified end to end the same way the defect was: `espeak-ng -X` on the input and
+the output. `8 gigabytes` where it said "eight G B"; `A P I` where it said
+"ay-pee"; `that is` where the sentence had been abandoned at the unpronounceable
+`km`.
+
+### Three bugs in my own first version, each found by running it
+
+- **`\bkm` cannot match `42km`.** `2` and `k` are both word characters, so there
+  is no boundary between them — the anchor has to be `(?<![A-Za-z])`. This is the
+  case that matters most, since `42km/h` is the sentence that started the module,
+  and the first version passed on `5 km` while failing on `5km`.
+- **`5km` became `5kilometres`.** Replacing just the abbreviation runs two words
+  together, so the number is captured and re-emitted with the space the author did
+  not type.
+- **The change report printed a function repr.** `str(repl)` on a callable gives
+  `<function _mk_money_repl.<locals>.repl at 0x...>`, a log line that cannot be
+  checked against the sentence that was spoken. Each callable is now matched
+  against the pattern that produced it so the report quotes the words the listener
+  hears.
+
+### The seam, and why it is not in an engine
+
+Normalisation runs in `synthesize()` beside `apply_timbre`, because both are the
+steps that are not an engine. Putting it in `_synthesize` would put it four times
+in one file, once per engine, which is how a normaliser comes to disagree with
+itself. A normaliser that raises **never costs a reply** — the call site catches
+it and speaks the raw text, because an engine that says "forty two K E M slash H"
+is better than no engine at all. That guarantee is tested by driving the real
+method with the normaliser forced to raise, and the companion test asserts the
+rewritten text *does* reach the engine, so neither passes against a call site
+that ignores the normaliser entirely.
+
+## open-intelligent-ui, sixth pass: nothing new taken, and why that is the finding
 
 Read the rest of the repo (`page.tsx`, `layout.tsx`, all 219 lines of `map.tsx`,
 `vector-basemap.ts`, the generated library spec). **No sixth transfer**, recorded
@@ -9685,3 +9766,56 @@ same widget that will hold the answer, because the token stream goes straight
 into the page. Chronoa's skills are subprocesses returning a string. A mid-run
 progress mechanism would be a real design decision, not a harvest item, and it is
 left as one.
+
+## ECC: the skill dashboard that goes green when its writer breaks (2026-10-11)
+
+`../harness-study/ecc` (`affaan-m/everything-claude-code`) is a harness-performance
+system: 71 agents, 311 skills, 97 commands, and its real substance is *runtime
+enforcement* — Node hooks interposed on every tool call. Most of what it has,
+Chronoa already has and is further along with: `usage.py` counts tokens against a
+price table and refuses to turn "unknown" into `$0.00`; `provenance.py` fences
+untrusted content with a **per-turn nonce** so a document cannot forge its own
+terminator; `guardrail.py` is deterministic argument validation on the stated
+principle that "a prompt is a promise, a fact is the only reason the check is
+worth having"; `learning.py` is wired live into dispatch, selection, reflexes and
+distillation. **Do not re-propose any of those** — the harvest is in
+`../harness-study/HARVEST-*.md` and Chronoa's own `usage.py` docstring already
+names opencode as its source.
+
+**The one thing taken, and it is the #2463 lesson.** ECC's skill dashboard counted
+a never-run skill as *healthy*, so a broken telemetry writer produced a green
+report across every skill and no alert ever fired. Its own fix comment is the
+transferable sentence:
+
+> *A skill with no runs in the window is not healthy, it is unmeasured. Folding
+> it into "healthy" turned a missing telemetry writer into a green dashboard
+> across every skill (#2463) — false confidence that never triggers an alert.*
+
+Chronoa had the same shape from the other side. `gui/surfaces/activity.py`'s
+per-skill block called `per_skill()`, which returns **only skills that have
+calls** — so three rows read as a complete account of skill health while the other
+252 skills were absent from the screen as well as from the log. "Absent" and
+"nothing to report" are different claims, and nothing on screen said which one it
+was.
+
+`skill_coverage(records, known)` returns `(skills, measured, unmeasured)` with
+`total = measured + unmeasured`, and the "By skill" subtitle now states it:
+
+```
+254 of 255 skills have never run here, so this block is what ran, not what works.
+```
+
+Three rules it keeps, each for a reason:
+
+- **The denominator is the registry, not the log.** An unreadable registry
+  returns `(0, 0, 0)` rather than counting the skills that happened to appear —
+  a number over the wrong universe is worse than no number.
+- **An `unverified` call is not a measurement.** It is most calls on a real
+  machine and says nothing about whether the skill works.
+- **A name in the log is not necessarily a skill.** `liar` and `unver` are
+  fixtures that no longer exist; they are not two more skills the whitelist is
+  missing (this is `installed_skills()`'s existing job, reused).
+
+`tools/mutations/activity.py`: **4 mutations, 4 caught, 0 survivors, 0
+equivalent.** The two that matter are the fold itself (`total` → `measured`) and
+`unmeasured → 0`, each of which leaves the panel reading perfectly healthy.

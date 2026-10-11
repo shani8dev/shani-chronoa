@@ -548,3 +548,111 @@ class TestHostileRecords:
         row = built["hostile"]["rows"][0]
         assert row["tooltip"], "the full text is nowhere"
         assert len(row["tooltip"]) > len(row["subtitle"])
+
+class TestNeverRunSkillsAreACountedAbsence:
+    """The "By skill" block listed skills that have calls, so a log holding
+    three skills read as a complete account of skill health. It is not: the
+    other skills are absent from the screen as well as from the log, and
+    "absent" and "nothing to report" are different claims.
+
+    ECC shipped exactly this bug (#2463): its skill dashboard folded a
+    never-run skill into "healthy", so a broken telemetry writer produced a
+    green report across every skill. The defence is the same either way -
+    `total = measured + unmeasured`, so an absence is counted rather than
+    omitted.
+    """
+
+    @staticmethod
+    def _known():
+        return {"set_brightness", "get_datetime", "delete_file"}
+
+    def _records(self):
+        # Two calls for one skill, and an `unverified` call for another, which
+        # is most calls and says nothing about whether the skill works.
+        return [
+            {"tool_name": "set_brightness", "verdict": "failed"},
+            {"tool_name": "set_brightness", "verdict": "verified"},
+            {"tool_name": "get_datetime", "verdict": "unverified"},
+        ]
+
+    def test_a_skill_that_ran_is_measured_and_one_that_did_not_is_not(self):
+        from shani_chronoa.gui.surfaces import activity as A
+        assert A.skill_coverage(self._records(), known=self._known()) == (3, 1, 2)
+
+    def test_measured_and_unmeasured_partition_the_whole_whitelist(self):
+        """The invariant the whole point rests on. If it cannot be written as
+        an equation, the check is a description rather than a control."""
+        from shani_chronoa.gui.surfaces import activity as A
+        for records in ([], self._records(),
+                        [{"tool_name": "set_brightness", "verdict": "verified"}],
+                        [{"tool_name": "x", "verdict": "failed"}] * 5):
+            total, measured, unmeasured = A.skill_coverage(records, known=self._known())
+            assert total == measured + unmeasured, (total, measured, unmeasured)
+            assert total == 3, total
+
+    def test_an_unverified_call_is_not_a_measurement(self):
+        """An unverified call is most calls on a real machine. Counting it
+        would report the shape of the log rather than the state of the skill."""
+        from shani_chronoa.gui.surfaces import activity as A
+        total, measured, unmeasured = A.skill_coverage(
+            [{"tool_name": "set_brightness", "verdict": "unverified"},
+             {"tool_name": "set_brightness", "verdict": None}], known={"set_brightness"})
+        assert (measured, unmeasured) == (0, 1), (measured, unmeasured)
+
+    def test_a_name_in_the_log_that_is_not_a_skill_is_not_in_the_universe(self):
+        """`liar` and `unver` are fixtures that no longer exist. They are not
+        two more skills the whitelist is missing."""
+        from shani_chronoa.gui.surfaces import activity as A
+        records = self._records() + [{"tool_name": "liar", "verdict": "failed"}]
+        assert A.skill_coverage(records, known=self._known()) == (3, 1, 2)
+
+    def test_when_everyknown_skill_has_run_there_is_nothing_left_to_name(self):
+        from shani_chronoa.gui.surfaces import activity as A
+        known = self._known()
+        records = [{"tool_name": n, "verdict": "verified"} for n in known]
+        assert A.skill_coverage(records, known=known) == (3, 3, 0)
+
+    def test_an_unreadable_registry_states_no_number_at_all(self):
+        """The denominator is the whitelist. Without one, counting the skills
+        that happened to appear in the log would be a number over the wrong
+        universe - the confident-wrong-answer shape this panel exists to avoid.
+        """
+        from shani_chronoa.gui.surfaces import activity as A
+        assert A.skill_coverage(self._records(), known=set()) == (0, 0, 0)
+
+    def test_the_sentence_names_the_absence_and_what_the_block_is(self):
+        from shani_chronoa.gui.surfaces import activity as A
+        sentence = A._coverage_sentence(self._records(), known=self._known())
+        assert "2 of 3 skills have never run here" in sentence, sentence
+        # The claim is bounded: this block is what ran, not what works. Without
+        # that half the sentence reads as a finding about three skills.
+        assert "what ran, not what works" in sentence, sentence
+
+    def test_the_sentence_is_quiet_when_nothing_is_unmeasured(self):
+        """The other direction, so the sentence is not simply always-on."""
+        from shani_chronoa.gui.surfaces import activity as A
+        known = self._known()
+        records = [{"tool_name": n, "verdict": "verified"} for n in known]
+        sentence = A._coverage_sentence(records, known=known)
+        assert "never run here" not in sentence, sentence
+        assert "All 3 skills have been measured" in sentence, sentence
+
+    def test_the_partition_is_not_a_number_that_is_always_zero(self):
+        """A negative control for the count itself.
+
+        The tempting bug is `unmeasured` folded into `total`, which makes the
+        panel say "3 skills" on a machine measuring one of them and reports a
+        perfectly healthy dashboard. This asserts the count moves in the
+        direction the claim needs, which is the property that mutation removes
+        first and that an always-zero constant would pass.
+        """
+        from shani_chronoa.gui.surfaces import activity as A
+        known = self._known()
+        one = A.skill_coverage([{"tool_name": "set_brightness", "verdict": "failed"}],
+                               known=known)
+        all_ = A.skill_coverage(
+            [{"tool_name": n, "verdict": "failed"} for n in known], known=known)
+        assert one != all_, (one, all_)
+        assert one[2] > all_[2], (one, all_)
+        # and folding `measured` into `total` would show up here
+        assert one[0] == 3 and one[1] == 1, one
