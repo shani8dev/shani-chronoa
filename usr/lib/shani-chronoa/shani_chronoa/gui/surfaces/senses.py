@@ -84,16 +84,15 @@ SUMMARY_LIMIT = 110
 
 
 def _plain(text: Any) -> str:
-    """`text` as an Adw row's title or subtitle, escaped if that row is one.
+    """`text` as a row's title or subtitle; `common.row` does the escaping.
 
-    See the module docstring: `Adw.PreferencesRow.use-markup` defaults to True
-    (measured on libadwaita 1.5), so a bare `&` or `<` in a sense's own text
-    empties the label silently. `common.row()`'s plain-GTK answer is a
-    `Gtk.Label`, which takes no markup and would print the entities themselves,
-    so the escape follows whichever branch built the row.
+    This hand-rolled the escape until 2026-10-11, because `common.row` claimed to
+    do it and did not - measured: `Adw.ActionRow`'s title **and** subtitle are
+    both Pango markup, so a bare `&` in a sense's own text emptied the label
+    silently. `common.row` escapes both now, so escaping here as well would
+    double-escape and render the literal `&amp;`.
     """
-    flat = str(text or "")
-    return GLib.markup_escape_text(flat, -1) if common.adw_ready() else flat
+    return str(text or "")
 
 
 def _add(group: Gtk.Widget, child: Gtk.Widget) -> None:

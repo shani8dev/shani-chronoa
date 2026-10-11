@@ -104,6 +104,26 @@ def _label(text: str, dim: bool = False, wrap: bool = True) -> Gtk.Label:
     return lab
 
 
+def _human_size(path) -> str:
+    """`4.7 MB`, and "unknown size" when `stat` fails.
+
+    A received file's *size* is the second thing anybody asks - the first is its
+    name - and a row with a size nobody can read is a number that reads as
+    complete.
+    """
+    try:
+        number = float(path.stat().st_size)
+    except OSError:
+        return "unknown size"
+    if number < 1024:
+        return f"{int(number)} B"
+    for unit in ("kB", "MB", "GB"):
+        number /= 1024.0
+        if number < 1024:
+            return f"{number:.1f} {unit}"
+    return f"{number:.1f} TB"
+
+
 def _button(label: str, on_click: Callable[[], None], suggested: bool = False,
             icon: str = "") -> Gtk.Button:
     btn = Gtk.Button(label=label) if not icon else Gtk.Button(icon_name=icon, tooltip_text=label)
@@ -138,7 +158,10 @@ def _preview(body: str, width: int = 80) -> str:
 
 
 def _item(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None) -> Gtk.Widget:
-    row = common.row(GLib.markup_escape_text(title or "(unknown)"), subtitle, suffix=suffix)
+    # `common.row` escapes the title itself since 2026-10-11; this used to
+    # hand-roll it, which is the workaround that made the helper's own contract
+    # untrue. Escaping in both places now would double-escape and show `&amp;`.
+    row = common.row(title or "(unknown)", subtitle, suffix=suffix)
     row.add_css_class(ROW_CSS)
     return row
 
@@ -524,7 +547,56 @@ class PhonePanel:
         box.append(_label("Files from the phone: share them to this computer over Bluetooth "
                           "(Share > Bluetooth on the phone). Chronoa asks before saving each one, "
                           "into your Downloads folder.", dim=True))
+        # **What actually arrived.** The sentence above has been here since the
+        # receiver landed, and it was the whole of it: a person who shared
+        # something to this computer had no way to see what had been saved or
+        # where, so the only confirmation was a notification they might have
+        # missed. `obex_receive` writes into Downloads by name and never
+        # overwrites, so the folder *is* the record - it just was not shown.
+        self.received = common.page_body(0)
+        box.append(self.received)
+        box.append(_label("", dim=True))            # the note, filled below
+        self.received_note = box.get_last_child()
+        _in_thread(self._received_work, self._received_done)
         return box
+
+    def _received_work(self):
+        """What has arrived over Bluetooth, newest first.
+
+        `Downloads/` is the whole list on purpose: `obex_receive.deliver()` moves
+        a completed file there and `free_path` never lets two share a name, so
+        the folder is the store. Keeping a second index of it is how a shelf
+        comes to disagree with the files it is describing.
+
+        Sorted by `(mtime, name)` - the name as tiebreaker, because two files
+        this machine wrote in the same instant are exactly what happens when a
+        test seeds them, and what happens whenever a receiver moves two files
+        quickly. Directory order is not a claim about anything, and the row
+        above it says "newest first".
+        """
+        import pathlib
+        from shani_chronoa import obex_receive
+        folder = pathlib.Path(obex_receive.downloads())
+        try:
+            found = sorted((p for p in folder.iterdir() if p.is_file()),
+                           key=lambda p: (p.stat().st_mtime, p.name),
+                           reverse=True)
+        except OSError as exc:
+            raise RuntimeError(f"could not read {folder} ({exc})") from exc
+        return folder, found[:40]
+
+    def _received_done(self, result):
+        if isinstance(result, Exception):
+            self.received_note.set_text(f"Could not read Downloads: {result}")
+            return
+        folder, found = result
+        _clear(self.received)
+        if not found:
+            self.notice(self.received, "Nothing has arrived yet.")
+            return
+        self.received_note.set_text(f"{len(found)} file(s) in {folder}, newest first.")
+        for path in found:
+            self.received.append(common.row(path.name, _human_size(path)))
 
     def pick_file(self) -> None:
         dialog = Gtk.FileDialog(title="Send to your phone", modal=True)

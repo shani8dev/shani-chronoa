@@ -111,17 +111,15 @@ _KINDS = (
 
 
 def _plain(text: Any) -> str:
-    """`text` as an Adw row's title or subtitle, escaped if that row is one.
+    """`text` as a row's title or subtitle, escaped by `common.row` itself.
 
-    See the module docstring: `Adw.PreferencesRow.use-markup` defaults to True
-    (measured on libadwaita 1.5), so an unescaped `&` or `<` out of a rules file
-    leaves the label empty and silent. `GLib` does the escaping because it is
-    the one that knows Pango's five entities. The plain-GTK answer from
-    `common.row()` is a `Gtk.Label`, which takes no markup and would print the
-    entities themselves, so the escape follows whichever branch built the row.
+    This used to escape it here, which is the workaround `common.row`'s own
+    docstring claimed it did not need - and now that `common.row` escapes both
+    the title and the subtitle, escaping in both places double-escapes: a rules
+    file containing `&` would render as the literal `&amp;`. Kept as a function
+    because it normalises the type; the escaping it no longer does.
     """
-    flat = str(text)
-    return GLib.markup_escape_text(flat, -1) if common.adw_ready() else flat
+    return str(text)
 
 
 def _add(group: Gtk.Widget, child: Gtk.Widget) -> None:

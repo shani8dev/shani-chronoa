@@ -31,7 +31,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
 
-from gi.repository import Adw, Gtk, Pango  # type: ignore
+from gi.repository import Adw, GLib, Gtk, Pango  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -560,15 +560,24 @@ def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
         activatable: bool = False) -> Gtk.Widget:
     """One row: a title, an optional explanation, an optional control.
 
-    A model-supplied title goes through `set_markup` after escaping; the
-    subtitle goes through `set_text`, which takes no markup at all. That
-    asymmetry is deliberate - it is the cheapest way to be certain a description
-    from a sense module cannot become a tag.
+    **The title is escaped here, and this docstring already claimed it was.**
+    Measured 2026-10-11: `Adw.ActionRow`'s title is Pango markup, so
+    `set_title("weather & news")` fails to parse and logs *"Entity did not end
+    with a semicolon"* - an ampersand is an ordinary character in a name somebody
+    typed. Three surfaces had each hand-rolled `GLib.markup_escape_text` before
+    calling this, which is the shape of a helper that does not do what its own
+    contract says: one function, three workarounds, and every *new* caller left
+    to find out for themselves. They no longer need to.
+
+    The subtitle goes through `set_subtitle`, which is **also** Pango markup -
+    measured, not assumed: `set_subtitle("a & b")` logs the same parse error. So
+    both are escaped here, and the plain-GTK branch below escapes neither,
+    because `Gtk.Label` takes no markup at all.
     """
     if adw_ready():
-        widget = Adw.ActionRow(title=title)
-        if subtitle:
-            widget.set_subtitle(subtitle)
+        widget = Adw.ActionRow(
+            title=GLib.markup_escape_text(title) if title else "",
+            subtitle=GLib.markup_escape_text(subtitle) if subtitle else "")
         if suffix is not None:
             widget.add_suffix(suffix)
         if activatable:
