@@ -135,29 +135,45 @@ class TestUnavailableIsNotEmpty:
 
 
 class TestX11IsUnchanged:
-    def test_on_x11_the_xdotool_path_still_wins(self, monkeypatch):
-        """No behaviour change where xdotool works.
+    """The intent of this class is unchanged: on X11 the answer is the complete
+    one, not the partial accessibility-bus one.
 
-        It is authoritative there: window ids, geometry, and every window whether
-        or not it implements accessibility. The fallback is for sessions xdotool
-        cannot see, not a replacement.
-        """
-        monkeypatch.setenv("DISPLAY", ":99")
+    It used to be named "the xdotool path still wins" and drove a fake
+    `subprocess.run`. The path is gone - `xdotool` is absent from both ShaniOS
+    images, and `getwindowclassname` never existed in the build it called - so
+    what is pinned now is the property: **an X session is answered by the X
+    backend, and the a11y bus is not consulted.**
+
+    Verified for real with `xdotool` removed from `PATH` entirely: the backend
+    lists Slack's actual client window, its real `WM_CLASS`, and its geometry.
+    """
+
+    def test_on_x11_the_backend_answers_not_the_bus(self, monkeypatch):
+        from shani_chronoa.windows import Window
+
         monkeypatch.setattr(LW, "session_problem", lambda: "")
 
-        class _Proc:
-            stdout = "12345\n"
-            stderr = ""
-            returncode = 0
+        class _Backend:
+            name = "X11"
 
-        monkeypatch.setattr(LW.subprocess, "run", lambda *a, **kw: _Proc())
-        monkeypatch.setattr(LW, "files", type("F", (), {
-            "cap_list": lambda rows, limit: (rows, 0),
-            "withheld_note": lambda *a, **kw: "",
-            "tool_missing": lambda *a, **kw: "xdotool missing",
-        }))
+            def list(self):
+                return [Window(id="12582916", title="Slack", app_id="slack",
+                               pid=4, workspace=0, focused=False, minimized=False,
+                               maximized=False, fullscreen=False,
+                               x=67, y=69, width=1853, height=1011)]
+
+        monkeypatch.setattr(LW, "control_backend", lambda: (_Backend(), ""))
         out = LW._run({})
-        assert "accessibility bus" not in out
+
+        assert "X11" in out, out
+        assert "12582916" in out, out
+        assert "accessibility bus" not in out, (
+            "an X session was answered by the a11y bus, which is the partial "
+            "observation this class exists to keep off it")
+        assert "slack" in out.lower(), (
+            "the answer carried no application name, so the one fact that makes "
+            "a window recognisable was lost")
+
 
 
 class TestTheControlHalfIsRecorded:

@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
@@ -252,84 +251,33 @@ def _via_accessibility(arguments: dict | None = None) -> str:
 
 
 def _run(arguments: dict) -> str:
+    """The window list, from the desktop's own window control.
+
+    **One path, and it is the desktop's own.** This used to fork one `xdotool
+    search` and then one process *per window* for its name, its class and its
+    geometry - and `xdotool getwindowclassname` **does not exist** in this build,
+    so every class came back empty while the call still exited 0. Measured on both
+    counts: `xdotool` is absent from the GNOME *and* the Plasma ShaniOS image, so
+    that block could not run where this ships at all, and the backend that
+    replaces it reads `_NET_CLIENT_LIST` and its properties over one connection.
+
+    The X11/xdotool distinction is kept where it is still true - a Wayland session
+    falls to the accessibility bus, and `session_problem` still says so - but the
+    listing itself is one call whichever display server it runs under.
+    """
     problem = session_problem()
-    if problem:
-        # A desktop with real window control (KWin, the GNOME extension) gives
-        # the full list with ids. Otherwise the accessibility bus answers - a
-        # different, partial observation, labelled as one.
+    if problem and not os.environ.get("DISPLAY"):
+        # No display at all: no backend can run, and the a11y bus is the only
+        # thing left. Reported as partial, as it always was.
         from shani_chronoa.windows.atspi import AtspiBackend
-        backend, _why = control_backend()
+        backend, why = control_backend()
         if backend is not None and not isinstance(backend, AtspiBackend):
             return _via_backend(backend, arguments)
-        out = _via_accessibility(arguments)
-        if isinstance(backend, AtspiBackend) and "window(s) reported a title" in out:
-            out += ("  Here close_window and arrange_window (minimize, maximize) work by "
-                    "title on GTK4 apps." + (f" {backend.note}." if backend.note else ""))
-        return out
-    try:
-        proc = subprocess.run(
-            ["xdotool", "search", "--onlyvisible", "--name", ""],
-            capture_output=True, text=True, timeout=_TIMEOUT, check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return f"xdotool did not answer within {_TIMEOUT}s, so no windows are listed."
-    except OSError as exc:
-        return f"Could not list windows: {exc}"
-
-    ids = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    if not ids:
-        note = (proc.stderr or "").strip()
-        return (
-            "xdotool found no visible windows with a name. Some windows really "
-            "do have no title set, so this is not proof the desktop is empty."
-            + (f" xdotool said: {note}" if note else "")
-        )
-
-    rows = []
-    for wid in ids[:_MAX_WINDOWS]:
-        def ask(*args):
-            try:
-                out = subprocess.run(["xdotool", *args, wid], capture_output=True,
-                                     text=True, timeout=_TIMEOUT, check=False)
-                return out.stdout.strip() if out.returncode == 0 else ""
-            except (subprocess.TimeoutExpired, OSError):
-                return ""
-        name = ask("getwindowname")
-        cls = ask("getwindowclassname")
-        geo = ask("getwindowgeometry")
-        rows.append((wid, name, cls, geo))
-
-    # A desktop routinely has more windows than anyone wants to read, and the
-    # answer to "which window is Slack" should not carry all twenty-two of them.
-    # Filtering after collecting rather than before means the xdotool search
-    # stays a single call, and the count reported is of everything found, so a
-    # filter that matches nothing is distinguishable from a filter that was
-    # ignored.
-    title_filter = ""
-    title_filter = _text_argument(arguments, "title_contains")
-    matched = [row for row in rows if _matches_filter(row, title_filter)]
-    if title_filter and not matched:
-        return (
-            f"No visible window's title or class contains {title_filter!r}. "
-            f"{len(rows)} window(s) are open - call list_windows with no "
-            f"filter to see them all."
-        )
-    if len(matched) != len(rows):
-        rows = matched
-
-    lines = [f"{len(ids)} visible window(s); showing {len(rows)}:"]
-    for wid, name, cls, geo in rows:
-        geo_text = ""
-        if geo:
-            parts = [p for p in geo.splitlines() if p.strip()]
-            geo_text = " " + parts[1].strip() if len(parts) > 1 else ""
-        lines.append(
-            f"  {wid:>10}  {cls or '(no class)':<24} {(name or '(no title)')[:60]}{geo_text}"
-        )
-    if len(ids) > len(rows):
-        lines.append(f"  ... {len(ids) - len(rows)} more not shown (limit {_MAX_WINDOWS}).")
-    lines.append("  Use the window id with focus_window or close_window.")
-    return "\n".join(lines)
+        return _via_accessibility(arguments)
+    backend, why = control_backend()
+    if backend is None:
+        return f"Could not list windows: {why}."
+    return _via_backend(backend, arguments)
 
 
 SKILLS = [Skill(name="list_windows", schema=SCHEMA, run=_run)]

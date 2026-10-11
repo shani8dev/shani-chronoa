@@ -47,28 +47,32 @@ class _Proc:
 
 @pytest.fixture
 def windows(monkeypatch):
-    """Drive the xdotool path with a fixed set of windows."""
-    names = {r[0]: r[1] for r in ROWS}
-    classes = {r[0]: r[2] for r in ROWS}
+    """Drive the window-control backend with a fixed set of windows.
+
+    **This fixture used to fake `subprocess.run`**, because the listing forked one
+    `xdotool search` and then one process per window. The listing is a single
+    `backend.list()` now, so the fixture is a single stub - and it stubbs the
+    interface the display server actually answers with, rather than the shape of
+    another program's stdout.
+    """
     monkeypatch.setattr(LW, "session_problem", lambda: "")
     monkeypatch.setattr(LW, "_MAX_WINDOWS", 60)
-    seen = []
+    monkeypatch.setattr(LW, "control_backend", lambda: (_FixedBackend(), ""))
+    return []
 
-    def run(cmd, **kw):
-        seen.append(list(cmd))
-        if cmd[1:3] == ["search", "--onlyvisible"]:
-            return _Proc("\n".join(names))
-        wid = cmd[-1]
-        if cmd[1] == "getwindowname":
-            return _Proc(names.get(wid, ""))
-        if cmd[1] == "getwindowclassname":
-            return _Proc(classes.get(wid, ""))
-        if cmd[1] == "getwindowgeometry":
-            return _Proc("Position: 0,0\nGeometry: 800x600+0+0\n")
-        return _Proc("")
 
-    monkeypatch.setattr(LW.subprocess, "run", run)
-    return seen
+class _FixedBackend:
+    """The desktop's own answer, as `Window` objects."""
+
+    name = "X11"
+
+    def list(self):
+        from shani_chronoa.windows import Window
+
+        return [Window(id=r[0], title=r[1], app_id=r[2], pid=1, workspace=0,
+                       focused=False, minimized=False, maximized=False,
+                       fullscreen=False, x=0, y=0, width=800, height=600)
+                for r in ROWS]
 
 
 def _titles(out: str) -> list:
@@ -97,11 +101,11 @@ class TestFiltering:
     def test_the_count_reports_everything_found(self, windows):
         """So a filter that matched nothing is not a filter that was ignored."""
         out = LW._run({"title_contains": "slack"})
-        assert "5 visible window(s)" in out and "showing 2" in out
+        assert "5 window(s) from X11" in out, out and "showing 2" in out
 
     def test_no_match_says_so_and_says_how_many_are_open(self, windows):
         out = LW._run({"title_contains": "zzzz-nothing"})
-        assert "No visible window" in out
+        assert "No window's title or application contains" in out, out
         assert "5 window(s) are open" in out
 
     def test_and_points_at_the_unfiltered_call(self, windows):
