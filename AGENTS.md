@@ -4143,6 +4143,71 @@ session's new skills (`lan_phone`, `screen_to_phone`), and one of them says so i
 its own message: *"if it is not, it is another session's work in progress and
 this failure is not about your change."*
 
+## The finite check was two copies, then three, then four — and the grep found them (2026-10-11)
+
+The pass above added `senses/location.py`'s finite-number test by reading
+`skills/media_control.py`, **which already had the identical three lines**. So the
+consolidation-worthy duplication this repo keeps recording (`files.py`: *"the
+earlier `wpctl` triplication... three copies, three timeouts, and a divergence
+nobody notices until one of them is wrong"*) was **made worse by the fix that
+should have prevented it** — a second copy added while the first existed, by an
+author who had just read it.
+
+`sysfs.finite()` is now the one implementation, and `sysfs.read_float(path,
+field=0)` is the float sibling `read_int` never had — which is what
+`cpu.read_uptime` was hand-rolling (`try: float(raw.split()[0]) except
+(ValueError, IndexError): return None`) until it went through `sysfs` too. The
+extraction has a real caller, so a new helper is not born dead, which is the
+dead-code class this file records most often.
+
+**A grep for the duplicated pair found a third and a fourth copy, and the control
+that did it is the interesting part.** `triggers/sources.py` carried the exact
+same test on a deadline read from a hand-editable JSON file — a `json.loads` reads
+the bare tokens `NaN` and `Infinity` (Python's own `json.dumps` writes them), and
+`expires_at - moment` then yields `nan`, which compares False against every
+threshold, so the signal reads OK forever and **a deadline is never reported**.
+Consolidated. `triggers/common.py:_clamped_seconds` also tests for NaN and is
+deliberately **not** folded in: its contract is different (NaN returns the rule's
+`default`, not a refusal, and it lets the `min`/`max` pair pin an infinity to
+`high`), so sharing it would change trigger behaviour from a de-duplication pass.
+Recorded rather than tidied.
+
+**Three of my own tests could not fail, and the mutation run is what said so:**
+
+- `test_no_third_copy_exists_anywhere` was **too broad** on its first version —
+  its pattern matched `triggers/common.py`, which is a different contract, so it
+  failed on correct code and the "fix" would have been widening it into nothing.
+  Narrowed to the exact duplicated pair, with the third module's difference
+  written into the test's own docstring.
+- `test_an_empty_file_is_none_not_zero` was an **equivalent witness** for the
+  "empty file is no longer None" mutation: `"".split()` raises `IndexError`,
+  which the `except` already covers, so the test passed either way. The real
+  witness is the unreadable path, where `read_text` returns `None` and
+  `None.split()` is an `AttributeError` — named in the harness instead.
+- `test_uptime_against_the_real_file` **passed with the local copy restored**,
+  because it asserts the value and both implementations return it. Only a
+  source-level assertion can tell a shared helper from a fourth duplicate, so
+  `test_uptime_reads_through_the_shared_reader` reads `inspect.getsource` — and
+  the mutation that restores the local copy fails it.
+
+**Two claims checked and NOT made.** `float("nan")` reaching
+`skills/read_video.py`'s `divmod(int(seconds), 60)` does raise (`ValueError:
+cannot convert float NaN to integer`, and `OverflowError` for inf, both outside
+the `except (TypeError, ValueError)`), but **ffprobe could not be made to emit
+one** — six input shapes tried here (broken mp4, empty file, valid mp4, audio-only
+m4a, bad ts, and no file at all) all produce `N/A` or nothing, so the path is
+unproven rather than live, and it is not claimed. Second: `local_llm`'s `tps >
+1000` guard does not exclude a NaN (`nan > 1000` is False), so `weights * tps`
+would be `nan` — but llama.cpp's timing fields were not observed to carry one
+either, so that is recorded as the same shape and not fixed.
+
+`tests/test_one_finite_check.py` — 35 tests, **10 of 10 mutations confirmed to
+fail**, covering the shared predicate, both call sites growing their own copy
+back, the fourth copy reappearing, the `field` argument (`read_uptime` taking the
+idle column would double the machine's age), and the extracted caller. 546 passed
+across the location, diff, capability, triggers, scheduler, cpu, media, senses and
+surface suites; 0 stray `.pyc`; 0 real-state-dir writes.
+
 
 A single full run is not a reliable way to get a number out of this suite on
 this box: over the course of one afternoon it lost its output three ways, and

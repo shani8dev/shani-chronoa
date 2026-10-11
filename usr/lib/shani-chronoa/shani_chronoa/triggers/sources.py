@@ -9,6 +9,8 @@ import os
 import shutil
 import subprocess
 import time
+
+from shani_chronoa import sysfs
 from pathlib import Path
 from typing import Any, Optional
 
@@ -559,7 +561,15 @@ def read_expiry(
         return _unavailable(
             EVENT_EXPIRY, subject, f"the deadline at {path} has no usable 'expires_at'"
         )
-    if expires_at != expires_at or expires_at in (float("inf"), float("-inf")):
+    # `sysfs.finite`, the one implementation. This was a fourth copy of the
+    # same two-line test - `media_control` had it first, `senses/location` added
+    # a second on 2026-10-11 without noticing, and `triggers/sources.py` and
+    # `triggers/common.py` each carried their own. A `json.loads` reads the bare
+    # tokens `NaN` and `Infinity` (Python's `json.dumps` writes them), so a
+    # hand-edited deadline file can hold one, and `expires_at - moment` then
+    # produces `nan` - which compares False against every threshold, so the
+    # signal reads OK forever and the deadline is never reported.
+    if not sysfs.finite(expires_at):
         return _unavailable(EVENT_EXPIRY, subject, f"the deadline at {path} is not a real instant")
 
     remaining = expires_at - moment

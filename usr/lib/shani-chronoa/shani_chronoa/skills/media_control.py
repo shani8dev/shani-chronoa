@@ -96,7 +96,12 @@ def _seconds(arguments: dict):
         value = float(str(raw).strip().removesuffix("s"))
     except ValueError:
         return None, f"Could not use {raw!r} as a number of seconds."
-    if value != value or value in (float("inf"), float("-inf")):
+    # `sysfs.finite`, the one implementation, rather than this check written out
+    # again: `float("nan")` and `float("inf")` both succeed, and an infinite
+    # seek offset would move the player somewhere no track has ever been.
+    from shani_chronoa import sysfs
+
+    if not sysfs.finite(value):
         return None, f"Could not use {raw!r} as a number of seconds."
     if value == 0:
         return None, "Seeking by 0 seconds would not move anything."

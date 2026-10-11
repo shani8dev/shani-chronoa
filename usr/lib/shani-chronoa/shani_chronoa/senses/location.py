@@ -84,15 +84,18 @@ def _coordinate(value: object) -> "Optional[float]":
       the confident wrong answer this sense exists not to give: it is a
       *position*, so nothing downstream can tell it was never a place.
 
+    The finite/type half is `sysfs.finite`, the one implementation shared with
+    `media_control._seconds` - the second copy of that test was written here
+    while the first already existed, which is the `wpctl` triplication
+    `files.py` records.
+
     Returning None rather than raising is the point: `locate()` tries its next
     source on a None, so one malformed answer moves on instead of ending the
     question.
     """
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    if value != value or value in (float("inf"), float("-inf")):
-        return None
-    return float(value)
+    from shani_chronoa import sysfs
+
+    return float(value) if sysfs.finite(value) else None
 
 
 def _on_the_planet(lat: object, lon: object) -> "Optional[Tuple[float, float]]":

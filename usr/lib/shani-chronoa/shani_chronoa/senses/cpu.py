@@ -124,13 +124,15 @@ def read_load() -> Optional[dict]:
 
 
 def read_uptime() -> Optional[float]:
-    raw = sysfs.read_text(_UPTIME)
-    if not raw:
-        return None
-    try:
-        return float(raw.split()[0])
-    except (ValueError, IndexError):
-        return None
+    """Seconds since boot, or None if `/proc/uptime` cannot be read.
+
+    `sysfs.read_float`, field 0: the file is `"<uptime> <idle>"` and only the
+    first is what this returns. That was a local copy of the read-and-None
+    contract before it was `sysfs`'s, which is the same consolidation
+    `read_int` already went through - "Sixteen senses and skills carried their
+    own copy of these two functions... a fix to one reached one copy at a time."
+    """
+    return sysfs.read_float(_UPTIME, 0)
 
 
 def read_memory_pressure() -> Optional[dict]:
