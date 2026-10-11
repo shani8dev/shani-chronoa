@@ -234,6 +234,7 @@ def index_directory(root, progress=None, embed=True, db=None):
     root = pathlib.Path(root)
     if not root.is_dir():
         return {"error": f"{root} is not a directory"}
+    root_resolved = root.resolve()
 
     owns = db is None
     db = db or _connect()
@@ -285,7 +286,7 @@ def index_directory(root, progress=None, embed=True, db=None):
                 resolved = path.resolve()
             except OSError:
                 continue
-            if root.resolve() not in resolved.parents and resolved != root.resolve():
+            if root_resolved not in resolved.parents and resolved != root_resolved:
                 problems.append(f"{path.name}: it resolves outside {root}")
                 skipped += 1
                 continue
@@ -377,8 +378,23 @@ def index_directory(root, progress=None, embed=True, db=None):
             db.commit()
         db.commit()
 
-        # Rows whose file has gone.
-        gone = [r[0] for r in db.execute("SELECT path FROM docs") if r[0] not in seen]
+        # Rows whose file has gone **[within this root, not within the index].**
+        #
+        # The first version deleted every row the walk did not see, which is a
+        # second indexing run **erasing the first one's directory**: index
+        # `~/notes`, then index `~/work`, and `notes` is gone from the shelf -
+        # silently, because nothing reports a deletion and the count still looks
+        # like a working index.
+        #
+        # And `search()` had the same scope question answered the other way
+        # round: it read every row in the table, so with `path=` naming one
+        # directory it answered about *all* of them. Index scope and search scope
+        # disagreed, which is the shape where "N files under X" is a number about
+        # something other than what gets searched.
+        seen_in_root = {path for path in seen
+                        if _under(path, root_resolved)}
+        gone = [r[0] for r in db.execute("SELECT path FROM docs")
+                if r[0] not in seen_in_root and _under(r[0], root_resolved)]
         for gone_path in gone:
             db.execute("DELETE FROM docs WHERE path=?", (gone_path,))
             db.execute("DELETE FROM docs_fts WHERE path=?", (gone_path,))
@@ -402,6 +418,15 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
 
     The second element exists so a caller can say *why* a set of results came
     back: with the embedding server, or keyword-only because it was not there.
+
+    **The search is confined to `root`.** The first version read every row in
+    the table, so `search("~/notes", q)` answered about a directory the caller
+    never named - and once `index_directory` stopped erasing other directories'
+    rows, that meant a person who indexed two of them got hits from *both* when
+    searching either. `status()` meanwhile reported the count for the one they
+    were looking at. A number about one thing and results about another is the
+    "confident wrong answer" shape, and the fix is to make both say the same
+    thing.
     """
     root = pathlib.Path(root)
     owns = db is None
@@ -413,7 +438,8 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
             try:
                 keyword = [r[0] for r in db.execute(
                     "SELECT path FROM docs_fts WHERE docs_fts MATCH ?"
-                    " ORDER BY rank LIMIT ?", (pattern, limit * 4))]
+                    " ORDER BY rank LIMIT ?", (pattern, limit * 8))
+                    if _under(r[0], root)]
             except sqlite3.OperationalError:
                 keyword = []          # a query FTS5 refuses is not an error
 
@@ -443,6 +469,11 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
                     scored = []
                     for path, blob in db.execute(
                             "SELECT path, vector FROM docs WHERE vector IS NOT NULL"):
+                        # *Confined to `root`*, same as the keyword half. A
+                        # vector hit from a directory the caller did not name is
+                        # a result they cannot check and cannot filter out.
+                        if not _under(path, root):
+                            continue
                         score = local_embed.similarity(want,
                                                         local_embed.from_blob(blob))
                         if score >= SIMILARITY_FLOOR:
@@ -476,6 +507,22 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
     finally:
         if owns:
             db.close()
+
+
+def _under(path: str, root: pathlib.Path) -> bool:
+    """Whether `path` is inside `root`, string-safe.
+
+    `path.is_relative_to(root)` is the 3.9 spelling but it takes a `Path`, and
+    these come out of a sqlite column as strings; converting each one back is a
+    `Path()` per row per call. String comparison is also the *honest* one here,
+    because the index stores the path as the walker resolved it, and the question
+    is "did this walk see that file" - which is a question about the same string.
+    """
+    try:
+        child = pathlib.Path(path).resolve()
+    except OSError:
+        return False
+    return child == root or root in child.parents
 
 
 def status(db=None) -> dict:

@@ -554,3 +554,168 @@ class TestTheWalkSkipsTheMachinesOwnHoard:
         assert report.get("truncated"), (
             "the walk stopped without saying it had - a partial index presented "
             "as a complete one is the confident-wrong-answer shape")
+
+
+class TestTheIndexAnswersWhatItHolds:
+    """`status()` exists because `search()` cannot answer the question a panel
+    asks before searching anything.
+
+    **An empty search result is the same either way** - "nothing matched" and
+    "nothing was ever indexed" are opposite answers, and only the first is about
+    the query. A caller holding only `search()` would have had to run a reindex
+    to find out, which is a slow, side-effecting way to ask a question.
+    """
+
+    def _three(self, tmp_path, embed: bool = False):
+        (tmp_path / "a.txt").write_text("the wifi box")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "b.md").write_text("the btrfs rollback")
+        (tmp_path / "nested.txt").write_text("another note")
+        F.index_directory(tmp_path, embed=embed)
+
+    def test_it_counts_what_was_indexed(self, tmp_path):
+        self._three(tmp_path)
+        state = F.status()
+        assert state["indexed"] == 3, state
+        assert state["embedded"] == 0, state
+
+    def test_an_empty_index_is_zero_not_an_error(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        state = F.status()
+        assert state == {"indexed": 0, "embedded": 0, "root": None,
+                         "newest": 0.0}, state
+
+    def test_an_unreadable_index_is_zero_not_an_error(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+        path = F.index_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("this is not a database")
+        state = F.status()
+        assert state["indexed"] == 0, (
+            "a panel calls this on open, before anything exists; a corrupt or "
+            "absent index must be an answer, not a crash")
+
+    def test_it_names_the_directory_the_files_share(self, tmp_path):
+        self._three(tmp_path)
+        state = F.status()
+        assert state["root"] == str(tmp_path), state
+
+    def test_files_in_more_than_one_tree_still_answer(self, tmp_path):
+        """The panel has to name *what* is indexed, and a person who indexed
+        two directories is told so rather than being shown either one."""
+        one, two = tmp_path / "one", tmp_path / "two"
+        one.mkdir()
+        two.mkdir()
+        (one / "a.txt").write_text("first")
+        (two / "b.txt").write_text("second")
+        db = F._connect()
+        for root in (one, two):
+            F.index_directory(root, embed=False, db=db)
+        state = F.status(db=db)
+        assert state["indexed"] == 2, state
+        assert state["root"] == str(tmp_path), (
+            "two directories under one tmp dir share the tmp dir, which is what "
+            "the panel should say rather than either one of them")
+
+    def test_it_says_how_many_can_be_searched_by_meaning(self, tmp_path, monkeypatch):
+        from shani_chronoa import local_embed
+        # **Indexed once, with embeddings, from empty.** `_three` defaults to
+        # `embed=False`; indexing a second time with `embed=True` would find
+        # every fingerprint unchanged and embed nothing, so the assertion would
+        # read `embedded == 0` against a working path - a fixture answering the
+        # test for it.
+        monkeypatch.setattr(local_embed, "embed",
+                            lambda texts, **k: [[1.0, 0.0] for _ in texts])
+        monkeypatch.setattr(local_embed, "configured", lambda: True)
+        self._three(tmp_path, embed=True)
+        state = F.status()
+        assert state["embedded"] == 3, state
+
+
+class TestTheIndexAndTheSearchAgreeAboutScope:
+    """Two defects, found by building a panel that asks both questions.
+
+    **`index_directory(A)` then `index_directory(B)` erased A's rows.** The
+    deletion pass removed every row *the walk did not see*, which is a second
+    run wiping the first one's directory - silently, because nothing reports a
+    deletion and the count still looks like a working index.
+
+    **And `search(root, q)` read every row in the table.** So with `path=`
+    naming one directory it answered about all of them. Together: "N files
+    under X" was a number about one thing and results about another, which is
+    the shape where a person cannot check either.
+    """
+
+    def _two(self, base):
+        notes, work = base / "notes", base / "work"
+        notes.mkdir()
+        work.mkdir()
+        (notes / "a.txt").write_text("the wifi box drops the link")
+        (work / "b.txt").write_text("the wifi box is in the office")
+        db = F._connect()
+        F.index_directory(notes, embed=False, db=db)
+        F.index_directory(work, embed=False, db=db)
+        return notes, work, db
+
+    def test_the_second_directory_does_not_erase_the_first(self, tmp_path):
+        _notes, _work, db = self._two(tmp_path)
+        assert F.status(db=db)["indexed"] == 2, (
+            "indexing a second directory deleted the first one's rows; a panel "
+            "showing 'N files' would be counting one directory's worth")
+
+    def test_each_search_is_confined_to_what_it_was_given(self, tmp_path):
+        notes, work, db = self._two(tmp_path)
+        hits, _ = F.search(str(notes), "wifi box", embed=False, db=db)
+        paths = [h["path"] for h in hits]
+        assert paths == [str(notes / "a.txt")], paths
+        hits, _ = F.search(str(work), "wifi box", embed=False, db=db)
+        assert [h["path"] for h in hits] == [str(work / "b.txt")], paths
+
+    def test_a_deleted_file_still_leaves_its_own_directory(self, tmp_path):
+        """The confinement is on *this root*, so a file the person really did
+        delete still leaves - without taking the other directory with it."""
+        notes, _work, db = self._two(tmp_path)
+        (notes / "a.txt").unlink()
+        F.index_directory(notes, embed=False, db=db)
+        remaining = F.status(db=db)["indexed"]
+        assert remaining == 1, remaining
+
+    def test_the_counts_and_the_results_describe_the_same_directory(self, tmp_path):
+        """The number and the answers, about the same thing."""
+        notes, _work, db = self._two(tmp_path)
+        state, hits = F.status(db=db), None
+        hits, _ = F.search(str(notes), "wifi box", embed=False, db=db)
+        assert state["indexed"] == 2, state
+        assert len(hits) == 1, hits
+
+    def test_the_vector_half_is_confined_too(self, tmp_path, monkeypatch):
+        """**The survivor, and it is the half that costs a person.**
+        `local_embed` answered on this machine so the vector path never ran in
+        any test, which is why a mutation removing its root check stayed green.
+        A vector hit from a directory nobody named is a result the person cannot
+        check, and it arrives *ranked by meaning* - which reads as the good half
+        of the search rather than the unverified half.
+        """
+        from shani_chronoa import local_embed
+        base = self._two(tmp_path)[0].parent
+        (base / "third").mkdir()
+        (base / "third" / "c.txt").write_text("the wifi box is in the third place")
+        monkeypatch.setattr(local_embed, "embed",
+                            lambda texts, **k: [[1.0, 0.0, 0.0] for _ in texts])
+        monkeypatch.setattr(local_embed, "configured", lambda: True)
+        monkeypatch.setattr(local_embed, "similarity",
+                            lambda a, b: 0.9)
+
+        db = F._connect()
+        # **Written with vectors.** Indexing with `embed=False` leaves every
+        # `vector` column NULL, so `SELECT path, vector FROM docs WHERE vector
+        # IS NOT NULL` returns nothing and the guard under test is never reached
+        # - which is exactly why the first version of this test passed against
+        # the mutation it was written to catch.
+        for directory in ((base / "notes"), (base / "work"), (base / "third")):
+            F.index_directory(directory, embed=True, db=db)
+
+        hits, how = F.search(str(base / "notes"), "wifi box", embed=True, db=db)
+        assert how.startswith("keyword and embedding"), how
+        paths = [h["path"] for h in hits]
+        assert paths == [str(base / "notes" / "a.txt")], paths
