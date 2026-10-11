@@ -202,6 +202,37 @@ class TestResample:
         out = F.resample(sine(40000.0), 1, 2)
         assert amp(out[15000:30000], 4000.0, rate=int(RATE / 2)) < 0.001
 
+    def test_the_passband_is_flat_up_to_the_output_nyquist(self):
+        """The half of the anti-alias contract the stopband test cannot see.
+
+        Decimating by `down` must pass everything below the **output** Nyquist at
+        unity - that is the other side of "suppress everything above it". The
+        stopband test cannot catch a filter that is too narrow, because
+        attenuating more only suppresses more: a lowpass whose own -6 dB point
+        sits at half the cutoff it claims still passes the stopband test.
+
+        Measured on `resample(x, 1, 2)` at 250 kS/s, output Nyquist 62500 Hz:
+
+            | fraction of output Nyquist | 30% | 50% | 64% | 80% | 90% |
+            |---|---|---|---|---|---|
+            | output amplitude | 1.0000 | 0.9992 | 1.0041 | 0.9034 | 0.6775 |
+
+        so the flat part ends near 64% and the transition begins after it. With
+        the sinc argument halved - the form that makes the filter's cutoff half
+        of what it claims - the -6 dB point lands at 28125 Hz and 40000 Hz, which
+        is 64% of the output Nyquist and must pass, is attenuated instead.
+        """
+        out_nyquist = RATE / 4
+        for fraction in (0.3, 0.5, 0.64):
+            hz = out_nyquist * fraction
+            out = F.resample(sine(hz), 1, 2)
+            got = amp(out[15000:30000], hz, rate=int(RATE / 2))
+            assert got > 0.95, (
+                f"a tone at {fraction * 100:.0f}% of the output Nyquist "
+                f"({hz:.0f} Hz) came back at amplitude {got:.4f}; a decimator "
+                "must pass its own output band. A filter whose -6 dB point is "
+                "half the cutoff it claims does not.")
+
     def test_it_refuses_the_non_artefact(self):
         try:
             F.resample(sine(1000.0), 0, 2)

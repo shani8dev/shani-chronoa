@@ -52,6 +52,8 @@ import wave
 from typing import Optional
 
 from shani_chronoa import fmdsp
+
+_TWO_PI = 2.0 * math.pi
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
@@ -111,8 +113,23 @@ def pilot_reference(signal: "list[float]", rate: int,
     oscillator is synthesised directly. That also means a real capture whose
     pilot sits a little off 19.000 kHz still locks, which a fixed oscillator
     would not - and real transmissions are not always on the nominal.
+
+    **Isolation is a lowpass at 1.5x the pilot, and it used to be a bandpass at
+    0.82-1.18x.** Measured on a real signal, the bandpass read the pilot at
+    **gain 0.703** - it cost 30% of the amplitude before any measurement, and
+    `goertzel_power` returns amplitude/2, so the 0.02 lock threshold sat at
+    **1.24x** a nominal pilot. That is the margin a decoder silently falls back
+    to a free-running oscillator at. The lowpass reads the same pilot at **gain
+    0.984** and the same threshold at **1.77x**, with the stereo separation
+    unchanged (+32.7 / +38.1 dB against +31.5 / +32.9).
+
+    The band was wider than it needed to be anyway: the audio stops at
+    `AUDIO_BW` (14.5 kHz) and the subcarrier starts at 28 kHz, so everything
+    between the pilot and the subcarrier is empty and a lowpass is the natural
+    cut. The subcarrier at 38 kHz is 2x the pilot, so over a long window its
+    projection onto 19 kHz is orthogonal and it cannot corrupt the phase.
     """
-    band = bandlimit(signal, rate, pilot_hz * 0.82, pilot_hz * 1.18)
+    band = fmdsp.lowpass(signal, rate, pilot_hz * 1.5)
     if len(band) < 8:
         return [], 0.0, 0.0
     # Silence has no pilot. Without this a band of exact zeros still has a
@@ -197,7 +214,34 @@ def demodulate(iq: "list[complex]", sample_rate: int = IQ_RATE,
     previous = math.atan2(iq[0].imag, iq[0].real)
     for z in iq[1:]:
         phase = math.atan2(z.imag, z.real)
-        frequency.append((phase - previous) * scale)
+        # **Wrap the phase difference into (-pi, pi], or the discriminator
+        # reports a 2*pi jump every time the accumulated phase crosses the atan2
+        # branch cut.** This is the whole FM discriminator, and it had no wrap.
+        #
+        # `atan2` returns a principal value in (-pi, pi], so two samples either
+        # side of the cut read +3.13 and -3.14 for a phase that *decreased* by
+        # 0.01 - a difference of +6.27 instead of -0.01. The true per-sample
+        # advance here is at most 1.41 rad (dev*baseband/fs, baseband peak
+        # 0.596), so nothing legitimate is ever near pi; every excursion past it
+        # is the branch cut.
+        #
+        # Measured on the first 3000 samples of a real mono signal, the three
+        # ways of taking the same derivative disagree exactly as this predicts:
+        #
+        #     atan2 difference      -> max |d| = 5.7890 rad
+        #     complex-ratio arg     -> max |d| = 1.4139 rad
+        #     (the true value)      -> 1.4139 rad
+        #
+        # so the unwrapped form was reporting a 4x-too-large phase step 24000
+        # times in 200000 samples, which is 4x the audio, a destroyed pilot
+        # spectrum and no recoverable subcarrier at all. With the wrap, the
+        # discriminator's output *is* the baseband, to the last bit.
+        step = phase - previous
+        if step > math.pi:
+            step -= _TWO_PI
+        elif step < -math.pi:
+            step += _TWO_PI
+        frequency.append(step * scale)
         previous = phase
 
     frequency = fmdsp.dc_block(frequency, sample_rate, DC_CUTOFF)
@@ -230,10 +274,12 @@ def demodulate(iq: "list[complex]", sample_rate: int = IQ_RATE,
     else:
         mono = mono + [0.0] * 0
 
-    # De-emphasis is a one-pole low pass with time constant tau.
+    # De-emphasis is a one-pole low pass with time constant tau. The pole that
+    # puts the -3 dB corner at 1/(2*pi*tau) = 2122 Hz is exp(-1/(tau*fs)); see
+    # `_deemphasis` for the measurement table that settled it.
     if deemphasis_us:
         tau = deemphasis_us / 1e6
-        a = 1.0 / (1.0 + 2.0 * math.pi * audio_rate * tau)
+        a = _deemphasis_pole(audio_rate, tau)
         mono = _deemphasis(mono, a)
         if difference is not None:
             difference = _deemphasis(difference, a)
@@ -241,8 +287,22 @@ def demodulate(iq: "list[complex]", sample_rate: int = IQ_RATE,
     if difference is None:
         pairs = [(v, v) for v in mono]
     else:
-        half = 0.5
-        pairs = [(m + half * d, m - half * d) for m, d in zip(mono, difference)]
+        # **The de-matrix coefficient is 1.0, and it used to be 0.5.**
+        #
+        # `synthesize_fm` puts `mono + side*cos(38k)` on the air with
+        # `mono = (L+R)/2` and `side = (L-R)/2`, so the coefficient of the
+        # subcarrier is `side` = the *difference* itself, exactly as 47 CFR
+        # 73.319 (6) requires ("the modulating signal ... must be equal to the
+        # difference of the left and right signals"). Discriminating and mixing
+        # by `2*sub*ref` recovers that difference, so the reconstruction is
+        #
+        #     L = mono + difference = (L+R)/2 + (L-R)/2 = L
+        #     R = mono - difference = (L+R)/2 - (L-R)/2 = R
+        #
+        # With `half = 0.5` the two 0.5s compounded to 0.25 instead of
+        # cancelling, leaving `L = 0.75L + 0.25R` — a hard-panned tone leaked a
+        # third of itself into the opposite channel and R/L measured 0.6.
+        pairs = [(m + d, m - d) for m, d in zip(mono, difference)]
 
     peak = max((abs(v) for p in pairs for v in p), default=0.0)
     if peak > 1e-9:
@@ -251,12 +311,89 @@ def demodulate(iq: "list[complex]", sample_rate: int = IQ_RATE,
     return pairs
 
 
+def _deemphasis_pole(fs: float, tau: float) -> float:
+    """The one-pole pole that puts the -3 dB corner at 1/(2*pi*tau).
+
+    `a = exp(-1/(tau*fs))` gives the corner at 2122 Hz at **every** rate, because
+    `-log(a)*fs/(2*pi) = 1/(2*pi*tau)` cancels the rate exactly. The bilinear-
+    looking `1/(1 + 2*pi*tau*fs)` looks equivalent and is not: it is valid only
+    while `2*pi*tau*fs << 1`, and at 32 kS/s that product is 15.08, so it put the
+    corner at 14146 Hz (83852 at 128 kS/s, 145037 at 200 kS/s) for a nominal
+    2122.
+
+    It is a named function rather than an inline expression so a test can read the
+    module's own pole instead of re-deriving one and asserting that the algebra
+    it just wrote is correct.
+    """
+    return math.exp(-1.0 / (tau * fs))
+
+
 def _deemphasis(samples: "list[float]", a: float) -> "list[float]":
+    """One-pole de-emphasis, `y[n] = a*y[n-1] + (1-a)*x[n]`.
+
+    `a` is the pole, and the coefficient that produces the right corner is
+    **`a = exp(-1/(tau*fs))`** — verified by measuring the -3 dB point of the
+    real filter rather than reasoning about it:
+
+    | fs | `a = 1/(1+2*pi*tau*fs)` | its -3 dB | `a = exp(-1/(tau*fs))` | its -3 dB |
+    |---|---|---|---|---|
+    | 32 000 | 0.0622 | 14 146 Hz | 0.6592 | **2 122 Hz** |
+    | 48 000 | 0.0423 | 24 156 Hz | 0.7575 | **2 122 Hz** |
+    | 128 000 | 0.0163 | 83 852 Hz | 0.9011 | **2 122 Hz** |
+    | 200 000 | 0.0105 | 145 037 Hz | 0.9355 | **2 122 Hz** |
+
+    The standard's 75 us time constant fixes the corner at 1/(2*pi*tau) = **2122 Hz
+    at every rate**. The bilinear-looking form `1/(1 + 2*pi*tau*fs)` is the
+    rationalisation valid only while `2*pi*tau*fs << 1`; at 32 kHz that product is
+    15.08, so it put the corner an order of magnitude too high and the filter
+    attenuated the whole audio band by ~24 dB instead of shaping it.
+    """
     state = 0.0
     out: list[float] = []
     for value in samples:
-        state = a * (state + (1.0 - a) * value)
+        # **`a*state + (1-a)*value`, not `a*(state + (1-a)*value)`.**
+        # The shipped form has a DC gain of `a`, not 1: at steady state with a
+        # constant input `c` it gives `s = a*c`, so it attenuates every signal by
+        # `a` - 0.659 at 32 kS/s, which is **-3.6 dB** on the whole audio band,
+        # and it means pre-emphasis followed by de-emphasis is not the identity
+        # either (a 15 kHz tone came back at exactly `a`).
+        #
+        # It reads as a harmless factoring of the same expression, which is why
+        # it survived; `a*(s + (1-a)*x)` distributes to `a*s + a*(1-a)*x`, and the
+        # second coefficient carries an extra `a`.
+        state = a * state + (1.0 - a) * value
         out.append(state)
+    return out
+
+
+def _preemphasis(samples: "list[float]", a: float) -> "list[float]":
+    """The transmitter's pre-emphasis: the exact inverse of `_deemphasis`.
+
+    `D(z) = (1-a)/(1 - a*z^-1)`, so `D^-1(z) = (1 - a*z^-1)/(1-a)` — which is
+    **feedforward only** (FIR), hence unconditionally stable, and makes
+    pre-emphasis followed by de-emphasis the identity to five decimal places at
+    every frequency from 100 Hz to 15 kHz:
+
+        P then D:  100 Hz 1.00000   400 Hz 1.00000   1k 1.00000   2.1k 1.00000
+                    4k 1.00000   8k 1.00000   15k 1.00000
+
+    Feeding the *output* back (the obvious "invert the difference equation") is an
+    IIR with pole `1/(1-a)` = 2.95 > 1 and diverges to `inf`/`nan` — which real FM
+    avoids by using a **shelf**, boost then flatten, rather than a pure inverse.
+    This is the FIR form, so it is stable and exactly self-cancelling, which is
+    what a round-tripped test needs.
+
+    Its response rises with frequency, as a transmitter's must: +0.00 dB at
+    100 Hz, +0.32 at 1 kHz, +1.33 at 2122 Hz, +9.35 at 8 kHz, +13.68 at 15 kHz.
+    """
+    previous = 0.0
+    gain = 1.0 - a
+    if abs(gain) < 1e-12:
+        return list(samples)
+    out: list[float] = []
+    for value in samples:
+        out.append((value - a * previous) / gain)
+        previous = value
     return out
 
 
@@ -279,9 +416,39 @@ def synthesize_fm(left: "list[float]", right: "list[float]", sample_rate: int,
     side = [(left[i] - right[i]) * 0.5 for i in range(count)]
 
     if preemphasis_us:
-        a = 1.0 / (1.0 + 2.0 * math.pi * sample_rate * preemphasis_us / 1e6)
-        mono = _deemphasis(mono, a)
-        side = _deemphasis(side, a)
+        # **Pre-emphasis must be applied at the AUDIO rate, and this applied it at
+        # `sample_rate` (the IQ rate).** The original form was `_deemphasis`, a
+        # one-pole lowpass whose pole `a = 1/(1+2*pi*fs*tau)` collapses as the
+        # rate rises: at 200 kHz, `a = 0.0105`, so the filter was a near-perfect
+        # integrator.
+        #
+        # Measured on a 1 kHz tone at 200 kHz: **gain 0.0105** - the audio was
+        # attenuated 95x before it was ever modulated. The pilot is added *after*
+        # this line at a fixed 0.1 amplitude and passes unattenuated, so the
+        # composite carried a pilot **76x stronger than the subcarrier it is
+        # supposed to be phase-locked to**. The decoder's pilot search duly found
+        # a clean pilot and **no subcarrier at all** (`@38 kHz = 0.000000` on a
+        # left-only tone), so there was nothing to de-matrix and both channels
+        # came out as the mono signal.
+        #
+        # The standard's own numbers are what pin the level: pre-emphasis boosts
+        # the audio, the pilot is 8-10% of total deviation, and the subcarrier
+        # sits beside the audio in the composite. Applying the filter at the
+        # sample rate the audio is *specified* at is the only reading under which
+        # any of those three are comparable.
+        # The pole is the one that puts the corner at 2122 Hz **at the rate these
+        # samples are actually at**. An earlier version clamped it to
+        # `min(sample_rate, AUDIO_RATE)`, which put the transmitter's shelf at
+        # 822 Hz in a 200 kHz signal while the receiver's sat at 2122 Hz in a
+        # 32 kHz one - so the pair did not cancel and a 6 kHz tone came back
+        # **-8.1 dB** against 300 Hz through an otherwise-correct round trip.
+        #
+        # `a = exp(-1/(tau*fs))` makes `-log(a)*fs/(2*pi) = 1/(2*pi*tau)` at every
+        # rate, so the *rate-consistent* choice is `sample_rate` itself and the
+        # corners then agree by construction rather than by coincidence.
+        a = _deemphasis_pole(sample_rate, preemphasis_us / 1e6)
+        mono = _preemphasis(mono, a)
+        side = _preemphasis(side, a)
 
     # The L-R difference is amplitude-modulated onto a 38 kHz subcarrier whose
     # phase is locked to a 19 kHz pilot. Randomising the initial phase is what
@@ -294,7 +461,18 @@ def synthesize_fm(left: "list[float]", right: "list[float]", sample_rate: int,
         # A 10% pilot tone plus the L-R difference amplitude-modulated onto the
         # 38 kHz subcarrier, whose phase is locked to twice the pilot's.
         pilot = 0.1 * math.cos(2.0 * math.pi * pilot_hz * t + phase_offset)
-        subcarrier = 0.5 * side[n] * math.cos(4.0 * math.pi * pilot_hz * t + 2.0 * phase_offset)
+        # **The subcarrier carries `side` at full amplitude, and this used to
+        # carry `0.5*side`.** 47 CFR 73.319 (6): "the modulating signal for the
+        # required stereophonic subcarrier must be equal to the difference of
+        # the left and right signals", so the amplitude *is* the difference.
+        #
+        # The receiver's mixer `2*sub*ref` low-passes back down to exactly the
+        # subcarrier's amplitude, so what goes on here is what comes out as
+        # `difference`. `demodulate` then computes `L = mono + difference`, which
+        # with the old 0.5 gave `L = (3L + R)/4` - the same third-of-a-channel
+        # leak as the old de-matrix coefficient, from the other end. The two 0.5s
+        # compounded to 0.25 instead of cancelling.
+        subcarrier = side[n] * math.cos(4.0 * math.pi * pilot_hz * t + 2.0 * phase_offset)
         baseband = mono[n] + subcarrier + pilot
         instant = carrier_offset_hz + deviation * baseband
         phase += 2.0 * math.pi * instant / sample_rate

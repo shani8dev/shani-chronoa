@@ -216,7 +216,7 @@ class TestScaffold:
 
 class TestBuildGate:
     def test_the_gate_comes_before_anything_else_is_confirmed(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(driver_dev, "_consent", lambda: (False, "because I said so"))
+        monkeypatch.setattr(driver_dev, "_consent", lambda _config: (False, "because I said so"))
         out = driver_dev._run_build({"name": "mymod", "path": str(tmp_path)})
         assert "because I said so" in out
         assert "does not exist" not in out, \
@@ -225,7 +225,7 @@ class TestBuildGate:
     def test_a_missing_toolchain_is_named_rather_than_shown_as_compiler_output(self,
                                                                               project,
                                                                               monkeypatch):
-        monkeypatch.setattr(driver_dev, "_consent", lambda: (True, ""))
+        monkeypatch.setattr(driver_dev, "_consent", lambda _config: (True, ""))
         monkeypatch.setattr(driver_dev, "_first_present", lambda *n: None)
         monkeypatch.setattr(driver_dev, "_build_dir", lambda release, root=None: None)
         out = driver_dev._run_build({"name": "mymod", "path": str(project)})
@@ -241,7 +241,7 @@ class TestBuildForReal:
     """A real Kbuild, not a mocked one. This is the whole point of the module."""
 
     def test_it_produces_a_module_the_kernel_can_read(self, project, monkeypatch):
-        monkeypatch.setattr(driver_dev, "_consent", lambda: (True, ""))
+        monkeypatch.setattr(driver_dev, "_consent", lambda _config: (True, ""))
         directory = project
         out = driver_dev._run_build({"name": "mymod", "path": str(directory)})
         assert "Built" in out, out
@@ -377,7 +377,7 @@ class TestI2cGuard:
 
 class TestI2cSkill:
     def test_a_write_is_refused_before_the_tool_is_even_looked_for(self, monkeypatch):
-        monkeypatch.setattr(user_driver, "_consent", lambda: (False, "no consent here"))
+        monkeypatch.setattr(user_driver, "_consent", lambda _config: (False, "no consent here"))
         monkeypatch.setattr(user_driver.shutil, "which", lambda name: None)
         out = user_driver._run_i2c({"action": "write", "bus": 1, "address": "0x48",
                                     "register": "0x0c", "value": "0x01"})
@@ -386,7 +386,7 @@ class TestI2cSkill:
             "the destructive refusal only fired because the binary was missing"
 
     def test_the_eeprom_refusal_fires_even_with_consent_granted(self, monkeypatch):
-        monkeypatch.setattr(user_driver, "_consent", lambda: (True, ""))
+        monkeypatch.setattr(user_driver, "_consent", lambda _config: (True, ""))
         out = user_driver._run_i2c({"action": "write", "bus": 1, "address": "0x50",
                                     "register": "0x00", "value": "0x01"})
         assert "Refusing to write register 0x00" in out

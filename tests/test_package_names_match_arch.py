@@ -57,6 +57,18 @@ TOOL_MISSING_CALLED_WITH = {
     "lp": "cups",
     "gsettings": "glib2",
     "xdotool": "xdotool",
+    # Infrared is the second place a remote's tools are split across two
+    # packages, and it is the split that is easy to get wrong: `ir-ctl` and
+    # `ir-keytable` are **v4l-utils**, while `irsend`, `irw`, `mode2` and
+    # `lircd` are **lirc**. A hint that named lirc for ir-ctl would send
+    # somebody to `pacman -S lirc` for a binary lirc does not contain. Both
+    # names were read out of the image's own pacman database rather than
+    # assumed - see `shani-install-media/chronoa-matrix/chronoa-matrix.json`.
+    "ir-ctl": "v4l-utils",
+    "ir-keytable": "v4l-utils",
+    "irsend": "lirc",
+    "irw": "lirc",
+    "mode2": "lirc",
 }
 
 
@@ -172,6 +184,25 @@ def test_the_hint_table_has_no_value_that_is_its_own_binary():
         # `base-devel core 1-2`, `dkms extra 3.4.4-1`.
         #
         # `base-devel` is a group rather than a package holding the compiler,
+        # so it is listed but a group, which the Arch API reports separately.
+        #
+        # Infrared (2026-10-10). `lirc` is the userspace route and is already a
+        # declared dependency of `shani-peripherals` in shani-pkgbuilds, so it
+        # is a real package rather than a colliding name - confirmed by reading
+        # that PKGBUILD and by the 29 `ir*` commands the image's own matrix
+        # attributes to it. `v4l-utils` is above, for `ir-ctl`/`ir-keytable`.
+        "lirc",
+        # Virtual machines (2026-10-10). `qemu-system-x86_64` is the *binary*,
+        # not a package: the image's own pacman database attributes
+        # `/usr/bin/qemu-system-x86_64` to **qemu-system-x86**, and
+        # `qemu-system-x86_64` appears there as a package name zero times. The
+        # same shape as `bluetoothctl` being in `bluez-utils`.
+        "qemu-system-x86",
+        # Containers (2026-10-10). `podman` is the real Arch package and is in
+        # the image's own pacman database; `machinectl` shares the container
+        # switch because an nspawn machine is a container as far as what it can
+        # do is concerned.
+        "podman",
         # and that is the point of the hint: `pacman -S base-devel` is the
         # command that installs a C compiler, `make` and `patch` together, so
         # naming it is actionable where naming `gcc` alone would only install

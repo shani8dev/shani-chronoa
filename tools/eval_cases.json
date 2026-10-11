@@ -1,5 +1,5 @@
 {
-  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS COMPLETE: every skill now has at least one case, so a regression in tool selection is visible anywhere in the list. The wording of the generated cases is a starting point rather than a transcript - each says so in its own `note` - so the depth is uneven on purpose: the hand-written cases are transcripts, and the generated ones assert the tool and the presence of its required arguments. `tools/gen_eval_cases.py --check` reports what is missing and `tests/test_task_eval.py` asserts the counts against this file.",
+  "about": "Chronoa task eval: what a person says, and the tool call a correct assistant makes. Checked, never executed. Each 'expect' entry is one acceptable call: 'tool' must match, and every key in 'args' must match its rule - a number equals (5 == 5.0), a string is compared case-insensitively and may be a list of acceptable values, a string starting with '~' must be contained, '*' only requires the key to be present. 'none': true means no tool should be called. 'ask': true also accepts ask_user. COVERAGE IS PARTIAL: fewer skills have at least one case than the tree registers, so a regression in tool selection is visible in most of the list and invisible in the rest. The exact counts live in `coverage` beside this text and are asserted by `test_the_recorded_coverage_is_still_the_coverage`, which is why the prose here does not repeat a number that a new skill would make stale. It was complete when it was last claimed; `tools/gen_eval_cases.py --check` reports what is missing, and this stops saying PARTIAL when that output is empty. `tools/gen_eval_cases.py --check` reports what is missing and `tests/test_task_eval.py` asserts the counts against this file.",
   "cases": [
     {
       "id": "time",
@@ -2540,13 +2540,88 @@
           }
         }
       ]
+    },
+    {
+      "id": "container-run-echo",
+      "say": "Run a quick alpine container that prints hello.",
+      "expect": [
+        {
+          "tool": "container",
+          "args": {
+            "action": "run",
+            "image": "alpine",
+            "command": [
+              "echo",
+              "hello"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "container-exec",
+      "say": "Run ls inside my web container.",
+      "expect": [
+        {
+          "tool": "container",
+          "args": {
+            "action": "exec",
+            "name": "web",
+            "command": [
+              "ls",
+              "-la"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "vm-launch-uefi",
+      "say": "Start a 2 gigabyte virtual machine and boot it with UEFI firmware.",
+      "expect": [
+        {
+          "tool": "vm",
+          "args": {
+            "action": "launch",
+            "memory_mb": 2048,
+            "firmware": "uefi"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vm-screen",
+      "say": "Take a screenshot of the test virtual machine's screen.",
+      "expect": [
+        {
+          "tool": "vm",
+          "args": {
+            "action": "screen",
+            "name": "test"
+          }
+        }
+      ]
+    },
+    {
+      "id": "vm-key",
+      "say": "Press ctrl-alt-f2 in the virtual machine.",
+      "expect": [
+        {
+          "tool": "vm",
+          "args": {
+            "action": "key",
+            "name": "test",
+            "keys": "ctrl-alt-f2"
+          }
+        }
+      ]
     }
   ],
   "coverage": {
-    "cases": 221,
-    "skills_asserted": 208,
-    "skills_total": 208,
-    "note": "partial so far; not a claim that the other skills are unreachable",
+    "cases": 226,
+    "skills_asserted": 210,
+    "skills_total": 244,
+    "note": "partial: 210 of 244 asserted. skills_total is a hand-kept claim; every new skill makes it stale until it is bumped, which is the test's purpose",
     "gated_unguarded": 56
   }
 }

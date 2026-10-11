@@ -93,7 +93,29 @@ _SLOW_TOOLS = {"generate_image": 300, "photo_video": 300, "scan_document": 180, 
                "speed_test": 180, "pdf_pages": 150, "set_hostname": 90, "set_locale": 90,
                # A wrist measurement takes up to a minute after a ~5 s connect, and
                # `listen` accepts up to 60 s: both were killed at the 30 s default.
-               "watch": 150, "bluetooth_gatt": 100, "find_device": 60}
+               "watch": 150, "bluetooth_gatt": 100, "find_device": 60,
+               # A container's app needs its window to appear *and* its
+               # accessibility tree to register after it (measured: ~11 s on this
+               # box, and an image pull on the first run) - `ui_elements drive`
+               # was killed at the 30 s default, in the field, on exactly that.
+               # Equal on purpose: `ui_elements drive start` *nests* a
+               # `container` call, and the sandbox's ceiling can only ever
+               # tighten - a nested profile asking for more than its parent
+               # already has is refused (measured: "the 'default' sandbox
+               # profile allows 300 of CPU time but this process is already
+               # limited to 185"). Equal fits; anything less refuses.
+               # A podman run also pulls a missing image by itself (measured:
+               # 14.5 s for redis:alpine, ~66 MB), and a QEMU launch plus its
+               # first screendump has to wait for firmware. Both run as user
+               # units, so the timeout is the unit's, not just the client's.
+               # `ui_elements` and `container` are *equal* on purpose:
+               # `ui_elements drive start` nests a `container` call, and the
+               # sandbox's ceiling can only ever tighten - a nested profile
+               # asking for more than its parent already has is refused
+               # (measured: "the 'default' sandbox profile allows 300 of CPU
+               # time but this process is already limited to 185"). Equal fits;
+               # anything less refuses.
+               "ui_elements": 300, "container": 300, "vm": 120}
 
 
 def _get_sandbox_config(tool_name: str) -> SandboxConfig:

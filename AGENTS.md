@@ -1149,7 +1149,12 @@ matrix.
 skill out of it (measured 2026-10-03).** The matrix flags a command as a skill
 candidate when no Chronoa code *calls that binary*, and this repo deliberately
 answers questions without the binary. Checking the top candidates against the
-127 skills that exist: `fastfetch`, `lscpu`, `lsblk`, `lsmod`, `ps` and `uptime`
+244 skills that exist (`discover_skills()` → 244 tools and 244 handlers,
+**re-measured 2026-10-11** — this figure moves as skills land, so treat the number
+as a measurement and not a constant) — **not** the 128 that
+`READ_ONLY_TOOLS | MUTATING_TOOLS` sums to, which is a *classification* used for
+explore mode, and a subset rather than the whitelist): `fastfetch`, `lscpu`,
+`lsblk`, `lsmod`, `ps` and `uptime`
 are all flagged, and all six are already answered by `system_info` /
 `list_processes`, which read `/proc` on purpose because those binaries can be
 absent on a minimal image. `rg`, `fd`, `tree` and `locate` are flagged and are
@@ -3601,8 +3606,13 @@ right-hand column answering them, in that order:
    lines that each change what a reply is allowed to mean.
 
 **Not in it, on purpose.** Not the senses and not health - those panels own
-them, with a per-row reason. Not goals or a plan: `goals.py` has no producer
-yet, and a card for a queue nothing can enqueue is a dead control. Every
+them, with a per-row reason. Not goals or a plan — **corrected 2026-10-11: this
+used to say "`goals.py` has no producer yet, and a card for a queue nothing can
+enqueue is a dead control", and it was stale.** `skills/manage_goals.py` is the
+producer and the Goals panel is the consumer; both are wired and tested. What
+Goals has no surface for in the *rail* is deliberate for this reason instead: a
+run that can park mid-plan is a queue nobody can act on from a side column, and
+its panel owns it. Every
 section above reads a store that already exists and renders an honest
 sentence when it is empty, because a rail of decoration is worse than no rail:
 it looks like it knows something.
@@ -3674,8 +3684,13 @@ the shape:
   more rounds do not break.
 - **`goals.py`** — a plain-data goal run that can `park` and `resume`, with
   `PlannedStep` variable dependencies that refuse to run a step whose inputs do
-  not exist yet. Deliberately un-wired into the UI: a task card over a queue
-  nothing can enqueue is a dead control.
+  not exist yet. **Wired, and this line said the opposite until 2026-10-11:**
+  it claimed the module was "deliberately un-wired into the UI: a task card over
+  a queue nothing can enqueue is a dead control". `skills/manage_goals.py` is
+  the producer, the Goals panel is the consumer, and `tests/test_goals_wired.py`
+  covers all three. A person can now also take one step out of a plan and
+  reorder it, and the model is told what was changed — see
+  `harness-study/HARVEST-OIU.md`.
 - **`restart.py` / `sandbox/qualify.py`** — the bounded restart table and a
   fail-closed qualification that reports `missing`/`unknown` rather than
   blending "off" into "yes". On this unprivileged machine it correctly reports
@@ -6980,12 +6995,15 @@ group never removed: 1 red, caught only by the control added above).
 
 **Swept the whole suite rather than trusting the file:** 7568 passed. The 11
 failures are all pre-existing or order-dependent — `test_capabilities` on the
-untracked `log_files.py`, `test_routines_live` needing a real model,
-`test_task_eval` on a stale skill count, `test_sidebar_toggle` (documented as
-failing 4/4 on untouched HEAD), and a trigger cluster that passes **1201
-tests** in its own chunk both with the fix and at HEAD. Two earlier flakes
-(`multi_step_turns`, `question_presenter`) likewise pass in isolation and in
-their own chunk with the fix applied — re-run failures serially before believing
+untracked `log_files.py` (since fixed upstream), `test_routines_live` (the live
+1.7B model's behaviour; now a SKIP naming the file — see its own section),
+`test_task_eval` on a stale skill count (since fixed upstream),
+`test_sidebar_toggle` (documented as failing 4/4 on untouched HEAD — it is green
+on its own, so it is order-dependent rather than broken), and a trigger cluster
+that passes **1201 tests** in its own chunk both with the fix and at HEAD. Two
+earlier flakes (`multi_step_turns`, `question_presenter`) likewise pass in
+isolation and in their own chunk with the fix applied — re-run failures serially
+before believing
 them.
 
 The second half of the original measurement, for anyone writing a probe: **the
@@ -7151,3 +7169,1548 @@ untested by the codec's own file.
 **Not claimed:** that a real remote recognises a frame this module builds, or
 that `send`/`receive` drive `ir-ctl`. Both need hardware nobody here owns, and
 the module that runs them says so.
+
+## Containers and VMs: the two actuators that run a whole computer (2026-10-10)
+
+`browse` drives a browser by putting a **window** beside a **protocol** - the in-app
+WebKit the person watches, plus CDP underneath. The same shape now exists for the
+two other things a person asks an assistant to *drive*: `container` (podman, plus
+nspawn through `machinectl`) and `vm` (QEMU with a visible window, QMP on a socket
+beside it). `container` is the *lifecycle* of a container and `vm` the lifecycle of a
+virtual machine; **what either one draws on this desktop is driven by `ui_elements`**
+(see the section below) - one way in, so a container request does not pay schema for a
+driving vocabulary it will never use. Both are gated, default off:
+`container-control-enabled` and `vm-control-enabled`, each with a Settings row, a `GATE_NAMES` label, a help-group
+entry and a `_SLOW_TOOLS` budget (300s and 120s). "Which containers / VMs exist"
+stays the read-only `list_containers` / `list_vms`; these two *run* them.
+
+**Every podman and QEMU invocation goes through a transient `systemd-run --user`
+unit, and that is measured rather than defensive.** A skill child runs under
+`PROFILE_DEFAULT`'s 512 MB `RLIMIT_AS`, soft equal to hard, inherited by everything
+it spawns and unraisable. Measured on this box with the real podman 5.7.0:
+
+| ceiling | `podman run --rm alpine echo hi` |
+|---|---|
+| 512 MB | Go runtime traceback in `runtime.schedinit` - the client will not start |
+| 1 GB | `runc: pthread_create failed: Resource temporarily unavailable` |
+| none | works |
+
+QEMU is the same wall: `ulimit -v 524288; qemu-system-x86_64 -m 1024` fails with
+*"allocate 1073741824 bytes for jit buffer: Cannot allocate memory"*. A transient
+user unit is spawned by the user manager, outside the skill child, and measured to
+escape both problems - a unit started from a capped shell reads back
+`Max address space unlimited unlimited`, a detached container outlives its unit
+(`probe-nginx Up 2 seconds` after the client exited), and the invocation contract
+through `--pipe` carries **stdout, stderr and the real exit status** (measured:
+exit 7 in the unit, rc=7 in the caller).
+
+**Four defects the first working versions shipped, all caught by running the real
+thing, none by reading it:**
+
+1. **The unit ran the wrong program.** The invocation was built as
+   `systemd-run ... run --rm alpine`, so the unit tried to exec the bare word
+   `run` and podman was never involved - `Failed to find executable run`. While it
+   lasted, `rm`, `stop`, `ps` and `logs` were executed as *system* binaries. The
+   regression test pins that the program the unit execs is `podman` and the
+   subcommand follows it.
+2. **A detached run died when its client exited.** With `--pipe` the invoking
+   process holds the read end, and the container's `conmon` inherits the write end,
+   so when `systemd-run` returns conmon takes a SIGPIPE and dies - leaving a
+   container that `podman ps` still shows **Up** while `stop` reports
+   *"conmon exited prematurely"*. A 2-second existence check cannot tell those
+   apart; the fix (file-captured unit output for detached runs) is asserted
+   structurally because the failure is invisible to a quick read.
+3. **A hyphenated combo was sent as one key.** `ctrl-alt-f2` was split on `+` only,
+   so the model's combo arrived as a single QMP key name and QEMU answered
+   *"Parameter 'data' does not accept value 'ctrl-alt-f2'"* - while the schema's own
+   example said `ctrl-alt-f2`. Both separators split now, in `_do_key`.
+4. **The pointer could not move.** The launch attached `virtio-mouse-pci`, which is
+   *relative*, and QMP's `input-send-event` with an `abs` axis is refused with
+   *"Input handler not found for event type abs"* on anything without an absolute
+   device. The launch attaches `virtio-tablet-pci` now.
+
+**Two more, in the launch path, both about retries:** a unit that failed on a
+previous attempt stays *loaded*, so systemd refuses a second transient unit under
+the same name ("was already loaded or has a fragment file") - `reset-failed` before
+the launch is what makes a retry possible; and the duplicate-name check read
+`LoadState`, so a **failed** unit was reported as "already running" rather than as
+dead.
+
+**What is verified, and what is not.** On this box, for real: a one-shot
+`alpine echo` through `execute_tool_outcome`, a detached nginx (Up 13 seconds
+later - the SIGPIPE control), `exec`, `logs`, `stop`, `rm`, `images`, `machines`
+(empty); a QEMU launch with a visible GTK window, `query-status`, a real 720x400
+PPM screendump, `send-key`, typing, a click at 50%, and a QMP `quit` with the
+unit going inactive (the post-condition reads that back, so `stop` reports
+VERIFIED). UEFI is real: `firmware: "uefi"` produced a **640x480** screendump,
+which is OVMF's own resolution and therefore the firmware that ran, against
+SeaBIOS's 720x400 on the bios path.
+
+**Three honest walls, each recorded where it is hit rather than papered over:**
+
+- **A virtual TPM cannot be verified here.** swtpm starts and its socket appears,
+  but the QEMU it is attached to creates its QMP socket, keeps running and never
+  answers it - libtpms does not come up on this Ubuntu build. The launch names this
+  specifically rather than saying "may have exited at once", and the path needs a
+  ShaniOS slot run before it can be claimed. Two more measurements on the way
+  there: swtpm refuses a socket under `/run/user/1000` (*"Could not open UnixIO
+  socket: Permission denied"* - Ubuntu's `usr.bin.swtpm` AppArmor profile allows
+  `owner @{HOME}/**` and libvirt's own paths, and the session runtime dir is
+  neither), which is why the socket and state live under `~/.cache`; and swtpm does
+  not create its own state directory, which is a fatal error *after* the socket
+  exists.
+- **nspawn's boot path is unverified.** Rootless `systemd-nspawn -D <rootfs>` fails
+  on this box with *"Failed to allocate user namespace with 64K users: No such file
+  or directory"* (AppArmor restricts unprivileged user namespaces), and a
+  privileged `machinectl start` asks machine1 for a polkit authentication this dev
+  machine cannot complete. `machinectl list` and the refusal sentence are verified
+  (rc=1, stderr, no pipe); `machine-start`/`machine-stop` report whatever machine1
+  says.
+- **`ir-remote-enabled` and `broken_symlinks` were in-flight work in a concurrent
+  session** and were red on this tree while it was being built; both have since
+  landed (`ir_remote.py` with its Settings row, `broken_symlinks.py` grouped),
+  and the gated keys that had no `GATE_NAMES` label - so their refusals named a
+  raw key instead of the row's label - were completed here: 15 keys, each taking
+  the label its own settings row already showed. That is the
+  switch-nobody-can-find failure in the other direction, and
+  `test_help_gate_labels_match_settings.py` only checks the labels that exist,
+  which is why it never noticed.
+
+`tests/test_container_skill.py` (17) and `tests/test_vm_skill.py` (26) include a
+live test each - a real container and a real VM through the real dispatch path -
+and 9 of the VM skill's 9 mutations and 5 of the container skill's 5 are confirmed
+to fail when their defect is restored. Two of my first-round mutations were
+*equivalent* (they changed nothing the test measured) and were rewritten; that is
+the same "a control that cannot fail" trap, and it is why every mutation asserts
+its anchor appears exactly once.
+
+### Three things the full-suite sweep on that work found (2026-10-10, later)
+
+A chunked re-run of all 318 files (8 chunks, one log each, per the lesson above)
+came back **green except two things, neither of them a product defect**:
+
+- **195 failures and 24 errors in one chunk were a full `/tmp`.** The messages
+  were `OSError: [Errno 122] Disk quota exceeded` on a six-byte `write_text`, in
+  the dispatch path, across a dozen unrelated files. `df` showed 13 G of a 16 G
+  tmpfs in use, `ulimit -f` was unlimited, no quota tooling existed, and every
+  write succeeded again after the box was restarted and the tmpfs cleared. **A
+  full tmpfs on this box reports EDQUOT, not ENOSPC** - so a wall of
+  "Disk quota exceeded" means "clean `/tmp`", not "fix the code". Re-running the
+  same chunk afterwards: 842 passed, 1 failed. Anyone reading a sweep log should
+  check `/tmp` before believing 195 failures.
+- **`test_routes_live.py`... `test_routines_live.py::test_good_morning_runs_its_tools_on_the_real_model`
+  fails, and it is not this work's doing.** The loaded model is
+  `Qwen3-1.7B-Q4_K_M`, and for "weather in Pune **and** what time it is" it calls
+  only `get_datetime`, then *narrates* "Let me check the weather in Pune" with no
+  tool call behind it — the assistant's loop correctly ends a turn whose reply
+  carries none, so the user is left holding a promise. Measured both ways: it
+  fails identically with the two new skills hidden from discovery, so the failure
+  is a property of the live 1.7B model rather than of the two added tools.
+
+  **Fixed 2026-10-11 as a SKIP that names its cause, because a live-model test is
+  the one kind whose result changes with what happens to be loaded.** Three ways
+  of identifying the loaded model were tried and two are wrong, which is worth
+  recording before someone re-derives it: `local_llm.active()` reads the symlink
+  through `model_dir()` → `XDG_DATA_HOME`, which this file's `gsettings_env`
+  fixture redirects, so it answers `""` under test; `/v1/models` reports the
+  generic `current.gguf` for every model on the machine, so it identifies nothing;
+  and `/props`' `model_path` is the **symlink**, so it must be `realpath`d before
+  it names the file behind it. `SINGLE_TOOL_MODELS` holds the models measured not
+  to manage two calls in one turn, and the skip prints the resolved path.
+  Control run both ways: a tag that matches nothing makes the test **run** and
+  fail on the 1.7B, so the skip is conditional on the model rather than permanent.
+
+**And the duplicate-key defect has now happened three times, so it has a test.**
+`browse` dead-labelled itself once, then `space_by_type` arrived with *three*
+entries in one table (two from the session that added it, one from a
+well-meaning pass adding a second label) while the table looked correct and
+pyflakes was the only thing that noticed - AGENTS.md's own note says "nothing in
+the suite did". `test_capabilities.py::...test_a_label_table_has_no_duplicate_key`
+now parses the module source with `ast` and counts the keys the way the
+interpreter will, for `_GROUPS`, `GATED` and `GATE_NAMES`. Mutation-verified: a
+duplicate key reinserted fails it with the key named. The concurrent session's
+own duplicate was resolved by keeping their label and folding both comments'
+information into one entry - **the later entry wins at runtime, so a duplicate is
+only ever a dead earlier label, never a wrong one.**
+
+## Containers with a display, and the cue layer that makes driving them visible (2026-10-10)
+
+`browse` is what "driving something in front of a person" looks like in this
+codebase: a window the person can see, and a protocol underneath it, with a
+**"Chronoa"-labelled cursor that glides to each target, a ring around it, and a
+ripple on the click** (`gui/browser_driver.py`). Nothing else here owned a window,
+so nothing else could be *watched* being driven. Two things closed that, and
+both are measured on this box rather than reasoned about.
+
+**`automation_overlay.py` - the cue layer for a display Chronoa does not own.**
+A transparent full-screen layer whose widget has `set_can_target(False)`, driven
+over a unix socket by newline-delimited JSON. It is a separate process on
+purpose: the thing doing the driving is a sandboxed skill child with no GTK main
+loop of its own, so the layer owns one - the same window-beside-protocol shape
+`browse` has. It draws nothing and clicks nothing; it is a picture of an action.
+
+**`container run display=x11|wayland` - the mechanism is `shani-testbed`'s and
+`shani-desktop-plasma`'s, copied rather than invented.** The display's socket is
+bound in, the variable that names it is handed over, and the toolkits are pinned
+to their X11 backends with software rendering - because a container has no GPU,
+and because a Wayland-native client cannot be driven by an X pointer
+(`lib/nspawn.sh`'s `X11_BIND`, `tests/plasma-session.sh`'s Xvfb + `xdotool`
+`mousemove`/`click`/`search --name` sequence, and the testbed's own comment that
+a private Xvfb is what keeps clicks off the person's real screen).
+
+**Verified for real, end to end, on this box:** `xeyes` from a container, with
+`/tmp/.X11-unix` bound in and `DISPLAY` passed through, opened a **real window on
+the host display** (measured: 200x187 at 893,463, found by title with `xdotool
+search --name`), the cue layer was driven over its socket to glide the cursor to
+the window's centre, `wait_until_pointing_at` confirmed the cursor had *visibly
+arrived* before the real pointer moved and clicked there, and the window was
+still alive afterwards. `xhost` was granted for the run and revoked at the end.
+
+**Five defects the running of it found, none of them visible in the code:**
+
+1. **The cue layer could not draw at all.** This PyGObject cannot marshal
+   `cairo.Context` (a `DrawingArea`'s draw function never fires), cannot marshal
+   `cairo.Region` (`set_input_region` fails with "could not find foreign type
+   Region"), and **segfaults in `Gsk.FillNode` and `Gsk.BorderNode` when they are
+   constructed directly**. The drawing therefore uses only `Gtk.Snapshot`'s
+   `append_color`, `append_border` (whose widths *and* colours are sequences, one
+   per edge) and `append_layout`, with the cursor glyph rasterised in plain
+   Python into a `Gdk.MemoryTexture` - the one thing a vector fill would have
+   been used for.
+2. **A cue layer that refused the first ping.** A unix socket file appears at
+   `bind()` and only *listens* a moment later, so the first connect of a freshly
+   started layer was refused - and a driver reading that as "no cue layer" drove
+   the machine with **no visible cursor at all**, silently. `cue()` retries the
+   connect until its timeout now; the other half is asserted too, so a genuinely
+   absent layer is still `None` rather than a five-second wait.
+3. **The reply was queued on the main loop, so it was lost.** The client shuts
+   its write end, the server's read loop sees EOF and closed the connection
+   *before* the main loop ran the queued reply - measured as `connect OK` then an
+   empty read. On Wayland the main loop can sit inside a composited frame for
+   seconds, so a reply queued behind it also arrives after the driver has given
+   up. Replies are sent on the socket thread now (`overlay.apply` only touches
+   plain tuples), and the next frame is driven by the 16 ms tick.
+4. **The ring faded *in*.** It was invisible at the instant it mattered - the
+   click is about to happen *now*. It is on at once and fades over its whole
+   life, and the test measures the alpha dropping rather than asserting
+   present-or-absent, because a ring that never fades is still "present" at both
+   moments.
+5. **`Gtk.Snapshot.translate()` takes a `Graphene.Point`**, not two floats, in
+   two places - and the resulting exception in `do_snapshot` killed the main
+   loop, which is what made every ping fail while the process ran.
+
+**What this box could and could not settle.** A TPM-equipped QEMU still never
+answers QMP here (libtpms does not come up on this Ubuntu build), so
+`firmware: "uefi"` is verified - the screendump comes back 640x480, OVMF's own
+resolution - while `tpm: true` is written and honestly marked unproven. swtpm
+refuses a socket under `/run/user/1000` (*Permission denied* - Ubuntu's
+`usr.bin.swtpm` AppArmor profile allows `owner @{HOME}/**` and libvirt's own
+paths), which is why the socket and state live under `~/.cache`.
+
+## Driving any app on this desktop: one tool, one cue, one call per turn (2026-10-10)
+
+`browse` drives a page it owns a window for. This is the same shape for **apps
+Chronoa did not start**: `ui_elements` gained `drive`, `act` and `state`, over a new
+app-agnostic driver, `usr/lib/shani-chronoa/shani_chronoa/ui_driver.py`. An app on
+the accessibility bus is reachable by what its controls *are* (button, field, menu
+item, with a name and a role); the input that reaches it is an X pointer on
+XWayland or XTEST, or the RemoteDesktop portal for a native Wayland window - the
+TeamViewer/AnyDesk mechanism. Every click glides a labelled cursor to the target
+first and rings it, through `automation_overlay.py` (the section above), so the
+person watching sees it happen.
+
+**The shape is one call per turn, and that is the whole design.** A model that must
+call four tools per step - read, click, read again, decide - spends its context on
+round trips. So `drive` takes an action and a control *number* and answers with the
+app's new state in the same short numbered form, plus the text on screen. Measured
+on a real GTK4 app in a real container, through the real dispatch path: turn 1
+returns 12 numbered controls and the OCR'd screen text in **795 bytes**; turn 2 is
+`click 5` and comes back with the click's coordinates *and* the next state. The
+driving loop is a model reading a numbered list and answering with a digit.
+
+**The tool's own schema was the inefficiency, and it was measured rather than
+argued.** The container skill had grown its own driving vocabulary (`windows`,
+`click`, `type`, `key`, `read`, `screen`, `drive`) beside `ui_elements`' - two ways
+in, with *different parameter names for the same thing* (`target` vs `number`), and
+routing offered both. Measured: `container` was the **largest schema in the registry
+at 3481 chars, ahead of `browse` at 3462**, carrying both halves, so a container
+request paid ~1.3k chars for driving it would never do. The driving vocabulary is
+now removed from `container` (3481 → **2146** chars, rank #1 → #5, ~335 tokens saved
+per offering) and lives in `ui_elements` alone. Nothing was lost: the end-to-end
+loop above still runs through `ui_elements`, and `container action=click` now
+refuses by name with the lifecycle list.
+
+**Two composition facts, both from a refusal rather than from reasoning.** `ui_elements
+drive start` *nests* a `container` call, and the sandbox's ceiling can only ever
+tighten: a nested profile asking for more than its parent already has is refused
+with *"the 'default' sandbox profile allows 300 of CPU time but this process is
+already limited to 185"*. So `ui_elements` and `container` are **equal at 300s** -
+equal fits, anything less refuses. And the two consent keys compose rather than
+merge: `input-control-enabled` gates the driving (it is input), and
+`container-control-enabled` gates starting the container, each enforced by the tool
+that does it, both named in the `drive` description.
+
+**Reachability was measured, not assumed.** A skill nothing offers is the failure this
+repo records most often, and the plainest phrasing - "click Fishbowl in the
+container" - was answered by `browse`, `ask_user` and `get_datetime`. Three changes,
+in the order the measurements forced them: synonyms (people say "container" and
+"click"; the schemas say "image", "run", "drive"); then a **cue of the kind
+`browse` has**, because "window" belongs to `close_window`/`list_windows` and page
+words to `browse`, so no word score could join the request to this tool; then
+**protection from the token cap**, because `_cap_to_window` dropped it anyway - its
+schema ranks below `ask_user`, which is the same zero-sum the `browse` lines already
+describe. Measured after: driving requests offer `ui_elements`, container lifecycle
+requests offer `container`/`list_containers`, and "what time is it", "volume up" and
+"save the file to my downloads" are unchanged. The cue is deliberately narrow:
+"press the" was in the first version and displaced `press_key` for "press the enter
+key" - two tests named it, and it is a keystroke, not a control.
+
+**Verified for real, end to end, on this box:** the loop above; a click by name on a
+control that was **off-screen** (scrolled into view, focused, wheeled over its own
+column, re-measured between each - the testbed's `a11y_client` sequence); typing
+into a field; `ctrl-alt-f2`; the cue layer's ping, glide and ripple; and a standing
+window border whose pixels were measured (`(53,132,228)` at 255 alpha on the edge,
+`(0,0,0,0)` inside). **Still open:** the RemoteDesktop portal accepts a session and
+then stalls on this box - the route is wired, fails fast at a 5s client timeout, and
+never claims a delivered effect it did not observe. `tools/route_cases.json` has no
+`ui_elements` entry either: the corpus's own note requires every skill in it to
+declare no required parameter, and `action` is required, which is a schema decision
+rather than a typing job.
+
+### And then it was run against this desktop's own app, which found two defects (2026-10-10)
+
+Everything above was verified against an app *inside a container*, which nests its
+controls at depth 5. Driving this desktop's own `gnome-text-editor` - a GTK4
+libadwaita app, the second half of the original ask - found two real defects, both
+invisible to the container test and both in the driver rather than in the skill:
+
+1. **`_screen_box` raised instead of returning `None`.** It caught
+   `(AttributeError, TypeError, KeyError)`, and the a11y bus raises **`GLib.GError`**
+   for an object with no Component interface - measured, on an object at
+   `/org/a11y/atspi/accessible/root`, so `state` came back as a **traceback** on a
+   real desktop app. The sibling reader in `ui_elements` has caught broadly here all
+   along, which is why only the driver's copy crashed. A position that cannot be
+   read is `None`, never an exception.
+2. **The tree walk's depth cap was silently throwing away every control.**
+   `_walk_all` capped at **8**; gnome-text-editor publishes its buttons at depth
+   **17-18** (467 nodes, deepest 26). Measured: **55 actionable named controls, 0 of
+   them under the old cap** - so the observation answered *"none this window can act
+   on by name"* about a window full of them. The cap is `ui_elements`' own 30 now,
+   with a node bound of 800 so a deep tree is not an unbounded walk. Measured after:
+   **12 numbered controls in 547 bytes in 0.6s**, on the desktop's own app.
+
+`tests/test_ui_driver.py` (7) pins both, and **both mutations are confirmed to
+fail** - the depth cap back to 8 fails 2, the narrow exception tuple back fails 1.
+
+**What driving a desktop app can and cannot do here, measured rather than argued:**
+reading works (above). Clicking *by position* refuses, correctly - no client may
+learn where a native Wayland window is, and the refusal says so and names the
+portal route. Typing and keys go through the RemoteDesktop portal, which does not
+deliver on this box. Pressing a control **does** go through AT-SPI and returns
+success - but a `New Tab` press reported success while the tab count stayed at
+**3 before and 3 after**, so the effect was not confirmed. That is recorded as
+unverified rather than as a working press: `_press` claims what `do_action`
+returned, and nothing here observed it, which is the post-condition gap this repo
+insists on naming.
+
+One clean result from the same run, recorded so nobody adds it by reflex: **0
+hidden** actionable controls - the observation lists only what is on screen, so no
+"showing" filter was needed and none was written.
+
+### The guard that only worked where it was not needed (2026-10-10)
+
+Taking two ideas from an anti-surveillance script (`~/try/privacy-shield.js`) - an
+eased pointer path with overshoot instead of a jump cut, and *refusing to type
+until it has confirmed where the keys will land* - added a guard before the first
+keystroke. It was written against an X window id, and **"we are on Wayland" is what
+showed that was backwards**: `xdotool` hands out a window id only for an XWayland
+window, so on this desktop the app being typed into is a native client that goes
+through the **portal** instead - and the guard sat *after* the window lookup, i.e.
+after the route it was meant to check. Measured: typing into a chat surface on the
+Wayland route would have gone straight through.
+
+`_comms_app` reads the app's own frame title from the accessibility tree, which every
+toolkit publishes on either display server, so the refusal fires before the portal
+is reached at all. Verified on the real desktop: `gnome-text-editor` is **not**
+refused (it goes to the portal and fails honestly), and `slack` **is** refused on the
+Wayland route. `key()` has the same hole and the same fix, because a chord can send
+a message too. **4 of the new tests fail when the guard is neutered**, including one
+that asserts the portal was never called.
+
+Not taken from that file, and the reason is not squeamishness: the rest of it is
+active *deception* - ghost-occupying the webcam so a capture process gets EBUSY,
+muting the mic while "it believes a live channel is being recorded", nulling and
+swapping frames inside another program's sqlite store, killing the capture process,
+iptables-redirecting its telemetry, and manufacturing synthetic keystrokes to defeat
+inactivity timers. **The agents it names are the same class as this workspace's own
+`shani-insights`** - an enrolled, consented product whose own AGENTS.md says
+retention and disclosure need HR-system scrutiny. Building that into the assistant
+would be covert sabotage of a consented sibling product, on the same machines, hidden
+from its operator; nothing in Chronoa's consent-key architecture was designed to
+authorise it, and it would need its own trust story first. What *is* worth building
+from the same source is the opposite: a **read-only detector** as a consent-gated
+sense, which reports to the person rather than fooling anyone. **What was built
+covers four channels: camera device holders, live audio streams, raw-input readers
+with the compositor excluded, and monitoring agents by name.** Two probes from the
+offer are **not** built, and the reasons are kept rather than dropped: `CAP_NET_RAW`
+holders (a process's capabilities are readable only for this user's own on this box,
+so it would report the compositor and the network stack and nothing else - the same
+privilege wall the agent's connections hit), and the monitoring agent's media growth
+(a sqlite row count in another program's store is a path into that program's data,
+which this sense has no business taking).
+
+### Built: the `monitoring` sense, and what it found on its first run (2026-10-10)
+
+`usr/lib/shani-chronoa/shani_chronoa/senses/monitoring.py` - the detector above,
+wired the way every sense is: consent key `monitoring-sense-enabled` (default
+**false**, sensitivity `private`), the `_SENSE_CONSENT_KEYS` entry, the
+`GATE_NAMES` label, and a Settings row under **Security and privacy** beside
+`capture`. Registry **52 -> 53**, TTL 600 = poll 600, schema compiles to a real
+`gschemas.compiled`. Eight tests in `tests/test_sense_monitoring.py`.
+
+It reads: which process holds each `/dev/video*`, whether an audio stream is
+capturing (`pactl`, `wpctl` fallback), who reads `/dev/input/event*` with the
+compositor excluded, and whether a monitoring agent is running by name. **It
+changes nothing** - no blocking, muting, occupying, killing or redirecting, and the
+docstring says so because the two look alike from the outside.
+
+**Run for real on this box, it found something immediately:**
+
+    A monitoring agent is running on this machine.
+    no camera device is held open
+    no audio stream is capturing
+    monitoring agent running: 1541 WorkpulsService /usr/lib/Workpuls/WorkpulsService
+    unknown: the agent's connections could not be attributed to it (ss names a
+    socket's owner only for this user's own), so whether it is uploading is unknown
+
+So the anti-surveillance script it was read beside was not written about a
+hypothetical: a Workpuls agent is running here. The sense says so and stops, which
+is the whole difference between it and that script.
+
+**Four defects of my own, each caught by something other than reading:**
+
+1. **`_run` was defined twice** - the subprocess helper and the sense's entry point
+   shared the name, so the second definition replaced the first and the sense
+   **never registered at all** (52 senses, no `monitoring`). Renamed to `_probe`,
+   with the reason in its docstring.
+2. **Two generator expressions in one list literal** - a `SyntaxError` the loader
+   reported and a read-through would have accepted.
+3. **The Settings row did not exist**, which is the key-nobody-can-reach trap in
+   its newest form: three tests, covering the schema key, the help label and the
+   switch reaching config.
+4. **UNKNOWN outranked a real finding.** The headline put "could not ask" above "an
+   agent is running", so the one true answer read as no answer. Precedence is
+   found-first now, and UNKNOWN is only for when *nothing* could be determined.
+
+One limit recorded in the sense rather than papered over: `ss -tunp` names a
+socket's owner only for this user's own processes, so **whether the agent is
+uploading is UNKNOWN here**, not "it isn't". A second user's copy of the sense
+cannot answer that without privileges, and saying so beats an empty list.
+
+## Typing into a real desktop app: what actually delivers, measured (2026-10-10)
+
+The delivery problem above ("XTEST exits 0 and nothing arrives") had **two**
+independent causes, and each was found only by running against the live desktop.
+The portal was cleared of a false accusation in the process.
+
+**1. `xdotool search` returns Mutter's decoration frame, not the app.** Slack's
+window is `10485898`, whose `WM_CLASS` is `"mutter-x11-frames"`; the real client
+is its child `6291460`, carrying `WM_CLASS "slack","Slack"`. `windowfocus` on the
+frame never moved focus; `windowfocus` on the client did, and the text landed on
+the next attempt. `xdotool windowactivate` fails on both with
+`XGetWindowProperty[_NET_WM_DESKTOP] failed`. `_client_window()` resolves the two,
+keyed on `xprop -id ... WM_CLASS`.
+
+  **Two bugs the unit test could not see, both found by running it:**
+  - **`xdotool getwindowclassname` does not exist in this build** ("Unknown
+    command", rc=1) and returns *empty* rather than failing loudly, so the first
+    version decided every window was its own client - the resolution was dead
+    code, and the test passed because its fixture supplied a value a real run
+    could never produce. The test now mocks `subprocess.run` and asserts the
+    `xprop` argv, and reverting to the nonexistent verb fails it.
+  - **`xwininfo -tree` prints hex** while every `xdotool` call here speaks
+    decimal, so returning its child verbatim (`0x600004`) broke every downstream
+    lookup in a way that reads as "the window has gone".
+
+**2. X focus and compositor focus are different things, and only one is enough.**
+`getwindowfocus` reported the right window while `getactivewindow` reported
+Mutter's guard window (4194307) - and every keystroke went to whatever window the
+compositor actually held (a terminal). The existing test asserted the opposite,
+on the reasoning that the compositor "lies"; it does not lie, it answers a
+different question, and it is the only signal that says whether keys land.
+`_focus_the_window` now checks both, and the refusal names the two ways out
+instead of saying "focus failed".
+
+**Why focus cannot be forced from the X side, and what does work.** Measured on
+GNOME Shell 50.1: `_NET_CLIENT_LIST_STACKING` showed Slack's client frontmost
+*of the X clients*, while `getmouselocation` at the point being clicked reported
+window `1024` (a Mutter internal window) - a native Wayland surface was covering
+it. Two stacking domains; only gnome-shell moves a window between them. And
+GNOME 50.1's `org.gnome.Shell` exposes **zero methods** - no
+`Application.Activate`, no `FocusApp` - so the only programmatic route is this
+repo's own extension (`chronoa-windows@shani.dev`), whose header already says it
+exists for this reason. `_focus_via_shell()` calls it first when the title
+matches; enabling it remains the person's decision.
+
+**The portal was wrongfully accused, twice.** It was recorded as "accepts a
+session and then stalls". Measured: the backend is **version 2**, and
+`persist_mode=2` plus a stored restore token meant the session was **granted in
+0.0 s with no dialog at all**. What it lacks is *targeting* - like uinput it is
+session-wide, so it delivers to whatever the compositor has focused. Both routes
+therefore need the same focus fix, and neither removes the guard.
+
+**Which injector, per the ArchWiki automation list, measured here:**
+
+| tool | verdict |
+|---|---|
+| **ydotool** | **works** - uinput, so events enter as real hardware input |
+| `wtype` | **cannot** - needs the virtual-keyboard protocol; `wayland-info` counts **0** on Mutter |
+| `wlrctl` | cannot - wlroots-only (foreign-toplevel/virtual-pointer), Mutter implements neither |
+| `python-keyboard`/`mouse` | not installed; same `/dev/uinput` requirement, plus global hooks needing root |
+
+`ydotool type` also has a spelling trap: this build accepts **only** the short
+options (`-d`, `-H`), and `--delay` is refused outright - the whole invocation
+fails, so it types nothing while looking like a success.
+
+**Two deployment facts, because the mechanism does not work without them.**
+`ydotool.service` is `UnitFileState=enabled` but **`ActiveState=inactive`** -
+enabled is not running, and the daemon present here was started by hand from a
+shell. And `/dev/uinput` is `root:input`, so this route needs **membership of the
+`input` group**, which a stock desktop user does not have. The driver therefore
+falls back to XTEST when `ydotool` is absent, which is also the only route inside
+a container's X display.
+
+**Read-back needed a second reader.** Slack publishes **zero** editable AT-SPI
+nodes, with or without a dialog open (Chromium builds its tree only for an
+announced assistive technology), so `_read_focused_text` returns `""` and
+delivery could never be confirmed. `type_text` now falls back to OCR of the
+window - which is what actually read `test message` back out of the composer.
+
+**Also worth knowing:** the ArchWiki records that **Electron has used Wayland by
+default since 38.2**, so a newer Slack would be a native client with no X window
+at all - which is the case the portal path exists for, and the one this driver
+takes when `find_window` returns nothing.
+
+**Which injector, researched rather than guessed (2026-10-10, later).** The
+ArchWiki's automation list is the authority, and each entry was checked against
+this box rather than assumed applicable:
+
+| tool | verdict, measured here |
+|---|---|
+| **ydotool** | works - uinput, so events enter as real hardware input |
+| **RemoteDesktop portal** | works - backend **v2**, granted in **0.0 s**, no privilege |
+| `wtype` | **cannot** - needs `zwp-virtual-keyboard`; `wayland-info` counts **0** |
+| `wlrctl` | cannot - wlroots-only; Mutter implements neither virtual-input nor foreign-toplevel |
+| `python-keyboard`/`mouse` | not installed; same `/dev/uinput` need, plus global hooks |
+
+**The portal is the better default on GNOME, and the reason is structural.** Every
+input protocol that could *target* a window (`zwp-virtual-keyboard`,
+`wlr-virtual-pointer`) is wlroots-only, so on Mutter there is no such protocol at
+all - which is why `wtype` cannot work here and why Chromium ships its own
+`remoting/tools/wdotool.py` built on "Gnome Remote Desktop and libEI APIs" for
+this exact job. `libei`/`EIS` is the successor (`RemoteDesktop.ConnectToEIS`,
+added in RemoteDesktop **v2**, which this portal reports); no `eis-0` socket
+exists here yet, so the portal's fd handover is the route, and `liboeffis` is
+the wrapper for it. Two limits recorded rather than discovered later:
+`NotifyKeyboardKeysym` does not type a character directly - it hands the
+compositor a keysym that is looked up **in the active keymap**, so characters
+absent from the layout are silently dropped (ASCII is fine) - and the portal is
+still **session-wide**, so it inherits uinput's one real limitation: it delivers
+to whatever the compositor has focused.
+
+So `type_text` now tries **portal → ydotool → XTEST**, **verifying after each**
+and naming the one that worked, rather than trying them blind and claiming the
+last. That ordering is by what the platform sanctions, not by what happened to
+work on one box: uinput delivers, but it arrives as hardware input *without* the
+compositor's access control ever seeing it, which is the thing Wayland's model
+exists to police.
+
+**And the window-stacking question is settled the same way.** `wdotool`'s own
+compatibility table marks `search`, `getactivewindow`, `windowactivate` and
+`windowclose` as **absent on every input backend** (libei, wlr-protocols, KDE,
+GNOME, uinput) - no input protocol can raise a window, because that is the
+compositor's authority and only the compositor grants it. KDE's door is kwin
+scripting over D-Bus; GNOME 50.1's `org.gnome.Shell` exposes **zero methods**,
+so this repo's existing extension is the only one. Which is why the focus guard
+exists at all, and why its refusal names the extension rather than saying
+"focus failed".
+
+Two things this research corrected in this file's own earlier claims: the portal
+was recorded as stalling (it does not - `persist_mode=2` plus a restore token
+means no dialog after the first consent), and uinput was treated as *the* route
+(it is the fallback; it needs the `input` group, which a stock desktop user does
+not have, and its `ydotool.service` here is `enabled` but **inactive**, started
+by hand from a shell).
+
+## The portal works, and it could never type a space (2026-10-10, correction)
+
+**This corrects two claims made earlier in this same session, both of which were
+wrong and both of which I believed for several hours.**
+
+**1. "The portal does not deliver" is false.** It delivers, and it is the route
+that works. Proven by read-back on this box: `ZZPORTALMARK` appeared in Slack's
+composer (a before/after OCR diff), `zzdirect` appeared as `zadirect`, `ab cd`
+appeared as `ab cq`, and `test message` was read back **exactly**.
+
+**2. Why it looked broken: `keysym_for()` could not type a space.**
+```python
+t = token.strip()          # " " becomes ""
+if t.lower() in KEYSYMS:   # so "space": 0x20 is never reached
+    ...
+if len(t) == 1:            # and "" is not length 1
+    ...
+raise ValueError(...)
+```
+`type_text("test message")` raised `ValueError: ' ' is not a key name`
+**before sending a single keystroke**, and `portal_type` turned that into a
+`GuiUnavailable` which the route loop reported as a route that could not run.
+Every single-word probe typed fine, which is exactly why it read as "the portal
+is broken here" rather than "the portal cannot type a space". The fix is to test
+length on the **unstripped** token first. **`test message` now types.**
+
+**3. A third false signal: OCR mangles single characters.** `zzdirect` reads as
+`zadirect`, `ab cd` as `ab cq`. Since the read-back is the only evidence of
+delivery, an exact substring test rejects text that demonstrably arrived - and
+the driver then blamed every route in turn. `_matches()` allows **one**
+differing character and no more: a reader that accepted more would confirm text
+that never arrived, which is the rc=0 lie wearing the costume of proof.
+
+**4. Re-focusing a window that is already focused breaks what follows.**
+`_focus_the_window()` returned success on an already-active window and the click
+and keystrokes after it went nowhere - the app's internal caret is disturbed and
+not restored by the click that follows. It now asks "is this already the focused
+window?" **first** and touches nothing if so.
+
+**The recipe that works, and it is not a privileged one:** `flatpak run
+com.slack.Slack` (a second launch request makes the running instance raise its
+own window - no extension, no D-Bus, no X-side trickery) -> confirm
+`getactivewindow` is the *client* 6291460, not the guard -> click the composer
+-> type through the portal. `type_text()` still does not confirm as a single
+call although each of its steps does when run separately; the click point, the
+re-focus and the cue layer have each been ruled out by measurement, and what
+remains is **not yet identified**. Recorded as open rather than guessed at.
+
+## The cue layer's cursor, found by rendering it and looking (2026-10-10)
+
+Reported as *"the cursor isn't good"* and *"the blue box is at a different
+location"*. Both are invisible by reading the code; both are obvious in one
+render. The sprite was rasterised to a PNG at 12x and looked at.
+
+**1. The glyph had no antialiasing at all.** One sample at each pixel's centre,
+written as fully on or fully off, so both diagonals of the arrow were a hard
+staircase - at 1:1 that reads as *broken*, not as *plain*. Now
+`_POINTER_SAMPLES` squared subsamples per pixel with the colour averaged and
+alpha as coverage: **81 of 263 edge pixels are partially transparent**, and the
+edge blends with what is behind the layer.
+
+**2. The quad was not an arrow.** Rendered, the old
+`((3, 2), (10.5, 21), (13.1, 13.4), (21, 11))` is a lopsided blob - the fourth
+corner sat almost level with the third, so the head was barely wider than the
+tail, and at 22px both the head and the tail were **flush against the sprite
+edge** (`right: 0`, `bottom: 0`), so the shape was being cut off square. Redrawn
+at 24px with standard arrow proportions.
+
+**3. The label was in two places at once, which is the whole of the second
+report.** `snapshot.append_layout()` takes **no position** - it draws wherever
+the snapshot has been translated to. The old `draw_tag` drew the blue box at a
+fixed `+16, +16` and the text at `0, 0`, so the word landed on the cursor's tip
+and the box floated off beside it: the label and its own background were never
+in the same place. Moving the offset could never have fixed it, because the two
+were never related. Box and text now share one origin, translated *into* the
+box, and the offset is derived from `POINTER_SIZE` so redrawing the glyph cannot
+strand it again.
+
+**What the tests hold, and what they honestly do not.** Three properties are
+pinned: antialiasing (a real count of partially transparent pixels), the glyph
+not being clipped by its own sprite, and the label starting beyond the sprite's
+width. All three fail when their defect is restored - measured, 2/1/1 failures.
+
+**The silhouette itself is not pinned, because no cheap number distinguishes
+it.** The first attempt compared head-width to tail-width and set the threshold
+at 2x; measuring both shapes showed the ratio is **exactly 2.0 for both**, so
+that test passed the blob and failed the arrow - "a check that cannot tell the
+two apart is not a check". The clipping test also cannot distinguish them now
+that the sprite is 24px and the old quad fits inside it. So the outline is
+held by the render, and the guards are antialiasing, clipping and placement.
+The tip is deliberately **exempt** from the clipping margin: a pointer's tip is
+its bounding-box corner because it is the hot spot, and nudging it inward would
+make the drawn arrow point somewhere other than where the click lands.
+
+## Clicking a real desktop app: full-screen OCR, not the window's (2026-10-11)
+
+**The window capture is the wrong coordinate space, and it cost an afternoon.**
+`import -window <id>` gives pixels in the *window's* space; turning those into a
+screen coordinate means adding a window origin, and on GNOME that origin is the
+**decoration frame's**, which sits above the app's own client and **moves**.
+Measured on Slack's window: frame at (67,32), client at (67,106) in one run and
+(67,69) in another - the same window, 37px and 74px of disagreement. A click
+computed from a window capture was landing **37px off**, which is most of a
+sidebar row.
+
+**A full-screen capture has no such arithmetic.** The Screenshot portal
+(`org.freedesktop.portal.Screenshot.Screenshot`, signature `(sa{sv})` - the
+**parent window argument is required**, and omitting it is an `InvalidArgs`, not
+a default) writes a real **1920x1080 PNG** to `~/Pictures/Screenshot-N.png`.
+OCR of that yields **absolute screen coordinates** with nothing to add.
+
+Measured, same target, same moment:
+
+| source | point for Abdul Bijur | result |
+|---|---|---|
+| window capture + client origin | (213, 819) | 37px low, **wrong row** |
+| full-screen OCR | **(213, 782)** | **`title` became `Abdul Bijur (DM)`** |
+
+**Three other full-screen routes are dead here, each measured rather than
+assumed:** `import -window root` fails ("missing an image filename"), `grim` says
+"compositor doesn't support wlr-screencopy-unstable-1", `xwd` is not installed,
+`gnome-screenshot` exits having written nothing, and the private
+`org.gnome.Shell.Screenshot.Screenshot` answers **"Screenshot is not allowed"**
+- it is locked like `org.gnome.Shell.Eval`. The **portal** is the one that works,
+which is the same answer the typing route gave.
+
+**And the portal's file must be found by mtime, not by "a new file appeared"** -
+it reuses `Screenshot-N.png`, so a set-difference against the previous listing
+finds nothing and the first version of this raised `TypeError: expected str ...
+not NoneType` from the copy.
+
+**The click itself is XTEST and it works** - measured with the pointer check
+that matters: `getmouselocation` must report the app's **client** window, not
+`1024` (a Mutter internal window, meaning the point is not over the app at all).
+The driver now resolves the frame to the client before any geometry is read.
+
+Also fixed in the same pass, all mutation-checked or measured: `x_percent` is a
+percentage and `0.079` put the click **0.3 pixels** from the corner while still
+reporting a click (out-of-range values are now refused with the reason);
+`click(button=)` for right/middle; a `scroll()` that glides visibly and then
+wheels **without pressing the left button** first; and `find_window` surviving a
+window that **renames itself** - a chat client titles its window after whatever
+is open in it, so after one click the old title matched nothing and the driver
+reported "no window appeared within 30s" for a window that was on screen. It now
+matches on the workspace+app tail, and **re-queries by the app's class**, because
+`xdotool search --name` takes the title as a regex and so filters the old title
+away before any comparison can happen.
+
+### Why Slack is hard to drive, researched rather than guessed (2026-10-11)
+
+Every desktop-driving failure on this box has one root: **Chromium/Electron
+publishes no accessibility tree unless it believes assistive technology is
+present.** Measured on Slack: **2 named nodes** (`application`, `frame`) - the
+tree exists but holds nothing clickable, which is why `element_box` finds nothing,
+`screen_box` is the only way to locate a row, and every click is a guess about
+coordinates.
+
+The documented ways to change that, from Chromium's and Electron's own docs:
+
+- **`--force-renderer-accessibility`** - *"Force accessibility to be enabled ...
+  for the entire execution."* Confirmed as the blocker by VS Code's issue:
+  Electron apps on Linux are *"not accessible under Orca ... this requires
+  passing a --force-renderer-accessibility command line parameter"*. It is a
+  launch flag, so it means restarting the app with different arguments.
+- **`app.setAccessibilitySupportEnabled(true)`** - Electron's own API, but only
+  callable from inside the app.
+- **`org.a11y.atspi.Registry.RegisterEvent(event, properties, app_bus_name)`** -
+  the registry's own docs: *"This method is to be called **by an AT** to indicate
+  that it is interested in receiving a particular event from applications."*
+  **Measured traps:** the registry is **not on the session bus** -
+  `ServiceUnknown: The name org.a11y.atspi.Registry was not provided` - it lives
+  on the **a11y bus**, whose address comes from `org.a11y.Bus.GetAddress`, and
+  `gdbus` has **no `--address`** (it must be reached through
+  `Gio.DBusConnection.new_for_address_sync`). `toolkit-accessibility` is `false`
+  here.
+
+**So the honest position: this has not been made to work.** The best remaining
+route is `--force-renderer-accessibility`, which needs the app restarted with a
+flag and is therefore a decision about somebody else's app rather than a change
+to this driver. Until an Electron app publishes its tree, driving it is
+necessarily **coordinate-based**, and coordinates must come from a **full-screen**
+capture - see the entry above - with every click read back before it is trusted.
+
+This is recorded as an open problem rather than a solved one. A driver that
+"drives Electron apps" by pixel-guessing is a weaker claim than one that says it
+cannot yet, and only the second is true today.
+
+## Two cursors, and why they were two (2026-10-11)
+
+Reported as *"why two cursors?"* The cue layer **draws** its own arrow and the
+system pointer is the **real** input. The module's own docstring says the two
+"read as one cursor", and that is true only while they are in the same place and
+only while one of them is the glide. At rest with both drawn, a person watching
+sees **two arrows**, which reports as two agents driving the mouse or as the
+machine driving itself twice. Neither is true.
+
+Two separate defects, both fixed and both measured:
+
+**1. The real pointer did not have to land.** `_move_like_a_hand` stopped at the
+first step it could not send — *"a step that cannot be sent stops the path rather
+than jumping the rest of the way"* — which sounds careful and is right about the
+**eased path**, and wrong about **arriving**. Measured before the fix: asked for
+`(213,754)`, the pointer finished at `(202,810)` — **56px** away — and the click
+reported success. It now ends with an exact `mousemove`, retried once, and
+**reads the pointer back** (`getmouselocation`) and returns whether it landed.
+The read-back is what makes the hand-over honest rather than assumed.
+
+**2. The drawn cursor was never retired.** New `hide` command on the cue
+protocol. Once the real pointer has landed, the drawn arrow has nothing left to
+add, so `_hand_over_to_the_real_cursor()` retires it — **but only if it landed**.
+A cursor that failed to arrive stays visible, because hiding the only cursor that
+got there would leave a click looking like it happened somewhere it did not.
+
+Verified on the live desktop through the driver's own `_glide_and_click`:
+
+```
+REAL pointer        : (187,806)  delta from request = (0,0)
+cue layer says drawn: False        <- one cursor on screen
+```
+
+**A ping could not tell "drawn" from "retired", and that was the trap.** After a
+hide the remembered position is exactly where the arrow was retired *at*, so
+`{"ping": True}` reported `(187,806)` either way — and "the second cursor is
+gone" would have been a claim no measurement supported. The reply now carries
+**`drawn`** alongside `pointer`, and a test asserts the two answers differ.
+
+**8 of 8 mutations confirmed to fail** (hide keeps drawing / ping says (0,0) /
+protocol drops `hide` / second glide starts at the corner / driver never retires
+/ a failed arrival is hidden anyway / arrival reported without a read-back / the
+final exact move never sent). **65 tests pass.**
+
+### `WINDOW=1024` — what it means, and why clicks "land and do nothing"
+
+`getmouselocation`'s `WINDOW` is the check this driver has been using to decide
+*"did the point actually land on the app?"*, and **`1024` means it did not**:
+6291460 is Slack's client. Measured this session, **the same coordinate answered
+`6291460` in one run and `1024` in the next**, with nothing in the code
+different — so what is raised over that part of the screen is what decides it.
+
+Window 1024 is **not** the cue layer: it is present with the layer down and up
+alike. It is a permanent **1920x1080 window at (0,0) with no `WM_CLASS` and no
+name** — Xwayland's own host window, which is what an X client sees when no
+other X-mapped window is under the pointer. So the honest reading is the
+negative one: at those moments **a native Wayland surface is covering the
+point**, and no amount of coordinate correctness helps.
+
+**This is the strongest candidate yet for the open "clicks land correctly and
+nothing happens"**, which has survived every other explanation (click point,
+re-focus, cue layer, frame/client arithmetic — each ruled out by measurement).
+The pattern fits exactly: the click arrives, at the right pixel, at a moment
+when the pixel belongs to something else. **Not yet proven** — it needs the
+person to say whether their terminal is on top of Slack at the time, which is
+one observation and settles it. Recorded as the lead, not as the answer.
+
+## Why the clicks did nothing: XTEST never leaves the X server (2026-10-11)
+
+The research answer to the longest open question in this file - *"clicks land on
+the right coordinates and nothing happens"*. It was **never a coordinate
+problem**. OpenJDK's own bug report on the subject (JDK-8280990) states it:
+
+> *"the emulated input event reaches the X11 clients, but not the Wayland
+> compositor which is the actual display server ... **these click events do not
+> leave the XWayland server** and are not reported to the Wayland compositor."*
+
+So `xdotool click` can dispatch, can exit 0, can move the X pointer - and the
+application never sees it. **This desktop is the documented worst case for it.**
+Measured: `/usr/bin/Xwayland :0 -rootless -noreset -accessx -core ... -enable-ei-portal`,
+Xwayland 24.1.10. That flag is the **libei** bridge (GNOME 45 / Xwayland 23.2+),
+so XTEST events are *additionally* forwarded to the compositor through the
+**Remote Desktop portal** - which means they inherit the portal's consent gate.
+The field report of that exact configuration (mutter 45.2, Fedora) is
+`xdotool key` opening a **"Remote Display"** consent window instead of pressing
+the key, and after allowing access once the popup stops while the keys still
+never arrive.
+
+**Fixed: `_pointer_routes()` sends every press through the portal or uinput,
+and XTEST is not in the ladder on a Wayland session.** Same route order typing
+already uses, which is why typing worked and clicking did not. `portal.py`'s
+`RemoteInput` gained the half it never had - `NotifyPointerMotion` (`(oa{sv}dd)`,
+two **doubles**; an `i` is an `InvalidArgs`) and `NotifyPointerScroll`
+(`(oa{sv}idd)`), so `click()` is no longer a click wherever the pointer
+happened to be.
+
+**XTEST is not removed everywhere, and that distinction is the point.** It is
+refused when `WAYLAND_DISPLAY` is set and kept when it is not - because
+`container ... display=x11` hands the inner process `DISPLAY` and **no**
+`WAYLAND_DISPLAY`, and there the X server genuinely is the display server, so
+XTEST is the only thing that can deliver. Reading `XDG_SESSION_TYPE` instead
+would refuse it there too: the over-fix that breaks the one case that works.
+
+### What was actually on screen at the coordinates
+
+The other half, found by OCR rather than reasoning. Full-screen OCR of the
+"sidebar region" returned `deepu`, `Jisha`, `Nevin`, `Abdul`, `github` at
+x~125 - and the surrounding text was **this agent's own terminal**:
+
+```
+Now the real sidebar found a test row,
+/home/shrinivaskumbhar/Documents/shani/shani-chronoa
+$ cd ... find usr -name __pycache__ ...
+```
+
+**The terminal was on top of Slack.** The clicks were landing on the terminal:
+correct coordinates, wrong window. Every time a command runs, the terminal
+raises itself - so *any* click attempted after running a command goes to the
+terminal, which is exactly the pattern observed all session. `WINDOW=1024` in
+`getmouselocation` was the same fact from the other side (1024 is a permanent
+1920x1080 unnamed window at 0,0 - Xwayland's own host window, which is what an
+X client sees when nothing else X-mapped is under the pointer).
+
+**Not a code fix - an observation rule.** A driver that drives a desktop must
+ask what is actually on top, not what should be. Capturing full-screen and
+reading it is the only way; the window's own state is a claim about what *it*
+thinks is above it.
+
+### One capture answers many questions (20 seconds each, measured)
+
+`screen_box` took a fresh `org.freedesktop.portal.Screenshot` **and** a fresh
+full-screen `tesseract` run **per query** - ~20s each, so looking for four
+sidebar rows cost 80s and four chances to catch the screen mid-repaint. That is
+why the session kept appearing to do nothing.
+
+`screen_words(region=None, attempts=2)` now takes **one** capture and returns
+every word as `(x, y, w, h, text)`; `screen_box` is a lookup over them and takes
+`words=` so several lookups share one capture.
+
+Three defects found by hitting it, not by reading it:
+
+- **Tesseract repeats its header row** (`left top width height` a second time),
+  and `int("left")` raises a `ValueError` that is not an OCR failure and was not
+  caught as one - so a perfectly good capture became a traceback that looked like
+  the capture was at fault.
+- **A failed OCR returned `None`**, which is the same answer as "that word is not
+  on screen". A **0-byte `.tsv`** with the image still 1080 rows of real pixels
+  was reported as four confident absences. It now retries and logs tesseract's
+  own stderr, which `capture_output=True` had been swallowing.
+- **`if not found: "the screen was not read at all"`** - found by *reading* the
+  finished code, after several live runs. With a `region` supplied, an empty
+  result is the ordinary correct answer (nothing in that rectangle), and the
+  warning claimed something stronger than anything measured. `read` counts rows
+  *before* the filter, which is what separates "OCR failed" from "nothing there".
+
+**15 tests, 10 mutations, 8 caught on the first pass and the 2 survivors fixed**
+rather than documented - one of them survived because the region test called
+`screen_words` directly and never reached the mutated line inside `screen_box`,
+which is a test that cannot fail wearing a passing one. **81 pass.**
+
+## libei: the actual successor, and why it is not reachable on this box (2026-10-11)
+
+The full research answer to *"how should a Wayland desktop be driven"*, measured
+rather than quoted. **libei is the answer**, and almost everything for it is
+already installed here - which makes the part that is missing worth stating
+precisely.
+
+**The sanctioned chain**, from libei's own README and Chromium's own tool:
+
+- the compositor starts a **libeis** socket at `$XDG_RUNTIME_DIR/eis-0`;
+- `xdg-desktop-portal` exposes **`org.freedesktop.portal.RemoteDesktop.ConnectToEIS`**,
+  authenticates the client and hands over **a file descriptor**;
+- the client speaks the binary `ei-packet` protocol over it and asks for devices
+  with `pointer` / `keyboard` / `touch` capabilities.
+
+**Chromium ships this exact tool** - `remoting/tools/wdotool/wdotool.py`, *"a
+simple replacement for xdotool suitable for Wayland desktops ... uses Gnome
+Remote Desktop and libEI APIs"* - and `cushycush/wdotool` is a maintained
+xdotool-compatible CLI with `libei` / `wlroots` / `kde` / `gnome` / `uinput`
+backends. A project's own input tool is the strongest available statement that
+this is the sanctioned route.
+
+### Measured on this machine
+
+| thing | result |
+|---|---|
+| `ConnectToEIS` on the portal | **present** in `RemoteDesktop` (alongside `NotifyPointerMotion`, `NotifyPointerButton`, `NotifyPointerAxis`, ...) |
+| `libei.so.1` (client) / `libeis.so.1` (server) | **both installed**, 1.5.0 |
+| mutter | 50.1 - far past the GNOME 45 floor for the XTEST bridge |
+| Xwayland | 24.1.10, and its own `--help` says `-enable-ei-portal  use the XDG portal for input emulation` |
+| gnome-shell | **links libeis**; libmutter has **94** EI symbols |
+| `$XDG_RUNTIME_DIR/eis-0` | **absent** |
+| `ConnectToEIS` reply | **fd 0** - the method is advertised and returns no connection |
+| `xdg-desktop-portal-gnome` | 50.0; knows the string `ConnectToEIS`, and links **0** libeis |
+
+**So: everything is installed and nothing is connected.** The compositor half is
+real (gnome-shell links libeis, mutter carries the symbols) and the **portal
+half is the missing piece** - `xdg-desktop-portal-gnome` exports the method name
+and does not link the library. That is the *"a name in an interface that answers
+with nothing"* class this file records elsewhere, and it is why a lookup for
+`eis-0` is **not** the test: the socket is absent *and* the fd route returns 0,
+so the socket was never the door.
+
+**Corrects an earlier entry in this file**, which recorded *"no `eis-0` socket
+exists here yet, so the portal's fd handover is the route"* as though the socket
+were the blocker. It was never the blocker, and the fd route is **also** closed.
+
+**What this leaves.** Portal `NotifyPointerMotion` / `NotifyPointerButton` and
+uinput are what actually work here, which is what `_pointer_routes` uses. Both
+are **session-wide** - they deliver to whatever the compositor has focused - so
+**the focus step is not optional on either**, and that is the same finding the
+RemoteDesktop portal raised earlier, now confirmed from the other direction.
+
+**On a machine with the full stack the ranking changes**, and it is worth
+recording so this is not mistaken for a permanent verdict: libei > portal > uinput,
+because libei goes through the compositor's own input path *and* can be given
+`pointer absolute` devices, so it is the only route that both targets correctly
+and needs no `input` group membership.
+
+## Why the cue layer was never visible, and the 116-process leak (2026-10-11)
+
+The person watching said *"the feedback cursor isn't visible"*, which this file
+had flagged as unverified three times. It was not a subtle bug. **The cue layer
+was never capable of being seen.**
+
+**A plain `Gtk.Window` cannot draw above another application on Wayland.**
+`main()` built one with `set_decorated(False)` and `set_default_size(...)` -
+and **`set_default_size` sets a size, not a stacking level**. A Wayland
+compositor puts ordinary windows at the **bottom** of the stack, so the layer
+drew underneath the app it was supposed to annotate. Nothing in GTK4 or Xlib
+can raise one; the only mechanism Wayland offers is a **layer-shell surface**,
+and it is compositor-specific.
+
+**Measured: `GtkLayerShell` is not installed here** (`Namespace GtkLayerShell
+not available`, no `libgtk-layer-shell.so`), so there is no fallback that
+works. `_make_it_a_layer()` now configures a real layer-shell surface when the
+typelib is there and **returns `False` when it is not**, and `main()` says so
+on stderr rather than pretending. `start_cue()` returns the same caveat, so a
+caller that asks can tell its driving is real and its *feedback is invisible*.
+
+**`present()` was the second half of it**, and it is worth separating from the
+first because both are wrong in the same direction. `present()` maps **and
+focuses**. Focusing a click-through layer steals the keyboard from the app being
+driven - the one thing this module exists to avoid. Now `show()`, never
+`present()`, and the rule is in `_show_unlayered()` where it can be tested.
+
+### 116 processes, and why
+
+`start_cue()` reused a layer from `_CUES`, **a per-Python-process dict** - so a
+layer started by one driving process was invisible to the next, and every
+process spawned its own, all racing to `bind()` the same path. **Only the first
+can bind.** Measured after one session: **116 processes**, the socket owned by
+the oldest of them, hours stale, the other 115 running forever having drawn
+nothing.
+
+Now `start_cue()` **asks the socket** (`_cue_answers()` pings it) rather than
+consulting a dict - the check that matches what is actually true - and
+`show_window()` no longer unpacks `start_cue`'s `(proc, why)` into a variable
+called `socket` and sends the highlight to `""`.
+
+**A `pgrep -f 'chronoa-cue-container'` killed my own shell**, because the
+pattern matched its own command line - the workspace AGENTS.md trap, reached
+again by a different route. `[c]hronoa-cue-container` fixes the self-match and
+excluding `$$` is what makes it safe.
+
+**10 tests, 7 mutations. Two survived the first pass and both were tests that
+could not fail**: `main()` opens a GTK main loop, so no test in the file
+reaches the `present()` decision - it is now `_show_unlayered()`, separately
+callable. And the mutation detector itself was one: it counted `FAILED` lines,
+so a mutation producing an `ERROR` read as "survived". It counts both now.
+
+### The cue layer **does** draw - measured, and I nearly said it did not twice
+
+Correcting two wrong claims from this same session, both of which I stated
+before checking properly.
+
+**Wrong #1: "the cue is still not drawing".** A before/after full-screen diff
+found the change was a diffuse `(41,41,41) -> (34,34,34)` darkening over
+`x 92..835, y 80..1049` - not a drawn border - so I concluded the layer was not
+drawing what it was told, and I checked the two rows I had asked for and found 0
+differing pixels of 1920. **That second check was the broken one**: it took "the
+two most recent `Screenshot-*.png` by mtime", which were not the before/after
+pair, so it compared two unrelated captures.
+
+**What the whole-screen search actually shows**, searching every pixel rather
+than a region I had guessed:
+
+```
+   76118 px   (34, 34, 34)   -> (44, 44, 44)
+    5845 px   (10, 10, 10)   -> (53, 132, 228)     <- CUE_BLUE
+```
+
+`CUE_BLUE` is `0x35 / 0x84 / 0xE4` - **the cue's own colour out of this
+module**. 5,845 pixels changed to exactly it when a highlight was sent. **The
+cue layer draws.** A threshold like `> 200 changed pixels` reported it as
+success; a region I picked myself reported it as failure. Neither measured the
+thing.
+
+**Wrong #2: "you will not see it".** An over-claim, and it is now corrected in
+`_CUE_LAYER_CAVEAT`. The layer draws **and** `present()` raises it. What it
+cannot do is **stay** on top: it is an ordinary `Gtk.Window`, and an ordinary
+window is raised over by anything else that asks. Measured as the same probe
+returning **0** cue pixels on a second run with nothing changed except that a
+terminal - running the probe - had raised itself since. **The probe that proves
+the cue is visible is the same probe that hides it**, which is the whole problem
+in one sentence.
+
+**So the honest state:** visible until something raises itself; and the thing
+that reliably does is a terminal, including this agent's own. Only a
+**layer-shell surface** cannot be covered, and `GtkLayerShell` is measured
+absent. `_make_it_a_layer()` is the fix on any machine that has it.
+
+### "chronoa name not in the blue box" - it was never drawn, not misplaced
+
+Reported against the highlight's name tab. **It is not a positioning fault:
+there was nothing in the box to be misplaced.** `draw_highlight` measured the
+label, filled and outlined a box around that measurement, and never drew the
+label.
+
+**And it could not draw it.** `_pango_layout()` reached for
+`Pango.FontMap.get_default()` - and **this PyGObject has no static `get()` or
+`get_default()` at all** (measured: both `AttributeError`, and
+`dir(Pango.FontMap)` confirms neither exists). So the function hit its own
+`except Exception` and returned `None` **on every call**, and `layout_size()`
+fell through to its character-count guess.
+
+**The guess is why nobody noticed**: for this label it returns **47x13** against
+a real **43x10**. Close enough that the box looked right in every screenshot,
+and the tab had been an empty blue rectangle for as long as it existed.
+
+A widget's own `create_pango_layout` is the route that works, and it is measured
+(43x10). `layout_size` uses that now.
+
+**Verified by rendering the real cue and counting pixels**, which is the only
+way to see this - `blue pixels above the window's top edge: 1498`, `white
+pixels above the window's top edge: 191`. Before the fix the second number was
+**0**. The pointer's own tag was checked the same way: **83 px inside its box**,
+with the **44 white px outside it correctly identified as the cursor arrow's own
+white centre** - my first probe counted those and reported "text is OUTSIDE the
+box" while the name was sitting in it. A third wrong verdict from the same
+measurement, and the same lesson: **count the thing, in the place it should be.**
+
+Two other bugs on the way, both of which had been hiding this one:
+
+- `_CueArea.do_snapshot` built a **fresh layout every frame** and measured it
+  immediately, and a layout that has never been through a render pass reports
+  **`get_pixel_extents() == 1x1`**. It is built once now.
+- `get_font_description()` returns **None** on a layout nobody has styled, so the
+  guard that was there meant the 11px bold was **silently never applied**.
+
+**29 tests in the overlay file, 5 mutations. Two survived and both were
+mutations I had aimed at a file I had not changed** - the first pair's anchors
+did not exist, which the runner reported as an assertion rather than silently.
+
+### The cue layer is now on screen, and it was three separate faults
+
+Measured on the live desktop at the end, through the driver's own
+`show_window()` and a `glide`, then a full-screen capture:
+
+```
+cue-blue pixels on the live screen : 12632   (x 11..1906, y 13..1046)
+white pixels in the name-tab strip :   450   <- the word "Chronoa"
+VERDICT: THE NAME IS VISIBLE ON SCREEN
+```
+
+Three faults stood between that and an empty screen, and **each one hid the
+next**, which is why each was found only after the previous was fixed:
+
+1. **`Pango.FontMap.get_default()` does not exist in this PyGObject** (nor
+   `get()`), so the highlight's tab drew a box from a character-count guess and
+   **never the name**. See the entry above.
+2. **`do_snapshot` built a fresh layout every frame** and measured it before
+   its first render pass, which reports `get_pixel_extents() == 1x1`.
+3. **The window got raised over** by anything else that asked - measured as the
+   same probe returning 0 cue pixels on a second run with nothing changed except
+   that a terminal had raised itself since. Now `apply()` sets a flag for any
+   message that draws, and `_frame()` re-presents **at most once per tick** -
+   coalesced because a 0.55s glide is ~33 frames, and on the main loop because
+   `apply()` runs on the socket thread where touching a GTK window is unsafe.
+
+**One mutation survived the first pass and it was the same failure as the
+session before**: `main()` opens a `GLib.MainLoop`, so no test could reach the
+tick, and removing `service_window()` from it left the file green. The tick is
+now `_frame()`, separately callable, and asserts both that it presents and that
+it returns `True` - **a falsy return silently stops the GLib timeout**, so the
+layer would draw one frame and then go quiet for good, with nothing logged.
+
+**Still the honest limit:** this is still an ordinary window. It is raised, and
+it comes back when a cue asks - but a window raised *while nothing is being
+drawn* covers it, and only a layer-shell surface cannot be covered.
+`gir1.2-gtklayershell-0.1` and `libgtk-layer-shell0` (0.10.0-1) are available
+in `resolute/universe` and `_make_it_a_layer()` already implements the whole
+protocol; **installing them is a root action and is the person's call.**
+
+### gtk-layer-shell: three faults, none of which was "it is not installed"
+
+Installed on this box and measured. **It still did not work**, and the code was
+wrong three times over rather than the machine:
+
+1. **`require_version("GtkLayerShell", "1")` - the namespace version is
+   `"0.1"`.** The typelib on disk is `GtkLayerShell-0.1.typelib`, so asking for
+   `"1"` raises `Namespace GtkLayerShell not available for version 1`, which an
+   `except Exception` swallowed and reported as *"gtk-layer-shell is not
+   installed"* on a machine where it **was** installed.
+2. **Ubuntu's `gir1.2-gtklayershell-0.1` is the GTK 3 build**, and it cannot
+   load in a GTK 4 process at all:
+   `ImportError: Requiring namespace 'Gtk' version '3.0', but '4.0' is already
+   loaded`. The package for a GTK 4 app is **`gir1.2-gtk4layershell-0.1`** with
+   **`libgtk4-layer-shell0`** (1.3.0-1) - a different pair entirely, and
+   `libgtk-layer-shell.so.0` is measurably `ldd`'d against `libgtk-3.so.0`.
+3. **Calling the C library with ctypes is not a workaround**, and the failure
+   looks like success until you read the warnings. Loading
+   `libgtk-layer-shell.so.0` pulls GTK 3's GObject type system into a GTK 4
+   process: `cannot register existing type 'GtkWidget'`, `cannot add class
+   private field to invalid type`, and the window never becomes a layer
+   surface. **Two GObject type systems in one process is not a degraded mode.**
+
+**Also measured, because it looked like the cause and was not:** layer-shell is
+a **Wayland** protocol, so forcing `GDK_BACKEND=x11` in a probe makes
+`init_for_window` a no-op and `get_layer` return `TOP` - the window looked
+layer-shaped and was not.
+
+`_make_it_a_layer()` now logs **the reason**, not just the fact, because "it is
+not installed" and "it is the wrong major version" need opposite fixes. The
+test asserts the message names the GTK 3/4 distinction, and the first version of
+that test captured `records == []` - **`logging.info` is filtered at the root
+logger (default level WARNING) before any handler sees it**, so attaching a
+handler is not enough and the test passed for the wrong reason until it did not.
+
+`sudo apt install gir1.2-gtk4layershell-0.1 libgtk4-layer-shell0` is the
+remaining root action.
+
+### The GTK4 typelib package is `gir1.2-gtk4layershell-1.0` - a different *namespace*
+
+Measured on Ubuntu 26.04 (`resolute`) by reading both debs' file lists rather
+than by trying names:
+
+| typelib file | namespace | package | GTK |
+|---|---|---|---|
+| `GtkLayerShell-0.1.typelib` | `GtkLayerShell` **0.1** | `gir1.2-gtklayershell-0.1` | **3** (`Depends: gir1.2-gtk-3.0`) |
+| `Gtk4LayerShell-1.0.typelib` | `Gtk4LayerShell` **1.0** | `gir1.2-gtk4layershell-1.0` | **4** |
+
+**So it was never a version typo - it is a different namespace name.** The GTK 3
+typelib cannot load in a GTK 4 process (`ImportError: Requiring namespace 'Gtk'
+version '3.0', but '4.0' is already loaded`), so asking for `GtkLayerShell` in a
+GTK 4 app is asking for the wrong library, not the wrong version of the right
+one. Both spellings are tried, GTK 4 first, because some distributions ship a
+GTK 4 build under the older name.
+
+The runtime package is `libgtk4-layer-shell0` (1.3.0-1, `Depends: libgtk-4-1`).
+Both are in `resolute/universe`:
+
+    sudo apt install gir1.2-gtk4layershell-1.0 libgtk4-layer-shell0
+
+**Neither name is guessable.** The four candidates I checked
+(`gir1.2-gtk4layershell-0.1`, `-0.4`, `gir1.2-gtk4-layer-shell-0.1`,
+`gtk4-layer-shell-gir`) all returned **no candidate at all** - only
+`apt-cache dumpavail` surfaced the real one, because it is named from the
+namespace rather than the library. The typelib inside is 5,140 bytes and
+installs exactly one file.
+
+### The answer, at last: Mutter does not implement layer-shell, and never has
+
+With `gir1.2-gtk4layershell-1.0` and `libgtk4-layer-shell0` installed, the GTK 4
+namespace loads cleanly and `_make_it_a_layer()` runs - and then the library
+says:
+
+```
+Failed to initialize layer surface, it appears your Wayland compositor doesn't
+support Layer Shell
+GtkWindow is not a layer surface. Make sure you called gtk_layer_init_for_window()
+```
+
+**`zwlr_layer_shell_v1` is a wlroots/KDE protocol. GNOME's Mutter has never
+implemented it.** No package installs that, and none ever will - which makes the
+whole layer-shell path a dead end on this desktop and not a matter of versions.
+
+**Two real bugs fell out of the attempt, both worth keeping:**
+
+- **`gtk4-layer-shell` must be linked *before* `libwayland-client`**, or the
+  layer surface silently fails to initialise. Its own warning says so, and it is
+  not advisory - the protocol needs a `wl_registry` that is still open when the
+  library initialises. This **cannot be fixed from inside a running process**
+  (the loader decides before `main()`), so `usr/bin/shani-chronoa-overlay`
+  **re-execs with `LD_PRELOAD`**, guarded on a marker so it cannot loop, and
+  skipped entirely when the library is absent. Measured: the warning goes from
+  present to **0 occurrences**.
+- **`set_keyboard_interactivity()` does not exist in 1.x** - the GTK 3 way of
+  saying "this layer takes no keys" became a *mode*. Calling it was an
+  `AttributeError` that took the whole layer down: **`exit=1`, socket never
+  created**, so the driver got no cue layer rather than a degraded one.
+
+**`get_zwlr_layer_surface_v1()` is now the success test**, because
+`init_for_window()` returning is not - it returns whether the *call* worked, not
+whether the *compositor* agreed. Returning True over an unlayered window is the
+one lie this function must never tell, and it is exactly what it used to do.
+
+**So the answer on this desktop is the fallback**: an ordinary window, raised
+again on every cue. Verified live - 12,632 cue pixels and 450 of them the word
+"Chronoa" - and the re-raise means it survives the terminal that would otherwise
+cover it. On a wlroots or KDE compositor the same code takes the layer path with
+no changes at all.
+
+### The 30-second pair WAS the flake's neighbour, and both are fixed (2026-10-11)
+
+Following the unexplained correlation rather than shrugging at it.
+
+`type_text()` called **`find_window()` before it consulted the communication
+gate**, so with no window present it sat in `_WINDOW_TIMEOUT` - **30 seconds,
+measured** - and only then refused. Two tests spent exactly 30 s each on it.
+
+**A consent gate that takes 30 seconds to say no is a gate that looks like a
+hang**, and that gate exists precisely to stop a keystroke leaving the machine.
+`_comms_app()` reads the app's frame title from the accessibility tree, so it can
+answer "is this a chat surface?" **without a window** - and whether that answer
+changes while a window search runs is not a question worth 30 seconds.
+
+The gate is now settled first. `tests/test_ui_driver.py`: **62.1 s -> 0.7 s**,
+and the whole three-file sweep **65 s -> 4.6 s**.
+
+**That is very likely the flake too, and it is not proven.** The two recorded
+failures were both in *fast* (~4.5 s) runs, which is the mode where those tests
+refused without hitting the 30 s timeout. The mode no longer exists - every run
+is now the fast one - and **8 of 8 full sweeps pass**. The condition that
+correlated with the failure is gone, which is evidence rather than proof, so it
+is recorded that way.
+
+Mutation-checked: moving `find_window()` back in front of the gate fails
+`test_the_consent_gate_never_waits_for_a_window`, which asserts the search is
+never made at all.
+
+
+### Ubuntu's dock and top bar are in the geometry, and not in anything else
+
+Asked directly - *"are you taking into account Ubuntu's sidebar and top bar?"* -
+after hours of clicking that did nothing. **They were accounted for
+geometrically and nowhere else.** Measured off a real capture, not a screenshot
+of the developer's memory:
+
+| | extent | colour at that spot | in the window box? |
+|---|---|---|---|
+| Ubuntu Dock (`ubuntu-dock@ubuntu.com`) | `x 0..~64` | `(94,39,80)` | yes - Slack's client starts at x=**67** |
+| Top bar | `y 0..~30` | `(19,19,19)` | yes - Slack's client starts at y=**106** |
+
+`window_box()` returns the **client**, so both offsets are already in it, and a
+click at x=214 is 150px clear of the dock. **Two things that is not enough for:**
+
+- **`dash-to-dock intellihide = true`, `autohide = true`, `dock-fixed = true`.**
+  Conflicting settings where the fixed dock wins, but `intellihide` means the
+  dock **slides out over content**. A glide that passes within `x < 64` can pop
+  it out over Slack's left edge - which is where the sidebar is. Nothing in the
+  driver accounts for that today.
+- **Both are drawn by GNOME Shell**, so the cue layer's ordinary window draws
+  **underneath** them: anything the layer paints in `x < 64` or `y < 30` is
+  invisible. That is a third concrete reason the layer wants to be a real
+  layer-shell surface, and Mutter cannot provide one.
+
+**And the thing they do _not_ explain**, recorded so it is not conflated with
+them: the click blocker is compositor focus. Measured at the same moment:
+
+    getmouselocation at (214,874) : WINDOW=1024    (not Slack's client)
+    X active window               : 2097155        (not Slack's 12582916)
+
+**Neither the dock nor the top bar is at fault for a click at (214,874) whose
+pointer is provably on the target.** The dock can cover the left edge; the top
+bar can cover the top; **focus is what decides where a portal or uinput click
+actually goes**, because both are session-wide.
+
+## Four defects the full-suite sweep found, all of them real (2026-10-11)
+
+A whole-suite run after the `gsettings` fix: **7843 passed, 6 failed**. Two were
+the environment, four were not, and all four are the same shape this file keeps
+recording — a test that was **describing a machine that does not exist**.
+
+### 1. The Wayland clipboard argv was X11's, so the whole skill was broken there
+
+`clipboard.py` built `[tool, "-selection", "clipboard", "-o"]` — xclip's form —
+for whichever tool `_detect_backend()` returned, at **all three** call sites
+(`get_clipboard`, `set_clipboard`, and the post-condition that verifies the
+write). On Wayland that runs `wl-paste -selection clipboard -o`, and
+`wl-paste --help` has neither flag: it takes `--no-newline` and `--type`.
+Measured on a real Wayland session:
+
+    /usr/bin/wl-paste: invalid option -- 'o'
+
+So `get_clipboard` answered *"The clipboard is empty."* for a clipboard that had
+just been written — an rc-non-zero is read as "empty", which is the
+absence-shaped wrong answer — and the **post-condition then verified the read it
+had just failed**, so a successful write was reported as a failed round trip.
+Two defects in one argv: the flags are wrong, and the failure is misread as
+data. **Wayland is ShaniOS's own session type**, so this was the shipped path,
+not an edge case; it was invisible because the unit tests stub the backend and
+the two live round-trip tests only run where the tools are installed.
+
+`_read_argv` / `_write_argv` now hold each session's flags in one place, and
+`TestTheClipboardArgvIsPerBackend` (6 tests) pins them — including that the two
+backends never share an argv, which is the property that was violated. Mutation
+confirmed: reverting the read argv to xclip's form fails 2 of the live tests.
+Verified end to end on the real tools: write → read back → `verified`.
+
+### 2. A gate label that drifted by one word
+
+`capabilities.GATE_NAMES["comms-typing-enabled"]` said *"Typing into chat and
+mail windows"*; the Settings row says *"Let Chronoa **type** into chat and mail
+windows"*. `test_help_gate_labels_match_settings` builds the real window and
+checks the Help label appears among its rows, so it caught it. The rule is
+written above the table — *"named here with the label that row actually carries,
+not a second wording"* — and one entry drifted. The Help window was therefore
+sending someone looking for a switch whose title they would not recognise.
+
+### 3. A `which()` fixture that could not see its own machine
+
+`test_input_control_ydotool.py`'s `fake_bin` **prepended** its directory to
+`PATH`, so `_only(bindir, "ydotool")` deleted the *fake* wtype while
+`shutil.which("wtype")` still resolved `/usr/bin/wtype` — which is really
+installed here. The assertion "only ydotool on PATH → ydotool chosen" was a
+statement about the host's packages. `PATH` is the bindir and nothing else now.
+Same class as the `GSETTINGS_BACKEND` note: **a probe that does not control its
+environment is describing the machine it ran on.**
+
+### 4. A refusal that named the wrong absence
+
+`test_ocr_sense` set `PATH=/nonexistent` and expected *"tesseract is not
+installed"*. `resolve_tesseract()` also falls back to a fixed
+`FALLBACK_TESSERACT`, and `/usr/bin/tesseract` really exists here, while
+`/usr/share/tessdata` does not — so the sense answered *"tesseract has no
+language data"*, which is **true**. The fixture was describing a machine that
+does not exist; it now neutralises the fallback path too.
+
+### And one that is genuinely environmental, closed honestly
+
+`test_routines_live` failed because the loaded `Qwen3-1.7B-Q4_K_M` calls only
+`get_datetime` for a two-part request and then *narrates* "Let me check the
+weather in Pune" with no tool call behind it — the assistant's loop correctly
+ends a turn whose reply carries none, so the user is left holding a promise.
+That is a property of the live model, and AGENTS.md already recorded it as
+measured both ways. It is now a **SKIP that names the resolved file**, because a
+live-model test is the one kind whose result changes with what happens to be
+loaded.
+
+Three ways of identifying the loaded model were tried and **two are wrong**,
+which is worth recording before someone re-derives it: `local_llm.active()`
+reads the symlink through `model_dir()` → `XDG_DATA_HOME`, which this file's
+`gsettings_env` fixture redirects, so it answers `""` under test; `/v1/models`
+reports the generic `current.gguf` for every model on the machine, so it
+identifies nothing; and `/props`' `model_path` is the **symlink**, so it must be
+`realpath`d before it names the file behind it — the first version of the check
+matched nothing and stayed a red test. Control run both ways: a tag that
+matches nothing makes the test **run** and fail on the 1.7B, so the skip is
+conditional on the model rather than permanent.
+
+### Closed the same way a round later: the last one was a staging gap (2026-10-11)
+
+`test_every_launcher_in_usr_bin_is_executable` failed with
+*"shani-chronoa-overlay is not tracked in git at all"*. Not a defect in the
+launcher: it asserts against **git's recorded mode**, deliberately, because a
+working-tree `chmod` papers over a 644 file that a fresh checkout still produces
+— and this class killed `shani-chronoa-lab-network` once already, on the only
+enforcement point for a security claim. The manifest half was already done
+(`shani-pkgbuilds/shani-chronoa/PKGBUILD` line 240 installs it), so it was the
+mode half only: staged. All eight launchers are `100755` and the suite is
+**28 passed**.
+
+**And the whole suite, after everything above: 7850 passed, 3 failed.** The three
+are all in `tests/test_sidebar_toggle.py`, and each one is green on its own —
+the file is 8/8 alone and **959 passed, 0 failed** in its own 45-file chunk. It
+is recorded at 3931 as flaky with no compositor (4 of 6 runs green with
+`window.py` unmodified from HEAD, which is how you show the residue is nobody's
+bug). Re-run failures serially and in their own chunk before believing them.
+
+**One thing that went wrong here, recorded because it cost real work.** The
+record above was written, then lost: the working tree rolled back 40 lines
+(section intact in a `/tmp` backup, absent from both the tree and HEAD). Nothing
+in git was lost, but a file another session is also editing can be reverted
+underneath you — so a record that matters is worth a copy outside the tree
+before it is handed on, and worth checking for after any `git checkout` in a
+shared working tree.
+
+### THE ANSWER: `NotifyPointerMotion` is the RELATIVE method (2026-10-11)
+
+**This is why the clicks did nothing.** Not the coordinate space, not the frame
+origin, not the window, not the app. The method was wrong.
+
+`portal.py`'s `move()` called `org.freedesktop.portal.RemoteDesktop`'s
+**`NotifyPointerMotion`** with an absolute `(x, y)`. That method is **relative**:
+it moves the pointer *by* that much. The portal also exports
+**`NotifyPointerMotionAbsolute`**, and the two are different methods with
+different signatures - the absolute one takes a `u stream` first.
+
+Measured, by asking the pointer where it ended up after each move:
+
+| pointer was at | asked to move to | pointer ended at | |
+|---|---|---|---|
+| `(688, 1079)` | `(214, 874)` | **`(902, 1079)`** | 688 + **214** |
+| `(902, 1079)` | `(600, 400)` | **`(1502, 1079)`** | 902 + **600** |
+| `(214, 874)` | `(214, 874)` | `(214, 874)` | XTEST, exact |
+
+`y` never moved in either case because it was already clamped at the bottom edge
+of a 1080-tall screen. So **every "click on a Slack sidebar row" was a click at
+the bottom of the screen**, delivered, and reported as delivered - which is
+exactly the failure shape this file keeps recording, reached through a method
+call that is perfectly well formed.
+
+**`NotifyPointerMotionAbsolute` is real but cannot be used to drive.** It needs a
+`stream`, and the portal answers `Failed: Invalid position (0)` for a literal 0.
+It is for a client that has opened an InputCapture session, not for one that
+wants a click.
+
+**So `move()` sends the difference from where the pointer already is**, which is
+the whole of what the relative method is. Read with a new
+`portal.pointer_position()`; the portal has no "where is the pointer" method, and
+reading through X is not a shortcut around the compositor - every motion the
+portal made showed up there to the pixel. Measured after, four targets, **every
+one exact**: `(214,874) (600,400) (1200,300) (214,874)`.
+
+When the position cannot be read, `move()` **raises rather than nudging** - the
+original bug was sending coordinates as though they were a delta.
+
+**A click now lands.** Through the driver's own `click()`, on this desktop's own
+Slack: `JoeL (DM)` -> `deepu (DM)` -> `vinod sivashankaran (DM)`, the last one
+confirmed by reading the window title *and* by looking at a full-screen capture
+of the conversation it opened. The pointer was verified to be **at** `(252,165)`
+when the press was sent; it reads as its old position afterwards because closing
+a RemoteDesktop session restores it, which is correct behaviour and not a
+failure.
+
+**And `NotifyPointerScroll` is not a method the portal has at all.** Introspecting
+`RemoteDesktop` lists `NotifyPointerAxis` and `NotifyPointerAxisDiscrete`; grepping
+the interface for the name the code was calling returns **0**. `scroll()` now
+uses `NotifyPointerAxis`, which takes the same `(oa{sv}dd)` and whose `dx`/`dy`
+are the relative amounts a wheel notch is.
+
+**The general guard, because two names in one file were wrong the same way.**
+`tests/test_portal_input.py` carries the real interface - recorded from this
+machine's introspection - and asserts that **every method `portal.py` calls on
+`RemoteDesktop` exists in it**, with a control that the scan is not silently
+finding nothing. A well-formed call to a method the portal does not have cannot
+be caught by reading, by a fake portal on a private bus, or by pyflakes.
+
+### Three smaller faults behind it, all found the same way
+
+1. **`raise_app` guessed the app id and all three guesses were wrong.** It tried
+   `slack`, `com.slack` and `slack.desktop` on a machine where the app is
+   **`com.slack.Slack`**. It also returned `True` on the first `Popen` that did
+   not raise, and `Popen` raises only when the *binary* is missing - so every
+   "raise" launched a program that did not exist and reported success. It now
+   resolves the id from `flatpak list --app --columns=application,name` and
+   returns **the id it started**, or `None`.
+2. **A raise holds focus for about three seconds, and `click()` spent twenty
+   before pressing.** The "what is under this point" read is a full-screen
+   capture plus OCR; measured, the raise's focus window is ~3s. Raising at the
+   start of a call and reading afterwards therefore **loses the window before the
+   press**, which no amount of coordinate accuracy could fix. `ensure_focused()`
+   now runs *after* the read and immediately before the press, and polls every
+   0.15s rather than 0.4s.
+3. **`frame_state() is None` is not "not focused".** That is a container's X11
+   app, or any app publishing no accessible frame; treating it as unfocused would
+   refuse every legitimate container click - the same over-fix as removing XTEST
+   from a Wayland session's ladder.
+
+**A claim in the code was wrong and is corrected.** `click()`'s comment said the
+frame's AT-SPI `ACTIVE` state "disagrees with X focus", which is why neither
+candidate guard shipped. Measured while fixing this, **the two agree on every
+sample** - both named Slack's client for the ~3s a raise held it, and both named
+the same 1x1 override-redirect window at `(-100,-100)` when it did not. So
+`ACTIVE` *can* distinguish the cases, and `ensure_focused()` does guard on it.
+The other candidate is still rejected on the reason given at the time: a DM is
+called `deepu`, not `slack`.
+
+**Still open, and not to be read as a verdict.** Scrolling delivered **0 changed
+pixels** on every route tried - the portal (both axis methods) and uinput - but
+**no target was used that certainly scrolls**, so the check could not have failed
+and the result means nothing either way. Two probes over the Slack sidebar and a
+message pane, then over a 3,000-line document in `gnome-text-editor`; the last
+was disturbed by the person using the desktop while it ran. Settling it needs a
+pane known to overflow. Likewise, clicks on Slack **channel** rows report the
+right coordinates and the right text under the point but have not been seen to
+navigate; DM rows have, three times.
+
+**11 new tests, 11 mutations run, 11 caught** - including two that first
+**survived** and were tests that could not fail: the ordering test now records
+the sequence `read, raise, press` rather than asserting each happened, and the
+poll-interval test captures the sleep delays instead of stubbing `sleep` to a
+no-op, which is what made the interval invisible. **117 pass** across the three
+driver suites.

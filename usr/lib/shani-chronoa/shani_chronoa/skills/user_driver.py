@@ -101,9 +101,16 @@ def _forbidden_register(reg: int, value: str) -> str:
     return ""
 
 
-def _consent() -> "tuple[bool, str]":
-    """Return (allowed, reason). Fail-closed: an undeclared key denies."""
-    if not ChronoaConfig().get_bool(_WRITE_KEY, False):
+def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
+    """Return (allowed, reason). Fail-closed: an undeclared key denies.
+
+    Takes the config for the same reason every other gated module does: the
+    consent sweep in `tests/test_question_presenter.py` calls `gate(config)`
+    for each entry in `capabilities.GATED`, and a zero-argument version raised a
+    `TypeError` there - so the sweep could not tell a working gate from a
+    missing one on this path.
+    """
+    if not config.get_bool(_WRITE_KEY, False):
         return False, (
             f"writing to a device register is turned off (enable '{_WRITE_KEY}' in "
             f"Settings). Reading registers needs no such permission - only writing "
@@ -258,7 +265,7 @@ def _run_i2c(arguments: dict) -> str:
         # The destructive refusal comes before the tool check, deliberately: a
         # refusal about erasing a device must be the same answer everywhere,
         # not one that only exists on machines missing the binary.
-        allowed, reason = _consent()
+        allowed, reason = _consent(ChronoaConfig())
         if not allowed:
             return f"Refusing to write to a device register: {reason}"
         forbidden = _forbidden_register(reg, str(arguments.get("value", "")))

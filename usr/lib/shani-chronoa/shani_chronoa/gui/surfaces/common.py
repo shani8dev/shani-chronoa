@@ -234,6 +234,7 @@ SENSE_TITLES = {
     "resources": "Resources running out", "rfsense": "Movement over Wi-Fi",
     "security": "Security posture", "services": "System services",
     "sessions": "Who is logged in", "snapshots": "Snapshots",
+    "monitoring": "Who is capturing",
     "stale": "Outdated running programs", "storage": "Disks",
     "thermalgrid": "Infrared heat sensor", "timebase": "Clock accuracy",
     "updates": "Package updates", "usb": "USB devices", "vision": "Vision",

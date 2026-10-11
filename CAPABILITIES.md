@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**243 skills in 24 groups.** Each is a named, schema-typed module; the model
+**244 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**89 of 243 are consent-gated and 17 are destructive.**
+**89 of 244 are consent-gated and 17 are destructive.**
 
 ## System
 
@@ -146,6 +146,7 @@ Read, write, move, archive and undo files.
 | `space_by_type` | Where the space goes, by kind of file | — |
 | `stale_files` | What is big AND untouched - the deletion candidates | — |
 | `sync_folder` | Sync two folders, showing what would change first | — |
+| `temp_files` | Find junk, temporary and leftover files by name | — |
 | `trash_file` | Move a file or folder to the trash, recoverably | **asks first, always** · needs `file-delete-enabled` |
 | `undo_last_change` | Undo Chronoa's last change to a file | **asks first, always** · needs `file-edit-enabled` |
 | `write_text_file` | Write a text file | needs `file-edit-enabled` to replace a file that already has content |
@@ -293,7 +294,7 @@ Launch, list and find applications.
 
 | Skill | What it does | Before it runs |
 |---|---|---|
-| `container` | Run and drive containers | needs `container-control-enabled` |
+| `container` | Run containers and nspawn machines | needs `container-control-enabled` |
 | `default_apps` | Which app opens a kind of file, and the default browser | needs `default-apps-enabled` |
 | `install_app` | Install and remove apps | needs `app-install-enabled` |
 | `list_apps` | List installed applications | — |
@@ -342,7 +343,7 @@ Drive the desktop without the keyboard.
 | `move_pointer` | Move the pointer | needs `input-control-enabled` |
 | `set_keyboard_layout` | Change the keyboard layout | — |
 | `type_text` | Type text | needs `input-control-enabled` |
-| `ui_elements` | Press buttons, fill fields and open menus in other apps | needs `input-control-enabled` |
+| `ui_elements` | Press buttons, fill fields and open menus in other apps, and drive them visible | needs `input-control-enabled` |
 
 ## Imagine
 

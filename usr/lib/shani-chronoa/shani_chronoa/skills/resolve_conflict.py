@@ -66,12 +66,22 @@ _STAGES = {1: "the common ancestor (base)", 2: "YOUR side (ours)",
 _ACTIONS = ("show", "ours", "theirs", "mark", "abort")
 
 
-def _consent(config: ChronoaConfig, key: str) -> tuple:
+def _consent(config: ChronoaConfig, key: str = _READ_KEY) -> tuple:
     """Return (allowed, reason) for one key. Fail-closed: undeclared denies.
 
     The same shape `git_write.py` uses, and deliberately so - the gate table
     in `capabilities.GATED` names one key per tool, so the second key has to be
     checked in the module, and this is where the package keeps that check.
+
+    **`key` defaults to the read key so the function is callable with the config
+    alone.** The consent sweep in `tests/test_question_presenter.py` calls
+    `gate(config)` for every entry in `capabilities.GATED` - one argument, because
+    that is the house signature - and a required second argument raised
+    `TypeError: _consent() missing 1 required positional argument: 'key'` there,
+    so the sweep could not reach this gate at all. An unreachable check reads as
+    "no gate" rather than "a gate the sweep could not call", which is the whole
+    failure that test exists to prevent. The escalation to the write key still
+    passes it explicitly, and the exported key is the read one `GATED` names.
 
     **The refusal names the key.** This package's rule, stated in
     `capabilities.py`, is that a shut gate is never mistaken for a missing

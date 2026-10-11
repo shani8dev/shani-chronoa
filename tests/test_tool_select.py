@@ -10,7 +10,7 @@ import json
 import pytest
 
 from shani_chronoa.tool_select import (ARITHMETIC, CORE, ranked, select_tools,
-                                       wants_a_conversation)
+                                       wants_a_browser, wants_a_conversation)
 from shani_chronoa.tools import TOOLS
 
 
@@ -53,6 +53,54 @@ def test_the_tool_a_request_needs_is_sent(request_, tool):
 def test_a_selection_fits_the_smallest_window(request_):
     sent = select_tools(request_, TOOLS)
     assert _tokens(sent) < 2048 * 0.75, "leave room for the conversation in a 2048 window"
+
+
+@pytest.mark.parametrize("request_", [
+    "Open blaze demo dot com and find the cheapest flight",
+    "Go to the blaze demo website and find the cheapest flight",
+    "open youtube dot com",
+    "On blazedemo.com book the cheapest flight from Boston to London",
+])
+def test_a_site_request_is_never_trimmed_of_its_browser(request_):
+    """The cap must not undo the rule that asked for the browser.
+
+    `wants_a_browser` is a decision about what the request *is* - it names a
+    site, or asks for something done on one - and `browse` is then **added**
+    rather than scored. `_cap_to_window` drops by ascending score, so an added
+    tool with no score of its own is exactly what it removes first when the
+    budget is tight.
+
+    That happened. Measured on "Open blaze demo dot com and find the cheapest
+    flight": `keep` held 11 tools including `browse`, and `_cap_to_window`
+    returned 7 without it - `browse` is ~850 tokens of a 1536-token budget. So
+    the selection for a request whose whole premise was working on a website had
+    no browser, and nothing anywhere said so: `wants_a_browser` still returned
+    True.
+
+    The counterpart is the file case, and both are asserted because the budget is
+    zero-sum: protecting `browse` on "download the file from example.com to my
+    Downloads folder" starves `open_file`, which is the tool that request is
+    actually about. Two tests, one budget, and the rule has to say which wins.
+    """
+    assert wants_a_browser(request_), f"this request no longer trips the site rule: {request_!r}"
+    assert "browse" in _names(select_tools(request_, TOOLS)), (
+        f"{request_!r} names a website but the selection was trimmed of the "
+        "browser - the token cap undid the site rule")
+
+
+@pytest.mark.parametrize("request_", [
+    "download the file from example.com to my Downloads folder",
+])
+def test_a_file_request_keeps_its_file_tools_even_though_it_names_a_site(request_):
+    """The other half of the same budget: a download is not a browsing session.
+
+    `_FILE_OR_APP` decides both whether the site displaces the file tools and
+    whether the browser is protected from the cap. When it matches, the file
+    tools win, because that is what the person asked about.
+    """
+    assert wants_a_browser(request_), "the site rule fires for this too - both halves are in play"
+    assert "open_file" in _names(select_tools(request_, TOOLS)), (
+        f"{request_!r} is about a file and lost open_file to the browser")
 
 
 def _fat(words, count, size=160):

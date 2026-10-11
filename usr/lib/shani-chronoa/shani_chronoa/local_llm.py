@@ -56,6 +56,16 @@ TIERS = (
                "smarter, slower on a CPU",
                _QWEN.format(repo="Qwen3-4B-GGUF", rev="bc640142c66e1fdd12af0bd68f40445458f3869b")),
      "Large (2.5 GB) - smarter, noticeably slower without a graphics card", 999),
+    (ModelSpec("qwen3-8b", "Qwen3-8B-Q4_K_M.gguf", 5_027_783_488,
+               "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
+               "the quality step; reliable tool calls, still CPU-viable",
+               _QWEN.format(repo="Qwen3-8B-GGUF", rev="7c41481f57cb95916b40956ab2f0b139b296d974")),
+     "Very large (4.7 GB) - the first size where replies are markedly better", 16),
+    (ModelSpec("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf", 9_001_752_960,
+               "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
+               "near-desktop-class reasoning; slow on a CPU",
+               _QWEN.format(repo="Qwen3-14B-GGUF", rev="530227a7d994db8eca5ab5ced2fb692b614357fd")),
+     "Huge (8.4 GB) - for machines with room; slow without a graphics card", 24),
 )
 SPECS = {spec.key: spec for spec, _label, _ram in TIERS}
 

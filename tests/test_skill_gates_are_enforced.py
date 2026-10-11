@@ -83,6 +83,17 @@ _IMPL = {
     "disk_activity": "shani_chronoa.skills.disk_activity",
     "nfc": "shani_chronoa.skills.nfc",
     "fm_radio": "shani_chronoa.skills.fm_radio",
+    # Both lirc and v4l-utils ship the whole IR route between them; the reader
+    # needs to know which module consults which key.
+    "ir_remote": "shani_chronoa.skills.ir_remote",
+    # Containers and VMs: each declares its own key inside the module, as
+    # `_CONSENT_KEY`, and checks it before any subprocess is built.
+    "container": "shani_chronoa.skills.container",
+    "vm": "shani_chronoa.skills.vm",
+    # Both gate on their own `*-control-enabled` key, deliberately not the
+    # `containers-sense-enabled` read key `list_containers` follows.
+    "container": "shani_chronoa.skills.container",
+    "vm": "shani_chronoa.skills.vm",
     "click_pointer": "shani_chronoa.skills.input_control",
     "type_text": "shani_chronoa.skills.input_control",
     "notify": "shani_chronoa.skills.notify",

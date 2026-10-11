@@ -170,6 +170,12 @@ class PrivacyPage:
         # the schema and nowhere a person can reach it - which is the same trap
         # as a refusal that names a setting with no switch.
         for label, key, blurb, tip in (
+            ("Let Chronoa type into chat and mail windows", "comms-typing-enabled",
+             "Off: driving another app's controls works, but a window that is a "
+             "chat or mail surface is refused before a keystroke, because text "
+             "typed there leaves the machine. On: it may be typed into when you "
+             "ask directly.",
+             "ui_driver refuses a communication surface while this is off"),
             ("Let Chronoa delete files", "file-delete-enabled",
              "Off: Chronoa can read, search, create and move files but never "
              "delete one. Deletion here is permanent and does not use the trash.",
@@ -330,6 +336,33 @@ class PrivacyPage:
              "never a bank card or a transit pass, which rewriting would break. Most laptops have "
              "no NFC reader at all, and that is reported as having none.",
              "reading or writing an NFC tag is refused while this is off"),
+            ("Let Chronoa send and receive infrared", "ir-remote-enabled",
+             "Off: Chronoa cannot send an infrared code through an IR device here, nor receive a "
+             "code from a remote. Its own switch, separate from the NFC one, because infrared "
+             "writes to the physical world: a code turns something on or off in the room, and most "
+             "devices answer a code somebody chose rather than a capability. Receiving is reading "
+             "whatever button was pressed on whatever remote is in reach, which is usually "
+             "somebody else's. Most machines have no infrared hardware at all - no /dev/lirc node "
+             "and nothing under /sys/class/rc - and that is reported as having none. lirc is "
+             "already installed on every Shanios image and ir-ctl comes with v4l-utils, so a "
+             "machine with a USB infrared blaster needs the device, not a package.",
+             "sending or receiving infrared is refused while this is off"),
+            ("Let Chronoa run containers", "container-control-enabled",
+             "Off: Chronoa cannot run a container, run a command inside one, stop or remove it, "
+             "pull an image, or start or stop an nspawn machine. A container is a whole computer "
+             "as far as anything it does is concerned, and pulling an image downloads whatever "
+             "the registry serves. Listing what containers already exist needs no permission - "
+             "only starting and changing them does. Each podman command runs as a short-lived "
+             "systemd user unit, which is measured to be necessary: the sandbox's memory "
+             "ceiling is smaller than the podman client itself.",
+             "running or changing a container is refused while this is off"),
+            ("Let Chronoa run and drive virtual machines", "vm-control-enabled",
+             "Off: Chronoa cannot start a virtual machine, look at its screen, send it keys or "
+             "clicks, or shut it down. On: QEMU runs with a window on the desktop and a control "
+             "socket beside it, so the machine is visible while it is driven. A VM boots "
+             "whatever disk or ISO it is pointed at, so this is its own switch and shares "
+             "nothing with containers.",
+             "starting or driving a virtual machine is refused while this is off"),
             ("Let Chronoa act on your phone connecting", "phone-sense-enabled",
              "Off: an automatic rule cannot trigger on your phone connecting or running low.",
              "a phone trigger is refused while this is off"),

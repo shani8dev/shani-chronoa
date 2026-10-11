@@ -32,6 +32,7 @@ SCHEMA = pathlib.Path("usr/share/glib-2.0/schemas/org.shani.chronoa.gschema.xml"
 # sense switch. Kept as a declared list because the binding is indirect: a
 # source scan would miss every one of these.
 CONTROLLED = {
+    "comms-typing-enabled",  # a destructive action row in Privacy
     "speech-rate", "end-of-speech-pause",  # spin rows in the Voice group
     "follow-up-enabled", "sound-cues-enabled",  # switches in the Voice group
     "voice-style",             # a ComboRow in the Voice group ("Voice"): the named
@@ -107,6 +108,14 @@ CONTROLLED = {
     "watch-nowplaying-enabled", "watch-weather-enabled",
     "nfc-enabled", "fm-radio-enabled", "watch-companion-enabled", "home-place", "phone-remote-enabled", "bluetooth-media-remote-enabled",
     "bluetooth-call-enabled",
+    # Infrared, with its own row rather than sharing the NFC switch: a code
+    # turns something on or off in the room, which is a different permission
+    # from reading a tag somebody tapped.
+    "ir-remote-enabled",
+    # Containers and VMs: two rows in the same section as their reading
+    # siblings, because a switch a user cannot reach is a refusal wearing a
+    # permission's clothes (the calendar_edit defect).
+    "container-control-enabled", "vm-control-enabled",
     "background-mode-enabled",
     "global-shortcut",  # the trigger string; changed in the desktop's own keyboard settings
     # the six desktop/device trigger gates, each a row in the automatic-rules group

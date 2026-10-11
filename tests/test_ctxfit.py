@@ -164,3 +164,134 @@ class TestServerArgsContext:
         monkeypatch.setattr(local_llm, "current_link", lambda: tmp_path / "model.gguf")
         args = local_llm.server_args(devices=["intel0:0"])
         assert args[args.index("-c") + 1] == "8192"
+
+
+class TestTheTensorRouteAgreesWithTheMetadataRoute:
+    """Two derivations of one number, one of which cannot inherit the other's misreading.
+
+    `kv_bytes_per_token` reads five GGUF conventions out of the header.
+    `kv_width_from_shapes` reads the K/V projection tensors' own shapes. They are
+    then asserted to agree - so a module that misreads a convention is caught by
+    a route that never looked at it.
+
+    This is edge0's `test_streaming_math.py:1-4` pattern - *"the exact path must
+    match a plain fp16 reference implementation"* - on the one place Chronoa does
+    arithmetic on a third-party file format. `tests/test_ctxfit.py` above asserts
+    against literals written by the same hand that wrote the module, which cannot
+    see a shared misreading; this can.
+    """
+
+    def _shapes(self, width=1024, dim=2048, layers=4):
+        """A fake GGUF tensor list: attn_k/_v at [dim, width], plus noise."""
+        out = []
+        for i in range(layers):
+            out.append((f"blk.{i}.attn_k.weight", [dim, width]))
+            out.append((f"blk.{i}.attn_v.weight", [dim, width]))
+            out.append((f"blk.{i}.attn_q.weight", [dim, dim]))
+            out.append((f"blk.{i}.ffn_gate.weight", [dim, dim * 3]))
+        return out
+
+    def _info(self, width=1024, dim=2048, heads=16, layers=4, **over):
+        info = {"general.architecture": "qwen3",
+                "qwen3.block_count": layers,
+                "qwen3.attention.head_count": heads,
+                "qwen3.attention.head_count_kv": width // (dim // heads),
+                "qwen3.embedding_length": dim}
+        info.update(over)
+        return info
+
+    def test_the_width_from_tensors_is_the_kv_width_not_the_embedding(self):
+        from shani_chronoa import ctxfit
+        # GQA: 16 query heads, 8 KV heads, head_dim 128 -> 1024, not the 2048
+        # embedding. Confusing the two is the bug this whole class exists for.
+        assert ctxfit.kv_width_from_shapes(self._shapes()) == 1024
+        assert ctxfit.kv_width_from_shapes(self._shapes(width=512)) == 512
+
+    def test_a_single_layer_of_cache_from_the_two_routes_agree(self):
+        """The per-layer figure, which is the convention-heavy half."""
+        from shani_chronoa import ctxfit
+        shapes = self._shapes()
+        info = self._info()
+        width = ctxfit.kv_width_from_shapes(shapes)
+        assert width == 1024
+        # One full-attention layer, f16 cache: K and V, 2 bytes each.
+        from_tensors = 2 * width * 2
+        per_layer = ctxfit.kv_bytes_per_token(info) // 4      # 4 full layers
+        assert per_layer == from_tensors, (
+            f"metadata says {per_layer} bytes/token/layer, the tensors say "
+            f"{from_tensors} - the two routes disagree about the same model")
+
+    def test_a_per_layer_kv_head_list_agrees_too(self):
+        """`head_count_kv` may be a list; the module must not mis-handle it."""
+        from shani_chronoa import ctxfit
+        info = self._info()
+        info["qwen3.attention.head_count_kv"] = [8, 8, 8, 8]
+        assert ctxfit.kv_bytes_per_token(info) == 4 * 2 * 1024 * 2
+
+    def test_the_key_length_override_moves_it_away_from_the_tensors(self):
+        """**The control: it can disagree, and here is when it should.**
+
+        A model that stores a *wider* cache than its projection width - which is
+        what `key_length`/`value_length` express - is genuinely different in the
+        two routes, and the metadata route is the right one there. Asserting the
+        disagreement is what stops the parity test from being a rubber stamp:
+        without it, a `kv_width_from_shapes` that always returned whatever the
+        module computed would pass every case above.
+        """
+        from shani_chronoa import ctxfit
+        info = self._info()
+        info["qwen3.attention.key_length"] = 2048       # twice head_dim
+        assert ctxfit.kv_bytes_per_token(info) == 4 * 8 * (2048 + 128) * 2
+        assert ctxfit.kv_width_from_shapes(self._shapes()) == 1024
+
+    def test_a_width_that_differs_between_k_and_v_is_refused_not_guessed(self):
+        from shani_chronoa import ctxfit
+        shapes = self._shapes() + [("blk.9.attn_k.weight", [2048, 4096])]
+        assert ctxfit.kv_width_from_shapes(shapes) == 0
+
+    def test_no_k_or_v_tensor_is_zero_not_a_width(self):
+        from shani_chronoa import ctxfit
+        assert ctxfit.kv_width_from_shapes([("blk.0.attn_q.weight", [2048, 2048])]) == 0
+        assert ctxfit.kv_width_from_shapes([]) == 0
+        assert ctxfit.kv_width_from_shapes(None) == 0
+
+    def test_the_real_model_on_this_box_agrees(self):
+        """The live check: the two routes meet a real file.
+
+        Opt-in by naming a model (`CHRONOA_KV_PARITY_MODEL=/path/to.gguf`),
+        because **the harness redirects both `HOME` and `XDG_DATA_HOME`**, so no
+        route to a real model exists from inside the suite - measured: `~` and
+        `files.data_home()` both answer a pytest temp dir. This is the same trap
+        that made `local_llm.active()` answer `""` under `test_routines_live`.
+
+        Without the variable it SKIPs and says so, rather than passing vacuously
+        on no model at all. `shani-testbed/slot-tests/chronoa-cli-formats.sh`
+        runs it against the image's own model.
+        """
+        gguf = pytest.importorskip("gguf")
+        from shani_chronoa import ctxfit
+        import os
+        path = os.environ.get("CHRONOA_KV_PARITY_MODEL", "")
+        if not path:
+            pytest.skip(
+                "no CHRONOA_KV_PARITY_MODEL set, and the harness redirects HOME "
+                "and XDG_DATA_HOME so no real model is reachable from the suite")
+        candidate = Path(path)
+        if not candidate.is_file():
+            pytest.fail(f"CHRONOA_KV_PARITY_MODEL names {candidate}, which is not a file")
+        reader = gguf.GGUFReader(str(candidate))
+        info = ctxfit.gguf_model_info(candidate)
+        assert info, "could not read the named model's header"
+        width = ctxfit.kv_width_from_shapes(reader.tensors)
+        if width == 0:
+            pytest.skip("this model's K/V widths are not uniform (fused attention?)")
+        layers = len([t for t in reader.tensors if t.name.endswith("attn_k.weight")])
+        from_tensors = layers * 2 * width * 2
+        from_metadata = ctxfit.kv_bytes_per_token(info)
+        # A hybrid model's metadata count is lower by design (sliding-window and
+        # shared-KV layers), so the tensors are an exact match for a plain
+        # full-attention model and an upper bound for a hybrid one.
+        assert from_tensors >= from_metadata, (
+            f"the tensors imply {from_tensors} bytes/token but the metadata route "
+            f"answered {from_metadata} - the module is UNDER-counting the cache, "
+            "which is the direction that spills a model onto the CPU")

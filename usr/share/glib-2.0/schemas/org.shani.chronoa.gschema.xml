@@ -559,6 +559,11 @@
       <summary>Let Chronoa tune an FM radio receiver</summary>
       <description>When true, Chronoa may tune a USB radio receiver (an RTL-SDR dongle) plugged into this computer, scan the FM band and play a station. Off by default. A laptop has no FM radio of its own, so without a dongle this is reported as having no receiver rather than as failing. No station names are invented: a scan reports frequencies.</description>
     </key>
+    <key name="ir-remote-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa send and receive infrared remote-control codes</summary>
+      <description>When true, Chronoa may send infrared codes through an IR device on this computer and receive codes from a remote. Off by default. Sending infrared turns things on and off in the room, and most devices respond to a code somebody chose rather than to a capability, so this is a write to the physical world. Receiving is reading whatever button was pressed on whatever remote is in reach, which is usually somebody else's. Most machines have no IR hardware at all: there is no /dev/lirc node and nothing under /sys/class/rc, and that is reported as having none. lirc is installed on every ShaniOS image and ir-ctl comes with v4l-utils, so a machine with a USB IR blaster needs a device rather than a package.</description>
+    </key>
     <key name="nfc-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa read and write NFC tags</summary>
@@ -628,6 +633,16 @@
       <default>true</default>
       <summary>Let Chronoa check for waiting package updates</summary>
       <description>Reports how many updates are waiting, and how old the package database the comparison was made against is. On by default: it reads the local package database and never leaves the machine.</description>
+    </key>
+    <key name="comms-typing-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa type into chat and mail windows</summary>
+      <description>Off: driving another app's controls works, but a window that is a chat or mail surface is refused before a keystroke, because text typed there leaves the machine. On: it may be typed into when you ask directly. Its own switch, so agreeing that Chronoa may drive your apps is not the same as agreeing it may send a message.</description>
+    </key>
+    <key name="monitoring-sense-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa report who is capturing on this machine</summary>
+      <description>Which process holds each camera, whether an audio stream is recording, who reads raw input devices, and whether a workforce-monitoring agent is running. Off by default: it reports about other processes on this machine, and it only ever reads.</description>
     </key>
     <key name="faults-sense-enabled" type="b">
       <default>true</default>
@@ -803,6 +818,16 @@
       <default>false</default>
       <summary>Let Chronoa act before calendar events</summary>
       <description>When true, a rule may act when one of your calendar events is about to start - "remind me ten minutes before a meeting". Off by default, because a rule acts with nobody asking, and it reads your calendar to do it.</description>
+    </key>
+    <key name="container-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa run containers</summary>
+      <description>When true, Chronoa may run a container with podman, run a command inside one that is already running, stop or remove it, read its logs, pull an image, and start, stop or list nspawn machines with machinectl. Off by default: a container is a whole computer as far as anything it does is concerned, and pulling an image downloads whatever the registry serves. Listing containers that already exist is a separate, ungated-capable skill and needs no such permission. Every podman command runs as a short-lived user systemd unit, because the sandbox's address-space ceiling is below what the podman client needs to start at all - that is measured, not defensive.</description>
+    </key>
+    <key name="vm-control-enabled" type="b">
+      <default>false</default>
+      <summary>Let Chronoa run and drive virtual machines</summary>
+      <description>When true, Chronoa may start a virtual machine with QEMU - a window on the desktop plus a QMP control socket, the same shape as the browser skill's window-plus-protocol - take a screenshot of its screen, send keys and clicks into it, read its power state and shut it down. Off by default: a VM boots whatever disk or ISO it is pointed at and does whatever that software does. The QEMU process runs as a user systemd unit so it is not killed when the skill call that started it ends, and so it is not confined by the sandbox's address-space ceiling, which is smaller than the guest memory it would allocate.</description>
     </key>
     <key name="phone-control-enabled" type="b">
       <default>false</default>

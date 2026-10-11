@@ -69,6 +69,7 @@ import subprocess
 from pathlib import Path
 
 from shani_chronoa import files
+from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 #: Building is gated; generating text is not. The split follows
@@ -462,11 +463,19 @@ def _dir_summary(directory: Path) -> str:
     return ", ".join(parts)
 
 
-def _consent() -> "tuple[bool, str]":
-    """Return (allowed, reason). Fail-closed: an undeclared key denies."""
-    from shani_chronoa.config import ChronoaConfig
+def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
+    """Return (allowed, reason). Fail-closed: an undeclared key denies.
 
-    if not ChronoaConfig().get_bool(_BUILD_KEY, False):
+    **It takes the config, and it used to build one.** The house signature is
+    `_consent(config)` so a caller that already holds one can hand it over, and
+    `tests/test_question_presenter.py`'s consent sweep does exactly that - it
+    calls `gate(config)` for every module in `capabilities.GATED`. A
+    zero-argument version raised
+    `TypeError: _consent() takes 0 positional arguments but 1 was given` there
+    and the sweep could not check the two drivers at all, which reads as "no
+    gate" rather than "a gate this test could not call".
+    """
+    if not config.get_bool(_BUILD_KEY, False):
         return False, (
             f"compiling a kernel module is turned off (enable '{_BUILD_KEY}' in "
             f"Settings). Writing the module's source needs no such permission - "
@@ -620,7 +629,7 @@ def _run_scaffold(arguments: dict) -> str:
 def _run_build(arguments: dict) -> str:
     # The gate comes first, before the path and the toolchain: a refusal must not
     # confirm that a directory exists or that a compiler is installed.
-    allowed, reason = _consent()
+    allowed, reason = _consent(ChronoaConfig())
     if not allowed:
         return f"Refusing to build: {reason}"
 

@@ -69,10 +69,31 @@ class TestTheDeadPlaceholderIsGone:
 
 class TestTheDateFormat:
     def test_it_reads_the_formatssl_actually_prints(self):
-        """A real `ssl` certificate's `notAfter`, verbatim."""
-        assert T._days_left("Dec 25 22:56:35 2026 GMT") == 77, (
-            "the stdlib's own notAfter format did not parse to the same "
-            "answer, so the hand-rolled parser has drifted from it")
+        """A real `ssl` certificate's `notAfter`, verbatim.
+
+        **The expectation is computed from the instant, not written down.** The
+        first version asserted `== 77` against `Dec 25 22:56:35 2026 GMT`, which
+        was right on the day it was committed and wrong the next morning - and
+        stays wrong every day until the date passes, at which point it goes
+        negative. A test that fails for a reason nobody wrote down is the same
+        failure as a test that cannot fail.
+
+        So the expected number is derived from the same wall clock the module
+        reads, and what is actually asserted is that `"Dec 25 22:56:35 2026
+        GMT"` lands on **2026-12-25 22:56:35 UTC** - which is the drift this
+        test exists to catch: a format string with the month and day swapped, or
+        a `GMT` silently read as a local zone, both still parse and both are
+        wrong.
+        """
+        from datetime import datetime, timezone
+
+        expected = (datetime(2026, 12, 25, 22, 56, 35, tzinfo=timezone.utc)
+                    - datetime.now(timezone.utc)).days
+        got = T._days_left("Dec 25 22:56:35 2026 GMT")
+        assert got == expected, (
+            f"the stdlib's own notAfter format parsed to {got} days but the "
+            f"same instant computed here is {expected}; the hand-rolled parser "
+            "has drifted from the format it claims to read")
 
     def test_an_unreadable_date_is_none_and_not_a_guess(self):
         """`None` means unknown. A negative number would read as a fact."""

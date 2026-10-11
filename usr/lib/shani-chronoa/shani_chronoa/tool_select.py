@@ -135,6 +135,31 @@ _SYNONYMS: Dict[str, str] = {
     "hotkey": "keyboard shortcuts", "hotkeys": "keyboard shortcuts",
     "bound to": "keyboard shortcuts", "what key": "keyboard shortcuts",
     "which key": "keyboard shortcuts", "what does this key": "keyboard shortcuts",
+    # Containers and driving a window. The words a person uses are "container",
+    # "docker", "click the Save button" - and the schemas' own words are "image",
+    # "run", "drive", "controls". Without these, a request to click inside a
+    # container's app reaches nothing: the skill exists, is gated, has a
+    # numbered-control observation shaped for a small model, and the router has
+    # no reason to offer it. Measured over five phrasings after adding these.
+    "container": "container image run command",
+    "containers": "container image run command",
+    "docker": "container image run command",
+    "podman": "container image run command",
+    "inside the container": "container image run command",
+    "in the container": "container image run command",
+    "click": "click control button window",
+    "click on": "click control button window",
+    "clicking": "click control button window",
+    "type into": "type text window control",
+    "type in": "type text window control",
+    "typing into": "type text window control",
+    "drive": "drive act controls window",
+    "automate": "drive act controls window",
+    "nspawn": "container image run command",
+    "gui": "controls window button app",
+    "window": "controls window app",
+    "test my app": "drive act controls window",
+    "test the app": "drive act controls window",
     "weather": "weather", "forecast": "weather", "temperature": "weather",
     "rain": "weather", "umbrella": "weather", "hot": "weather", "cold": "weather",
     "where am i": "location", "where is this": "location", "gps": "location",
@@ -432,6 +457,16 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     # a tool matching only a generic word ("set", "file") beside a strong
     # match is noise that costs tokens
     floor = scored[0][0] / 3 if scored else 0
+    # Driving an app's controls is its own thing, as `browse` is for a page: a
+    # cue, not a score, because the plainest phrasing ("click Save in the
+    # container's app") shares words with page and window tools both. It keeps
+    # only `ui_elements`: that tool *is* the driving now (`container` is
+    # lifecycle and 2.1k chars of schema for it), and its `drive start` starts
+    # the container itself, so a second tool here would be tokens spent on
+    # nothing this turn uses.
+    if wants_to_drive_an_app(request):
+        known = {t["function"]["name"] for t in tools}
+        keep |= {n for n in ("ui_elements",) if n in known}
     keep |= {name for score, name, _hits in scored[:limit] if score >= floor}
     # A distilled router may add a skill the word matcher scored zero. That is
     # the point of having one: "increase the sound" shares no word with
@@ -454,11 +489,41 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
         keep -= {"open_file"} - held
     if wants_a_browser(request):
         keep.add("browse")
-        if not _FILE_OR_APP.search(request or ""):
+        # **`_FILE_OR_APP` decides both halves, and the two were split apart.**
+        # A request about a file or an app keeps its file tools even when it
+        # also names a site - "download the file from example.com to my
+        # Downloads folder" is a download, not a browsing session. So the same
+        # condition that decides whether the site displaces the file tools also
+        # decides whether the browser is protected from the token cap.
+        #
+        # The first version protected `browse` unconditionally, which passed the
+        # browser test and broke `test_file_and_app_requests_keep_their_tools`:
+        # the window is zero-sum - `browse` alone is ~850 tokens of a 1536
+        # budget - so protecting it starved `open_file` on exactly the request
+        # whose whole subject is a file. Two tests, one budget, and the rule has
+        # to say which of them wins.
+        about_files = bool(_FILE_OR_APP.search(request or ""))
+        if not about_files:
             keep -= _DISPLACED_BY_A_SITE - set(in_use or ())
+    protected = set(CORE) | set(in_use or ())
+    # A request to drive a control cannot be answered without the tool that
+    # drives one, so the cap must not take it either - the same zero-sum the
+    # lines below describe for `browse`. Measured: with the cue firing,
+    # `_cap_to_window` still dropped both `ui_elements` and `container` on
+    # "click Fishbowl in the container", because their schemas rank below
+    # `ask_user`/`get_datetime` in `scored`.
+    if wants_to_drive_an_app(request):
+        protected |= {n for n in ("ui_elements",) if n in keep}
+    if "browse" in keep and not _FILE_OR_APP.search(request or ""):
+        # The site rule fired and the request is not about a file: what the
+        # person asked for cannot be done without a browser, so the cap must not
+        # take it. Measured on "Open blaze demo dot com and find the cheapest
+        # flight": `keep` held 11 tools, `_cap_to_window` returned 7 and
+        # `browse` was among the four dropped - the rule that asked for it,
+        # silently undone by the budget.
+        protected.add("browse")
     keep = _cap_to_window(keep, tools, scored,
-                          int(WINDOW_TOKENS * SELECTION_SHARE),
-                          set(CORE) | set(in_use or ()))
+                          int(WINDOW_TOKENS * SELECTION_SHARE), protected)
     return [t for t in tools if _name(t) in keep]
 
 
@@ -591,6 +656,37 @@ def wants_a_browser(request: str) -> bool:
     """
     text = request or ""
     return bool(_SITE.search(text) or _ACT_ON_A_PAGE.search(text))
+
+
+_ACT_IN_A_WINDOW = re.compile(
+    r"\b(click|clicks|clicking|type into|type in|typing into|drive|"
+    r"automate|ui test|test the app|test my app|"
+    r"in the (?:container|window|app)|inside the (?:container|window|app))\b",
+    re.IGNORECASE)
+#: A control is named, so the request is about *using* one rather than about a
+#: window in the abstract.
+_CONTROL_NAMED = re.compile(
+    r"\b(button|menu|field|checkbox|tab|dialog|popover|list item|"
+    r"dropdown|save|cancel|export|settings|toolbar|sidebar)\b",
+    re.IGNORECASE)
+
+
+def wants_to_drive_an_app(request: str) -> bool:
+    """Whether the request names a control in an app, rather than a website.
+
+    `browse` has a cue because word matching could not connect "book a flight on
+    blazedemo.com" to `browse`. The same is true here, and measured: "click
+    Fishbowl in the container" offered `browse`, `ask_user` and `get_datetime`,
+    and never `ui_elements` - because "click" is a page word and "container"
+    scores low, while `close_window`/`list_windows` hold the word "window".
+    So the driving gets its own cue, and a control named in an app is the
+    signal that distinguishes it from managing windows in the abstract.
+    """
+    text = request or ""
+    if _ACT_IN_A_WINDOW.search(text):
+        return True
+    return bool(_CONTROL_NAMED.search(text)
+                and re.search(r"\b(app|window|container|gtk|qt|gui)\b", text, re.IGNORECASE))
 
 
 def confident(request: str, tools: Iterable[dict], top: int = 3) -> List[str]:

@@ -247,6 +247,7 @@ _SENSE_CONSENT_KEYS = {
     "usb": "usb-sense-enabled",
     "resources": "resources-sense-enabled",
     "updates": "updates-sense-enabled",
+    "monitoring": "monitoring-sense-enabled",
     "faults": "faults-sense-enabled",
     # The kernel ring buffer, which is a different record from `faults`':
     # hardware faults and OOM kills that no service has touched, including the

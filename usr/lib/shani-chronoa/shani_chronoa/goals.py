@@ -91,6 +91,15 @@ class GoalRun(NamedTuple):
     created_at: float = 0.0
     updated_at: float = 0.0
     results: dict = {}
+    #: What a person changed by hand, newest last, as `(variable_name, at)`
+    #: pairs. **This is the half open-intelligent-ui contributed** (see
+    #: `describe_edits`): its route panel lets a person remove stops and add
+    #: suggestions, that state is saved with the message, and the next turn
+    #: rewrites it as a sentence the model reads - "(User's edits to this route:
+    #: removed stops (by id): belem; added stops: LX Factory.)". Without it a
+    #: plan a person trimmed looks exactly like one the model wrote whole, and a
+    #: model asked to continue simply re-adds what was taken out.
+    edits: tuple = ()
 
     def to_json(self) -> str:
         return json.dumps({
@@ -99,6 +108,7 @@ class GoalRun(NamedTuple):
             "index": self.index, "awaiting_reason": self.awaiting_reason,
             "created_at": self.created_at, "updated_at": self.updated_at,
             "results": dict(self.results),
+            "edits": [list(e) for e in self.edits],
         })
 
     @classmethod
@@ -118,6 +128,7 @@ class GoalRun(NamedTuple):
             created_at=data.get("created_at", 0.0),
             updated_at=data.get("updated_at", 0.0),
             results=dict(data.get("results", {})),
+            edits=tuple(tuple(e) for e in data.get("edits", ())),
         )
 
 
@@ -196,6 +207,166 @@ def dependencies_settled(run: GoalRun, step: PlannedStep) -> bool:
     """Every `depends_on` variable has a result. A step started before its
     inputs exist would be run against nothing, so the plan never runs it."""
     return all(name in run.results for name in step.depends_on)
+
+
+# ---------------------------------------------------------------------------
+# Editing a saved plan by hand (2026-10-11, from open-intelligent-ui).
+#
+# The queue above and `advance()` below are the machine's half: the model
+# writes a plan and the queue steps it. What was missing is the person's half,
+# and open-intelligent-ui is the reference that has it - its route panel lets
+# somebody remove stops and add suggestions, and the next turn rewrites those
+# edits as a sentence the model reads. Chronoa's Goals panel had "remove this
+# goal" and nothing else, so the only way to correct one wrong step was to
+# throw the whole plan away and ask again.
+#
+# The constraint open-intelligent-ui never faces: a PlannedStep names a
+# `variable_name` and other steps depend on it, so removing a step can orphan a
+# later one. `remove_step` therefore refuses rather than leaving a plan whose
+# steps cannot see their inputs - and it names the step that is in the way,
+# because a refusal nobody can locate is a refusal nobody will fix.
+# ---------------------------------------------------------------------------
+
+def dependents_of(run: GoalRun, variable_name: str) -> "list[str]":
+    """The steps that would lose an input if `variable_name` went away.
+
+    **Direct dependents only, and that is the wrong question here.** See
+    `downstream_of`, which is what the refusal uses: the person is deciding
+    whether to take a step out of *their* plan, and what they need to know is
+    the whole cost, not the first step of it.
+    """
+    return [s.variable_name for s in run.steps if variable_name in s.depends_on]
+
+
+def downstream_of(run: GoalRun, variable_name: str) -> "list[str]":
+    """Every step that stops being runnable, transitively, in plan order.
+
+    Removing `$a` from a chain `a -> b -> c -> d` directly breaks `$b` only, but
+    `$c` and `$d` park too - `$c` on `$b`'s missing result. A refusal that named
+    just `$b` would send the person back for a second refusal, then a third,
+    which is the "a refusal nobody can locate is a refusal nobody will fix"
+    failure wearing a different hat: the cost of the removal is spread over
+    three messages none of which states it.
+
+    Measured on a four-step chain, removing the first step names all three of
+    the others, so "remove those steps first" is one instruction the person can
+    actually carry out.
+    """
+    order = [s.variable_name for s in run.steps]
+    found: "list[str]" = []
+    frontier = [variable_name]
+    seen = {variable_name}
+    while frontier:
+        current = frontier.pop(0)
+        for s in run.steps:
+            if current in s.depends_on and s.variable_name not in seen:
+                seen.add(s.variable_name)
+                found.append(s.variable_name)
+                frontier.append(s.variable_name)
+    return sorted(found, key=order.index)
+
+
+def remove_step(run: GoalRun, variable_name: str, now: float = 0.0
+                ) -> "tuple[GoalRun, str]":
+    """(run, why-not). Drops one step, or refuses naming what depends on it.
+
+    The refusal is the load-bearing half. Open-intelligent-ui removes a stop
+    from an itinerary; a Chronoa step is a tool call whose output later steps
+    read by name, so deleting it silently would leave a plan that parks forever
+    with `waiting for:` naming a variable nothing produces - which reads as a
+    missing result rather than as a plan the person broke.
+    """
+    if not any(s.variable_name == variable_name for s in run.steps):
+        return run, (f"there is no step named ${variable_name} in this plan, so "
+                     "nothing was removed. The steps are: "
+                     + ", ".join(f"${s.variable_name}" for s in run.steps))
+    blocked_by = downstream_of(run, variable_name)
+    if blocked_by:
+        return run, (
+            f"${variable_name} is still needed: " + ", ".join(f"${b}" for b in blocked_by)
+            + " cannot run without it. Remove "
+            + ("that step" if len(blocked_by) == 1 else "those steps")
+            + " first, or the plan would park waiting for a result nothing "
+            "produces. Nothing was removed.")
+    steps = tuple(s for s in run.steps if s.variable_name != variable_name)
+    index = min(run.index, len(steps))
+    phase = run.phase
+    if phase is Phase.RUNNING and index >= len(steps):
+        phase = Phase.COMPLETED
+    return run._replace(
+        steps=steps, index=index, phase=phase,
+        results={k: v for k, v in run.results.items() if k != variable_name},
+        edits=run.edits + ((variable_name, now),),
+        updated_at=now,
+    ), ""
+
+
+def move_step(run: GoalRun, variable_name: str, to_index: int, now: float = 0.0
+              ) -> "tuple[GoalRun, str]":
+    """(run, why-not). Reorders one step, or refuses if that breaks its inputs.
+
+    **A step may only move where its dependencies still run before it.** A plain
+    reorder is free of that rule only when nothing moves across it; here the
+    dependency is checked in the *new* position, so moving a step above one it
+    depends on is refused by name.
+    """
+    order = [s.variable_name for s in run.steps]
+    if variable_name not in order:
+        return run, (f"there is no step named ${variable_name} in this plan, so "
+                     "nothing was moved.")
+    if not 0 <= to_index < len(order):
+        return run, (f"a plan of {len(order)} steps has no position {to_index}; "
+                     f"the range is 0 to {len(order) - 1}. Nothing was moved.")
+    steps = list(run.steps)
+    step = next(s for s in steps if s.variable_name == variable_name)
+    steps = [s for s in steps if s.variable_name != variable_name]
+    steps.insert(to_index, step)
+    proposed = tuple(steps)
+    settled = {d for d in _depends_on_of(proposed, variable_name)}
+    seen = set()
+    for s in proposed:
+        if s.variable_name == variable_name:
+            break
+        seen.add(s.variable_name)
+    missing = [d for d in settled if d not in seen and d not in run.results]
+    if missing:
+        return run, (
+            f"${variable_name} needs " + ", ".join(f"${d}" for d in missing)
+            + f" to run first, and position {to_index} is before "
+            + ("it" if len(missing) == 1 else "them")
+            + ". Nothing was moved.")
+    return run._replace(steps=proposed, index=min(run.index, len(proposed)),
+                        updated_at=now), ""
+
+
+def _depends_on_of(steps: tuple, variable_name: str) -> "list[str]":
+    for s in steps:
+        if s.variable_name == variable_name:
+            return list(s.depends_on)
+    return []
+
+
+def describe_edits(run: GoalRun) -> str:
+    """A sentence about what a person changed, for the model to read.
+
+    **This is the open-intelligent-ui mechanism, in Chronoa's words.** Its route
+    handler takes the saved component state and rewrites it as
+    "(User's edits to this route: removed stops (by id): belem; added stops:
+    LX Factory.)" so the next turn's model treats the edited route as current
+    and does not re-add what was taken out. `manage_goals`' `list` calls this,
+    which is the only place a model ever reads a saved plan.
+
+    Empty for a plan nobody touched, so an untouched plan reads as untouched -
+    a sentence that named no edits would be indistinguishable from one that
+    named few.
+    """
+    if not run.edits:
+        return ""
+    removed = [name for name, _at in run.edits]
+    return ("\n\n(A person edited this plan by hand: removed "
+            + ", ".join(f"${n}" for n in removed)
+            + ". Treat the edited plan as the one they want, and do not put "
+            "those steps back unless they ask.)")
 
 
 def advance(run: GoalRun, execute: Callable[[PlannedStep, dict], str]) -> GoalRun:

@@ -68,12 +68,20 @@ class _GoalsSurface:
             getattr(self._body, f"set_margin_{side}")(12)
         set_content(common.scrolled(self._body))
         self.running = False
+        self._notice = ""
         self.refresh()
 
     # -- drawing --------------------------------------------------------------
 
     def refresh(self) -> None:
         common.clear(self._body)
+        # The last thing a click did, said out loud. A refusal that is computed
+        # and never rendered is the dead-control defect this repo has recorded
+        # four times - `drop_step` can refuse (a later step needs this one) and
+        # a refusal nobody can see is a refusal nobody will act on.
+        if self._notice:
+            self._body.append(common.row("", self._notice))
+            self._notice = ""
         try:
             runs = sorted(self.store.list(), key=lambda r: r.created_at, reverse=True)
         except OSError as exc:
@@ -113,7 +121,30 @@ class _GoalsSurface:
             detail = f"{step.tool_name} -> ${step.variable_name}"
             if result is not None:
                 detail += f": {str(result)[:120]}"
-            _add(group, common.row(step.thought or step.tool_name, detail, suffix=mark))
+            row = common.row(step.thought or step.tool_name, detail, suffix=mark)
+            # **A step can be taken out of a plan, and this is the only control
+            # that ever could.** open-intelligent-ui's route panel lets a person
+            # remove a stop; Chronoa's Goals panel had "remove this goal" and
+            # nothing finer, so one wrong step meant throwing the whole plan away
+            # and asking again. The refusal when a later step needs this one is
+            # shown on the row that caused it, because a refusal nobody can
+            # locate is a refusal nobody will fix.
+            if not done:
+                drop = Gtk.Button(icon_name="user-trash-symbolic")
+                drop.add_css_class("flat")
+                drop.set_tooltip_text(f"Remove the step ${step.variable_name} from this plan")
+                drop.update_property(
+                    [Gtk.AccessibleProperty.LABEL],
+                    [f"Remove step {step.variable_name} of {run.goal}"])
+                drop.connect("clicked", lambda _b, r=run, s=step: self.drop_step(r, s))
+                _add(group, row)
+                holder = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, hexpand=True)
+                holder.set_hexpand(True)
+                holder.append(drop)
+                holder.set_halign(Gtk.Align.END)
+                _add(group, holder)
+            else:
+                _add(group, row)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6, halign=Gtk.Align.END)
         actions.set_margin_top(6)
@@ -181,11 +212,25 @@ class _GoalsSurface:
             self.store.resume(run_id, text.strip())
         self.refresh()
 
-    def remove(self, run_id: str) -> None:
-        try:
-            goals._state_path(self.store.root, run_id).unlink()
-        except OSError as exc:
-            logger.warning("could not remove goal %s: %s", run_id, exc)
+    def drop_step(self, run: goals.GoalRun, step: goals.PlannedStep) -> None:
+        """Take one step out of a plan, and say so when it cannot be.
+
+        The refusal is put in front of the person rather than swallowed:
+        `remove_step` names the step that still needs this one, and that
+        sentence is what the row would otherwise be missing. The store is
+        re-read rather than patched from the stale card, so two clicks in a row
+        cannot drop two steps on the strength of one.
+        """
+        import time
+
+        current = self.store.load(run.id) or run
+        updated, why = goals.remove_step(current, step.variable_name, now=time.time())
+        if why:
+            self._notice = why
+            logger.info("goal %s: step %s not removed: %s", run.id, step.variable_name, why)
+        else:
+            self._notice = f"Removed ${step.variable_name} from {run.goal}."
+            self.store.save(updated)
         self.refresh()
 
 

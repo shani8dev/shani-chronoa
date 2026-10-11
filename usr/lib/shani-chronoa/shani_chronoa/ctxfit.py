@@ -86,6 +86,56 @@ def kv_bytes_per_token(model_info: dict) -> int:
     return total
 
 
+def kv_width_from_shapes(shapes) -> int:
+    """The KV cache's per-layer width, from the projection tensors' own shapes.
+
+    **A second, independent derivation of the number `kv_bytes_per_token`
+    computes from metadata.** GGUF stores a linear weight as `[in, out]`, so the
+    K and V projections' *second* dimension is the KV width directly: for
+    `blk.0.attn_k.weight` on Qwen3-1.7B it is `shape[1] == 1024`, which is
+    `head_count_kv (8) x head_dim (128)`.
+
+    Why a second route at all: `kv_bytes_per_token` reads five conventions out of
+    the header - `head_count`, `head_count_kv` (which may be a scalar *or* a
+    per-layer list), `key_length`/`value_length` as overrides, and
+    `full_attention_interval` / `sliding_window_pattern` as layer filters. A test
+    written from the same reading as the module agrees with the module whether or
+    not the reading is right. The tensor route cannot inherit that: it asks the
+    file what the matrices actually are.
+
+    This is edge0's `test_streaming_math.py` discipline - *"the exact path must
+    match a plain fp16 reference implementation"* - applied to the one place
+    Chronoa does arithmetic on a third-party file format.
+
+    `shapes` is any iterable of `(name, [in, out])` or objects with `.name` /
+    `.shape`. Returns 0 when there is nothing to read, so a caller cannot tell
+    "no K tensor" from "zero width".
+    """
+    def _pair(entry):
+        if hasattr(entry, "name"):
+            name = str(entry.name)
+            shape = list(entry.shape)
+        else:
+            name = str(entry[0])
+            shape = list(entry[1])
+        return name, shape
+
+    widths = set()
+    for entry in shapes or ():
+        name, shape = _pair(entry)
+        if not name.endswith(("attn_k.weight", "attn_v.weight")):
+            continue
+        if len(shape) < 2 or not shape[1]:
+            continue
+        widths.add(int(shape[1]))
+    if len(widths) != 1:
+        # More than one width across the K/V projections means a fused or
+        # grouped attention this reader does not model. Saying so beats guessing
+        # which one the cache uses.
+        return 0
+    return widths.pop()
+
+
 def estimate_need(weights_bytes: int, context: int, per_token: Optional[int] = None) -> int:
     """Roughly how much memory a model needs at a given context size."""
     per_token = per_token or _KV_BYTES_PER_TOKEN

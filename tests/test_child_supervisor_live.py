@@ -582,6 +582,24 @@ class TestTheWatchdogSeesARealWedge:
         assert recorder.start_auto_stop(delivered.append, max_seconds=30.0, silence_seconds=0.16)
         return recorder, delivered
 
+    # The wedged capture is still running when this ends, which is the point:
+    # the test is about what the watchdog does *while* it runs, not about
+    # stopping it. So its ears activity is still lit, and that is by design
+    # rather than a leak - the same reasoning the two `_wedge` users below carry
+    # in their own markers, and the same reasoning line 371's marker spells out.
+    #
+    # This was the one `_wedge` user without the marker, and the chunked sweep
+    # did catch it once: `left ears ('listening') lit` at teardown, on a run of
+    # 44 files that passed the same file 20/20 in isolation.
+    #
+    # **No control was ever run for this.** Three attempts to reproduce it under
+    # load and under the chunk's own file list were contaminated by a concurrent
+    # session landing `skills/duplicate_files.py` part-way through the
+    # experiment, so the marker is here on the strength of the fixture's own
+    # documented convention and of symmetry with the tests below - not because a
+    # mutation was shown to fail. If the teardown error returns, this comment is
+    # the first thing to re-read.
+    @pytest.mark.holds_organs
     def test_a_capture_that_stops_writing_is_reported_as_hung(self, streaming, caplog):
         recorder, delivered = self._wedge(streaming, caplog)
 

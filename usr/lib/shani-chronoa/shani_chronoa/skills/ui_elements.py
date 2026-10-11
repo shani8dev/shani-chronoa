@@ -32,7 +32,8 @@ import time
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
-_ACTIONS = ("apps", "inspect", "press", "set_text", "read", "menu")
+_ACTIONS = ("apps", "inspect", "press", "set_text", "read", "menu",
+            "drive", "act", "state")
 MAX_ELEMENTS = 300
 MAX_DEPTH = 30
 _PRESS_NAMES = ("click", "press", "activate", "toggle", "jump", "open")
@@ -51,7 +52,12 @@ SCHEMA = {
             "are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its "
             "name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu "
             "item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu "
-            "path like 'File > Export'. Requires 'input-control-enabled'."
+            "path like 'File > Export'. drive: one turn of driving - give an action and a control "
+            "number and the reply is the app's new state in the same short numbered form, which is "
+            "what a small model can act on. act: click, type or key an app by name or position, with "
+            "a visible cursor. state: the numbered controls an app is showing. Works on a container's "
+            "app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start "
+            "also runs a container, so it needs 'container-control-enabled' as well."
         ),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": list(_ACTIONS)},
@@ -60,6 +66,13 @@ SCHEMA = {
             "text": {"type": "string"},
             "query": {"type": "string"},
             "path": {"type": "string", "description": "menu: e.g. 'File > Export'."},
+            "do": {"type": "string", "description": "For drive: start, read, click, type or key - what this turn does."},
+            "how": {"type": "string", "description": "For act: click, type or key."},
+            "number": {"type": "integer", "description": "For drive click: the control's number from the last state."},
+            "image": {"type": "string", "description": "For drive start: the container image to run, e.g. localhost/gtk4-probe2."},
+            "keys": {"type": "string", "description": "For act/drive: a combination like Down or ctrl-alt-f2."},
+            "x": {"type": "number", "description": "For act click: percentage across the window."},
+            "y": {"type": "number", "description": "For act click: percentage down the window."},
         }, "required": ["action"]},
     },
 }
@@ -324,6 +337,76 @@ def _check_same(acc, element_id: str, expect: str) -> None:
                       "inspect again")
 
 
+def _do_drive(arguments: dict) -> str:
+    """One turn of driving any app on this machine: an action in, a state out.
+
+    The whole point is the shape. A model that must call four tools per step -
+    read, click, read again, decide - spends its context on tool round trips
+    instead of on the app; this repo measured that trade twice on the schema side
+    (every schema offered: a 1.7B model scores 0/62; a few well-shaped ones:
+    56/62). So this is **one** call that reads the app for the model and answers
+    with a numbered list it can act on with a digit, plus the text on screen.
+
+    Container apps and desktop apps are the same call: an app on either side
+    publishes to the same accessibility bus, so the only difference is which
+    input route reaches it.
+    """
+    from shani_chronoa import ui_driver
+
+    try:
+        return ui_driver.drive(
+            action=str(arguments.get("do") or "read").strip().lower(),
+            app=str(arguments.get("app") or "").strip(),
+            image=str(arguments.get("image") or "").strip(),
+            title=str(arguments.get("title") or "").strip(),
+            number=arguments.get("number"),
+            text=str(arguments.get("text") or ""),
+            keys=str(arguments.get("keys") or "").strip(),
+            program=str(arguments.get("program") or ""))
+    except ui_driver.GuiUnavailable as exc:
+        return str(exc)
+
+
+def _do_actuate(arguments: dict) -> str:
+    """Click, type or key any app on this machine, watchably.
+
+    A container app is started by the container skill and draws on this desktop;
+    this drives it, and drives the desktop's own apps too - a native Wayland
+    window through the RemoteDesktop portal (the TeamViewer/AnyDesk mechanism),
+    an XWayland one through XTEST, which needs no dialog at all.
+    """
+    from shani_chronoa import ui_driver
+
+    how = str(arguments.get("how") or "click").strip().lower()
+    app = str(arguments.get("app") or "").strip()
+    title = str(arguments.get("title") or app).strip()
+    try:
+        if how == "click":
+            return ui_driver.click(
+                app=app, title=title,
+                target=str(arguments.get("target") or "").strip() or None,
+                x_percent=arguments.get("x"), y_percent=arguments.get("y"))
+        if how == "type":
+            return ui_driver.type_text(app=app, title=title,
+                                       text=str(arguments.get("text") or ""))
+        if how == "key":
+            return ui_driver.key(app=app, title=title,
+                                 keys=str(arguments.get("keys") or ""))
+        return f"how must be click, type or key, not {how!r}"
+    except ui_driver.GuiUnavailable as exc:
+        return str(exc)
+
+
+def _do_state(arguments: dict) -> str:
+    """What an app is showing, in the numbered shape a decision can be made from."""
+    from shani_chronoa import ui_driver
+
+    try:
+        return ui_driver.observation(str(arguments.get("app") or "").strip())
+    except ui_driver.GuiUnavailable as exc:
+        return str(exc)
+
+
 def _run(arguments: dict) -> str:
     action = (arguments.get("action") or "").strip().lower()
     if action not in _ACTIONS:
@@ -331,6 +414,15 @@ def _run(arguments: dict) -> str:
     allowed, reason = _consent(ChronoaConfig())
     if not allowed:
         return f"Refusing: {reason}."
+    # The driving actions do not need a specific app found first: they name it
+    # themselves, and a container app started by `drive start` is driven by the
+    # name it was given.
+    if action == "drive":
+        return _do_drive(arguments)
+    if action == "act":
+        return _do_actuate(arguments)
+    if action == "state":
+        return _do_state(arguments)
     try:
         Atspi = _atspi()
         if action == "apps":

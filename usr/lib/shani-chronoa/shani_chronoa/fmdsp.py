@@ -192,15 +192,45 @@ def butter_sos(order: int, cutoff, fs: float, btype: str = "low") -> "list[list[
         raise ValueError("order must be an even number of at least 2")
 
     if btype == "low":
+        # **A Butterworth lowpass has N zeros, all at Nyquist (z = -1)** - one per
+        # pole, so two per section, which as one second-order numerator is
+        # `(1 + z^-1)^2 = [1, 2, 1]`.
+        #
+        # This branch built `[1, 0, 0]`, a filter with **no zeros at all**, and it
+        # is the single worst defect this module has shipped. The poles were right,
+        # so the response looked correct everywhere below the cutoff and at the
+        # cutoff itself - and the only symptom was far above it: with no zero at
+        # Nyquist the response stops falling and climbs back to unity. Measured
+        # against an ideal order-4 Butterworth, it was **3.3x too high at 0.4 fs,
+        # 258x at 0.6 fs and 34,837x at 0.99 fs**.
+        #
+        # `skills/fm_radio.py`'s `bandlimit()` is `lowpass(hi) - lowpass(lo)`, and
+        # both of those stopbands pointed the wrong way, so their difference had a
+        # measured gain of **247x** at the 38 kHz stereo subcarrier it exists to
+        # extract. The FM decoder's mono channel carried the subcarrier at 8.17
+        # against a 0.05 passband, both channels came out identical, and stereo
+        # separation read -55 dB. It looked like a de-matrix polarity bug, because
+        # a wrong gain and a wrong sign both make "the right channel carries the
+        # left channel's signal".
+        #
+        # **The comment above this branch said the opposite, and that is why it
+        # survived**: the `highpass` branch states the correct principle - "a
+        # highpass blocks DC, which means a zero at DC; a lowpass blocks Nyquist" -
+        # and then calls the lowpass "the opposite of a lowpass, which has none".
+        # The zeros were already written for `high` (`[1,-2,1]`) and `bandpass`
+        # (`[1,0,-1]`); only this one was missing.
         poles = _lowpass_poles(order, float(cutoff), fs)
-        sections = _sections_from_poles(poles)
-        return _normalise(sections, "low", fs)
+        with_zeros = [[1.0, 2.0, 1.0, 1.0, s[4], s[5]]
+                      for s in _sections_from_poles(poles)]
+        return _normalise(with_zeros, "low", fs)
 
     if btype == "high":
         # **A Butterworth highpass has its zeros at DC, z = +1** - one per pole,
         # so two per section, which as one second-order numerator is
         # `(1 - z^-1)^2 = [1, -2, 1]`. That is the mirror of the bandpass case
-        # below and the opposite of a lowpass, which has none.
+        # below, and the mirror of the **lowpass** case above, whose zeros sit at
+        # Nyquist as `[1, 2, 1]`. All three types have N zeros; they differ only
+        # in where those zeros are placed.
         #
         # Two wrong designs are recorded here because both produced a filter that
         # *ran* and only misbehaved on the passband:
@@ -349,14 +379,37 @@ def bandpass(x, rate, low, high, order=4):
 def _sinc_lowpass(cutoff_norm: float, half: int) -> "list[float]":
     """A windowed-sinc FIR prototype for decimation.
 
-    `cutoff_norm` is the cutoff as a fraction of the *output* rate, which is
-    what keeps the anti-aliasing correct as the ratio changes.
+    `cutoff_norm` is the cutoff as a fraction of the *output* rate.
+
+    **The sinc argument carries a factor of two, and its absence is why this
+    filter never actually filtered.** The ideal discrete lowpass with cutoff `fc`
+    (in cycles per sample) is `h[m] = 2*fc*sinc(2*fc*m) = sin(2*pi*fc*m)/(pi*m)`.
+    This function used `sin(pi*fc*m)/(pi*m)`, which is the same expression with
+    `fc/2` in place of `fc` - a lowpass whose actual -6 dB point is **half** the
+    one it claims.
+
+    Normalising by the tap sum cannot repair that, because dividing a kernel by a
+    constant fixes its DC gain and leaves its rolloff point exactly where it was.
+    Measured by DTFT of the filter the code actually convolves with, for the
+    demodulator's own 128 kHz -> 32 kHz step (`fc = 0.45/4 = 0.1125`):
+
+    | | 1 kHz | 5 kHz | 10 kHz | 14 kHz | 16 kHz |
+    |---|---|---|---|---|---|
+    | as written | 1.000 | 0.993 | 0.900 | 0.898 | 0.898 |
+    | doubled argument | 1.000 | 1.000 | 1.003 | 0.774 | 0.521 |
+
+    The old form **plateaus at 0.898 and never crosses -6 dB at all** - it is a
+    mild shelf, not a lowpass. And the decimator's -6 dB point, measured rather
+    than assumed, was **7000 Hz for a nominal 14400**, exactly the factor of two.
+    A resampler that does not remove anything above the new Nyquist folds the
+    38 kHz stereo subcarrier straight down into the audio band; the FM decoder's
+    mono channel was carrying it at 8.17 against a 0.05 passband.
     """
     n = 2 * half + 1
     taps = []
     for k in range(n):
         m = k - half
-        sinc = cutoff_norm if m == 0 else math.sin(math.pi * cutoff_norm * m) / (math.pi * m)
+        sinc = 1.0 if m == 0 else math.sin(_TWO_PI * cutoff_norm * m) / (math.pi * m)
         # Hann window, computed inside the loop: the first version referenced k
         # before the loop bound it, so it raised on the first call.
         hann = 0.5 - 0.5 * math.cos(_TWO_PI * k / (n - 1)) if n > 1 else 1.0
@@ -415,6 +468,26 @@ def resample(x: "list[float]", up: int, down: int) -> "list[float]":
     # images above it.
     cutoff = 0.45 / max(ratio, 1.0)
     half = _INTERP_HALF
+    # **The kernel must be normalised to unit DC gain, and it was not.** The
+    # decimation path above does exactly this (`total = sum(taps) or 1.0`); the
+    # interpolation path never did, and `_sinc_at` returns a *peak* value of
+    # `cutoff`, so its sum came out at **0.493** for the demodulator's own
+    # 200 kHz -> 128 kHz step and at **0.697** for 128 kHz -> 32 kHz.
+    #
+    # A resampler that halves its input is not a resampler, and nothing raised:
+    # `demodulate()` normalises its output by the peak, so every length and every
+    # tone was correct and only the *absolute* level was wrong - which is what let
+    # the FM pilot measure **0.0103 against a 0.02 detection threshold**, so the
+    # decoder never built its phase-locked subcarrier reference and fell back to
+    # a free-running oscillator. That fallback then put the pilot's own phase on
+    # the difference channel, and the right channel carried the left's 1 kHz
+    # instead of its own 2 kHz: a filtering fault that presented as a de-matrix
+    # polarity fault.
+    #
+    # **A constant input must come out a constant input.** That is the property
+    # that pins it, and it is the one the round trip did not check.
+    scale = 1.0 / max(sum(_sinc_at(k, cutoff, half)
+                          for k in range(-half, half + 1)), 1e-15)
     n_out = int(len(x) / ratio)
     out: list[float] = []
     for n in range(n_out):
@@ -428,7 +501,7 @@ def resample(x: "list[float]", up: int, down: int) -> "list[float]":
             if 0 <= index < len(x):
                 d = frac - k
                 total += x[index] * _sinc_at(d, cutoff, half)
-        out.append(total)
+        out.append(total * scale)
     return out
 
 
@@ -439,11 +512,20 @@ _INTERP_HALF = 16
 
 
 def _sinc_at(distance: float, cutoff: float, half: int) -> float:
-    """Windowed sinc evaluated at a fractional distance."""
+    """Windowed sinc evaluated at a fractional distance.
+
+    **Same factor of two as `_sinc_lowpass`, for the same reason**: the ideal
+    lowpass with cutoff `fc` is `sin(2*pi*fc*d)/(pi*d)`, not `sin(pi*fc*d)/(pi*d)`.
+    Measured by DTFT on the demodulator's 200 kHz -> 128 kHz kernel (`fc = 0.288`,
+    nominal 57600 Hz), the old form put **no -6 dB point anywhere** - the
+    response sat at 0.76 from 38 kHz all the way to Nyquist, which is a shelf and
+    not a filter. The doubled argument measures its -6 dB point at **56558 Hz**
+    against the nominal 57600, which is what a windowed sinc should do.
+    """
     if abs(distance) < 1e-12:
-        value = cutoff
+        value = 1.0
     else:
-        value = cutoff * math.sin(math.pi * cutoff * distance) / (math.pi * distance)
+        value = math.sin(_TWO_PI * cutoff * distance) / (math.pi * distance)
     # Hann over the kernel span, so the sinc's infinite tails do not ring.
     return value * (0.5 + 0.5 * math.cos(math.pi * distance / half))
 

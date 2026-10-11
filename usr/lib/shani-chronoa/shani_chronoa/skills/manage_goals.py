@@ -119,6 +119,12 @@ def describe(run: "goals.GoalRun") -> str:
     line = f"{run.id}  [{run.phase.value}]  {run.goal}  ({done}/{len(run.steps)} steps)"
     if run.awaiting_reason:
         line += f"  - waiting: {run.awaiting_reason}"
+    # What a person changed by hand, in the one place a model reads a plan.
+    # **Without this a hand-trimmed plan reads exactly like one the model wrote
+    # whole**, so a model asked to continue it will put the removed steps back -
+    # the open-intelligent-ui route panel's "(User's edits to this route: ...)"
+    # sentence, which is the whole of what it takes to close that loop.
+    line += goals.describe_edits(run)
     return line
 
 

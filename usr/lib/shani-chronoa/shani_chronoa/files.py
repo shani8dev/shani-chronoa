@@ -579,6 +579,11 @@ _PACKAGE_HINTS = {
     "systemctl": "systemd",
     "journalctl": "systemd",
     "localectl": "systemd",
+    # QEMU and podman are not on the Arch desktop images the matrix was built
+    # from, so these two are hand-added rather than read out of a file
+    # database - which is the honest provenance, and why they say so.
+    "qemu-system-x86_64": "qemu-system-x86",
+    "podman": "podman",
     "wpctl": "wireplumber",
     "pactl": "libpulse",
     "df": "coreutils",
@@ -610,6 +615,18 @@ _PACKAGE_HINTS = {
     "nfc-emulate-forum-tag4": "libnfc",
     "nfc-jewel": "libnfc",
     "nfc-relay-picc": "libnfc",
+    # Infrared, and the two packages it is split across. `lirc` ships lircd,
+    # irsend, irw, mode2, irrecord, irdb-get and the rest of the userspace
+    # route (29 commands, read out of the image's own pacman database).
+    # `ir-ctl` and `ir-keytable` are *not* lirc - they are v4l-utils, which
+    # arrives with shani-multimedia. Getting this wrong sends somebody to
+    # `pacman -S lirc` for a binary lirc does not contain.
+    "ir-ctl": "v4l-utils",
+    "ir-keytable": "v4l-utils",
+    "irsend": "lirc",
+    "irw": "lirc",
+    "mode2": "lirc",
+    "lircd": "lirc",
     "udisksctl": "udisks2",
     "pdftotext": "poppler",
     "scanimage": "sane",

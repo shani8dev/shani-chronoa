@@ -381,3 +381,148 @@ this time two of them agreed with each other and were both wrong.
 list — no near-white literal in any `color` or `border-color` rule, no
 near-black literal as a `background-color` — because the principle is what was
 violated and a list of eight hexes would only catch those eight.
+
+## 2026-10-10 — The FM stereo decoder had never worked, and infrared got a codec
+
+Both from the same session, both following the pattern this file keeps
+recording: the defect was in the step nobody ran, and the part that could be
+verified without hardware was the part worth writing.
+
+### FM: four defects, none of them visible by reading
+
+`skills/fm_radio.py` shipped a stereo decoder that could never have separated a
+channel. The round trip through `synthesize_fm` → `demodulate` is what found
+them, and every one was measured rather than inferred:
+
+1. **The discriminator had no phase wrap.** `atan2` returns a principal value
+   in `(-pi, pi]`, so whenever the *accumulated* phase crosses the branch cut —
+   which a 500 Hz baseband does four times per cycle, because the integrated
+   phase swings by `dev*A/f` radians — the naive difference reads a spurious
+   `+/-2*pi` step. Measured on the first 3000 samples of a real signal:
+
+   | | max `|d(phase)|` |
+   |---|---|
+   | `atan2` difference (shipped) | **5.7890 rad** |
+   | complex-ratio `arg` (the true value) | **1.4139 rad** |
+
+   24 000 of 200 000 samples were wrong, which is 4x the audio, a destroyed
+   pilot spectrum, and no recoverable subcarrier at all. The wrap is three
+   lines and it is the whole discriminator.
+2. **The de-matrix compounded two 0.5s into 0.25 instead of cancelling them.**
+   `synthesize_fm` puts `mono + side*cos(38k)` on the air; `demodulate` read
+   `L = mono + 0.5*d`, so `L = 0.75L + 0.25R` and a hard-panned tone leaked a
+   third of itself across. 47 CFR 73.319(6): the subcarrier's modulating signal
+   "must be equal to the difference of the left and right signals".
+3. **`_deemphasis` had a DC gain of `a`, not 1.** `a*(state + (1-a)*value)`
+   distributes to `a*state + a*(1-a)*value` — the second coefficient carries an
+   extra `a`. It reads as a harmless factoring of the same expression. At
+   steady state a constant `c` comes out at `a*c`: **-3.6 dB** on every signal.
+4. **The de-emphasis pole scaled with the sample rate.** `1/(1 + 2*pi*tau*fs)`
+   is the rationalisation valid only while `2*pi*tau*fs << 1`; at 32 kS/s that
+   product is 15.08, so the corner came out at **14 146 Hz** (83 852 at 128 kS/s,
+   145 037 at 200 kS/s) for a nominal 2 122. `exp(-1/(tau*fs))` gives 2 122 Hz at
+   every rate because `-log(a)*fs/(2*pi) = 1/(2*pi*tau)` cancels the rate exactly.
+
+Two further defects found while fixing them: the pilot was measured through a
+bandpass costing **30% of its amplitude** (leaving the 0.02 lock threshold a
+1.24x margin — the exact margin a decoder silently falls back to a free-running
+oscillator at), and the transmitter applied pre-emphasis to IQ-rate samples with
+the *audio-rate* pole, putting its shelf at 822 Hz instead of 2 122, so the pair
+did not cancel and a 6 kHz tone came back **-8.1 dB** against 300 Hz.
+
+Measured after, 1 s at 200 kS/s:
+
+| | before | after |
+|---|---|---|
+| left-only, right-channel rejection | +3.3 dB | **+32.4 dB** |
+| right-only, left-channel rejection | +4.9 dB | **+35.1 dB** |
+| hard-panned, left separation | +5.9 dB | **+31.3 dB** |
+| hard-panned, right separation | +5.2 dB | **+38.2 dB** |
+| mono L/R residual | — | **-23.1 dB** |
+
+`tests/test_fm_radio_stereo.py` (29 tests) pins all of it, and **10 of 10
+mutations** were confirmed to fail — including the three that first *survived*
+and taught the tests something:
+
+- **A single-tone level test proves nothing.** `demodulate` normalises every
+  frame to a peak of 1.0, so every signal comes back at 1.0 whatever was done
+  to it. A 6 kHz tone sent alone reads -1.77 dB against 300 Hz **with the
+  transmitter given a lowpass instead of the pre-emphasis inverse**, because the
+  normalisation rescales the whole frame. The flatness test now sends both tones
+  *in one signal*, so the single scalar cannot hide the difference.
+- **A test that computes the pole itself asserts its own algebra.** The first
+  corner test computed `exp(-1/(tau*fs))` and checked the resulting corner —
+  which passes however the module computes its pole. Reverting the module's call
+  site to the rate-scaling form left it green. `_deemphasis_pole()` is a named
+  function now so the test reads the module's own value.
+- **The passband half of the anti-alias contract was untested.** `test_fmdsp`'s
+  `test_above_nyquist_is_suppressed_not_leaned_on` uses a 40 kHz tone for
+  `resample(x, 1, 2)` at 250 kS/s — which is *not above* the 62 500 Hz output
+  Nyquist at all. So it cannot catch a filter that is too narrow, because
+  attenuating more only suppresses more. Halving the sinc's argument left it
+  green. The new `test_the_passband_is_flat_up_to_the_output_nyquist` is the
+  missing half.
+
+### Infrared: the protocol is the verifiable half
+
+`skills/ir_remote.py`. There is no IR hardware on the dev box — no `/dev/lirc*`,
+nothing under `/sys/class/rc`, and not one of `ir-ctl`/`irsend`/`irw`/`mode2`/
+`ir-keytable` — so what can be verified is the protocol, and that is what is
+verified. The reasoning is the one that put `fm_radio`'s synthesiser and `nfc`'s
+NDEF reader here: a codec that can only be tested on hardware nobody owns is a
+codec nobody has tested.
+
+What ShaniOS actually has, read out of the image's own pacman database
+(`shani-install-media/chronoa-matrix/chronoa-matrix.json`) rather than assumed:
+
+- `lirc` is a dependency of `shani-peripherals`, which is in **all four image
+  profiles** (gnome, plasma, cosmic, gamescope), and it ships **29 commands**:
+  `lircd`, `irsend`, `irw`, `mode2`, `irrecord`, `irdb-get`, `pronto2lirc`, ...
+- `ir-ctl` and `ir-keytable` are **not lirc** — they are `v4l-utils`, which
+  arrives with `shani-multimedia`. Getting this wrong sends somebody to
+  `pacman -S lirc` for a binary lirc does not contain.
+
+The send route is `ir-ctl --send=<file>`, and its file format is quoted from the
+man page because it is the one contract here a wrong guess would make useless:
+an optional `carrier <hz>` line, then alternating `pulse`/`space` tokens with
+lengths in microseconds, **starting with a pulse**. That is the shape the codec
+emits, which is why there is no translation layer nobody could check.
+
+Two findings from writing the codec:
+
+- **Every NEC frame is exactly 67 420 us, and that is a theorem.** Each byte is
+  sent followed by its one's complement, so of the 16 bits in a byte pair
+  exactly 8 are ones however the byte was chosen (`k` ones plus `8-k`). Four
+  pairs give 32 bits with exactly 16 ones and 16 zeros. So the decoder checks the
+  total **exactly** rather than against a band — and a band would be the weaker
+  check, not the safer one.
+- **LSB-first is the one thing a matching decoder cannot catch.** A decoder
+  written to match its own encoder never notices the bit order is wrong. The bit
+  order is asserted against known frame bytes, and the frame's total against the
+  published arithmetic.
+
+`tests/test_ir_remote_skill.py` (43 tests) pins the codec against the published
+frame shapes, the man page's own rc-5 example, and 20% receiver jitter. **14 of
+14 mutations** were confirmed to fail, including the first three that survived:
+
+- An index of `2 + 2*25` flipped the **pulse** at NEC bit 25 instead of its
+  **space** at `3 + 2*25`, which the burst-width check refuses for an unrelated
+  reason — so the complement check could be deleted without anything failing.
+- The carrier line's keyword handling was tested by a mutation in the *inner*
+  token loop, where `break` is equivalent to `index += 2` because both end the
+  line. Replaced by a mutation that genuinely reads the carrier's frequency as a
+  pulse length.
+- The package-hint claim was untested by the codec's own file; it belongs to
+  `test_package_names_match_arch.py`'s `TOOL_MISSING_CALLED_WITH`, which now
+  carries all six IR binaries.
+
+Reachability was proven rather than assumed, through the real dispatch path: the
+loader sees it (232 skills), the handler's `__name__` is a real identifier, the
+gate refuses by name with the key false and answers the device question with it
+true, the codec works through `execute_tool_outcome`, and the Settings row is
+confirmed present in the **built** `SettingsWindow` rather than only in the
+table — which is the `calendar_edit` dead-switch defect's own test.
+
+**What is deliberately not claimed:** that a real remote recognises a frame this
+module builds, and that `send`/`receive` actually drive `ir-ctl`. Both need
+hardware nobody here owns, and the module that runs them says so.

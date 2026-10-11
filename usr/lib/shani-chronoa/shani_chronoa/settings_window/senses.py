@@ -179,6 +179,10 @@ SENSE_LABELS = {
         "Rollback points",
         "Btrfs rollback points and the subvolume currently booted",
     ),
+    "monitoring": (
+        "Who is capturing on this machine",
+        "Which process holds each camera, and whether a monitoring agent runs",
+    ),
     "sessions": (
         "Who is on this machine",
         "Logged-in sessions, and what runs as root outside the service tree",
@@ -310,9 +314,10 @@ SENSE_CATEGORIES = [
     ("Security and privacy",
      "Firmware security, connected hardware, which software can act as "
      "administrator, what is already using your camera, which ports are open "
-     "to the network, and who else is currently on this machine",
+     "to the network, who else is currently on this machine, and who is "
+     "capturing through it",
      ["security", "devices", "privilege", "polkitpolicy", "capture",
-      "sessions", "firewall", "listeners"]),
+      "monitoring", "sessions", "firewall", "listeners"]),
     ("Printers and scanners",
      "Whether anything is set up to print, and anything is there to scan",
      ["printing"]),
