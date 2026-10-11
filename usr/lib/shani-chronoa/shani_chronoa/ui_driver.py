@@ -200,14 +200,17 @@ def knowable() -> bool:
     asking the display server for its geometry, because a session variable says
     nothing about where a particular app's window is.
     """
-    if shutil.which("xdotool") is None:
-        return False
+    # **Asked of the X server, not of `xdotool`.** `getdisplaygeometry` is a
+    # wrapper for asking the display its size, and the binary that wraps it is
+    # absent from both ShaniOS images - so this used to answer "an element's
+    # position is unknowable here" on a machine where the answer was knowable.
+    from shani_chronoa import x11
+
     try:
-        proc = subprocess.run(["xdotool", "getdisplaygeometry"],
-                              capture_output=True, text=True, timeout=10,
-                              check=False)
-        return proc.returncode == 0 and bool(proc.stdout.strip())
-    except (OSError, subprocess.SubprocessError):
+        with x11.Display() as display:
+            width, height = display.size()
+        return width > 0 and height > 0
+    except x11.XError:
         return False
 
 
@@ -481,12 +484,16 @@ def _in_window(acc, x: float, y: float, w: float, h: float) -> bool:
 
 def _display_size():
     """The X display's size, so a window taller than it can be recognised."""
+    # Same two numbers as `xdotool getdisplaygeometry` printed, read from the
+    # server instead of from the program that reformats them - and without the
+    # `int()` on its whitespace, which turns a parse into a second thing that can
+    # be wrong.
+    from shani_chronoa import x11
+
     try:
-        proc = subprocess.run(["xdotool", "getdisplaygeometry"],
-                              capture_output=True, text=True, timeout=5, check=False)
-        parts = proc.stdout.split()
-        return int(parts[0]), int(parts[1])
-    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        with x11.Display() as display:
+            return display.size()
+    except x11.XError:
         return (10 ** 6, 10 ** 6)
 
 
