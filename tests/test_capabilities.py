@@ -12,10 +12,13 @@ a gated skill says so *and* says which switch, and that an unexpected
 third-party skill is still discoverable rather than dropped.
 """
 
+import pathlib
+
 import pytest
 
 from shani_chronoa import capabilities
 from shani_chronoa.capabilities import (
+    GATED,
     GATE_NAMES,
     Capability,
     find_capabilities,
@@ -351,3 +354,41 @@ def test_describe_names_broken_tools_and_their_workarounds():
     assert cap.has_command("sox") is True
     assert cap.has_command("vlc") is False
     assert cap.alternatives_for("ffmpeg", ("ffmpeg", "sox", "vlc")) == ["sox"]
+
+
+class TestNoGateLabelNamesAKeyThatDoesNotExist:
+    """`GATE_NAMES` is hand-kept, and a stale entry names a switch nobody can set.
+
+    The one that was here, `microphone-sense-enabled` -> "Transcribe speech", is
+    the `heard-sound` defect in the other direction: `heard-sound` had a consent
+    key **with no Settings row**, so the only switch that granted it was off
+    screen, and this had a Settings **row** for a key **that does not exist**.
+
+    It survived because every check on this table compares *labels* against the
+    rendered Settings rows, and the `hearing` sense carries the same title - so
+    "Transcribe speech" matched a real row while the key beside it was fiction.
+    Nothing grepped the key itself.
+
+    The label checks stay; this adds the half that was missing: **every
+    `GATE_NAMES` key must be a key something actually gates on.** Either a tool
+    in `GATED` names it as its consent key, or the schema declares it, or it is
+    a sense key the Settings rows are generated from.
+    """
+
+    def _schema_keys(self):
+        import glob
+        import re
+        keys = set()
+        for path in glob.glob("usr/share/glib-2.0/schemas/*.xml"):
+            for match in re.finditer(r'<key[^>]*name="([^"]+)"',
+                                     pathlib.Path(path).read_text()):
+                keys.add(match.group(1))
+        return keys
+
+    def test_no_label_names_a_key_nothing_uses(self):
+        gated_values = set(GATED.values())
+        for key in GATE_NAMES:
+            assert key in gated_values or key in self._schema_keys(), (
+                f"GATE_NAMES carries {key!r} -> {GATE_NAMES[key]!r}, but that "
+                f"key is in no gated tool, in no schema, and in no settings "
+                f"row - so the Help window would name a switch nobody can set")

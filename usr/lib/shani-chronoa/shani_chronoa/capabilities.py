@@ -742,7 +742,14 @@ GATE_NAMES: dict[str, str] = {
     "vision-sense-enabled": "Take and describe photos",
     "web-sense-enabled": "Web search",
     "location-sense-enabled": "Location",
-    "microphone-sense-enabled": "Transcribe speech",
+    # `microphone-sense-enabled` was here until 2026-10-11, naming the label
+    # "Transcribe speech". **That key is in no schema, in `GATED`, or anywhere
+    # else in this tree** - it was left behind when the microphone consent became
+    # the `hearing` and `heard-sound` senses, and its label survived only because
+    # the Help check matches labels against Settings rows and the `hearing` sense
+    # carries the same title. A label for a switch nobody can reach is the
+    # `heard-sound` defect in the other direction, and
+    # `test_no_gate_label_names_a_key_that_does_not_exist` now refuses it.
     "file-delete-enabled": "Let Chronoa delete files",
     "process-kill-enabled": "Let Chronoa stop processes",
     "window-close-enabled": "Let Chronoa close windows",
