@@ -440,6 +440,33 @@ _ORB_MARK_SVG = (
 )
 
 
+def _jump_label(text: str):
+    """A label with a chevron: the sign that a press goes somewhere.
+
+    **The chevron is not decoration.** A `flat` button renders as unstyled words -
+    on the Brain page the "Use a model on this computer" jump sat underneath the
+    Next button looking exactly like a dead label, which is the "minor UI glitch
+    during model installation" that got reported. The control was wired the whole
+    time; the affordance was missing.
+
+    The same device this file already uses for the welcome rows
+    (`Adw.ActionRow` + `go-next-symbolic`), whose comment records that the chevron
+    exists because an `Adw.ActionRow` gives no affordance of its own for "this is
+    activatable". A `flat` button has even less: it has a border when styled and
+    none when it is not.
+
+    Imports its own `Gtk`, because this module imports it inside `build_window` on
+    purpose - it is also imported by the MCP server and the CLI, which may run on
+    a machine with no display at all.
+    """
+    from gi.repository import Gtk
+
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    row.append(Gtk.Label(label=text))
+    row.append(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+    return row
+
+
 def _void_has_room(adjustment) -> bool:
     """Whether a page's content is shorter than its window, so there is a void.
 
@@ -1505,8 +1532,16 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
                    halign=Gtk.Align.CENTER)
     n.connect("clicked", lambda *_: goto("ears"))
     page_footer(box).append(n)
-    local_button = Gtk.Button(label="Use a model on this computer",
-                              css_classes=["flat"], halign=Gtk.Align.CENTER)
+    # **Visibly a control, not a bare line of text.** This was a `flat` button,
+    # which in a dark theme renders as unstyled words - so it sat underneath the
+    # Next button looking exactly like a dead label, which is the "minor UI glitch
+    # during model installation" that got reported. The control has been wired the
+    # whole time (it goes to the model picker); the affordance was missing, and
+    # the chevron is what makes one.
+    local_button = Gtk.Button(css_classes=["flat", "jump-link"],
+                              halign=Gtk.Align.CENTER)
+    local_button.set_child(_jump_label("Use a model on this computer"))
+    local_button.set_tooltip_text("Pick which language model this computer uses")
     local_button.connect("clicked", lambda *_: goto("model-picker"))
     page_footer(box).append(local_button)
     view.add(brain)

@@ -1055,11 +1055,37 @@ def _context_arg() -> str:
             per_token = ctxfit.kv_bytes_per_token(info) or None
             chosen = ctxfit.context_that_fits(
                 weights, total_bytes=total, per_token=per_token)
+            # **The cache type is a lever, not a measurement.** The context
+            # ladder has bottomed out and the KV cache is still f16 - which is
+            # llama.cpp's default and 2x the bytes of `q8_0`. Rather than ship a
+            # context that does not fit, keep the context and compress the cache
+            # it is made of. This is unsloth's budget decision: it ranks cache
+            # types by bytes per element and picks the lightest that fits,
+            # instead of treating the KV cost as fixed.
+            #
+            # f16 is preferred everywhere it fits, so this only fires when the
+            # ladder has already failed - the ordering buys nothing otherwise.
+            cache_type = "f16"
+            if not ctxfit.estimate_fit(weights, chosen, total_bytes=total,
+                                       per_token=per_token).fits:
+                cache_type = ctxfit.cache_type_for_context(
+                    weights, chosen, total_bytes=total,
+                    per_token_at_f16=per_token)
+                if cache_type != "f16":
+                    chosen = ctxfit.context_that_fits(
+                        weights, total_bytes=total,
+                        per_token=ctxfit.kv_bytes_per_token(info, cache_type))
+                    logger.info(
+                        "llama-server context: KV cache quantised to %s so the "
+                        "context fits (%d) at %0.1f GiB vram",
+                        cache_type, chosen, total / 1024**3)
             logger.info(
-                "llama-server context: %d (weights %0.1f GiB, vram %0.1f GiB, kv/token %s)",
+                "llama-server context: %d (weights %0.1f GiB, vram %0.1f GiB, "
+                "kv/token %s, cache %s)",
                 chosen, weights / 1024**3, total / 1024**3,
-                per_token if per_token is not None else "unknown",
+                per_token if per_token is not None else "unknown", cache_type,
             )
+            _KV_CACHE_TYPE[0] = cache_type
             return str(chosen)
     except OSError:
         pass

@@ -30,16 +30,54 @@ def _int(value) -> int:
         return 0
 
 
-def kv_bytes_per_token(model_info: dict) -> int:
+#: Bytes one KV-cache element costs, by llama.cpp cache type. The figures are
+#: `unsloth`'s (`studio/backend/core/inference/llama_cpp.py:_kv_bytes_per_elem`),
+#: cross-checked against ggml's block sizes: `q8_0` is 34 bytes for 32 values,
+#: `q5_1` 0.75, `q4_0`/`iq4_nl` 0.5625. `f16` is 2.0 and is llama.cpp's default,
+#: which is what `kv_bytes_per_token` assumed before this table existed.
+#:
+#: A type not in the table costs the f16 default rather than a guess, so an
+#: unknown name is the safe direction: it over-counts the cache rather than
+#: promising a context the VRAM cannot hold.
+KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
+    "f32": 4.0,
+    "f16": 2.0,
+    "bf16": 2.0,
+    "q8_0": 34 / 32,
+    "q5_1": 0.75,
+    "q5_0": 0.6875,
+    "q4_1": 0.625,
+    "q4_0": 0.5625,
+    "iq4_nl": 0.5625,
+}
+
+#: The cache types worth trying, cheapest first. `q4_0`/`iq4_nl` are the floor
+#: and there is nothing cheaper in llama.cpp; `f32` is excluded because it is
+#: more expensive than the default and would only be chosen by someone asking
+#: for it explicitly.
+CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0", "q4_0")
+
+
+def cache_bytes_per_elem(cache_type: Optional[str]) -> float:
+    """Bytes one KV element costs in `cache_type`, or the f16 default."""
+    return KV_CACHE_BYTES_PER_ELEM.get(
+        (cache_type or "f16").strip().lower(), 2.0)
+
+
+def kv_bytes_per_token(model_info: dict, cache_type: str = "f16") -> int:
     """KV-cache bytes one token of context costs, from GGUF/`/api/show` metadata.
 
     The flat 40 kB guess is off by 3x either way: a full-attention 8B needs
     ~100 kB a token, while hybrid models (linear attention, sliding window)
     keep a full cache on only a handful of layers. Reading the architecture is
     the difference between a context that fits and one that spills the model
-    onto the CPU. Assumes llama.cpp's default f16 cache, which errs on the safe
-    side if the server quantises it. Returns 0 when the metadata is missing,
-    so callers fall back to the generic estimate.
+    onto the CPU. Returns 0 when the metadata is missing, so callers fall back
+    to the generic estimate.
+
+    `cache_type` defaults to `f16`, llama.cpp's own default, which is what this
+    function assumed before the type was a parameter. It matters because the
+    cache is one of only two things a context decision can trade away: shrinking
+    the context, or compressing the cache that the context is made of.
     """
     info = model_info or {}
     arch = str(info.get("general.architecture") or "")
@@ -82,8 +120,12 @@ def kv_bytes_per_token(model_info: dict) -> int:
     total = 0
     for i in full_layers:
         kv = kv_per_layer[i] if i < len(kv_per_layer) else (kv_per_layer[-1] if kv_per_layer else 0)
-        total += kv * (k_len + v_len) * 2      # f16: two bytes per value
-    return total
+        total += kv * (k_len + v_len)
+    # Scaled rather than rewritten, so the cache type is a *lever* and not a
+    # second copy of the arithmetic above. `per_elem` is 2.0 for f16, which is
+    # llama.cpp's default and is what this function assumed before the type
+    # became a parameter.
+    return int(total * cache_bytes_per_elem(cache_type))
 
 
 def kv_width_from_shapes(shapes) -> int:
@@ -198,6 +240,48 @@ def context_that_fits(
         if estimate_fit(weights_bytes, context, total_bytes=total_bytes,
                         per_token=per_token).fits:
             return context
+    return ladder[-1]
+
+
+def cache_type_for_context(
+    weights_bytes: int,
+    context: int,
+    *,
+    total_bytes: Optional[int] = None,
+    per_token_at_f16: Optional[int] = None,
+    ladder: "tuple[str, ...]" = CACHE_TYPE_LADDER,
+) -> str:
+    """The **lightest** cache type that still fits `context`, or the cheapest tried.
+
+    **The second axis a context decision never had.** `context_that_fits()` walks
+    a ladder of *contexts* and treats the KV cost as fixed, so the only way to fit
+    more context was to shrink it. unsloth treats the same quantity as a budget
+    variable - `min(_planned_main_cache_types(...), key=_kv_bytes_per_elem)`,
+    *"the KV-byte reserve takes the heavier axis... which is conservative for
+    storage but hides a paired quantized axis"* - and picks the smallest cache
+    type that fits.
+
+    With `q8_0` at 0.5625 of f16's bytes and `q4_0` at 0.28125, a context that
+    does not fit at all in f16 fits in `q8_0` with room to spare, and the context
+    is what a person asked for. Measured on Qwen3-8B's shape: 16 KiB/token at f16,
+    8.5 KiB at `q8_0`, 4.5 KiB at `q4_0`.
+
+    `ladder` is ordered **best first** - `f16`, then the quantized types - so the
+    first type that fits is also the least lossy one that fits, and the walk
+    returns it rather than always reaching for the cheapest.
+
+    Returns the cheapest type tried when nothing fits. That is deliberate: the
+    caller is already in the "nothing fits" case, and returning `f16` there would
+    claim a quality level the numbers do not support.
+    """
+    if not per_token_at_f16:
+        return ladder[0]
+    f16 = cache_bytes_per_elem(ladder[0])
+    for cache_type in ladder:
+        scaled = int(per_token_at_f16 * cache_bytes_per_elem(cache_type) / f16)
+        if estimate_fit(weights_bytes, context, total_bytes=total_bytes,
+                        per_token=scaled).fits:
+            return cache_type
     return ladder[-1]
 
 

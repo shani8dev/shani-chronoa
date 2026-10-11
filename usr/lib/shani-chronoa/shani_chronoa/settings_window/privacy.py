@@ -617,6 +617,33 @@ class PrivacyPage:
             self._entry(byok, label, "", config.api_key_value(key),
                         lambda text, k=key: config.set_api_key(k, text.strip()), secret=True)
 
+        # **A way to find out whether any of the above actually work.**
+        # Until now every key field here saves and shows a sentence about saving,
+        # and an expired, revoked or wrong-product key is indistinguishable from a
+        # working one until a *turn* fails - by which point the question has
+        # already been asked. The speech row below already does exactly this for
+        # audio; `cloud_llm.probe_keys()` is the same live probe for the chat
+        # route.
+        probe_group = self._group(
+            page, "Test the keys",
+            "Sends one one-token question to each provider and reads what the "
+            "server itself says back.")
+        probe_status = Gtk.Label(xalign=0, wrap=True)
+        probe_status.add_css_class("dim-label")
+        probe_button = Gtk.Button(label="Test the keys now", halign=Gtk.Align.START)
+        probe_button.set_tooltip_text(
+            "Ask each provider with the key below. Takes a few seconds.")
+        probe_button.connect("clicked", lambda _b: self._probe_cloud_keys(
+            probe_button, probe_status))
+        probe_group.add(Adw.ActionRow(
+            title="What works, and what does not",
+            subtitle="Nothing is sent to a provider that has no key."))
+        probe_status.set_max_width_chars(60)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.append(probe_status)
+        probe_group.add(box)
+        probe_group.add(probe_button)
+
         # **A model server of your own, which had no field anywhere.** The three
         # keys are in the schema, `app/brain.py` puts the endpoint first in the
         # cloud chain when it is set, and the "Answering now" panel displays it -
@@ -680,6 +707,39 @@ class PrivacyPage:
 
         threading.Thread(
             target=lambda: _probe_worker(work, button), daemon=True).start()
+
+    def _probe_cloud_keys(self, button: Gtk.Button, status: Gtk.Label) -> None:
+        """Ask each provider whether the key saved for it works.
+
+        **Five verdicts, each naming a different action.** `needs-key` is a field
+        to fill; `needs-paid` is a route that costs money this app does not spend
+        by itself; `no` is a key that was accepted and answered something
+        unusable; `unreachable` is a host that did not answer - a network fact and
+        not a verdict about the key.
+
+        Off the main loop: nine providers at up to 20 s each would otherwise
+        freeze the window for minutes.
+        """
+        button.set_sensitive(False)
+        status.set_text("Asking the providers which keys work...")
+        status.remove_css_class("dim-label")
+
+        def work(report) -> None:
+            from shani_chronoa import cloud_llm
+
+            try:
+                found = cloud_llm.probe_keys()
+            except Exception as exc:  # noqa: BLE001 - a failed probe is a report
+                report(f"Could not measure: {type(exc).__name__}")
+                button.set_sensitive(True)
+                return
+            # **Only what a person can act on**, and never the key itself: a
+            # report that echoed a provider's error body would be a row that can
+            # carry somebody's secret into a screenshot.
+            report(cloud_llm.keys_sentence(found))
+            button.set_sensitive(True)
+
+        _probe_worker(work, status)
 
     def _gateway_rows(self, group) -> None:
         """The `gateways` entry, and a live row of what is actually listening.

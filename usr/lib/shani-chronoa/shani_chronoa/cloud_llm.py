@@ -166,6 +166,154 @@ DEFAULT_PROVIDER_ORDER = ("llm7", "kilo", "blockrun")
 CUSTOM_ID = "custom"
 
 
+#: What `probe_keys()` reports. **Five states, and each names a different
+#: action.** `yes` means the key works. `needs-key` means the field is empty or
+#: wrong. `needs-paid` means the route exists and costs money, which this app does
+#: not spend by itself. `no` means the key was accepted and the answer was not
+#: usable. `unreachable` means the host did not answer - which is a network fact,
+#: not a verdict about the key.
+_VERDICTS = ("yes", "needs-key", "needs-paid", "no", "unreachable")
+
+
+def probe_keys(timeout: float = 20.0, keys: "Optional[dict] | None" = None) -> dict:
+    """Ask each provider a real question, and report what it says.
+
+    **There was no way to find out whether a key worked.** Every surface that
+    takes one - Settings -> Privacy's nine fields, and the setup wizard's Cloud
+    keys page - saves it and shows a sentence about saving. A key that is expired,
+    revoked, for the wrong product, or for a provider whose free tier has run out
+    is indistinguishable from a working one until a turn *fails*, and by then the
+    person has already asked the question.
+
+    `CloudVoice.probe_capabilities()` already does this for speech, for exactly the
+    same reason, and its measured lesson is the one this follows: **a status code is
+    not a capability - the server's own sentence about what is wrong is.** So this
+    posts a *real body* (`max_tokens: 1`, so it costs one token at most) rather
+    than an empty one, and reads the reply's own words. An empty POST answers 400
+    both for "no such route" and for "wrong model name", which is how the speech
+    table was wrong three times before it was right.
+
+    `keys` may be supplied so a caller can probe what is in the fields *before*
+    saving it; the default reads the saved ones.
+    """
+    from shani_chronoa.config import ChronoaConfig
+
+    if keys is None:
+        keys = ChronoaConfig().cloud_llm_api_keys()
+
+    out = {}
+    for pid, provider in sorted(PROVIDERS.items()):
+        key = (keys or {}).get(pid, "")
+        if provider.requires_key and not key:
+            # **Not asked at all** - a key that is not there is a fact about the
+            # UI, and a request that can only answer 401 tells us nothing we do
+            # not already know, while costing a round trip on a machine whose whole
+            # point is not to talk to strangers.
+            out[pid] = {"verdict": "needs-key", "detail": "no key is entered yet",
+                        "base_url": provider.base_url}
+            continue
+        try:
+            response = _ask(pid, provider, key, timeout)
+        except Exception as exc:  # noqa: BLE001 - reaching nothing is not a bad key
+            out[pid] = {"verdict": "unreachable", "detail": type(exc).__name__,
+                        "base_url": provider.base_url}
+            continue
+        row = _classify_chat(response, provider)
+        row["base_url"] = provider.base_url
+        out[pid] = row
+    return out
+
+def _classify_chat(response, provider: "CloudProvider") -> dict:
+    if response.is_success:
+        try:
+            body = response.json()
+        except ValueError:
+            return {"verdict": "no", "status": response.status_code,
+                    "detail": "answered %d with something that is not JSON"
+                              % response.status_code}
+        # **The reply has to actually be an answer.** A 200 carrying
+        # `{"error": ...}` is the rate-limit shape AGENTS.md records from Kilo
+        # and BlockRun, and `raise_for_status` alone never sees it.
+        if isinstance(body, dict) and body.get("error"):
+            return {"verdict": "no", "status": response.status_code,
+                    "detail": str(body["error"])[:200]}
+        choices = body.get("choices") if isinstance(body, dict) else None
+        if not choices:
+            return {"verdict": "no", "status": response.status_code,
+                    "detail": "answered 200 with no choices: "
+                              + response.text[:200]}
+        return {"verdict": "yes", "status": response.status_code,
+                "model": (body.get("model") or "")[:120]}
+    text = response.text or ""
+    lowered = text.lower()
+    if response.status_code == 402 or "payment required" in lowered \
+            or "x402" in lowered:
+        # Its own state, not folded into either neighbour: a route billed to a
+        # crypto wallet behind a field labelled "API key" is the finding
+        # `cloud_voice` recorded for speech, and it applies here too.
+        return {"verdict": "needs-paid", "status": response.status_code,
+                "detail": text[:200]}
+    if response.status_code in (401, 403) or "api key" in lowered \
+            or "unauthorized" in lowered or "invalid api" in lowered:
+        return {"verdict": "needs-key", "status": response.status_code,
+                "detail": text[:160]}
+    if response.status_code == 429 or "rate" in lowered and "limit" in lowered:
+        return {"verdict": "no", "status": response.status_code,
+                "detail": "the key was accepted but the free quota is spent: "
+                          + text[:160]}
+    return {"verdict": "no", "status": response.status_code, "detail": text[:200]}
+
+
+def _ask(pid: str, provider: "CloudProvider", key: str, timeout: float):
+    """One provider's route, with the body a real chat request carries."""
+    return httpx.post(provider.base_url.rstrip("/") + "/chat/completions",
+                     json={"model": provider.default_model,
+                           "messages": [{"role": "user", "content": "hi"}],
+                           "max_tokens": 1},
+                     headers=_headers(pid, key),
+                     timeout=timeout)
+
+
+def _headers(pid: str, key: str) -> dict:
+    """The headers one provider's route needs, and only those."""
+    if pid == "anthropic":
+        return {"x-api-key": key or "", "anthropic-version": "2023-06-01",
+                "content-type": "application/json"}
+    return ({"authorization": "Bearer %s" % key} if key
+            else {"content-type": "application/json"})
+
+
+def keys_sentence(probes: dict) -> str:
+    """One line a person can act on, from a `probe_keys()` result.
+
+    **Ordered by what to do first**: the providers that would work, then the ones
+    needing a key, then the ones that are unreachable. A list in provider order
+    buries the working answer under the broken ones.
+    """
+    order = {"yes": 0, "needs-key": 1, "needs-paid": 2, "no": 3, "unreachable": 4}
+    working = [pid for pid, row in probes.items() if row["verdict"] == "yes"]
+    broken = [(order.get(row["verdict"], 5), pid, row)
+              for pid, row in probes.items() if row["verdict"] != "yes"]
+    bits = []
+    if working:
+        bits.append("works: " + ", ".join(sorted(working)))
+    for _rank, pid, row in sorted(broken, key=lambda item: (item[0], item[1])):
+        verdict = row["verdict"]
+        why = (row.get("detail") or "").strip().splitlines()[:1]
+        said = why[0][:70] if why else ""
+        if verdict == "needs-key":
+            bits.append("no key for %s" % pid)
+        elif verdict == "unreachable":
+            bits.append("%s unreachable (%s)" % (pid, said or "no answer"))
+        elif verdict == "needs-paid":
+            bits.append("%s costs money" % pid)
+        else:
+            bits.append("%s refused (%s)" % (pid, said or "no detail"))
+    if not bits:
+        return "No cloud provider is configured yet."
+    return "; ".join(bits) + "."
+
+
 def custom_provider(base_url: str, model: str = "") -> "CloudProvider | None":
     """A provider for any OpenAI-compatible endpoint, or None if unusable.
 

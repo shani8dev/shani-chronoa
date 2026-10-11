@@ -379,7 +379,7 @@ def skill_coverage(records, known=None) -> "tuple[int, int, int]":
     measured = set()
     for record in records:
         tool = record.get("tool_name")
-        if tool in known:
+        if tool in known and record.get("verdict") in ("verified", "failed"):
             measured.add(tool)
     return (len(known), len(measured), len(known - measured))
 
