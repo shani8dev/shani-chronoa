@@ -138,6 +138,68 @@ def list_outputs() -> list[AudioDevice]:
     return _devices("output")
 
 
+STREAM_PLAYBACK = "Stream/Output/Audio"   # the app is producing sound
+STREAM_CAPTURE = "Stream/Input/Audio"     # the app is consuming sound (its mic)
+
+
+@dataclass(frozen=True)
+class AudioStream:
+    """One application carrying audio right now.
+
+    **Not a device.** A device is hardware, or a virtual endpoint a person picks
+    once; a stream arrives and leaves with whatever is playing, so it gets its
+    own type rather than carrying fields that never apply to it.
+    """
+
+    name: str            # `node.name` - what `pw-record --target` takes
+    direction: str       # "playback" or "capture"
+    media: str = ""      # `media.name`: what the app says it is playing
+    nick: str = ""
+
+    @property
+    def label(self) -> str:
+        """`media.name` first: the only field that says *what*, where a browser's
+        `node.name` is its binary. `node.name` is the fallback."""
+        return self.media or self.nick or self.name
+
+    @property
+    def recordable(self) -> bool:
+        """Only a **playback** stream: audio leaving the app, so there is
+        something to capture. A capture stream is the app's own microphone."""
+        return self.direction == "playback"
+
+
+def list_streams() -> list[AudioStream]:
+    """Applications carrying audio right now, playback first.
+
+    **Restored 2026-10-11.** The original was written and then lost when a
+    concurrent session replaced `recording.py` and `pipewire.py` in this tree;
+    the tests in `tests/test_audio_devices.py` are what specified it again.
+
+    Empty is the honest answer when nothing is playing - a graph with no
+    streams is a quiet machine, not a broken one.
+    """
+    found: list[AudioStream] = []
+    for props in _graph_nodes():
+        media_class = str(props.get("media.class") or "")
+        if media_class == STREAM_PLAYBACK:
+            direction = "playback"
+        elif media_class == STREAM_CAPTURE:
+            direction = "capture"
+        else:
+            continue
+        name = props.get("node.name")
+        if not name:
+            continue          # untargetable: `--target` needs a name or a serial
+        found.append(AudioStream(
+            name=str(name),
+            direction=direction,
+            media=str(props.get("media.name") or ""),
+            nick=str(props.get("node.nick") or ""),
+        ))
+    return sorted(found, key=lambda s: (not s.recordable, s.label.lower()))
+
+
 def resolve_target(configured: str, kind: str) -> "tuple[str, Optional[str]]":
     """Decide which device to actually use, and say why.
 

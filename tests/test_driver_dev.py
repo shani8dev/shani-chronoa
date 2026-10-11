@@ -108,8 +108,16 @@ class TestDriverStatusIsHonest:
         assert "does not stop a build: dkms" in out
 
 
-class TestSecureBootReading:
-    """The lockdown file is `[active] available...`, not a bare word."""
+class TestLockdownReading:
+    """The lockdown file is `[active] available...`, not a bare word.
+
+    **Rewritten 2026-10-11 against the split API.** These four tests called
+    `_secure_boot_state()`, which read lockdown first and returned from every
+    branch - so its SecureBoot block was unreachable on any machine that had a
+    lockdown node at all, and all four were passing against the half of the
+    function that ran while the half they were named for never did. They now
+    call `_lockdown_mode()` and assert what they always asserted.
+    """
 
     def _write(self, tmp_path, text):
         d = tmp_path / "sys" / "kernel" / "security"
@@ -118,27 +126,24 @@ class TestSecureBootReading:
         return tmp_path
 
     def test_none_means_not_locked_down(self, tmp_path):
-        root = self._write(tmp_path, "[none] integrity confidentiality")
-        state, how = driver_dev._secure_boot_state(root)
-        assert state == "not locked down", how
-        assert "'none'" in how
+        mode, problem = driver_dev._lockdown_mode(self._write(tmp_path, "[none] integrity confidentiality"))
+        assert mode == "none", problem
 
     def test_an_enforced_mode_is_reported_as_locked(self, tmp_path):
-        root = self._write(tmp_path, "[integrity] confidentiality")
-        state, how = driver_dev._secure_boot_state(root)
-        assert state == "locked down"
-        assert "integrity" in how
+        mode, problem = driver_dev._lockdown_mode(self._write(tmp_path, "[integrity] confidentiality"))
+        assert mode == "integrity", problem
 
-    def test_an_unexpected_shape_is_unknown_rather_than_guessed(self, tmp_path):
-        root = self._write(tmp_path, "none")
-        state, how = driver_dev._secure_boot_state(root)
-        assert state == "unknown"
-        assert "not the [active] modes form" in how
+    def test_an_unexpected_shape_is_a_problem_not_a_guess(self, tmp_path):
+        mode, problem = driver_dev._lockdown_mode(self._write(tmp_path, "none"))
+        assert mode == ""
+        assert problem and "not the [active] modes form" in problem, problem
 
-    def test_no_efivars_is_unknown_because_uefi_does_not_apply(self, tmp_path):
-        state, how = driver_dev._secure_boot_state(tmp_path)
-        assert state == "unknown"
-        assert "without UEFI" in how
+    def test_no_lockdown_file_is_a_problem_rather_than_an_answer(self, tmp_path):
+        mode, problem = driver_dev._lockdown_mode(tmp_path)
+        assert mode == ""
+        assert problem is None, (
+            "no lockdown node is a shape to report, not an error - the caller "
+            "says 'unknown - there is no /sys/kernel/security/lockdown to read'")
 
 
 class TestScaffold:
@@ -479,3 +484,175 @@ class TestDeviceProbe:
                             lambda pattern: ["i2c-1", "i2c-2", "i2c-10"])
         buses, _note = user_driver._i2c_buses()
         assert buses == ["1", "2", "10"], buses
+
+# --- Secure Boot and lockdown are two different facts ---------------------------
+#
+# `_secure_boot_state` used to read `/sys/kernel/security/lockdown` first and
+# `return` from every branch of that block, so the careful efivar parsing below
+# it never ran on any kernel carrying a lockdown node. Measured by AST: 4
+# returns inside `if lockdown.exists():`. A parser that cannot run reads as a
+# control, and this one read as two.
+
+def _root(tmp_path, *, lockdown="[none] integrity confidentiality",
+          secure_boot=None, with_efivars=False):
+    root = tmp_path
+    if lockdown is not None:
+        (root / "sys/kernel/security").mkdir(parents=True, exist_ok=True)
+        (root / "sys/kernel/security/lockdown").write_text(lockdown)
+    if secure_boot is not None:
+        efi = root / "sys/firmware/efi/efivars"
+        efi.mkdir(parents=True, exist_ok=True)
+        (efi / driver_dev._SECURE_BOOT_NAME).write_bytes(secure_boot)
+    elif with_efivars:
+        (root / "sys/firmware/efi/efivars").mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def test_the_firmware_is_read_even_when_lockdown_exists(tmp_path):
+    """**The fix.** A machine with both is the ordinary one, and it is exactly
+    where the old code stopped looking."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = _root(tmp_path, secure_boot=b"\x06\x00\x00\x00\x01")
+
+    mode, problem = driver_dev._lockdown_mode(root)
+    firmware, how = driver_dev._firmware_secure_boot(root)
+
+    assert problem is None and mode == "none"
+    assert firmware == "on", how
+
+
+def test_secure_boot_off_is_read_from_the_firmware_not_assumed(tmp_path):
+    """Measured on this box: `0600000000` - attributes, then the data byte `00`."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = _root(tmp_path, lockdown=None, secure_boot=b"\x06\x00\x00\x00\x00")
+
+    assert driver_dev._firmware_secure_boot(root) == (
+        "off", f"{root / 'sys/firmware/efi/efivars' / driver_dev._SECURE_BOOT_NAME} reads 0")
+
+
+def test_lockdown_is_not_secure_boot(tmp_path):
+    """Lockdown enforces 'none' while the firmware says on, and the two rows must
+    not agree by construction - that is what folding them together did."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = _root(tmp_path, secure_boot=b"\x06\x00\x00\x00\x01")
+    rows = driver_dev._driver_status_rows(root) if hasattr(
+        driver_dev, "_driver_status_rows") else None
+
+    assert driver_dev._lockdown_mode(root)[0] == "none"
+    assert driver_dev._firmware_secure_boot(root)[0] == "on", (
+        "a Secure-Booted machine can still be unlocked; saying otherwise is the "
+        "same wrong-direction claim this module already warns about")
+
+
+def test_a_locked_down_kernel_says_no(tmp_path):
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = _root(tmp_path, lockdown="[integrity] none integrity confidentiality",
+                 secure_boot=b"\x06\x00\x00\x00\x01")
+
+    mode, _problem = driver_dev._lockdown_mode(root)
+    assert mode == "integrity"
+
+
+def test_no_variable_and_no_mokutil_is_unknown_not_off(tmp_path):
+    """"Could not ask" and "it is off" are opposite claims, and the second is
+    what a default would produce."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = _root(tmp_path, lockdown=None, with_efivars=True)
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(driver_dev.shutil, "which", lambda name: None)
+    try:
+        state, why = driver_dev._firmware_secure_boot(root)
+    finally:
+        monkey.undo()
+
+    assert state == "unknown", why
+    assert "mokutil" in why, why
+
+
+def test_a_legacy_iboot_is_named_as_such(tmp_path):
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    root = tmp_path          # no efivars directory at all
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(driver_dev.shutil, "which", lambda name: None)
+    try:
+        state, why = driver_dev._firmware_secure_boot(root)
+    finally:
+        monkey.undo()
+
+    assert state == "unknown"
+    assert "without UEFI" in why, why
+
+
+def test_mokutil_is_used_only_when_it_answers_something_recognised(tmp_path):
+    """A tool that prints something new must not be read as either state."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    monkey = pytest.MonkeyPatch()
+    # **Strict by name.** An earlier version answered for any argument, so a
+    # mutation pointing the code at a binary that does not exist was never
+    # seen - the stub still handed it a path.
+    monkey.setattr(driver_dev.shutil, "which",
+                   lambda n: "/usr/bin/mokutil" if n == "mokutil" else None)
+    monkey.setattr(driver_dev.subprocess, "run",
+                   lambda *a, **k: type("R", (), {"stdout": "Secure Boot: ???"})())
+    try:
+        state, why = driver_dev._firmware_secure_boot(tmp_path)
+        assert state == "unknown", why
+
+        monkey.setattr(driver_dev.subprocess, "run",
+                       lambda *a, **k: type("R", (), {"stdout": "SecureBoot disabled\n"})())
+        state, why = driver_dev._firmware_secure_boot(tmp_path)
+        assert state == "off", why
+        assert "mokutil" in why, (
+            "the answer came from mokutil and must say so - a number with no "
+            "provenance is the failure this module keeps refusing: %r" % why)
+    finally:
+        monkey.undo()
+
+
+def test_the_answer_rows_say_the_right_thing_for_each_lockdown(monkeypatch):
+    """**Only the value was being checked; the sentence was not.**
+
+    `_lockdown_mode()` returning "none" proved nothing about what the report
+    *says*: mutating the branch to treat "none" as an enforced mode left every
+    assertion green and reported "no - an unsigned module is refused" on a
+    machine where it loads. That is the dangerous direction this module names.
+    """
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    def rows_with(mode):
+        monkeypatch.setattr(driver_dev, "_lockdown_mode", lambda root=Path("/"): (mode, None))
+        monkeypatch.setattr(driver_dev, "_firmware_secure_boot", lambda root=Path("/"): ("off", "read"))
+        monkeypatch.setattr(driver_dev, "_var_is_volatile", lambda: (False, "x"))
+        monkeypatch.setattr(driver_dev, "_toolchain", lambda: [])
+        text = driver_dev._status_text()
+        return [ln.strip() for ln in text.splitlines() if "unsigned" in ln]
+
+    assert "it would" in rows_with("none")[0], rows_with("none")
+    assert "no" in rows_with("integrity")[0], rows_with("integrity")
+    assert "unknown" in rows_with("")[0], rows_with("")
+
+
+def test_secure_boot_is_reported_separately_from_lockdown(monkeypatch):
+    """Two rows, two questions. Folding them is what made all four of the old
+    tests pass against the half that ran."""
+    from shani_chronoa.skills import driver_dev as driver_dev
+
+    monkeypatch.setattr(driver_dev, "_lockdown_mode", lambda root=Path("/"): ("none", None))
+    monkeypatch.setattr(driver_dev, "_firmware_secure_boot",
+                        lambda root=Path("/"): ("on", "mokutil --sb-state says 'SecureBoot enabled'"))
+    monkeypatch.setattr(driver_dev, "_var_is_volatile", lambda: (False, "x"))
+    monkeypatch.setattr(driver_dev, "_toolchain", lambda: [])
+
+    rows = [ln.strip() for ln in driver_dev._status_text().splitlines()
+            if "unsigned" in ln or ln.strip().startswith("Secure Boot")]
+
+    assert len(rows) == 2, rows
+    assert "it would" in rows[0], rows
+    assert "on" in rows[1] and "mokutil" in rows[1], rows

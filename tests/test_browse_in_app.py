@@ -306,3 +306,197 @@ def test_browse_drives_the_real_in_app_window(tmp_path, broadway, compiled_schem
     assert "egress policy refuses" not in out["away_unguarded"], (
         "the control was refused too, so the guard is not what the test measured: "
         + out["away_unguarded"])
+
+
+# --- what the page's own engine can do (measured: it cannot hear) ---------------
+#
+# WebKitGTK answers `undefined` for every Web Speech interface, measured in a real
+# WebView over `http://127.0.0.1` with `navigator.mediaDevices` present in the
+# same page as the control. So a page's own voice search or "read aloud" button
+# is inert here - and `browse` clicking one and reporting success is the
+# "a click that lands on something inert reports success" failure this driver
+# has already met once.
+
+
+@pytest.mark.parametrize("label", [
+    "Voice search", "Search by voice", "Search with voice", "Dictate",
+    "Voice input", "Tap to speak", "Read aloud", "Read this aloud",
+    "Listen to this article", "text to speech",
+])
+def test_a_voice_control_says_when_the_engine_cannot_do_it(label, monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", lambda timeout=15.0: {
+        "speech_recognition": False, "speech_synthesis": False, "microphone": True})
+
+    note = browser_driver._voice_note(label)
+
+    assert note, "%r is about voice and nothing was said about it" % label
+    assert "may not have started" in note, (
+        "the wording must not claim the control is broken: a page can dictate "
+        "through its own server, so 'this engine has no Web Speech' is not "
+        "proof the button is dead - %r" % note)
+
+
+@pytest.mark.parametrize("label", [
+    "Listen live", "Play episode", "Record a purchase", "Play all episodes",
+    "Search flights", "Order history", "Jisha",
+])
+def test_an_ordinary_control_is_never_announced_as_voice(label, monkeypatch):
+    """The control: these must not fire, or the note is noise on every page.
+
+    "Listen", "play" and "record" are ordinary English - "Listen live" is a
+    stream, not a speech synthesiser.
+    """
+    from shani_chronoa.gui import browser_driver
+
+    def refused(timeout=15.0):
+        raise AssertionError("the page was probed for a control that is not about voice")
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", refused)
+
+    assert browser_driver._voice_note(label) == "", label
+
+
+def test_an_ordinary_click_pays_nothing_for_the_probe(monkeypatch):
+    """The capabilities are read only when the label matches, so a normal click
+    costs nothing: one less round trip into the page on every click."""
+    from shani_chronoa.gui import browser_driver
+
+    def refused(timeout=15.0):
+        raise AssertionError("the page was probed on an ordinary click")
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", refused)
+    assert browser_driver._voice_note("Book a flight") == ""
+
+
+def test_a_voice_control_that_can_work_is_not_announced(monkeypatch):
+    """The other direction: a browser that *had* speech must stay quiet."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", lambda timeout=15.0: {
+        "speech_recognition": True, "speech_synthesis": True, "microphone": True})
+
+    assert browser_driver._voice_note("Voice search") == ""
+
+
+def test_a_probe_that_could_not_answer_is_not_read_as_an_absence(monkeypatch):
+    """`None` is unknown, not missing. A page that blocks the check must not
+    produce "this browser has no speech recognition" - that is the confident
+    wrong answer this note exists to avoid."""
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", lambda timeout=15.0: None)
+    assert browser_driver._voice_note("Voice search") == ""
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", lambda timeout=15.0: {})
+    assert browser_driver._voice_note("Voice search") == "", (
+        "an empty dict is not an answer either")
+
+
+def test_the_probe_names_the_interfaces_it_is_measuring():
+    """A probe that quietly stops measuring anything is not a probe.
+
+    Asserted on the script's text because the only thing that can tell is the
+    names themselves - there is no page here to run it against.
+    """
+    from shani_chronoa.gui import browser_driver
+
+    for symbol in ("SpeechRecognition", "webkitSpeechRecognition",
+                   "speechSynthesis", "getUserMedia"):
+        assert symbol in browser_driver.CAPABILITIES_JS, (
+            "%s is missing from the probe, so the answer would be silently "
+            "about something else" % symbol)
+
+
+def test_the_capabilities_action_is_reachable_and_not_mistaken_for_a_bad_name(
+        web_allowed, no_provider):
+    """It can be asked, not only inferred from a click.
+
+    **This asserts routing, not wording.** There is no window in this process,
+    so the action honestly reports that - and that answer is indistinguishable
+    from any other failure, which is why the wording is checked separately
+    below with the probe stubbed. What is checked here is the part that *can*
+    tell two cases apart: the action got past the registry instead of being
+    refused as unknown.
+    """
+    from shani_chronoa.gui import browser_driver
+
+    assert "capabilities" in browser_driver.ACTIONS
+
+    answer = browser_driver.act({"action": "capabilities"})
+
+    assert "unknown action" not in answer, answer
+    # the control: an action that is NOT registered is refused by name
+    assert "unknown action" in browser_driver.act({"action": "capabilitie"})
+
+
+def test_the_capabilities_action_names_what_is_missing(web_allowed, no_provider,
+                                                      monkeypatch):
+    from shani_chronoa.gui import browser_driver
+
+    monkeypatch.setattr(browser_driver, "page_capabilities", lambda timeout=15.0: {
+        "speech_recognition": False, "speech_synthesis": False, "microphone": True})
+
+    answer = browser_driver.act({"action": "capabilities"})
+
+    assert "microphone" in answer, answer
+    assert "speech recognition" in answer and "speech synthesis" in answer, answer
+    assert "will not work here" in answer, answer
+
+
+def test_the_click_answer_actually_carries_the_note(web_allowed, no_provider,
+                                                   monkeypatch):
+    """**A helper can be correct and still be unreachable.**
+
+    Every other test here calls `_voice_note` directly, so removing it from the
+    click path entirely - the mutation that removed the whole feature - left the
+    file green. This drives `_act` through the click branch instead, because
+    the feature is not the function, it is the sentence the person reads.
+    """
+    from shani_chronoa.gui import browser_driver
+
+    for name, value in (
+            ("_order_button", lambda *a, **k: ""),
+            ("_money_ok", lambda *a, **k: ""),
+            ("_say", lambda *a, **k: None),
+            ("_point_at", lambda *a, **k: None),
+            ("_click_script", lambda *a, **k: "return 1;"),
+            ("_start_script", lambda *a, **k: "return 1;"),
+            ("_describe_load", lambda *a, **k: "Nothing new loaded."),
+            ("_challenge_note", lambda: ""),
+            ("_drive", lambda *a, **k: ({"label": "Voice search"}, None)),
+            ("_voice_note", lambda label, timeout=15.0: " NOTE-MARKER"),
+    ):
+        monkeypatch.setattr(browser_driver, name, value)
+
+    answer = browser_driver._act("click", {"selector": "#mic"}, 15.0)
+
+    assert "NOTE-MARKER" in answer, (
+        "the click answer never asked whether the control could work: %r" % answer)
+    assert answer.index("Clicked") < answer.index("NOTE-MARKER"), (
+        "the note belongs after the outcome, so a refusal is never dressed up "
+        "with it: %r" % answer)
+
+
+def test_a_refusal_is_not_dressed_up_with_the_note(web_allowed, no_provider,
+                                                   monkeypatch):
+    """The note is added *after* the outcome is known good."""
+    from shani_chronoa.gui import browser_driver
+
+    for name, value in (
+            ("_order_button", lambda *a, **k: ""),
+            ("_money_ok", lambda *a, **k: ""),
+            ("_say", lambda *a, **k: None),
+            ("_point_at", lambda *a, **k: None),
+            ("_click_script", lambda *a, **k: "return 1;"),
+            ("_start_script", lambda *a, **k: "return 1;"),
+            ("_describe_load", lambda *a, **k: "Error: the network policy refuses it."),
+            ("_voice_note", lambda label, timeout=15.0: " NOTE-MARKER"),
+            ("_drive", lambda *a, **k: ({"label": "Voice search"}, None)),
+    ):
+        monkeypatch.setattr(browser_driver, name, value)
+
+    answer = browser_driver._act("click", {"selector": "#mic"}, 15.0)
+
+    assert "NOTE-MARKER" not in answer, answer

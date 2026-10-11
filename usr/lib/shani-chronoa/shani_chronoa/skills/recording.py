@@ -16,13 +16,15 @@ which is never touched; nothing is overwritten.
 
 from __future__ import annotations
 
+import subprocess
 import tempfile
 from pathlib import Path
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
 
-_ACTIONS = ("text", "subtitles", "speakers", "clean", "sounds", "listen")
+_ACTIONS = ("text", "subtitles", "speakers", "clean", "sounds", "listen",
+              "streams", "capture")
 
 SCHEMA = {
     "type": "function",
@@ -33,7 +35,10 @@ SCHEMA = {
             "Works on the sound, on this computer. text: what was said; subtitles: "
             "save an .srt beside it; speakers: who said what, turn by turn; clean: a copy with background "
             "noise removed; sounds: what can be heard in it (music, a dog, traffic...); listen: what can be "
-            "heard around the computer right now (the microphone, a few seconds; needs the sound consent)."
+            "heard around the computer right now (the microphone, a few seconds); streams: which "
+            "applications are carrying audio right now, and the name to capture one by (a call in "
+            "a browser is one); capture: record one of those for 5-600 seconds and transcribe "
+            "it - which records the room, so it needs the sound consent like the microphone does."
         ),
         "parameters": {"type": "object", "properties": {
             "action": {"type": "string", "enum": list(_ACTIONS)},
@@ -115,6 +120,141 @@ def _run(arguments: dict) -> str:
     action = (arguments.get("action") or "").strip().lower()
     if action not in _ACTIONS:
         return f"action must be one of {', '.join(_ACTIONS)}."
+    if action == "streams":
+        from shani_chronoa import pipewire
+        from shani_chronoa.config import ChronoaConfig
+        config = ChronoaConfig()
+        # The same consent `listen` asks for. A stream list is a list of what is
+        # playing: `media.name` measured a filename here and would read a meeting
+        # title on a real desktop, so the names are about the user's world in
+        # exactly the way the microphone is.
+        if not config.sense_allowed("heard-sound"):
+            return config.sense_allowed_reason("heard-sound") or (
+                "Listing what is playing is turned off (enable 'Let Chronoa name a "
+                "sound when you ask' in Settings -> Privacy).")
+        if not pipewire.is_available():
+            return ("Cannot read the audio graph: pw-dump is not installed, or no "
+                    "PipeWire graph is running.")
+        streams = pipewire.list_streams()
+        if not streams:
+            return ("Nothing is playing or recording audio right now. No application "
+                    "has an audio stream open, which is a quiet machine and not a "
+                    "failure.")
+        playable = [st for st in streams if st.recordable]
+        head = (f"{len(playable)} of {len(streams)} can be captured."
+                if playable else
+                "None of these can be captured - they are applications' "
+                "microphones, not audio leaving them.")
+        rows = ["%s%-3s %s%s" % ("yes" if st.recordable else "no ", "", st.label,
+                                 ("  (capture as: %s)" % st.name) if st.recordable
+                                 else "  (this app's own microphone)")
+                for st in streams]
+        return head + "\n" + "\n".join(rows)
+
+    if action == "capture":
+        from pathlib import Path
+        from shani_chronoa import pipewire
+        # `recordings` is already bound at the top of `_run`.
+        from shani_chronoa.config import ChronoaConfig
+        config = ChronoaConfig()
+        # **This records the room.** The stream is audio *leaving* an
+        # application, so a call in a browser captures whoever is speaking in it
+        # - people who are not at this machine and cannot be asked here. That is
+        # a different disclosure from dictation, which is own voice and short,
+        # which is why it stays behind the microphone's switch instead of riding
+        # along with "transcribe my file".
+        if not config.sense_allowed("heard-sound"):
+            return config.sense_allowed_reason("heard-sound") or (
+                "Recording what an application is playing is turned off (enable "
+                "'Let Chronoa name a sound when you ask' in Settings -> Privacy).")
+        if not pipewire.is_available():
+            return ("Cannot read the audio graph: pw-dump is not installed, or no "
+                    "PipeWire graph is running.")
+        try:
+            seconds = float(arguments.get("seconds") or 30)
+        except (TypeError, ValueError):
+            return "seconds must be a number, 5 to 600."
+        if not 5 <= seconds <= 600:
+            return ("seconds must be 5 to 600 - under 5 there is nothing to "
+                    "transcribe, and over 600 is a whole meeting recorded in one "
+                    "call with nobody told it was.")
+        playable = [st for st in pipewire.list_streams() if st.recordable]
+        if not playable:
+            return ("Nothing is playing that can be captured. Capturing an "
+                    "application means audio is *leaving* it, not its microphone - "
+                    "use recording action=streams to see what is running.")
+        wanted = str(arguments.get("stream") or "").strip()
+        chosen = None
+        if wanted:
+            low = wanted.lower()
+            for st in playable:
+                if low == st.name.lower() or low in st.label.lower():
+                    chosen = st
+                    break
+            if chosen is None:
+                return ("No playing stream matches %r. Playable right now: %s"
+                        % (wanted, ", ".join(f"{st.label!r} (as {st.name})"
+                                             for st in playable)))
+        elif len(playable) == 1:
+            chosen = playable[0]
+        else:
+            return ("%d things are playing; say which one with stream=. Playable: %s"
+                    % (len(playable), ", ".join(f"{st.label!r} (as {st.name})"
+                                                for st in playable)))
+
+        # **Not `AudioRecorder`, and the reason is a defect in it for this use.**
+        # That recorder calibrates its silence threshold from the first ~320ms,
+        # which is right for a microphone - the room before the person talks -
+        # and cannot work for a stream already playing: the audio is continuous
+        # from frame zero, so the threshold calibrates to twice the signal's own
+        # peak and the signal can never again count as speech. Measured: the
+        # recorder ran its whole window, reported reason "limit", and handed
+        # back `on_done(None)`. `vad.calibrate_noise_floor`'s docstring is built
+        # around "the room before speech"; a stream has no such room.
+        wav = Path(tempfile.mkstemp(suffix=".wav", prefix="chronoa-stream-")[1])
+        try:
+            proc = subprocess.Popen(
+                ["pw-record", "--rate", "16000", "--channels", "1", "--format",
+                 "s16", "--latency", "100ms", "--target", chosen.name, str(wav)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        except OSError as exc:
+            wav.unlink(missing_ok=True)
+            return f"Could not start capturing {chosen.label!r}: {exc}"
+        try:
+            proc.wait(timeout=seconds + 20)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+        if not wav.exists() or wav.stat().st_size < 1024:
+            said = proc.stderr.read().strip()[:160] if proc.stderr else ""
+            wav.unlink(missing_ok=True)
+            return (f"Capturing {chosen.label!r} produced no audio"
+                    + (f" ({said})" if said else "")
+                    + ". It may have stopped playing as the capture started.")
+        try:
+            # **The shipped diarisation path, not a new one.** `segments_for` is
+            # what the `speakers` action runs - whisper's timed segments, then
+            # `speakers.diarize` + `assign_speakers` for the turns.
+            segments, note = recordings.segments_for(
+                wav, str(arguments.get("language") or "auto"),
+                with_speakers=bool(arguments.get("people")))
+        except (recordings.RecordingError, RuntimeError, ValueError, OSError) as exc:
+            return f"Recorded {chosen.label!r} (kept at {wav}), but could not transcribe it: {exc}"
+        text = recordings.to_text(segments)
+        how_long = recordings.duration(wav)
+        if not text.strip():
+            return (f"Recorded {chosen.label!r} for {how_long:.0f}s (kept at {wav}) "
+                    f"and heard nothing in it.")
+        out = f"In {chosen.label!r}: {text}"
+        if note:
+            out += f"\n\n({note})"
+        out += (f"\n\nRecorded {how_long:.0f}s, kept at {wav} - `speakers` or "
+                f"`subtitles` can run on that file.")
+        return out
+
     if action == "listen":
         from shani_chronoa import sounds
         from shani_chronoa.config import ChronoaConfig

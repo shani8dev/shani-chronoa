@@ -142,49 +142,84 @@ def _var_is_volatile(root: Path = Path("/")) -> "tuple[bool | None, str]":
     return None, "/var is not listed in /proc/mounts"
 
 
-def _secure_boot_state(root: Path = Path("/")) -> "tuple[str, str]":
-    """(state, how it was read). Never guesses.
+#: The efivar holding the firmware's Secure Boot state. Read as bytes: the
+#: layout is a 4-byte attributes block followed by a single data byte, and the
+#: data byte carries the answer. Measured on this box: `06 00 00 00 00` -
+#: attributes `06 00 00 00`, data `00`, i.e. Secure Boot off.
+_SECURE_BOOT_NAME = "SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
 
-    The SecureBoot efivar lives in efivarfs at mode 0400 root-only, so the
-    honest answer for a normal desktop user is UNKNOWN with that reason - and
-    that is the *right* answer, because "off" would be a claim made by a
-    process that never read the variable.
+
+def _lockdown_mode(root: Path = Path("/")) -> "tuple[str, str]":
+    """`(mode_or_empty, problem_or_None)` - kernel lockdown, the thing that decides.
+
+    **Lockdown is what actually refuses an unsigned module**, which is why it is
+    read on its own: Secure Boot is the *mechanism* that turns lockdown on, and
+    answering with the firmware's state when the question is whether a module
+    loads conflates the two.
+
+    (Restored 2026-10-11: this split was written, then lost when a concurrent
+    session replaced the file. The old `_secure_boot_state` read lockdown first
+    and returned from every branch of that block, so its SecureBoot parsing was
+    unreachable on any kernel carrying a lockdown node. Measured by AST: four
+    returns inside `if lockdown.exists():`.)
     """
     lockdown = root / "sys" / "kernel" / "security" / "lockdown"
-    if lockdown.exists():
+    if not lockdown.exists():
+        return "", None
+    try:
+        value = lockdown.read_text().strip()
+    except OSError as exc:
+        return "", f"{lockdown} exists but could not be read ({exc})"
+    # The file reads `[active] mode mode ...` - the bracketed token is what is
+    # enforced now. Measured on this box: `[none] integrity confidentiality`,
+    # i.e. NOT locked down. Treating the whole line as the answer calls that
+    # "locked down", the dangerous direction to be wrong in: it claims unsigned
+    # modules are refused when they are not.
+    active = re.search(r"\[([^\]]*)\]", value)
+    if active is None:
+        return "", f"{lockdown} reads {value!r}, which is not the [active] modes form"
+    return active.group(1).strip(), None
+
+
+def _firmware_secure_boot(root: Path = Path("/")) -> "tuple[str, str]":
+    """`(state, how it was read)` - the firmware's own Secure Boot setting.
+
+    **Never guesses.** A machine that cannot be asked reads UNKNOWN with the
+    reason, and that is the right answer: "off" is a claim about the firmware
+    and only the firmware's own variable can support it.
+    """
+    target = root / "sys" / "firmware" / "efi" / "efivars" / _SECURE_BOOT_NAME
+    if target.exists():
         try:
-            value = lockdown.read_text().strip()
+            raw = target.read_bytes()
         except OSError as exc:
-            return "unknown", f"{lockdown} exists but could not be read ({exc})"
-        # The file reads `[active] mode mode ...` - the bracketed token is what
-        # is enforced now and the rest are the modes available. Measured on this
-        # box: `[none] integrity confidentiality`, i.e. NOT locked down. Treating
-        # the whole line as the answer calls that "locked down", which is the
-        # dangerous direction to be wrong in: it claims unsigned modules are
-        # refused when they are not.
-        active = re.search(r"\[([^\]]*)\]", value)
-        if active is None:
-            return "unknown", f"{lockdown} reads {value!r}, which is not the [active] modes form"
-        mode = active.group(1).strip()
-        if mode and mode != "none":
-            return "locked down", f"{lockdown} enforces {mode!r}, so unsigned modules are refused"
-        if mode == "none":
-            return "not locked down", f"{lockdown} enforces 'none'"
-    efivars = root / "sys" / "firmware" / "efi" / "efivars"
-    matches = sorted(efivars.glob("SecureBoot-*")) if efivars.is_dir() else []
-    for match in matches:
-        try:
-            raw = match.read_bytes()
-        except OSError as exc:
-            return "unknown", f"{match} exists but could not be read ({exc}; it is root-only)"
-        # efivar value layout: 4-byte attributes, then a UTF-16LE name, then
-        # the data. SecureBoot is a single byte, 1 enabled.
+            return "unknown", f"{target} exists but could not be read ({exc})"
         if len(raw) >= 5 and raw[4] == 1:
-            return "enabled", f"{match} reads 1"
-    if matches:
-        return "disabled", f"{matches[0]} reads 0"
+            return "on", f"{target} reads 1"
+        if len(raw) >= 5:
+            return "off", f"{target} reads 0"
+        return "unknown", f"{target} is {len(raw)} bytes, too short to carry the flag"
+    # No readable efivar - `mokutil --sb-state` reads the same variable and is
+    # measured to answer unprivileged. AGENTS.md recorded mokutil as
+    # server-profile-only; the CLI matrix measures it on the GNOME image
+    # (`pulled_in_by=['shani-core']`), so the route exists and was not used.
+    mok = shutil.which("mokutil")
+    if mok:
+        try:
+            done = subprocess.run([mok, "--sb-state"], capture_output=True,
+                                  text=True, timeout=15, check=False)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return "unknown", f"mokutil --sb-state could not be run ({exc})"
+        said = done.stdout.strip()
+        if "disabled" in said.lower():
+            return "off", f"mokutil --sb-state says {said!r}"
+        if "enabled" in said.lower():
+            return "on", f"mokutil --sb-state says {said!r}"
+        return "unknown", f"mokutil --sb-state answered {said!r}"
+    efivars = root / "sys" / "firmware" / "efi" / "efivars"
     if efivars.is_dir():
-        return "unknown", f"{efivars} exists but carries no SecureBoot variable"
+        return "unknown", (f"{efivars} carries no SecureBoot variable and no mokutil "
+                           "is installed, so the firmware's state is unknown")
     return "unknown", "this machine booted without UEFI, so Secure Boot does not apply"
 
 
@@ -236,8 +271,23 @@ def _status_text() -> str:
     elif volatile is None:
         lines.append(f"  {'':42} {var_reason} - whether a module there would survive is unknown")
 
-    state, how = _secure_boot_state()
-    lines.append(f"  {'would an unsigned module load?':<42} {state} ({how})")
+    mode, problem = _lockdown_mode()
+    firmware, how = _firmware_secure_boot()
+    if problem:
+        lines.append(f"  {'kernel lockdown':<42} could not be read ({problem})")
+    elif mode and mode != "none":
+        lines.append(f"  {'would an unsigned module load?':<42} no - kernel lockdown "
+                     f"enforces {mode!r}, so unsigned modules are refused")
+    elif mode == "none":
+        lines.append(f"  {'would an unsigned module load?':<42} it would - kernel "
+                     f"lockdown enforces 'none'")
+    else:
+        lines.append(f"  {'would an unsigned module load?':<42} unknown - there is "
+                     f"no /sys/kernel/security/lockdown to read")
+    # Reported by its own name, not folded into the line above: Secure Boot is
+    # the firmware's setting and lockdown is the kernel's, and a machine can be
+    # Secure-Booted and not locked down.
+    lines.append(f"  {'Secure Boot':<42} {firmware} ({how})")
 
     # Only a missing compiler, make or build tree stops a *build*. dkms does
     # not: without it the module still builds, and simply stops being rebuilt

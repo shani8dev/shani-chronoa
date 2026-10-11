@@ -128,3 +128,136 @@ def test_listening_on_request_needs_its_consent(monkeypatch):
     ChronoaConfig().set("sound-sense-enabled", "true")
     assert "turned off" in recording._run({"action": "listen"}), \
         "granting the sound-event key must not open the microphone"
+
+
+# --- `recording action=streams` (measured reachable through the real dispatch) ---
+#
+# `pipewire.list_streams()` is the half that was missing: an app's
+# `Stream/Output/Audio` node, which `list_inputs`/`list_outputs` never matched.
+# Measured here, through the real dispatch path: consent off refuses by name,
+# a quiet machine reports itself quiet, and a playing application is listed
+# with the name to capture it by.
+
+
+class _Config:
+    def __init__(self, allowed=True, reason=""):
+        self._allowed, self._reason = allowed, reason
+
+    def sense_allowed(self, sense): return self._allowed
+
+    def sense_allowed_reason(self, sense): return self._reason
+
+
+class _Stream:
+    def __init__(self, name, label, recordable=True):
+        self.name, self.label, self.recordable = name, label, recordable
+
+    def __repr__(self):  # so the failure text names the thing
+        return "<%s %s recordable=%s>" % (type(self).__name__, self.name, self.recordable)
+
+
+def test_streams_is_advertised_and_not_just_reachable(monkeypatch):
+    """**Reachable but unadvertised is the mirror of the dead-control trap.**
+
+    `_run` accepts the action (proven through the real dispatch path), but the
+    model is offered `action` as an enum - if `streams` is not in it, no
+    request ever names it and the feature is invisible while working.
+    """
+    from shani_chronoa import tools
+
+    offered = [entry["function"]["parameters"]["properties"]["action"]["enum"]
+               for entry in tools.TOOLS
+               if entry.get("function", {}).get("name") == "recording"]
+
+    assert offered, "recording is not in the registry at all"
+    assert "streams" in offered[0], offered[0]
+
+    # and the control: an action that is genuinely absent is NOT offered
+    for absent in ("streamz", "meeting"):
+        assert absent not in offered[0], absent
+
+
+def test_streams_requires_the_same_consent_as_listening(monkeypatch):
+    """A stream name says what is playing. `media.name` measured
+    `/tmp/tone.wav`; on a real desktop it would say a meeting's title, so this
+    is the microphone's consent and not a free one."""
+    from shani_chronoa.skills import recording
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig",
+                        lambda: _Config(allowed=False, reason="turned off in Settings"))
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: pytest.fail("the graph was read with consent off"))
+
+    said = recording._run({"action": "streams"})
+
+    assert "turned off" in said, said
+    assert "Settings" in said, said
+
+
+def test_a_quiet_machine_reports_itself_quiet(monkeypatch):
+    """Empty is not a failure - reporting one there is the confident wrong
+    answer this file keeps recording."""
+    from shani_chronoa.skills import recording
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams", lambda: [])
+
+    said = recording._run({"action": "streams"})
+
+    assert "Nothing is playing" in said, said
+    assert "not a" in said and "failure" in said, said
+
+
+def test_a_playing_application_is_listed_with_its_capture_name(monkeypatch):
+    """The name is the point: it is what `pw-record --target` takes, and without
+    it the list is decorative."""
+    from shani_chronoa.skills import recording
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: [_Stream("pw-play", "/tmp/tone.wav", True)])
+
+    said = recording._run({"action": "streams"})
+
+    assert "1 of 1 can be captured" in said, said
+    assert "/tmp/tone.wav" in said, said
+    assert "capture as: pw-play" in said, said
+
+
+def test_an_applications_microphone_is_not_offered_as_capture_target(monkeypatch):
+    """`Stream/Input` is audio going INTO an app. Offering it is a dead control."""
+    from shani_chronoa.skills import recording
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: [_Stream("chromium", "Audio input", False)])
+
+    said = recording._run({"action": "streams"})
+
+    assert "None of these can be captured" in said, said
+    assert "capture as:" not in said, said
+    assert "own microphone" in said, said
+
+
+def test_no_pipewire_is_said_plainly(monkeypatch):
+    """Absent, not silent - and not a report about what is playing."""
+    from shani_chronoa.skills import recording
+
+    monkeypatch.setattr("shani_chronoa.config.ChronoaConfig", lambda: _Config())
+    monkeypatch.setattr("shani_chronoa.pipewire.is_available", lambda: False)
+    monkeypatch.setattr("shani_chronoa.pipewire.list_streams",
+                        lambda: pytest.fail("the graph was read with no pw-dump"))
+
+    said = recording._run({"action": "streams"})
+
+    assert "pw-dump" in said and "not installed" in said, said
+
+
+def test_an_unknown_action_is_still_refused():
+    """The control: `streams` must not be matching by accident."""
+    from shani_chronoa.skills import recording
+
+    said = recording._run({"action": "streamz"})
+
+    assert "must be one of" in said, said
+    assert "streams" in said, said

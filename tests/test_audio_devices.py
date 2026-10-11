@@ -230,3 +230,113 @@ class TestDevicesCliCommand:
         assert result.returncode == 0, result.stderr
         assert "inputs" in result.stdout
         assert "outputs" in result.stdout
+
+
+# --- application streams (measured: real, and capturable) ----------------------
+#
+# `_devices()` matches `Audio/Source` and `Audio/Sink` **exactly**, so an app's
+# `Stream/Output/Audio` node was never in any list - the graph could show a
+# running application's audio and the driver still had nothing to point at.
+# Measured on this box: `pw-record --target=<stream>` took -27.4 dBFS off a live
+# `pw-play`, where targeting the *sink* returned 11.9s of silence.
+
+_PLAYBACK = {"media.class": "Stream/Output/Audio", "node.name": "pw-play",
+             "media.name": "/tmp/tone.wav", "media.type": "Audio"}
+_CAPTURE = {"media.class": "Stream/Input/Audio", "node.name": "chromium",
+            "media.name": "Audio input", "media.type": "Audio"}
+
+
+def _graph(*nodes):
+    return lambda: list(nodes)
+
+
+def test_a_playing_application_is_listed(monkeypatch):
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(_PLAYBACK))
+
+    streams = pipewire.list_streams()
+
+    assert len(streams) == 1
+    assert streams[0].name == "pw-play", (
+        "name must be node.name, because that is what `pw-record --target` takes")
+    assert streams[0].recordable is True
+
+
+def test_a_microphone_belonging_to_an_app_is_not_something_to_record(monkeypatch):
+    """`Stream/Input` is the app consuming audio - its own microphone - and is
+    already what `list_inputs()` is for. Offering it as a capture target would be
+    the same dead control the repo keeps refusing."""
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(_CAPTURE))
+
+    streams = pipewire.list_streams()
+
+    assert len(streams) == 1, "it is still a real stream, and hiding it would be a lie"
+    assert streams[0].recordable is False, (
+        "a capture stream is audio going INTO the app; there is nothing to take")
+
+
+def test_the_label_says_what_is_playing_not_which_binary(monkeypatch):
+    """A browser's `node.name` is the binary. `media.name` is the only field
+    that says what - here, the file being played."""
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(_PLAYBACK))
+    assert pipewire.list_streams()[0].label == "/tmp/tone.wav"
+
+    bare = dict(_PLAYBACK)
+    bare.pop("media.name")
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(bare))
+    assert pipewire.list_streams()[0].label == "pw-play", (
+        "with nothing else set, the node name is the honest fallback - "
+        "`pw-play` had no nick and no description either")
+
+
+def test_a_stream_with_no_node_name_is_skipped_not_listed_blank(monkeypatch):
+    """`--target` takes a name or a serial. A stream with neither cannot be
+    pointed at, so listing it would offer a control that cannot work."""
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes",
+                        _graph({"media.class": "Stream/Output/Audio"}))
+
+    assert pipewire.list_streams() == []
+
+
+def test_devices_are_not_mistaken_for_streams(monkeypatch):
+    """The control: the two lists must stay apart, or `list_streams` is
+    `list_outputs` wearing a different name."""
+    from shani_chronoa import pipewire
+
+    sink = {"media.class": "Audio/Sink", "node.name": "alsa_output.pci",
+            "node.description": "Speaker"}
+    source = {"media.class": "Audio/Source", "node.name": "alsa_input.pci",
+              "node.description": "Mic"}
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(sink, source, _PLAYBACK))
+
+    assert [d.name for d in pipewire.list_outputs()] == ["alsa_output.pci"]
+    assert [d.name for d in pipewire.list_inputs()] == ["alsa_input.pci"]
+    assert [s.name for s in pipewire.list_streams()] == ["pw-play"]
+
+
+def test_a_quiet_machine_is_empty_and_not_a_failure(monkeypatch):
+    """Empty is the honest answer: nothing is playing. A caller that turns this
+    into an error would be reporting a broken machine where there is a quiet one."""
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph())
+    assert pipewire.list_streams() == []
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph({"nonsense": True}))
+    assert pipewire.list_streams() == []
+
+
+def test_recordable_streams_come_first(monkeypatch):
+    """A person reading the list wants the capturable one, not the app's mic."""
+    from shani_chronoa import pipewire
+
+    monkeypatch.setattr(pipewire, "_graph_nodes", _graph(_CAPTURE, _PLAYBACK))
+
+    assert [s.recordable for s in pipewire.list_streams()] == [True, False]

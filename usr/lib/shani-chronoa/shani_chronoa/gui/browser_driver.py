@@ -29,6 +29,7 @@ is narrower than the Chromium path:
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import threading
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 #: What this path does. Anything else gets `UNSUPPORTED`'s sentence.
 ACTIONS = ("navigate", "get_text", "click", "type", "select", "scroll", "back",
            "forward", "reload", "stop", "get_title", "get_url", "screenshot",
-           "wait", "wait_text")
+           "wait", "wait_text", "capabilities")
 
 UNSUPPORTED = {
     "evaluate": ("the in-app browser carries your own sign-ins, and a script run in "
@@ -354,6 +355,74 @@ def _pause(seconds: float) -> None:
         time.sleep(seconds)
 
 
+#: What the **page's own engine** can do, read from inside the page.
+#:
+#: WebKitGTK answers `undefined` for every Web Speech interface - measured in a
+#: real `WebKit.WebView` over `http://127.0.0.1` (a secure context), with
+#: `navigator.mediaDevices` present in the same page as the control. So a
+#: page's own voice search, "read aloud" button and dictation box are **inert
+#: here**, and a driver that clicks one reports success.
+#:
+#: `getUserMedia` is in the same probe on purpose: it *is* implemented, so a page
+#: with its own recording widget can work, and the note must not imply otherwise.
+CAPABILITIES_JS = """
+return {
+  speech_recognition: typeof window.SpeechRecognition !== 'undefined'
+                   || typeof window.webkitSpeechRecognition !== 'undefined',
+  speech_synthesis:   typeof window.speechSynthesis !== 'undefined',
+  microphone:         !!(navigator.mediaDevices
+                         && navigator.mediaDevices.getUserMedia)
+};
+"""
+
+#: `(pattern, capability, what it is called)` - **phrases, not single words.**
+#: "listen", "play" and "record" are ordinary English on a page ("Listen live",
+#: "Play episode"), and a note that fires on those is a confident wrong answer.
+_VOICE_PHRASES = (
+    (r"voice search|search (?:by|with) voice|tap to (?:speak|talk)|voice input"
+     r"|dictate|speak into",
+     "speech_recognition", "voice input"),
+    (r"read (?:this )?aloud|listen to (?:this|the) article|text[- ]to[- ]speech",
+     "speech_synthesis", "reading aloud"),
+)
+
+
+def page_capabilities(timeout: float = 15.0):
+    """What the page's engine supports, or `None` when it cannot be read.
+
+    `None` means **unknown, not absent** - a page that clears its own scripts or
+    a cross-origin frame raises here. Nothing is claimed from a probe that did
+    not answer, because a capability reported missing when it was never read is
+    the confident wrong answer this note exists to avoid.
+    """
+    caps = _json(CAPABILITIES_JS, timeout)
+    return caps if isinstance(caps, dict) else None
+
+
+def _voice_note(label: str, timeout: float = 15.0) -> str:
+    """A heads-up when a voice control is pressed and the engine cannot hear.
+
+    **It notes; it never refuses.** A page can dictate through its own server or
+    its own WASM, so "this engine has no Web Speech" is *not* proof the button is
+    dead - which is why the wording is about the browser and says a click **may**
+    have done nothing, rather than asserting the control is broken.
+
+    The capabilities are read **only when the label matches**, so an ordinary
+    click pays nothing for it.
+    """
+    text = str(label or "").lower()
+    for pattern, capability, described in _VOICE_PHRASES:
+        if not re.search(pattern, text):
+            continue
+        caps = page_capabilities(timeout)
+        if not caps or caps.get(capability):
+            return ""
+        return (f" Note: {label!r} looks like {described}, and this browser has "
+                f"no {capability.replace('_', ' ')} (measured in the page), so a "
+                f"page's own feature may not have started.")
+    return ""
+
+
 def _say(text: str, refused: bool = False) -> None:
     """Name the step in the window's activity strip. Never fails the action."""
     try:
@@ -618,6 +687,22 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
         _main(lambda w: w.webview().stop_loading())
         return "Stopped loading."
 
+    if action == "capabilities":
+        caps = page_capabilities(timeout)
+        if not caps:
+            return ("Could not read what this page's browser can do - "
+                    "the page blocked the check, so this is unknown, not "
+                    "an absence.")
+        have = [k.replace("_", " ") for k, v in sorted(caps.items()) if v]
+        missing = [k.replace("_", " ") for k, v in sorted(caps.items()) if not v]
+        out = ("This page's browser can: "
+                + (", ".join(have) if have else "nothing of the three") + ".")
+        if missing:
+            out += (" It has no " + ", ".join(missing)
+                    + ", so anything on the page built on those will not "
+                      "work here.")
+        return out
+
     if action == "click":
         x, y = arguments.get("x"), arguments.get("y")
         if not selector and (x is None or y is None):
@@ -642,6 +727,8 @@ def _act(action: str, arguments: dict, timeout: float) -> str:
         if followed.startswith("Error"):
             _say(f"the click on {what!r} led somewhere the network policy refuses", refused=True)
             return f"{followed} (after clicking {what!r})"
+        # After the outcome, so a refusal above is never dressed up with it.
+        said += _voice_note(what, timeout)
         return f"{said} {followed}".strip() + (_challenge_note() if load else "")
 
     if action == "type":
