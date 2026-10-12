@@ -15629,3 +15629,81 @@ for any wrapper, which is what happened when it was tested.
 unattended caller. `rules.py` says so itself - `fire_all` and `evaluate_many`
 have exactly one caller, `shani-chronoa-sense trigger run`. This section shows
 **event** rules, which `AmbientScheduler` does drive.
+
+## A real literature sweep of the small-model tool-use problem, and what it says about this repository's approach (2026-10-12)
+
+`websearch` returns nothing for **every** query on this box, so the sweep was run
+against the **arXiv API** (`export.arxiv.org/api/query`) and the GitHub and
+HuggingFace APIs, which all answer. Recorded as a harvest rather than a fix:
+nothing below was built, and each item says what would have to be measured first.
+
+**The finding that challenges this repository's approach.** *"Don't Adapt Small
+Language Models for Tools; Adapt Tool Schemas to the Models"*
+([arXiv:2510.07248](https://arxiv.org/abs/2510.07248), **ACL 2026 Main**). Small
+models fail tool use largely through **schema misalignment** - they hallucinate
+plausible tool names absent from the schema, because the naming conventions in
+the schema are not the ones in their pretraining. Its method, **PA-Tool**, is
+**training-free**: it renames tool components toward naming the model already
+knows, selecting candidates by **peakedness**, a pretraining-familiarity signal
+borrowed from contamination detection. Reported **up to +17% tool-use accuracy
+and 80% fewer schema-misalignment errors, with no retraining**.
+
+**And `tool_select.py` is a keyword harness.** Its own docstring: *"Scoring is
+plain word overlap between the request and each tool's name"*, plus a
+hand-kept `_SYNONYMS` table. That is exactly the class PA-Tool says loses the
+accuracy. **This is the strongest external evidence yet that the lever is the
+schema-selection layer rather than the weights** - which is where every merge
+and adapter attempt in this repository has been aimed.
+
+**Why the merge path may be aimed wrong, not merely blocked.** *"Constrained
+Decoding Eliminates Structural Failures in Small LLMs but Reveals a
+Scale-Dependent Semantic Gap"* ([arXiv:2609.23742](https://arxiv.org/abs/2609.23742))
+benchmarks five models in the **0.6B-4B** range - this repository's size - over
+14 structured-output tasks. Two findings:
+
+1. **Constrained decoding takes schema validity from 78.6-92.9% to 100%.**
+2. **Content accuracy still shows a scale-dependent gap**, and the division is
+   exact: **type-coercion failures are fully CD-rescuable; instruction-semantic
+   failures are CD-resistant.**
+
+The paper's own summary - *"schema conformance is necessary but not sufficient
+... CD's reach ends exactly where schema conformance ends"* - is the sentence
+this repository's whole measurement discipline has been arguing from the other
+direction. **It also means a grammar-constrained tool-call decoder is the single
+largest measurable lever available at this scale**, and llama.cpp ships
+GBNF grammars (`--grammar`, `json-schema-to-grammar`) that this repository has
+never used. **Not built**, and recorded as the next experiment rather than a
+claim: the win is stated at *schema validity*, which is not the instrument
+`task_eval` scores.
+
+**The distillation route, which needs no local training stack.** Three papers on
+getting small models tool-capable from a teacher's traces, none requiring weights
+on this box:
+
+- *AgentDistill* ([2506.14728](https://arxiv.org/abs/2506.14728)) - **training-free**
+  agent distillation into generalizable MCP boxes.
+- *Student-Centered Distillation Narrows the Agentic Gap* ([2509.14257](https://arxiv.org/abs/2509.14257)).
+- *Small Language Models for Agentic Systems: A Survey* ([2510.03847](https://arxiv.org/abs/2510.03847)) -
+  the map; read before building anything else in this area.
+
+**Surveys worth reading before the next attempt**, so nobody re-derives the
+map: SLM agentic systems ([2510.03847](https://arxiv.org/abs/2510.03847)),
+model merging at scale ([2603.09938](https://arxiv.org/abs/2603.09938)), and
+the merging survey already read for the merge path
+([2408.07666](https://arxiv.org/abs/2408.07666)).
+
+**What this changes about the plan, stated as a priority rather than a
+conclusion.** The merge and adapter paths have consumed every measurement in this
+repository's model work and produced **zero** shipped artifacts, and the
+literature now says the gap at this scale is *instruction-semantic*, which
+weight editing has not been shown to fix. Meanwhile the two levers the literature
+does support - **constrained decoding** and **schema alignment** - are both
+untried here and both need no training stack. **That is the argument for
+moving off the merge**, and it is an argument from two independent papers, not a
+preference.
+
+**One measurement this repository already owns and did not connect.** `task_eval`
+scores **right tool *and* right arguments**. PA-Tool's reported win is schema
+misalignment; CD's is schema validity. Neither is what this repository measures,
+so a 17% paper gain would not move `task_eval` unless it changed the arguments
+too - **which is the experiment to run before believing either result here.**
