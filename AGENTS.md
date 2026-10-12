@@ -12259,11 +12259,10 @@ one model being an outlier, and the answer changes what the floor should be: a
 smooth trend means `q5_0` costs more on the 30B MoE tier the ladder actually
 exists for, and an outlier means the 8B is the odd one.
 
-`Qwen3-1.7B-Q4_K_M.gguf` is present in this repo's own
-`shani-install-media/test-env/cache/llm-models/` and would have settled it. It
-cannot be read:
+**This "blocks the third" conclusion was wrong, and it is corrected below at
+"What a permission check that globbed two directories cost".** The 1.7B *was*
+readable the whole time, in a directory this check did not look in. Measured now.
 
-    -rw------- 1 root root  1107409472  Qwen3-1.7B-Q4_K_M.gguf
 
 Root-owned, mode 0600, and this is an unprivileged dev box. All four
 `llama-perplexity` runs failed with `Permission denied` - which is not a
@@ -12662,3 +12661,43 @@ uncommitted in a tree someone else commits from.
 The habit that follows, and the one this cost: **append and commit in one
 command.** This entry is committed that way, in the same shell invocation that
 wrote it, precisely so it cannot happen twice.
+
+## What a permission check that globbed two directories cost (2026-10-12)
+
+The entry above concluded that the 1.7B was unreadable and that a slot run with a
+30B-class checkpoint would be needed to price `q5_0` where the ladder is used.
+**Both halves were wrong, and the error was in the check rather than in the box.**
+
+`Qwen3-1.7B-Q4_K_M.gguf` has been readable all along, in chronoa's own data home:
+
+    $ ls -la cache/data-home/shani-chronoa/llm/
+    -rw------- 1 shrinivaskumbhar shrinivaskumbhar 1107409472 Qwen3-1.7B-Q4_K_M.gguf
+    -rw-rw-r-- 1 shrinivaskumbhar shrinivaskumbhar 5027783488 Qwen3-8B-Q4_K_M.gguf
+    lrwxrwxrwx 1 shrinivaskumbhar shrinivaskumbhar       22 current.gguf -> Qwen3-1.7B-Q4_K_M.gguf
+
+Root-owned, mode 0600 in `shani-install-media/test-env/cache/llm-models/` - that
+much was true. The check globbed that directory and `~/local/share/chronoa-models`,
+found no readable 1.7B in either, and stopped. It never looked in
+`shani-chronoa/cache/data-home/`, which is the repo's own model home and the one
+place a model this central would obviously live. **`current.gguf` points at it**,
+meaning the 1.7B is the *default* tier, not a spare.
+
+And `Qwen3-8B` lives in the same directory - the model the floor's second
+measurement came from, which a `find` under `$HOME` had also just missed because
+it was looking for the wrong thing at the wrong depth. Two of the three models the
+floor rests on were "missing" for the same reason: **the check was narrower than
+the box.**
+
+The cost was not just the wasted slot-run assumption. It is that a false
+limitation was written into the file that is supposed to be this repo's
+current-state source of truth, phrased as a hard limit and as a thing a future
+reader would need a slot to settle. A limitation recorded in a repo that is wrong
+is worse than no limitation, because the next reader trusts it and does not look.
+
+The habit: **before recording "cannot", prove the model is absent everywhere it
+could reasonably live** - not absent from the two directories that happened to
+come to mind. The measurement is running now, and the result goes in
+`KV_CACHE_MEASUREMENTS` rather than into a slot-run TODO.
+
+The same check would also have found that `SmolVLM2-500M` and `nomic-embed-text`
+are unreadable for real, so those still stand blocked.
