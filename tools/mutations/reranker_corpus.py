@@ -86,16 +86,31 @@ MUTATIONS = [
         'new': '        negatives = list(offered)\n',
     },
     {
+        'label': 'the arguments are dropped from the corpus again',
+        'why': 'the second wrong claim, in the other direction: a scan for '
+               '`arguments` instead of `args` concluded 111 argument-bearing '
+               'cases carried none, and the corpus followed the scan. '
+               '`ascension_gate` scores arguments, so this drops the evidence the '
+               'gate is scored on.',
+        'expect': [
+            'test_the_arguments_reach_every_row_that_has_them',
+            'test_the_arguments_are_the_ones_the_corpus_names',
+        ],
+        'file': _SOURCE,
+        'old': 'args = dict(case["expect"][0].get("args") or {})\n',
+        'new': 'args = dict(case["expect"][0].get("arguments") or {})\n',
+    },
+    {
         'label': 'the stated argument limit is replaced with a vague claim',
         'why': 'a file that claims a limit nothing checks is the claim this '
-               'repository records as false; this proves the test reads the '
-               'file rather than trusting it.',
+               'repository records as false; this proves the test reads what '
+               'the generator writes rather than the file left on disk.',
         'expect': [
             'test_the_limit_is_stated_in_what_the_generator_writes',
         ],
         'file': _SOURCE,
-        'old': 'RANKING only. `ascension_gate` scores right tool AND right "',
-        'new': 'selection of tools for a model. `ascension_gate` scores right "',
+        'old': 'answerable on 111 rows',
+        'new': 'answerable on some rows',
     },
     {
         'label': 'the held-out split is dropped so every row is training',

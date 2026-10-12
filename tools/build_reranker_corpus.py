@@ -65,7 +65,7 @@ def build():
     usable = [c for c in cases
               if c.get("expect") and c["expect"][0].get("tool")]
     rows = []
-    stats = {"offered": 0, "not_offered": 0}
+    stats = {"offered": 0, "not_offered": 0, "with_args": 0}
 
     for case in sorted(usable, key=lambda c: c["say"]):
         say = case["say"]
@@ -98,14 +98,27 @@ def build():
         negatives = sorted(negatives, key=lambda n: rank.get(n, 10 ** 6))
         negatives = negatives[:NEGATIVES]
 
+        # `args`, **not** `arguments` - and this is not a detail. The first
+        # version read `expect[0].get("arguments")`, found nothing, and wrote a
+        # corpus whose limit sentence said no case carries arguments. Measured:
+        # **111 of the 220 do**, under the key `args`, and `task_eval.py:91`
+        # reads that key. The claim was false and it was made by a scan for a
+        # plausible spelling of a word rather than by reading the corpus, so the
+        # whole "this can only evidence ranking" conclusion built on it was
+        # wrong - and `ascension_gate`, which scores right tool **and** right
+        # arguments, was gradable the whole time.
+        args = dict(case["expect"][0].get("args") or {})
         rows.append({
             "say": say,
             "positive": want,
+            "positive_args": args,
             "positives_desc": descs.get(want, want),
             "negatives": [{"tool": n, "desc": descs.get(n, n)} for n in negatives],
             "offered": offered,
             "recall_hit": want in offered,
         })
+        if args:
+            stats["with_args"] += 1
     return rows, stats
 
 
@@ -136,9 +149,14 @@ def main() -> int:
                   f"{SEED}. Negatives come from the selector's own top-"
                   f"{NEGATIVES}, not from uniform sampling - the tools that "
                   "crowd out the answer are the ones it already rates highest."),
-        "limit": ("No case carries ARGUMENTS, so this can evidence tool "
-                  "RANKING only. `ascension_gate` scores right tool AND right "
-                  "arguments; nothing in this corpus can satisfy that."),
+        "limit": (
+            "Evidence for tool RANKING, and for arguments on the "
+            "111 of 220 cases that carry them. `ascension_gate` scores "
+            "right tool AND right arguments, so a run graded by it is "
+            "answerable on 111 rows and NOT on the 109 with no "
+            "arguments - a verdict drawn from those 111 is a verdict "
+            "about argument-bearing requests and says nothing about "
+            "the rest."),
         "seed": SEED,
         "counts": {"requests": len(rows), "pairs": pairs,
                    "train": len(train), "held_out": len(held)},
@@ -151,8 +169,10 @@ def main() -> int:
           f"({len(train)} train / {len(held)} held out)")
     print(f"  positives the selector already ranks inside its offer: "
           f"{stats['offered']}, outside it: {stats['not_offered']}")
+    print(f"  carrying arguments: {stats['with_args']}")
     print(f"  wrote {_shown(OUT, REPO)}")
-    print("\nLIMIT: no arguments in any case - this evidences RANKING only.")
+    print("\nLIMIT: 109 of 220 cases carry no arguments, so an argument-level score"
+          "\n      over the whole corpus is a score over 111 rows.")
     return 0
 
 

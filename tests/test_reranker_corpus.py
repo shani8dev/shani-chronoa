@@ -45,7 +45,6 @@ def corpus(tmp_path_factory):
     is `test_the_shipped_file_matches_a_fresh_build`, and that is where
     "the artefact is stale" belongs.
     """
-    out = tmp_path_factory.mktemp("corpus") / "reranker_corpus.json"
     rows, stats = builder.build()
     doc = json.loads((REPO / "tools" / "reranker_corpus.json").read_text())
     # The structural fields come from the real generator; only the row lists are
@@ -232,18 +231,121 @@ class TestARecallFailureIsStillACorpusRow:
         assert any(r["negatives"] for r in missed)
 
 
-class TestTheDeclaredLimitIsTrue:
-    """`ascension_gate` scores right tool AND right arguments.
+class TestArgumentsAreCarried:
+    """`ascension_gate` scores right tool AND right arguments, so the gate
+    needs them - and the first version of this file asserted there were none.
 
-    No case in `eval_cases.json` carries arguments, so this corpus can evidence
-    ranking only. The limit is written into the file - and a file that states a
-    limit nobody checks is the claim this repository keeps recording as false.
+    **That assertion was a scan for the wrong spelling.** It asked for
+    `expect[0]["arguments"]` and found none, concluded the corpus could evidence
+    ranking only, and wrote that limit into the corpus file. Measured: **111 of
+    the 220 carry arguments under the key `args`**, across 98 distinct tools, and
+    `tools/task_eval.py:91` reads that key. A scan for a plausible spelling of a
+    word is the `price`/`collapse` failure in its purest form - it finds nothing
+    and the nothing reads as a fact about the tree.
+
+    So the corpus carries them, and these tests read the key `task_eval.py`
+    reads rather than the one the wrong assumption was built on.
     """
 
-    def test_no_row_carries_arguments(self, rows):
+    #: The key `tools/task_eval.py` reads, asserted here so a rename in one
+    #: place is a red test rather than a corpus that quietly carries nothing.
+    ARGS_KEY = "args"
+
+    def test_the_arguments_reach_every_row_that_has_them(self, rows):
+        source = {}
+        for case in json.loads(
+                (REPO / "tools" / "eval_cases.json").read_text())["cases"]:
+            if case.get("expect"):
+                source[case["say"]] = dict(case["expect"][0].get(self.ARGS_KEY) or {})
+        expected = sum(1 for v in source.values() if v)
+        carried = sum(1 for r in rows if r["positive_args"])
+        assert expected == 111, (
+            f"{expected} cases carry arguments, not 111 - the corpus's own "
+            f"stated number is stale and the limit sentence below is false"
+        )
+        assert carried == expected, (
+            f"{carried} of {expected} rows carry the arguments the corpus "
+            f"already had available"
+        )
+
+    def test_the_arguments_are_the_ones_the_corpus_names(self, rows):
+        source = {}
+        for case in json.loads(
+                (REPO / "tools" / "eval_cases.json").read_text())["cases"]:
+            if case.get("expect"):
+                source[case["say"]] = dict(case["expect"][0].get(self.ARGS_KEY) or {})
         for r in rows:
-            assert "arguments" not in r
-            assert "args" not in r
+            assert r["positive_args"] == source[r["say"]], (
+                f"{r['say']!r}: arguments differ from the corpus they came from"
+            )
+
+    def test_a_row_with_no_arguments_says_so_with_an_empty_dict(self, rows):
+        """An absent key is indistinguishable from a dropped one in a consumer
+        that reads `row.get("args")`, so the field is always present."""
+        for r in rows:
+            assert "positive_args" in r
+            assert isinstance(r["positive_args"], dict)
+
+    def test_the_task_eval_key_is_the_one_this_corpus_uses(self):
+        """A source-level check, because the two spellings differ.
+
+        This is the whole defect in one assertion: `task_eval.py` reads `args`,
+        so a corpus written against `arguments` would be scored as carrying none
+        and the gate would silently refuse for a reason that reads like a model
+        failure.
+        """
+        import inspect
+        sys.path.insert(0, str(REPO / "tools"))
+        import task_eval
+        src = inspect.getsource(task_eval)
+        assert '"args"' in src, (
+            "task_eval no longer reads `args`; this corpus's key must follow it"
+        )
+        assert 'want.get("args")' in src
+
+    def test_the_headroom_the_gate_is_capable_of(self):
+        """How much of the corpus `ascension_gate` can score at all.
+
+        Of the 220 case-carrying rows, **109 declare no expected arguments**, so
+        a model that calls the right tool with an *empty argument dict* scores
+        as fully correct on all 109 - measured through the real scorer, not
+        inferred. That is not a bug in the scorer; it is the difference between
+        "the call was right" and "there was nothing in this call to be right
+        about", and only the second is being reported here.
+
+        What it means for a 15.5-hour training run: `Measurement.right` cannot
+        distinguish an improvement on the 111 from a vacuous pass on the 109, so
+        the honest statement of the headroom is **111 of 220, not 220**. A verdict
+        drawn from the total is a verdict that counts 109 things that were never
+        being scored.
+        """
+        sys.path.insert(0, str(REPO / "tools"))
+        import task_eval
+        cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
+        rows = [c for c in cases if c.get("expect")]
+        empty = [c for c in rows if not c["expect"][0].get("args")]
+        assert len(rows) == 220 and len(empty) == 109, (
+            f"{len(rows)} expect-carrying cases with {len(empty)} declaring no "
+            f"arguments - both numbers moved, so the limit sentence and the "
+            f"assertion above are stale"
+        )
+        vacuous = sum(
+            1 for c in empty
+            if task_eval.score(c, [{"name": c["expect"][0]["tool"], "args": {}}])
+        )
+        assert vacuous == len(empty) == 109, (
+            f"{vacuous} of {len(empty)} no-argument cases score as passing on an "
+            f"empty argument dict"
+        )
+
+
+class TestTheDeclaredLimitIsTrue:
+    """The limit is about the 109 rows that carry nothing, and it names them.
+
+    Written rather than assumed: a file that states a limit nobody checks is the
+    claim this repository records as false, and the previous version of this
+    limit was simply wrong.
+    """
 
     def test_the_limit_is_stated_in_what_the_generator_writes(self, tmp_path,
                                                               monkeypatch):
@@ -257,8 +359,13 @@ class TestTheDeclaredLimitIsTrue:
         monkeypatch.setattr(builder, "OUT", tmp_path / "c.json")
         assert builder.main() == 0
         limit = json.loads((tmp_path / "c.json").read_text())["limit"]
-        assert "ARGUMENT" in limit.upper()
-        assert "rank" in limit.lower()
+        assert "111 of 220" in limit, (
+            "the limit must name its own population, in the sentence that "
+            "bounds it - not merely somewhere in the file. A `in` check passes "
+            "when 111 appears twice and one is removed, which is the "
+            "witness-that-cannot-fail trap this set already found once."
+        )
+        assert "NOT on the 109" in limit
 
     def test_the_negative_cap_cannot_silently_exceed_the_offer(self):
         """Why the ordering assertion exists, and what would unmake it.
@@ -284,24 +391,6 @@ class TestTheDeclaredLimitIsTrue:
             f"shuffle-then-truncate form becomes a defect"
         )
 
-    def test_the_corpus_really_carries_no_arguments_anywhere(self):
-        """Checked at the source rather than in the generated output.
-
-        A builder that dropped the field would produce a clean corpus and a true
-        limit sentence, while the source it read still had arguments in it - so
-        the claim is checked where it originates.
-        """
-        cases = json.loads((REPO / "tools" / "eval_cases.json").read_text())["cases"]
-        with_args = [
-            c for c in cases
-            if c.get("expect")
-            and any(e.get("arguments") for e in c["expect"])
-        ]
-        assert not with_args, (
-            f"{len(with_args)} case(s) now carry arguments, so the stated limit "
-            f"is false and the corpus can evidence argument-level training too"
-        )
-
 
 class TestTheScriptItselfRuns:
     """`tools/build_reranker_corpus.py` is the entry point a person runs."""
@@ -321,4 +410,5 @@ class TestTheScriptItselfRuns:
             capture_output=True, text=True, env=env, timeout=600,
         )
         assert proc.returncode == 0, proc.stderr[-2000:]
-        assert "RANKING only" in proc.stdout
+        assert "carrying arguments: 111" in proc.stdout
+        assert "111 rows" in proc.stdout

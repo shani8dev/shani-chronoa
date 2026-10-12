@@ -154,9 +154,19 @@ only purpose is to report success" this module argues against.
   threads, 15.9 GB peak RSS** - so **one epoch over the 165 training rows of
   `tools/reranker_corpus.json` is about 15.5 hours**, and that is the optimiser
   alone, with no evaluation and no checkpointing. **On a machine of this class
-  the path is viable and unattended**, and the honest reason not to start it is
-  that 15.5 hours buys one epoch of a measurement whose instrument does not yet
-  exist - `ascension_gate` scores arguments and no corpus case carries any.
+  the path is viable and unattended.**
+  **CORRECTED the same day, and the correction removes the reason not to start
+  it.** It was recorded here as "`ascension_gate` scores arguments and no corpus
+  case carries any" - false, and false by a scan looking for the key
+  `arguments` when the corpus spells it `args`. Measured: **111 of the 220 cases
+  carry arguments**, across 98 distinct tools, and `task_eval.py:91` reads that
+  key, so both halves of the gate - right tool **and** right arguments - are
+  answerable. The reranker corpus dropped them because the builder read the same
+  wrong spelling; it carries them now. **A scan for a plausible spelling of a
+  word is the `price`/`collapse` failure** - it finds nothing, and the nothing
+  reads as a fact about the tree. The 109 rows that carry no arguments are stated
+  as the limit of the corpus rather than as a limit of the gate, because a
+  verdict over 111 argument-bearing requests says nothing about the other 109.
 - **The measurement that justifies "models second" cannot be reproduced here.**
   `model_zoo` cites 11,868 recorded calls with 94% identical labels; this
   machine's `tool_calls.log` holds **one**. `model_zoo.compare()` returns **zero
