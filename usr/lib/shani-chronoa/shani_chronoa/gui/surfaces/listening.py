@@ -281,10 +281,29 @@ def build(app: Any = None) -> Gtk.Widget:
 
     unlock.connect("clicked", again)
 
-    page.append(headline)
-    page.append(_Card("What is possible", can_row, consent_row, caveat_row))
-    page.append(_Card("What is playing right now", status, stream_rows))
-    controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    # **Behind a scroller, because "what is playing right now" grows.** A machine
+    # with four captured streams makes this card taller than any window, and
+    # `test_every_surface_can_scroll` is the check that caught `inventory` shipping
+    # the same defect - rows straight into the toolbar's slot, unreachable at the
+    # bottom at every height. The controls that act on the list stay *above* it,
+    # so pressing one never scrolls away from what it acted on.
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_vexpand(True)
+    scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    scrollable = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+    scrollable.append(headline)
+    scrollable.append(_Card("What is possible", can_row, consent_row, caveat_row))
+    scrollable.append(_Card("What is playing right now", status, stream_rows))
+    scroller.set_child(scrollable)
+    page.append(scroller)
+    # **A FlowBox, not a horizontal Box.** Five items end to end measured
+    # 529px against the contract's 480px, so a narrow window clipped or
+    # side-scrolled them - the contract's own `test_no_surface_overflows...`
+    # caught it. The FlowBox bottoms out at 158px and stacks instead, which is
+    # the widget `OrganStrip` was switched to for the same reason.
+    controls = Gtk.FlowBox()
+    controls.set_selection_mode(Gtk.SelectionMode.NONE)
+    controls.set_column_spacing(8)
     controls.append(Gtk.Label(label="Capture for", xalign=0.0))
     controls.append(seconds)
     controls.append(Gtk.Label(label="seconds", xalign=0.0))

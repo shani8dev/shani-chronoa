@@ -41,7 +41,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, GLib, Gtk, Pango  # noqa: E402
 
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
@@ -427,6 +427,10 @@ def _engine_box(app: Any) -> Gtk.Widget:
     box.add_css_class("card")
     heading = Gtk.Label(label="Where the assistant answers from", xalign=0)
     heading.add_css_class("heading")
+    # Ellipsised, not left to be clipped: the layout contract allows a long
+    # label only if it wraps or ellipsises, and a card heading over 30 characters
+    # that did neither was cut off at the card's own width.
+    heading.set_ellipsize(Pango.EllipsizeMode.END)
     box.append(heading)
     summary = Gtk.Label(xalign=0, wrap=True)
     summary.add_css_class("dim-label")

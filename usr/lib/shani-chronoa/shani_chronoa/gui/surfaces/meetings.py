@@ -47,7 +47,10 @@ from shani_chronoa.gui.surfaces import common
 logger = logging.getLogger(__name__)
 
 TITLE = "Meetings"
-ICON = "audio-microphone-symbolic"
+#: **`audio-microphone-symbolic` is not a glyph this theme ships** (measured
+#: with `Gtk.IconTheme.has_icon`); `audio-input-microphone-symbolic` is, and is
+#: the name the Voice panel already uses for the same idea.
+ICON = "audio-input-microphone-symbolic"
 SECTION = "Remembering"
 SUBTITLE = ("Record a whole meeting, keep it, and read the transcript and notes "
             "back whenever you want them.")
@@ -234,7 +237,7 @@ class _MeetingsView(Gtk.Box):
         self.stop.set_sensitive(True)
         self.elapsed.set_label(f"Recording — up to {label}")
         self._present(nothing_state(
-            "audio-microphone-symbolic", RECORDING, RECORDING_DESC))
+            "audio-input-microphone-symbolic", RECORDING, RECORDING_DESC))
         self._started = time.monotonic()
         threading.Thread(target=self._capture, args=(seconds,), daemon=True).start()
 
@@ -314,7 +317,7 @@ class _MeetingsView(Gtk.Box):
         self._rows = []
         if not found:
             self._present(nothing_state(
-                "audio-microphone-symbolic", NOTHING_YET, NOTHING_YET_DESC))
+                "audio-input-microphone-symbolic", NOTHING_YET, NOTHING_YET_DESC))
             return
         group = common.group()
         group.set_margin_start(12)

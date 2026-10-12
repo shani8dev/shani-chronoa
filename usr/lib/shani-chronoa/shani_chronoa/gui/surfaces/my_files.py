@@ -54,7 +54,12 @@ from shani_chronoa.gui.surfaces import common
 logger = logging.getLogger(__name__)
 
 TITLE = "My files"
-ICON = "folder-search-symbolic"
+#: **`folder-search-symbolic` is not a glyph this theme ships** - measured
+#: with `Gtk.IconTheme.has_icon`, and the check is
+#: `tests/test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`.
+#: A name the theme lacks renders as an empty box the size of an icon, which
+#: reads as a rendering bug rather than as a missing glyph.
+ICON = "folder-documents-symbolic"
 SECTION = "Remembering"
 SUBTITLE = ("Search your own documents and notes, by keyword and - where the "
             "embedding model is installed - by meaning.")
@@ -242,11 +247,25 @@ class _FilesView(Gtk.Box):
     # -- the four answers ----------------------------------------------------
 
     def _present(self, widget: Gtk.Widget) -> None:
+        """Put one widget in the answer slot, behind a scroller if it has none.
+
+        **The scroller, not the states.** `test_every_surface_can_scroll` is the
+        check that caught `inventory` shipping this same defect - rows passed
+        straight to the toolbar's content slot, so the last ones could not be
+        read at any window height - and it caught it here: seven
+        `common.empty_state()` sites went in unwrapped.
+
+        Wrapping here rather than at each site is what keeps the two from
+        disagreeing: `_show_hits` already scrolls its own list, so it passes
+        something that carries a `ScrolledWindow` and must not be wrapped twice.
+        """
         child = self._answer_slot.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
             self._answer_slot.remove(child)
             child = following
+        if not _has_scroller(widget):
+            widget = common.scrolled(widget, 520)
         self._answer_slot.append(widget)
 
     def _show_index_state(self) -> None:
@@ -260,7 +279,7 @@ class _FilesView(Gtk.Box):
             self._present(_consent_refusal(self._app))
             return
         self._present(common.empty_state(
-            "folder-search-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
+            "folder-documents-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
 
     def _show_hits(self, hits: List[dict], how: str, query: str) -> None:
         group = common.group()
@@ -323,7 +342,7 @@ class _FilesView(Gtk.Box):
         state = file_index.status(root=self._directory())
         if not state["indexed"]:
             self._present(common.empty_state(
-                "folder-search-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
+                "folder-documents-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
             return
         self._present(common.empty_state(
             "edit-find-symbolic",
@@ -464,6 +483,26 @@ def _plain_preferences_row() -> Gtk.Widget:
     return _FallbackPreferencesRow()
 
 
+def _has_scroller(widget: Gtk.Widget) -> bool:
+    """Whether `widget` already contains a `Gtk.ScrolledWindow`.
+
+    Read rather than remembered, because a caller that wraps its own list must
+    not be wrapped a second time - a scroller inside a scroller gives the
+    content two independent scroll positions and neither is the one the person
+    expects.
+    """
+    stack = [widget]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, Gtk.ScrolledWindow):
+            return True
+        child = node.get_first_child()
+        while child is not None:
+            stack.append(child)
+            child = child.get_next_sibling()
+    return False
+
+
 def _consent_refusal(app: Any) -> Gtk.Widget:
     """The panel's answer when the consent key is off.
 
@@ -479,6 +518,10 @@ def _consent_refusal(app: Any) -> Gtk.Widget:
     box.set_margin_end(24)
     title = Gtk.Label(label="Indexing your files is turned off")
     title.add_css_class("title-2")
+    # Wrapped: the layout contract allows a long label only if it wraps or
+    # ellipsises, and this one was an unbroken sentence in a page that is
+    # deliberately narrower than it.
+    common.wrap_label(title)
     box.append(title)
     detail = Gtk.Label(
         label=(f"Nothing has been read. Turn on “{CONSENT_KEY}” in Settings "
