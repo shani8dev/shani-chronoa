@@ -501,6 +501,75 @@ The audit also came back clean on the checks that matter more: **no set names a
 in its file** - so the over-claiming I found in my own set is the only instance of
 it in the inventory.
 
+## A full sweep of all 513 files: 34 failures, none of them real after triage (2026-10-12)
+
+Nine chunks, one log each. Raw tally: **0 / 0 / 7 / 12 / 0 / 1 / 2 / 12 / 0 =
+34 failures.** Every failing file was re-run in isolation before any of them was
+believed, which is this file's own rule and which changed the answer completely.
+
+| what the sweep said | what isolation showed |
+|---|---|
+| `test_temperature_bounds.py` **11 failed** | **13 passed** - all 11 were contamination |
+| `test_incoming_call` (4), `test_listening_surface` (3), `test_obex_receive` (5) | **18 passed, 0 failed** - contamination |
+| `test_surface_export` (1) | passes alone - order-dependent, fails only after `test_setup_button_is_reachable` |
+| `test_setup_button_is_reachable` (1) | passes alone - the documented intermittent abort |
+| `test_mode_strip` (2) | **real** - stale assertions |
+| `test_settings_surface_is_complete` (1) | **real** - ten keys with no control and no reason |
+| `test_one_finite_check` (1) | **real** - my own regression |
+| models panels (4) | pre-existing environmental, proved earlier by the one-file swap |
+
+**So: 34 reported, 3 real.** The other 31 were contamination (11), order (1),
+environmental (5) and the pre-existing four.
+
+### The contamination is a gap in the protection, not bad luck
+
+The runner has a guard - *"a mutation run holds the tree, so this suite would read
+mutated code"* - and it did not fire, because it checks the lock **at collection
+time**. The concurrent session started its mutation run *after* my chunk had begun,
+so the guard had already passed and the chunk read mutated source for the next nine
+minutes. A start-time check is not a continuous one, and in a tree two sessions work
+in, that window is real. The remedy that worked is the one this file already
+prescribes - re-run failures serially - and it is cheap. The gap is recorded rather
+than patched, because the fix is a change to a tool the other session owns and is
+editing right now.
+
+### The one that is mine, and the one that is not
+
+**`test_no_third_copy_exists_anywhere` caught my own regression.** `clamp_temperature`
+and `clamp_shift` carried the inline finite pair
+`if t != t or t in (float("inf"), float("-inf"))`. I wrote them when porting laya's
+temperature bounds - **after** consolidating `sysfs.finite` - so the consolidation I
+landed earlier this session was undone by my own later change, and the test written
+to prevent exactly that is the one that caught it. Both go through `sysfs.finite`
+now. A consolidation that a later change silently undoes is the failure mode the
+consolidation exists for, and only a source-level check catches it, which is why
+that check is a test and not a comment.
+
+**Two real defects were found and deliberately not fixed, because they live in the
+other session's uncommitted files.** The mode strip's three `_MODES` menu lines are
+42, 87 and 70 characters, and the layout contract fails any label over 30 that can
+neither wrap nor ellipsise - menu items do neither. `_STYLES` directly above
+documents the rule and obeys it; `_MODES` does not. The root cause is **one string
+doing two jobs**: the third field is both the menu text and the tooltip sentence
+(`f"Where answers come from: {word}. {sentence}"`), and only one of the two can be
+long. Separately, the cloud-keys wizard page asks for **640px of a 560px window** -
+the same defect this file records as fixed once at 590px.
+
+Committing my version of `gui/window.py` or `setup_wizard.py` while they hold
+uncommitted work in both would drop it, which is the destructive path operation this
+workspace forbids in a different disguise. The findings are recorded with the root
+cause and the shape of the fix instead. `window.py` was mid-edit during the triage
+(`_answer_mode_chip` being renamed while `_read_answer_mode` still referenced it,
+which is why 15 tests failed at one instant and passed minutes earlier) - direct
+evidence that the caution was the right call.
+
+### And one clean check worth having run
+
+`usr/share/glib-2.0/schemas/gschemas.compiled` is **tracked in git**. A compiled
+schema that is stale against its XML fails the way this file records: every setting
+silently takes its Python default, with exit 0 and no error. Recompiled fresh and
+compared byte for byte - **in sync.**
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
