@@ -112,6 +112,14 @@ INVENTORY: Tuple[Organ, ...] = (
           ("senses/power.py", "senses/thermalgrid.py", "senses/hwmon.py",
            "senses/services.py", "senses/network.py", "senses/security.py"),
           BUILT, gerund="feeling the machine", source="the machine-state senses (senses/*)", indicator="nose"),
+    Organ("fingertip", "Senses", "Fingertips",
+          "reaching outward: looking something up beyond this machine",
+          ("websearch.py", "webtext.py", "senses/web.py"), PART,
+          missing="the only sense that leaves the machine by default - it is "
+                  "gated on 'web-sense-enabled' and the egress layer records it, "
+                  "but no organ owned it until now, and it is the one sense a "
+                  "person would assume is covered by eyes or skin"),
+
     Organ("skin_touch", "Senses", "Touch",
           "contact: idle time, and what is plugged into it",
           ("senses/idle.py", "senses/devices.py", "senses/usb.py",
@@ -139,8 +147,11 @@ INVENTORY: Tuple[Organ, ...] = (
            "approvals.py"), BUILT),
     Organ("lungs", "Action", "Diaphragm",
           "breath: the rhythm of a day - awake, active, idle, asleep",
-          ("daemon.py", "senses/idle.py", "model_service.py"), PART,
-          missing="no awake/idle/sleep state machine; the daemon runs, nothing sleeps"),
+          ("daemon.py", "senses/idle.py", "model_service.py", "presence.py"), PART,
+          missing="the awake/active/asleep cycle now exists for the *model* "
+                  "(presence.py, on the mode strip, and it reaches SLEEPING), "
+                  "but nothing sleeps the rest of it: the daemon keeps its rules "
+                  "and senses running through every state"),
 
     # -- Core ------------------------------------------------------------
     Organ("brain", "Core", "Brain",

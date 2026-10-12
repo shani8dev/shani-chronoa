@@ -798,7 +798,7 @@ question - **what is Chronoa, in the vocabulary of a body** - and the
 answer is machine-readable, in `organism.py`, because a table in a
 document cannot be kept true and one sitting next to the code can.
 
-26 functions: **17 built, 9 part, 0 absent.**
+27 functions: **17 built, 10 part, 0 absent.**
 
 Eight of them have a light in the window's organ strip; the rest have
 no indicator, and the Inventory panel says so rather than implying they
@@ -816,13 +816,14 @@ there is no left pinky, because nothing in here has one.
 | Senses | Ears | hearing: the microphone, speech recognition, wake phrase, and what is heard. | built | `ears` | `audio.py`, `stt.py`, `stt_provision.py`, `wakeword.py`, `vad.py`, `senses/hearing.py` |
 | Senses | Eyes | sight: the camera, the screen, OCR, faces, objects, and the vision model. | built | `eyes` | `screengrab.py`, `local_vision.py`, `opencv/`, `photo_library.py`, `senses/vision.py` |
 | Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/power.py`, `senses/thermalgrid.py`, `senses/hwmon.py`, `senses/services.py`, `senses/network.py`, `senses/security.py` |
+| Senses | Fingertips | reaching outward: looking something up beyond this machine. | part | - | `websearch.py`, `webtext.py`, `senses/web.py` | the only sense that leaves the machine by default - it is gated on 'web-sense-enabled' and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin
 | Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py`, `senses/usb.py`, `senses/bluetooth.py` | no raw input events, on purpose - it watches devices, not you
 | Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
 | Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | no salience or priority queue; selection is by tool relevance only
 | Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py`, `sherpa.py`, `audio.py` |
 | Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `portal.py`, `desktop_session.py`, `phone.py` |
 | Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py`, `skills/timer.py`, `approvals.py` |
-| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py` | no awake/idle/sleep state machine; the daemon runs, nothing sleeps
+| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py`, `presence.py` | the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state
 | Core | Brain | thinking: the language model and the tool loop it drives. | built | `brain` | `assistant.py`, `local_llm.py`, `ollama_llm.py`, `cloud_llm.py`, `mcp.py` |
 | Core | Prefrontal cortex | judgement before acting: permissions, plan mode, and the refusals. | built | - | `capabilities.py`, `planmode.py`, `permissions.py`, `approvals.py` |
 | Core | Cerebellum | checking its own work: post-conditions, and repairing a broken turn. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
@@ -845,9 +846,10 @@ The two `absent` ones first, because they are the ones worth building:
 And the nine that are part-built, which is a different problem: each one
 works and stops short of something specific.
 
+- **Fingertips** - the only sense that leaves the machine by default - it is gated on 'web-sense-enabled' and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin.
 - **Touch** - no raw input events, on purpose - it watches devices, not you.
 - **Vestibular sense** - no salience or priority queue; selection is by tool relevance only.
-- **Diaphragm** - no awake/idle/sleep state machine; the daemon runs, nothing sleeps.
+- **Diaphragm** - the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state.
 - **Reticular formation** - no interrupt policy; everything notable is announced equally.
 - **Heart** - a liveness signal exists per subsystem; nothing consumes it yet.
 - **Thermoregulation** - it reads its temperature; it does not act on it unasked.
@@ -869,4 +871,3 @@ works and stops short of something specific.
   (sidebar, What Chronoa knows, Inventory) answers **"what is it"**. Two
   pages on purpose: they disagree whenever something is half-built, and
   that disagreement is the useful part.
-
