@@ -372,7 +372,17 @@ def build(app: Any) -> Gtk.Widget:
     """Build the compare page for `app`."""
     page, set_content = common.surface(TITLE, SUBTITLE)
     view = _CompareView(app)
-    set_content(view)
+    # **In a scroller, like every other panel.** `common.surface` hands back an
+    # `Adw.ToolbarView` when libadwaita is there, and a caller that puts its view
+    # straight into the content slot gets a panel whose bottom is unreachable at
+    # any window height. `test_every_surface_can_scroll` exists for exactly this
+    # and was written against `inventory`, which had the same defect; three of
+    # the four panels without `common.scrolled` build their own `Gtk
+    # .ScrolledWindow` instead, and this was the one with none at all.
+    #
+    # It was pre-existing, not introduced by the status row - the sweep that
+    # found it ran against the commit before the status slot existed.
+    set_content(common.scrolled(view))
     # Re-read on every showing: the window builds a panel once and keeps it, so
     # a load at build time alone froze the store listing at the moment the
     # panel was first opened.
