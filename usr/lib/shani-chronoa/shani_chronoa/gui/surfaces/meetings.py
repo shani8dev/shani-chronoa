@@ -116,6 +116,9 @@ class _MeetingsView(Gtk.Box):
         self._stop = threading.Event()
         self._recording = False
         self._rows: List[tuple] = []
+        #: The live source id of the elapsed clock, or 0 when it is not running.
+        #: Kept so `_reset_controls` can end the timer as well as the recording.
+        self._tick_source = 0
         self.status_recorder = common.StatusRecorder()
 
         self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -239,7 +242,25 @@ class _MeetingsView(Gtk.Box):
         self._present(nothing_state(
             "media-record-symbolic", RECORDING, RECORDING_DESC))
         self._started = time.monotonic()
+        # **Schedule the elapsed clock, or it never moves.** `_tick` was written
+        # with a docstring about not looking hung, and then nothing ever called
+        # it: measured, a stub capture held the label at "Recording — up to 15
+        # minutes" for the whole four seconds it watched. A person recording a
+        # two-hour meeting got no feedback at all for two hours, which is the
+        # exact failure `_tick` exists to prevent.
+        self._schedule_tick()
         threading.Thread(target=self._capture, args=(seconds,), daemon=True).start()
+
+    def _schedule_tick(self) -> None:
+        self._stop_tick()
+        self._tick_source = GLib.timeout_add(250, self._tick)
+
+    def _stop_tick(self) -> None:
+        """End the clock. A stale id is not passed to `source_remove`, which
+        warns loudly about sources that have already gone."""
+        if self._tick_source:
+            GLib.source_remove(self._tick_source)
+            self._tick_source = 0
 
     def _tick(self) -> bool:
         """The elapsed clock, while a recording runs.
@@ -249,6 +270,9 @@ class _MeetingsView(Gtk.Box):
         failure the orb's `QUEUED` state was added to fix on the chat path.
         """
         if not self._recording:
+            # Already ended: retire the source and let its own bookkeeping know,
+            # so `_stop_tick` cannot later be handed a dead id.
+            self._tick_source = 0
             return False
         self.elapsed.set_label(f"Recording — {_clock(time.monotonic() - self._started)}")
         return True
@@ -301,6 +325,12 @@ class _MeetingsView(Gtk.Box):
         return False
 
     def _reset_controls(self) -> None:
+        # **The clock ends with the recording.** Measured before this: the timer
+        # was never scheduled at all, and one properly scheduled would otherwise
+        # have kept writing after the recording ended, naming times on an idle
+        # panel. `_tick` self-terminates on `_recording` going false; this covers
+        # the gap between that and its next 250ms tick.
+        self._stop_tick()
         self.record.set_active(False)
         self.record.set_sensitive(True)
         self.duration.set_sensitive(True)

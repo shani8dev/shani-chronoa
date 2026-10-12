@@ -37,7 +37,7 @@ import json, os, pathlib, sys, tempfile
 sys.path.insert(0, %(pkg)r)
 import gi
 gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, GLib, Gtk
 Adw.init()
 
 from shani_chronoa import file_index, meeting
@@ -80,6 +80,18 @@ def buttons(widget, out=None):
     child = widget.get_first_child()
     while child is not None:
         buttons(child, out)
+        child = child.get_next_sibling()
+    return out
+
+
+def _descend(widget, out=None):
+    """The tree as widgets, so a case can press what a person would press."""
+    if out is None:
+        out = []
+    out.append(widget)
+    child = widget.get_first_child()
+    while child is not None:
+        _descend(child, out)
         child = child.get_next_sibling()
     return out
 
@@ -181,6 +193,42 @@ elif case == "meetings_empty":
     page._refresh_status()
     page._refresh_list()
     say(texts=texts(page), buttons=buttons(page))
+
+elif case == "meetings_clock":
+    import threading, time
+    page = meetings.build(App(**{"meeting-enabled": True}))
+    toggle = [w for w in _descend(page)
+              if isinstance(w, Gtk.ToggleButton)][0]
+    clock = [w for w in _descend(page)
+             if isinstance(w, Gtk.Label) and w.get_label() == ""][0]
+
+    def stubbed_capture(timeout=7200.0, recorder=None, on_level=None):
+        time.sleep(2.6)
+        return meeting.MeetingResult(wav=None, seconds=12.0,
+                                     why=meeting.END_SILENCE)
+
+    real = meeting.capture
+    meeting.capture = stubbed_capture
+    try:
+        toggle.set_active(True)
+        ctx = GLib.MainContext.default()
+        deadline = time.time() + 5
+        seen, started = [], time.time()
+        while time.time() < deadline:
+            while ctx.pending():
+                ctx.iteration(False)
+            now = clock.get_label()
+            if now and (not seen or seen[-1] != now):
+                seen.append(now)
+            time.sleep(0.05)
+        # once the capture ended, the clock must stop rather than naming
+        # times on a panel that is no longer recording
+        say(values=seen, advanced=len(set(seen)) > 1,
+            first=seen[0] if seen else "", stopped=not clock.get_label(),
+            elapsed=round(time.time() - started, 2))
+    finally:
+        meeting.capture = real
+        toggle.set_active(False)
 
 elif case == "routines_listed":
     # Three routines, one of them named with a bare ampersand - which is how
@@ -494,3 +542,49 @@ class TestTheNewSurfacesAreReadable:
         assert "Can this machine share?" in words
         # The 90-second probe is the reason this panel exists in the shape it does.
         assert "takes a while" in words, words
+
+    def test_the_recording_clock_actually_moves(self, broadway, tmp_path):
+        """**The timer was never scheduled.** `_tick` was written with a docstring
+        about not looking hung, and nothing ever called it.
+
+        Measured before this: the label read "Recording — up to 15 minutes" and
+        then held that text for the whole time a stub capture held the panel
+        open — one distinct value, for a page whose only live feedback is that
+        clock. A person recording a two-hour meeting got no feedback at all for
+        two hours, which is exactly the failure the docstring says it prevents.
+
+        This presses the real toggle, runs the real main loop, and reads the
+        label as it changes.
+        """
+        out = _run(broadway, "meetings_clock", tmp_path)
+        assert out["advanced"], (
+            "the elapsed clock never moved: " + " | ".join(out["values"]))
+
+    def test_the_clock_names_seconds_and_not_just_that_it_is_running(self, broadway, tmp_path):
+        """The first version of the label said "Recording — up to 15 minutes",
+        which is the ceiling, not the elapsed time. A clock that shows only the
+        ceiling is indistinguishable from a hung panel, which is the other half
+        of the same defect.
+        """
+        out = _run(broadway, "meetings_clock", tmp_path)
+        for value in out["values"][1:]:
+            assert "up to" not in value, value
+            # some form of elapsed time is on screen
+            assert "m " in value or "s" in value, value
+
+    def test_the_clock_stops_when_the_recording_ends(self, broadway, tmp_path):
+        """The other direction: a panel that names times on nothing is a wrong
+        answer too. **What this actually measures is the label clearing**, and that
+        much is a live control - mutating the clear to leave a frozen value on the
+        panel fails it.
+
+        **And a documented survivor:** removing the `_stop_tick()` call from
+        `_reset_controls` leaves this green in every run, because `_tick` retires
+        itself the moment `_recording` goes false. The call is defence-in-depth
+        on the source lifetime, not something this test protects - so it is
+        recorded as a survivor rather than claimed as covered.
+        """
+        out = _run(broadway, "meetings_clock", tmp_path)
+        assert out["stopped"], (
+            "the label was still alive after the recording ended: "
+            + " | ".join(out["values"]))
