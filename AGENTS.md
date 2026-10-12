@@ -16956,3 +16956,108 @@ The honest summary is **one unreproduced failure in 240 runs of these files**,
 against 170 passing in the last sweep. It is recorded so that if it recurs, the
 next person starts here instead of re-deriving that the presenter is broken -
 which is the wrong conclusion, four clean runs in.
+
+## The missing instrument, built: what `tool_select` actually offers, measured without a model (2026-10-12)
+
+The entries above ended by naming a measurement this repository does not take:
+**how many tools does a request need, and how well does the selector pick
+them.** It turns out to need no model, no server and no download - `eval_cases`
+names the right tool for 221 cases, and `select_tools` decides what is sent, so
+the whole thing runs in about a second.
+
+| | measured |
+|---|---:|
+| scorable cases (a tool is expected) | 221 |
+| **correct tool present in the offered set** | **211 = 95.5%** |
+| **top-ranked tool is the correct one** | **177 = 80%** |
+| mean tools offered per request | 6.2 (max 11) |
+| **offered tools sharing no request word at all** | **287 of 825 = 35%** |
+| adjacent ranking inversions | **1 in 2,202** |
+
+**Two things follow, and they point in opposite directions from what was
+expected.**
+
+`task_eval`'s `select` score has a **ceiling of 95.5%** that has never been
+stated, and it is a property of the selector rather than of the model - so the
+0/62 -> 56/62 result recorded on 2026-10-02 was not a model result and the
+`bare`/`select` gap is a **capacity wall**, exactly as the token arithmetic above
+said it was.
+
+But the selector's **top pick is right 80% of the time** and its ordering is
+almost perfectly consistent (**one inversion in 2,202 adjacent pairs**), so this
+is **not** a ranking defect and not a vocabulary gap either: **16 of the 18
+misses score between 1.5 and 34.0 and are simply not offered**. What it is
+**dilution** - **35% of the tools actually sent to the model share no word with
+the request**, and a third of a small budget spent on unrelated schemas is the
+same waste `select` exists to prevent, one level down.
+
+### The test I wrote asserted the wrong story, and the suite caught it
+
+The first version of `tests/test_tool_select_recall.py` asserted that every
+missed tool scores **zero** on word overlap - a vocabulary failure that synonyms
+would fix - **and it failed**: 16 of 18 score 1.5 to 34.0. Two runs of the same
+probe then disagreed with each other, so the *order* of `select_tools` and
+`ranked` was checked and found irrelevant, and the correct split was taken from
+a single run that prints both classes.
+
+**That is the failure this file warns about most often, caught in the act**:
+the diagnosis was written into a docstring, into a test name
+(`TestTheMissesAreAVocabularyProblem`) and into an assertion before anything was
+measured past the count. A synonym table would have been "fixed" against a
+finding that was 16/18 wrong. **The test file's own header now carries the
+correction**, which is why the correction is in the file rather than only here.
+
+### And the reserved budget is violated by the shipped default
+
+`tool_select.WINDOW_TOKENS = 2048`, documented as "the smallest context window
+any supported tier has, and **the share of it a tool selection may take**".
+Measured over 45 sampled requests, real tokenizer, real model:
+
+| | tokens actually sent for the selected tools |
+|---|---:|
+| min | 1,797 |
+| **median** | **3,973** |
+| p90 | 4,472 |
+| max | 4,580 |
+
+**44 of 45 requests (98%) exceed the declared reservation**, the median by
+**1.9x** and the worst by 2.2x - and `DEFAULT_LIMIT = 8` x the measured mean
+schema cost of **543 tokens** is **4,344**, which is the same 2.1x. So the
+constant and the limit disagree with each other, and the disagreement is in the
+direction of sending more than the module says it may.
+
+It is not currently a failure - 3,973 tokens of tools inside an 8k window leaves
+room for the conversation, which is why `select` works - but **a reservation
+that its own default exceeds on 98% of requests is not a reservation**, and any
+future "tighten the selection" work would be working from a number that is wrong.
+
+### What this suite does and does not cover
+
+`tests/test_tool_select_recall.py` (11 tests) is a **floor guard, not a metric
+lock**, and a mutation proved which: adding the overlap count to `ranked()`'s
+score **left all 11 green**, because every assertion is a floor and the mutation
+*improves* the metric. The control that **was** caught is dropping `CORE` from
+`select_tools`' union - `test_the_core_tools_are_always_available` goes red.
+That is the same trade `Report.honest()` makes: a pinned exact number turns the
+suite red every time a skill lands and reports nothing about the regression it
+was written for. **To know whether the metric moved, re-run the table; to know
+whether it broke, run the file.**
+
+**Not fixed.** `WINDOW_TOKENS` is left as found, because whether the right repair
+is to raise the reservation or lower `DEFAULT_LIMIT` is a product decision about
+how much of an 8k window a tool list may take - and **the second, cheaper
+question is the one to answer first**: 35% of what is sent is irrelevant, so
+raising the budget for it would be paying for the waste rather than removing it.
+
+### This entry survived one loss, and the habit that would have saved it
+
+Written, appended, and then lost: a concurrent session committed `b7d4e04`
+rewriting `AGENTS.md` while this entry sat uncommitted, and `git log -S` for its
+own heading returned nothing because **it had never been committed**. The
+measurements were recoverable - they are in the test, which the concurrent
+session could not overwrite - but the reasoning was not, and the reasoning is
+the part this file exists to hold.
+
+The file's own advice is right and this is the second time: **append and commit
+in one command.** An entry whose measurements live in a test can be rebuilt from
+the test; an entry whose only copy is a paragraph in a working tree cannot.
