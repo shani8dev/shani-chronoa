@@ -604,6 +604,47 @@ class Assistant:
             )
         return added
 
+    def rewind_to_user_text(self, text: str) -> bool:
+        """Drop `text` and everything after it from the history.
+
+        Called when the user edits a turn and reruns from there. Without it the
+        model keeps answering as though the abandoned turns had happened - the
+        window would show one conversation and the model would be reasoning about
+        another, which is the same defect as a transcript that does not match the
+        history, only less visible.
+
+        **Matched by content, not by index.** The transcript's turn number and
+        this list are not in step: tool calls insert assistant and tool messages
+        between turns, a perception can be parked mid-history, and compression
+        can rewrite everything older than a threshold. So the index the window
+        knows is meaningless here, and the last user message whose content starts
+        with `text` is the reliable anchor. *Last*, because "yes" typed twice must
+        rewind to the second one.
+
+        Returns False and changes nothing when there is no match - after a
+        compression that dropped the turn, the honest answer is "I cannot go
+        back that far", not a truncation to the wrong place.
+        """
+        wanted = (text or "").strip()
+        if not wanted:
+            return False
+        for index in range(len(self._history) - 1, 0, -1):
+            message = self._history[index]
+            if message.get("role") != "user":
+                continue
+            content = message.get("content") or ""
+            if not isinstance(content, str):
+                continue
+            # `startswith`, not equality: a turn with attachments is stored with
+            # the files block appended, while the transcript shows only the text
+            # the user typed.
+            if content.strip().startswith(wanted):
+                del self._history[index:]
+                logger.info("rewound history to the user turn at %d", index)
+                return True
+        logger.info("no user turn matched a rewind request; history unchanged")
+        return False
+
     def _trim_history(self) -> None:
         if len(self._history) <= MAX_HISTORY_MESSAGES:
             return

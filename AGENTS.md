@@ -15294,3 +15294,63 @@ a file keeps all three.
 Eight skills now declare, one shared extractor. `office_document` is the first
 that declares a **directory**, and `ArtifactBlock` renders it without a
 thumbnail, which was already correct and is now tested rather than assumed.
+
+## Edit an earlier turn and rerun from there (2026-10-12)
+
+`regenerate` re-asks the **last** question. This is the one every assistant UI
+has and this one did not: pick turn 7 of 20, change the question, and everything
+after it stops existing.
+
+**Two stores have to agree and neither owns the other.** The transcript is a
+list of widgets the window built; the history is a list of messages the
+assistant built. The window cuts its own and *asks* over a new `rewind-history`
+signal, which returns a bool - and **refuses to cut the screen when the answer
+is no**. Order matters and only one direction is safe: history first, transcript
+second, because a model remembering nine turns while four are on screen answers
+the next question from something the user cannot see. The local index is
+checked first so the cut cannot fail after the irreversible thing.
+
+The history rewind matches on **content, not index**: tool calls, parked
+percepts and compression all mean the window's turn number is meaningless in
+`_history`. *Last* match, so "yes" typed twice rewinds to the second. A refusal
+is honest rather than best-effort - after a compression, "I cannot go back that
+far" beats truncating to the wrong place.
+
+### Three bugs that all looked correct in the diff
+
+1. **`get_first_child()` instead of `get_last_child()`** for the turn anchor.
+   Every anchor pointed at the opening row, so rewinding cleared the whole
+   conversation *while still reporting exactly the right turns removed*.
+2. **Removing the anchor instead of the row after it** - the anchor belongs to
+   the *previous* turn, so this cut one turn too many.
+3. **A signature mismatch**: the transcript calls its handler `(index, text)`
+   and the signal handler must be `(window, text)`. Passing the handler straight
+   through sent three arguments to a method taking one.
+
+### Two of my own tests could not fail
+
+Worth recording, because both were green and meant nothing:
+
+- **The row/turn invariant test rewound at index 0, emptied the transcript, and
+  then `if not visible_turns(): break` stopped it** - so it performed exactly
+  one cut, the single cut point where bug 1 is invisible. It passed *under* the
+  mutation it was written for. Now: a fresh transcript per cut point.
+- The invariant itself is the *relation* between the two counts. `_turns` and
+  `_rows` move independently, so a test written against either alone cannot see
+  two turns sharing one row.
+
+**Four mutations, four caught.** Anchor direction, cut position, `turn_at`
+always answering, and the window cutting the screen despite a refusal.
+
+### Also fixed: a segfault that was killing the test process
+
+`test_composer_and_escape.py` built a `Gtk.Application` per test and called
+`app.register(None)`. Registering exports on D-Bus; the second application in a
+process **dies with a segfault inside `Gtk.Application.__init__`**, not an
+exception - so the file ran five tests and then took the process down with
+everything queued behind it. Verified pre-existing by swapping all five files of
+this feature back to HEAD: identical crash, same line.
+
+`8 passed` where it was five-and-a-crash. This is the most likely single cause
+of the unreadable full-suite result (`8,344 errors`) - a segfault ends the run,
+so everything after it is reported as an error rather than as a pass.

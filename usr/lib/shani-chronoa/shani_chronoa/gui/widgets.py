@@ -586,6 +586,9 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: None means the window offers no such control, rather than offering one
         #: that goes nowhere.
         self._on_regenerate = on_regenerate
+        #: Set by `set_rewind_handler`; None means no assistant to rewind to.
+        self._on_rewind = None
+        self._rewind_rows: "list[tuple[Gtk.Widget, int]]" = []
         #: Set by `set_turn_footer_handler`; `None` means a turn draws no
         #: footer, which is the empty state that was always reachable.
         self._on_turn_footer = None
@@ -629,6 +632,14 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: labels whose contents include a code block's language tag and a table
         #: cell - which would find "bash" in a reply that never mentions it.
         self._turns: "list[tuple[str, str]]" = []
+        #: For each turn, the child that was already in `_rows` when it began -
+        #: the last row *before* it - or None when the turn started an empty
+        #: transcript. An anchor widget rather than an index, because `_rows` is
+        #: a `Gtk.Box`: it has no `len()` and no `get_nth_child()`, so both of the
+        #: things an index would have been used for are unavailable. Measured, not
+        #: assumed - `len(self._rows)` raises `TypeError: object of type 'Box'
+        #: has no len()`. See `_append_turn`.
+        self._turn_start: "list" = []
         #: Bumped every time the reader's position is recorded, so a follow that
         #: was scheduled *before* that can tell it is stale. Measured without it:
         #: a reader who scrolled away and then had a turn arrive was jumped to
@@ -708,6 +719,116 @@ class TranscriptView(Gtk.ScrolledWindow):
         """
         self._on_turn_footer = handler
 
+    def truncate_from_turn(self, index: int):
+        """Remove turn `index` and everything after it.
+
+        Returns the `(role, text)` of the turns removed, or None when `index`
+        is not a turn - a caller that gets None has removed nothing, which is
+        the only safe answer to "rewind to something that isn't there".
+
+        **Rows, not turns, are what come off.** `_rows` also holds tool cards
+        and compaction notices, so the last turn removed took its tool calls and
+        notices with it. Cutting at the recorded row index gets that for free;
+        cutting at the turn index would leave three orphaned tool cards above an
+        answer that no longer follows them.
+
+        The placeholder is *not* restored: the transcript is about to be sent a
+        replacement turn, and showing "ask something" in between reads as a lost
+        conversation. An empty transcript after a rewind still shows the user's
+        edited text as soon as it is re-sent.
+        """
+        if not isinstance(index, int) or not 0 <= index < len(self._turns):
+            return None
+        removed = self._turns[index:]
+        anchor = self._turn_start[index]
+        # **`anchor.get_next_sibling()`, not `anchor` itself.** The anchor is the
+        # last row *before* this turn, so it belongs to the previous turn and
+        # removing it would take one turn too many - measured: rewinding turn 6 of
+        # 7 left five rows for six turns.
+        #
+        # `anchor is None` means this turn began an empty transcript, so there is
+        # no earlier row and everything goes.
+        child = (anchor.get_next_sibling() if anchor is not None
+                 else self._rows.get_first_child())
+        while child is not None:
+            following = child.get_next_sibling()
+            self._rows.remove(child)
+            child = following
+        del self._turns[index:]
+        del self._turn_start[index:]
+        self._current_assistant = None
+        self._blocks = None
+        self._block_text = ""
+        return removed
+
+    def turn_at(self, index: int):
+        """The `(role, text)` of turn `index`, or None."""
+        if 0 <= index < len(self._turns):
+            return self._turns[index]
+        return None
+
+    def set_rewind_handler(self, handler) -> None:
+        """Attach (or detach) what secondary-clicking a turn does.
+
+        The window is built before the application knows whether there is an
+        assistant to rewind *to*, so the handler arrives after construction - the
+        same shape `set_regenerate_handler` uses. None means no assistant, and
+        then no gesture is attached either: a right-click menu whose only item
+        cannot work is worse than no menu.
+        """
+        self._on_rewind = handler
+        for row, index in list(getattr(self, "_rewind_rows", ())):
+            self._attach_rewind_gesture(row, index, None)
+        self._rewind_rows = []
+
+    def _attach_rewind_gesture(self, row, index, handler):
+        """Put a right-click on one row, or take the existing one off."""
+        if handler is None:
+            for gesture in list(getattr(row, "_rewind_gestures", ())):
+                row.remove_controller(gesture)
+            row._rewind_gestures = []
+            return
+        gesture = Gtk.GestureClick()
+        # Secondary button only: a left-click that popped a menu would fight the
+        # text selection the label is explicitly selectable for.
+        gesture.set_button(Gtk.BUTTON_SECONDARY)
+        gesture.connect("pressed", self._on_rewind_pressed, row, index, handler)
+        row.add_controller(gesture)
+        row._rewind_gestures = list(getattr(row, "_rewind_gestures", ())) + [gesture]
+        row.update_property(
+            [Gtk.AccessibleProperty.DESCRIPTION],
+            ["Secondary-click to edit this and rerun from here"])
+
+    def _on_rewind_pressed(self, gesture, n_press, x, y, row, index, handler):
+        """Offer one action, and say plainly what it will do."""
+        turn = self._turns[index] if 0 <= index < len(self._turns) else None
+        if turn is None or turn[0] != "user":
+            # Only a *user* turn is a place to branch from: rewinding to the
+            # middle of an answer has no question to re-ask.
+            return False
+        popover = Gtk.Popover()
+        popover.set_parent(row)
+        popover.set_has_arrow(False)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_top(8)
+        box.set_margin_bottom(8)
+        box.set_margin_start(10)
+        box.set_margin_end(10)
+        button = Gtk.Button(label="Edit this and rerun from here")
+        button.set_valign(Gtk.Align.START)
+        note = Gtk.Label(label="Everything after it is removed")
+        note.add_css_class("dim-label")
+        note.set_wrap(True)
+        note.set_max_width_chars(32)
+        box.append(button)
+        box.append(note)
+        popover.set_child(box)
+        button.connect("clicked", lambda _b: (popover.popdown(), handler(index, turn[1])))
+        popover.update_property([Gtk.AccessibleProperty.DESCRIPTION],
+                                ["Edit this turn and rerun from here"])
+        popover.popup()
+        return True
+
     def set_regenerate_handler(self, handler) -> None:
         """Attach (or detach) "Ask that again".
 
@@ -745,6 +866,7 @@ class TranscriptView(Gtk.ScrolledWindow):
 
     def clear(self) -> None:
         self._turns = []
+        self._turn_start = []
         child = self._rows.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
@@ -802,6 +924,16 @@ class TranscriptView(Gtk.ScrolledWindow):
             # Clears the search index as well, so the record below is the first
             # entry in it rather than the one that gets wiped.
             self.clear()
+        # **Recorded before anything is appended.** `_rows` holds tool cards and
+        # compaction notices too, so turn *i* is not row *i*, and truncating
+        # "from turn 7" cannot be arithmetic on either list.
+        #
+        # **`get_last_child()`, not `get_first_child()`** - and the first version
+        # used the first child, so every anchor pointed at the opening row and a
+        # rewind from turn 2 cleared the entire conversation while still
+        # reporting the right turns removed. Measured by comparing anchor
+        # identity against the row list; it looked entirely reasonable in a diff.
+        self._turn_start.append(self._rows.get_last_child())
         if role == "assistant":
             # Blocks, not one label: a command, a table and an equation each
             # need their own controls, and all three arrive in the same reply.
@@ -857,6 +989,12 @@ class TranscriptView(Gtk.ScrolledWindow):
         label.update_property([Gtk.AccessibleProperty.LABEL], [f"{role} said: {text}"])
         if role == "user":
             self._rows.append(label)
+            # **Only a user turn is a branch point**, so only a user turn gets the
+            # gesture - an answer has no question to re-ask from the middle of.
+            if self._on_rewind is not None:
+                index = len(self._turns)
+                self._attach_rewind_gesture(label, index, self._on_rewind)
+                self._rewind_rows.append((label, index))
         else:
             self._rows.append(self._with_copy_button(label, text))
         self._turns.append((role, text))

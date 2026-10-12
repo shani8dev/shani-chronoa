@@ -58,8 +58,14 @@ def _window():
 
     from shani_chronoa.gui.window import ChronoaWindow
 
+    # **No `app.register(None)`.** This helper is called once per test, and
+    # registering exports the application on D-Bus; the second one in a process
+    # dies with a *segfault* inside `Gtk.Application.__init__`, not an
+    # exception - so the whole file crashed after five tests and took whatever
+    # ran after it with it. Measured with all of this feature's own files
+    # swapped back to HEAD, to be sure it was not that: identical crash, same
+    # line. An unregistered application builds the window perfectly well.
     app = Gtk.Application(application_id="test.chronoa.composer")
-    app.register(None)
     return ChronoaWindow(app)
 
 

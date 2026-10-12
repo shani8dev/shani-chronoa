@@ -179,6 +179,22 @@ class ConversationMixin:
         if self.window:
             self.window.set_regenerate_handler(
                 self._regenerate if self.assistant else None)
+            # Same rule for rewind: with no assistant there is no history to
+            # take turns out of, so the gesture is not attached at all.
+            self.window.set_rewind_handler(
+                self._rewind_history if self.assistant else None)
+
+    def _rewind_history(self, _window, text: str) -> bool:
+        """The window's `rewind-history` signal, answered by the assistant.
+
+        Returns whether the model actually gave the turns up, and the window
+        refuses to cut the transcript when this says no. The two have to agree:
+        a window showing fewer turns than the model remembers answers the next
+        question as though the abandoned ones had happened.
+        """
+        if not self.assistant:
+            return False
+        return self.assistant.rewind_to_user_text(text)
 
     def _regenerate(self) -> None:
         """Take back the last answer and ask the same question again.

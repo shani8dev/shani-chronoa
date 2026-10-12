@@ -2498,6 +2498,60 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if self._regenerate is not None:
             self._regenerate()
 
+    def set_rewind_handler(self, handler) -> None:
+        """Attach (or detach) what secondary-clicking a turn does.
+
+        Same late-binding as `set_regenerate_handler`: the window exists before
+        the application knows whether there is an assistant to rewind to.
+        """
+        # **Presence only.** The transcript calls its handler as
+        # `(index, text)` while the `rewind-history` signal handler has to be
+        # `(window, text)` - two different shapes for the same action, and
+        # passing `handler` straight through was how a call with three
+        # arguments reached a method taking one. So the window keeps its own
+        # method, and `handler` is only the answer to "is there an assistant to
+        # rewind to", which is all it was ever for.
+        self._transcript.set_rewind_handler(
+            self._on_rewind_requested if handler is not None else None)
+
+    def _on_rewind_requested(self, index: int, text: str) -> None:
+        """Take turn `index` out of the conversation and put its text back.
+
+        The window truncates only what it owns - the transcript - and *asks* to
+        have the history rewound, because the assistant is not its to reach.
+
+        **Order matters, and both orders leave a window where the two disagree.**
+        History first, transcript second: a model remembering nine turns while
+        four are on screen is the direction this codebase keeps paying for -
+        a confident answer built on something the user cannot see. So the turn is
+        checked locally first, the history is rewound, and only then is the
+        transcript cut; the local check is what makes the cut reliable rather
+        than a second thing that can fail after the irreversible one.
+
+        A refused rewind changes nothing. After a compression that dropped the
+        turn, "I cannot go back that far" is the only honest answer, and cutting
+        the screen anyway would leave the user editing a conversation the model
+        no longer has.
+
+        The text goes into the composer rather than being resubmitted, so the
+        edit is the user's to make. Rerunning automatically would replace their
+        question with the same question.
+        """
+        if self._transcript.turn_at(index) is None:
+            return
+        if not self.emit("rewind-history", text):
+            self.set_status("That turn is too old to rewind to - earlier parts "
+                            "of this conversation have been compressed.")
+            return
+        removed = self._transcript.truncate_from_turn(index)
+        if removed is None:                # pragma: no cover - checked above
+            logger.warning("turn %d vanished between the check and the cut", index)
+            return
+        self._set_input_text(text)
+        self._input_entry.grab_focus()
+        self.set_status("Rewound - everything after that turn is removed. "
+                        "Edit it and press Enter to run it again.")
+
     def _run_command(self, text: str) -> bool:
         """Run a `/command` if the text is one. True when it was handled.
 
@@ -2853,6 +2907,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     __gsignals__ = {
         "user-input": (GObject.SignalFlags.RUN_FIRST, str, (str,)),
+        # Emitted after the transcript has dropped a turn, so the application can
+        # take the same turn out of the assistant's history. bool in the return
+        # means "I did rewind"; the window checks it, because a window whose
+        # display and the model's memory disagree is the failure this exists to
+        # avoid.
+        "rewind-history": (GObject.SignalFlags.RUN_FIRST, bool, (str,)),
     }
 
 

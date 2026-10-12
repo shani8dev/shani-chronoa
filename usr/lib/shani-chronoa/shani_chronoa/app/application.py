@@ -771,6 +771,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 lambda s: self.wakeword.resume() if s is AssistantState.IDLE else self.wakeword.pause()
             ]
             self.window.connect("user-input", self._on_user_input)
+            self.window.connect("rewind-history", self._rewind_history)
             self.window.set_browser_available(browser_available())
             # A window raised by a global shortcut arrives with the caret
             # somewhere else, so the first thing a person types is lost.
