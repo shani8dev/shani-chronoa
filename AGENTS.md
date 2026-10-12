@@ -14446,3 +14446,91 @@ finishing, against 65 seconds for 11 files. So for several turns the coverage I
 described was narrower than I believed, which is the same category of error as the
 regex that invented 42 senses: **a number measured with the wrong instrument, then
 repeated as though it were coverage.**
+
+## A refusal reached the model and nobody else (2026-10-12)
+
+`tools.py` returns the refusal reason as the tool result, so the assistant knows it
+was declined and can propose something else. **Before this, that was the only
+copy.** Nothing on the dispatch path touched the UI, so a person whose request was
+declined found out from whatever the model said afterwards, or not at all.
+
+That is this file's own doctrine going unsatisfied: *"a mode that removes
+capabilities without saying so reads as a bug the first time the assistant declines
+something that was explicitly permitted."*
+
+    Not done: That is outside what you allowed this time (/home/me/report.pdf)
+
+**`body.Body.set_notice` mirrors `set_audible`,** because the body is already the
+one process-wide channel from a refusal inside the tool loop to something visible -
+`tools.py` imports no GUI and has no app reference, it is four layers down. Measured
+in this very session: the suite-order failure that looked like a code defect was
+**my own concurrent test runs** competing for D-Bus names.
+
+**A transient notice, not a ninth organ light.** A refusal is an **event**; a strip
+shows what is continuously true. And the strip was measured at **148px off centre**
+with two more lights, so it has no room either.
+
+The control asserts the tool result *still* carries the reason, so the assistant can
+recover rather than only being told no.
+
+### The gate for dead lights, and the time it cried wolf
+
+Every organ in `body.ORGANS` must be passed to the body by a real call site. This
+exists because `nose` and `brain` sat in `ORGANS` **and** in `ORGAN_ICONS` with
+nothing ever lighting them: the strip showed a brain that never lit while the model
+was answering. **A light with nothing behind it is not decoration, it is a claim
+that does not hold.**
+
+**Its first version was wrong, and finding out is why it earns the place.** It
+reported `brain` as dead when it was alive, because `assistant.py` lights it through
+a local `_lit("brain", ...)` that forwards its own argument to `body.body.use`. That
+is the **same false-positive trap as the settings audit, one level down** - and a
+gate that cries wolf is worse than no gate, because it would send the next person to
+add a duplicate emit site for a light that already works. Fixed with a second pass
+that resolves wrapper functions; verified by mutation, which turns it red naming
+`brain`.
+
+### Ten lights do not fit, and the test that said so was right
+
+Adding `legs` and `prefrontal` was built and verified working, then **reverted**:
+
+    the lights sit 18px from the left of a 745px column and -130px from the right
+    - the row is 148px off centre, which is what the strip looked like before
+    `do_measure` reported the real sum
+
+**I first read that failure as a count assertion and told the reader so.** Two of the
+three failures *were* — a hardcoded `== 8` and missing `ORGAN_TONE` entries — and
+fixing those let the centring assertion actually run, which is where the real problem
+was. Confident too early, and "just update the count" would have shipped a broken
+layout.
+
+## Every gate I built checks a property, and every surprise was a sequence (2026-10-12)
+
+The transferable part of this stretch, and it is not a setting or an organ.
+
+Three separate order-dependence incidents, each costing real time:
+
+1. **A D-Bus timeout I caused.** A test of mine drove the real handlers on a real
+   `GApplication`; importing `shani_chronoa.app.application` leaves the session bus
+   such that a later `app.register(None)` fails with `NoReply` - five tests in
+   another file, 25 seconds each, turning a 0.49s file into 104s. I first blamed
+   GSettings schema caching and **that hypothesis was wrong**; measuring it is what
+   redirected me.
+2. **101 errors that were not a defect.** The same seven files gave 113 passed /
+   101 errors, then 214 passed / 0 errors, unchanged. The cause was my own
+   concurrent test runs competing for D-Bus names. Two wrong guesses came first -
+   GApplication export contention, then nothing - when **this file already records
+   the class**: the trigger tests' OS-lock contamination, and "isolating
+   `XDG_RUNTIME_DIR` takes the trigger tests from 6 failures to 137 passed."
+   Having hit it once already, concurrency should have been the first hypothesis and
+   it was the fourth.
+3. **A test that could not fail.** The dead-light gate, above.
+
+**Every instrument built this stretch is a static property check** - settings
+reachability, light emit sites, dependency key-sets - **and every surprise came from
+a sequence.** That is not a coincidence, and it is the limitation to state plainly:
+these gates are good at proving a property holds and **structurally unable to see
+one test disturbing another.** Nothing here checks order-independence.
+
+It is also why the full sweep has never completed in this session, which is the one
+claim this work cannot yet make.
