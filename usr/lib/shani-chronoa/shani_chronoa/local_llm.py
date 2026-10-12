@@ -740,6 +740,80 @@ def calibrated_quantize(source: "Path", target: str = "Q4_K_M",
                    "comparison"}
 
 
+def compare_calibration(out: Dict[str, object]) -> Dict[str, object]:
+    """Did the importance matrix actually help? Both builds, and the delta.
+
+    `calibrated_quantize` builds **two** files on purpose - the same target from
+    the same source, one fitted with an importance matrix and one without - and
+    its own return value says the second is *"beside it for comparison"*. Nothing
+    compared them: `naive_path` had no reader outside the test asserting the two
+    files differ, which is a fact about the filesystem and not about quality.
+
+    **This is the one measurement the operation exists for**, and it is the
+    question `quality_verdict` structurally cannot answer. That gate compares a
+    candidate against the model being *replaced*; this compares the new build
+    against the one it would have been without spending ten seconds on a
+    calibration.
+
+    Two shapes of answer, as in `quality_verdict`: **measured** (both builds
+    scored on the same fixed corpus, so the numbers are comparable), and
+    **unmeasured**, where `perplexity()` returned `None` for either. `None` is
+    never read as "no difference" - a missing measurement and a measured zero
+    are different facts, and only the second one says the matrix did nothing.
+
+    The percentage is reported **beside both absolute numbers**, never instead
+    of them: a figure derived from two numbers stays true-looking when the
+    numbers are dropped, so a sentence carrying only "0.4% better" cannot be
+    checked against anything.
+    """
+    naive, calibrated = out.get("naive_path"), out.get("calibrated_path")
+    if not naive or not calibrated:
+        return {"measured": False, "verdict": "unmeasured",
+                "naive": None, "calibrated": None, "change_percent": None,
+                "why": "no pair to compare - this was not a successful build of "
+                       "both files, so nothing was measured"}
+    if naive == calibrated:
+        return {"measured": False, "verdict": "unmeasured",
+                "naive": None, "calibrated": None, "change_percent": None,
+                "why": "the two builds are the same file, so comparing them would "
+                       "report the number twice and call it a measurement"}
+
+    before = perplexity(Path(str(naive)))
+    after = perplexity(Path(str(calibrated)))
+    if before is None or after is None:
+        missing = [name for name, value in (("uncalibrated", before),
+                                            ("calibrated", after)) if value is None]
+        return {"measured": False, "verdict": "unmeasured",
+                "naive": before, "calibrated": after, "change_percent": None,
+                "why": f"perplexity could not be measured for the "
+                       f"{' and '.join(missing)} build"
+                       f"{'s' if len(missing) > 1 else ''} - llama-perplexity is "
+                       "absent or would not run, so whether the matrix helped is "
+                       "unknown and not the same as 'it did not help'"}
+    if before <= 0.0:
+        # A percentage of a non-positive baseline is not a small number, it is
+        # not a number. Report the two figures and refuse to divide.
+        return {"measured": False, "verdict": "unmeasured",
+                "naive": before, "calibrated": after, "change_percent": None,
+                "why": f"perplexity {before:.3f} for the uncalibrated build is not "
+                       "positive, so there is no meaningful percentage; the "
+                       f"calibrated build measured {after:.3f}"}
+
+    change = (after - before) / before * 100.0
+    if after == before:
+        verdict = "unchanged"
+    elif after < before:
+        verdict = "helped"
+    else:
+        verdict = "hurt"
+    direction = {"helped": "better", "hurt": "worse"}.get(verdict, "the same")
+    return {"measured": True, "verdict": verdict,
+            "naive": before, "calibrated": after, "change_percent": change,
+            "why": f"perplexity {before:.3f} uncalibrated against {after:.3f} "
+                   f"calibrated ({change:+.3f}%), so the matrix made it {direction} "
+                   "on the same fixed corpus"}
+
+
 def adopt_path(candidate: "Path", gate: bool = True) -> Dict[str, object]:
     """Point `current.gguf` at **any** model file, after the quality gate.
 

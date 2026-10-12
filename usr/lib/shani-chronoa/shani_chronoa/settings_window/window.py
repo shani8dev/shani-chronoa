@@ -601,6 +601,22 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         if not built:
             report("but no path was reported, so nothing was adopted")
             return
+
+        # **Say whether the calibration was worth the ten seconds it took.** The
+        # two builds are the same target from the same source and `out` names
+        # both - the result value even says the second is "beside it for
+        # comparison" - and nothing compared them. `adopt_path`'s gate answers a
+        # *different* question, is this better than the model being replaced, so
+        # a rebuild that fitted an importance matrix and produced a worse file
+        # reported "Built" and nothing else. Off the main loop, as the calibration
+        # itself is, so two more `llama-perplexity` runs cost no frame.
+        comparison = local_llm.compare_calibration(out)
+        if comparison.get("measured"):
+            report(str(comparison["why"]))
+        else:
+            report(f"The matrix's effect was NOT measured. "
+                   f"{str(comparison['why'])[:160]}")
+
         verdict = local_llm.adopt_path(pathlib.Path(built), gate=True)
         if verdict.get("promote"):
             report(f"In use now: {pathlib.Path(built).name} "

@@ -68,6 +68,26 @@ prompt and the tables are **generated** from the registry, so there is no second
 list to drift - is the right one and it is a change across every skill. Recorded
 as the next pass, not half-done in this one.
 
+**And it was measured before being recorded, which changes what the entry says.**
+All four lists agree *today*:
+
+| check | result |
+|---|---|
+| tools in the registry (`discover_skills()`) | 257 |
+| with a `_GROUPS` row | **257 of 257** |
+| with a `GATED` entry | 78 |
+| consent keys with a `GATE_NAMES` row | **57 of 57** |
+| `_IMPL` keys absent from `GATED` / `GATED` keys `_IMPL` lacks | 15 harmless extras / **none** |
+| `test_capabilities`, `_doc`, `_skill_gates_are_enforced`, `_help_gate_labels` | **50 passed** |
+
+So there is **no live defect to fix**, and doing the refactor here would have been
+churn dressed as improvement: it touches every skill in the registry to prevent a
+problem that is not present and is already guarded by three tests. The argument
+for it is that *nothing structural keeps them that way* - a weaker claim, and it
+belongs in the same sentence as the measurement rather than instead of it. The
+trigger to actually do it is the first time one of those tests goes red, at which
+point the refactor is the fix rather than the prophylaxis.
+
 
 ## The wizard's void got a mark, and the icon was a gear the first time (2026-10-11)
 
@@ -11393,3 +11413,113 @@ uncommitted `mimic` note into their commit** - the identical measurement already
 recorded for `ec6b295` above. Nothing is lost and the note is in `HEAD`; the
 split needs a history rewrite under a live session, which is a person's decision
 and not a mechanical fix.
+
+## heretic: the comparison the Rebuild result advertised and nobody made (2026-10-12)
+
+`harness-study/heretic` (`p-e-w/heretic`, `49b56e5`, 6,748 lines, AGPL-3.0).
+Write-up: **`../harness-study/HARVEST-HERETIC.md`**. One transfer, and it is not
+the thing the repository is named for.
+
+**First, a correction worth having: it is not an adversarial-prompt tool.** It
+does not craft suffixes and never asks a model to say what it was trained not to
+say. It does **abliteration** — it moves the model's internal refusal
+directions, and picks how far by **multi-objective TPE/Optuna search** over two
+scorers: refusals ↓ *together with* KL-divergence-from-the-original ↓. Its claim
+is the same suppression at lower damage (their table: 3/100 refusals at KL 0.16,
+against 1.04 and 0.45 for two hand-made ablations).
+
+### Not taken, and the reason is architectural rather than squeamish
+
+Chronoa's security **does not rest on the model refusing anything**, which is
+what makes this a non-risk rather than a suppressed one. `tools._dispatch_inner`
+calls `permissions.decide(name, scoped_resource, consent_key, …)` at
+`tools.py:1066` **in Python, before the skill runs**; `guardrail.py`, the sandbox,
+`provenance.py` and the consent keys are all code. `ARCHITECTURE-TARGET.md` says
+it outright: *"A learned component that authorises anything. It advises.
+Authority stays with the consent keys."* A decensored model changes which
+**answers** Chronoa gives and nothing about which **actions** it can take.
+
+And nothing is lost by refusing it, measured rather than assumed. Its case is
+**over-refusal**; `tools/task_eval.py` scores **56/62** with the harness
+narrowing the tool set, and this file records `bare` at **0/62** with the cause
+named — 19,700 tokens against an 8k context, so the request is *rejected*, not
+refused. **What would change the verdict is a measurement, not a model**: a
+refusal-rate scorer over `tools/eval_cases.json` reported beside `task_eval`'s
+score, so "this model declines things it should answer" becomes a number instead
+of an impression.
+
+### Taken: heretic's central claim is not about abliteration
+
+Every scorer is reported **beside its baseline**: `Scorer` declares
+`get_baseline_score()`, `kl_divergence.py` captures `baseline_logits` *before any
+modification*, and the README puts the original model's row first. And Chronoa had
+the exact gap, measured:
+
+`calibrated_quantize()` builds **two** files on purpose — same target, same
+source, one fitted with an importance matrix and one without — and says so
+itself: *"the uncalibrated build of the same target is **beside it for
+comparison**"*. Measured over the whole tree: **`naive_path` had no production
+reader at all.** Two occurrences — the line producing it, and
+`test_calibrated_quantization.py:142` asserting the two paths *differ*, which is a
+fact about the filesystem and not about quality.
+
+So the person pressing Rebuild saw:
+
+    Built Q4_K_M at /home/.../-calibrated.gguf
+    In use now: Q4_K_M
+
+`adopt_path`'s gate is right and does something else: it refuses a model >2% worse
+than the one being **replaced**, and promotes an unmeasured one while recording
+the promotion as unverified. **Was fitting the matrix worth the ten seconds it
+took?** was nobody's question — so a rebuild that produced a *worse* file than the
+naive build of the same source reported "Built" and stopped.
+
+`local_llm.compare_calibration()` is that measurement, in `quality_verdict`'s own
+two-shape form: **measured** (`helped`/`hurt`/`unchanged`, with **both absolute
+numbers and the percentage** in the sentence) or **unmeasured** (names *which*
+build, and says "unknown" — never "the matrix did nothing"). Three guards that
+are reasons rather than tidiness: **`None` is never a measured zero** (a missing
+measurement and a measured no-change are different facts, and `perplexity()`
+returns `None` on every failure path, so this is the easiest substitution to make
+**by accident**); a **non-positive baseline is refused, not divided**; and **two
+paths that are one path is not a comparison**.
+
+Settings → Models → Rebuild now prints it, between `Built` and `adopt_path`, and
+prints `The matrix's effect was NOT measured.` when it could not be read — so the
+absence is visible rather than silently absent. It runs in the existing
+`_off_main` worker, so two more `llama-perplexity` runs cost no frame.
+
+`tests/test_calibration_comparison.py` (13). `tools/mutations/calibration.py` —
+**7 mutations, 7 caught, 0 survivors, 0 equivalent**.
+
+### Two things the controls caught, and both are the recorded traps
+
+- **A witness naming a class is a witness that never ran.** The set's first
+  `expect` for the unmeasurable-build mutation was
+  `["TestWhatIsNotAMeasurement"]`, and the runner called it a **SURVIVOR** while
+  printing *"4 failed"* — every one the right test. A named witness matching no
+  test id is the same defect as a check that cannot fail; both are test ids now.
+- **Ten of the thirteen tests call `compare_calibration` directly**, measuring the
+  behaviour behind the widget. The runner proved it: a mutation replacing the call
+  in `window.py` with a hardcoded dict left those ten **green** and failed exactly
+  the two that drive the real handler. Three tests press the control and read the
+  lines a person would see, and that mutation fails **2**.
+
+### Read, checked, and not taken
+
+Multi-objective **Pareto** instead of a weighted sum (Chronoa's guards are
+deliberate *conjunctions* — `Report.honest()` needs recall lift **and** precision
+lift — and a front has no question to attach itself to for a binary decision);
+`Score`'s contract that a value *"must be of the order of magnitude 1"* (every
+Chronoa score is already ratio-based or scale-separated); `_is_match`'s
+normalisation set, including **counting an empty response as a match** so silence
+cannot be optimised into a perfect score (Chronoa refuses the degenerate answer in
+`Report.honest()` and `evaluate_bandit`, but has no measurement this would
+protect); resumable Optuna studies (**Chronoa's fits are 24 s, not hours** — that
+is where it pays off); and `is_builtin_plugin` disabling reproducibility for
+external plugins (would refuse the exact case
+`~/.config/shani-chronoa/skills/` exists for).
+
+AGPL-3.0, unlike everything else in `harness-study/`. **No code was taken** —
+the transfer is a discipline, and `compare_calibration` shares no structure with
+any line of heretic's.
