@@ -111,6 +111,11 @@ def all_surfaces() -> "Surfaces":
 SURFACE_IDS = (
     # Conversation
     "conversations",
+    # Compare two conversations by the questions they asked. A model asked
+    # "what did I ask about last week" answers from the conversation it is
+    # holding, which is not that question; this needs both sets of questions in
+    # hand at once.
+    "compare",
     # Your own files, searchable, and the meetings it has recorded. Both were
     # skills with no panel at all until 2026-10-11: reachable only by a model
     # deciding to call them, which is the wrong shape for a box and the wrong
@@ -229,6 +234,7 @@ SECTION_PHONE = "Phone and remote"
 #: showing three of fourteen panels looks like a sidebar with three panels.
 DEFAULT_SECTION = {
     "conversations": "Remembering",
+    "compare": "Remembering",
     "memory": "Remembering",
     "activity": "Remembering",
     "skills": "Acting",

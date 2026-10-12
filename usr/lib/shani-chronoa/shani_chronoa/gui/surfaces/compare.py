@@ -1,0 +1,249 @@
+"""Compare two conversations by the questions they asked.
+
+**Why a panel, and not a skill.** A model can be asked "what did I ask about
+last week", and will answer from the conversation it currently holds - which is
+not the same question. Asking across conversations needs both sets of questions
+in hand at once, and that is a thing a panel does rather than a thing a model
+does.
+
+**Why questions and not text.** Assistant text is not comparable: the same
+question answered twice gives two different answers, so a diff over that half
+reports every turn as new on every comparison. `conversation_diff` holds the
+comparison, and this file holds the widgets.
+
+**The two drop-downs are both optional and neither is preselected to a
+surprising pair.** Defaulting to the two most recent is the useful choice for
+"what's new since last time", which is the common case - but the order is
+stated in the labels ("Earlier"/"Later") so a pair picked the other way round is
+still readable rather than being silently reversed.
+"""
+
+import logging
+from typing import Any, List
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk  # noqa: E402
+
+from shani_chronoa import conversation_diff as diff_module  # noqa: E402
+from shani_chronoa.gui.surfaces import common  # noqa: E402
+
+logger = logging.getLogger(__name__)
+
+TITLE = "Compare"
+#: `document-compare-symbolic` and `edit-compare-symbolic` are both absent from
+#: Adwaita - checked with `rglob` over the theme directory, because an icon name
+#: the theme lacks renders as an empty box that reads as a bug rather than as a
+#: missing glyph. `view-continuous-symbolic` is the theme's own "side by side".
+ICON = "view-continuous-symbolic"
+SECTION = "Remembering"
+
+SUBTITLE = ("What changed between two conversations, by the questions you asked. "
+            "Replies are not compared: the same question answered twice gives two "
+            "different answers.")
+
+NEED_TWO = "Pick two conversations to compare."
+ONLY_ONE = "There is only one conversation to compare."
+UNREADABLE = "Could not read your conversations"
+NO_QUESTIONS = "One of these asked nothing."
+
+
+def _store_root(app: Any):
+    """Where conversations live, or None when the app cannot say.
+
+    Several paths here have been renamed or added over the session, so this asks
+    for the one it wants and accepts any of the plausible names rather than
+    assuming a single attribute exists.
+    """
+    for name in ("_conversation_root", "conversation_root", "_sessions_root"):
+        root = getattr(app, name, None)
+        if root is not None:
+            return root
+    session_dir = getattr(app, "session_dir", None)
+    return session_dir
+
+
+def _conversations(root) -> "List[tuple[str, str]]":
+    """`(id, title)` newest first, read from the store's own index.
+
+    **The index, not the files.** Enumerating `*.jsonl` would list a
+    conversation whose index entry never got written - an interrupted session -
+    and then fail to load it, which is a panel reporting a broken file for a
+    conversation that is merely unlisted.
+    """
+    from shani_chronoa import conversation_store
+
+    try:
+        data = conversation_store.index(root)
+    except Exception as exc:  # noqa: BLE001 - an unreadable store is a message
+        logger.debug("compare: the conversation index is unreadable: %s", exc)
+        return []
+    sessions = data.get("sessions") or {}
+    rows = [(str(sid), str((meta or {}).get("title") or "Untitled"))
+            for sid, meta in sessions.items()]
+    rows.sort(key=lambda pair: (str((sessions.get(pair[0]) or {}).get("updated")
+                                   or ""), pair[1]), reverse=True)
+    return rows
+
+
+def _messages(root, sid: str):
+    from shani_chronoa import conversation_store
+
+    try:
+        return conversation_store.load(conversation_store.session_path(root, sid))
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("compare: conversation %s is unreadable: %s", sid, exc)
+        return []
+
+
+def _row(text: str, dim: bool = False) -> Gtk.Label:
+    label = Gtk.Label(label=text)
+    label.set_xalign(0.0)
+    label.set_wrap(True)
+    label.set_selectable(True)
+    if dim:
+        label.add_css_class("dim-label")
+    return label
+
+
+def _group(title: str, items: "tuple[str, ...]", dim: bool = False,
+           limit: int = 25) -> Gtk.Widget:
+    """One heading and its rows, or a single line saying there are none.
+
+    **The empty case says so.** A heading with nothing under it is
+    indistinguishable from a section that failed to build, and in a comparison
+    panel "no questions only in the later one" is a real and useful answer.
+    """
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+    box.set_margin_top(10)
+    heading = _row(f"{title} ({len(items)})")
+    heading.add_css_class("heading")
+    box.append(heading)
+    if not items:
+        box.append(_row("None", dim=True))
+        return box
+    for text in items[:limit]:
+        box.append(_row("• " + diff_module.for_display(text), dim))
+    if len(items) > limit:
+        # Counted, not hidden: a capped list that does not say it was capped
+        # reads as the whole answer.
+        box.append(_row(f"and {len(items) - limit} more", dim=True))
+    return box
+
+
+class _CompareView(Gtk.Box):
+    def __init__(self, app: Any) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.set_margin_top(12)
+        self.set_margin_bottom(12)
+        self.set_margin_start(12)
+        self.set_margin_end(12)
+        self._app = app
+        self._root = _store_root(app)
+        self._rows: "List[tuple[str, str]]" = []
+        #: **Two boxes, not one.** The first version put the drop-downs and the
+        #: results in the same box and cleared the results by index - removing
+        #: `children[2:]` on the assumption that the two selectors are always
+        #: first. Reordering the layout by one row would then have deleted a
+        #: drop-down and left one that does nothing.
+        self._selectors = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                 spacing=4)
+        self._result_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                   spacing=0)
+        self.append(self._selectors)
+        self.append(self._result_box)
+        self._earlier = None
+        self._later = None
+        self.reload()
+
+    # -- data ---------------------------------------------------------------
+
+    @staticmethod
+    def _clear(box: Gtk.Box) -> None:
+        while box.get_first_child() is not None:
+            box.remove(box.get_first_child())
+
+    def reload(self) -> None:
+        self._rows = _conversations(self._root) if self._root else []
+        self._clear(self._selectors)
+        self._clear(self._result_box)
+        self._earlier = self._later = None
+
+        if not self._root:
+            self._result_box.append(_row(UNREADABLE))
+            return
+        if len(self._rows) < 2:
+            # One conversation is not a comparison, and saying "pick two" when
+            # there is one to pick is an instruction nobody can follow.
+            self._result_box.append(_row(ONLY_ONE if self._rows else NEED_TWO))
+            return
+
+        titles = [title for _sid, title in self._rows]
+        earlier = Gtk.DropDown.new_from_strings(titles)
+        later = Gtk.DropDown.new_from_strings(titles)
+        # **The two most recent, in the useful order.** Index 0 is newest, so
+        # `later` is 0 and `earlier` is 1 - which answers "what is new since
+        # last time", the reason this panel exists.
+        later.set_selected(0)
+        earlier.set_selected(1)
+        for drop, name in ((earlier, "Earlier conversation"),
+                           (later, "Later conversation")):
+            drop.update_property([Gtk.AccessibleProperty.LABEL], [name])
+            drop.connect("notify::selected", lambda *_a: self._compare())
+            self._selectors.append(drop)
+        self._earlier, self._later = earlier, later
+        self._compare()
+
+    def _compare(self) -> None:
+        self._clear(self._result_box)
+        if self._earlier is None or self._later is None:
+            return
+        old_id = self._selected(self._earlier)
+        new_id = self._selected(self._later)
+        result = diff_module.diff_conversations(
+            _messages(self._root, old_id), _messages(self._root, new_id))
+
+        self._result_box.append(_row(
+            f"Earlier asked {result.old_count} question(s); "
+            f"later asked {result.new_count}. "
+            f"{len(result.shared)} in both."))
+        # **Either side, not both.** The sentence says "One of these asked
+        # nothing", and the first version fired only when *both* counts were
+        # zero - so a conversation consisting of nothing but a system prompt,
+        # compared against a real one, reported "Earlier asked 1 question(s);
+        # later asked 0" and three groups of "None", with nothing saying that
+        # one of them is empty. The count line is true and useless.
+        if not result.old_count or not result.new_count:
+            self._result_box.append(_row(NO_QUESTIONS))
+        self._result_box.append(_group("Only in the later", result.only_new))
+        self._result_box.append(_group("Only in the earlier", result.only_old))
+        self._result_box.append(_group("Asked more than once, earlier",
+                                       result.old_repeats, dim=True))
+        self._result_box.append(_group("Asked more than once, later",
+                                       result.new_repeats, dim=True))
+
+    def _selected(self, drop: Gtk.DropDown) -> str:
+        """The id at the drop-down's index, clamped.
+
+        Clamped because `set_selected` and the notification can disagree for a
+        frame during a relayout, and an out-of-range index would be a
+        `IndexError` from inside a `notify` handler.
+        """
+        index = max(0, min(len(self._rows) - 1, drop.get_selected()))
+        return self._rows[index][0]
+
+
+def build(app: Any) -> Gtk.Widget:
+    """Build the compare page for `app`."""
+    page, set_content = common.surface(TITLE, SUBTITLE)
+    view = _CompareView(app)
+    set_content(view)
+    # Re-read on every showing: the window builds a panel once and keeps it, so
+    # a load at build time alone froze the store listing at the moment the
+    # panel was first opened.
+    if hasattr(page, "connect") and common.adw_ready():
+        page.connect("showing", lambda *_a: view.reload())
+    page.view = view
+    page.reload = view.reload
+    return page

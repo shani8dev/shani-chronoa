@@ -17848,3 +17848,64 @@ answer available: `pytest-env` is not installed, so `pytest.ini` cannot set the
 variable, and a root-level `sitecustomize.py` that `site` would auto-import is
 magic nobody would expect to find in this repo.
 
+
+## Comparing two conversations, and what was chosen *not* to compare
+
+The last of the approved main-UI features. `conversation_diff.py` holds the
+comparison; `gui/surfaces/compare.py` is the panel; both are new.
+
+**Assistant text is not comparable, and comparing it is worse than useless.**
+The same question answered twice gives two different answers, so a diff over the
+assistant's half reports every turn as new on *every* comparison. A panel that
+says "everything is different" every time is a panel nobody opens twice. What
+*is* comparable is what the person asked, and "have I already asked this?" is
+the question a conversation list cannot answer.
+
+**Matching is on normalised text - NFKC, casefolded, whitespace collapsed,
+trailing punctuation dropped.** A diff that calls "What's the weather?" and
+"what's the weather ?" two different questions teaches the reader to distrust it
+on the first comparison. **NFKC rather than NFC** because a question typed on a
+phone and the same question pasted from a web page routinely differ by more than
+one accent form.
+
+**Repeats are counted, not collapsed.** A set-based diff hides that a question
+was asked three times, which is exactly what someone re-reading an old
+conversation wants to know.
+
+**Order is preserved within each side but is not a difference.** The order
+questions were asked in is the order of the work, so `only_old` and `only_new`
+keep it. But a question asked earlier in one conversation and later in the other
+is the same question, and `identical` ignores order - a panel reporting that as
+four changes would be reporting on a reordering.
+
+### Three tests that could not have failed
+
+Each of these passed against a mutation that broke the behaviour it names. All
+three are the same mistake wearing different clothes - **test data chosen
+without checking it could distinguish the two behaviours.**
+
+- **"first, second, third" is in alphabetical order**, so sorting the unique
+  questions changed nothing and *two* mutations survived. The test now asks in
+  the order `zebra, apple, mango`.
+- **The ordering test checked `only_new` alone**, so sorting `only_old` was
+  invisible. An asymmetry that is genuinely wrong.
+- **`set_selected(99)` is clamped by GTK**, so the out-of-range state the test
+  named was unreachable and removing the clamp in `_selected` passed. The index
+  now comes from a stand-in that returns 99.
+
+And **two substring/membership slips of my own**: `'"Only in the later" in
+labels` against a *list* asks for an element equal to the whole phrase, and the
+element is `"Only in the later (1)"`. Both failures showed the panel rendering
+exactly the right thing.
+
+### A real defect the panel test found
+
+`NO_QUESTIONS` said *"One of these asked nothing"* but fired only when **both**
+sides were empty. A conversation consisting of nothing but a system prompt,
+compared against a real one, reported "Earlier asked 1 question(s); later asked
+0" and three groups of "None" - true, and useless. The count line was right and
+said nothing.
+
+The selectors and the results also live in **separate boxes now**: the first
+version cleared results by index (`children[2:]`), assuming the two drop-downs
+are always first. Reordering the layout by one row would have deleted a control.
