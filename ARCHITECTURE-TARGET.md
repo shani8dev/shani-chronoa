@@ -717,9 +717,17 @@ real version of it.
    something.
 10. **Vision on llama.cpp** (Eyes). Qwen-VL GGUF with its mmproj through
     `llama-server`, so vision needs no Ollama, the same way text does not.
+    **Built (2026-10-12).** `local_vision.py` serves it on 127.0.0.1:8767 with
+    `--mmproj`, verified by digest and downloaded through `stt_provision`'s
+    checked path; `senses/vision.py` calls `local_vision.describe` behind the
+    `vision` consent key and falls back to a local Ollama otherwise.
 11. **Feeds** (Ingest). RSS/Atom as a trigger source.
 12. **smartctl** (Smell). SMART attributes in `senses/storage.py` when
     `smartmontools` is installed.
+    **Built (2026-10-12).** `senses/storage.py`'s `_run_smartctl` shells the real
+    binary with a named timeout and the sense's read path calls it. The
+    "when installed" conditional is how the code behaves: `smartctl` absent is a
+    UNKNOWN with the package named, not an empty table.
 
 **Later: GPU-class, or needs a decision first**
 
