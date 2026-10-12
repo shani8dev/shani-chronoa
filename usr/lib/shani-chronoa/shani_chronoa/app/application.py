@@ -778,9 +778,16 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         """
         mode = (self.config.get("answer-mode", "") or "").strip().lower()
         if not mode:
-            # Nothing has ever chosen. Leaving the engine alone is right, and
-            # guessing "local" here would override a cloud chain the startup
-            # path legitimately built.
+            # **Only reachable when the key has no value at all** - and since
+            # the gschema was given `answer-mode` a default of 'local', that is
+            # a config without the schema (tests, a build whose compiled
+            # schemas predate it), not the ordinary startup. Not deleting it:
+            # with a real schema the empty case never arrives, and the first
+            # draft of this comment claimed it was the everyday path and that
+            # guessing 'local' would override a legitimate cloud chain. It
+            # would not - 'local' is the schema's own default - but a comment
+            # that describes a path the code cannot take is a comment that
+            # misleads whoever reads it next.
             return
         want = "cloud" if mode == "cloud" else "local"
         try:
