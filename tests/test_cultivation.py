@@ -650,3 +650,59 @@ def test_the_module_says_only_one_gate_is_live_and_does_not_overclaim():
         "the module must state which gate is real")
     assert "treats a stage with no verdict as **locked**" in doc, (
         "the module must state that no-verdict means locked, not passed")
+
+
+def test_the_chimera_ladder_is_recorded_in_full_and_never_beats_the_base():
+    """The chimera attempt is the newest and most interesting measurement here,
+    and it is a refusal at every coefficient. This pins all four rungs so the
+    record cannot decay into "we tried stacking adapters" - the shape that reads
+    as progress while every number in it is a loss.
+
+        base alone            4/5 at  4.65 s
+        one adapter, lambda=1 4/5 at  7.65 s
+        three, lambda=0.35    2/5 at 24.4 s
+        three, lambda=1.0     0/5 at 29.6 s
+
+    Orthogonality between the three is 50.0%, which is why the row also says
+    that orthogonality is necessary and not sufficient.
+    """
+    said = cultivation.TERMS["ascension"]["measured"]
+    for figure in ("4/5", "4.65", "7.65", "2/5", "24.4", "0/5", "29.6"):
+        assert figure in said, "chimera ladder rung %r is missing from the record" % figure
+    assert "REFUSED" in said
+    assert "50.0%" in said, "the orthogonality measurement is the point"
+    assert "necessary and not sufficient" in said
+
+
+def test_the_orthogonality_claim_is_pinned_to_a_number_and_a_direction():
+    """The adapters differ in every lora_a tensor and agree on ~half their signs.
+    A claim that three things are 'genuinely independent' with no figure is the
+    plausible sentence; the figure is what makes it checkable."""
+    said = " ".join(cultivation.TERMS["ascension"]["measured"].split())
+    assert "all 196" in said, said[:200]
+    assert "97.77%" in said, "the near-copy comparison is what makes 50% mean something"
+
+
+def test_the_old_merge_wall_explanation_is_marked_falsified_not_deleted():
+    """The recorded blocker was 'no capability-differentiated checkpoints on
+    this box'. That was falsified by finding three orthogonal ones. The row must
+    say so - a correction that does not reach its own claim leaves the next
+    reader re-deriving the wrong reason."""
+    said = cultivation.TERMS["ascension"]["measured"]
+    assert "falsified" in said, said[:200]
+
+
+def test_every_chimera_rung_fails_the_real_gate():
+    """**The load-bearing check.** Each measured rung is pushed through
+    `ascension_gate` and every one must refuse. A ladder recorded in prose but
+    not held by the gate is a table, not a control."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.65)
+    rungs = [
+        ("one adapter, lambda=1", cultivation.Measurement(right=4, of=5, seconds=7.65)),
+        ("three, lambda=0.35", cultivation.Measurement(right=2, of=5, seconds=24.4)),
+        ("three, lambda=1.0", cultivation.Measurement(right=0, of=5, seconds=29.6)),
+    ]
+    for label, adapted in rungs:
+        v = cultivation.ascension_gate(base, adapted, held_out=True)
+        assert v.unlocked is False, "%s should have refused: %s" % (label, v.why)
+        assert v.why, label

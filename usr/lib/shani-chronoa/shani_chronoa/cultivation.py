@@ -328,16 +328,26 @@ TERMS: Dict[str, Dict[str, str]] = {
         "is": "the adapter loaded *alongside* the base, so the trial does not "
               "rewrite what already works",
         "from": "adapter.check",
-        "measured": "REFUSED on the honest instrument. `adapter.check` passes - "
-                    "lumen-mouth-lora FITS Qwen3-1.7B-Q4_K_M and is refused "
-                    "against the 0.6B with 168/196 mismatches - and *fitting* is "
-                    "not *earning*. Measured on task_eval, 5 cases, select "
-                    "config: base alone 4/5 at 4.65 s/case, base + adapter 4/5 "
-                    "at 7.65 s/case, zero refusals either way, and both miss "
-                    "the same one. Same accuracy, 65% slower: the adapter adds "
-                    "nothing it has been shown to earn, so Ascension stays "
-                    "locked. It is reversible - dropping the file undoes it - "
-                    "which is exactly why trying it was cheap",
+        "measured": "REFUSED at every coefficient measured. The blocker this "
+                    "row used to carry - that the merge wall is caused by "
+                    "checkpoints not differing in capability - is **falsified**: "
+                    "three capability-named adapters for this exact base "
+                    "(lumen mouth / cortex / executor, 392 tensors each, all "
+                    "valid against the 1.7B) differ in **all 196** lora_a "
+                    "tensors and sit at **50.0% sign-agreement** with each other "
+                    "- orthogonal, against 97.77% for the near-copies that made "
+                    "interference vanish. So the ingredients exist and they are "
+                    "genuinely independent. Stacking them is task arithmetic in "
+                    "adapter space (llama-server takes comma-separated "
+                    "--lora-scaled), and the ladder on task_eval, 5 cases, "
+                    "select config, reads: base alone **4/5 at 4.65 s**; one "
+                    "adapter at lambda=1 **4/5 at 7.65 s**; three at lambda=0.35 "
+                    "**2/5 at 24.4 s**; three at lambda=1.0 **0/5 at 29.6 s**. "
+                    "Scaling recovers part of the damage and never reaches the "
+                    "base. **Orthogonality is necessary and not sufficient**: "
+                    "these are role adapters, so summing them composes into a "
+                    "less decisive model rather than a more capable one. Cheap to "
+                    "try - a flag, not a rewrite - and it did not earn it",
     },
     "immortality": {  # 长生 changsheng - lasting by not rotting
         "is": "a signed, provenance-bearing record: every change attributable "
