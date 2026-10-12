@@ -16535,15 +16535,22 @@ wrote nothing at all"*. Measured both ways on the same tree: isolated, **4
 passed**; as the repo runs it, **1 failed**. Same class as the tests that wrote
 into the real user's `tool_calls.log`, and the `fake_bin` `PATH` lesson.
 
-### Still in the real keyfile, and it needs a person
+### Was in the real keyfile; reset on the person's decision
 
-The test is fixed and no longer writes. **What it already wrote is still there:**
-`hearing-sense-enabled`, `filesystem-sense-enabled` and `web-sense-enabled` are
-all `true` in `~/.config/glib-2.0/settings/keyfile`, against schema defaults of
-false, set by a test rather than by anyone using the machine. **`hearing` is
-consent for the microphone**, so this is not cosmetic and it is not this file's
-call: resetting it mutates real user data outside a disposable harness, which
-Boundaries says to ask about first.
+The test is fixed and no longer writes. It had already written
+`hearing-sense-enabled`, `filesystem-sense-enabled` and `web-sense-enabled` as
+`true` into `~/.config/glib-2.0/settings/keyfile`, against schema defaults of
+false - set by a test rather than by anyone using the machine, and `hearing` is
+consent for the microphone. **Reset to false on the owner's instruction**, through
+`gsettings set` with a freshly compiled schema so the write matches the format the
+app itself uses.
+
+Verified rather than assumed: `diff` against the pre-change backup shows exactly
+those three lines, mode still `600`, the group still `[org/shani/chronoa]`, and
+36 keys before and after. The lesson stands regardless of the repair —
+**a test that writes outside a disposable harness is writing consent**, and the
+fixture's own comment claimed to have solved this for the *schema dir* and the
+*backend* while leaving the store they resolve to wide open.
 
 ### And the probe that read the wrong machine, twice in one turn
 
