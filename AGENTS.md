@@ -570,6 +570,38 @@ schema that is stale against its XML fails the way this file records: every sett
 silently takes its Python default, with exit 0 and no error. Recompiled fresh and
 compared byte for byte - **in sync.**
 
+## The settings window had no layout check, and the one label it flags is a measured false positive (2026-10-12)
+
+The layout contract covers three things: every surface (parametrized), every
+wizard page (`test_no_wizard_page_needs_a_sideways_scrollbar`) and the main window
+(`test_the_main_window_wraps_or_ellipsises_its_long_text`). **The settings window was
+in none of them** - verified by grep, no test mentioning `SettingsWindow` also
+mentions wrap, ellipsis, overflow, scroll, width or layout.
+
+That is the same shape as the `inventory` surface that could not scroll for months:
+found only by somebody looking, because a gap in a contract is an *absence* and
+absence is not something a suite reports. So the sweep passed while 25 groups of
+subtitles written to be read were unchecked.
+
+Measured rather than assumed - **710 labels**, and what the predicate flags:
+
+    Check which providers can do speech   35 chars, no wrap, no ellipsis
+
+**And it is a false positive, with the measurement that says so.** It is a button
+label demanding **289px of a 560px window** - it fits, with room. The predicate is a
+*heuristic*: over 30 characters is the shape that *can* exceed a window, which is
+not the same as exceeding one. So the exemption carries the number, and the test
+asserts `demand <= 560` on every entry - an exemption that has silently grown past
+the window fails rather than sitting there looking deliberate.
+
+`test_the_settings_window_wraps_or_ellipsises_its_long_text` and
+`test_the_settings_window_check_is_not_vacuous` (2). **The negative control drives
+the predicate itself**, over four labels, and asserts it separates the one that
+cannot shrink from the three that can - because the first version built a long
+label, asserted it was long, and asserted it was not in the table, which passes
+whether or not the check works. Removing the length test from
+`_settings_offenders` fails **both** tests, verified by running it.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit

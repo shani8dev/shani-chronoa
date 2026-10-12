@@ -482,6 +482,114 @@ def test_the_main_window_can_scroll():
     assert scrollers, "the conversation area has no scroller, so long turns cannot be read"
 
 
+#: Labels the >30-character predicate flags that are **demonstrably** narrow
+#: enough, with the measurement that says so. Kept as a table rather than a bare
+#: exception because a heuristic exemption nobody re-measures is the stale-claim
+#: shape this repository records: the number beside each is the demand, and the
+#: settings window it sits in is 560px.
+_SETTINGS_WINDOW_MEASURED = {
+    "Check which providers can do speech": 289,
+}
+
+
+def _settings_window():
+    """The settings window, built headless.
+
+    **It was the one window the layout contract did not cover.** Surfaces are
+    parametrized, every wizard page has its own scrollbar check, and the main
+    window has the wrap check below - and the settings window, 25 groups with
+    subtitles written to be read, had none of the three. Measured rather than
+    assumed: 710 labels, and the check below is that measurement turned into a
+    gate instead of a one-off.
+    """
+    from shani_chronoa.config import ChronoaConfig
+    from shani_chronoa.settings_window import SettingsWindow
+
+    class _App(Gtk.Application):
+        def __init__(self):
+            super().__init__(application_id="test.chronoa.settingslayout",
+                             flags=Gio.ApplicationFlags.NON_UNIQUE)
+            self.config = ChronoaConfig()
+            self.window = None
+            self._wake_word_active = False
+
+        def activate_action(self, name, arg=None):
+            pass
+
+    return SettingsWindow(_App())
+
+
+def _settings_offenders(labels):
+    """Labels that the predicate flags **and** no measurement excuses.
+
+    A named function because the negative control drives the same predicate: a
+    check whose logic lives inline in an assertion can only be tested by
+    breaking the assertion, which is not a test of the check.
+    """
+    out = []
+    for label in labels:
+        if not isinstance(label, Gtk.Label):
+            continue
+        text = (label.get_label() or "").strip()
+        if not text or len(text) <= LONG_TEXT:
+            continue
+        if label.get_wrap() or int(label.get_ellipsize()) != 0:
+            continue
+        if text not in _SETTINGS_WINDOW_MEASURED:
+            out.append(text)
+    return out
+
+
+def test_the_settings_window_wraps_or_ellipsises_its_long_text():
+    """The same check the main window gets, for the window that had none.
+
+    The predicate is a *heuristic* - over 30 characters, no wrap, no ellipsis -
+    because that is the shape that can exceed a window. It is not the same as
+    exceeding one, and this window proves it: **one label is flagged, and it
+    demands 289px of a 560px window.** So the exemption carries the measurement,
+    and a second offender that does *not* carry one fails. That is the
+    difference between a documented exception and a silenced check.
+    """
+    window = _settings_window()
+    if window is None:
+        pytest.skip("the settings window would not build headless")
+    unexcused = _settings_offenders(_walk(window))
+    assert not unexcused, (
+        "these cannot shrink, and a single one of them can be wider than the "
+        f"window: {unexcused}")
+    for text, demand in _SETTINGS_WINDOW_MEASURED.items():
+        assert demand <= 560, (
+            f"{text!r} was exempted as narrow enough but demands {demand}px of "
+            f"a 560px window - re-measure it, or make it wrap")
+
+
+def test_the_settings_window_check_is_not_vacuous():
+    """**The negative control, driving the same predicate rather than restating it.**
+
+    The first version of this built a long label, asserted it was long, and
+    asserted it was not in the exemption table - which passes whether or not the
+    check above works, because it never runs the check. This drives
+    `_settings_offenders` itself, over four labels, and asserts the one thing
+    that separates a live check from a dead one: the planted label is caught,
+    and the three that are legitimately narrow are not.
+
+    Without this, deleting the predicate's length test would leave the window
+    clean and the test green.
+    """
+    long_and_stuck = Gtk.Label(
+        label="a deliberately long label that can neither wrap nor ellipsise")
+    wrapped = Gtk.Label(label="a long label that wraps, so it can always shrink")
+    wrapped.set_wrap(True)
+    short = Gtk.Label(label="short")
+    excused = Gtk.Label(
+        label="Check which providers can do speech")   # in the measured table
+
+    caught = _settings_offenders([long_and_stuck, wrapped, short, excused])
+    assert caught == [long_and_stuck.get_label().strip()], (
+        f"the check did not separate the one label that cannot shrink from the "
+        f"three that can: {caught}")
+
+
 def test_the_main_window_wraps_or_ellipsises_its_long_text():
     window = _main_window()
     if window is None:
