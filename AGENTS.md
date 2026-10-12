@@ -18983,3 +18983,86 @@ Re-run one by hand in the directory the test claims to be in before believing
 it: the same mutation, applied there, failed immediately. Paths, not coverage.
 
 **3 mutations, 3 caught** once the path was absolute.
+
+## A test file written and never run, and the harness that made it look run (2026-10-13)
+
+`tests/test_plan_mode_asks.py` had **13 tests, and every one of them hung for
+180 seconds.** The whole file timed out.
+
+```python
+def presenter(question, options):
+    event = threading.Event()
+    event.chronoa_answer = reply          # the answer, on an event
+    return event
+```
+
+`ask_bridge.ask` does `done.wait(timeout)` and *then* reads `chronoa_answer`
+off it - so an event that is never **`set()`** is not an answer, it is a
+three-minute wait. `DEFAULT_TIMEOUT_SECONDS` is **180**, not the 120 the rest of
+this file says, and every test in the file asks exactly one question.
+
+`event.set()`. **13 passed in 0.15 s.**
+
+**The file counted as covered everywhere that counts files.** It was in the
+session's "new, mostly unexecuted" list; it was committed; it was pyflakes-clean;
+and it was in a batch that *appeared* to run. **A test file that times out tells
+you nothing about the thing it was written for**, and every listing that counts
+files rather than results reports it identically to one that passes.
+
+**And the batch it was hiding in timed out at the same place**, which is what
+finally surfaced it: a 900 s run stopped at test 114 of the batch with one `F`
+and no summary. `exit=124` is not a flaky result, it is a hang, and the only
+evidence is that the number is there — the same distinction this file draws for
+`MutationDidNotParse`.
+
+**3 mutations, 3 caught**, and the fourth is **equivalent by construction**:
+removing `ask_to_proceed`'s `if not ask_bridge.has_presenter()` guard leaves all
+13 green, because `ask()` returns `""` with no presenter and `""` is not
+`"Do it now"` - so the call falls through to the same refusal and the same
+record. The guard is kept as the readable statement of a rule the layer below
+also happens to enforce, and the file says so rather than growing a test that
+passes either way.
+
+## Two false verdicts in one afternoon, and both were concurrency (2026-10-13)
+
+### Five D-Bus timeouts that were my own backgrounded run
+
+`test_model_selector_chip.py` reported **5 failed** — every test in the file —
+with `g-io-error-quark: Timeout was reached (24)` and a runtime of **125
+seconds**.
+
+It is **5 passed in 0.68 s**. The cause was a pytest run I had backgrounded
+earlier and never collected, still alive and holding `dev.shani.chronoa`; the
+file builds a real `Gtk.Application`, so its activation was forwarded to the
+stale owner and never ran locally. **25-second waits, five of them.**
+
+This is the recorded mechanism - `test_setup_button_is_reachable` documents it
+with *"measured with three concurrent suites live"* - and it is the **fourth**
+time this session that concurrency was the answer, after `GSETTINGS_BACKEND`,
+`fake_bin`'s `PATH` and `XDG_RUNTIME_DIR`. **The 125 s against 0.68 s is the
+tell**: a test that takes two minutes when it takes one is waiting on something,
+not computing something.
+
+**Both of my own PIDs, killed by number** (102112, then its child 102118 — `kill`
+on the parent left the pytest running, because it was the *shell* that was
+signalled). The user's `shani-chronoa-overlay` (77892) was left alone, which is
+the only reason it is still running.
+
+### And a snapshot that was not a faithful copy
+
+The other files were run in `/tmp/opencode/snap-ms` while the real tree was
+locked by the other session's mutation run — the sanctioned approach. One file
+failed there and passed in the real tree:
+
+> `the default is qwen3-1.7b but only [''] is installed`
+
+**`cache/` is gitignored, so the snapshot never had it** - and `local_llm`
+reads the model directory to answer "what is installed". A test that asks what
+is on this machine cannot be run against a tree where the answer is *nothing*,
+and a snapshot is not a machine.
+
+**A snapshot is a faithful copy of the files you copied, and only of those.**
+For anything that reads accumulated state - installed models, a tool log, a
+ledger - the copy answers a different question from the original, and the
+difference reads exactly like a defect. The batch is green in the real tree:
+**130 passed, 0 failed, 16.65 s**, including the startup probe.

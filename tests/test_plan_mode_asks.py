@@ -10,6 +10,16 @@ dismissed prompt, a timeout, an empty answer - all of them mean *no answer was
 given*, and this app's rule is that an unanswered question is never consent.
 That is the whole reason this file exists: the feature adds a way for a tool to
 run that did not run before.
+
+**One guard here has no witness, and is not given one.** `ask_to_proceed`
+refuses early when `ask_bridge.has_presenter()` is false. Removing that guard
+leaves **all 13 of these tests green**, because `ask()` itself returns `""` when
+no presenter is set and `""` is not `"Do it now"` - so the call falls through to
+the same refusal and the same record. **An equivalent mutant by construction**,
+not a coverage gap, and the guard is kept as the readable statement of a rule
+the layer below also happens to enforce. Three of the four mutations aimed here
+are caught; this one is not, and saying so is cheaper than a test that passes
+either way.
 """
 
 import sys
@@ -41,12 +51,25 @@ def _isolate():
 
 
 def _answers_with(reply, log=None):
-    """A presenter that always answers `reply`, recording the questions."""
+    """A presenter that always answers `reply`, recording the questions.
+
+    **`set()` is what makes it an answer.** `ask_bridge.ask` waits on the
+    returned event with `done.wait(timeout)` and then reads
+    `chronoa_answer` off it - so an event that is never set blocks for the
+    module's whole timeout, **`DEFAULT_TIMEOUT_SECONDS = 180`** per question.
+
+    Which is what happened: this file was written and never run, and running
+    it hung at 90 s with **no test completing at all**, because every test in
+    it asks one question and every one waited three minutes. A test file that
+    times out tells you nothing about the thing it was written for, and this
+    one looked green in every listing that counted files rather than results.
+    """
     def presenter(question, options):
         if log is not None:
             log.append((question, list(options)))
         event = threading.Event()
         event.chronoa_answer = reply
+        event.set()
         return event
     return presenter
 
