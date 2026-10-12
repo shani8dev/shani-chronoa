@@ -14660,3 +14660,34 @@ afterwards on all three properties.
 - the settings key-set, the light-gate wrapper, the inverted emptiness guard, and
 now this. A gate that cannot fail is worse than no gate, and a gate that fails for
 the wrong reason is worse still, because it teaches you to distrust green.
+
+## `deadcode.py` re-run: 81 dead names, zero dead modules, and two names two tools disagree about (2026-10-12)
+
+`tools/deadcode.py --json` re-run: **81** dead public names over **2,207**
+defined (AGENTS.md recorded 79 / 2,173). +34 defined, +3 wired, +2 dead. The
+**triage did not change, which is the part worth trusting**: dead names spread
+over 45 modules, and **no module is entirely dead** — every one of them is a
+dead *name* inside a live module, concentrated in the statistics toolbox this
+file already calls one. So "81 dead names" is a much smaller statement than it
+looks, and the framing that would have been wrong is *"dead modules"*.
+
+**And a second instrument now disagrees with it on exactly two names, which is
+worth recording rather than smoothing over.**
+`tests/test_no_surface_method_is_unreachable.py` (this session) scans
+`gui/surfaces/` by word-mention instead of by AST attribute, and reports
+`show_devices` and `speaking_row` **live** where `deadcode.py` reports them
+**dead**. Both names are dispatched through a *string*:
+`phone_link.py:370` names `show_devices` in a tuple handed to `getattr`, and
+`voice.py`'s `_FORWARDED` carries `speaking_row` into a `setattr(page, name,
+getattr(content, name))`. `deadcode.py`'s own docstring records the cost —
+*"String constants are not scanned, which is what removes the prose false
+positives"* — so it cannot see either, and its published answer for these two
+is the one to distrust. Both are reachable; the AST-only scan is the weaker
+instrument for this question, and it is the one AGENTS.md has been quoting.
+
+Measured, not reasoned: with `phone_link`'s row never appended, the new test
+turns red naming `meetings.py:213 _record_row()` in 3.3s, and restoring the
+file turns it green with the source byte-identical afterwards (`cmp`). 309
+surface methods across 35 modules, none unreachable, and that count is asserted
+so a scan over a missing path cannot pass forever.
+
