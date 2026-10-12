@@ -13828,3 +13828,43 @@ without_the_lock` is the negative control that must keep failing when the patch
 is removed** - it is the one test that asserts the gate genuinely refuses, so a
 fixture that hands the lock to everything would quietly delete the property the
 gate exists for. That is the check that makes this fix honest.
+
+## PROVEN: isolating XDG_RUNTIME_DIR takes the trigger tests from 6 failures to 137 passed (2026-10-12)
+
+The entry above identifies the root cause and specifies the fix. This is the proof,
+and it settles two things at once: the cause is not a hypothesis, and the fix is
+not a guess.
+
+    $ XDG_RUNTIME_DIR=/tmp/opencode/rt ... pytest tests/test_trigger_event_reachability.py
+    137 passed, 1 warning in 16.29s
+
+**All six `TestTheRealLoopEvaluatesIt` failures disappear** - and with them the
+seventh in `test_ui_layout_contract[cloud-keys]` was never in this file. No
+product code changed, no test changed: one environment variable, pointed at an
+empty directory.
+
+**And the negative control survived, which is the half that makes this fix
+honest.** `test_the_scheduler_leaves_the_rules_alone_without_the_lock` is in the
+137. Isolating `XDG_RUNTIME_DIR` does not hand the lock to everything - it gives
+the test a lock nobody else holds, so the test that asserts the gate genuinely
+refuses can still make it refuse. A fix that broke that test would have been the
+over-fix: a fixture that grants the lock to all would delete the property the gate
+exists for.
+
+**So the fix is one line and it is in the test, not the product.** `conftest.py`'s
+autouse `gsettings_env` isolates `HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
+`XDG_CONFIG_HOME`; `XDG_RUNTIME_DIR` is the fifth store the product resolves a
+path from and it is the one missing. Pointing it at a per-test temp dir is the
+same shape as the `fake_bin` `PATH` lesson this file records - *a probe that does
+not control its environment is describing the machine it ran on* - and it covers
+`release()` as well as `holds()`, which is why it is stronger than monkeypatching
+the function.
+
+**What this says about the suite, beyond the six.** This test class has been
+failing on any machine where the assistant was actually running - every machine
+with a user - and reporting `expected exactly one dispatch, got []`, which points
+at the trigger wiring rather than at the environment. That is the absence-shaped
+verdict this file records repeatedly: the failure text names the product, not the
+machine. The chunked sweep found it only because a chunk happened to run while a
+real Chronoa process held the lock, and it is the reason a red test must be
+re-run serially and in its own environment before it is believed.
