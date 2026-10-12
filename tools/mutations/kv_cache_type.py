@@ -32,13 +32,26 @@ MUTATIONS = [
     },
     {
         "file": _CTX,
-        "old": '    if not per_token_at_f16:\n        return ladder[0]\n    f16 = cache_bytes_per_elem(ladder[0])\n    for cache_type in ladder:\n        scaled = int(per_token_at_f16 * cache_bytes_per_elem(cache_type) / f16)\n        if estimate_fit(weights_bytes, context, total_bytes=total_bytes,\n                        per_token=scaled).fits:\n            return cache_type\n    return ladder[-1]\n',
-        "new": '    if not per_token_at_f16:\n        return ladder[0]\n    return ladder[-1]\n',
-        # Always the cheapest, ignoring whether a better type already fits. The
-        # least-lossy-that-fits ordering is the whole design: `q8_0` at 0.5625 is
-        # near-lossless and is preferred wherever it fits, so reaching for `q4_0`
-        # by default trades quality it did not need to trade.
-        "label": "the lever always picks the cheapest type, ignoring the ordering",
+        # Re-anchored 2026-12: the floor clamp was inserted between
+        # `return ladder[0]` and the walk, so the old anchor was no longer
+        # contiguous and reported as rotted. It is now the **walk alone**,
+        # which is narrower than what it replaced - the clamp is left
+        # intact, so this still removes one defect rather than two.
+        "old": '    f16 = cache_bytes_per_elem(ladder[0])\n    for cache_type in ladder:\n        scaled = int(per_token_at_f16 * cache_bytes_per_elem(cache_type) / f16)\n        if estimate_fit(weights_bytes, context, total_bytes=total_bytes,\n                        per_token=scaled).fits:\n            return cache_type\n    return ladder[-1]\n',
+        "new": '    return ladder[0]\n',
+        # **The walk never runs.** The least-lossy-that-fits ordering is the whole
+        # design and the ladder is best-first, so returning `ladder[0]`
+        # unconditionally promises a context that does not fit in f16 in f16.
+        #
+        # It used to be the other end of the ladder - always the cheapest,
+        # ignoring whether a better type already fits - and that is **no longer
+        # expressible**, which is why this was re-anchored rather than repaired.
+        # `CACHE_TYPE_LADDER` is `("f16", "q8_0")` now, so `ladder[-1]` *is* the
+        # floor, and the floor is already what the function returns when nothing
+        # fits: a mutation that returned it was a restatement of the no-op path
+        # and a SURVIVOR against both witnesses it named. A two-entry ladder has
+        # no "cheapest" distinguishable from "nothing fitted".
+        "label": "the lever never steps down from the first type, ignoring whether a cheaper one is needed",
         "expect": ["test_the_least_lossy_type_that_fits_is_the_one_chosen",
                    "test_when_nothing_fits_the_cheapest_tried_is_returned"],
     },
