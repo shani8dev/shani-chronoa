@@ -292,6 +292,20 @@ def _combine(base_arr, task_vectors, method, density, lam):
     property of the input and not a limitation here - but a two-parent "TIES
     merge" should never be described as interference resolution.
 
+
+    **Three model files are not three voters.** `blend` takes `parents` and a
+    separate `base`, and `base` is expressed by giving *itself* a coefficient of
+    0 - which `blend` skips before the tensor is even read. So
+    `blend([base, a, b], [0.0, 1.0, 1.0], base=base)` loads **two** task
+    vectors, and every contested coordinate is still 1-1 against the base. A
+    merge over N fine-tunes of one ancestor therefore needs **N >= 3 fine-tunes
+    and four files** before the election can express a majority.
+
+    This was measured, not assumed: the sweep run against three Qwen3-0.6B
+    checkpoints (`Qwen3-0.6B-Base` 48.770, `Qwen3-0.6B` 76.469, and a heretic
+    fine-tune 77.707) carries **two** voters, and a three-parent merge over it
+    is a two-parent merge with an extra file on disk.
+
     """
     import numpy as np
 

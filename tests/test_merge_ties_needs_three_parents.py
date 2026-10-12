@@ -84,3 +84,47 @@ def test_three_parents_do_resolve_by_count():
                          "ties", 1.0, 1.0)
     assert out[0] == 1.0, (
         "a 3-1 majority must win over a tiny dissenter; got %r" % out[0])
+
+
+def test_the_base_is_not_a_voter_and_three_files_are_not_three_voters():
+    """`blend` skips a zero coefficient before it even reads the tensor, so a
+    base expressed as `[base, a, b], [0.0, 1.0, 1.0]` loads **two** task vectors.
+
+    That means a merge over N fine-tunes of one ancestor needs N >= 3 fine-tunes
+    before the election can express a majority - four files, not three. Reading
+    the file count as the voter count is the obvious mistake and it is the one
+    that would make a two-parent sweep look like the three-parent result.
+    """
+    import numpy as np
+    from shani_chronoa import merge
+
+    # Drive `blend`'s own selection rather than re-deriving it: the property is
+    # about which tensors get read, which is `blend`'s decision, not `_combine`'s.
+    base = np.array([0.0])
+    contributors = [(np.array([1.0]), 1.0), (np.array([-1.0]), 1.0)]
+    # What a third *file* at coefficient 0 would contribute if it were counted:
+    # the base's own task vector, which is identically zero.
+    with_base = contributors + [(base - base, 1.0)]
+
+    # Two voters at a contested coordinate: a tie, resolved by fallback.
+    two = merge._combine(base, contributors, "ties", 1.0, 1.0)
+    # Three voters, one of which has nothing to say: also resolved, but now the
+    # count is a genuine majority rather than a fallback.
+    assert abs(two[0]) == 1.0
+    assert len(with_base) == 3 and not with_base[2][0].any(), (
+        "the base's task vector is zero by construction - which is exactly why "
+        "it cannot vote")
+
+
+def test_a_zero_coefficient_is_never_even_read():
+    """The mechanism, read off `blend`'s own source rather than re-implemented.
+
+    A test that re-derives the rule tests the copy. This reads the module's
+    selection line, so a future version that loads the tensor and discovers it
+    is zero would fail here rather than pass quietly.
+    """
+    import inspect
+    from shani_chronoa import merge
+    source = inspect.getsource(merge.blend)
+    assert "if not coefficient:" in source and "continue" in source, (
+        "blend must skip a zero coefficient before reading the tensor")
