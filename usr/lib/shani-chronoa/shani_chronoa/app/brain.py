@@ -82,6 +82,15 @@ class BrainMixin:
 
     def _open_setup(self) -> None:
         """Show the setup window; when it finishes, pick up a model or voice it installed without a restart."""
+        # **Not during teardown.** A queued "offer setup once" idle can be
+        # drained inside `do_shutdown`, and building a window against an
+        # application that has begun shutting down segfaults the interpreter.
+        # Declining costs nothing: a fresh install that quits before the wizard
+        # appeared gets it on the next launch, because `_setup_needed()` is
+        # unchanged by this.
+        if getattr(self, "_shutting_down", False):
+            logger.info("not opening setup while the application shuts down")
+            return
         from shani_chronoa import setup_wizard
         existing = getattr(self, "_setup_window", None)
         if existing is not None and existing.get_visible():
