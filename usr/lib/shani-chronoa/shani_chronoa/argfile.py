@@ -418,6 +418,33 @@ def reference_command(
 def run_from_file(envelope_path: str) -> int:
     """Child side: rebuild the arguments and run the skill named in the envelope.
 
+    **The `version` field is written and deliberately not read, and this is the
+    note that says so.** `reference_command` stamps `version: 1`, and nothing in
+    this function branches on it - which reads as an oversight and is not one.
+    The transport carries its own program: the child is `python3 -c
+    _REFERENCE_PROGRAM`, whose text comes from *this* file of *this* process, so
+    the writer and the reader are the same code by construction and there is no
+    version skew for a gate to catch. The field exists for a human reading a
+    leftover envelope, not as a compatibility check.
+
+    That is the opposite of the harness rule this repo recorded from ECC's
+    `ecc.session.v1` - *"`schemaVersion` is the only compatibility gate.
+    Consumers MUST branch on it"* - and the difference matters, so it is stated
+    rather than left to be inferred: **a version field is a gate only when the
+    writer and the reader can differ.** Here they cannot, so branching would be
+    theatre. If a future change makes the envelope's shape change while an older
+    reader may still see it, this function grows the branch *then* and not
+    before.
+
+    The module and function names are file content reaching `importlib`, and
+    **that is bounded by how the file is written, not by anything here**: the
+    directory is `mkdtemp` (0700) and the envelope is 0600, and the caller passes
+    `handler_module`/`handler_func` from the skill registry rather than from
+    anything a model said. So the single-user threat model is the whole of it -
+    another local account cannot write the file, and the account that could can
+    already do anything. Recorded because a reader of this function sees an
+    unvalidated import and deserves to find the argument next to it.
+    
     Runs under a fixed program with no interpolated input, so the only thing
     this has to get right is the data. It writes `str(result)` to stdout and
     returns 0, which is exactly what the inline transport's program does, so
