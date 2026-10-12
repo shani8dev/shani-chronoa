@@ -11197,3 +11197,31 @@ The second trap was the fixture: `tests/conftest.py`'s `_hermetic_env` redirects
 measurements skipped on a box that had all three. `in_that_graph` already links the
 cache in for the other measured-engine tests; the new test does the same without
 the PipeWire graph it does not use.
+
+## Correction: `learning.load()` is live, and my earlier claim it was dead was wrong
+
+Earlier this session I reported that `learning.load()` had **no caller in `usr/`**
+and that the live reader was `_entries()`. That was wrong, and it was a grep that
+did not cover the call form: I searched for `learning.load(` and missed the
+**unqualified** in-module call. `load()` has three real callers:
+
+| caller | line | what it is |
+|---|---|---|
+| `train_and_save` | 2220 | the training entry point |
+| `merge_models` | 3023 | the merge verdict path, from the Models panel |
+| `train_and_report` | 4173 | the "is there signal in this log at all" report |
+
+`_entries()` is live too, but on a different surface - `unknown_tool_examples()` and
+`lessons()`, which want raw dicts. Two readers, two shapes, both called.
+
+**Why the mistake mattered.** It made the `active_vector` fix look like dead-code
+cleanup with a live side effect, when the truth is the opposite: `load()` is the
+reader for every training, merge and report path, and the 297x speedup
+(`245b1d8`) was on all of them. Measured after the fix, on this machine's 18.9 MB
+log: **0.23 s cold, 0.000 s warm, 18,787 examples** - against the 24 s this file
+records for the pre-fix path on a smaller 16 MB log.
+
+So the same lesson as the `cache/data-home` miss, from the other side: a grep for
+`module.function(` finds cross-module callers and silently drops the ones inside
+the defining module. For a function in a large file, the search has to include the
+bare `function(` form.
