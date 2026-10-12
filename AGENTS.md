@@ -15354,3 +15354,57 @@ this feature back to HEAD: identical crash, same line.
 `8 passed` where it was five-and-a-crash. This is the most likely single cause
 of the unreadable full-suite result (`8,344 errors`) - a segfault ends the run,
 so everything after it is reported as an error rather than as a pass.
+
+## `rows_of` was dead and its docstring's premise was false (2026-10-12)
+
+Found by extending this session's reachability scan from class methods to
+**module-level** public functions in `gui/surfaces/` - a population it was blind
+to, hiding 85 helpers. Exactly one is unreachable.
+
+`common.rows_of(container)` claimed:
+
+> `Adw.PreferencesGroup` is a `Gtk.ListBox`, so its rows are its children; a
+> plain box built by `group()` holds whatever was appended.
+
+**Measured, both halves are false.** The group `group()` returns is an
+`Adw.PreferencesGroup`, not a `Gtk.ListBox`, and its direct children are not the
+rows. On a group holding three rows it returns **one** child - an internal `Box`.
+The actual subtree:
+
+    PreferencesGroup
+      Box                     <- what rows_of returns
+        Box
+          Label  Label        <- the header
+        Box
+          ListBox
+            ActionRow         <- the rows, three levels down
+
+`Adw.PreferencesGroup` exposes **no public row accessor** (only the generic
+`Gtk.Widget` surface), so there is no way to make it correct without walking
+libadwaita's private composite template. A helper that had zero callers and would
+have returned the wrong thing with total confidence the moment it got one is
+worse than one that is merely unwired. Retired with the reason recorded, the way
+`ipc.py` and `scan_archive.py` were; `typing.List` went with it as the only other
+user.
+
+### And the self-contamination trap, three times in one file
+
+The scan reads the whole tree and lives inside it, so **naming a finding in a
+docstring puts the name in the source and the dead thing reads as live.** It
+happened three times in `test_no_surface_method_is_unreachable.py`: the control
+for `set_suggestion_handler`, then that control's expected value, then `_index`'s
+own docstring - and a fourth time for `rows_of` when the module-level population
+was added, which is why the first extended run reported the tree clean. **Each
+time the assertion passed for the wrong reason.**
+
+The fix is architectural: `_index` excludes this file, and a guard asserts the
+exclusion is in effect rather than merely claimed. Composing names at runtime was
+the first attempt and was the wrong fix - it made the docstrings unreadable to
+defend against one name when the exclusion handles every future name at once.
+
+This is the same family as the enum scan that found its own literals, the grep
+that matched its own comment, and `price`/`collapse` matching English words:
+**a scanner whose needle is in its own input reports nothing.** The difference
+here is that the needle was a *finding being documented*, which is the hardest
+kind to notice because the prose is doing its job.
+
