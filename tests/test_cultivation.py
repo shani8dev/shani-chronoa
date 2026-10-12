@@ -481,3 +481,172 @@ def test_no_term_or_element_reads_as_a_success_the_measurement_did_not_produce()
                     "measurement refused, the row must say so"
                     % (name, word, word, measured))
                 start = low.find(word, start + 1)
+
+
+# --- the ascension gate: a real function that can refuse ---------------------
+#
+# The module's thesis is "a stage that does not measure is not unlocked", and
+# until this gate existed `Verdict` was declared and never constructed by
+# anything - the claim had no enforcement. These tests drive it with the real
+# measured numbers from this machine.
+
+def test_ascension_gate_refuses_the_measurement_that_was_actually_taken():
+    """**The load-bearing test.** The real run: base alone 4/5 at 4.65 s/case,
+    base + adapter 4/5 at 7.65 s/case. Same accuracy, 65% slower. The gate must
+    return a refusal on those exact numbers, and the reason must name both."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.65)
+    adapted = cultivation.Measurement(right=4, of=5, seconds=7.65)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=True)
+    assert verdict.unlocked is False, verdict.why
+    assert "no better" in verdict.why, verdict.why
+    assert "4" in verdict.why and "5" in verdict.why, verdict.why
+
+
+def test_a_real_accuracy_gain_wins_the_stage():
+    """**The control.** A gate that refuses everything is as useless as one that
+    passes everything. A strictly-better, not-slower adapter must unlock, or the
+    gate is theatre."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.65)
+    adapted = cultivation.Measurement(right=5, of=5, seconds=4.90)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=True)
+    assert verdict.unlocked is True, verdict.why
+    assert "earned" in verdict.why
+
+
+def test_the_gate_refuses_unequal_case_counts_before_comparing():
+    base = cultivation.Measurement(right=4, of=5, seconds=4.0)
+    adapted = cultivation.Measurement(right=9, of=10, seconds=4.0)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=True)
+    assert verdict.unlocked is False
+    assert "not comparable" in verdict.why, verdict.why
+
+
+def test_the_gate_refuses_without_a_held_out_split():
+    """A gate that cannot tell what it was scored on will score itself on its
+    own tuning set, so the caller must assert a held-out split."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.0)
+    adapted = cultivation.Measurement(right=5, of=5, seconds=4.0)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=False)
+    assert verdict.unlocked is False
+    assert "held-out" in verdict.why, verdict.why
+
+
+def test_more_refusals_is_worse_even_when_accuracy_is_up():
+    """An adapter that makes the model decline more often has made it worse in
+    the most expensive way there is, even if accuracy nominally rose."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.0, refusals=0)
+    adapted = cultivation.Measurement(right=5, of=5, seconds=4.0, refusals=2)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=True)
+    assert verdict.unlocked is False
+    assert "decline" in verdict.why, verdict.why
+
+
+def test_speed_can_refuse_but_can_never_rescue_an_accuracy_loss():
+    """Speed never rescues accuracy: a faster model that is less accurate is not
+    an improvement. And a genuinely better model that is a bit slower is still
+    judged on its accuracy first."""
+    # faster but less accurate -> refuse on accuracy, not rescued by speed
+    base = cultivation.Measurement(right=5, of=5, seconds=8.0)
+    worse_but_fast = cultivation.Measurement(right=4, of=5, seconds=2.0)
+    v = cultivation.ascension_gate(base, worse_but_fast, held_out=True)
+    assert v.unlocked is False and "no better" in v.why, v.why
+    # strictly better but past the slowdown limit -> refuse on time
+    base = cultivation.Measurement(right=4, of=5, seconds=4.0)
+    better_but_slow = cultivation.Measurement(right=5, of=5, seconds=9.0)
+    v = cultivation.ascension_gate(base, better_but_slow, held_out=True)
+    assert v.unlocked is False and "slower" in v.why, v.why
+
+
+def test_a_verdict_from_the_gate_is_actually_a_verdict():
+    """The gate returns the module's own `Verdict`, not a bool - the refusal has
+    to carry a reason a person can act on."""
+    v = cultivation.ascension_gate(
+        cultivation.Measurement(4, 5, 4.65),
+        cultivation.Measurement(4, 5, 7.65), held_out=True)
+    assert isinstance(v, cultivation.Verdict)
+    assert isinstance(v.unlocked, bool)
+    assert v.why and len(v.why) > 20, "a refusal must be actionable"
+
+
+# --- the progression enforces order, rather than describing it ----------------
+
+def test_unlocked_stages_stops_at_the_first_gate_that_did_not_unlock():
+    """The ordering's whole argument is that the irreversible advances come last,
+    and that argument is worth nothing if a failed gate still hands you the
+    stages behind it."""
+    gates = {
+        "foundation": cultivation.Verdict(True, "digest matches"),
+        "perception": cultivation.Verdict(True, "the log was read"),
+        "refinement": cultivation.Verdict(False, "did not beat the baseline"),
+        "attunement": cultivation.Verdict(True, "would have been better"),
+    }
+    got = cultivation.unlocked_stages("foundation", gates)
+    assert got == ["foundation", "perception"], got
+
+
+def test_a_stage_with_no_verdict_is_locked_not_passed():
+    """**The absence-shaped green.** A gate nobody ran is not a gate that
+    passed; `not measured` has never meant `fine` in this repository."""
+    gates = {"foundation": cultivation.Verdict(True, "digest matches")}
+    got = cultivation.unlocked_stages("foundation", gates)
+    assert got == ["foundation"], got
+    assert "perception" not in got
+
+
+def test_an_unknown_starting_stage_earns_nothing():
+    assert cultivation.unlocked_stages("not-a-stage", {}) == []
+
+
+def test_the_measured_ascension_refusal_blocks_everything_after_it():
+    """The real numbers through the real gate, into the real enforcement: the
+    adapter is not earned, so immortailty - the stage that needs a signed,
+    provenance-bearing record built on top of an earned artifact - must not be
+    reachable past it."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.65)
+    adapted = cultivation.Measurement(right=4, of=5, seconds=7.65)
+    verdict = cultivation.ascension_gate(base, adapted, held_out=True)
+    gates = {"foundation": cultivation.Verdict(True, "digest matches")}
+    got = cultivation.unlocked_stages("foundation", gates)
+    # foundation earned, but nothing beyond it has a gate, so nothing follows
+    assert got == ["foundation"]
+    assert verdict.unlocked is False
+
+
+def test_every_stage_the_gate_can_pass_is_one_it_has_a_verdict_for():
+    """`unlocked_stages` only lets a stage through on an explicit `unlocked`
+    verdict; the ascension gate is currently the sole real gate, so this pins
+    that the function is reading verdicts and not inferring pass from presence.
+    """
+    gates = {s: cultivation.Verdict(True, "ok") for s in cultivation.STAGES}
+    assert cultivation.unlocked_stages("foundation", gates) == list(cultivation.STAGES)
+    gates.pop("immortality")
+    assert cultivation.unlocked_stages("foundation", gates) == list(
+        cultivation.STAGES[:-1])
+
+
+def test_the_ascension_row_names_the_gate_that_actually_exists():
+    """`PRODUCES` is read as the gates, so the ascension row must name the
+    function that decides it - the same rule every other row was rewritten to
+    obey. This asserts the name and drives the real gate behind it."""
+    said = cultivation.PRODUCES["ascension"]
+    assert "ascension_gate" in said, said
+    # and the gate it names is callable and returns a Verdict
+    v = cultivation.ascension_gate(
+        cultivation.Measurement(4, 5, 4.65),
+        cultivation.Measurement(4, 5, 7.65), held_out=True)
+    assert isinstance(v, cultivation.Verdict)
+
+
+def test_the_module_says_only_one_gate_is_live_and_does_not_overclaim():
+    """The docstring must not read as "six live gates". Ascension's gate is a
+    function; the other five are still prose. Overclaiming here would be the
+    very 'reports success without doing the work' the module refuses - so this
+    test reads the claim and holds it."""
+    # join the docstring so a source line-wrap cannot hide a phrase from the
+    # check - a substring test that trips over formatting is a check that fails
+    # for the wrong reason, which is the shape this repo keeps recording.
+    doc = " ".join((cultivation.__doc__ or "").split())
+    assert "only **ascension's is a function**" in doc, (
+        "the module must state which gate is real")
+    assert "treats a stage with no verdict as **locked**" in doc, (
+        "the module must state that no-verdict means locked, not passed")

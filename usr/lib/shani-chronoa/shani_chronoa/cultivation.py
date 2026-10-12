@@ -113,13 +113,22 @@ person acts on.
 **What is currently true, measured rather than asserted.**
 
 **The three axes.** `STAGES` is *where you are*, `RESOURCES` is *what you
-have*, and `TERMS` is the **genre vocabulary those two are written in** - kept
-because a term naming nothing here would be decoration, so each one either
-names the function that decides it or is refused with the reason. The
+have*, and `TERMS` / `ELEMENTS` are the **genre vocabulary those two are written
+in** - kept because a term naming nothing here would be decoration, so each one
+either names the function that decides it or is refused with the reason. The
 progression is the genre's own shape (a ladder with prerequisites, bounded
 resources, and a trial at each advance) used honestly: the trial really refuses,
 and "immortal" really means attributable and reversible, which is the only
 part of the metaphor that survives contact with a machine.
+
+**Which gates are real, stated so this is not overclaimed.** `PRODUCES` names
+six gates; only **ascension's is a function** (`ascension_gate`), and it is the
+one with a real held-out measurement behind it. The other five still refuse only
+in prose, and `unlocked_stages` treats a stage with no verdict as **locked**,
+not passed - so the honest state is that nothing is currently unlocked past
+Foundation except by supplying verdicts. This is stated here because a table of
+six gates that reads as six live checks would be exactly the "machinery whose
+only purpose is to report success" this module argues against.
 
 **What is currently true, measured rather than asserted.**
 
@@ -168,7 +177,10 @@ PRODUCES: Dict[str, str] = {
     "refinement": "a router that beats the majority-tool baseline",
     "attunement": "a merge whose `merge.gate` verdict is `better` - at the "
                    "same quantisation as its parents, which is not automatic",
-    "ascension": "a reversible adapter that measures on a held-out split",
+    "ascension": "a reversible adapter that `ascension_gate` unlocks - which "
+                  "means strictly more right-tool-and-arguments than the base "
+                  "on a held-out split, no more refusals, and not materially "
+                  "slower. A tie is a refusal, not a win",
     "immortality": "a signed record whose digest verifies and whose prior "
                    "version still exists",
 }
@@ -633,6 +645,101 @@ class Verdict(NamedTuple):
     why: str
 
 
+class Measurement(NamedTuple):
+    """What `tools/task_eval.py` reports for one configuration, and nothing else.
+
+    `right` is **right tool and right arguments**, which is the count that
+    matters - `right_tool` alone is the number a tool-selection harness makes
+    look good while every argument is wrong. `of` is the case count, kept so two
+    measurements can refuse to be compared when they were run over different
+    numbers of cases, which is otherwise a comparison of two different
+    experiments.
+    """
+    right: int
+    of: int
+    seconds: float
+    refusals: int = 0
+
+
+#: How much slower an adapter may be before it is refused. 25% is chosen, not
+#: assumed: at 1.7B on this machine one adapter's measured overhead was 65%, and
+#: a gate set at 100% would have waved that through.
+SLOWDOWN_LIMIT = 0.25
+
+
+def ascension_gate(base: Measurement, adapted: Measurement, *,
+                   held_out: bool = False,
+                   slowdown_limit: float = SLOWDOWN_LIMIT) -> Verdict:
+    """渡劫: does this adapter *earn* its place beside the base?
+
+    **This function is why the ASCENSION row is a measurement rather than a
+    hope.** Until now `PRODUCES["ascension"]` said "a reversible adapter that
+    measures on a held-out split" in prose, `Verdict` was declared and never
+    constructed by anything, and no gate in this module could refuse anything -
+    so the module's own thesis, *"a stage that does not measure is not
+    unlocked"*, had no enforcement anywhere in it.
+
+    Four refusals, each before the accuracy comparison because each is a
+    cheaper way to be wrong:
+
+    1. **not comparable** - the two runs did not cover the same cases, so the
+       numbers are two experiments and not a comparison;
+    2. **no held-out split** - the caller did not assert one, and a gate that
+       cannot tell what it was scored on will happily score itself on its own
+       tuning set;
+    3. **more refusals** - an adapter that makes the model decline more often
+       has made it worse in the most expensive way there is;
+    4. **a tie is not a win** - identical accuracy is `merge.gate`'s `no-better`
+       refusing rather than passing, and it is the same rule for the same
+       reason: a table that reports "better" for something that did not differ
+       is how a number reads as a result when nothing distinguished it.
+
+    Only then does speed apply, because an adapter that is slower *and* no more
+    accurate has cost the user time and bought nothing. Speed can never rescue
+    an accuracy loss - a 10x faster model that is less accurate is not an
+    improvement, and a gate that let it through would be measuring the wrong
+    thing.
+
+    **Measured on this machine, the verdict is a refusal**: base alone 4/5 at
+    4.65 s/case against base + adapter 4/5 at 7.65 s/case, same case missed,
+    zero refusals either way - equal accuracy, 65% slower. `fits_base` is
+    deliberately *not* a parameter, because it was checked separately
+    (`adapter.check` passes on the 1.7B) and passing it is not the same fact as
+    earning the place. **Fitting is necessary and not sufficient**, and this is
+    the first measurement in the repo that establishes the second half.
+    """
+    if base.of <= 0 or adapted.of != base.of:
+        return Verdict(False, (
+            f"not comparable: the two runs covered {base.of} and {adapted.of} "
+            "cases, so this is two experiments rather than a comparison"))
+    if not held_out:
+        return Verdict(False, (
+            "no held-out split was asserted, and a gate that cannot tell what "
+            "it was scored on will score itself on its own tuning set"))
+    if adapted.refusals > base.refusals:
+        return Verdict(False, (
+            f"the adapter makes the model decline more often "
+            f"({adapted.refusals} against {base.refusals}); that is worse in "
+            "the most expensive way there is"))
+    if adapted.right <= base.right:
+        return Verdict(False, (
+            f"no better: {adapted.right} of {adapted.of} right tool and "
+            f"arguments against {base.right} of {base.of} for the base alone. "
+            "A tie is a refusal, not a win"))
+    if base.seconds > 0:
+        slower = adapted.seconds / base.seconds - 1.0
+        if slower > slowdown_limit:
+            return Verdict(False, (
+                f"the adapter is {slower * 100:.0f}% slower "
+                f"({adapted.seconds:.2f} s/case against {base.seconds:.2f}), "
+                f"past the {slowdown_limit * 100:.0f}% limit, for accuracy it "
+                "did not earn"))
+    return Verdict(True, (
+        f"earned: {adapted.right} of {adapted.of} against {base.right} of "
+        f"{base.of}, at {adapted.seconds:.2f} s/case against "
+        f"{base.seconds:.2f}, and reversible by dropping the file"))
+
+
 def stage_status(current: str) -> List[str]:
     """The stages at or after `current`. Unknown names get nothing.
 
@@ -649,3 +756,35 @@ def next_stage(current: str) -> Optional[str]:
     """The stage after `current`, or None at the end - and None for nonsense."""
     tail = stage_status(current)
     return tail[1] if len(tail) > 1 else None
+
+
+def unlocked_stages(earliest: str, gates: Dict[str, Verdict]) -> List[str]:
+    """The stages actually earned, given a verdict per stage.
+
+    **This is the enforcement the module's thesis needed and did not have.**
+    `stage_status` walks a hard-coded tuple, so it answers "what comes after
+    this" without consulting whether anything was measured - which is the same
+    shape as a checklist that ticks itself. This walks from `earliest` forward
+    and **stops at the first stage whose gate did not unlock**, because the
+    ordering's whole argument (`BOUNDARIES`) is that the expensive, irreversible
+    advances come last, and that argument is worth nothing if a failed gate
+    still hands you the stages behind it.
+
+    A stage with **no verdict at all** is treated as locked, not as passed. That
+    is the deliberate asymmetry: a gate nobody ran is the absence-shaped green
+    this repository keeps catching, and "not measured" has never meant "fine".
+
+    Ascension is the only stage whose gate is a function here; the other five
+    are named in `PRODUCES` and still refuse only in prose, so a caller passing
+    no verdict for them gets them locked - which is the honest answer rather
+    than the convenient one.
+    """
+    if earliest not in STAGES:
+        return []
+    earned: List[str] = []
+    for stage in STAGES[STAGES.index(earliest):]:
+        verdict = gates.get(stage)
+        if verdict is None or not verdict.unlocked:
+            break
+        earned.append(stage)
+    return earned
