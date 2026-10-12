@@ -145,6 +145,18 @@ only purpose is to report success" this module argues against.
   copying of the parent's KV section, not more type mapping.**
 - 渡劫 has no code. `llama-server` on this box already supports `--lora`,
   `--lora-scaled` and `POST /lora-adapters`; nothing in this package passes them.
+- **渡劫's stack now exists and its cost is measured, so "has no code" is no
+  longer the whole of the gap.** `cache/cultivate-libs` carries torch
+  2.14.1+cpu, peft 0.21.2, transformers 5.19.0 and accelerate 1.15.0 (none
+  packaged; both `cache/` trees gitignored), and `tools/lora_timing.py` times a
+  real rank-8 LoRA over `q/k/v/o_proj` on Qwen3-1.7B in safetensors. Measured
+  here: **31.8 s per optimiser step at 512 tokens, 8 examples per step, 4
+  threads, 15.9 GB peak RSS** - so **one epoch over the 165 training rows of
+  `tools/reranker_corpus.json` is about 15.5 hours**, and that is the optimiser
+  alone, with no evaluation and no checkpointing. **On a machine of this class
+  the path is viable and unattended**, and the honest reason not to start it is
+  that 15.5 hours buys one epoch of a measurement whose instrument does not yet
+  exist - `ascension_gate` scores arguments and no corpus case carries any.
 - **The measurement that justifies "models second" cannot be reproduced here.**
   `model_zoo` cites 11,868 recorded calls with 94% identical labels; this
   machine's `tool_calls.log` holds **one**. `model_zoo.compare()` returns **zero
