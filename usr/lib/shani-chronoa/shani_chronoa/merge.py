@@ -225,9 +225,111 @@ def check_compatible(paths: Sequence[Path]) -> Dict[str, object]:
             "basename": base.get("general.basename")}
 
 
+def _combine(base_arr, task_vectors, method, density, lam):
+    """Combine one tensor's task vectors. Pure arithmetic, no files.
+
+    Split out of `blend` so the arithmetic is testable without a 600 MB file,
+    which is the only reason these two algorithms can both be compared at all.
+
+    `task_vectors` is a list of `(array, coefficient)`; `base_arr` is the
+    reference the vectors are differences *from*.
+
+    **The two methods, and why there are two.** Naive task arithmetic sums every
+    difference from the base; when the parents disagree, contributions cancel
+    signal and compound noise. TIES adds the two steps every method in
+    mergekit's family converges on: *sparsify* each vector so only its largest
+    changes survive, then take a *sign consensus* so a coordinate is decided by
+    whoever agrees on its direction rather than by whoever is loudest.
+
+    Measured on the one sibling pair this box has
+    (`Qwen3-0.6B-Base` 48.770 against `Qwen3-0.6B` 76.469, same corpus, a 57%
+    gap), a midpoint of the two models lands between them and beats neither -
+    which is the interference this exists for, observed rather than argued.
+    """
+    import numpy as np
+
+    reference = np.asarray(base_arr, dtype=np.float32)
+    if lam == 0.0 or not task_vectors:
+        return reference
+
+    if method == "task_arithmetic":
+        total = np.zeros_like(reference)
+        for array, coefficient in task_vectors:
+            total += np.float32(coefficient) * (np.asarray(array, np.float32)
+                                                - reference)
+        return reference + np.float32(lam) * total
+
+    if method != "ties":
+        raise MergeRefusal(
+            f"unknown merge method {method!r} - this is task_arithmetic or "
+            "ties, and a name that is neither is a typo rather than a method")
+
+    if not 0.0 < density <= 1.0:
+        raise MergeRefusal(
+            f"TIES density is {density} - it is the fraction of each task "
+            "vector that survives, so 0 drops every change and makes a silent "
+            "copy of the base, and anything above 1 is not a fraction")
+
+    # Trim, per tensor. mergekit's TIES trims by magnitude within each tensor;
+    # DELLA is the row-wise variant and is not this.
+    trimmed = []
+    for array, coefficient in task_vectors:
+        vector = np.float32(coefficient) * (np.asarray(array, np.float32)
+                                            - reference)
+        flat = vector.reshape(-1)
+        keep = max(1, int(round(float(density) * flat.size)))
+        if keep >= flat.size:
+            trimmed.append(vector)
+            continue
+        # The largest `keep` by magnitude; ties broken by index so the result
+        # is deterministic rather than dependent on the partition's ordering.
+        cut = np.argpartition(np.abs(flat), flat.size - keep)[flat.size - keep:]
+        sparse = np.zeros_like(flat)
+        sparse[cut] = flat[cut]
+        trimmed.append(sparse.reshape(vector.shape))
+
+    # **Elect Sign: majority by count, not by magnitude.** mergekit sums each
+    # task vector's *sign* and takes the sign of that count, so a coordinate
+    # where three parents agree and one dissents is decided by the three
+    # whatever their magnitudes. Summing magnitudes instead would let one large
+    # vector outvote three small ones, which is the failure the step exists to
+    # avoid. An exact count tie has no majority at all, so it falls back to
+    # summed magnitude; that fallback is a stated choice, not mergekit's rule.
+    votes = np.zeros_like(reference)
+    positive = np.zeros_like(reference)
+    negative = np.zeros_like(reference)
+    for vector in trimmed:
+        votes += np.sign(vector)
+        positive += np.where(vector > 0, vector, np.float32(0.0))
+        negative += np.where(vector < 0, -vector, np.float32(0.0))
+    elected = np.where(votes > 0, np.float32(1.0),
+                       np.where(votes < 0, np.float32(-1.0), np.float32(0.0)))
+    undecided = elected == 0.0
+    elected = np.where(undecided,
+                       np.where(positive >= negative, np.float32(1.0),
+                                np.float32(-1.0)),
+                       elected)
+
+    # Disjoint mean: only the contributions that agree with the elected sign
+    # count, and only when at least one does. A coordinate with no agreement
+    # keeps the base, because there is no change worth importing.
+    agree = np.zeros_like(reference)
+    counts = np.zeros(reference.shape, dtype=np.int32)
+    for vector in trimmed:
+        mask = np.sign(vector) == elected
+        agree += np.where(mask, vector, np.float32(0.0))
+        counts += mask
+    total = np.divide(agree, np.maximum(counts, 1),
+                      out=np.zeros_like(reference), where=counts > 0)
+    return reference + np.float32(lam) * total
+
+
 def blend(parents: Sequence[Path], weights: Sequence[float],
           base: Optional[Path] = None,
-          out_path: Optional[Path] = None) -> Path:
+          out_path: Optional[Path] = None,
+          method: str = "task_arithmetic",
+          density: float = 0.5,
+          lam: float = 1.0) -> Path:
     """`base + sum(lambda_i * (parent_i - base))`, written as a single F16 GGUF.
 
     `base` defaults to `parents[0]` with its coefficient taken as the reference,
@@ -282,17 +384,15 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
     hows = set()
     blended = []
     for name, (_shape, _ref_data, ref_type) in ref_map.items():
-        acc = np.array(ref_float[name], dtype=np.float32)
+        vectors = []
         for index, coefficient in enumerate(weights):
             if not coefficient:
                 continue
             _shape, data, qtype = loaded[index][name]
             array, how = to_float32(data, qtype)
             hows.add(how)
-            # Task arithmetic: every parent contributes its *difference* from the
-            # reference, never its raw weights. That is what makes lambda=1
-            # return that parent exactly, which the probe asserts.
-            acc = acc + np.float32(coefficient) * (array - ref_float[name])
+            vectors.append((array, coefficient))
+        acc = _combine(ref_float[name], vectors, method, density, lam)
         blended.append((name, acc, _keep.get(ref_type,
                                              gguf_write.GGML_TYPE_F16)))
 
@@ -340,6 +440,16 @@ def perplexity(path: Path, corpus: Optional[Path] = None) -> Optional[float]:
     takes the same stance: "installed" and "usable" are different claims, and a
     gate that cannot run must not be a gate that says yes.
     """
+    # **A path that does not exist is not measurable, and saying so is the whole
+    # contract.** The first version logged `path.name` in its own warning, so
+    # passing the `None` that `quantize()` returns for a failed or absent
+    # `llama-quantize` raised `AttributeError` *inside the probe* - which reads
+    # as the merge being broken rather than as the measurement never happening.
+    # `quantize` returns None for three different reasons and all three mean
+    # "unmeasured", so the None is checked before anything else touches it.
+    if path is None or not Path(path).is_file():
+        logger.warning("merge: no model file to measure (%s)", path)
+        return None
     binary = shutil.which("llama-perplexity")
     if not binary:
         return None
