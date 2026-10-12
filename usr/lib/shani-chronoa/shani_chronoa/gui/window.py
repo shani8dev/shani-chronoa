@@ -1199,6 +1199,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # state the column's own widgets report (the orb state, the live tool)
         # and pointing it at half-built widgets would show "Idle" forever.
         self._rail = None                      # built at the end of this method
+        #: What this session's skills declared they made, newest last.
+        self._artifacts: list = []
         self._rail_row = None
         self._rail_toggle = Gtk.ToggleButton()
         self._rail_toggle.set_icon_name("sidebar-show-right-symbolic")
@@ -1553,7 +1555,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._rail = rail_module.NowRail(get_state=self._rail_state,
                                          get_tool=self._rail_tool,
                                          on_open=self._show_surface,
-                                         get_context=self._rail_context)
+                                         get_context=self._rail_context,
+                                         get_artifacts=self._rail_artifacts)
         self._chat_row.append(self._rail)
         # **Hidden, not shrunk, on a narrow window.** At a fraction of its width
         # the rail wraps every label into two and three lines and reads as a
@@ -2465,6 +2468,30 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         so a reply containing a path cannot put a file on screen.
         """
         self._transcript.add_tool_call(name, arguments, result, ok, artifacts)
+        # **Collected here, where they are already resolved.** These have been
+        # through `tools.artifacts_for`, so they are absolute and present - the
+        # rail reads the same list the transcript drew its thumbnails from,
+        # rather than a second source that could disagree with the first.
+        self._note_artifacts(artifacts)
+
+    #: The rail shows the most recent `RAIL_ARTIFACT_LIMIT`; the rest stay in
+    #: the transcript. Capped so one long turn that made thirty files does not
+    #: turn the rail into a file browser.
+    RAIL_ARTIFACT_LIMIT = 6
+
+    def _note_artifacts(self, artifacts) -> None:
+        """Remember what this session made, for the rail's "Made" section."""
+        if not artifacts:
+            return
+        for path in artifacts:
+            if path not in self._artifacts:
+                self._artifacts.append(path)
+        self._artifacts = self._artifacts[-self.RAIL_ARTIFACT_LIMIT:]
+        if getattr(self, "_rail", None) is not None:
+            self._rail.refresh()
+
+    def _rail_artifacts(self):
+        return list(self._artifacts)
 
     def add_notice_row(self, sentence: str, kind: str = "compaction") -> None:
         """A housekeeping note in the transcript - see the transcript's own

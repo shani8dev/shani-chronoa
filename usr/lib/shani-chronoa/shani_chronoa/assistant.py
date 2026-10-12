@@ -1116,7 +1116,19 @@ class Assistant:
                     # text it returns.
                     ok = not str(result).lstrip().lower().startswith(("error", "refused"))
                     try:
-                        on_tool_result(name, arguments, str(result), ok)
+                        # **The clipped text, not the raw one.** This callback
+                        # fires *before* the clip is applied to what goes into the
+                        # history, so the card in the transcript was being handed
+                        # the full result while the model was handed the cut one.
+                        # Two consequences, both bad: the person expanding the card
+                        # read output the model never saw and reasonably took it
+                        # as what the model worked from, and nothing anywhere said
+                        # a megabyte of it had been dropped. Clipping here means
+                        # the card shows exactly what the model was given, with
+                        # the note naming how much was withheld and how to get
+                        # it.
+                        on_tool_result(name, arguments,
+                                       _clip_tool_result(str(result)), ok)
                     except Exception as e:
                         logger.error(f"on_tool_result callback failed: {e}")
                 if sink is not None:

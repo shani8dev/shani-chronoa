@@ -49,7 +49,10 @@ gi.require_version("Adw", "1")
 gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gtk, Pango  # noqa: E402 - after require_version
 
+from pathlib import Path  # noqa: E402 - used by the Made section
+
 from shani_chronoa import config as config_mod  # noqa: E402
+from shani_chronoa import files  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +190,8 @@ class NowRail(Gtk.Box):
     def __init__(self, get_state: Optional[Callable[[], str]] = None,
                  get_tool: Optional[Callable[[], str]] = None,
                  on_open: Optional[Callable[[str], None]] = None,
-                 get_context: Optional[Callable[[], object]] = None) -> None:
+                 get_context: Optional[Callable[[], object]] = None,
+                 get_artifacts: Optional[Callable[[], object]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("now-rail")
         self.set_size_request(RAIL_WIDTH, -1)
@@ -196,6 +200,11 @@ class NowRail(Gtk.Box):
         self.get_tool = get_tool or (lambda: "")
         self.on_open = on_open or (lambda _name: None)
         self.get_context = get_context or (lambda: None)
+        #: What this session's skills declared they made. A callback for the same
+        #: reason as the others: the rail reads, it does not own. The paths have
+        #: already been through `tools.artifacts_for`, so they are absolute and
+        #: present by the time they arrive here.
+        self.get_artifacts = get_artifacts or (lambda: ())
 
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -217,11 +226,12 @@ class NowRail(Gtk.Box):
         self._context = _Section("Context")
         self._timers = _Section("Timers")
         self._changed = _Section("Changed")
+        self._made = _Section("Made")
         self._tasks = _Section("Tasks")
         self._goals = _Section("Goals")
         self._posture = _Section("Posture")
         for section in (self._now, self._context, self._timers, self._changed,
-                        self._tasks, self._goals, self._posture):
+                        self._made, self._tasks, self._goals, self._posture):
             inner.append(section)
 
         scroller.set_child(inner)
@@ -334,6 +344,69 @@ class NowRail(Gtk.Box):
         if len(pairs) > len(shown):
             self._changed.empty(f"and {len(pairs) - len(shown)} more")
 
+    def _fill_made(self) -> None:
+        """The files this session's skills declared they made.
+
+        **Next to "Changed" because they are the two halves of one thought** -
+        what Chronoa altered, and what it produced. A file made three turns ago
+        is otherwise only findable by scrolling back to the turn that mentioned
+        it, which is the same problem as having to remember which panel a thing
+        went into.
+
+        Newest first, because the file just made is the one being looked for,
+        and the transcript keeps the chronological order for anyone reading it as
+        a conversation.
+
+        A path that has since been deleted is dropped rather than listed: a row
+        that offers to open something that is not there is worse than the row
+        not existing. It is checked here rather than trusted from the caller
+        because a file made minutes ago can go in the time since.
+        """
+        self._made.clear()
+        try:
+            paths = list(self.get_artifacts() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: artifacts unreadable: %s", exc)
+            self._made.empty("Could not read what Chronoa made")
+            return
+        present = [p for p in reversed(paths) if Path(p).exists()]
+        gone = len(paths) - len(present)
+        if not present:
+            self._made.empty("Nothing made yet in this conversation")
+            return
+        for path in present[:6]:
+            p = Path(path)
+            try:
+                size = files.human_size(p.stat().st_size) if p.is_file() else "folder"
+            except OSError:
+                continue
+            self._made.link(p.name, size, self._icon_for(p), self.on_open)
+        if len(present) > 6:
+            self._made.empty(f"and {len(present) - 6} more in the conversation")
+        elif gone:
+            self._made.empty(f"{gone} removed since it was made")
+
+    #: Icons are checked with `Gtk.IconTheme.has_icon` against the themes on this
+    #: machine, not remembered. **`image-x-generic-symbolic` and
+    #: `image-missing-symbolic` do not exist here** - measured - and an earlier
+    #: draft reached for both, behind a `_has()` guard that would have quietly
+    #: substituted nothing at all. A missing icon renders as a blank, which looks
+    #: like a row with no icon rather than like a mistake.
+    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+    TEXT_SUFFIXES = (".md", ".txt", ".html")
+
+    @classmethod
+    def _icon_for(cls, path: Path) -> str:
+        """An icon that means the *kind* of thing, decided by what it is."""
+        if path.is_dir():
+            return "folder-symbolic"
+        suffix = path.suffix.lower()
+        if suffix in cls.IMAGE_SUFFIXES:
+            return "folder-documents-symbolic"
+        if suffix in cls.TEXT_SUFFIXES:
+            return "text-x-generic-symbolic"
+        return "document-open-symbolic"
+
     def _fill_tasks(self) -> None:
         self._tasks.clear()
         config = config_mod.ChronoaConfig()
@@ -441,8 +514,8 @@ class NowRail(Gtk.Box):
         """Rebuild every section. Never raises: a rail that cannot be built
         must leave the window exactly as it was."""
         for fill in (self._fill_now, self._fill_context, self._fill_timers,
-                     self._fill_changed, self._fill_tasks, self._fill_goals,
-                     self._fill_posture):
+                     self._fill_changed, self._fill_made, self._fill_tasks,
+                     self._fill_goals, self._fill_posture):
             try:
                 fill()
             except Exception as exc:  # noqa: BLE001

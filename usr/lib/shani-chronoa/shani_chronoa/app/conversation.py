@@ -322,6 +322,17 @@ class ConversationMixin:
             on_cloud_turn=self._on_cloud_turn,
         )
 
+    #: The running tool's clock. `None` when nothing is running.
+    _tool_clock = None
+    #: Bumped each time a tool starts; a tick whose token no longer matches is
+    #: stale and removes itself, which is what keeps a slow tool's last tick from
+    #: landing on the *next* tool's status. Same shape as the transcript's
+    #: `_follow_generation`.
+    _tool_clock_token = 0
+    _clock_token_at_start = -1
+    _tool_clock_name = ""
+    _tool_clock_started = 0.0
+
     def _on_compaction(self, sentence: str) -> None:
         """A context notice in the transcript, where the conversation is.
 
@@ -347,14 +358,66 @@ class ConversationMixin:
         GLib.idle_add(self._on_tool_call_main, name)
 
     def _on_tool_call_main(self, name: str) -> bool:
-        """Show which skill is currently running instead of a generic status."""
-        if self.window:
-            self.window.set_status(f"{name.replace('_', ' ').capitalize()}...")
+        """Show which skill is currently running instead of a generic status.
+
+        **And how long it has been.** A 40-second `generate_image` showed a
+        status line that said "Generate image..." and never changed, so the only
+        question a person could answer - *is it working or has it hung?* - had no
+        answer in it. A number that moves is the whole fix, and it is why this
+        ticks rather than adding a placeholder card: the card is deliberately
+        built at result time, when the arguments and the output exist together,
+        and a placeholder would undo that on the most visible surface in the app.
+
+        The clock is a `GLib` timeout on the main thread, like every other UI
+        update here, and each tick re-checks `self._tool_clock_token` so a tool
+        that has already finished cannot overwrite the next one's status.
+        """
+        self._stop_tool_clock()
+        if not self.window:
+            return GLib.SOURCE_REMOVE
+        self._tool_clock_token += 1
+        # **Recorded after the bump.** The tick is stale unless the token still
+        # matches, so writing the "current" value before the increment made every
+        # first tick stale on arrival - measured: the status never left
+        # "Generate image..." no matter how long the tool ran.
+        self._clock_token_at_start = self._tool_clock_token
+        self._tool_clock_name = name
+        self._tool_clock_started = time.monotonic()
+        self.window.set_status(self._tool_clock_text(0))
+        self._tool_clock = GLib.timeout_add_seconds(
+            1, self._on_tool_clock_tick)
         return GLib.SOURCE_REMOVE
+
+    def _tool_clock_text(self, seconds: float) -> str:
+        said = self._tool_clock_name.replace("_", " ").capitalize()
+        return f"{said}... {int(seconds)}s" if seconds >= 1 else f"{said}..."
+
+    def _on_tool_clock_tick(self) -> bool:
+        """One tick. Returns False - i.e. removes itself - if it is stale."""
+        if self._tool_clock_token != self._clock_token_at_start:
+            return GLib.SOURCE_REMOVE
+        if self.window:
+            self.window.set_status(
+                self._tool_clock_text(time.monotonic() - self._tool_clock_started))
+        return GLib.SOURCE_CONTINUE
+
+    def _stop_tool_clock(self) -> None:
+        """Stop ticking, so a finished tool's clock cannot outlive it.
+
+        Bumping the token is what invalidates a tick that is already queued: the
+        timeout may have fired before `source_remove` reached it.
+        """
+        if self._tool_clock is not None:
+            GLib.source_remove(self._tool_clock)
+            self._tool_clock = None
+        self._tool_clock_token += 1
 
     def _on_tool_result_main(self, name: str, arguments: dict, result: str,
                              ok: bool, artifacts: tuple = ()) -> None:
         """Put a tool card in the transcript, from AsyncBridge's thread."""
+        # First, so a clock still ticking cannot overwrite the status the card
+        # is about to leave behind.
+        self._stop_tool_clock()
         GLib.idle_add(self._add_tool_card, name, arguments, result, ok,
                       artifacts)
 

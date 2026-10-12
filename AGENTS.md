@@ -15408,3 +15408,52 @@ that matched its own comment, and `price`/`collapse` matching English words:
 here is that the needle was a *finding being documented*, which is the hardest
 kind to notice because the prose is doing its job.
 
+
+## A running skill now says how long it has been running (2026-10-12)
+
+A 40-second `generate_image` showed a status line reading "Generate image..." and
+never changed. The only question a person has during a long tool call is
+*working or hung*, and a static line answers neither.
+
+**It ticks rather than adding a placeholder card, deliberately.** The card is
+built at result time on purpose - `on_tool_result` is the only point at which the
+arguments *and* the output exist together - so a placeholder would undo that on
+the most visible surface in the app. Making the existing status count up adds the
+missing information and leaves that decision alone.
+
+Each tick re-checks a token, the same shape as the transcript's
+`_follow_generation`: a timeout that already fired when `source_remove` reached
+it must not overwrite the next tool's status.
+
+**The first version never counted at all.** `_clock_token_at_start` was written
+before the token was bumped, so every first tick was stale on arrival and removed
+itself - measured by the status staying at "Generate image..." no matter how long
+the tool ran. Two mutations caught: the clock not stopping on result, and a stale
+tick continuing forever.
+
+## The transcript card was showing more than the model saw (2026-10-12)
+
+**The premise I checked rather than assumed.** I expected per-result truncation
+to be silent. It is not - `_clip_tool_result` appends a note naming what was
+dropped and what the limit was. But the note goes to the *model*: it is applied
+at line 1146, while `on_tool_result` fires earlier at line 1119 with the raw
+result.
+
+So the card in the transcript was handed a megabyte the model never received.
+Someone expanding it read output the model had not worked from, with nothing
+saying a megabyte had been withheld - the confident-wrong-answer shape this
+repository keeps paying for, arriving through a different door.
+
+The callback now gets the clipped text. The card and the model see the same
+string, and the note is visible when the card is expanded.
+
+**The test that mattered, and one that could not fail.** The first version
+compared `_clip_tool_result(x)` with `_clip_tool_result(x)` - two identical
+calls, green always. Replaced with a driven turn: a stub LLM that emits one tool
+call, `execute_tool` monkeypatched to return an oversized result. It immediately
+caught that the history stores the result inside a provenance fence
+(`[untrusted-content-<nonce> source=file]`), which is correct and deliberate.
+
+So the assertion is **containment, not equality** - the two strings differ by the
+fence, and the test now also asserts the fence is still there. Mutation-checked:
+handing the card the raw result again fails it.
