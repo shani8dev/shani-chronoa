@@ -17191,3 +17191,46 @@ it - but the tree had five pytest processes and two mutation runs in flight, so
 running anything would have meant reading code that was being rewritten. It is
 committed as a runnable analyser rather than an unverified test, which is the
 lesser evil and is said so rather than left implicit.
+
+## A gate for the `MathBlock` class that this codebase's shape defeats (2026-10-12)
+
+`MathBlock` read `self.language` and never assigned it. Since a class *can* read
+a name it does not define, I wrote a checker for that class of defect: collect
+`self.<name>` assignments in a class, its bases and its mixins, report the reads
+left over. Three bugs in the checker, found by running it, before any of its
+output was worth reading:
+
+1. **Methods did not count as definitions.** `def _on_user_input(self)` then
+   `self.window.connect(..., self._on_user_input)` is a callback being *passed*.
+   The first version reported **every callback in the application** as an
+   undefined attribute - 248 of them.
+2. **The class index was per-module.** `ConversationMixin._on_user_input` lives
+   in `conversation.py` and is used by `ChronoaApplication` in
+   `application.py`, so a per-module index cannot see the mixins. Still 169.
+3. **After fixing both, the remaining 169 are not defects**, and two irreducible
+   causes account for them:
+   - `self.window`, `self.config` and `self.assistant` are **assigned by the
+     composing class** (`application.py:769`, `:61`, `:964`) and **read inside
+     mixins in other files**. That is whole-program dataflow, not class analysis.
+   - `activate`, `quit`, `hold`, `release`, `add_action` are **inherited
+     `Gio.Application` methods**. Verified: `hasattr(Gio.Application, "quit")`
+     is True.
+
+**So this gate is not shipped.** A checker whose report is 169 phantoms is the
+"nobody reads it" outcome wearing a test's clothes, and shipping it would have
+meant a permanently red suite - or worse, a permanently skipped one, which is
+this repository's most-recorded failure.
+
+What *is* worth keeping is the search for it by hand, which is what actually
+found the two live bugs today (`Gtk.BUTTON_SECONDARY`, and
+`_input_entry.set_placeholder_text`). Both are a **call to a method a class does
+not have** - checkable by `hasattr`, which is `tools/widget_api_sweep.py` and
+does work. The distinction is the point:
+
+| defect | statically checkable? | how |
+|---|---|---|
+| method a class does not have | **yes** | `hasattr(cls, method)` |
+| attribute a class never assigns | **no, not here** | composition defeats it |
+
+The second still needs to be found by running the thing. That is why
+`MathBlock`'s test was red instead of green: somebody ran it.
