@@ -312,7 +312,12 @@ class TestReachable:
         assert out["present"], out
         assert out["all_present"], (
             "a surface whose module fails to import is a hole in the sidebar")
-        assert out["section"] == "Acting", out
+        # **"Phone and remote", not "Acting"** since 2026-10-12: this panel and
+        # three others describe how this computer is *reached* from a phone or
+        # over the network, which is not a thing Chronoa was asked to do, and
+        # "Acting" had grown to 14 of 33 panels. Asserting the literal is the
+        # point - it is what catches the panel being filed back.
+        assert out["section"] == "Phone and remote", out
         assert out["target"] == "settings:privacy", out
 
     def test_discovery_with_nothing_around_is_an_answer_not_a_crash(self, broadway, tmp_path):

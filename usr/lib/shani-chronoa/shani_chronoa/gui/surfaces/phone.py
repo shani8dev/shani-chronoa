@@ -48,6 +48,25 @@ PREBUILD = False
 
 CONTROL_KEY = "phone-control-enabled"
 READ_KEY = "phone-messages-read-enabled"
+#: What each switch is called **in Settings**. This panel used to print the key
+#: itself - `phone-messages-send-enabled` and `bluetooth-call-enabled` went on
+#: screen as sentences - which is the storage name, not the one a person ever
+#: sees. These are the labels the rows carry in `settings_window/privacy.py`, so
+#: the sentence names the switch the same way Settings does, and can be found by
+#: reading either place.
+GATE_NAMES = {
+    "phone-control-enabled":
+        "Let Chronoa use your paired phone",
+    "phone-messages-send-enabled":
+        "Let Chronoa send texts and place calls from your phone",
+    "bluetooth-call-enabled":
+        "Let Chronoa call through your paired phone",
+}
+
+#: Both keys are written in `settings_window/privacy.py` and nowhere else, so it
+#: is the only page on which either answer can change.
+GATE_TARGET = "settings:privacy"
+
 SEND_KEY = "phone-messages-send-enabled"
 CALL_KEY = "bluetooth-call-enabled"
 GATT_KEY = "bluetooth-gatt-enabled"
@@ -202,9 +221,18 @@ class PhonePanel:
         self.status_box = common.page_body(0)
         body.append(self.status_box)
         if not self.ok(CONTROL_KEY):
+            # **This branch is the dead end the panel is built around**, and it
+            # had the same two defects as the notes below: it printed the
+            # storage key `phone-control-enabled` and then told the person to
+            # "Turn it on in Settings, under Privacy" with nothing to press.
+            # It is also the branch that returns earliest, so on a machine where
+            # the gate is shut - which is the default - this panel had *no*
+            # interactive widget on it at all. Measured: a walk of the built
+            # panel found `[]`.
             self.set_status(common.STATUS_OFF, "Using your phone is turned off",
-                            f"Nothing was asked of your phone, because '{CONTROL_KEY}' is off. "
-                            "Turn it on in Settings, under Privacy.")
+                            "Nothing was asked of your phone. In Settings, under "
+                            f"Privacy: \"{GATE_NAMES[CONTROL_KEY]}\".")
+            body.append(self._route_button())
             set_content(common.scrolled(body))
             return page
         self.set_status(common.STATUS_UNKNOWN, "Looking for your phone...")
@@ -289,12 +317,52 @@ class PhonePanel:
         self.devices_note = _label("", dim=True)
         box.append(self.devices_note)
         self.call_note = _label("", dim=True)
-        box.append(self.call_note)
+        self._call_note_row, self._call_note_btn = self._note_row()
+        self._call_note_row.append(self.call_note)
+        box.append(self._call_note_row)
         self.show_route()
         box.append(_label("Recent calls"))
         self.history = common.page_body(0)
         box.append(self.history)
         return box
+
+    def _route_button(self, visible: bool = True) -> Gtk.Button:
+        """A wired route to the one page that writes all three gates."""
+        button = common.wire_page_button(
+            common.open_settings_button("Open Privacy settings", GATE_TARGET),
+            self.app, GATE_TARGET)
+        button.set_visible(visible)
+        return button
+
+    def _note_row(self) -> "tuple[Gtk.Box, Gtk.Button]":
+        """A dim note that can also hold the way out of it.
+
+        The note used to be a bare `Gtk.Label` appended straight to the page, so
+        a sentence naming a switch had nowhere to put a button for it. The
+        button is created once and shown only when the gate is actually off.
+        """
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        button = common.wire_page_button(
+            common.open_settings_button("Open Privacy settings", GATE_TARGET),
+            self.app, GATE_TARGET)
+        button.set_visible(False)
+        row.append(button)
+        return row, button
+
+    def _say_gate(self, note: Gtk.Label, button: Gtk.Button, key: str,
+                  what: str) -> None:
+        """Say which switch is off, by the name Settings gives it, and offer it.
+
+        **The route appears only while the gate is off**, following
+        `gui/surfaces/devices.py`: granted has nothing to fix, so a button would
+        open Privacy settings and change nothing - a worse dead end than the
+        sentence it replaced.
+        """
+        name = GATE_NAMES.get(key, key)
+        note.set_text(f"{what} turned off. In Settings, under Privacy: "
+                      f"\"{name}\".")
+        off = not self.ok(key)
+        button.set_visible(off)
 
     def call(self, number: str) -> None:
         number = (number or "").strip()
@@ -302,7 +370,8 @@ class PhonePanel:
             self.call_note.set_text("Type a number first.")
             return
         if not self.ok(SEND_KEY):
-            self.call_note.set_text(f"Calling is turned off ('{SEND_KEY}' in Settings, Privacy).")
+            self._say_gate(self.call_note, self._call_note_btn,
+                          SEND_KEY, "Calling is")
             return
         if self.device is None:
             self.call_note.set_text("No phone is connected.")
@@ -351,7 +420,8 @@ class PhonePanel:
         if getattr(self, "_routing", False):
             return
         if not self.ok(CALL_KEY):
-            self.call_note.set_text(f"Moving call audio is off ('{CALL_KEY}' in Settings, Privacy).")
+            self._say_gate(self.call_note, self._call_note_btn,
+                          CALL_KEY, "Moving call audio is")
             return
         self.call_note.set_text("...")
         _in_thread(lambda: _tool("bluetooth_call", {"action": "audio", "to": where}),
@@ -405,7 +475,9 @@ class PhonePanel:
         compose.append(_button("Send", self.send, suggested=True))
         box.append(compose)
         self.send_note = _label("", dim=True)
-        box.append(self.send_note)
+        self._send_note_row, self._send_note_btn = self._note_row()
+        self._send_note_row.append(self.send_note)
+        box.append(self._send_note_row)
         return box
 
     def load_conversations(self) -> None:
@@ -452,7 +524,8 @@ class PhonePanel:
             self.send_note.set_text("Type a number and a message.")
             return
         if not self.ok(SEND_KEY):
-            self.send_note.set_text(f"Sending is turned off ('{SEND_KEY}' in Settings, Privacy).")
+            self._say_gate(self.send_note, self._send_note_btn,
+                          SEND_KEY, "Sending is")
             return
         if self.device is None:
             self.send_note.set_text("No phone is connected.")
