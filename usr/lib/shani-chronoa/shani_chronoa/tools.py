@@ -31,6 +31,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
+from pathlib import Path
 
 from shani_chronoa import (argfile, capabilities, config as config_mod,
                        permissions, planmode, verification)
@@ -156,6 +157,81 @@ def _json_safe(value):
     return str(value)
 
 
+#: Skills that write files declare them here, by tool name.
+#:
+#: The value takes the skill's **own return text** and returns the paths it
+#: wrote. That is not parsing: the callable lives in the skill that did the
+#: writing, so it is the code that created a file saying which file it created.
+#: Parsing would mean trusting prose the model wrote and reads - a path inside
+#: `generate_image`'s answer could equally have come from a web page it read.
+#:
+#: Mirrors `verification.post_condition_for`, which asks the same question of a
+#: skill module and is the reason this shape is not new to the codebase.
+#:
+#: Opt-in, and the default is "declared nothing", so a skill that is not in
+#: this table produces no artifact and nothing renders for it.
+ARTIFACTS: dict = {}
+
+
+def declare_artifacts(name: str, produced) -> None:
+    """Register what `name` writes, as `produced(skill_return_text) -> paths`.
+
+    A callable that raises, or returns anything but paths, contributes nothing:
+    **an artifact declaration may never break a tool call.** The file it names
+    is still checked for existence before anything renders it, because a skill
+    can also be wrong about a file it meant to write.
+    """
+    ARTIFACTS[name] = produced
+
+
+def _declaration_for(name: str):
+    """The skill's own `DECLARES_ARTIFACTS`, found without an import cycle.
+
+    Read off the handler module already imported, so nothing new is imported at
+    module scope: `tools` imports the skills, and a skill that imports `tools`
+    back finds a half-built module. That happened - the first version made
+    `generate_image` fail to load - so the arrow points one way only.
+    """
+    if name in ARTIFACTS:
+        return ARTIFACTS[name]
+    handler = _HANDLER_FNS.get(name)
+    module_name = getattr(handler, "__module__", None)
+    if not module_name:
+        return None
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:                                   # noqa: BLE001
+        return None
+    produced = getattr(module, "DECLARES_ARTIFACTS", None)
+    if callable(produced):
+        ARTIFACTS[name] = produced
+    return produced
+
+
+def artifacts_for(name: str, result_text: str) -> tuple:
+    """What `name` declared it produced. Empty for everything undeclared."""
+    produced = _declaration_for(name)
+    if produced is None:
+        return ()
+    try:
+        declared = produced(result_text)
+    except Exception:                                   # noqa: BLE001
+        logger.warning("%s declared artifacts and the declaration failed",
+                       name, exc_info=True)
+        return ()
+    if not isinstance(declared, (tuple, list)):
+        return ()
+    out = []
+    for item in declared:
+        try:
+            path = Path(item)
+        except TypeError:
+            continue
+        if path.is_absolute() and path.is_file():
+            out.append(path)
+    return tuple(out)
+
+
 class DispatchResult(NamedTuple):
     """What a dispatch actually did, as data rather than as prose.
 
@@ -183,6 +259,23 @@ class DispatchResult(NamedTuple):
     verdict: verification.Verdict
     ran: bool
     evidence: str = ""
+    #: Files this dispatch **produced**, as absolute paths.
+    #:
+    #: **Not parsed out of `text`, and that is the whole point.** A skill's
+    #: answer is prose the model wrote and reads; a path inside it is a claim,
+    #: not a fact. `generate_image` ends with *"saved it to
+    #: /home/you/pictures/cat.png"*, and rendering a picture on the strength of
+    #: that sentence would let any reply that contains a path put an image on
+    #: screen - a prompt-injection surface wearing a thumbnail.
+    #:
+    #: So a skill **declares** what it made and the UI renders only from this
+    #: field. It defaults empty, which makes the whole feature opt-in: a skill
+    #: that declares nothing renders nothing, and there is nothing to backfill.
+    #:
+    #: Verified non-breaking: `evidence` already carries a default, so
+    #: positional construction of the first three arguments is untouched and all
+    #: 13 construction sites in the tree need no edit.
+    artifacts: tuple = ()
 
     @property
     def is_error(self) -> bool:
@@ -1139,7 +1232,8 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
             return _tool_failure_result(_with_feedback(
                 local_msg[len(ToolFailure.MARKER):], _feedback_for_dispatch))
         return DispatchResult(_with_feedback(local_msg, _feedback_for_dispatch),
-                              verification.Verdict.UNVERIFIED, True)
+                              verification.Verdict.UNVERIFIED, True,
+                              artifacts=artifacts_for(name, local_msg))
 
     # A skill may opt into the by-reference transport for its own oversized
     # arguments (see `skills/speak.py:wants_by_reference`). Ask the module

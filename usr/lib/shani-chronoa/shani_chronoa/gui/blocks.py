@@ -669,6 +669,140 @@ class InlineDiff(Gtk.Box):
         self.append(lines)
 
 
+class ArtifactBlock(Gtk.Box):
+    """A file a skill **declared** it produced, shown rather than described.
+
+    **Every media skill in this app used to hand back a sentence** -
+    `generate_image` ends with *"saved it to /home/you/pictures/cat.png"* - and
+    the transcript rendered that sentence. A picture the assistant just made
+    was a line of text with a path in it, and the only way to see the picture
+    was to go and open a file manager.
+
+    **What arrives here is the declared path, never one read out of the
+    sentence.** `DispatchResult.artifacts` is filled by
+    `tools.artifacts_for`, which asks the skill's own module what it wrote and
+    drops anything not on disk. A reply containing a path cannot put a file on
+    screen here, because a reply is not what gets read.
+
+    Four controls, which is what `CodeBlock` already has for code: **open it**,
+    **copy its path**, **save a copy somewhere else**, and for an image a
+    thumbnail in the transcript itself.
+    """
+
+    #: What gets a thumbnail rather than a name. Everything else is listed by
+    #: name, because a preview that silently fails is worse than a name.
+    IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+    def __init__(self, paths) -> None:
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.add_css_class("reply-block")
+        self._paths = [Path(p) for p in paths]
+
+        heading = Gtk.Label(label="Made" if len(self._paths) == 1 else
+                            f"Made {len(self._paths)} files")
+        heading.add_css_class("reply-block-heading")
+        heading.set_xalign(0.0)
+        self.append(heading)
+
+        for path in self._paths:
+            self.append(self._row(path))
+
+    def _row(self, path: Path) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        if path.suffix.lower() in self.IMAGE_SUFFIXES:
+            thumb = self._thumbnail(path)
+            if thumb is not None:
+                row.append(thumb)
+
+        name = Gtk.Label(label=path.name)
+        name.set_hexpand(True)
+        name.set_xalign(0.0)
+        name.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        name.set_tooltip_text(str(path))     # the full path, since the name is cut
+        name.update_property([Gtk.AccessibleProperty.LABEL],
+                             [f"{path.name}, at {path}"])
+        row.append(name)
+
+        row.append(_flat_button("document-open-symbolic", f"Open {path.name}",
+                                self._on_open, path))
+        row.append(_flat_button("edit-copy-symbolic", "Copy this file's path",
+                                self._on_copy_path, path))
+        row.append(_flat_button("folder-download-symbolic", "Save a copy elsewhere",
+                                self._on_save, path))
+        return row
+
+    def _thumbnail(self, path: Path):
+        """A scaled preview, or nothing at all.
+
+        **No placeholder on failure.** An unrenderable image gets its name and
+        its three controls, which is what a person can act on; a grey box
+        standing in for a picture reads as "this is the picture" and is not.
+        """
+        try:
+            from gi.repository import GdkPixbuf
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(path), 96, 96, True)
+            # **A Pixbuf is not a `Gdk.Paintable` in GTK 4** - measured, as a
+            # `TypeError: argument paintable: Expected Gdk.Paintable, but got
+            # ...Pixbuf`. The texture wrapper is what implements it.
+            #
+            # This is worth recording for the *shape* of the failure rather than
+            # the API: the broad `except` below did exactly what it is written
+            # to do - no placeholder, a log line - and in doing so hid a real
+            # defect for as long as nobody turned logging on. The same
+            # `except Exception: pass` this file records hiding an empty
+            # vision list, reached from the opposite direction: a correct
+            # fallback is also a way of not noticing that the primary path is
+            # broken.
+            # **`new_for_pixbuf` is deprecated and kept deliberately.** The two
+            # replacements do not work through this PyGObject, both measured:
+            # `pixbuf.read_pixels()` returns an **int** - the raw pointer, which
+            # cannot be marshalled into bytes - and
+            # `Gdk.Texture.new_from_bytes()` is bound with **one** argument
+            # against a five-argument C function, so there is no way to pass the
+            # width, height and stride it needs. `new_from_resource` needs a
+            # compiled GResource and this repository has none.
+            #
+            # So this is a deprecation warning on a thumbnail, not a defect, and
+            # it is written down rather than worked around, because a future
+            # pass would otherwise re-derive all three dead ends.
+            return Gtk.Image.new_from_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        except Exception:                                   # noqa: BLE001
+            logger.info("no thumbnail for %s", path, exc_info=True)
+            return None
+
+    def _on_open(self, button: Gtk.Button, path: Path) -> None:
+        """Open with whatever the desktop uses for this kind of file."""
+        try:
+            Gtk.show_uri(button.get_root(), path.as_uri(),
+                         Gdk.CURRENT_TIME)
+        except Exception:                                   # noqa: BLE001
+            logger.warning("could not open %s", path, exc_info=True)
+
+    def _on_copy_path(self, button: Gtk.Button, path: Path) -> None:
+        _copy_to_clipboard(button, str(path))
+        CodeBlock._flash(button, "edit-copy-symbolic", "edit-copy-symbolic")
+
+    def _on_save(self, button: Gtk.Button, path: Path) -> None:
+        dialog = Gtk.FileDialog()
+        dialog.set_initial_name(path.name)
+        dialog.save(button.get_root(), None,
+                    lambda dlg, result: self._saved(dlg, result, path))
+
+    def _saved(self, dialog: Gtk.FileDialog, result, source: Path) -> None:
+        try:
+            target = dialog.save_finish(result)
+        except GLib.Error as exc:
+            logger.info("artifact not saved: %s", exc.message)
+            return
+        try:
+            target.replace_contents(source.read_bytes(), None, False,
+                                    Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+        except (GLib.Error, OSError) as exc:
+            logger.warning("could not save a copy of %s: %s", source, exc)
+
+
 class ToolCallCard(Gtk.Box):
     """What a skill did, with the arguments it was given and what came back.
 
@@ -681,6 +815,7 @@ class ToolCallCard(Gtk.Box):
 
     def __init__(self, name: str, arguments: Optional[dict] = None,
                  result: str = "", ok: bool = True, on_open: Optional[Callable] = None,
+                 artifacts: tuple = (),
                  on_show_diff: Optional[Callable[[], None]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.add_css_class("tool-card")
@@ -755,6 +890,17 @@ class ToolCallCard(Gtk.Box):
                                ["Show the details of " + name])
         row.append(toggle)
         self.append(row)
+
+        # **What this call actually produced, shown.** Before this, a picture
+        # the assistant had just made was a sentence ending "saved it to
+        # /home/you/pictures/cat.png", and the only way to see the picture was
+        # to leave the app and open a file manager.
+        #
+        # It is rendered below the header and **above** the detail toggle,
+        # because the toggle is for the parts you want on demand and this is
+        # the part the turn was *for*.
+        if artifacts:
+            self.append(ArtifactBlock(artifacts))
 
         self.revealer = Gtk.Revealer()
         self.revealer.set_reveal_child(False)

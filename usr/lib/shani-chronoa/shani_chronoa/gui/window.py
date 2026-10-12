@@ -2457,9 +2457,14 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._transcript.scroll_to_turn(hits[self._search_cursor])
 
     def add_tool_call(self, name: str, arguments: dict, result: str = "",
-                      ok: bool = True) -> None:
-        """Show a skill's call, its arguments and what it returned."""
-        self._transcript.add_tool_call(name, arguments, result, ok)
+                      ok: bool = True, artifacts: tuple = ()) -> None:
+        """Show a skill's call, its arguments and what it returned.
+
+        `artifacts` is what that dispatch **declared** it produced - never a
+        path taken out of `result`. The transcript renders only from that field,
+        so a reply containing a path cannot put a file on screen.
+        """
+        self._transcript.add_tool_call(name, arguments, result, ok, artifacts)
 
     def add_notice_row(self, sentence: str, kind: str = "compaction") -> None:
         """A housekeeping note in the transcript - see the transcript's own

@@ -161,3 +161,30 @@ def _verify_generated_image(arguments: dict, tool=None):
 POST_CONDITION = _verify_generated_image
 
 SKILLS = [Skill(name="generate_image", schema=SCHEMA, run=_run)]
+
+
+def _declared_pictures(result_text):
+    """**This skill's own declaration of what it wrote.**
+
+    The transcript renders a thumbnail from this, never from the sentence
+    `_run` returns. That sentence is prose the model reads, and a path inside
+    it could have come from anywhere - a web page the model quoted, a refusal
+    that quoted a path back. Reading it from the code that did the writing is
+    the whole trust boundary.
+
+    It still re-checks the file: a skill can be wrong about a file it meant to
+    write, and `tools.artifacts_for` drops anything that is not there.
+    """
+    import re
+    found = re.search(r"saved it to (.+?)\.$", result_text or "")
+    return (found.group(1),) if found else ()
+
+
+#: **Exposed, not registered.** The first version called
+#: `tools.declare_artifacts()` at import time, which is a circular import:
+#: `tools` imports the skills, so the skill's import of `tools` found a
+#: half-built module and the loader reported
+#: *"Failed to load built-in skill 'generate_image'"* - a real skill outage
+#: caused by adding a declaration to it. `tools.artifacts_for` now collects
+#: this attribute lazily, so the arrow points one way only.
+DECLARES_ARTIFACTS = _declared_pictures

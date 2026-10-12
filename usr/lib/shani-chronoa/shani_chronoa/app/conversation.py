@@ -336,16 +336,20 @@ class ConversationMixin:
             self.window.set_status(f"{name.replace('_', ' ').capitalize()}...")
         return GLib.SOURCE_REMOVE
 
-    def _on_tool_result_main(self, name: str, arguments: dict, result: str, ok: bool) -> None:
+    def _on_tool_result_main(self, name: str, arguments: dict, result: str,
+                             ok: bool, artifacts: tuple = ()) -> None:
         """Put a tool card in the transcript, from AsyncBridge's thread."""
-        GLib.idle_add(self._add_tool_card, name, arguments, result, ok)
+        GLib.idle_add(self._add_tool_card, name, arguments, result, ok,
+                      artifacts)
 
-    def _add_tool_card(self, name: str, arguments: dict, result: str, ok: bool) -> bool:
+    def _add_tool_card(self, name: str, arguments: dict, result: str,
+                       ok: bool, artifacts: tuple = ()) -> bool:
         if self.window:
-            self.window.add_tool_call(name, arguments, result, ok)
+            self.window.add_tool_call(name, arguments, result, ok, artifacts)
         return GLib.SOURCE_REMOVE
 
-    def _on_tool_result(self, name: str, arguments: dict, result: str, ok: bool) -> None:
+    def _on_tool_result(self, name: str, arguments: dict, result: str,
+                        ok: bool, artifacts: tuple = ()) -> None:
         """Assistant callback - runs on AsyncBridge's background thread.
 
         `on_tool_result` arrives after the skill has run, which is the only point
@@ -353,7 +357,7 @@ class ConversationMixin:
         the card is built. A card that appeared at call time and was filled in
         later would need the same information in two places.
         """
-        self._on_tool_result_main(name, arguments, result, ok)
+        self._on_tool_result_main(name, arguments, result, ok, artifacts)
 
     def _on_response_ready(self, result: object) -> bool:
         """Deliver an assistant response (or error) back on the GTK main thread."""

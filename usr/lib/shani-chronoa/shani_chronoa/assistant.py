@@ -1081,7 +1081,8 @@ class Assistant:
                 if sink is not None:
                     head = str(result).lstrip().lower()
                     sink.fire("on_tool_finish", name, arguments, str(result),
-                              not head.startswith(("error", "refused")))
+                              not head.startswith(("error", "refused")),
+                              tuple(getattr(result, "artifacts", ()) or ()))
                 # tool_call_id correlates this result back to the specific
                 # tool_calls entry that requested it - required by the
                 # actual OpenAI spec (tolerated without it by the free

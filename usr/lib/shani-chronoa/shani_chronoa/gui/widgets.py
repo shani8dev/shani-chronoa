@@ -1095,13 +1095,19 @@ class TranscriptView(Gtk.ScrolledWindow):
             row._turn_text = text
 
     def add_tool_call(self, name: str, arguments: dict, result: str = "",
-                      ok: bool = True) -> None:
+                      ok: bool = True, artifacts: tuple = ()) -> None:
         """Show what a skill did, above the reply it led to.
 
         A card per call, in the order they ran, inside the assistant's turn: the
         status line said a name was running and then nothing, so the one moment
         the user can check the arguments is after it is over. `result` may be
         filled in later by calling this again with the same `name`.
+
+        `artifacts` are the files that dispatch **declared** it produced. It is
+        a separate argument rather than something read out of `result` because
+        `result` is prose the model wrote and reads: a path inside it is a
+        claim, not a fact, and rendering a file on the strength of one would let
+        any reply containing a path put it on screen.
         """
         self._note_position()
         if self._blocks is None:
@@ -1113,7 +1119,8 @@ class TranscriptView(Gtk.ScrolledWindow):
                 self._rebuild_card(child, result, ok)
                 return
         card = reply_blocks.ToolCallCard(name, arguments, result, ok,
-                                         on_show_diff=self._on_show_diff)
+                                         on_show_diff=self._on_show_diff,
+                                         artifacts=artifacts)
         # Above the reply, in the order the skills ran: that order *is* the
         # record, and reversing it to put the newest on top would make a
         # six-call turn unreadable as a sequence of decisions.

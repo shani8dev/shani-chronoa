@@ -1,0 +1,293 @@
+"""A file a skill made is shown, not described - and only if it *declared* it.
+
+The claim this file exists to hold: **the transcript renders a path only when
+the skill's own code says it wrote that path.**
+
+Before this, `generate_image` ended its answer with *"saved it to
+/home/you/pictures/cat.png"* and the transcript rendered that sentence. A picture
+the assistant had just made was a line of text, and seeing it meant leaving the
+app for a file manager.
+
+The obvious cheap version of this feature is to scrape the path out of the
+sentence. **That is the thing being refused**, and it is refused for a reason
+this repository already has a name for: `result` is prose the model wrote and
+reads, so a path inside it may have come from a web page the model quoted rather
+than from anything on this machine. Rendering a file on the strength of one is a
+prompt-injection surface wearing a thumbnail.
+
+So a skill **declares** what it wrote (`DECLARES_ARTIFACTS`), `tools` collects
+that lazily, and only an absolute path that is on disk becomes an artifact.
+"""
+
+import sys
+
+import pytest
+
+gi = pytest.importorskip("gi")
+gi.require_version("Gtk", "4.0")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Gtk  # noqa: E402
+
+sys.path.insert(0, "usr/lib/shani-chronoa")
+
+from shani_chronoa import tools, verification  # noqa: E402
+from shani_chronoa.gui import blocks  # noqa: E402
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+@pytest.fixture
+def a_real_file(tmp_path):
+    path = tmp_path / "picture.png"
+    path.write_bytes(PNG)
+    return path
+
+
+# --------------------------------------------------------------------------
+# the field, and that adding it broke nothing
+
+
+def test_the_field_exists_and_defaults_to_nothing():
+    result = tools.DispatchResult("t", verification.Verdict.UNVERIFIED, False)
+    assert result.artifacts == (), (
+        "a dispatch that declared nothing must report nothing, or every skill "
+        "renders an artifact nobody asked for")
+
+
+def test_every_existing_construction_shape_still_works():
+    """**The non-breaking claim, asserted rather than argued.**
+
+    All thirteen construction sites in the tree build the first three arguments
+    positionally, so a new fifth field must not disturb them. `evidence`
+    already carried a default, which is what makes that true.
+    """
+    positional = tools.DispatchResult("text", verification.Verdict.FAILED, True)
+    assert positional.evidence == ""
+    assert positional.artifacts == ()
+    assert len(positional) == len(tools.DispatchResult._fields)
+
+
+# --------------------------------------------------------------------------
+# the trust property: only what a skill declared
+
+
+def test_a_skill_declares_what_it_wrote(a_real_file):
+    assert tools.artifacts_for(
+        "generate_image",
+        f"Made a 512x512 picture in 12 s and saved it to {a_real_file}."
+    ) == (a_real_file,)
+
+
+def test_a_path_in_prose_the_skill_did_not_write_declares_nothing(tmp_path):
+    """**The load-bearing gate.**
+
+    A sentence full of paths that this skill did not produce must declare
+    **nothing**. If this fails, the feature is a regex and every reply that
+    mentions a file can put one on screen.
+    """
+    quoted = tmp_path / "quoted-from-a-web-page.png"
+    quoted.write_bytes(PNG)
+    for sentence in (
+        f"the docs at {quoted} explain it",
+        f"see {quoted} and /etc/passwd",
+        f"not written: {quoted}",
+        f"error: {quoted}",
+    ):
+        assert tools.artifacts_for("generate_image", sentence) == (), (
+            f"a path the skill did not write became an artifact: {sentence!r}")
+
+
+def test_a_file_that_is_not_there_is_not_an_artifact(tmp_path):
+    """A skill can be wrong about a file it meant to write."""
+    gone = tmp_path / "never-written.png"
+    assert tools.artifacts_for(
+        "generate_image", f"saved it to {gone}.") == ()
+
+
+def test_a_relative_path_is_refused(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "here.png").write_bytes(PNG)
+    assert tools.artifacts_for(
+        "generate_image", "saved it to here.png.") == (), (
+        "a relative path would resolve against whatever directory the UI "
+        "happened to be in")
+
+
+def test_a_refusal_declares_nothing(a_real_file):
+    """Every way `_run` can decline, checked together - they are three sentences
+    and only one is actionable."""
+    for sentence in (
+        "Say what the picture should show.",
+        "Making pictures is not set up on this computer.",
+        f"Could not make the picture: no engine, though it tried {a_real_file}",
+    ):
+        assert tools.artifacts_for("generate_image", sentence) == ()
+
+
+def test_a_declaration_that_raises_contributes_nothing(a_real_file):
+    """**An artifact declaration may never break a tool call.**"""
+    tools.ARTIFACTS["explodes"] = lambda _text: 1 / 0
+    try:
+        assert tools.artifacts_for("explodes", f"saved it to {a_real_file}.") == ()
+    finally:
+        tools.ARTIFACTS.pop("explodes", None)
+
+
+def test_an_undeclared_skill_declares_nothing(a_real_file):
+    assert tools.artifacts_for("get_datetime",
+                               f"saved it to {a_real_file}.") == ()
+
+
+# --------------------------------------------------------------------------
+# the block
+
+
+def _widgets(node):
+    out, stack = [], [node]
+    while stack:
+        current = stack.pop()
+        child = current.get_first_child() if isinstance(current, Gtk.Widget) else None
+        while child is not None:
+            out.append(child)
+            stack.append(child)
+            child = child.get_next_sibling()
+    return out
+
+
+def _buttons(root):
+    return [w for w in _widgets(root) if isinstance(w, Gtk.Button)]
+
+
+def _images_in(root):
+    """`Gtk.Image`s that are not inside a control - i.e. thumbnails only."""
+    out = []
+    for w in _widgets(root):
+        if not isinstance(w, Gtk.Image):
+            continue
+        parent = w.get_parent()
+        if isinstance(parent, Gtk.Button):
+            continue                    # a control's own icon
+        out.append(w)
+    return out
+
+
+def _thumbnail_of(block):
+    """The row's **first child**, which is where the thumbnail goes.
+
+    Not "every `Gtk.Image` in the tree": each of the three controls is a
+    `_flat_button`, and a flat button *is* an `Gtk.Image` inside a `Gtk.Button`.
+    The first version counted those and concluded the broken image had a
+    thumbnail - a test measuring the wrong thing, which is the same defect as
+    the witness that could not fail.
+    """
+    row = block.get_last_child()
+    if row is None:
+        return None
+    first = row.get_first_child()
+    return first if isinstance(first, Gtk.Image) else None
+
+
+def test_a_made_file_is_shown_with_its_three_controls(a_real_file):
+    block = blocks.ArtifactBlock([a_real_file])
+    assert len(_buttons(block)) == 3, (
+        "a made file needs open / copy path / save a copy - the controls "
+        "CodeBlock already has for code")
+    labels = [w for w in _widgets(block) if isinstance(w, Gtk.Label)]
+    assert any(a_real_file.name in (w.get_label() or "") for w in labels)
+
+
+def test_a_real_image_gets_a_thumbnail_and_a_broken_one_does_not(a_real_file,
+                                                                tmp_path):
+    """**No placeholder on failure.** A grey box standing in for a picture
+    reads as "this is the picture" and is not one."""
+    broken = tmp_path / "not-really.png"
+    broken.write_bytes(PNG)                 # right extension, not a real image
+    assert _thumbnail_of(blocks.ArtifactBlock([a_real_file])) is None
+    assert len(_buttons(blocks.ArtifactBlock([broken]))) == 3, (
+        "a file with no thumbnail must still be openable and copyable - the "
+        "name is what a person can act on")
+
+
+def test_a_thumbnail_actually_renders(tmp_path):
+    """The other half: that a valid image produces a thumbnail at all.
+
+    **This is the control for the test above.** `ArtifactBlock._thumbnail`
+    caught its own `TypeError` and logged it while the block silently carried
+    on with no picture, so "no broken image gets a placeholder" passed
+    perfectly while the working path was dead. A control that only proves a
+    thing is missing proves nothing about a thing that is present.
+    """
+    try:
+        import gi
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import GdkPixbuf
+    except (ImportError, ValueError):                      # pragma: no cover
+        pytest.skip("GdkPixbuf is not usable here")
+    real = tmp_path / "real.png"
+    pixbuf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 32)
+    pixbuf.fill(0x3366CCFF)
+    assert pixbuf.savev(str(real), "png", [], []) is True
+    assert _thumbnail_of(blocks.ArtifactBlock([real])) is not None, (
+        "a valid image produced no thumbnail - the fallback is hiding a broken "
+        "primary path, which is how a dead control reads as working")
+
+
+def test_the_card_renders_artifacts_and_shows_nothing_without_them(a_real_file):
+    """**Asserted on `ArtifactBlock` itself**, not on "no images".
+
+    Two earlier versions of this asserted on images and both were wrong: a
+    `_flat_button` *is* an `Gtk.Image` inside a `Gtk.Button`, and the card's
+    own success/failure icon is a direct `Gtk.Image` child. Both made a
+    correct card look wrong. The claim is about the block, so the block is what
+    is asked about.
+    """
+    def _blocks_in(root):
+        return [w for w in _widgets(root) if isinstance(w, blocks.ArtifactBlock)]
+
+    card = blocks.ToolCallCard("generate_image", {"prompt": "a cat"},
+                               "Made a picture.", True, artifacts=(a_real_file,))
+    made = _blocks_in(card)
+    assert len(made) == 1, f"a declared artifact rendered no file row: {_blocks_in(card)}"
+    assert len(_buttons(made[0])) == 3
+
+    plain = blocks.ToolCallCard("get_datetime", {}, "It is noon.", True)
+    assert not _blocks_in(plain), (
+        "a card with no artifacts must show no file row at all")
+
+
+# --------------------------------------------------------------------------
+# the sink, which had no arity check until this widening needed one
+
+
+def test_the_sink_refuses_a_subscriber_of_the_wrong_arity():
+    """**The arity check, and why it exists.**"""
+    from shani_chronoa.events import EventSink
+
+    def four(_n, _a, _r, _ok):               # the pre-widening shape
+        pass
+
+    def five(_n, _a, _r, _ok, _artifacts):
+        pass
+
+    with pytest.raises(TypeError, match="5 arguments"):
+        EventSink(on_tool_finish=four)
+    assert EventSink(on_tool_finish=five) is not None
+
+
+def test_a_star_args_subscriber_is_not_a_mismatch():
+    """**The correction.** The first version refused `*args` subscribers, which
+    broke two tests that build one on purpose - `test_a_callable_object_builds`
+    exists precisely to prove the guard is not `isinstance(value, type(lambda:
+    None))`, and a sink that raises is given `explodes(*_args)`.
+
+    A `*args` callable accepts any arity, so refusing it was the guard
+    rejecting correct code.
+    """
+    from shani_chronoa.events import EventSink
+
+    class _Callable:
+        def __call__(self, *args):
+            return args
+
+    assert EventSink(on_tool_start=_Callable()) is not None
+    assert EventSink(on_tool_finish=lambda *a: None) is not None
