@@ -16248,3 +16248,135 @@ way, and re-running them one file at a time is what separated the real ones from
 the noise. **The rule about never running concurrent pytest processes is not
 about D-Bus contention alone** - it is that concurrency manufactures failures
 that look exactly like defects.
+
+## A third sweep, this time aimed at this repository's own subsystems (2026-10-12)
+
+The first two sweeps went after the topics the model work had been chasing.
+This one went after **the things this tree already does**, so that each hit
+could be compared against a measurement rather than a plan. Ten more queries,
+same instrument.
+
+### The repo already implements the paper - and has no way to measure it working
+
+*Verified Tool Calls Improve LLM Agent Reliability Under Non-Atomic Failures*
+([arXiv:2608.02645](https://arxiv.org/abs/2608.02645)) opens by naming the
+assumption this repository is built on:
+
+> *"Existing agent frameworks typically assume that tool calls are **atomic**
+> and return **binary** success or failure signals. However, real-world systems
+> exhibit non-atomic behaviors such as **timeouts after dispatch, delayed
+> visibility, and partial state updates**."*
+
+Its remedy is "postcondition verification, **verify-before-retry** logic, and
+**idempotency keys**", and the reported effect is that it "significantly reduces
+duplicate actions, while maintaining comparable task success rates" - "without
+requiring modifications to the underlying language model".
+
+**Three of those four are already here**: `verification.py`'s post-conditions,
+`permissions`' replay receipts (`REPLAY_TTL_SECONDS` / `REPLAY_CAPACITY`), and
+the four-state `ToolFailure` that exists precisely because binary success was a
+lie. `AGENTS.md` even records live instances of the exact failure mode -
+`pdf_pages`' freshness check exists because "a refused call leaves an older file
+of the same name", and `stop_service()` returning `''` for an already-inactive
+unit is the "did it happen or was there nothing to happen" ambiguity.
+
+**So the gap is not the mechanism, it is the instrument.** The paper measures
+by **injecting non-atomic failures** into a controlled environment; this
+repository has no such harness and therefore **cannot say whether its replay
+receipts and post-conditions reduce duplicate actions at all** - only that they
+exist. A fault-injection slot-test is the missing half, and it is named here
+rather than built, because a benchmark needs numbers this repository does not
+have.
+
+### The cloud fallback is a measured design this repository has refused
+
+*Do I Need the Cloud? Uncertainty-Aware Step-Level Handoff*
+([arXiv:2610.07816](https://arxiv.org/abs/2610.07816)) states the limitation in
+the first sentence of its framing: **"Existing routers typically select a model
+once per query"** - which is what `app/brain.py`'s `_maybe_enable_cloud_fallback`
+does and what this file records as *"chosen at startup, and not reconsidered
+since"*. The paper's argument is that "agents expose **sequential decision
+points** whose difficulty dynamically changes based on intermediate
+observations", and it measures the gap on Qwen2.5-1.5B/7B over a 52-task
+BFCL-derived split:
+
+| | trajectory success | cloud actions |
+|---|---:|---:|
+| local only | 48.0% | 0% |
+| **step-level (STEPGATE)** | **69.0%** | **30.0%** |
+| query-level routing | 57.0% | - |
+
+**This is the largest measured gap in the whole session's research, and it
+cannot simply be taken.** STEPGATE's escalation *is* egress: it sends the step
+to a provider, which is precisely what `privacy-mode` and `cloud-fallback-enabled`
+exist to withhold. So the finding is real and the automatic conclusion is wrong
+for this tree - and the useful part is the *mechanism* rather than the policy:
+**score the local model's uncertainty at each step**, then escalate to
+something. What that "something" is may be a larger **local** model, a retry
+with a wider tool set, or asking the person - all of which keep the guarantee.
+Adopting the escalation target without asking that question would break the one
+property this repository is built around.
+
+### A recorded measurement is narrower than it was written
+
+*Tool Mediation Alters Refusal Mechanisms*
+([arXiv:2609.35117](https://arxiv.org/abs/2609.35117)) finds that **"harmful
+tool-mediated interactions are less likely to be refused than regular
+conversational ones"**, that "tool-mediated inputs remain permissive until
+harmfulness crosses a **substantially higher effective refusal threshold**", and
+that tool-mediated refusal is **more brittle** under perturbation.
+
+**This repo's refusal-rate measurement ran through the tool loop.** It recorded
+0 refusals in 60 cases across both a hand-written and a machine-generated
+population, and concluded that heretic's over-refusal premise "does not hold
+here". That conclusion stands - and the paper says the measurement was taken in
+**the regime where refusal is hardest to observe at all**. So the number is
+real and its scope is smaller than "this model does not over-refuse": it is "in
+tool-mediated turns, where refusal is already suppressed, this model declines
+nothing". The distinction is the difference between a fact and a bound.
+
+It also **strengthens** the position heretic's entry argues: this repository's
+security does not rest on the model refusing anything, because that mechanism
+is measurably weaker exactly where the assistant lives.
+
+### Evidence for the security argument this repository already makes
+
+*How Fragile Is On-Device Language Model Safety?*
+([arXiv:2610.09000](https://arxiv.org/abs/2610.09000)) reports that modifying
+**0.19% of the weights in `down_proj`** yields **53% Basic ASR / 56% GCG ASR**
+while utility holds (51.6% against a 52.2% baseline).
+
+That is a measurement of the assumption this repository declined to rely on: a
+fraction of one percent of one projection matrix destroys the model's safety
+behaviour and leaves its capabilities intact. It is why *"a learned component
+that authorises anything"* is in "What counts as done" as a refusal - **authority
+stays with the consent keys, in code**. Measured on LLaMA-2-7B, not on this
+repository's 1.7B, so it is evidence for the shape and not for a number here.
+
+### MCP: the threat model is the server's, and this repository is one
+
+*SMCP: Secure Model Context Protocol*
+([arXiv:2602.01129](https://arxiv.org/abs/2602.01129)) names the risk set for
+MCP as "unauthorized access, **tool poisoning**, prompt injection, privilege
+escalation, and **supply chain attacks**", answered with identity management,
+mutual authentication, context propagation, fine-grained policy enforcement and
+audit logging.
+
+Its deployment picture is a networked multi-agent ecosystem, which is not this:
+`mcp.py` is **stdio-only and same-user-trusted**, and the MCP *client* is
+refused on purpose. **But one of its named risks applies to this repository in
+the server direction and is not discussed anywhere in this file**: tool
+poisoning and supply-chain attack against a server that *loads modules from
+disk* is exactly `~/.config/shani-chronoa/skills/`, where a dropped file is code
+that runs. The mitigations that exist are the plugin contract, the handler-name
+check, and the scans - recorded here as **the attack surface a reader would not
+otherwise know this repository has**, not as a new defect.
+
+### Not taken
+
+MCP-Solver, the gateway-hardening line, AgentWatcher's rule-based injection
+monitor (the same shape as `user_prompts.rules_message()`, already built),
+`ToolRACER` (an agentic-emulation corpus for training - which is what
+`distill.py`'s router needs and does not have), `Toward SLM-based agentic
+task-tool intent matching`, and the embedding-model decision framework: named,
+none built, each needing its own measurement first.
