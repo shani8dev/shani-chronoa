@@ -16556,3 +16556,130 @@ returned `false`, which is what finally separated the two. **A probe that does n
 control its environment is describing the machine it ran on, and when the machine
 is the thing being debugged, it will agree with the bug.**
 
+
+## TSCG is the biggest finding of the research sequence, and it points at this repository's own measured 0/62 (2026-10-12)
+
+Fifth sweep, into the areas none of the first four touched: voice endpointing,
+code editing, tool-call parsing, context management, and permission design.
+Ten queries.
+
+*TSCG: Deterministic Tool-Schema Compilation for Agentic LLM Deployments*
+([arXiv:2605.04107](https://arxiv.org/abs/2605.04107)) opens on the premise
+that this repository's most-quoted measurement already implies and never acts on:
+
+> *"Production agent frameworks (OpenAI Function Calling, Anthropic Tool Use,
+> **MCP**) transmit tool schemas as JSON, a format designed for **machine
+> parsing, not for interpretation by language models**. For small models
+> (4B-14B), **this protocol mismatch accounts for the majority of tool-use
+> failure at production catalog sizes**."*
+
+Its remedy is at the API boundary - convert JSON schemas into token-efficient
+structured text, "**without model access, fine-tuning, or runtime search**" -
+and the reported numbers are the largest in this entire research sequence:
+
+| | measured on their benchmark |
+|---|---|
+| Phi-4 **14B** at 20 tools | **0% → 84.4%** accuracy (90.3% at 50 tools) |
+| accuracy-retained ratio, three models on BFCL | **108-181%** |
+| token savings | **52-57%** |
+| mechanism | format-vs-compression decomposition, **R² 0.88 → 0.03** |
+| shipped as | a **1,200-line zero-dependency TypeScript package** |
+
+**Why this is aimed exactly at this repository.** The single most-quoted
+measurement in this file is that `bare` scores **0/62** because **131 tool
+schemas are ~19,700 tokens against an 8k context**, so the request is *rejected
+before the model reads a word*, and that narrowing to relevant tools takes the
+same weights to 56/62. That is a *representation* failure, not a model failure -
+and this file's own conclusion was *"the harness is what makes the small model
+work"*. TSCG says the representation itself is the lever, with **half the
+tokens** and better accuracy than the full JSON.
+
+**And it collides with the two findings above it.** The action-space-bias paper
+(0% to 97% from schema wording alone) says the *interface* decides success;
+the structure-tax paper says the *field ordering* inside it decides the cost;
+this says the *serialisation* of it decides most of the failure. Three papers,
+three levels of the same object, all pointing away from the weights and toward
+**the schema as this repository writes and sends it**.
+
+**What this would mean here, and what it would not.** It needs **no weights, no
+training stack and no downloads** - it is a boundary transformation over schemas
+this repository already owns - and the repo already has the instrument to judge
+it (`task_eval`, with `bare` as the 0/62 baseline and `select` as the 56/62
+one). **But the evidence is 4B-14B and this repository runs 1.7B**, so the
+headline recovery is a claim at a scale above ours, and `Phi-4-14B 0% → 84.4%`
+is large enough that it should be treated as a number to reproduce rather than a
+number to adopt. **Recorded as the next experiment to run, not as a conclusion,
+and not built** - for the reason this file keeps giving: it needs a measurement
+on this corpus, and that measurement is a real run rather than an argument.
+
+**If it reproduces, the consequence is architectural.** `tool_select.py` is the
+repository's answer to the 19,700-token problem, and the action-space-bias
+finding says it is "plain word overlap", which is the class that loses the
+accuracy. A representation fix that makes the *whole* catalog affordable would
+make the retrieval layer unnecessary for length reasons - and that is a much
+larger change than a better synonym table.
+
+### The permission gate: an external measurement of a design this repository made differently, and a coverage gap it closed by construction
+
+*Measuring the Permission Gate*
+([arXiv:2604.04978](https://arxiv.org/abs/2604.04978)) independently stress-tests
+**Claude Code's deployed auto mode** on "deliberately ambiguous authorization
+scenarios, i.e., tasks where the user's intent is clear but the **target scope,
+blast radius, or risk level is underspecified**". Against Anthropic's own
+reported 0.4% FPR / 17% FNR, they measure:
+
+- end-to-end **false-negative rate 81.0%** (95% CI 73.8-87.4%);
+- **36.8% of all state-changing actions fall outside the classifier's scope**;
+- even on the 160 actions it does evaluate, FNR 70.3% at FPR 31.9%;
+- worst on artifact cleanup (**92.9% FNR**), "where agents naturally **fall back
+  to editing state files when the expected CLI is unavailable**".
+
+The conclusion is a **coverage** finding, not an accuracy one: *"auto mode
+assumes dangerous actions transit the shell, but agents routinely achieve
+equivalent effects through file edits that the classifier does not evaluate."*
+
+**This repository does not have that gap, and the reason is structural rather
+than lucky**: its gate is `permissions.decide()` in Python *before* the skill
+runs, keyed on the **tool name**, so `write_text_file`, `edit_file` and
+`move_or_copy_file` are each gated in their own right rather than being reached
+as a side effect of an ungated command. That is an external measurement
+landing on a design decision this file already records, from the opposite
+direction.
+
+**The instrument is the part worth taking.** This repository has the most
+carefully designed consent layer in the comparison - four modes, session grants,
+replay receipts, post-conditions - and **no way to measure whether it works**,
+which the same gap produced for the post-conditions. A benchmark of
+deliberately-ambiguous-scope tasks, scored per action against an oracle, is
+buildable against `tools.execute_tool_outcome` with no downloads and no model
+weights. **Not built; named as the second missing instrument.**
+
+### Two smaller ones that map onto this repository's subsystems
+
+**Voice endpointing is a studied problem, not a constant.**
+*Two-pass Endpoint Detection* ([arXiv:2401.08916](https://arxiv.org/abs/2401.08916))
+frames it exactly as this file describes the symptom: the detector "has to
+trade-off between accuracy and latency, since waiting longer reduces the cases
+of users being cut-off early", and answers with a second model - an **EP
+Arbitrator** - that verifies the first pass's endpoint. This file records the
+same tension resolved by hand: dictation raises `silence_seconds` from 1.2 to
+2.5 "because 1.2 seconds of silence cuts at every pause *inside* a paragraph
+rather than at its end", and the shipped voice work measures WER 0.00-0.29.
+The two-pass structure is a better shape than the constant, and is recorded here
+as a design rather than a result - it needs a second model and was not measured.
+
+**Tool selection is a documented injection target.**
+*Prompt Injection Attack to Tool Selection*
+([arXiv:2504.19793](https://arxiv.org/abs/2504.19793)) introduces ToolHijacker:
+injecting **a malicious tool document into the library** so the agent
+"consistently chooses the attacker's malicious tool", formulated as an
+optimization problem. Its defense survey is the part to note - StruQ, SecAlign,
+known-answer detection, perplexity detection and windowed perplexity detection
+were all tried and are reported **"insufficient"**.
+
+`tool_select.py` is exactly the retrieval stage that attack targets. **The
+repository's answer is a property the paper does not have**: a fixed whitelist
+and consent gates bound the *consequence*, so an injected document can steer
+*selection* but cannot introduce an executable tool. That bounds the damage; it
+does not mean selection is unmanipulated, and a reader should not record the
+whitelist as a defence against retrieval attacks.
