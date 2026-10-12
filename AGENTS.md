@@ -18643,3 +18643,195 @@ case the protection exists for — "book the cheapest flight on blazedemo.com" l
 not (2.89 vs 21.16). The real discriminator is what the displacement already
 removed, and answering it needs to know what the person is asking to *do* —
 which is the intent layer the research points at, not another heuristic.
+
+## The deep scan, and the fix it refused
+
+**`Verdict` never reaches the screen.** `verification.Verdict` has four states -
+`VERIFIED`, `FAILED`, `UNVERIFIED`, `IMPOSSIBLE` - and the class docstring argues
+in detail why each matters. Nothing in `gui/` reads it. And the assistant decides
+the card's `ok` by string prefix:
+
+```python
+ok = not str(result).lstrip().lower().startswith(("error", "refused"))
+```
+
+so a refusal whose wording does not begin with *error* or *refused* reaches the
+transcript as a success. That is precisely what `DispatchResult`'s own docstring
+warns about: "a refusal starts to look indistinguishable from a success that
+nobody checked".
+
+**The fix already exists.** `execute_tool_outcome` returns the verdict as data,
+its docstring is written against exactly this failure, and `brain.py` and
+`gateway.py` both use it. The assistant was the one caller that had not been
+moved.
+
+### It could not be fixed here, and the reason is worth more than the fix
+
+Two attempts, both stopped by the same thing:
+
+- **calling `execute_tool_outcome` alongside `execute_tool` runs the skill
+  twice** - a write performed twice because the caller wanted to know whether
+  it worked;
+- **replacing one with the other moves the seam**, and **58 test files patch
+  `execute_tool`** to intercept a turn's tool calls
+  (`monkeypatch.setattr(A, "execute_tool", lambda *a, **k: big)`). Moving the
+  seam bypassed every one of them: they ran the real skill instead of their
+  fixture, and a turn that used to write a stub wrote a real file. One test
+  failed loudly; the rest passed while doing something other than what they
+  claimed.
+
+That is a worse outcome than the string guess, so the seam stays where the tests
+are. What survives is `_tool_ok()`, a named function with the markers read from
+one place, the limitation stated, and the reason recorded - rather than an
+unexplained expression in the middle of the tool loop where the next person to
+touch it has no way to know why it is still a prefix.
+
+**The real fix is a migration, not an edit:** move the 58 patch sites, then move
+the seam. That is a change with its own review and its own test run, and it is
+not something to slip into a session that also moved three modes onto a strip.
+
+### What else the scan found
+
+- **`model_seconds` was computed and never shown.** Now the footer says
+  *"1.2s of it the model"* when the turn took two seconds or more - separating
+  thinking time from tool time, which on a local model is the question you ask
+  before choosing a smaller tier.
+- **No dead GUI code.** Every public method in `gui/` is called by product,
+  test or tool - 0 orphans across 1114 files.
+- **`budget_seconds` is computed and read nowhere, deliberately left so:** it
+  only feeds the over-budget check and showing it would add a denominator
+  nobody asked for.
+
+## The model picker row, and three defects that only rendering showed (2026-10-13)
+
+`gui/model_picker.py` was written, and `rows_for()` was verified — **all six
+tiers render, the subtitles are right**. The *widget* had never been built.
+Writing `tests/test_model_picker.py` found three things, and each of them is a
+class this file has already recorded under a different name.
+
+### 1. Three methods were on the wrong class, and the window could not be built
+
+`_model_row`, `_model_word` and `_refresh_model_word` were written inside
+`_ModeStrip`. `_model_row()` is called from **`ChronoaWindow.__init__`**
+(`window.py:1925`), which does not inherit from `_ModeStrip` — so
+`ChronoaWindow._model_row()` was an **`AttributeError` on every window
+construction**. pyflakes cannot see it: `self.foo()` inside a method of class A
+is a name, not an attribute the compiler resolves.
+
+Found by **building the row and asking for its label**, which is the only thing
+that reaches the lookup. The three methods moved to `ChronoaWindow`;
+`_model_chip` and `_model_rows` stayed on the strip, where they are used.
+
+### 2. `rebuild()` called a `Gtk.Box` method on a `Gtk.Popover` — shipped
+
+```python
+while self.get_child() is not None:
+    self.remove(self.get_child())      # AttributeError
+```
+
+**`Gtk.Popover` holds one child through a setter and is not a `Gtk.Box`.**
+Measured: `hasattr(Gtk.Popover, "remove")` is **False**,
+`hasattr(Gtk.Box, "remove")` is True.
+
+It shipped because **`rebuild()` is called from `__init__`, where the child is
+still `None`** — so the loop body never ran and construction succeeded. Every
+rebuild *after* that raised. And what the method exists for, in its own
+docstring, is *"a picker that kept stale rows would say 'answering now' next to
+a model that stopped"* — a model downloaded while the window was open. **The
+one thing it exists for was the one thing that did not work**, and no shipped
+caller calls it, so nothing surfaced it.
+
+`set_child(None)`. The second mutation in the set **restores the shipped line
+and fails two tests**, which is the strongest kind there is: not hypothetical.
+
+### 3. The redraw looked for a method on the wrong object, behind a guard
+
+`application._refresh_strip` did `getattr(window, "_refresh_model_word", None)`
+— on the **window**, while the method was defined on the **strip**. `getattr`
+returned `None`, `callable()` said no, and **the refresh silently did nothing**:
+the row kept naming the previous model after a switch. The `callable()` guard
+is what made it invisible — *a refresh that does nothing looks exactly like a
+refresh with nothing to do*.
+
+The two widgets being separate is real (`_model_row()` appends into the
+window's `main_box`, not the strip), so the lookup stays; what was wrong was
+which object asked, and the method now lives where the caller looks.
+
+### 4. Two widgets, two tables, two words for one state
+
+The chip read `SPECS` and walked `installed()`; the row read `TIERS`. Rendered
+across four machine states:
+
+| machine | chip said | row said |
+|---|---|---|
+| nothing installed, nothing answering | `No model` | **`the default model`** |
+| 1.7B installed and answering | `1.7B` | `1.7B` |
+| 8B installed, nothing chosen | `8B` | `8B` |
+| **a model nothing describes is active** | **`No model`** | **`ghost-gguf`** |
+
+Two labels for the *absence* of a choice, one of which implies a choice was
+made; and "No model" beside a model that is loaded. **The row now asks the
+strip's own `_model_rows()`** — the table the chip is drawn from, so the
+question cannot be answered twice — and `_model_rows()` names the active key
+when nothing else describes it. **All four states agree**, and
+`test_the_row_and_the_chip_always_name_the_same_model` is parametrized over all
+four so it cannot go quiet.
+
+### 5. `chip_for()` was dead, with a docstring claiming otherwise
+
+It built *a second model button* — bare, no label, different from the row's —
+and had **zero callers**. Its docstring said *"Called on every refresh, from the
+same place the menu was built"*. Deleted rather than wired: the strip's control
+is answered by `_model_chip`, and a dead button whose docstring describes a
+caller reads as coverage. **This is the `code_hl` shape** — a function written
+and a caller claimed, measured at ninety seconds after the other session
+finished wiring it.
+
+### Three of my own test bugs, and the one that matters most
+
+The file's own header records the general finding — *test data chosen without
+checking it could distinguish the behaviour from its opposite* — and this file
+was no better:
+
+- **The `TIERS` fixture omitted the `" - "` separator** the real labels carry
+  (`"Small (0.6 GB) - quick on any computer, for simple requests"`). So
+  `rows_for`'s split had nothing to split and my assertion that the title is
+  `"Small"` failed against correct code. **The fixture was shaped unlike the
+  real data.**
+- **The `_choose` test used `ModelPicker.__new__`.** `popdown` is a `Gtk.Popover`
+  vfunc, and a Python attribute on an *uninitialised* GObject does not shadow
+  it — the call reached the real method and raised *"object is not
+  initialized"*. A fixture shaped like the call rather than like the thing
+  being called, which is the rule this file states about `meeting.notes`' fake.
+- **The "unreadable list" assertion only checked a widget existed.** A
+  `Gtk.Label` with an empty string satisfies it. It asserts the *words* now.
+
+**And one assertion of mine was simply wrong**: I claimed the title should be
+`"Small"` and the size should go. The size stays — the *sentence* is what will
+not fit in a 260px popover, and the size is what a person needs before choosing
+something they are about to load. The module was right.
+
+### 6 mutations, 6 caught, 0 survivors
+
+| mutation | |
+|---|---|
+| `set_child(None)` → `remove()` (**the shipped bug**) | **2 failed** |
+| the pick hands over an empty key | 1 failed |
+| an absent model says "ready" | 1 failed |
+| the answering model does not say "answering now" | 1 failed |
+| the row stops reading the strip's table | **3 failed** |
+| the row ignores an active key the rows cannot describe | 1 failed |
+
+Run against a **copy** at `/tmp/opencode/snap-mp`, never the shared tree —
+the other session was committing throughout and a mutation run that rewrites
+product source is a mutation run that ships somebody else's defect.
+
+### And the one fix that could not be made, restated for the next person
+
+The assistant's `ok` is still a string-prefix guess while the dispatcher
+computes the real four-state verdict one line earlier. **`execute_tool_outcome`
+is the fix and 58 test files patch `execute_tool`** — moving the seam bypasses
+all of them, and a turn that wrote a stub wrote a real file instead. That is a
+migration with its own review, not an edit, and it is why `_tool_ok()` exists
+as a named function carrying the limitation rather than as an unexplained
+expression in the middle of the tool loop.
