@@ -731,3 +731,35 @@ def test_every_chimera_rung_fails_the_real_gate():
         v = cultivation.ascension_gate(base, adapted, held_out=True)
         assert v.unlocked is False, "%s should have refused: %s" % (label, v.why)
         assert v.why, label
+
+
+def test_the_first_gate_pass_is_recorded_as_the_refusal_it_became():
+    """同化: the first `merge.gate` `ship: true` in this repository's history, and
+    the reason it is still a refusal.
+
+        merge gate   52.684 vs base 52.945, parent 53.871  -> ship: true
+        task_eval    4/5 vs base 4/5, same miss, 14.4 vs 4.65 s/case
+
+    A tie at three times the cost. This is the second time perplexity and the
+    real task have disagreed here, and the first time perplexity said *yes* -
+    which is the more dangerous of the two, so the row has to carry both numbers
+    or the next reader sees only the gate's verdict.
+    """
+    said = cultivation.TERMS["attunement"]["measured"]
+    assert "ship: true" in said, said[:200]
+    assert "52.684" in said and "52.945" in said, "both parents' figures"
+    assert "4/5" in said, "the honest instrument's figure"
+    assert "14.4" in said and "4.65" in said, "both timings"
+    assert "tie is a" in said, "and the reason it does not ship"
+
+
+def test_the_gate_passing_merge_is_refused_by_the_real_gate():
+    """**The load-bearing check.** The measured merge figures are pushed through
+    `ascension_gate`, which must refuse - a tie is a refusal, not a win. If this
+    ever passes, the row and the gate have started disagreeing, which is the one
+    thing this module exists to prevent."""
+    base = cultivation.Measurement(right=4, of=5, seconds=4.65)
+    merged = cultivation.Measurement(right=4, of=5, seconds=14.4)
+    v = cultivation.ascension_gate(base, merged, held_out=True)
+    assert v.unlocked is False, v.why
+    assert "no better" in v.why, v.why

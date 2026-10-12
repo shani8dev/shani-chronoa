@@ -321,8 +321,22 @@ TERMS: Dict[str, Dict[str, str]] = {
         "is": "the weight merge: sibling checkpoints interpolated into one, "
               "which must measure better than every parent to count",
         "from": "merge.gate",
-        "measured": "three verdicts, and only `better` ships - a tie is not a "
-                    "win, it is a no-better refusal",
+        "measured": "**The first gate pass in this repository's history is "
+                    "still a refusal on the honest instrument.** Merging the base "
+                    "with a *tool-calling* Qwen3-1.7B fine-tune at lambda=0.3 - "
+                    "same architecture, same shapes, differing in capability, "
+                    "which is the ingredient every earlier attempt lacked - "
+                    "`merge.gate` returned `ship: true`, `better`, **52.684 "
+                    "against a base of 52.945 and a parent of 53.871**, beating "
+                    "every measured parent. On task_eval the same file scores "
+                    "**4/5 against the base's 4/5**, missing the same case, at "
+                    "**14.4 s/case against 4.65** - a tie at three times the "
+                    "cost. `ascension_gate` calls that what it is: a tie is a "
+                    "refusal. lambda 0.5, 0.7 and 1.0 were all `worse` outright "
+                    "(56.179 / 54.378 / 54.066). **This is the second time "
+                    "perplexity and the task disagreed here, and the first time "
+                    "the perplexity side said yes**, which is the more dangerous "
+                    "of the two",
     },
     "ascension": {  # 渡劫 du jie - surviving the trial to advance
         "is": "the adapter loaded *alongside* the base, so the trial does not "
