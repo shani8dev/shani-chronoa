@@ -374,6 +374,55 @@ incomplete for the same reason and reading the paragraph back is the only thing
 that found it - no test checks AGENTS.md against the tree, which is the whole
 reason this list rots.
 
+## "Fix all": the environmental table's own headline, and the nine rows under it (2026-10-12)
+
+Asked to fix all of them. The `still open` / `not fixed` audit was done; the
+environmental-failure table was the claim left standing, and it had **two** layers
+of staleness, not one.
+
+The entry headed *"The environmental failure list is stale"* re-measured all eleven
+files and found zero failures - and then **the table it corrected sat two thousand
+lines above it still claiming nine of them failed**, including its headline:
+
+> Every one is environmental on this box, and each is a real capability that is
+> genuinely absent rather than a defect
+
+Re-measured again today, each file on its own: `test_setup_extras` **27 passed**,
+`test_sandbox_seccomp` **61 passed + 1 skipped**, `test_sandbox_profiles_live`
+**37 passed**, `test_sense_idle` **20 passed + 3 skipped**, `test_everyday_skills`
+**53 passed**, `test_input_skills` **23 passed**, `test_portal_input` **14 passed**,
+`test_vision_sense` **53 passed + 1 skipped**, `test_recordings` **19 passed**, plus
+the two already corrected. **Zero failures across all eleven, for the second time.**
+
+The nine rows are struck with their re-measured result, and the headline claim is
+struck rather than deleted - it is a dated snapshot of a real run, and what was
+wrong was that nothing struck it when the later measurement arrived. **Two of the
+rows were already corrected and were corrected for the wrong reason**, which is the
+part worth carrying: `test_permission_decisions` was never the missing `grim`, it
+was a fixture that supplied the tool and not the *display*, and it is the row this
+file says taught it that *"a list that says environmental stops asking why"*.
+
+### The three-question method this whole audit converged on
+
+Every false claim in this pass was found the same way, and it is worth stating once
+because it is not what the instruction says:
+
+1. **grep the adjective** - `still open`, `not fixed`, `environmental`, `unverified`,
+   `DONE`, `FIXED`. The adjective is the claim.
+2. **measure the noun it is about** - run the file, grep the importer, read the
+   handler. Not the sentence *near* it, the noun.
+3. **check the correction reached the claim.** This is the one that caught the
+   fifth entry: the three bullets were struck and the summary sentence under them
+   was not, so a paragraph asserted the opposite of what it had just been corrected
+   to say. A correction that stops one line short of its own claim is half a
+   correction - and it happened twice in the same edit.
+
+**No test checks AGENTS.md against the tree**, which is why this list rots and why
+step 2 has to be run by a person. The two claims that are *not* stale were left
+alone precisely because step 2 was run on them: the scrolling entry still reads
+"not to be read as a verdict" because no pane known to overflow was used, and the
+tool_select scoring weakness is a scoring matter rather than a functional defect.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
@@ -1979,18 +2028,22 @@ group). **All 27 failures are in test files this work never touched** - verified
 by intersecting the failure list with the modified-file list, which is empty.
 Every one is environmental on this box, and each is a real capability that is
 genuinely absent rather than a defect:
+**[that claim was false for every one of the eleven - re-measured 2026-10-12, all
+eleven pass, see the table below and the entry headed "The environmental failure
+list is stale". Kept as written because it is a dated snapshot of a real run; what
+is wrong is that nothing struck it.]**
 
 | file | why |
 |---|---|
 | ~~`test_browser_window_probe.py` (7)~~ **no longer environmental — the row was stale (corrected 2026-10-11)** | it said "WebKitGTK is not installed (`require_version` fails for both 6.0 and 4.1)". Measured: **`WebKit 6.0` resolves** (`WebKit-6.0.typelib` present; 4.1 is only refused because 6.0 is already loaded, which is not the same as missing), and the file now runs **7 passed, 2 skipped**. `xdotool`, `grim` and `tesseract` are likewise all present. This row is the shape of a list that stops asking why — it is corrected rather than deleted so the next reader sees that "environmental" is a claim to re-measure |
-| `test_setup_extras.py` (6) | `ConsentRequired` - model downloads are gated shut in this environment. Verified pre-existing on the **unmodified** tree |
-| `test_sandbox_seccomp.py` (2), `test_sandbox_profiles_live.py` (1) | Landlock and seccomp need the real kernel; AGENTS.md already says so |
-| `test_sense_idle.py` (3) | real clock and real X resources, headless |
-| `test_everyday_skills.py` (2), `test_input_skills.py` (1) | xdotool / X11 not present |
+| ~~`test_setup_extras.py` (6)~~ **re-measured 2026-10-12: 27 passed** | ~~`ConsentRequired` - model downloads are gated shut in this environment~~ |
+| ~~`test_sandbox_seccomp.py` (2), `test_sandbox_profiles_live.py` (1)~~ **re-measured 2026-10-12: 61 passed + 1 skipped, and 37 passed** | ~~Landlock and seccomp need the real kernel~~ - they do, and the files now **test for the absence honestly** rather than failing on it |
+| ~~`test_sense_idle.py` (3)~~ **re-measured 2026-10-12: 20 passed, 3 skipped** | ~~real clock and real X resources, headless~~ - the skips are the component asking, not the environment guessing |
+| ~~`test_everyday_skills.py` (2), `test_input_skills.py` (1)~~ **re-measured 2026-10-12: 53 passed, and 23 passed** | ~~xdotool / X11 not present~~ |
 | ~~`test_permission_decisions.py` (2)~~ **FIXED 2026-10-09 — this entry named the wrong cause** | it was never the missing `grim`/`gnome-screenshot`. The fixture already writes a fake `grim` to a temp dir and puts it on `PATH`, because the skill runs in a sandboxed child that inherits `PATH` and not the test process's patches. What it did **not** supply was a *display*: `screengrab.capture_screen` calls `display_environment()` first and raises *"there is no display to capture"* when neither `WAYLAND_DISPLAY` nor `DISPLAY` is set — so on a headless runner the fake `grim` was never executed. **Supplying the tool does not supply the display.** The fixture now sets `WAYLAND_DISPLAY` too (preferred over `DISPLAY`, because `display_environment()` prefers it and setting only `DISPLAY` on a Wayland desktop would capture the XWayland root — the exact mistake that function's docstring warns against, committed in this test). 19 pass headless **and** with `DISPLAY` set; removing the display fails 2, removing the tool fails 5, so both halves are load-bearing. **A list that says "environmental" stops asking why, and this one was wrong for as long as it was there** — the same lesson as the seccomp entry above. |
-| `test_portal_input.py` (1) | no `org.freedesktop.impl.portal.RemoteDesktop` backend |
-| `test_recordings.py` (1) | the consent switch is off here, so the honest refusal is returned instead of the granted path |
-| `test_vision_sense.py` (1) | a real screenshot of this desktop, which needs `grim` |
+| ~~`test_portal_input.py` (1)~~ **re-measured 2026-10-12: 14 passed** | ~~no `org.freedesktop.impl.portal.RemoteDesktop` backend~~ |
+| ~~`test_recordings.py` (1)~~ **re-measured 2026-10-12: 19 passed** | ~~the consent switch is off here~~ |
+| ~~`test_vision_sense.py` (1)~~ **re-measured 2026-10-12: 53 passed, 1 skipped** | ~~a real screenshot of this desktop, which needs `grim`~~ |
 
 **Two failures were mine to fix and are fixed**: `test_packaging.py`'s two
 bytecode checks (690 stray `.pyc` left by ad-hoc probes - AGENTS.md's documented
