@@ -213,6 +213,30 @@ class _CompareView(Gtk.Box):
         self._app = app
         self._root = _store_root(app)
         self._rows: "List[tuple[str, str]]" = []
+        #: What this panel says about itself, for the sidebar's health dot and
+        #: for the row it draws. Built once and read on the way past, so there is
+        #: no second count to fall out of date.
+        #:
+        #: **This panel shipped without one, and the test named it.**
+        #: `memory.py`'s build ends with `surface.status =
+        #: surface.status_recorder.status`; this one attached `page.view` and
+        #: `page.reload` and stopped. The result was the only sidebar row in the
+        # app with no dot at all, which
+        #: `test_every_panel_says_something_about_itself` reads as *"a panel that
+        #: cannot say is not a broken panel, but twenty of them is a flat list."*
+        self.status_recorder = common.StatusRecorder()
+        #: **The status slot, and the row is drawn through the recorder.** The
+        #: first version of this fix called `status_recorder.set(...)`, which
+        #: records the word and draws nothing - and
+        #: `test_the_dot_agrees_with_the_row_the_panel_shows` said exactly that:
+        #: *"status() says 'ok' so the sidebar dot would be 'status-ok', but the
+        #: panel renders no such row. Either the row was not written through the
+        #: recorder, or the recorder recorded a word nothing was drawn for."*
+        #: `recorder.row()` does both in one call, which is the whole reason it
+        #: exists instead of twenty hand-written closures.
+        self._status_slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                                    spacing=0)
+        self.append(self._status_slot)
         #: **Two boxes, not one.** The first version put the drop-downs and the
         #: results in the same box and cleared the results by index - removing
         #: `children[2:]` on the assumption that the two selectors are always
@@ -241,9 +265,31 @@ class _CompareView(Gtk.Box):
         self._clear(self._result_box)
         self._earlier = self._later = None
 
+        # **The row and the dot, made in one call so they cannot disagree.**
+        # `_conversations` returns `[]` both for a store with nothing in it and
+        # for one that could not be read, so the rows alone cannot tell them
+        # apart - and "I could not ask" is not "there is nothing to ask".
+        common.clear(self._status_slot)
         if not self._root:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION, "The conversation store could not be "
+                "asked", "the panel does not know where Chronoa's conversations "
+                "are kept on this machine"))
             self._result_box.append(_row(UNREADABLE))
             return
+        if not self._rows:
+            self._status_slot.append(self.status_recorder.row(
+                common.STATUS_ATTENTION, "Nothing to compare yet",
+                "two conversations are needed before this panel can say "
+                "anything; ask something twice and it will"))
+            self._result_box.append(_row(NEED_TWO))
+            return
+        # **An empty store that was read is an answer, not a fault.** Amber is
+        # for a panel that could not find out; this one could, and the answer
+        # is that there is nothing to compare.
+        self._status_slot.append(self.status_recorder.row(
+            common.STATUS_OK,
+            f"{len(self._rows)} conversation(s) to compare between"))
         if len(self._rows) < 2:
             # One conversation is not a comparison, and saying "pick two" when
             # there is one to pick is an instruction nobody can follow.
@@ -334,4 +380,7 @@ def build(app: Any) -> Gtk.Widget:
         page.connect("showing", lambda *_a: view.reload())
     page.view = view
     page.reload = view.reload
+    # **And what it says about itself.** Missing this is what left the sidebar
+    # row with no dot. `memory.py`'s build ends with the same line; this is it.
+    page.status = view.status_recorder.status
     return page
