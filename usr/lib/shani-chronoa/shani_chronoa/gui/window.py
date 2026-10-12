@@ -1404,6 +1404,28 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._turn_stop_button.connect("clicked", self._on_turn_stop_clicked)
         self._turn_stop_button.set_visible(False)
         input_row.append(self._turn_stop_button)
+
+        # **Undo, and it names what it will undo.** `undo_last_change` is
+        # *global* - it undoes the last change, and its own docstring separates
+        # that from "revert to some earlier state I happened to have in mind" -
+        # so a button on an individual turn would say "undo this" and undo
+        # something else. That is the defect this session keeps finding, so it
+        # lives here instead: always in the composer, always about the most
+        # recent change, and `recent_changes()` supplies the path so the label
+        # is not a guess.
+        #
+        # **Hidden when there is nothing to undo.** A button that appears to
+        # have nothing behind it is the same shape as the stop-speaking button
+        # above, which is built, hidden and never revealed.
+        self._undo_button = Gtk.Button()
+        self._undo_button.set_icon_name("edit-undo-symbolic")
+        self._undo_button.add_css_class("flat")
+        self._undo_button.set_valign(Gtk.Align.CENTER)
+        self._undo_button.connect("clicked", self._on_undo_clicked)
+        self._undo_button.set_visible(False)
+        input_row.append(self._undo_button)
+        self._refresh_undo_button()
+
         input_row.append(self._send_button)
         main_box.append(self._attach_bar)
         # The organ strip sits directly above the composer, always present, so
@@ -1916,6 +1938,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._transcript.show_placeholder()
             return
         self._transcript.add_assistant_turn(text)
+        # A turn is when files get changed, so it is when the undo ring can have
+        # gained something. Refreshed here rather than on a timer, so the button
+        # appears with the change that caused it instead of up to a tick later.
+        self._refresh_undo_button()
 
     # -- the panels -------------------------------------------------------
 
@@ -2541,6 +2567,82 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _on_input_activate(self, entry: Gtk.Entry) -> None:
         self._submit_input()
+
+    def _last_change(self):
+        """`(path, description)` for the newest undoable change, or None.
+
+        Goes through `recent_changes()` rather than reading the ring itself:
+        that function already skips entries with no file behind them and entries
+        whose file is unchanged, so a preview that invented the "after" side is
+        something this codebase decided against.
+        """
+        try:
+            from shani_chronoa.skills import undo_last_change
+            changes = undo_last_change.recent_changes()
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the undo ring", exc_info=True)
+            return None
+        if not changes:
+            return None
+        path = changes[-1][0]
+        return path, path.name
+
+    def _refresh_undo_button(self) -> None:
+        """Show the undo button only when there is something it can undo."""
+        button = getattr(self, "_undo_button", None)
+        if button is None:
+            return
+        found = self._last_change()
+        button.set_visible(found is not None)
+        if found is None:
+            button.set_tooltip_text("Nothing to undo")
+            return
+        path, name = found
+        try:
+            allowed, why = self._consent_for_undo()
+        except Exception:                               # noqa: BLE001
+            allowed, why = False, ""
+        button.set_tooltip_text(
+            f"Undo the change to {name}" if allowed
+            else f"Undo is off: {why}")
+        button.set_sensitive(True)
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"undo the change to {name}"])
+
+    def _consent_for_undo(self):
+        """The skill's own gate, asked here rather than guessed at.
+
+        `undo_last_change` refuses without `file-edit-enabled` and says why. If
+        the button ignored that, it would offer a control whose every press ends
+        in a refusal.
+        """
+        from shani_chronoa.skills import undo_last_change
+        return undo_last_change._consent(self._config)
+
+    def _on_undo_clicked(self, _button: Gtk.Button) -> None:
+        """Undo the last change, and say what was actually undone.
+
+        **Reports the skill's own words rather than its own assumption.** The
+        button says which file it will undo, but the ring can have moved under
+        it, and the skill's refusal - "undoing a file change is turned off" - is
+        more useful than anything this could invent.
+        """
+        from shani_chronoa.skills import undo_last_change
+        found = self._last_change()
+        if found is None:
+            self.set_status("There is nothing left to undo")
+            self._refresh_undo_button()
+            return
+        path, name = found
+        try:
+            said = undo_last_change._run({})
+        except Exception:                               # noqa: BLE001
+            logger.warning("undo failed", exc_info=True)
+            self.set_status(f"Could not undo the change to {name}")
+            return
+        self.set_status(said.strip() or f"Undid the change to {name}")
+        self._refresh_undo_button()
 
     def _turn_stats_for_footer(self):
         """The running turn's cost, or nothing when there is no turn to cost.
