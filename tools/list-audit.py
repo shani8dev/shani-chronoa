@@ -22,8 +22,9 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(os.environ.get("SHANI_ROOT",
-                              str(pathlib.Path(__file__).resolve().parent)))
+NAMEISH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
+CAPS = re.compile(r"[A-Z][A-Z0-9_]{3,}")
+MIN_NAMES = 3
 
 TARGETS = [
     ("shani-cassini/src", "python"),
@@ -32,9 +33,32 @@ TARGETS = [
     ("shani-settings/etc", "conf"),
 ]
 
-NAMEISH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_./-]*$")
-CAPS = re.compile(r"[A-Z][A-Z0-9_]{3,}")
-MIN_NAMES = 3
+
+def _workspace_root() -> pathlib.Path:
+    """Where the sibling repos are, without asking anyone to set an env var.
+
+    This tool lives at `<workspace>/shani-chronoa/tools/list-audit.py` and its
+    targets are siblings of `shani-chronoa`, so the workspace is up the tree
+    from here. The first version defaulted to the script's own directory, which
+    is `tools/` - so `ROOT / "shani-chronoa/..."` never existed, every target
+    was skipped by `if not base.is_dir(): continue`, and the tool printed
+
+        scanned 0 code-level name lists across 4 repos; 0 unmeasured
+
+    **A clean result from measuring nothing.** Read as a pass, it says every
+    hand-kept list in four repos is measured, and it is the same
+    absence-presented-as-a-result shape this workspace records everywhere else.
+    `main` now refuses to print that verdict at all; see NOTHING WAS MEASURED
+    there. Set SHANI_ROOT to override this.
+    """
+    here = pathlib.Path(__file__).resolve()
+    for candidate in here.parents:
+        if any((candidate / rel).is_dir() for rel, _ in TARGETS):
+            return candidate
+    return here.parent
+
+
+ROOT = pathlib.Path(os.environ.get("SHANI_ROOT", str(_workspace_root())))
 
 
 def _names_from(values):
@@ -126,10 +150,12 @@ def main():
     total = 0
     findings = []
     conf_seen = []
+    seen_repos = []
     for rel, kind in TARGETS:
         base = ROOT / rel
         if not base.is_dir():
             continue
+        seen_repos.append(rel.split("/")[0])
         repo = rel.split("/")[0]
         mentioned = mentioned_tokens(ROOT, repo)
         lister = {"python": python_lists, "bash": bash_lists,
@@ -152,8 +178,26 @@ def main():
                 if name.lstrip("_") not in mentioned:
                     findings.append((repo, str(path.relative_to(ROOT)),
                                      name, lineno, len(names)))
+    print()
+    if not seen_repos:
+        # **Refuse to report a clean result from measuring nothing.** Every
+        # target was skipped, so "0 unmeasured" is a fact about the paths and
+        # not about the lists - and it reads exactly like a pass. The summary
+        # line is not printed at all, because that line is the thing that reads
+        # as a verdict: a reader skimming past the refusal below would still
+        # take "0 unmeasured" for an answer. Exit 2, so a caller checking the
+        # status is not told everything is fine either.
+        print("NOTHING WAS MEASURED: none of the four target directories exist")
+        print("under %s" % ROOT)
+        print("Looked for:")
+        for rel, _ in TARGETS:
+            print("    %s/%s" % (ROOT, rel))
+        print("This tool lives in <workspace>/shani-chronoa/tools/ and audits that")
+        print("workspace's siblings; it finds them from its own location. Set")
+        print("SHANI_ROOT to point it somewhere else.")
+        return 2
     print("scanned %d code-level name lists across %d repos; %d unmeasured"
-          % (total, len(TARGETS), len(findings)))
+          % (total, len(seen_repos), len(findings)))
     print("(%d config files also scanned as data - excluded from the code total)"
           % len(conf_seen))
     print()

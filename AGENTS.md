@@ -2,6 +2,66 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
+
+Asked to wire every check in this repo that nothing runs. Two `check_*` audit
+scripts were already wired (`check_capabilities_doc.py` by `test_capabilities_doc.py`,
+`check_readme_numbers.py` by the test added this pass). Four more candidates were
+classified by reading each one's own claim rather than by its name:
+`audit_description_claims.py`, `audit_tool_packages.py` and `list-audit.py` are
+**surveys** that call themselves "a lead list, not a defect list" and exit 0 -
+wiring them to fail on findings would be wrong, and `live_webcheck.py` /
+`probe_skills_on_host.py` need the network and the host's own binaries, so
+neither is a portable test. **The one gate that was unwired was
+`tools/gen_organism_doc.py`**, and it had drifted.
+
+### Part 3 of ARCHITECTURE-TARGET.md, and the column headed "Code"
+
+The generator's own docstring says *"a test asserts the panel and the inventory
+still match"*. **No test ran it**, and the committed section had drifted two
+independent ways:
+
+- **`organ.code[:2]` truncated the Code column while 23 of 26 organs declare
+  more than two files.** `Nose` declares six and was published as two. The
+  column is headed "Code" and nothing anywhere says it is a sample, so on the
+  page whose stated job is to map every box to today's code, the table stated
+  less than it knew.
+- **One row was hand-edited after generation.** `Synaptic plasticity` carried
+  `distill.py` - which `organism.py` has never declared - plus a measured note
+  (*"the outcome model is a flag, not a predictor: 83% top-1 against a 94%
+  constant"*). So the section was regenerable except for the one row that was
+  not, and the truncation meant regenerating reproduced neither half of it.
+
+Truncation removed, section regenerated, `tests/test_organism_doc.py` (2) wired
+with a negative control that doctors the document in a copy and asserts the gate
+sees it. **Proved against the real thing rather than argued:** HEAD's Part 3
+compares **False** against the generator and the regenerated one compares
+**True**. The hand-edit's finding is not lost - `AGENTS.md` carries it in fuller
+form, with the measurement table it came from.
+
+65 passed across the organism, standing-decisions, capabilities-doc,
+readme-numbers and body-and-organs suites.
+
+### `list-audit.py` reported a clean result from measuring nothing
+
+Run as a person would - from the repo root, no env var - it printed
+
+    scanned 0 code-level name lists across 4 repos; 0 unmeasured
+
+**"0 unmeasured" read as a pass.** It says every hand-kept name list in four
+repos is measured by some test. `ROOT` defaulted to the script's own directory
+(`shani-chronoa/tools/`), so `ROOT / "shani-chronoa/usr/lib/..."` did not exist,
+all four targets were dropped by `if not base.is_dir(): continue`, and nothing
+was scanned. Fixed in two halves, and **the second one was found by my own
+test's assertion being right and the code being wrong**: the first fix printed
+the refusal *after* the summary line, so a reader skimming still saw
+"0 unmeasured". The summary is not printed at all now - that line is the thing
+that reads as a verdict - and the exit is 2. Measured after: **334 lists, 198
+unmeasured, exit 0** with no env var; **NOTHING WAS MEASURED, exit 2** pointed
+at an empty tree; `SHANI_ROOT` still wins.
+
+`tests/test_list_audit_tool.py` (3), including the negative control.
+
 ## The four senses the README's table did not have, and the check nothing ran (2026-10-12)
 
 A chunked suite run found that my chunk-composition had included `tests/check_*.py`

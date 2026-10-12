@@ -51,7 +51,11 @@ def main() -> None:
     for system, members in organism.by_system():
         for organ in members:
             light = BT + organ.indicator + BT if organ.indicator else "-"
-            code = ", ".join(BT + path + BT for path in organ.code[:2])
+            # Every file, not the first two. The column is headed "Code" and
+            # nothing says it is a sample, so a two-of-six list read as the
+            # whole of it - the confident-wrong-answer shape, on the page that
+            # maps every box to today's code.
+            code = ", ".join(BT + path + BT for path in organ.code)
             note = "" if organ.state == organism.BUILT else " " + organ.missing
             out.append(f"| {system} | {organ.anatomy} | {organ.function}. | "
                        f"{MARK[organ.state]} | {light} | {code} |{note}")

@@ -773,31 +773,31 @@ there is no left pinky, because nothing in here has one.
 | System | Organ | What it is for | State | Light | Code |
 |---|---|---|---|---|---|
 | Boundary | Skin | the outside edge: everything that leaves this machine, and the log of it. | built | `skin` | `egress.py`, `senses/network.py` |
-| Boundary | Immune system | what defends against a hostile world - untrusted input, privilege, secrets. | built | - | `guardrail.py`, `redaction.py` |
-| Boundary | Scar tissue | the wall between a skill and the machine it runs on. | built | - | `sandbox/executor.py`, `sandbox/profiles.py` |
-| Senses | Ears | hearing: the microphone, speech recognition, wake phrase, and what is heard. | built | `ears` | `audio.py`, `stt.py` |
-| Senses | Eyes | sight: the camera, the screen, OCR, faces, objects, and the vision model. | built | `eyes` | `screengrab.py`, `local_vision.py` |
-| Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/power.py`, `senses/thermalgrid.py` |
-| Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py` | no raw input events, on purpose - it watches devices, not you
-| Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py` |
-| Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py` | no salience or priority queue; selection is by tool relevance only
-| Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py` |
-| Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/` |
-| Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py` |
-| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py` | no awake/idle/sleep state machine; the daemon runs, nothing sleeps
-| Core | Brain | thinking: the language model and the tool loop it drives. | built | `brain` | `assistant.py`, `local_llm.py` |
-| Core | Prefrontal cortex | judgement before acting: permissions, plan mode, and the refusals. | built | - | `capabilities.py`, `planmode.py` |
-| Core | Cerebellum | checking its own work: post-conditions, and repairing a broken turn. | built | - | `verification.py`, `history_repair.py` |
-| Core | Amygdala | fast evaluation of danger, before the slow part of the brain is asked. | built | - | `guardrail.py`, `permissions.py` |
-| Core | Reticular formation | attention: deciding what is worth interrupting for. | part | - | `triggers/events.py`, `cues.py` | no interrupt policy; everything notable is announced equally
-| Regulation | Heart | pulse: is it alive, is the model up, is the clock sane. | part | - | `model_service.py`, `local_llm.py` | a liveness signal exists per subsystem; nothing consumes it yet
-| Regulation | Thermoregulation | keeping itself at a working temperature, and noticing when it cannot. | part | `nose` | `senses/thermalgrid.py`, `senses/hwmon.py` | it reads its temperature; it does not act on it unasked
+| Boundary | Immune system | what defends against a hostile world - untrusted input, privilege, secrets. | built | - | `guardrail.py`, `redaction.py`, `sandbox/`, `permissions.py`, `senses/security.py` |
+| Boundary | Scar tissue | the wall between a skill and the machine it runs on. | built | - | `sandbox/executor.py`, `sandbox/profiles.py`, `sandbox/landlock.py`, `sandbox/seccomp.py` |
+| Senses | Ears | hearing: the microphone, speech recognition, wake phrase, and what is heard. | built | `ears` | `audio.py`, `stt.py`, `stt_provision.py`, `wakeword.py`, `vad.py`, `senses/hearing.py` |
+| Senses | Eyes | sight: the camera, the screen, OCR, faces, objects, and the vision model. | built | `eyes` | `screengrab.py`, `local_vision.py`, `opencv/`, `photo_library.py`, `senses/vision.py` |
+| Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/power.py`, `senses/thermalgrid.py`, `senses/hwmon.py`, `senses/services.py`, `senses/network.py`, `senses/security.py` |
+| Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py`, `senses/usb.py`, `senses/bluetooth.py` | no raw input events, on purpose - it watches devices, not you
+| Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
+| Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | no salience or priority queue; selection is by tool relevance only
+| Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py`, `sherpa.py`, `audio.py` |
+| Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `portal.py`, `desktop_session.py`, `phone.py` |
+| Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py`, `skills/timer.py`, `approvals.py` |
+| Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py` | no awake/idle/sleep state machine; the daemon runs, nothing sleeps
+| Core | Brain | thinking: the language model and the tool loop it drives. | built | `brain` | `assistant.py`, `local_llm.py`, `ollama_llm.py`, `cloud_llm.py`, `mcp.py` |
+| Core | Prefrontal cortex | judgement before acting: permissions, plan mode, and the refusals. | built | - | `capabilities.py`, `planmode.py`, `permissions.py`, `approvals.py` |
+| Core | Cerebellum | checking its own work: post-conditions, and repairing a broken turn. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
+| Core | Amygdala | fast evaluation of danger, before the slow part of the brain is asked. | built | - | `guardrail.py`, `permissions.py`, `approvals.py`, `senses/security.py` |
+| Core | Reticular formation | attention: deciding what is worth interrupting for. | part | - | `triggers/events.py`, `cues.py`, `speech.py` | no interrupt policy; everything notable is announced equally
+| Regulation | Heart | pulse: is it alive, is the model up, is the clock sane. | part | - | `model_service.py`, `local_llm.py`, `senses/timebase.py` | a liveness signal exists per subsystem; nothing consumes it yet
+| Regulation | Thermoregulation | keeping itself at a working temperature, and noticing when it cannot. | part | `nose` | `senses/thermalgrid.py`, `senses/hwmon.py`, `skills/power_profile.py` | it reads its temperature; it does not act on it unasked
 | Regulation | Hypothalamus | setpoints: the conditions it should notice on its own. | part | - | `triggers/rules.py`, `approvals.py` | no built-in presets; a rule has to be armed by the user
-| Regulation | Circadian rhythm | rhythm: knowing what time it is and whether that matters now. | part | - | `senses/timebase.py`, `senses/idle.py` | the clock is read; nothing is scheduled *because* of the hour
-| Memory and learning | Hippocampus | what it was told, and what it perceived. | built | `memory` | `senses/store.py`, `conversation_store.py` |
+| Regulation | Circadian rhythm | rhythm: knowing what time it is and whether that matters now. | part | - | `senses/timebase.py`, `senses/idle.py`, `triggers/` | the clock is read; nothing is scheduled *because* of the hour
+| Memory and learning | Hippocampus | what it was told, and what it perceived. | built | `memory` | `senses/store.py`, `conversation_store.py`, `local_embed.py` |
 | Memory and learning | Sleep | consolidation: turning a long conversation into something usable. | built | - | `consolidation.py`, `compression.py` |
-| Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py`, `distill.py` - the outcome model is a **flag**, not a predictor: 83% top-1 against a 94% constant |
-| Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py` | faults and pressures are reported; there is no reward signal at all
+| Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py`, `tool_select.py` |
+| Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py`, `verification.py` | faults and pressures are reported; there is no reward signal at all
 
 ### The gaps, in one place
 
