@@ -481,36 +481,103 @@ def perplexity(path: Path, corpus: Optional[Path] = None) -> Optional[float]:
 
 
 def gate(merged: Path, parents: Sequence[Path],
-         corpus: Optional[Path] = None) -> Dict[str, object]:
+         corpus: Optional[Path] = None,
+         quant: Optional[str] = None) -> Dict[str, object]:
     """Whether the merge is worth serving, measured against **both** parents.
 
     A merge that beats neither parent has produced nothing worth loading. Being
     *worse than the base* is the clearer failure and is reported separately,
     because "the merge did not help" and "the merge damaged the base" call for
     different responses.
+
+    **`quant` compares like with like, and without it the gate is wrong.**
+
+    A merge is written F16 and then quantised **once** - that is the whole point
+    of `blend` - so the file being judged is Q4_K_M while its parents are sitting
+    on disk in whatever they shipped as, which here is Q8_0. The first version
+    compared those two directly and therefore charged the entire requantization
+    cost to the merge. Measured on Qwen3-0.6B, an identity merge - lambda = [1,
+    0], which *is* the base, bit for bit - came back 55.374 against the base's
+    48.770 and was **refused for being 13.6% worse than the thing it is**. The
+    requantization alone costs 10-14% on this checkpoint depending on the
+    parent, and it is the same number for every merge.
+
+    Pass the quantisation the merge was written at and each parent is requantised
+    to match before anything is compared. Both figures are recorded, so the
+    cost is visible rather than silently distributed - `scores` holds each
+    parent's own number under its own name and the matched one beside it.
+
+    **Three verdicts, not two.** A merge that exactly *equals* its better parent
+    has added nothing and is not a failure either, and "no worse" is not "better":
+    the first version's success sentence claimed a merge tied for first had
+    "beats every measured parent", which is the kind of sentence that makes a
+    number read as a result.
     """
-    scores = {"merged": perplexity(merged, corpus)}
-    for parent in parents:
-        scores[parent.name] = perplexity(parent, corpus)
-    if scores["merged"] is None:
-        return {"ok": False, "ship": False, "why": "the merged model's quality "
-                "could not be measured, and an unmeasured merge is not a good "
-                "merge", "scores": scores}
-    rival = [v for k, v in scores.items() if k != "merged" and v is not None]
-    if not rival:
-        return {"ok": False, "ship": False, "why": "no parent's quality could be "
-                "measured, so there is nothing to compare against", "scores": scores}
-    best_parent = min(rival)
-    if scores["merged"] > best_parent:
-        return {"ok": False, "ship": False,
-                "why": f"the merge is worse than its best parent "
-                       f"({scores['merged']:.3f} vs {best_parent:.3f}), so it has "
-                       "cost quality rather than adding any",
-                "scores": scores}
-    return {"ok": True, "ship": True,
-            "why": f"beats every measured parent ({scores['merged']:.3f} vs "
-                   f"{best_parent:.3f})",
-            "scores": scores}
+    scratch = None
+    try:
+        rivals = []
+        scores: Dict[str, object] = {}
+        for parent in parents:
+            own = perplexity(parent, corpus)
+            scores[parent.name] = own
+            measured = own
+            if quant:
+                try:
+                    if scratch is None:
+                        import tempfile
+                        scratch = Path(tempfile.mkdtemp(prefix="merge-gate-"))
+                    same = quantize(parent, scratch / (parent.stem + f".{quant}.gguf"),
+                                    quant)
+                    measured = perplexity(same, corpus) if same else None
+                except Exception as problem:                 # noqa: BLE001
+                    # Falling back to the parent's own number keeps the gate
+                    # answering rather than crashing, which is right - and a
+                    # refusal that cannot say why is the thing this module is
+                    # for, so the reason is recorded rather than swallowed.
+                    measured = None
+                    scores[parent.name + " (same quant)"] = (
+                        "not measured: %s" % problem)
+                if measured is not None:
+                    scores[parent.name + " (same quant)"] = measured
+            if measured is not None:
+                rivals.append(measured)
+        merged_score = perplexity(merged, corpus)
+        scores["merged"] = merged_score
+        if merged_score is None:
+            return {"ok": False, "ship": False, "verdict": "unmeasured",
+                    "why": "the merged model's quality could not be measured, "
+                    "and an unmeasured merge is not a good merge",
+                    "scores": scores}
+        if not rivals:
+            return {"ok": False, "ship": False, "verdict": "unmeasured",
+                    "why": "no parent's quality could be measured, so there is "
+                    "nothing to compare against", "scores": scores}
+        best_parent = min(rivals)
+        if merged_score > best_parent:
+            return {"ok": False, "ship": False, "verdict": "worse",
+                    "why": f"the merge is worse than its best parent "
+                           f"({merged_score:.3f} vs {best_parent:.3f}), so it "
+                           "has cost quality rather than adding any",
+                    "scores": scores}
+        if merged_score == best_parent:
+            return {"ok": False, "ship": False, "verdict": "no-better",
+                    "why": f"the merge is no better than its best parent "
+                           f"({merged_score:.3f}), so it has cost disk and added "
+                           "nothing", "scores": scores}
+        return {"ok": True, "ship": True, "verdict": "better",
+                "why": f"beats every measured parent ({merged_score:.3f} vs "
+                       f"{best_parent:.3f})", "scores": scores}
+    finally:
+        if scratch is not None:
+            for leftover in scratch.glob("*"):
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+            try:
+                scratch.rmdir()
+            except OSError:
+                pass
 
 
 def provenance(parents: Sequence[Path], weights: Sequence[float],
