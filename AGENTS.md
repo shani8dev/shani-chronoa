@@ -136,6 +136,84 @@ failure this file records most often.
 `tests/test_asleep_is_reachable.py` (+6, 18 in the file) and three more mutations
 in `tools/mutations/asleep_state.py` (12 in the set).
 
+## And storing the choice made it stale, which is the claim `detect` exists not to make (2026-10-12)
+
+The `Asleep` entry above is what *introduced* this. While the presence state was
+re-derived from `detect()` on every read it could not disagree with the machine.
+Storing it in `app._presence` means it can outlive the fact it was true of, and
+the ordinary sequence does exactly that:
+
+1. the app starts with nothing running, so `_presence` is DROWSY;
+2. a question arrives and cold-starts the model - which is the whole point of
+   `_use_local_server(wake=True)`;
+3. the Settings row reads the **stored** DROWSY and says *"the model is not
+   loaded. The next question loads it again"* - about a model that is loaded.
+
+Measured, not reasoned: the stored choice stayed DROWSY while `detect()` answered
+ACTIVE. That is the exact claim `detect`'s own docstring says presence exists not
+to make (*"a presence that disagrees with the machine is worse than no presence,
+because it reports memory held that has been released"*), reached from the other
+side - reporting memory *not* held that is.
+
+`presence.reconcile(chosen, is_up)` brings the two back in step, and the row calls
+it. **SLEEPING is the exception and deliberately so**: it is a decision about
+behaviour rather than an observation of memory, so the machine coming up does not
+withdraw it - and `_use_local_server` reads `is_up()` *before* its guard, so a
+machine that is up answers whatever the choice says. All six
+choice-machine combinations are pinned.
+
+Two things worth keeping from writing it:
+
+- **The anchor was not unique and the runner refused it.** `detect` and
+  `reconcile` end with the same `return Presence.ACTIVE if is_up() else
+  Presence.DROWSY`, so the mutation aimed at that line matched twice. That is rule
+  1 doing its job - *every anchor must occur exactly once* - on a line this pass
+  had itself duplicated. The mutation now anchors on the pair.
+- **It broke one of my own tests from the previous entry**, because that test set
+  the choice to ACTIVE while leaving the machine down, which `reconcile` correctly
+  corrects to DROWSY. The test now controls both halves, and it is a better test
+  for it: it demonstrates that showing the window re-reads *and* reconciles.
+
+`tests/test_asleep_is_reachable.py` (21), three more mutations in
+`tools/mutations/asleep_state.py` (15 in the set).
+
+## Read and cleared: every app GAction is reachable, and two of them only from D-Bus (2026-10-12)
+
+`AGENTS.md` claims *"every app action has a control (none - `show-page` is for
+D-Bus)"*. That claim rots as actions are added, so it was re-measured: **27
+`Gio.SimpleAction` registrations** across the package, each attributed to the file
+that declares it and then counted over the files that mention it besides.
+
+| | count | |
+|---|---|---|
+| actions registered | 27 | |
+| mentioned in some other file | 25 | |
+| mentioned nowhere but their own declaration | **2** | `show-page`, `show-window` |
+
+The two with no in-tree caller are the claim in this file being **correct rather
+than stale**, and they were verified rather than assumed:
+
+- `show-page` takes a `s` variant and connects to `_on_show_page`, the doorway
+  `pages.py` holds the ids for.
+- `show-window` takes no parameter and its handler is
+  `lambda: self.window.present()` - *present*, which raises and focuses, which is
+  the fix this file already records for `show()` having replaced `present()`.
+
+Both are registered with `self.add_action(...)` on the **application**, so both are
+exported on its D-Bus interface - which is precisely why nothing in the tree names
+them: a notification or a tray icon reaches them from outside.
+
+**And the scan itself could not fail before it said anything, twice.** Its first
+version asked `"action" in reach_text` where `reach_text` was every file under the
+package *including* the declaring one - so all 27 passed trivially, the same
+class as the enum scan two entries above. The second attributes per file, which is
+what produced the two. It is the recurring trap: a scanner whose needle is present
+in its own input reports nothing.
+
+Recorded as a clean result rather than deleted, so the next pass checks the claim
+instead of re-deriving it - and so the two D-Bus actions are not "wired" into a
+menu by someone reading only this table.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
@@ -5317,11 +5395,43 @@ and it costs under a second.
 lie" is a claim with witnesses. **That is safe to run** because `run_set`
 restores the file it mutated and the journal covers `tools/mutate.py` too.
 
-**What is not claimed.** That the *full* inventory is green right now: the last
-clean end-to-end figure was **48 mutations, 48 caught** across four sets, and the
-five rebuilt sets have each been run individually and clean. `--list` and
-`--check-anchors` are the two things a fresh clone can verify in seconds; the
-full run is the slow, deliberate half.
+**The first complete inventory, and the survivor that was the harness's own
+blindness.** Run to completion 2026-12 across **43 sets, 357 mutations**:
+**341 caught, 2 survivors, 14 equivalent** (1833s). The arithmetic closes —
+341 + 2 + 14 = 357 — which is what the `unmeasurable` column and the
+equivalents-as-keys fixes make checkable, and why those two commits were worth
+the re-run.
+
+**One of the two survivors was not a coverage gap.** `wizard_mark`'s "the name
+collision, restored" was reported a plain SURVIVOR while its own summary line
+read `28 passed, 8 warnings, 101 errors` — **and the first two of those 101
+errors are the mutation's own named witnesses.** The runner passed `-rf`, and
+pytest's short summary is **per-category**: `-rf` reports failures only, a raising
+fixture turns every test using it into an ERROR, `-rf` prints none of them,
+`failed` comes back empty, and the verdict is "nothing caught this and nothing
+else failed either" about a mutation that broke a hundred and one things. `-rfE`
+fixes it and the mutation is **caught by both its witnesses**, verified on the
+live tree (`wizard_mark` 1 survivor → **0**). So the inventory was
+**under-reporting coverage**, which is the direction that makes a suite look
+worse than it is and sends people hunting for tests that already exist.
+
+**Two more fell out of the same investigation.** A run with *only* errors prints
+`1 error in 0.01s`, which contains neither " passed" nor " failed" — so such a
+mutation was reported UNMEASURABLE when its witness was in the error list all
+along; the summary is anchored at a count now, with `error` in the vocabulary.
+And `ERROR tests/x.py` is a **file**, not a `file::test_id`, so the old parse
+yielded the literal word `"ERROR"` as a test id and a mutation that broke every
+test in a file reported `failed for another reason: {'ERROR'}` — naming nothing
+to act on.
+
+**What is still not claimed.** That the full inventory is green: the remaining
+survivor is `kv_parity`'s "the caller discards what the check said", whose two
+real-GGUF witnesses both **skip** without `CHRONOA_KV_PARITY_MODEL` — so it is
+**unmeasured here**, not proven uncovered. The figure above is for the **14:00
+snapshot of 43 sets**; there are 44 now (`asleep_state` landed mid-run), so it is
+not a claim about this tree today. `--list` and `--check-anchors` are the two
+things a fresh clone can verify in seconds; the full run is the slow, deliberate
+half, and the incomplete run is now one that says it is incomplete.
 
 `build/` is gitignored for the runner's redirected `XDG_*` directories - a
 mutation run must not write into the developer's real home, which is the same
