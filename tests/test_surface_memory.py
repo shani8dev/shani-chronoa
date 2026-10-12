@@ -43,9 +43,9 @@ import pytest
 
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
-from shani_chronoa import egress, markdown_lite  # noqa: E402
+from shani_chronoa import egress  # noqa: E402
 from shani_chronoa.senses import Percept  # noqa: E402
 from shani_chronoa.senses.store import PerceptStore  # noqa: E402
 
@@ -425,7 +425,11 @@ class TestMarkup:
         store.add(_fact("memory", self.HOSTILE))
         widget = surface.build(_app(store))
         row = _marked(widget, surface.FACT_CSS)[0]
-        assert row.get_title() == markdown_lite.escape(self.HOSTILE), row.get_title()
+        # The escaping `common.row()` uses, not a second one - see the
+        # note in `common.row()`'s docstring for why Pango leaves `\"`
+        # alone in text.
+        assert row.get_title() == GLib.markup_escape_text(self.HOSTILE), (
+            row.get_title())
         assert "&amp;" in row.get_title() and "&lt;b&gt;" in row.get_title()
         assert row.get_property("use-markup") is True, (
             "if use-markup is ever False the escaping is no longer load-bearing "

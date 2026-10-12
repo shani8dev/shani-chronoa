@@ -538,7 +538,9 @@ class _CalendarSurface:
 
     def _event_row(self, event: Any, now: float) -> Gtk.Widget:
         summary = str(getattr(event, "summary", "") or "(no title)")
-        row = common.row(_plain(summary), _plain(_detail(event, now)))
+        # `common.row()` escapes both fields; `_plain()` escaping again is what
+        # made an `&` in a summary render as `&amp;` on screen.
+        row = common.row(summary, _detail(event, now))
         row.add_css_class(ROW_CSS)
         row.set_tooltip_text(_plain(_tooltip(event, now)))
         row.update_property([Gtk.AccessibleProperty.LABEL], [f"Calendar event {summary}"])

@@ -225,7 +225,7 @@ def _row(finding: Finding) -> Gtk.Widget:
     fallback.
     """
     status = finding.status
-    widget = common.row(_text(finding.title), _text(f"{status} - {finding.detail}"))
+    widget = common.row(finding.title, f"{status} - {finding.detail}")
     widget.add_css_class(ROW_CSS)
     label = _value_label(widget)
     if label is not None:

@@ -11044,3 +11044,45 @@ the rule.
 
 `tools/mutations/tool_result.py`: 4 mutations, all caught - including the one that
 moves the clip inside the fence.
+
+## personaplex: the loudness target that is not needed, measured (2026-10-12)
+
+`harness-study/personaplex` (NVIDIA's full-duplex speech-to-speech model, cloned this
+session). Its voice conditioning is normalised to a target before use -
+`normalize_audio(raw_audio, self._sample_rate, -24.0)`, *"Normalize to -24 LUFS
+(mono-safe)"* - so a persona's voice is consistent whatever recording it came from.
+
+Chronoa has four engines with measured-different character and no loudness
+normalisation at all (the only `gain` in the chain is `voice_style._eq`'s EQ). That
+looked like a real defect. **Measured, and it is not one.**
+
+The same sentence through each named style's own SoX effect list:
+
+    unstyled -19.89 dBFS ... calm -19.95 (-0.06) ... warm -18.92 (+0.97)
+
+**Spread: -0.06 to +0.97 dB.** The just-noticeable-difference for loudness is about
+1 dB, so the whole style table sits inside it. Choosing a style changes the timbre
+and not the volume - which is what the design intends and already works.
+
+The axis PersonaPlex's normalisation is actually *for* - variance between input voice
+recordings - has no Chronoa equivalent, because Chronoa's voices are engine ids, not
+embeddings. The axis that would matter here, **the four engines' relative loudness**,
+is not measurable on this box: only `espeak-ng` resolves, and `piper`/`kokoro` are not
+installed. That is a slot run, not a guess.
+
+**What would settle it, and what to do then:** in a slot with a Piper voice and the
+Kokoro model both installed, synthesise the same sentence through each engine and
+compare RMS. Under ~1 dB, close it. Several dB, put the target at the *engine
+boundary* (`PiperTTS.synthesize()`, after the engine and before SoX) - measuring what
+was produced rather than what was played.
+
+**Nothing was built.** An unmeasurable loudness target is a number nobody can check,
+and `gain` applied to a signal whose level is already fine is pure risk. Full
+write-up with the tables: `../harness-study/HARVEST-PERSONAPLEX.md`.
+
+The one discipline here worth remembering is not the loudness: `server.py:170` guards
+an expensive reload with a change check (`if self.lm_gen.voice_prompt !=
+voice_prompt_path`) and `:157` **raises** for a voice prompt that does not exist
+rather than defaulting. Both are already the house rule - guard the reload, refuse
+rather than default - and both are the things to check first if a persona/voice
+switch is ever built here.

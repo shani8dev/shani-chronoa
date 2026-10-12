@@ -284,9 +284,12 @@ def _as_title(text: str) -> str:
     `Adw.PreferencesRow.use-markup` defaults to **True** (measured on
     libadwaita 1.5), so an `Adw.ActionRow` parses both its title and its
     subtitle as Pango markup: unescaped, a fact reading `A & B < C` is markup,
-    not text. `common.row()` does not escape - its own docstring describes an
-    escaping it does not do - so it is done here, at the point the untrusted
-    text enters.
+    not text. `common.row()` escapes both fields, so this is only for the call
+    sites that bypass it - **the sentence this docstring used to carry said
+    `common.row()` does not escape, and it was true when written.** It is the
+    reason the row call sites escaped twice and a fact rendered as
+    `teapot &amp;amp;`: five call sites kept reading a docstring that a change
+    to the helper had made false.
 
     The plain-GTK answer in `common.row()` is a `Gtk.Label(label=...)`, which
     takes no markup and would print the entities themselves, so the escaping
@@ -343,9 +346,14 @@ def _forget_button(percept: Any, on_forget: Any) -> Gtk.Button:
 def _fact_row(percept: Any, now: float, durable_path: str, on_forget: Any) -> Gtk.Widget:
     """One fact: its text, how old it is, and a way to be rid of it."""
     content = str(getattr(percept, "content", "") or "")
+    # **Neither title nor subtitle is `_as_title()`ed.** `common.row()` escapes
+    # both fields now, and the surface's own hand-rolled escape on the same
+    # condition was escaping a second time - measured, a fact reading
+    # `teapot & <b>blue</b>` rendered as `teapot &amp;amp; &amp;lt;b&amp;gt;`,
+    # the entity shown to the person.
     built = common.row(
-        title=_as_title(content),
-        subtitle=_as_title(_detail(percept, now)),
+        title=content,
+        subtitle=_detail(percept, now),
         suffix=_forget_button(percept, on_forget),
     )
     built.add_css_class(FACT_CSS)

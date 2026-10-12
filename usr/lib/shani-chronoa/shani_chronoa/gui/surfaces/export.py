@@ -637,7 +637,7 @@ class _ExportView(Gtk.Box):
         suffix.append(actions)
         suffix.append(status)
 
-        row = common.row(_adw_text(title), _adw_text(fields), suffix=suffix)
+        row = common.row(title, fields, suffix=suffix)
         row.add_css_class(ROW_CSS)
         row.update_property([Gtk.AccessibleProperty.LABEL], [f"Export {title}"])
         row.set_tooltip_text(fields)

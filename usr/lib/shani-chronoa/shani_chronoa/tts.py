@@ -88,6 +88,29 @@ def _light_mouth(text: str) -> None:
         pass
 
 
+#: Target RMS for spoken output, in dBFS. Measured 2026-10-12 through this repo's
+#: own cache, one sentence per engine via `synthesize_to_bytes`:
+#:
+#:     espeak-ng  -19.89     piper  -18.86     kokoro  -24.69
+#:
+#: A 5.83 dB spread, against a just-noticeable-difference of about 1 dB - so
+#: choosing a voice engine changes perceived loudness by roughly a factor of two.
+#: This is the axis PersonaPlex normalises for (`normalize_audio(..., -24.0)` on
+#: every voice prompt) and it had no Chronoa equivalent. The target sits inside the
+#: measured range, so no engine is pushed to its ceiling to reach it.
+TARGET_RMS_DBFS = -20.0
+
+#: Ceiling on the peak. `piper` measured -0.00 dBFS - full scale, no headroom - so
+#: a positive-gain EQ from a voice style clips it, and clipping is audible on speech
+#: in a way a level error is not.
+PEAK_CEILING_DBFS = -3.0
+
+#: How far from the RMS target an engine may sit before it is re-encoded. Every
+#: pass through SoX is a decode and an encode, so an engine already inside this
+#: band is left alone rather than rewritten for no audible gain.
+LOUDNESS_TOLERANCE_DB = 1.0
+
+
 class PiperTTS:
     """Text-to-speech using the best engine installed."""
 
@@ -400,6 +423,24 @@ class PiperTTS:
 
         ok = self._synthesize(text, output_file)
         if ok:
+            # The loudness pass, beside the timbre pass and for the same reason:
+            # it is a step that is not an engine. Measured 2026-10-12 through this
+            # repo's own cache, one sentence, `synthesize_to_bytes` per engine:
+            #
+            #     espeak-ng  -19.89 dBFS RMS     piper  -18.86     kokoro  -24.69
+            #
+            # A 5.83 dB spread, against a just-noticeable-difference of about 1 dB -
+            # so choosing a voice engine changes perceived loudness by roughly a
+            # factor of two, and `piper` arrives at -0.00 dBFS peak, i.e. full
+            # scale with no headroom for a style's EQ to lift. Both are the axis
+            # PersonaPlex normalises for (`normalize_audio(..., -24.0)` on every
+            # voice prompt), and neither had a Chronoa equivalent.
+            #
+            # A failure here never costs a reply, exactly as above: an engine
+            # whose level is wrong still says the right words.
+            skipped = self.apply_loudness(output_file)
+            if skipped:
+                logger.debug("Loudness left as the engine wrote it: %s", skipped)
             skipped = self.apply_timbre(output_file)
             if skipped:
                 logger.warning("Voice left as the engine wrote it: %s", skipped)
@@ -637,6 +678,66 @@ class PiperTTS:
             return ("sox is not installed, so it is not applied at all "
                     "(on Arch: sudo pacman -S sox)")
         return ""
+
+    def apply_loudness(self, wav_path: str) -> str:
+        """Bring a synthesised WAV to the loudness target, in place.
+
+        Returns "" when the file is already within tolerance of the RMS target,
+        and otherwise the reason nothing was done - naming what could not be
+        measured, so no caller can report a normalisation that did not happen.
+        Never raises and never fails the reply: an engine whose level is wrong
+        still says the right words, which is the better outcome of the two.
+
+        Two numbers, because the engines are wrong in two different ways and one
+        gain cannot fix both:
+
+        - **RMS**, so the three engines agree. Measured 2026-10-12: espeak-ng
+          -19.89, piper -18.86, kokoro -24.69 dBFS.
+        - **Peak ceiling**, because `piper` arrives at -0.00 dBFS. A positive-gain
+          EQ from a voice style would then clip it.
+
+        The ceiling caps the gain rather than the level: lifting a quiet engine
+        past it is worse than leaving it quiet, because it clips.
+        """
+        try:
+            import math
+            import subprocess
+
+            stat = subprocess.run(["sox", wav_path, "-n", "stat"],
+                                  capture_output=True, text=True, timeout=30)
+            if stat.returncode != 0:
+                return f"sox could not measure {wav_path!r}"
+            rms = peak = None
+            for line in (stat.stderr or "").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("RMS") and "amplitude" in stripped:
+                    value = float(stripped.split(":", 1)[1].strip())
+                    rms = 20 * math.log10(value) if value > 0 else None
+                elif stripped.startswith("Maximum") and "amplitude" in stripped:
+                    value = float(stripped.split(":", 1)[1].strip())
+                    peak = 20 * math.log10(value) if value > 0 else None
+            if rms is None or peak is None:
+                return "sox reported no level to normalise"
+            gain = TARGET_RMS_DBFS - rms
+            # The ceiling limits a **lift** only. A cut never raises a peak, so
+            # applying the ceiling to one as well would hold an already-loud
+            # engine further below target than the numbers ask for - which is what
+            # the first version of this did, and it showed up as `piper` landing
+            # 1.9 dB under target for no reason the measurement explained.
+            allowed = PEAK_CEILING_DBFS - peak
+            if gain > allowed:
+                gain = allowed
+            if abs(gain) < LOUDNESS_TOLERANCE_DB:
+                return ""
+            staged = wav_path + ".loud.wav"
+            applied = subprocess.run(["sox", wav_path, staged, "gain", f"{gain:+.2f}"],
+                                     capture_output=True, text=True, timeout=30)
+            if applied.returncode != 0 or not os.path.exists(staged):
+                return "sox could not apply the gain"
+            os.replace(staged, wav_path)
+            return ""
+        except Exception as exc:  # noqa: BLE001 - a normaliser must not cost a reply
+            return f"loudness not normalised: {type(exc).__name__}: {exc}"
 
     def apply_timbre(self, wav_path: str) -> str:
         """Apply the configured transforms to `wav_path`, in place.

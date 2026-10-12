@@ -302,7 +302,10 @@ def _row(title: Any, subtitle: Any = "") -> Gtk.Widget:
     the row and then setting its subtitle raises on the fallback path - which is
     exactly the shape a headless builder gets.
     """
-    widget = common.row(_text(title), _text(subtitle))
+    # **Not `_text()`:** `common.row()` escapes both fields now, and
+    # escaping twice is what made a device named `Ann & Bob` render as
+    # `Ann &amp; Bob` on screen.
+    widget = common.row(title, subtitle)
     widget.add_css_class(ROW_CSS)
     return widget
 
@@ -465,7 +468,7 @@ def _device_row(device: Any, read_at: float) -> Gtk.Widget:
         _battery(device),
         "last known at " + time.strftime("%H:%M:%S", time.localtime(read_at)),
     ))
-    widget = common.row(_text(name), _text(subtitle), suffix=_stamp(read_at))
+    widget = common.row(name, subtitle, suffix=_stamp(read_at))
     widget.add_css_class(ROW_CSS)
     widget.add_css_class(DEVICE_CSS)
     return widget

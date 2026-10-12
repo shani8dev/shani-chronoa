@@ -41,7 +41,7 @@ import pytest
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Gtk  # noqa: E402
+from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa import eds_calendar  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
@@ -451,11 +451,14 @@ class TestMarkup:
         """`Adw.PreferencesRow.use-markup` defaults to True (measured on
         libadwaita 1.5), so an unescaped summary leaves the label *empty* with
         only a Gtk-WARNING on stderr."""
-        from shani_chronoa import markdown_lite
         _reads(monkeypatch, events=[_event(3600, summary=self.HOSTILE)])
         widget = surface.build(_app())
         title = _title(_rows(widget)[0])
-        assert title == markdown_lite.escape(self.HOSTILE), title
+        # The escaping `common.row()` uses, not a second one: Pango does
+        # not need `\"` escaped in text, so `markdown_lite.escape` and
+        # `GLib.markup_escape_text` differ by one character class and the
+        # row is correct either way.
+        assert title == GLib.markup_escape_text(self.HOSTILE), title
         assert "&amp;" in title and "&lt;b&gt;" in title
         assert _rows(widget)[0].get_property("use-markup") is True, (
             "if use-markup is ever False the escaping stops being load-bearing "
