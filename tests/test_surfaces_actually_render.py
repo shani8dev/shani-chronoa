@@ -211,14 +211,34 @@ def test_the_footer_sits_below_the_scroller_not_above_it(wizard):
                  if isinstance(n, Gtk.Box)
                  and any(isinstance(c, Gtk.ScrolledWindow) for c in _walk(n))
                  and any(isinstance(c, Gtk.Button) for c in _walk(n)))
-    kinds = []
+    children = []
     child = outer.get_first_child()
     while child is not None:
-        kinds.append(type(child).__name__)
+        children.append(child)
         child = child.get_next_sibling()
-    assert "ScrolledWindow" in kinds and "Box" in kinds, kinds
-    assert kinds.index("ScrolledWindow") < len(kinds) - 1, (
-        f"the action row is not the last child: {kinds}")
+
+    # **Which child holds what, one level down where the void-mark needs it.**
+    # `page()` wraps the scroller in an `Overlay` to draw a mark over the empty
+    # space, so the scrolled window is not necessarily a direct child - which is
+    # what made the first version of this assertion fail against a correct page.
+    def _holds(widget, kind):
+        return any(isinstance(n, kind) for n in _walk(widget))
+
+    scroller_at = [i for i, w in enumerate(children) if _holds(w, Gtk.ScrolledWindow)]
+    assert scroller_at, [type(w).__name__ for w in children]
+    # and no action button sits before it
+    early = [i for i, w in enumerate(children)
+             if i < scroller_at[0] and _holds(w, Gtk.Button)]
+    assert not early, (
+        f"a button sits beside or before the content it acts on: "
+        f"{[type(w).__name__ for w in children]}")
+    # and the footer is the last child
+    assert children[-1] is not children[scroller_at[0]], (
+        "the action row is not the last child: "
+        f"{[type(w).__name__ for w in children]}")
+    assert _holds(children[-1], Gtk.Button), (
+        f"the last child is not the action row: "
+        f"{[type(w).__name__ for w in children]}")
 
 
 def test_the_open_folder_button_launches_the_file_manager(monkeypatch, tmp_path):

@@ -1564,8 +1564,14 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         start.connect("clicked", _start)
         started = wrapping("")
         started.add_css_class("dim-label")
-        box.append(start)
-        box.append(started)
+        # **`page_footer(box)`, not `box`.** The pinned row under the scroller is
+        # where a page's action belongs - which is where `Next` already goes on
+        # every page. Appended to `box`, this one sits *inside* the scroller, so
+        # on a tall page the only control on it slides out of reach; measured,
+        # by `test_surfaces_actually_render.py`, which walks every wizard page
+        # for actions inside the scroller.
+        page_footer(box).append(start)
+        page_footer(box).append(started)
     else:
         box.append(wrapping("Nothing is set up to answer yet."))
     n = Gtk.Button(label=f"Next: {_titles.get('ears', 'Ears')}",

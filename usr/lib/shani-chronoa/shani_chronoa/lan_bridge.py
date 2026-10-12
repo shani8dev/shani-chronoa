@@ -60,9 +60,13 @@ def build_parser():
     parser = argparse.ArgumentParser(
         prog="shani-chronoa-lan-bridge",
         description="Drive Chronoa from a KDE Connect phone on the same Wi-Fi.")
-    parser.add_argument("--host", default="",
+    parser.add_argument("--phone", default="",
                         help="the phone's address; empty means the device seen by "
-                             "'lan_phone devices'")
+                             "'lan_phone devices'. **Not `--host`,** which in this "
+                             "codebase means the address a *server* binds - six "
+                             "other sites, all a loopback constant. Naming a "
+                             "destination `--host` is how someone later 'fixes' "
+                             "it to bind the phone's address.")
     parser.add_argument("--once", action="store_true",
                         help="handle what has arrived and exit, rather than looping")
     return parser
@@ -156,7 +160,7 @@ def main(argv: "Optional[list[str]]" = None) -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(message)s")
     args = build_parser().parse_args(argv)
-    host = args.host
+    host = args.phone
     bridge = LanBridge(host=host)
 
     from shani_chronoa import lan_link
