@@ -670,8 +670,33 @@ def test_the_chimera_ladder_is_recorded_in_full_and_never_beats_the_base():
     for figure in ("4/5", "4.65", "7.65", "2/5", "24.4", "0/5", "29.6"):
         assert figure in said, "chimera ladder rung %r is missing from the record" % figure
     assert "REFUSED" in said
-    assert "50.0%" in said, "the orthogonality measurement is the point"
-    assert "necessary and not sufficient" in said
+    assert "50.0%" in said, "the orthogonality measurement is recorded"
+
+
+def test_the_confounded_ladder_is_marked_confounded_and_not_read_as_a_chimera_result():
+    """**The correction is the load-bearing part.** The first version of this
+    row concluded from the ladder that "orthogonality is necessary and not
+    sufficient". Measuring the delta magnitudes showed that conclusion was
+    confounded: the three adapters differ in strength by 134x, so the ladder
+    summed one negligible perturbation and two enormous ones and measured the
+    two large. Direction says nothing about magnitude, and reading a chimera
+    result off direction alone is the error.
+
+    This test fails if that correction is deleted - which is the point: a
+    correction that does not reach its own claim leaves the next reader
+    re-deriving the wrong conclusion from the same table.
+    """
+    said = " ".join(cultivation.TERMS["ascension"]["measured"].split())
+    assert "CORRECTED" in said, said[:220]
+    assert "confounded" in said, said[:220]
+    assert "134x" in said, "the magnitude gap is the whole correction"
+    for figure in ("0.0732", "6.5299", "9.7797"):
+        assert figure in said, "delta norm %s missing" % figure
+    # and the retracted claim must be gone, not merely caveated
+    assert "necessary and not sufficient" not in said, (
+        "the retracted interpretation is still standing in the row")
+    assert "Nothing has yet been shown" in said, (
+        "the row must say plainly that composition is untested")
 
 
 def test_the_orthogonality_claim_is_pinned_to_a_number_and_a_direction():
