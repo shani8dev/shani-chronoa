@@ -380,6 +380,84 @@ class TestThePostConditionCannotBeSatisfiedByARefusal:
         assert verdict.verdict.value != "verified", verdict.evidence
         assert "never there" in verdict.evidence or "restore record" in verdict.evidence, verdict.evidence
 
+    def test_gone_with_no_record_at_all_is_not_verified(self, granted, a_real_trash):
+        """**Written because the mutation set found this had no witness.**
+
+        `test_gone_but_no_restore_record_is_not_verified` builds a *stale record*
+        and ages the trash, so it still passes when the record check is deleted -
+        the stale record satisfies the *next* condition. This is the case with no
+        record at all, which is the one the record check exists for.
+        """
+        target = _in_trashbox(a_real_trash, "no-record.txt")
+        old = time.time() - 4000
+        os.utime(a_real_trash / "info", (old, old))
+
+        checked = _verdict({"path": str(target)})
+        assert checked.verdict.value != "verified", checked.evidence
+        # Which of the two branches fires depends on whether the trash moved, so
+        # the claim is that the evidence names the trash - not which sentence.
+        # Over-specifying the wording made this fail for the right verdict, which
+        # is the mirror of the "a control that fails on correct output" trap.
+        assert "trash" in checked.evidence, checked.evidence
+
+    def test_a_record_with_no_file_beside_it_is_not_verified(self, granted, a_real_trash):
+        """**The other half, and the witness the set said was missing.**
+
+        A `.trashinfo` with nothing under `files/` is what a half-finished copy
+        across filesystems looks like, and it cannot be restored. Verifying on the
+        record alone would call that a successful delete.
+        """
+        target = _in_trashbox(a_real_trash, "record-only.txt")
+        (a_real_trash / "info" / "record-only.txt.trashinfo").write_text("[Trash Info]\n")
+
+        checked = _verdict({"path": str(target)})
+        assert checked.verdict.value != "verified", checked.evidence
+        assert "do not agree" in checked.evidence, checked.evidence
+
+    def test_a_file_in_the_trash_with_no_record_is_not_verified(self, granted, a_real_trash):
+        """**The mirror of the two above, and the last survivor the set found.**
+
+        A file sitting in `Trash/files/` with no `.trashinfo` beside it is what a
+        half-finished cross-filesystem `gio trash` leaves behind, and **no file
+        manager can restore it** - the record is what tells a file manager where
+        the original path was. So the record is the half that matters, and
+        verifying on the file alone would call an unrecoverable delete successful.
+
+        Removing the record check from the post-condition leaves this verified and
+        nothing else fails, which is why the mutation set exists: the two tests
+        above each hold the other half, so neither could see this one removed.
+        """
+        target = _in_trashbox(a_real_trash, "orphan.txt")
+        (a_real_trash / "files" / "orphan.txt").write_text("half a move")
+
+        checked = _verdict({"path": str(target)})
+        assert checked.verdict.value != "verified", checked.evidence
+        assert "restore record" in checked.evidence, checked.evidence
+
+    def test_files_trash_checks_the_path_really_left(self, granted, a_real_trash, monkeypatch):
+        """**`files.trash`'s own last guard, which nothing was exercising.**
+
+        A `gio` that exits 0 and leaves the file where it was is a silent failure
+        - `gio` is a third-party binary and its exit code is a claim, not a fact
+        about the filesystem. The skill then reports a delete that did not happen.
+        """
+        import subprocess as sp
+
+        target = _in_trashbox(a_real_trash, "still-here.txt")
+        target.write_text("x")
+
+        class _LiesAboutSuccess:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        monkeypatch.setattr(sp, "run", lambda *a, **k: _LiesAboutSuccess())
+        moved, why = files.trash(target)
+
+        assert not moved, "a trash that reported success while leaving the file must not be believed"
+        assert "still there" in why, why
+        assert target.is_file(), "and nothing may have removed it to make the story true"
+
     def test_the_evidence_says_where_it_went_rather_than_only_that_it_is_gone(self, granted, a_real_trash):
         target = _in_trashbox(a_real_trash, "gone.txt")
         target.write_text("x")
