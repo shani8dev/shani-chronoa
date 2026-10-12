@@ -12231,12 +12231,25 @@ holds — same audio, same voice, same model, one variable.
   first element as a list of schemas works; treating the return as the list does
   not.
 
-**Durability gap, recorded rather than papered over:** the experiment is a
-throwaway script, and this repository's rule is that a one-off is lost. It needs
-`shani-testbed/slot-tests/` with the corpus and the two conditions, since that
-repo already holds the whisper model cache. Not built here — a slot run to verify
-it is a different piece of work from the question, and the answer is already
-negative enough to act on.
+**Durability gap, closed 2026-12:** the experiment *was* a throwaway script, and
+this repository's rule is that a one-off is lost. It is now
+**`../shani-testbed/slot-tests/chronoa-whisper-prompt.sh`**, with its host-side
+self-test `tests/chronoa-whisper-prompt-results.sh` (8 checks, and the three
+doctored captures all bite: identical transcripts, one silent condition, and a
+capture directory that does not exist).
+
+Run live on the dev box it reproduces this section's numbers **exactly** — 29.0%
+against 37.0% — because the vocabulary is derived from `discover_skills()` at
+run time rather than pasted, so the same 77 words arrive by the same route.
+
+**And it deliberately does not assert the direction.** This measurement is
+espeak-ng synthetic audio on Ubuntu, which cannot settle a recognition question
+for the distribution we ship; encoding it as a platform fact is the confident
+wrong answer. The slot-test prints both rates and asserts only what synthetic
+audio cannot contaminate — that **whisper.cpp honours `--prompt` at all**, since
+a build that ignored the flag would leave a vocabulary feature silently dead on
+every machine with nothing saying so. A real slot run is still unexercised: it
+is the number for this image that is missing, not the claim.
 
 ## Two models can't answer the size question, and here is what blocks the third (2026-10-12)
 
