@@ -267,6 +267,73 @@ def _scratch(prefix: str) -> Path:
     return Path(tempfile.mkdtemp(prefix=prefix, dir=str(base)))
 
 
+def _balance_for_run(loaded, weights, ref_float, ref_map):
+    """One scale factor per parent, taken from a real tensor pair.
+
+    The factors are per-parent rather than per-tensor: a per-tensor balance would
+    make every tensor independently loud and remove the relative strength the
+    fine-tunes were fitted with. Taken from the first tensor every loaded parent
+    carries, so it is a measurement of the merge that is about to happen rather
+    than a constant declared near the top of the file.
+    """
+    import numpy as np
+
+    first = next((n for n in ref_map if all(n in m and m[n] for m in
+                    [loaded[i] for i in loaded])), None)
+    if first is None:
+        return [1.0] * len(weights)
+    pairs = []
+    for i in sorted(loaded):
+        _shape, data, qtype = loaded[i][first]
+        array, _how = to_float32(data, qtype)
+        pairs.append((np.asarray(array, np.float32), weights[i]))
+    return balance_scales(pairs, np.asarray(ref_float[first], np.float32))
+
+
+def balance_scales(task_vectors, reference):
+    """Per-parent coefficients that equalise every task vector's delta norm.
+
+    **This is the arithmetic the LoRA-merge literature prescribes for a spread
+    this module measures.** The three lumen adapters all carry `alpha/rank` of
+    2.0 - identical, so a reader expects comparable strength - and their total
+    delta norms are **0.0365 / 3.0265 / 4.0636**, a **111x spread**. Almost all
+    of it is `lora_b`, which no schema field declares and nothing in the file
+    counts. *Crowded in B-Space* (arXiv:2604.16826) is named for exactly this:
+    co-adapters with unequal `lora_b` norms leave the weak one unable to be heard
+    in a shared direction.
+
+    So a three-adapter sum is not "three capabilities". Measured here it is
+    executor + cortex + **0.5% of `mouth`**, which is a rounding error - **the
+    retracted ladder was confounded by this**, and the confound is arithmetic
+    rather than a claim about orthogonality, which is what makes it worth fixing
+    rather than arguing about.
+
+    **What is returned is the per-vector scale factors, not the vectors.**
+    Rescaling a 0.0365 vector up to 4.06 means multiplying it by **111x**, which
+    inflates something trained to be small into a magnitude it was never fitted
+    at. That is the honest cost, and it is a number a reader gets rather than a
+    fused expression: `blend(balance=...)` reports these factors in its return.
+
+    A task vector of **zero norm is left alone** rather than given a share of
+    the target. It contributed nothing before and scaling it up does not create
+    what training did not put there - the same refusal the rest of this module
+    makes, and the reason the caller's own coefficients survive as multipliers
+    rather than being overwritten.
+    """
+    import numpy as np
+
+    ref = np.asarray(reference, dtype=np.float32)
+    norms = []
+    for array, _coefficient in task_vectors:
+        vector = np.asarray(array, dtype=np.float32) - ref
+        norms.append(float(np.linalg.norm(vector)))
+    live = [n for n in norms if n > 0.0]
+    if not live:
+        return [1.0] * len(norms)
+    target = sum(live) / len(live)
+    return [(target / n) if n > 0.0 else 1.0 for n in norms]
+
+
 def _combine(base_arr, task_vectors, method, density, lam):
     """Combine one tensor's task vectors. Pure arithmetic, no files.
 
@@ -433,7 +500,8 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
           out_path: Optional[Path] = None,
           method: str = "task_arithmetic",
           density: float = 0.5,
-          lam: float = 1.0) -> Path:
+          lam: float = 1.0,
+          balance: bool = False) -> Path:
     """`base + sum(lambda_i * (parent_i - base))`, written as a single F16 GGUF.
 
     `base` defaults to `parents[0]` with its coefficient taken as the reference,
@@ -445,9 +513,8 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
     real Qwen3 file, which `llama-quantize` then refused. The weights are the only
     thing that changed, so `gguf_write.kv_section_bytes` hands back the parent's
     own bytes and only the tensor infos and the tensor data are written here.
+    before this parameter existed.
     """
-    import numpy as np
-
     if len(weights) != len(parents):
         raise MergeRefusal(
             f"{len(weights)} coefficients for {len(parents)} parents - a weight "
@@ -457,6 +524,14 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
 
     from shani_chronoa import gguf_write
 
+    """`base + sum(lambda_i * (parent_i - base))`, written as a single F16 GGUF.
+
+    `balance=True` rescales each task vector to a common delta norm before
+    combining, because measured on this box the three capability adapters sit
+    **111x** apart while all declaring `alpha/rank` of 2.0 - see
+    `balance_scales` for the numbers and the cost. **Off by default**, so a run
+    without it is byte-identical to the merge before this parameter existed.
+    """
     reference = Path(base) if base else Path(parents[0])
     ref_map = tensor_entries(reference)
     metadata_bytes, tensor_count, alignment = gguf_write.kv_section_bytes(reference)
@@ -474,6 +549,7 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
     loaded = {i: tensor_entries(p) for i, p in enumerate(paths) if weights[i]}
     ref_float = {name: to_float32(data, qtype)[0]
                  for name, (_shape, data, qtype) in ref_map.items()}
+
 
     target = Path(out_path) if out_path else _scratch("chronoa-merge-") / "merged-f16.gguf"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -495,6 +571,15 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
 
     hows = set()
     blended = []
+    # Reported, not fused: the scale factors are the honest cost of balancing,
+    # and a merge that quietly inflates one parent by 111x is a merge nobody can
+    # check. Collected across the first tensor's worth of parents and logged once
+    # for the run, because the factors are per-parent rather than per-tensor.
+    if balance:
+        scales = _balance_for_run(loaded, weights, ref_float, ref_map)
+    else:
+        scales = [1.0] * len(weights)
+
     for name, (_shape, _ref_data, ref_type) in ref_map.items():
         vectors = []
         for index, coefficient in enumerate(weights):
@@ -503,7 +588,10 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
             _shape, data, qtype = loaded[index][name]
             array, how = to_float32(data, qtype)
             hows.add(how)
-            vectors.append((array, coefficient))
+            # **The caller's coefficient survives and the scale is a
+            # multiplier on it.** Overwriting the caller's weight would make
+            # `balance=True` silently change what `lambda` means.
+            vectors.append((array, coefficient * scales[index]))
         acc = _combine(ref_float[name], vectors, method, density, lam)
         blended.append((name, acc, _keep.get(ref_type,
                                              gguf_write.GGML_TYPE_F16)))

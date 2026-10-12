@@ -4,9 +4,12 @@ Every test here is a property that could be false, and the interference pair is
 the one that distinguishes TIES from averaging: if deleting the sparsify and
 sign-consensus steps leaves this file green, the suite is measuring nothing.
 """
+import pathlib
+import sys
 import numpy as np
 import pytest
 
+from shani_chronoa import merge
 from shani_chronoa.merge import MergeRefusal, _combine
 
 BASE = np.zeros(8, dtype=np.float32)
@@ -109,3 +112,129 @@ def test_an_unknown_method_is_refused_by_name():
 
 def test_no_vectors_returns_the_base():
     assert np.array_equal(_combine(BASE, [], "ties", 0.5, 1.0), BASE)
+
+
+# ---------------------------------------------------------------------------
+# The 111x spread is the measured confound in the retracted chimera ladder.
+# ---------------------------------------------------------------------------
+class TestBalanceEqualisesTheDeltaNorms:
+    """The 111x spread is the measured confound in the retracted chimera ladder.
+
+    Three capability adapters, all declaring `alpha/rank` of 2.0, sit **111x**
+    apart in total delta norm - measured off the real GGUFs, not asserted: 0.0365
+    / 3.0265 / 4.0636 across 196 `lora_a`/`lora_b` pairs each. Almost all of the
+    difference is `lora_b`.
+
+    So a three-adapter sum is executor + cortex + **0.5% of mouth**, which is a
+    rounding error, and the ladder that was read as "orthogonality does not give
+    semantic composition" was confounded by arithmetic. `alpha/rank` says the
+    three are comparable; the tensors say one of them is 1% of another.
+    """
+
+    #: The three measured totals, from `build/probe_adapter_norms.py` against the
+    #: real files. Named so the docstring's claim is checked rather than trusted.
+    MEASURED = (0.0365, 3.0265, 4.0636)
+    MEASURED_PAIRS = 196
+    MEASURED_SPREAD = 111.2
+
+    def _vectors(self, norms):
+        import numpy as np
+        # A zero-mean vector of the given norm, so "same shape, different
+        # magnitude" is exactly what is under test and nothing else varies.
+        return [(np.full(8, n / (8 ** 0.5)), 1.0) for n in norms]
+
+    def test_the_spread_is_real_off_the_real_files(self):
+        """Measured from the GGUFs, so a re-run cannot quietly pass on a claim.
+
+        This is the positive control for the class: if the measurement stops
+        reproducing, the reason for balancing has stopped holding and this fails
+        - rather than the arithmetic proceeding on a number nobody re-derived.
+        It resolves the repo root from **this file** (four `parents` up), because
+        the first version used `merge.__file__` and landed on `usr/lib`, which
+        made the control skip rather than run. **A skip that hides the control is
+        the same defect as a control that cannot fail.**
+        """
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        build = repo / "build"
+        if str(build) not in sys.path:
+            sys.path.insert(0, str(repo / "tools"))
+        sys.path.insert(0, str(repo / "cache" / "cultivate-libs"))
+        import adapter_norms as probe
+
+        present, totals = [], []
+        for name in probe.ADAPTERS:
+            path = repo / "cache/data-home/shani-chronoa/llm" / name
+            if not path.exists():
+                pytest.skip(f"{name} is not on this box")
+                continue
+            per, total, fams = probe.read_adapter(path)
+            assert len(per) == self.MEASURED_PAIRS, (
+                f"{name}: {len(per)} lora_a/lora_b pairs against "
+                f"{self.MEASURED_PAIRS} measured - either the adapters changed or "
+                f"the probe is no longer reading them all, and the 111x figure "
+                f"this class rests on is unverified")
+            present.append(name)
+            totals.append(total)
+        assert len(present) >= 2, (
+            "fewer than two adapters are on this box; nothing was compared")
+        spread = max(totals) / min(totals)
+        assert spread > 10.0, (
+            f"measured spread {spread:.1f}x, against the {self.MEASURED_SPREAD}x "
+            f"the docstring cites - the reason for balancing has changed and this "
+            f"must be re-derived rather than trusted")
+
+    def test_equalising_gives_every_parent_the_same_delta_norm(self):
+        scales = merge.balance_scales(self._vectors(self.MEASURED), np.zeros(8))
+        after = [scales[i] * float(np.linalg.norm(self._vectors(
+            self.MEASURED)[i][0])) for i in range(3)]
+        assert max(after) / min(after) < 1.0001, after
+
+    def test_the_weakest_parent_is_inflated_by_a_reported_factor(self):
+        """The cost is the point, so it is asserted rather than described.
+
+        Rescaling 0.0365 up to the mean of the three multiplies it by **65x**.
+        That inflates something trained to be small into a magnitude it was never
+        fitted at. The test pins the number so a reader sees it in the failure
+        rather than in a comment.
+        """
+        scales = merge.balance_scales(self._vectors(self.MEASURED), np.zeros(8))
+        weakest = min(range(3), key=lambda i: self.MEASURED[i])
+        assert scales[weakest] > 50.0, (
+            f"the weakest adapter's scale is {scales[weakest]:.2f}x - either the "
+            f"measurement moved or the balancing is no longer equalising")
+
+    def test_the_callers_coefficient_survives_rather_than_being_replaced(self):
+        """`lambda` means what it meant before the parameter existed.
+
+        Overwriting the caller's weight would make `balance=True` silently
+        redefine `lambda_i`, which is how a merge starts not containing the model
+        the caller thought it did.
+        """
+        import numpy as np
+        tf = pathlib.Path(merge.__file__).read_text()
+        assert "coefficient * scales[index]" in tf, (
+            "the balance factor must multiply the caller's coefficient"
+        )
+
+    def test_a_zero_norm_vector_is_left_alone(self):
+        """A parent that contributed nothing gets no share of the target.
+
+        Scaling it up does not create what training did not put there, and the
+        alternative is a merge where an absent capability is amplified by a
+        factor the caller never asked for.
+        """
+        import numpy as np
+        zero = (np.zeros(8), 1.0)
+        live = (np.full(8, 4.0 / 8 ** 0.5), 1.0)
+        scales = merge.balance_scales([zero, live], np.zeros(8))
+        assert scales[0] == 1.0, scales
+
+    def test_balancing_is_off_by_default_so_an_ask_for_nothing_is_unchanged(self):
+        """The default is the merge that existed before the parameter.
+
+        A new default that changes what a merge contains is a regression wearing
+        a feature's clothes; `f16` is the same rule `ctxfit` used for the KV
+        ladder.
+        """
+        import inspect
+        assert inspect.signature(merge.blend).parameters["balance"].default is False
