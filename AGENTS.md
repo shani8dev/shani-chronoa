@@ -12224,3 +12224,57 @@ a distinction two identical skips would have hidden.
   local to the helper — so the one machine the skip exists for raised `NameError`
   instead of skipping. All three found by running, the last two only by reading the
   path after the first was fixed.
+
+## The "environmental" failure list is stale: all eleven of those files pass (2026-10-12)
+
+The table above lists eleven files as failing because of this machine. Measured,
+each file run on its own, 2026-10-12:
+
+| file | recorded as | measured |
+|---|---|---|
+| `test_browser_window_probe.py` (7) | WebKitGTK absent | **7 passed, 2 skipped** *(already corrected above)* |
+| `test_setup_extras.py` (6) | `ConsentRequired`, downloads gated | **27 passed** |
+| `test_sense_idle.py` (3) | real clock and real X, headless | **20 passed, 3 skipped** |
+| `test_sandbox_seccomp.py` (2) | Landlock/seccomp need the real kernel | **61 passed, 1 skipped** |
+| `test_permission_decisions.py` (2) | `grim` missing | **19 passed** *(already corrected above)* |
+| `test_everyday_skills.py` (2) | xdotool / X11 not present | **53 passed** |
+| `test_sandbox_profiles_live.py` (1) | needs the real kernel | **37 passed** |
+| `test_input_skills.py` (1) | xdotool / X11 not present | **23 passed** |
+| `test_portal_input.py` (1) | no RemoteDesktop backend | **14 passed** |
+| `test_vision_sense.py` (1) | no Wayland capture tool | **53 passed, 1 skipped** |
+| `test_recordings.py` (1) | consent switch off | **19 passed** |
+
+**Zero failures across all eleven.** The list is not partially stale; it is
+wholly stale, and it is the second time this file has had to correct it.
+
+### What replaced it is strictly better, and that is the part worth reading
+
+Seven tests still skip, and **every one names a measured cause** rather than a
+guess about the machine:
+
+```
+WebKit's web process cannot start here; no page can be loaded
+the X server here does not offer MIT-SCREEN-SAVER
+an LSM on this machine refuses to execute a file with no pathname
+  (memfd_create + execve is killed before Python sees it)
+a display environment is advertised here, but a real capture does not
+  work: gnome-screenshot falls back and writes nothing
+```
+
+Those are exactly the shapes this file later records as *correct*: the guard asks
+the component rather than the environment, and a check that **refuses to certify
+itself when its premise is absent** is the right behaviour rather than a failure
+to fix. So the old table was not describing a machine — it was describing a
+version of these files that no longer exists.
+
+**Corrected rather than deleted, deliberately.** These files can legitimately
+fail on a machine that genuinely lacks X, a real capture tool, or a permissive
+LSM, and the reasons are still the right ones to try first. What was wrong was
+the claim that they fail *here*, asserted without re-measurement.
+
+**The rule, which is the transferable half:** *a failure list nobody re-measures
+is worse than no list*, because it teaches the next reader that eleven files do
+not work — which is the "a stale **dead** label is worse than a missing **live**
+one" shape in a new place. It is only corrected by measuring, and two entries
+had already been corrected that way in this file, which is what made the other
+nine worth re-checking. **`environmental` is a claim, not a verdict.**
