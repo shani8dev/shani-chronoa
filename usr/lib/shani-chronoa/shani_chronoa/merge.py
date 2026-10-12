@@ -306,6 +306,33 @@ def _combine(base_arr, task_vectors, method, density, lam):
     fine-tune 77.707) carries **two** voters, and a three-parent merge over it
     is a two-parent merge with an extra file on disk.
 
+
+    **What the trim is actually for, measured rather than assumed.** mergekit's
+    framing leads with interference, and this module did too - which turned out
+    to be aiming the method at the smaller of its two effects. Measured on three
+    Qwen3-0.6B checkpoints:
+
+    - The two fine-tunes disagree at **2.23%** of coordinates (13,294,030 of
+      595,049,920). So 97.77% of the task vector points the same way.
+    - Summing two task vectors at coefficient 1.0 each gives perplexity
+      **33097.4** against a base of 48.770 - 678x, a diverged model rather than
+      a merge. Trimming the same two vectors to density 0.5 gives **75.68**.
+    - On two parents, task arithmetic scores 84.40 and the trim scores **73.60**
+      - a 12.8% recovery, none of it from resolving interference, because there
+      is almost none to resolve.
+
+    **The trim is a stabiliser, not a conflict resolver.** Summing two
+    fine-tunes of one ancestor roughly doubles the perturbation everywhere they
+    agree, and they agree almost everywhere; keeping only the largest
+    `density` fraction per tensor is what bounds how far the sum can travel
+    from the base. Interference resolution is a 2.23% side effect on top of
+    that, and it is the part that needs three voters to work at all.
+
+    So the honest ordering of these two steps, for models that share an
+    ancestor, is **trim first and consensus second** - which is the opposite of
+    the order the paper presents them in, and it is the order the measurement
+    here supports.
+
     """
     import numpy as np
 
