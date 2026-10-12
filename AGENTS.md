@@ -12620,3 +12620,32 @@ distinct failure mode from "no compression at all" - still ordering-correct, sti
 ladder-shaped, just quietly half the headroom.
 
 `tools/mutations/floor_cost.py`: 3 mutations, 3 caught, 0 survivors, 0 equivalent.
+
+## The shared-tree hazard, observed from the other side (2026-10-12)
+
+This file records the cost habits of a shared tree, and one of them was just
+demonstrated on me rather than by me.
+
+The entry above - *"What the q8_0 floor costs"* - was appended to this file and
+then left uncommitted across a long window: three mutation runs, a targeted test
+run, and the launch of a full suite. In that window the concurrent session
+committed, and their commit `f310aad` (*"README: four senses were absent from the
+table"*) introduced this file's KV-floor entry:
+
+    git log --oneline -S'What the q8_0 floor costs' -- AGENTS.md
+    f310aad README: four senses were absent from the table, and the check is now run
+
+So a KV-cache finding sits in the history of a commit whose message is about the
+sense table. **Nothing was lost, and this is recorded rather than fixed** -
+`f310aad` is another session's commit and rewriting it to correct an attribution
+is a person's call, not a mechanical one.
+
+The part that was mine: the hazard here is not `git commit` without `--only`,
+which is already forbidden and which I have used throughout. It is the *window*
+between writing a file and committing it. `--only` protects the commit from
+sweeping in other people's staged work; it does nothing about a file left sitting
+uncommitted in a tree someone else commits from.
+
+The habit that follows, and the one this cost: **append and commit in one
+command.** This entry is committed that way, in the same shell invocation that
+wrote it, precisely so it cannot happen twice.
