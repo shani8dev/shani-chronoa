@@ -431,6 +431,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
     caught = 0
     survivors = []
     equivalent = []
+    unmeasurable = []
     originals = {}
     for entry in mutations:
         target = ROOT / entry["file"]
@@ -443,6 +444,24 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             if verbose:
                 print(f"  MUTATED: {entry['label']}")
             failed, summary, skipped = _failures(test_file)
+        except MutationDidNotParse as unmeasurable_run:
+            # **One mutation pytest could not measure is a result about that
+            # mutation, not a reason to abandon the rest of the set.** Measured
+            # 2026-12: `sense_budget`'s "the worker catches Exception instead of
+            # BaseException" produced no summary at all, and the raise cost that
+            # set every remaining mutation - while `reached` still counted it, so
+            # the tally would read `43 of 43 sets` over a mutation count that
+            # silently excluded them. Counting sets is not enough; a partial
+            # inventory has to be able to say it is a fraction of a mutation too.
+            #
+            # **Only `MutationDidNotParse` is caught.** `_apply`'s refusal on a
+            # rotated anchor still propagates and still stops the set, because
+            # that is a statement about the whole file the remaining mutations
+            # are aimed at, not about one run.
+            unmeasurable.append((entry["label"], unmeasurable_run))
+            if verbose:
+                print(f"    -> UNMEASURABLE  ({unmeasurable_run})")
+            continue
         finally:
             for path2, text in originals.items():
                 path2.write_text(text, encoding="utf-8")
@@ -494,7 +513,8 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             if unexplained:
                 print(f"       failed for another reason: {unexplained}")
     return {"set": name, "count": len(mutations), "caught": caught,
-            "survivors": survivors, "equivalent": equivalent}
+            "survivors": survivors, "equivalent": equivalent,
+            "unmeasurable": unmeasurable}
 
 
 def main(argv=None) -> int:
@@ -542,6 +562,7 @@ def main(argv=None) -> int:
     reached = 0
     all_survivors = []
     all_equivalent = []
+    all_unmeasurable = []
     failures = []
     try:
         lock = _Lock(timeout=args.wait)
@@ -575,7 +596,8 @@ def main(argv=None) -> int:
                     # as "nothing ran".
                     print()
                     _report(totals, all_survivors, failures, started,
-                            all_equivalent, (reached, len(wanted)))
+                            all_equivalent, (reached, len(wanted)),
+                            all_unmeasurable)
                     return 1
                 continue
             if result.get("empty"):
@@ -585,14 +607,16 @@ def main(argv=None) -> int:
             totals["caught"] += result["caught"]
             all_survivors.extend((name,) + s for s in result["survivors"])
             all_equivalent.extend((name,) + e for e in result.get("equivalent", []))
+            all_unmeasurable.extend((name,) + u
+                                    for u in result.get("unmeasurable", []))
     finally:
         lock.__exit__(None, None, None)
 
     if not args.quiet:
         print()
     _report(totals, all_survivors, failures, started, all_equivalent,
-            (reached, len(wanted)))
-    return 1 if (all_survivors or failures) else 0
+            (reached, len(wanted)), all_unmeasurable)
+    return 1 if (all_survivors or failures or all_unmeasurable) else 0
 
 
 def _check_anchors(wanted, available) -> int:
@@ -638,7 +662,8 @@ def _check_anchors(wanted, available) -> int:
     return 0
 
 
-def _report(totals, survivors, failures, started, equivalent=(), sets=None) -> None:
+def _report(totals, survivors, failures, started, equivalent=(), sets=None,
+             unmeasurable=()) -> None:
     """The tally.
 
     **`sets` is `(reached, available)`, and it is not decoration.** A run that
@@ -646,20 +671,33 @@ def _report(totals, survivors, failures, started, equivalent=(), sets=None) -> N
     caught` either way - with nothing in the output to say which. That number is
     the thing people quote, so a number that cannot tell a full inventory from a
     third of one is worse than no number at all.
+
+    **`unmeasurable` is the same defect one level down.** A set that reached every
+    mutation and lost one to a run pytest could not measure was still counted as
+    *reached*, so `43 of 43 sets` would have read complete over a mutation count
+    that quietly excluded it. Together the two make the arithmetic checkable:
+    **caught + survivors + equivalent + unmeasurable == count**, so a reader who
+    adds the columns up knows whether the run measured what it claims to.
     """
     reached, available = sets if sets else (None, None)
     line = (f"{totals['count']} mutations, {totals['caught']} caught, "
-            f"{len(survivors)} survivors, {len(equivalent)} equivalent")
+            f"{len(survivors)} survivors, {len(equivalent)} equivalent, "
+            f"{len(unmeasurable)} unmeasurable")
     if available:
         line += f", {reached} of {available} sets"
     print(f"{line}  ({time.time() - started:.0f}s)")
-    if available and reached < available:
+    if available and (reached < available or unmeasurable):
         # **Say it in the tally, not only on stderr.** The stderr line is the first
         # thing a raising run prints; the tally is the thing that survives into a
         # commit message. A partial run must not be quotable as a clean one.
-        print(f"  INCOMPLETE: {available - reached} of {available} sets were never "
-              f"run, so the {totals['count']} above is a partial inventory and NOT "
-              f"the full one - re-run without --stop-on-first-error to get the rest")
+        print(f"  INCOMPLETE: the {totals['count']} above is a partial "
+              f"inventory and NOT the full one - "
+              + (f"{available - reached} of {available} sets were never run, so "
+                 f"re-run without --stop-on-first-error to get them; "
+                 if available - reached else "")
+              + (f"{len(unmeasurable)} mutation(s) could not be measured at all "
+                 f"and are listed below; " if unmeasurable else "")
+              + "nothing was measured for them either way")
     for name, label, summary, failed in survivors:
         print(f"  SURVIVOR [{name}] {label}")
         print(f"          {summary}")
@@ -669,6 +707,9 @@ def _report(totals, survivors, failures, started, equivalent=(), sets=None) -> N
         print(f"  EQUIVALENT [{name}] {label}")
         if why:
             print(f"          {why}")
+    for name, label, exc in unmeasurable:
+        print(f"  UNMEASURABLE [{name}] {label}")
+        print(f"          {type(exc).__name__}: {exc}")
     for name, exc in failures:
         print(f"  ERROR [{name}] {type(exc).__name__}: {exc}")
 

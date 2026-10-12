@@ -809,7 +809,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         }])
         out = _run(name, cwd=tmp_path)
         assert "SURVIVOR" in out.stdout, out.stdout + out.stderr
-        assert "unmeasurable" not in out.stdout, (
+        assert "unmeasurable on this machine" not in out.stdout, (
             "a survivor was annotated as possibly-unmeasurable in a run where "
             "nothing skipped at all:\n" + out.stdout)
 
@@ -904,3 +904,112 @@ class TestTheTallyCannotBeQuietlyWrong:
         assert ("2 of 2" in default.stdout) != ("2 of 2" in stopped.stdout), (
             "--stop-on-first-error and the default reached the same number of "
             "sets, so the flag does not do what its help says")
+
+    #: A replacement that leaves the file unterminated, so pytest aborts with
+    #: "1 error during collection" and the runner cannot measure the mutation.
+    #: This is the real historical case, not a contrived one: a mutation set whose
+    #: replacement drops a quote produced exactly that.
+    _UNPARSEABLE = {
+        "file": "usr/lib/fixture_module.py",
+        "old": '    """A sum that is checked against a known total."""\n',
+        "new": '    """A sum that is checked against a known total.\n',
+        "label": "the mutation leaves the file unterminated",
+        "expect": ["test_the_total_is_what_the_docstring_says"],
+    }
+
+    def test_an_unmeasurable_mutation_does_not_cost_the_rest_of_its_set(self,
+                                                                       tmp_path):
+        """The defect this closes, one level below the one above.
+
+        `sense_budget`'s "the worker catches Exception instead of BaseException"
+        produced no summary at all. `MutationDidNotParse` propagated out of
+        `run_set`, so that mutation **and every mutation after it in the same
+        set** were never measured - while `reached` still counted the set, which
+        would have printed `43 of 43 sets` over a mutation count that quietly
+        excluded them. One unmeasurable mutation is a result about that mutation.
+        """
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        out = _run("aaa_partial", cwd=tmp_path)
+        assert "UNMEASURABLE [aaa_partial]" in out.stdout, (
+            "the mutation pytest could not measure was not reported as such:\n"
+            + out.stdout + out.stderr)
+        assert "caught by test_the_total" in out.stdout, (
+            "the mutation AFTER the unmeasurable one never ran, so one bad "
+            "measurement cost the whole set:\n" + out.stdout)
+        assert "2 mutations," in out.stdout, out.stdout
+
+    def test_the_tally_columns_add_up_to_the_mutation_count(self, tmp_path):
+        """**The invariant that makes a partial inventory visible by arithmetic.**
+
+        A count nobody can add up is a count nobody can audit, and the four
+        verdicts a mutation can get are exhaustive: a named witness failed, none
+        did, it is a documented equivalent, or pytest could not measure it.
+        """
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        out = _run("aaa_partial", cwd=tmp_path)
+        tally = [l for l in out.stdout.splitlines() if " mutations," in l]
+        assert tally, out.stdout
+        # "N mutations, C caught, S survivors, E equivalent, U unmeasurable"
+        words = tally[-1].split(", ")
+        count = int(words[0].split()[0])
+        columns = [int(w.split()[0]) for w in words[1:5]]
+        assert sum(columns) == count, (
+            f"{count} mutations but caught+survivors+equivalent+unmeasurable "
+            f"= {sum(columns)}, so at least one mutation has no verdict recorded "
+            f"and the tally is not auditable:\n{tally[-1]}")
+
+    def test_an_unmeasurable_mutation_makes_the_tally_incomplete(self, tmp_path):
+        """The set *was* reached - every mutation was attempted - and the run is
+        still not a complete inventory. Those are different sentences and the
+        tally has to be able to say both."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        out = _run("aaa_partial", cwd=tmp_path)
+        assert "1 of 1 sets" in out.stdout, out.stdout
+        assert "INCOMPLETE" in out.stdout, (
+            "a run that lost a mutation to an unmeasurable pytest printed a "
+            "complete-looking tally:\n" + out.stdout)
+        assert "could not be measured" in out.stdout, out.stdout
+
+    def test_a_finished_tally_is_not_marked_incomplete_by_the_column_alone(self,
+                                                                        tmp_path):
+        """**The control.** A column that is always printed must not always warn,
+        or the warning says nothing about any particular run."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_fine", [self._FINE])
+        out = _run("aaa_fine", cwd=tmp_path)
+        assert "0 unmeasurable" in out.stdout, out.stdout
+        assert "INCOMPLETE" not in out.stdout, out.stdout
+
+    def test_an_unmeasurable_mutation_is_a_failure_exit(self, tmp_path):
+        """A run that could not measure something is not a clean run, and the
+        exit code is what a script reads."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        out = _run("aaa_partial", cwd=tmp_path)
+        assert out.returncode != 0, (
+            "a run that could not measure one of its mutations exited 0, so a "
+            "script would read it as clean:\n" + out.stdout)
+
+    def test_a_rotated_anchor_still_stops_its_set(self, tmp_path):
+        """**The over-fix guard.** The `except` catches `MutationDidNotParse`
+        only; a rotted anchor raises something else and must still stop the set,
+        because that is a statement about the file the remaining mutations are
+        aimed at rather than about one run."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_rots", [self._ROTATED, self._FINE])
+        out = _run("aaa_rots", cwd=tmp_path)
+        assert "ERROR [aaa_rots]" in out.stdout, out.stdout
+        assert "caught by test_the_total" not in out.stdout, (
+            "the second mutation ran after the anchor rotted, so the except has "
+            "widened past MutationDidNotParse and a stale file is now measured "
+            "against code that no longer has the anchor:\n" + out.stdout)
+        # Nothing is *missing* here - the set was reached and its outcome is in
+        # the ERROR line - so the tally is not INCOMPLETE. That is the difference
+        # between "could not be measured" and "was never attempted", and the
+        # unmeasurable test above is the other side of it.
+        assert "INCOMPLETE" not in out.stdout, (
+            "a set that was reached and reported an ERROR is not an incomplete "
+            "inventory:\n" + out.stdout)
