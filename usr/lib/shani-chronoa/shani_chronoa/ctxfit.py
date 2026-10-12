@@ -76,6 +76,28 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 #: codebooks, so acoustic fidelity can be traded away and meaning never can. The
 #: KV ladder has no such floor, because a floor is a quality claim and this one
 #: would be unmeasured.
+#: **The speed axis of this dial is unmeasured, and this is the note that says
+#: so.** `cache_type_for_context` chooses on VRAM fit alone, because quality is
+#: measured (see `KV_CACHE_FLOOR`) and speed is not. That matters more than it
+#: looks: a quantized KV cache pays a dequantization cost, so a ladder chosen to
+#: fit more context could partly give back in `tok/s` - and `min_tps` is what
+#: `requirements_met` gates the tiers on.
+#:
+#: Not for want of trying, and the failure is worth writing down so nobody
+#: re-derives it. `llama-perplexity` does no real generation (0.69 ms for 2 tokens
+#: on this model), so it reports a quality figure and no decode rate. `llama-bench`
+#: is the right tool and takes `-ctk`, but **this build refuses to create a context
+#: with a quantized cache type** - measured, `ctk=f16` rows=1 errors=0,
+#: `ctk=q8_0` rows=0 errors=1, `ctk=bf16` rows=1 errors=0. Both types that work
+#: are 2 bytes per element, so it is the quantized path specifically. Meanwhile
+#: `llama-server` and `llama-perplexity` accept `-ctk q8_0` without complaint, so
+#: the limit is this benchmark binary rather than the runtime.
+#:
+#: So the honest statement in the code: quality is measured, VRAM is measured,
+#: and speed is not. If a quantized cache turns out to cost decode rate, the
+#: lever's tradeoff is worse than the numbers here imply, and the place to fix
+#: that is a slot run with a `llama-bench` that will accept the flag.
+
 #: The most compression the KV cache may take. `q4_0` is deliberately absent.
 #:
 #: Measured 2026-10-12 with this repo's own `llama-perplexity` path and its own

@@ -11777,3 +11777,32 @@ A better model is a slot run with a bigger checkpoint, and the note says so.
 Two of my own errors on the way, both the recurring shape: a docstring claimed the
 clamp adds types it only removes, and a test asserted a one-entry ladder would
 return a type it did not contain.
+
+## The KV dial's speed axis is unmeasured, and here is why (2026-10-12)
+
+Follow-on to the quality floor. The same dial has a speed axis and
+`cache_type_for_context` ignores it, choosing on VRAM fit alone. That matters more
+than it looks: a quantized KV cache pays a dequantization cost, so a ladder chosen
+to fit more context could partly give back in `tok/s` — and `min_tps` is what
+`requirements_met` gates the tiers on. The floor I measured last round bounds the
+quality direction; nothing bounds this one.
+
+Tried to measure it, and the failure is worth writing down so nobody re-derives
+it:
+
+- **`llama-perplexity` does no real generation** — 0.69 ms for 2 tokens on this
+  model. It reports a perplexity figure and no decode rate at all.
+- **`llama-bench` is the right tool and takes `-ctk`, but this build refuses to
+  create a context with a quantized cache type.** Measured with a negative control
+  that the failure is the quantized path and not the flag: `ctk=f16` rows=1
+  errors=0, `ctk=bf16` rows=1 errors=0, `ctk=q8_0` rows=0 errors=1. Both types
+  that work are 2 bytes per element.
+- Meanwhile `llama-server` and `llama-perplexity` both accept `-ctk q8_0` without
+  complaint, so the limit is this benchmark binary rather than the runtime — the
+  ladder is safe to *pass* (which was the earlier measurement), it just cannot be
+  benchmarked here.
+
+So the code now says it plainly: quality measured, VRAM measured, **speed not**,
+and why. If a quantized cache turns out to cost decode rate, the lever's tradeoff
+is worse than the numbers imply, and the place to settle it is a slot run with a
+`llama-bench` that will accept the flag.
