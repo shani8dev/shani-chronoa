@@ -113,6 +113,91 @@ _UNAVAILABLE = ("busy", "quota", "rate limit", "rate_limit", "too many", "timeou
                 "unavailable", "overloaded", "429", "502", "503", "504")
 
 
+# --------------------------------------------------------------------------
+# What the model said when it did not act.
+#
+# `score` reports "no tool" for every case where no call was made, which
+# discards the only evidence there was. "I can't tell you the time" and "Let me
+# check that for you" are both `no tool`, and they are opposite failures: one is
+# a refusal to answer a request the assistant exists to answer, the other is the
+# model promising an action it never takes. AGENTS.md records the second as a
+# live failure (`test_routines_live` on "weather in Pune and what time is it").
+#
+# The classification is heretic's (`scorers/keyword_rate.py`) applied to this
+# harness's own cases: normalise the text, then match markers. The normalisation
+# is not decoration - a model writes "I *can't*" and "I can’t", and an unquoted
+# marker list misses both.
+# --------------------------------------------------------------------------
+
+def _normalise(text: str) -> str:
+    """Lowercase, drop emphasis, straighten typographic apostrophes, collapse space.
+
+    Every step is one a real reply was observed to need: markdown emphasis
+    splits a marker's own word apart (`I *can't*`), and a phone or a document
+    gives "can't" with U+2019 where the marker list has U+0027.
+    """
+    return " ".join((text or "").lower().replace("*", "").replace("\u2019", "'").split())
+
+
+#: A refusal. Trimmed to the ways an assistant declines a request it should
+#: answer; heretic's list is built for harmful prompts, and its safety-policy
+#: vocabulary ("i'm an ai", "violat", "ethical boundaries") is a different
+#: question from "did this decline to tell me the time".
+_REFUSAL_MARKERS = (
+    "i can't", "i cant", "i cannot",
+    "i won't", "i wont", "i will not",
+    "i'm unable", "i am unable", "im unable",
+    "i'm not able", "i am not able",
+    "i don't have access", "i do not have access",
+    "i'm sorry, but", "i am sorry, but", "unfortunately, i",
+)
+
+#: A narration: the model states an intention and performs nothing. Not a
+#: refusal and not an answer, and the person is left holding a promise.
+_NARRATION_MARKERS = (
+    "let me", "i'll check", "i will check", "i'll look", "i will look",
+    "one moment", "give me a moment", "hang on", "i'll find", "i will find",
+    "i'll pull", "i will pull",
+)
+
+#: The four answers, and why "empty" is one of them rather than a fifth way of
+#: saying "answer".
+#:
+#: **Measured on this box, 2026-10-12**: Qwen3 is a thinking model, and with
+#: `max_tokens: 80` a completely ordinary "What time is it?" came back with
+#: `content == ""` - the budget spent on `reasoning_content` before it spoke.
+#: A refusal-marker check that treated empty as compliant would have scored that
+#: silence as an answer. heretic reaches the same conclusion from the other side,
+#: counting an empty response as a match "to avoid optimizing for them"; here it
+#: is its own state, because "did not speak" and "declined to speak" and "spoke
+#: plainly" are three different facts about a run.
+REPLY_EMPTY = "empty"
+REPLY_REFUSAL = "refusal"
+REPLY_NARRATION = "narration"
+REPLY_ANSWER = "answer"
+
+
+def classify_reply(text: str) -> str:
+    """One of the four states, from the reply's own words.
+
+    `empty` is tested **first**: an empty string contains no marker at all, so
+    every other branch would pass it straight through as an answer.
+    """
+    flat = _normalise(text)
+    if not flat:
+        return REPLY_EMPTY
+    if any(marker in flat for marker in _REFUSAL_MARKERS):
+        return REPLY_REFUSAL
+    if any(marker in flat for marker in _NARRATION_MARKERS):
+        return REPLY_NARRATION
+    return REPLY_ANSWER
+
+
+#: How much of the reply to keep in the JSON. Enough to read what happened on a
+#: miss, short enough that 226 cases do not produce a report nobody opens.
+REPLY_EXCERPT_CHARS = 200
+
+
 def build_llm(config: str, cloud: str):
     from shani_chronoa import cloud_llm, local_llm
     if config.startswith("cloud"):
@@ -163,8 +248,13 @@ async def run_case(llm, config: str, case: dict) -> dict:
     # a request that failed is a failed case, even one that expected no tool:
     # "no answer" is not "correctly chose not to act"
     tool_ok, args_ok, seen = (False, False, "") if error else score(case, _calls(reply))
+    text = (reply or {}).get("content") or ""
     return {"id": case["id"], "tool": tool_ok, "args": args_ok, "seconds": round(seconds, 2),
-            "seen": error or seen, "schemas": len(tools), "unavailable": unavailable}
+            "seen": error or seen, "schemas": len(tools), "unavailable": unavailable,
+            # What it said, kept because `seen` throws it away. A miss recorded
+            # only as "no tool" cannot be told from a refusal.
+            "reply": "" if error else classify_reply(text),
+            "text": "" if error else text[:REPLY_EXCERPT_CHARS]}
 
 
 async def run(configs, cases, cloud: str, repeat: int, pause: float = 0.0) -> dict:
@@ -202,9 +292,40 @@ def markdown(results: dict) -> str:
     for config, r in results.items():
         for row in r["rows"]:
             if not row["args"] and not row.get("unavailable"):
-                fails.setdefault(row["id"], []).append(f"{config}: {row['seen']}")
+                fails.setdefault(row["id"], []).append(
+                    f"{config}: {row['seen']}"
+                    + (f" ({row['reply']})" if row.get("reply") else ""))
     if fails:
         lines += ["", "Misses:", ""] + [f"- **{cid}** - " + "; ".join(v) for cid, v in sorted(fails.items())]
+
+    # **A refusal rate beside the accuracy, because accuracy alone cannot see
+    # this.** "no tool" is the same word for declining the request and for
+    # promising it and never doing it, and the fix for each is different.
+    said = {}
+    for config, r in results.items():
+        for row in r["rows"]:
+            if row.get("unavailable") or not row.get("reply"):
+                continue
+            said.setdefault(config, {}).setdefault(row["reply"], []).append(row["id"])
+    if said:
+        lines += ["", "What the model said when it did not act", "",
+                  "| config | refusals | narrations | empty | plain answers |"]
+        lines.append("|---|---|---|---|---|")
+        for config in sorted(said):
+            counts = said[config]
+            lines.append(
+                f"| {config} | {len(counts.get(REPLY_REFUSAL, []))} | "
+                f"{len(counts.get(REPLY_NARRATION, []))} | "
+                f"{len(counts.get(REPLY_EMPTY, []))} | "
+                f"{len(counts.get(REPLY_ANSWER, []))} |")
+        for config in sorted(said):
+            bad = said[config].get(REPLY_REFUSAL) or []
+            if bad:
+                lines += ["", f"{config}: refused outright - " + ", ".join(sorted(bad))]
+            gaps = said[config].get(REPLY_NARRATION) or []
+            if gaps:
+                lines += ["", f"{config}: said it would act and did not - "
+                              + ", ".join(sorted(gaps))]
     return "\n".join(lines) + "\n"
 
 

@@ -11563,3 +11563,94 @@ Unsupported cache type: nonsense_xyz`), before any model is loaded, so the test
 could distinguish accepted-from-rejected. **All nine llama.cpp types** - `f16`,
 `bf16`, `q8_0`, `q5_1`, `q5_0`, `q4_1`, `q4_0`, `iq4_nl`, `f32` - are accepted, so
 every entry in the ladder is safe to pass on this build.
+
+## `no tool` was four different things, and the count that gates the harness could not be repaired (2026-10-12)
+
+Both of these came from following the heretic study's own open item - *"what would
+change the verdict is a measurement, not a model"* - and the first attempt at it
+found a pre-existing red test that had been red for a while.
+
+### A refusal, a promise, and silence all scored `no tool`
+
+`tools/task_eval.py`'s `score()` reports `"no tool"` for every case with no tool
+call, and `run_case` returned that string and **threw the reply away**. So
+"I can't tell you the time" and "Let me check that for you" are the same result -
+and they are opposite failures with opposite fixes. The second is already recorded
+in this file as a live one (`test_routines_live` on "weather in Pune and what time
+is it").
+
+`classify_reply()` separates them into `empty` / `refusal` / `narration` /
+`answer`, using heretic's `scorers/keyword_rate.py` applied to this harness's own
+cases: normalise, then match markers.
+
+**`empty` is its own state because of a measurement, not a hunch.** Qwen3 is a
+thinking model, and with `max_tokens: 80` the ordinary eval case "What time is it?"
+came back with `content == ""` - the budget spent on `reasoning_content` before it
+spoke. An empty string contains no marker, so every other branch passes it
+through **as an answer**. I nearly recorded that as the model declining; it was
+the harness, and the two readings are indistinguishable from the reply alone.
+heretic reaches the same conclusion from the other side (counting an empty
+response as a match "to avoid optimizing for them"); here it is its own state,
+because "did not speak", "declined to speak" and "spoke plainly" are three
+different facts about a run.
+
+The normalisation is load-bearing rather than decorative - both of its steps were
+found by a reply that needed it: markdown emphasis splits a marker's own word
+apart (`I *can't*`), and a phone gives U+2019 where the marker list has U+0027.
+
+`markdown()` now carries a refusal/narration/empty/answer table and names the
+cases in each. `tests/test_task_eval.py` (+6).
+
+### `skills_total` was 250 against a registry of 257, and no tool could fix it
+
+`tests/test_task_eval.py::test_the_recorded_coverage_is_still_the_coverage` was
+**red** - not on this work's account, verified against HEAD: `tools/eval_cases.json`
+says `skills_total: 250` and the registry has **257**. The gate was working; the
+concurrent session's seven new skills had not been counted.
+
+The finding is **why nobody fixed it**. `tools/gen_eval_cases.py` is the only thing
+that writes that block, and it rewrites it inside `if added:` - so only when a
+skill is missing a case - setting `skills_total = skills_asserted`, because its job
+is to *fill the gaps* and leave coverage complete. Correct for what it does, and
+useless for this: **running it to correct one stale number would have appended 47
+generated cases and flipped `about` to "COVERAGE IS COMPLETE".** A repair tool
+that cannot repair is a reason the repair does not happen.
+
+`--refresh-coverage` recomputes the three numbers from the registry and the cases,
+writes **no** cases, and leaves `about` alone. The three are pure functions of two
+facts already in this repo, so there is no state in which the recorded value is
+right and the derived one wrong - which is the whole argument for generating them,
+and the same one this file makes about not repeating a number in prose.
+
+**`gated_unguarded: 56` is retired rather than recomputed.** It matches neither
+`len(capabilities.GATED)` (**78**) nor the gated skills with no case (**9**),
+nothing read it and nothing checked it, so its meaning is not recoverable and
+recomputing it would mean inventing one. Retired *with the reason kept*, per this
+file's rule that knowledge is retired with the reason rather than discarded.
+
+### Four controls that could not fail, and what each one was
+
+Every one of these ran **green** against the fix before I changed the test:
+
+- **A marker list is only as tested as its least-covered member.** Emptied three of
+  the thirteen refusal markers and the file stayed green, because the one measured
+  refusal contains "i don't have access" and "i can't". A property that iterates
+  the *current* list cannot see a marker being **deleted** - a deleted marker
+  simply stops being iterated. Fixed by testing each marker **bare**, because a
+  reply that is *only* the deleted marker is the input that distinguishes them.
+- **Both marker lists are now pinned**, with the shape argued rather than assumed:
+  adding a phrase to a list of ways a model declines is an editorial judgement and
+  going green on it is fine; **removing one makes a decline read as an answer**, so
+  that direction is pinned. A literal list is the right instrument for a judgement
+  being *reviewed* and the wrong one for a fact being *derived* - `skills_total` is
+  the latter and is generated for exactly that reason.
+- **The `--check`-writes-nothing test compared parsed JSON**, and a rewrite that
+  only reformats leaves parsed JSON identical. The file's **bytes** are what
+  "wrote nothing" means.
+- **The report tests built their rows by hand**, so they proved `markdown` renders a
+  classification but not that anything produces one. `run_case` is now driven with
+  a reply that declines.
+
+`tests/test_eval_coverage_refresh.py` (9), `tests/test_task_eval.py` (+6).
+`tools/mutations/task_eval_reply.py` and `tools/mutations/eval_coverage.py` -
+**13 mutations, 13 caught, 0 survivors, 0 equivalent**. 34 sets / 288 anchors.
