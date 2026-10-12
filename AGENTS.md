@@ -4995,6 +4995,14 @@ unmutated code before it was written down:
   measured green** (`5 mutations, 4 caught` becoming `18 mutations, 0 caught`).
   Re-running something you already know the answer to is the cheapest detector of
   a harness that has stopped looking.
+- **Assert that a mutation changes behaviour, not merely that its anchor matched
+  once.** The arithmetic control above was `all_unmeasurable.extend(...[:1])`
+  against a fixture set holding exactly **one** unmeasurable mutation - so the
+  slice was a no-op, `s.count(old) == 1` was true of it, and the suite stayed
+  green on a "mutation" that changed nothing. Inflating the *denominator* breaks
+  the same invariant and is caught. `count(old) == 1` is necessary and **not
+  sufficient**; this is the `str.replace` trap in the one costume that still gets
+  past the guard written for it.
 - **A mutation is "caught" only when a named witness fails**, and a whole-file
   red for another reason is reported as a survivor *and* names what failed. The
   first run of this found exactly that: a witness named a base id while the
@@ -5013,6 +5021,18 @@ unmutated code before it was written down:
   repo's own full-inventory test had been passing `--keep-going` all along, which
   is how a false claim survived in a file whose whole subject is not claiming
   things that were not measured.
+- **A set can reach every mutation and still fail to measure one of them.**
+  `MutationDidNotParse` is caught **per mutation**, recorded as
+  `UNMEASURABLE [set] label`, and the set carries on - so the invariant behind the
+  whole tally is arithmetic: **caught + survivors + equivalent + unmeasurable ==
+  count**. The four verdicts are exhaustive, which is what makes a reader who adds
+  the columns up able to tell a complete inventory from a partial one. `reached`
+  counts a set when the loop reaches it, so a set that reached all its mutations
+  and lost one to an unmeasurable run used to print `43 of 43 sets` over a count
+  that quietly excluded it - **the same defect one level below the one above,
+  which is how it was found.** Only `MutationDidNotParse` is caught: a rotated
+  anchor still stops its set, because that is a statement about the file the
+  remaining mutations are aimed at rather than about one run.
 - **A survivor says whether its witnesses could run at all.** A witness that
   *skips* cannot fail, so the summary line's skip count rides along with every
   survivor and the report says a skip may make it unmeasurable on this machine
