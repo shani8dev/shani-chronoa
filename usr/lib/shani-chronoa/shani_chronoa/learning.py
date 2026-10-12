@@ -40,6 +40,8 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
+from shani_chronoa import sysfs
+
 #: One logger for the whole engine. The three merged modules each defined their
 #: own; three loggers for one subsystem means three places to look and three
 #: levels to configure.
@@ -3251,7 +3253,7 @@ def clamp_temperature(value: Any,
         t = float(value)
     except (TypeError, ValueError):        # pragma: no cover - _is_number covered it
         return 1.0
-    if t != t or t in (float("inf"), float("-inf")):
+    if not sysfs.finite(t):
         return 1.0
     # **Zero is the identity, and it is not the fitter's floor.** `temperature or
     # 1.0` used to make 0 read as 1.0 by the accident of `or`, and naive clamping
@@ -3282,7 +3284,7 @@ def clamp_shift(value: Any) -> "List[float]":
             term = float(term)
         except (TypeError, ValueError):    # pragma: no cover - _is_number covered it
             return []
-        if term != term or term in (float("inf"), float("-inf")):
+        if not sysfs.finite(term):
             return []
         out.append(max(-_SHIFT_MAX, min(_SHIFT_MAX, term)))
     return out

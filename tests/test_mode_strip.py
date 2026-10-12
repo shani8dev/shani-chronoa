@@ -62,6 +62,7 @@ class _Config:
         self.wake_word_enabled = wake
         self.barge_in_vad_enabled = barge_in
         self.reply_style = "ordinary"
+        self.answer_mode = "local-cloud"
 
 
 def _toggle_privacy(state, fired):
@@ -102,6 +103,15 @@ def gapp():
         lambda: setattr(config, "wake_word_enabled", not config.wake_word_enabled))
     add(app, "toggle-barge-in-vad",
         lambda: setattr(config, "barge_in_vad_enabled", not config.barge_in_vad_enabled))
+    answer_mode = Gio.SimpleAction.new_stateful(
+        "answer-mode", GLib.VariantType.new("s"),
+        GLib.Variant("s", config.answer_mode))
+    answer_mode.connect("change-state",
+                        lambda a, v: (config.__setattr__(
+                            "answer_mode", v.get_string()),
+                            a.set_state(v)))
+    app.add_action(answer_mode)
+
     dictate = Gio.SimpleAction.new("dictate", None)
     dictate.connect("activate", lambda *_a: fired.append("dictate"))
     app.add_action(dictate)
@@ -427,9 +437,16 @@ def test_dictation_is_a_button_because_it_has_no_state(state):
         assert len(toggles) == len(_ModeStrip._CHIPS), (
             f"expected one switch per chip, got {len(toggles)}")
         assert all(t.get_action_name() != "app.dictate" for t in toggles)
-        assert len(plain) == 1, f"expected exactly one button, got {len(plain)}"
-        assert plain[0].get_action_name() == "app.dictate"
-        assert not isinstance(plain[0], Gtk.ToggleButton), (
+        # **Which button, not how many.** This asserted exactly one, and the
+        # Listening button added beside Dictate made it two - the count was
+        # standing in for the claim, and the claim is the one the docstring
+        # makes: dictation is *not* a chip. A strip may legitimately gain a
+        # second button; what may not happen is dictation becoming a toggle.
+        assert [b.get_action_name() for b in plain].count("app.dictate") == 1, (
+            f"dictation is not the one plain button: "
+            f"{[b.get_action_name() for b in plain]}")
+        dictate = next(b for b in plain if b.get_action_name() == "app.dictate")
+        assert not isinstance(dictate, Gtk.ToggleButton), (
             "dictation is a button: a toggle would stay pressed after the turn "
             "ended on silence, claiming a turn is running when it is not")
     finally:
@@ -448,9 +465,13 @@ def test_the_dictate_button_really_activates_the_action(pressed):
 
     def check(strip):
         _toggles, plain = _chips(strip)
-        assert len(plain) == 1, f"expected one button, found {len(plain)}"
-        button = plain[0]
-        assert button.get_action_name() == "app.dictate"
+        # Which button, not how many - the strip legitimately gained a second
+        # (Listening, beside Dictate on purpose: they are the same question to
+        # a person). Taking `plain[0]` would have pressed whichever happened to
+        # be built first, which is not the button under test.
+        names = [b.get_action_name() for b in plain]
+        assert names.count("app.dictate") == 1, f"no single dictate button: {names}"
+        button = next(b for b in plain if b.get_action_name() == "app.dictate")
         before = state.count("dictate")
         button.emit("clicked")
         return state.fired_since(before)
@@ -629,3 +650,120 @@ def test_the_strip_goes_icon_only_and_back(strip):
     assert strip._barge_chip.get_tooltip_text()
     strip.set_compact(False)
     assert strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0] == wide
+
+
+def _labels(strip):
+    """Every `mode-chip-label` in the strip, by descending the widget tree.
+
+    A helper because the chip words live inside each chip's own box, one level
+    down from the chip itself, and `get_child()` reaches only the first.
+    """
+    out = []
+    stack = [strip]
+    while stack:
+        node = stack.pop()
+        child = node.get_first_child()
+        while child is not None:
+            stack.append(child)
+            if isinstance(child, Gtk.Label) \
+                    and "mode-chip-label" in child.get_css_classes():
+                out.append(child)
+            child = child.get_next_sibling()
+    return out
+
+
+class TestWhereAnswersComeFrom:
+    """The mode the wizard asked once and then forgot the answer to.
+
+    The setup wizard's Mode page offers "In the cloud" and writes `setup-mode`,
+    which decided which *pages* the wizard showed. `_init_components` built
+    Ollama and llama.cpp first regardless - "local-first by design" - and only
+    reached the cloud when neither answered. So someone who chose the cloud and
+    happened to have a local model installed was answered locally, by the
+    download they had just declined. The choice is a setting now, this chip is
+    where it changes, and `_apply_answer_mode` makes it true immediately rather
+    than at the next launch.
+    """
+
+    def _words(self, strip):
+        return [l.get_label() for l in _labels(strip)
+                if "mode-chip-label" in l.get_css_classes()]
+
+    def _strip(self, state):
+        strip = _ModeStrip(state, state.config)
+        strip.refresh()
+        return strip
+
+    def test_the_default_is_the_one_chronoa_always_had(self, state):
+        """`local-cloud` is what happened before the setting existed, so a fresh
+        install is byte-for-byte the behaviour it had yesterday.
+        """
+        state.config.answer_mode = "local-cloud"
+        strip = self._strip(state)
+        assert strip._read_answer_mode() == "local-cloud"
+        assert "This computer, then cloud" in self._words(strip)
+
+    @pytest.mark.parametrize("mode,word", [
+        ("local", "This computer"),
+        ("local-cloud", "This computer, then cloud"),
+        ("cloud", "Cloud"),
+    ])
+    def test_the_chip_word_is_the_mode(self, state, mode, word):
+        state.config.answer_mode = mode
+        strip = self._strip(state)
+        assert word in self._words(strip), (
+            f"the strip is showing {self._words(strip)} for mode {mode!r}")
+
+    def test_an_unknown_mode_reads_as_the_default_not_as_private(self, state):
+        """Guessing the *private* answer from a typo would be the wrong
+        direction to be wrong in.
+        """
+        state.config.answer_mode = "nonsense"
+        assert self._strip(state)._read_answer_mode() == "local-cloud"
+
+    def test_local_is_the_quiet_chip_and_everything_else_is_a_flag(self, state):
+        """Highlighted when anything may leave this machine, so "local" is the
+        only state that reads as settled.
+        """
+        for mode, expected in (("local", False), ("local-cloud", True),
+                               ("cloud", True)):
+            state.config.answer_mode = mode
+            strip = self._strip(state)
+            on = "mode-chip-on" in strip._answer_chip.get_css_classes()
+            assert on is expected, f"{mode!r} read as {'on' if on else 'off'}"
+
+    def test_the_word_fits_the_strips_label_contract(self, state):
+        """`test_ui_layout_contract` fails any label over 30 characters that
+        can neither wrap nor ellipsise, and these cannot.
+        """
+        for mode, _word, _line in _ModeStrip._MODES:
+            assert len(_ModeStrip._MODE_WORDS[mode]) <= 30, (
+                f"{mode!r}'s chip word is over 30 characters")
+
+    def test_every_mode_has_a_menu_line(self, state):
+        assert len(_ModeStrip._MODES) == 3
+        lines = [line for _k, _w, line in _ModeStrip._MODES]
+        assert len(set(lines)) == 3, "two modes share a menu line"
+
+    def test_the_tooltip_names_the_current_mode(self, state):
+        state.config.answer_mode = "cloud"
+        strip = self._strip(state)
+        assert "Cloud" in strip._answer_chip.get_tooltip_text()
+        assert "local model" in strip._answer_chip.get_tooltip_text()
+
+    def test_the_chip_says_which_mode_it_is_in_plain_words(self, state):
+        """The tooltip, because that is the read-back this PyGObject has.
+
+        **`get_accessible_name()` does not exist on a `Gtk.MenuButton`** - the
+        first version of this test called it and raised `AttributeError`, the
+        same shape of mistake this file records for
+        `get_accessible_property` in `test_the_strip_carries_an_accessible_label_
+        for_every_chip`: an API that is not there, read as if it were. So the
+        sentence is asserted through the tooltip, and the accessible label is
+        still set in `refresh()` for a screen reader to announce.
+        """
+        state.config.answer_mode = "local"
+        strip = self._strip(state)
+        tip = strip._answer_chip.get_tooltip_text()
+        assert "Where answers come from" in tip
+        assert "This computer" in tip

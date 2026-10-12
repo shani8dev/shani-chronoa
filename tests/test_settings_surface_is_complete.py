@@ -182,6 +182,32 @@ CONTROLLED = {
 # Keys deliberately not in the window, each with the reason. A new entry here
 # is a decision someone has to write down.
 NOT_EXPOSED = {
+    # **Where the answer comes from, chosen in the mode strip rather than here.**
+    # `answer-mode` is a real GAction (`answer-mode`, a string state) and the
+    # strip draws a menu button for it beside the reply-style chip, appending
+    # `app.answer-mode::{key}` lines - which is what the schema's own
+    # description promises ("shown as a dropdown in the window's mode strip").
+    # A second control in Settings would be a second place to set one thing,
+    # and privacy mode already forces local regardless of what this says.
+    "answer-mode": "chosen in the window's mode strip, as the dropdown its own "
+                   "description promises - the same strip that holds the reply "
+                   "style and the four mode chips. A second control here would "
+                   "be a second place to set one answer, and privacy mode "
+                   "forces local whatever this is set to",
+    # **Per-provider model names, picked at setup time from the provider itself.**
+    # Each is read by `config.py` and empty by default, and the setup window's
+    # cloud-keys page fills it from the provider's own GET /models - a text row
+    # here could name a model the provider has since withdrawn, and the list
+    # moves without this repository changing.
+    "opencode-zen-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "openrouter-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "blockrun-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "llm7-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "kilo-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "groq-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "google-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "openai-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
+    "anthropic-model": "read live from the provider at setup time, where choosing one is also where the key is entered; empty means the provider's own default, so nothing changes until a model is picked",
     "kokoro-voice": "chosen on the setup window's Voice page, in the same list as the Piper voices, "
                     "where choosing one also downloads Kokoro; Settings has the Kokoro on/off switch",
     "extra-languages": "chosen on the setup window's More page, which installs each language's "
