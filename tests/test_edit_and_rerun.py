@@ -356,3 +356,66 @@ def test_the_history_is_asked_before_the_screen_is_cut():
     assert order == ["history"], "the model was never asked"
     assert window._transcript.visible_turns() == [
         ("user", "first question"), ("assistant", "first answer")]
+
+
+# --------------------------------------------------------------------------
+# the gesture, in the order the app actually uses
+
+
+def test_a_user_turn_grows_a_gesture_when_the_handler_is_attached_first():
+    """**The order the app uses, and the one every other test here got wrong.**
+
+    `set_rewind_handler` only *enables* the gesture; the gesture is built in
+    `_append_turn`, so a turn added *before* the handler is attached never gets
+    one. Every test in this file did it that way - build the conversation, then
+    attach - and so never constructed the gesture at all.
+
+    Measured: handler-after gives **0** gestures attached, handler-before gives
+    **1**. The production path is handler-first: `attach_regenerate()` runs when
+    the window is shown, long before anyone types.
+
+    That gap hid a live crash. The committed gesture called
+    `Gtk.BUTTON_SECONDARY`, which is a **GTK 3** constant GTK 4 removed -
+    `hasattr(Gtk, "BUTTON_SECONDARY")` is False - so every user turn in the
+    shipped app raised `AttributeError` out of `add_user_turn`, and thirteen
+    tests in this file were green throughout.
+
+    It also asserts the *mechanism*, not just the count: a gesture with no
+    button filter would be built by the same line and fail the same way.
+    """
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gdk
+
+    view = widgets_module.TranscriptView()
+    view.set_rewind_handler(lambda index, text: None)
+    view.add_user_turn("a question typed into a live app")
+
+    gestures = []
+    child = view._rows.get_first_child()
+    while child is not None:
+        gestures.extend(getattr(child, "_rewind_gestures", ()))
+        child = child.get_next_sibling()
+
+    assert len(gestures) == 1, (
+        f"{len(gestures)} gestures on the first user turn; the app attaches the "
+        f"handler before anyone types, so this is the path that runs")
+    assert gestures[0].get_button() == Gdk.BUTTON_SECONDARY, (
+        f"the gesture listens on button {gestures[0].get_button()}, not the "
+        f"secondary one - a left-click popover would fight text selection")
+
+
+def test_the_gesture_is_removed_when_the_handler_is_detached():
+    """No assistant means no gesture; and a gesture left behind is a control
+    whose handler is gone."""
+    view = widgets_module.TranscriptView()
+    view.set_rewind_handler(lambda index, text: None)
+    view.add_user_turn("a question")
+    view.set_rewind_handler(None)
+
+    left = []
+    child = view._rows.get_first_child()
+    while child is not None:
+        left.extend(getattr(child, "_rewind_gestures", ()))
+        child = child.get_next_sibling()
+    assert not left, f"{len(left)} gestures survived detaching the handler"
