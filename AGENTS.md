@@ -2,6 +2,74 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## laya's confidence floor, and the reward its one caller fed it (2026-10-12)
+
+`harness-study/laya-decision`'s `laya/confidence.py` names the hazard precisely:
+
+> reporting the entropy number under the `answer_confidence` name would be worse
+> than reporting nothing, because **the name is what a caller filters on.**
+
+Chronoa had it twice over, and the second instance is the one worth reading.
+
+### The floor inflated every k above 2
+
+`decision.confidence` floored at 0.5, on the reasoning that "a binary outcome
+cannot be less than even" - true at k=2, false above, and this repository's own
+outcome model has **three** verdicts. Measured:
+
+| distribution | max(p) | was reported as |
+|---|---|---|
+| 0.33/0.33/0.34 | 0.34 | **0.5** |
+| 0.40/0.30/0.30 | 0.40 | **0.5** |
+
+A genuinely-below-even 3-way answer read as *even*, and **two different
+distributions read as the same number** so a caller could not order them. The floor
+is `1/k` now, which at k=2 is 0.5 and so leaves the case the old reason described
+untouched.
+
+### The caller was passing a reward
+
+`ActionSelector.select` read `confidence({c: rewards.value[c]}) < threshold` - a
+**reward-space** scalar through a **probability-space** clamp. An arm worth 0.05
+and one worth 0.49 both reached the comparison as 0.5. Measured, that was **inert
+at the default threshold of 0.7**: every value below 0.7 is unconfident whether or
+not it was clamped first. It was **one constant away from live** - at 0.3 an arm
+worth 0.05 climbs to 0.5 and reads as *confident*, so the explore path stops asking
+about the worst tool on the machine. The threshold is on the value now.
+
+### Two things the fix got wrong first, both caught by the same mutation run
+
+- **A `1/k` floor reports a single value as certainty.** The old caller passed
+  `{c: reward}` - one key - so `1/1 = 1.0` told a caller a 0.05 arm was certain,
+  which is *worse* than the 0.5 it used to be told. `len(< 2)` now falls through
+  to the value itself.
+- **Three of my witnesses never called `select()`.** They rebuilt the `unconfident`
+  list by hand with the same expression, or asserted on `rewards.value` directly,
+  so all three mutations of the caller came back as survivors. A witness has to
+  drive the thing it names.
+
+`tests/test_confidence_floor.py` (9), `tools/mutations/confidence_floor.py`
+(**6 caught, 0 survivors, 2 equivalent, both provably**).
+
+**And the two equivalents are the interesting part.** Neither is a shrug; each
+states something that is not obvious until it is measured:
+
+1. **The `1/k` floor never binds on a valid distribution.** For any distribution
+   over k outcomes the maximum is at least the mean, which is 1/k - so
+   `max(1/k, top)` is `top`, always. The floor is pure defence against a caller
+   passing something that is not a distribution, which is what the `len < 2` guard
+   covers. Keeping it is a bet on future callers, not a current fix.
+2. **The caller change is behaviour-preserving for a second, independent reason.**
+   With the `len < 2` guard in place, `confidence({c: value})` returns the value
+   unchanged, so putting the old call back is the same expression. The conflation is
+   fixed twice over - by removing it from the caller *and* by making the function
+   refuse to apply a probability floor to a scalar - and either half alone would
+   have been enough, which is why both mutations are inert.
+
+103 passed across the confidence-floor, learning-chain, learning-calibration,
+outcome-model, surface-learning and learning-says-what-a-fit-is-worth suites.
+
+
 ## laya, second repo: the temperature the reader divides by (2026-10-12)
 
 The first clone was the wrong Laya - the notification command center, which gave

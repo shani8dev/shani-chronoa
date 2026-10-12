@@ -1301,16 +1301,43 @@ class decision:
 
     @staticmethod
     def confidence(probabilities: Dict[str, float]) -> float:
-        """How much of the mass sits on one answer, in [0.5, 1].
+        """How much of the mass sits on one answer, in [1/k, 1].
 
-        1.0 is certainty. The floor is 0.5 because a binary outcome cannot be
-        less than even, so a "confidence" below that would be a scale nobody
-        can act on.
+        1.0 is certainty. **The floor is `1/k`, and it used to be 0.5.**
+
+        The old floor's reason was that "a binary outcome cannot be less than
+        even" - true for k=2, where 1/k *is* 0.5 and nothing changes. It is false
+        for every k above 2, and this repository's own outcome model has three
+        verdicts. Measured, feeding it what its name says it takes:
+
+        | distribution | max(p) | reported as |
+        |---|---|---|
+        | 3 outcomes, 0.33/0.33/0.34 | 0.34 | **0.5** |
+        | 3 outcomes, 0.40/0.30/0.30 | 0.40 | **0.5** |
+
+        A genuinely-below-even 3-way answer was reported as *even*, which inflates
+        it - and two different distributions were reported as the same number, so
+        a caller could not order them. The floor is the smallest maximum any
+        k-outcome distribution can have, which for k=2 is 0.5 and for k=3 is 0.333.
+
+        `harness-study/laya` (the decision model) names the wider hazard this sits
+        in, in `laya/confidence.py`'s docstring: a caller filters on a *name*, so
+        reporting a different quantity under a name means the caller's threshold
+        selects on the wrong scale. See `ActionSelector.select`, which was doing
+        exactly that with this function.
         """
         if not probabilities:
             return 0.0
         top = max(probabilities.values())
-        return max(0.5, min(1.0, top))
+        # **A single value is not a distribution and must not read as certainty.**
+        # The 1/k floor is only right where the input really is a distribution over
+        # k outcomes: the previous caller passed `{c: reward}` - one key holding an
+        # arbitrary scalar - and `1/1 = 1.0` would have reported a 0.05 arm as
+        # certainty, which is worse than the 0.5 it used to report. Measured,
+        # `confidence({"x": 0.05})` was 1.0 before this guard.
+        if len(probabilities) < 2:
+            return min(1.0, top)
+        return max(1.0 / len(probabilities), min(1.0, top))
 
     class ActionSelector:
         """Explore or exploit, and know which you are doing.
@@ -1328,13 +1355,30 @@ class decision:
 
         def select(self, candidates: Sequence[str],
                    values: Optional[Dict[str, float]] = None) -> Tuple[str, str]:
-            """Returns (choice, 'exploit' | 'explore')."""
+            """Returns (choice, 'exploit' | 'explore').
+
+            **The threshold is on the arm's value, not on a `confidence`.**
+
+            This used to read `decision.confidence({c: self.rewards.value[c]}) <
+            self.explore_threshold`, which laundered a **reward-space** number
+            through a **probability-space** clamp. `confidence` floors at 1/k, so
+            every arm worth less than 0.5 read as 0.5 - the worst arm and the
+            middle arm were the same number to it.
+
+            Measured, that was inert at the default threshold of 0.7: every value
+            below 0.7 is unconfident whether or not it was clamped first. It was
+            one threshold change away from being live - at 0.3, an arm worth 0.05
+            climbed to 0.5 and read as **confident**. Laya's docstring for the same
+            shape: *"reporting the entropy number under the `answer_confidence`
+            name would be worse than reporting nothing, because the name is what a
+            caller filters on."* The name was the bug, not the arithmetic.
+            """
             pool = [c for c in candidates if c]
             if not pool:
                 raise ValueError("no candidates")
             unconfident = [c for c in pool
                            if c not in self.rewards.value
-                           or decision.confidence({c: self.rewards.value[c]}) < self.explore_threshold]
+                           or self.rewards.value[c] < self.explore_threshold]
             if unconfident and self.rng.random() < 0.5:
                 return self.rng.choice(unconfident), "explore"
             if values:
