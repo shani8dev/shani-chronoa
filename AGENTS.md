@@ -13702,3 +13702,76 @@ never claimed: **it re-checks the tree lock between every 43 files.**
 A single long run can still be told a clean tree at its start and then read
 mutated code for the following forty minutes. Nothing in the tree can close that
 from inside the suite; the guard's own docstring is the warning.
+
+## Six reproducible failures in the trigger event loop, and the one datum still missing (2026-10-12)
+
+Found by the chunked sweep above, re-run serially in their own process, and
+**against committed code** - so this is a real defect rather than a chunking or
+ordering artefact. All six are in one class and all six have the same shape:
+
+    tests/test_trigger_event_reachability.py::TestTheRealLoopEvaluatesIt
+      test_a_scheduled_poll_reads_the_signal_and_dispatches
+      test_one_transition_dispatches_exactly_once
+      test_an_unchanged_source_does_not_fire_again
+      test_a_raising_event_engine_does_not_stop_the_senses_being_polled
+      test_the_loop_wakes_for_the_event_interval_with_no_ambient_senses
+      test_the_summary_reports_the_armed_rules
+    AssertionError: expected exactly one dispatch, got []      assert 0 == 1
+
+`tests/test_ui_layout_contract.py::...[cloud-keys]` fails the same way (1
+reproducible). Neither is in any file this session touched, and
+`grep -c 'ctxfit\|KV_CACHE' tests/test_trigger_event_reachability.py` is **0** -
+the trigger layer has no reference to this session's surface at all. The class
+arrived with `8886b63`.
+
+### Established, by experiment rather than by reading
+
+- **The rule arms correctly.** The real `_arm()` returns *"Armed
+  'repo-changed': git on .../home/repo -> notify. It polls .../home/repo and
+  acts on a change, at most once every 1s and once per change."* Source path,
+  actuator, cooldown and once-per-change are all right.
+- **The baseline poll is correct.** Nothing has changed, so dispatching nothing
+  is the right answer - the failure is the *second* poll, after a real commit.
+- **The fixture's placement is deliberate and correct.** `_git_repo()` puts the
+  repo at `$HOME/repo`, inside the `tmp_path/home` that `conftest.py`'s autouse
+  fixture redirects, because `read_git_state` confines its source to the home
+  directory and reports `SIGNAL_UNAVAILABLE` for anything outside it
+  (`test_trigger_event_reachability.py:175-183`).
+
+### Established, by reading the code
+
+`EventEngine.poll()` (`triggers/events.py:825`) reaches `feed()` only when the
+read produced an event, and has exactly **two** paths that silently do not:
+
+1. `signal.status != SIGNAL_OK` -> appended as suppressed with
+   `SIGNAL_UNAVAILABLE`/`SIGNAL_WATCH_ERROR` (lines 841-850);
+2. `signal.event is None or signal.fingerprint is None` -> the fingerprint is
+   **recorded** and the loop continues (lines 851-862).
+
+The comment on the second path describes this very bug class: *"a rule whose
+baseline would have come from this quiet read keeps its old one and the next real
+transition looks like the first sighting - which `feed()` treats as a baseline and
+silently swallows."* So the mechanism is known, documented in the source, and
+still not working.
+
+### The one datum still missing, and how to get it
+
+**Which of those two paths poll #2 takes is not yet determined.** Four attempts
+failed for their own reasons and are recorded so they are not repeated: a
+standalone probe used a symbol `triggers` does not export; a second used
+`triggers.manage_triggers` (it is `skills.manage_triggers`); a third was refused
+at arming - *"arming or disarming automatic rules is turned off (enable
+'trigger-control-enabled')"* - because a standalone process has no consent and the
+real test grants it through its `consent` fixture; and an instrumented *copy* run
+inside `tests/` crashed in its own instrumentation after printing `poll#1: []`.
+
+**The datum is one print away.** Run the failing test against a copy inside
+`tests/` (so `conftest.py`'s `gsettings_env` applies and consent is granted) and
+print what `poll()` *returns* rather than what `_CALLS` holds:
+
+    print(scheduler.poll_due())          # -> list[EventEvaluation]
+
+Each `EventEvaluation` carries `signal_status` and `reason`, which names which of
+the two paths was taken and therefore which of two fixes applies. One is a source
+reader reporting unavailable for a path it should accept; the other is a baseline
+being recorded when it should not be, or not recorded when it should.
