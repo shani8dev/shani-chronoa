@@ -107,6 +107,35 @@ def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
 #: fine tool and it ranks on merit - it just must not be free.
 CORE = ("ask_user", "get_datetime", "web_search")
 
+#: How strongly a tool must outscore the conversation path before that path
+#: yields to it. **Chosen from the measurement on both sides, and the margin is
+#: narrow, which is the honest part.**
+#:
+#: | turn | top score | must it yield? |
+#: |---|---|---|
+#: | "thanks!", "hello" | 0.00 | no - it is small talk |
+#: | "good morning" | 9.72 (`routines`) | no - a greeting |
+#: | "What is plugged in, and Thunderbolt docks." | 13.21 (`usb_devices`) | **yes** |
+#: | "Explain a command." | 29.01 (`explain_command`) | **yes** |
+#: | "What is conflicting in a git repository..." | 33.98 (`resolve_conflict`) | **yes** |
+#:
+#: 11.0 sits in the only gap that exists, and that gap is **3.5 points wide**.
+#: A `name_hits` discriminator was tried instead and does not hold: it cleanly
+#: separates two of the three (`explain_command` and `resolve_conflict` each have
+#: 2 request words in the tool's own name, `routines` has 0) but `usb_devices`
+#: also has 0 and still scores 13.21. So the separating quantity is the score,
+#: and the constant is a measurement rather than a derivation - which is why both
+#: sides are recorded here and a test pins both ends.
+#:
+#: Being wrong in the *safe* direction is the failure that matters: too low and
+#: small talk gets eight tools again, which is what this path was built to stop.
+CONVERSATION_YIELD = 11.0
+
+
+def _outranks_conversation(scored: "List[tuple]") -> bool:
+    """Whether the best match is strong enough to beat the conversation path."""
+    return bool(scored) and scored[0][0] >= CONVERSATION_YIELD
+
 _STOP = set("""a an the is are was were be been am i me my you your it its this that these those
 to of in on at for from by with and or but if then so as do does did can could would should
 will shall may might must please what whats which who whom how why where when there here
@@ -447,13 +476,21 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
     """The schemas to send for `request`, in the order `tools` lists them."""
     tools = list(tools)
     keep: Set[str] = set(CORE) | set(in_use or ())
+    scored = ranked(request, tools)
     # A turn that is conversation gets the smallest honest set: there is nothing
     # to call, and sending eight tools to "thanks!" is what produced two of the
     # five eval misses (2026-10-09). `in_use` still wins, so a turn mid-task is
     # never starved of the tool it is already using.
-    if wants_a_conversation(request):
+    #
+    # **...unless something outranks it, and that is the second half.** Measured
+    # over all 220 scorable cases, exactly three turns take this path and **all
+    # three are misses** - "Explain a command.", "What is conflicting in a git
+    # repository", "What is plugged in, and Thunderbolt docks." Each had the
+    # correct tool ranked **first** and each was answered with a single
+    # `ask_user` schema. The cue cannot see that `explain_command` is what
+    # "explain a command" asks for, so it threw away the answer.
+    if wants_a_conversation(request) and not _outranks_conversation(scored):
         return [t for t in tools if _name(t) in {"ask_user"} | set(in_use or ())]
-    scored = ranked(request, tools)
     # a tool matching only a generic word ("set", "file") beside a strong
     # match is noise that costs tokens
     floor = scored[0][0] / 3 if scored else 0
@@ -542,7 +579,24 @@ _DISPLACED_BY_A_SITE = frozenset({
 #: Words that mean the request really is about files or an app, so nothing is displaced.
 _FILE_OR_APP = re.compile(r"\b(file|files|folder|folders|directory|document|documents|pdf|download(?:s|ed)?|"
                           r"desktop|app|application|program)\b|~/|/home/", re.I)
-_ACT_ON_A_PAGE = re.compile(r"\b(book|booking|fill (?:in|out)|sign (?:in|up)|log ?in|checkout|check out|"
+#: **`log ?in` needed the word boundary, and its absence was the most expensive
+#: single character in this module.** `log` with no trailing `\b` matches inside
+#: **"login"**, so "Is fingerprint **login** set up on this machine?" read as a
+#: request to act on a page: `wants_a_browser` fired, `browse` was added *and
+#: protected*, and `browse` is 3496 characters against a budget of
+#: `WINDOW_TOKENS * SELECTION_SHARE` (1536 tokens at 4 chars each). Protected
+#: CORE plus `browse` is **1395 of those 1536**, so `_cap_to_window` had 141
+#: tokens left and dropped `fingerprint_status` - which `ranked()` had put
+#: **first**. Measured: the correct tool was ranked #1, offered on 0 of 220
+#: turns that phrase appeared in, and no layer said why.
+#:
+#: A false cue here is not merely an extra tool. `browse` is protected because a
+#: request to act on a page cannot be answered without it, and that protection
+#: is **zero-sum** - the same property this file already records for
+#: `ui_elements`. So one over-broad regex spent 91% of the turn's tool budget on
+#: a tool the person did not ask for. `\blog\b ?in\b` still matches "log in"
+#: and "sign in", and no longer matches "login", "login_history" or "logins".
+_ACT_ON_A_PAGE = re.compile(r"\b(book|booking|fill (?:in|out)|sign (?:in|up)|\blog\b ?in|checkout|check out|"
                             r"add to cart|order|purchase|buy|submit|click|reserve)\b", re.I)
 
 
