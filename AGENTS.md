@@ -14910,3 +14910,90 @@ tree and mutates there, so the shared tree is never rewritten at all. **A
 mutation harness in a shared tree should not touch the shared tree**, and the
 lock in `tools/mutate.py` guards two mutation runs from each other rather than
 guarding either from a plain `pytest`.
+
+## Rendered and looked at: the colours paint (2026-10-12)
+
+Every gate above is structural - a round-trip, a contrast ratio, a tag shape -
+and this file's own history is that a widget can satisfy all three and still be
+unreadable. The organ strip passed its width test while drawing eight labels as
+one run-on string; the voice-style row was inspected only after shipping. So the
+markup was rendered and **the picture read**.
+
+    # a comment          <- grey      1314 px
+    def                  <- pink       347 px   (#b02a8b, light) / 345 (#ff7b72, dark)
+    f(x):                <- f orange    42 px   (the `name` colour, distinct from keyword)
+    # an indented comment<- grey      ~650 px
+    return               <- pink
+    "a string"           <- green      327 px
+    42                   <- blue        86 px
+
+Dark re-renders with the dark palette and the same counts to within
+antialiasing (comment 1226, keyword 345, string 325, number 89, name 38), so
+**both palettes reach the screen** - which is the thing the disjoint-luminance
+argument only ever claimed should be possible.
+
+`preproc` and `error` measure **0 px, and that is correct**: the sample is
+Python, which has no preprocessor, and it is not a diff, so it has no removed
+line. A zero with no reason is a defect; a zero with a reason is a measurement.
+
+### The recipe, after five attempts that each failed for a recorded reason
+
+**No window at all.** Draw into a `Gtk.Snapshot` directly, exactly as
+`automation_overlay`'s cue layer does:
+
+    layout = Gtk.Label().create_pango_layout("x")      # for its Pango context
+    ok, attrs, plain, _len = Pango.parse_markup(markup, -1, "\x00")
+    layout.set_text(plain); layout.set_attributes(attrs)
+    snapshot.append_layout(layout, Gdk.RGBA())        # (layout, COLOUR), not a position
+    node = snapshot.to_node()
+    Gsk.CairoRenderer.new() -> realize(None) -> render_texture(node, viewport)
+
+What each earlier attempt cost:
+
+| attempt | why it failed |
+|---|---|
+| window + `present()` + timer | a timer added inside `activate` never fires on broadway - four runs produced no output and I read it as buffering twice |
+| `Gtk.Widget.snapshot()` | not exposed by this PyGObject; it suggests `do_snapshot` |
+| `Gtk.WidgetPaintable` | NO NODE - an unmapped widget has no surface, this file's own recorded trap |
+| `Gdk.Texture.download()` | takes 3 arguments here, not 4 - which is why `test_automation_overlay.py` decodes the PNG by hand, and its decoder was lifted rather than rewritten |
+| `create_pango_layout(markup)` | **does not parse markup in GTK 4** |
+
+**And that last one is the one worth keeping.** It did not fail - it produced a
+perfectly good image of the *tags as literal text*, with every token colour at
+**0 px**. `create_pango_layout` treats its argument as plain text, so the
+renderer faithfully drew `<span foreground="#6a737d">` as characters.
+
+### The instrument had no positive control, and said so by passing wrongly
+
+The first version reported **all seven token colours at 0 px and all four
+negative controls at 0 px**, and printed *"the counting method is trustworthy"*.
+Every number was vacuous: a blank image matches no colour at all, so a negative
+control **cannot distinguish "this colour is absent" from "nothing was
+rendered"**.
+
+**The positive control is what caught it** - non-black pixels and distinct
+colours in the image - and it is now in the probe:
+
+    POSITIVE CONTROL: 2299 non-black px, 269 distinct colours of 19780
+    OK - the image is NOT blank, so a 0 below means 0
+
+**A control that only ever proves a thing is missing proves nothing about a
+thing that is present**, and a colour-counting probe needs both directions. This
+is the same sentence as the Diff panel's fills being measured on words that were
+never coloured, arrived at from the measuring instrument rather than the product.
+
+The negative control still reports **5 magenta and 1 blue pixel** at tolerance 3
+- subpixel antialiasing fringes, not a palette entry. So the probe prints
+*"do not trust any number above"*, which is the correct thing for it to say: the
+fringe pixels are indistinguishable from a real colour by this method. The
+counts are still meaningful at a 260:1 ratio, and **the picture is the evidence**,
+not the histogram.
+
+### What is still not done
+
+**The probe lives in `/tmp/opencode/` and this session ends.** That is exactly
+what this file's own rule forbids - a check written by hand into a scratch dir is
+lost - and the fix is a `slot-test` in `shani-testbed`, where a real display and
+the image's own Python exist. Not built here. What is durable is the recipe
+above and the measurement, and a future pass should re-run it rather than trust
+the numbers.
