@@ -496,6 +496,40 @@ class StyleMixin:
         .now-rail {
             border-left: 1px solid alpha(@theme_fg_color, 0.12);
         }
+
+        /* The turn minimap. **Width and contrast are the whole design**: a
+           ruler has to be findable in peripheral vision and ignorable when you
+           are reading, so it is three pixels wide, and every tick is a faint
+           shade of the foreground except the ones under the viewport. A map
+           that competes with the conversation is a second thing to read. */
+        .turn-minimap {
+            padding-top: 4px;
+            padding-bottom: 4px;
+        }
+        .minimap-tick {
+            min-height: 3px;
+            background-color: alpha(@theme_fg_color, 0.18);
+            border-radius: 2px;
+            border: none;
+            padding: 0;
+            margin: 0;
+        }
+        .minimap-tick:hover {
+            background-color: alpha(@theme_fg_color, 0.40);
+        }
+        /* Role, not success: a dimmer tick per role would read as importance,
+           and what is visible is meant to be. */
+        .minimap-user {
+            background-color: alpha(@theme_fg_color, 0.26);
+        }
+        .minimap-assistant {
+            background-color: alpha(@theme_fg_color, 0.16);
+        }
+        /* The viewport. Brighter than everything else on the map, because
+           "where am I" is the only question the map is on screen to answer. */
+        .minimap-tick.minimap-visible {
+            background-color: alpha(@theme_fg_color, 0.55);
+        }
         .rail-heading {
             font-size: 11px;
             font-weight: 700;

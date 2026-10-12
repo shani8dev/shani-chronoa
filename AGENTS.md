@@ -17629,3 +17629,122 @@ recorded nowhere becomes "an un-caught mutation" read as coverage.
 **Also recorded from writing it:** `window.py` has no `from __future__ import
 annotations`, so an import inserted on that anchor put nothing there and left
 `time` undefined - caught by pyflakes, but only because the file was read back.
+
+## A rail row that clicked nothing, and named nothing
+
+Three call sites of `_Section.link(text, detail, surface, on_open)` passed an
+**icon theme name in the `surface` slot**. `link` had lost its `icon` parameter
+at some point; the call sites kept passing one.
+
+Nothing raised. The row rendered, the tooltip read *"Open the
+preferences-system-symbolic panel"*, and clicking it asked the window for a
+surface named `preferences-system-symbolic` - which does not exist. A third bug
+of the same shape was already recorded in that function's comment: the previous
+fix for a *duplicate* `surface=` keyword had deleted the keyword and kept the
+icon, converting a loud `TypeError` into a silent lie.
+
+- **Fixed** by restoring `icon` as a named parameter (`link(..., icon=...)`) and
+  giving all five rows a surface that exists: `diff`, `artifact_store`,
+  `triggers`, `senses`, `goals`.
+- **Gated** by `test_every_rail_row_opens_a_panel_that_exists`, which clicks
+  every button in the rail and checks the name against
+  `surfaces.available_surfaces()` - read live, not a hand-copied list, because a
+  copied list drifts and then asserts nothing.
+
+**The gate did not bite at first, and that is the part worth keeping.** With a
+made-up artifact path (`/tmp/opencode/one.png`, which does not exist) the Made
+section renders nothing, so restoring the Made row's bug under it passed -
+**1 mutation survived, because the row under test was never built.** The fix was
+to make the fixture create a real file, and to add
+`test_the_made_section_is_actually_under_the_gate`, which asserts the row
+exists so the gate's coverage is visible rather than assumed.
+
+### Two checkers I wrote and then threw away
+
+**A static scan of `link(` call sites.** It reported every surface as unknown
+because it compared the literal `'"diff"'` against the unquoted name `'diff'` - a
+check that cannot pass is not a check. Fixed the quoting, and it then flagged
+`self._icon_for(p)` and `'detail'` - it mis-parses any multi-line call, because
+the regex terminates at the first `)` it meets. **Dropped in favour of the
+runtime gate**, which cannot mis-parse: it clicks the button and reads what
+actually happened.
+
+**`widgets.py` in the mutation harness.** The harness copied
+`shani_chronoa/widgets.py`, which does not exist - it is `gui/widgets.py` - so
+every mutation reported `No such file or directory` and *looked* like it had
+passed.
+
+### Editing without an assert
+
+Three edits in the Sensing patch used bare `str.replace` with no count check. One
+of them - adding `_fill_senses` to `refresh()`'s filler list - silently did not
+match, so the section was built and never filled, and **ten of fifteen tests
+failed**. A silent no-op edit reads exactly like a bug in the thing being
+tested; the cost of `assert s.count(old) == 1` is one line.
+
+### Snapshot testing while another session mutates the tree
+
+`conftest` refuses to run while a mutation run is live, which is correct. The
+way to keep working without fighting it: `cp -r usr tests /tmp/opencode/snap/`
+- **preserving the `usr/lib` + `usr/share` layout**, because `conftest` computes
+`SCHEMA_SRC = REPO_ROOT/"usr/share/glib-2.0/schemas"` and flattening it gives a
+`glib-compile-schemas` failure that looks like a schema bug. Verify the copy
+carries your markers with `grep -c` before trusting any result from it, and run
+mutations *there* - mutating the real tree while another session rewrites it is
+how you ship someone else's mutation.
+
+## A ruler for long conversations, and four GTK facts that cost a morning
+
+The minimap (`gui/minimap.py`) is one tick per turn, coloured by role, with the
+viewport drawn on it. `visible_turns()` and `scroll_to_turn()` already existed,
+so the data was there and nothing was drawing it.
+
+**The window needed a way to know a turn arrived.** The transcript emitted no
+signals at all, so `TranscriptView` grew a `turn-added` signal emitted at both
+append points. The alternative - re-deriving the turn count on every scroll
+tick - is work proportional to the whole conversation, on every pixel of
+scrolling, to learn something that changed once.
+
+**The viewport arithmetic is a module-level function on purpose.**
+`visible_turn_range(value, upper, page_size, spans)` takes five numbers and
+returns two, so each edge has a hand-worked answer in the tests. The one that
+motivated it: GTK hands back a `value` up to a pixel or two past
+`upper - page` during a fling, and an unclamped comparison reports **the last
+turn as not visible** - at exactly the bottom of the conversation, which is
+where you notice.
+
+### Four GTK4 facts, each found by a test that could fail
+
+- **`self._remove` does not exist.** `TurnMinimap.set_turns` cleared its ticks
+  with `self._remove(...)`, a GTK3 name. Every unit test called `set_turns`
+  exactly once, so the clearing code never ran until the *wiring* test added a
+  second turn - and then **PyGObject swallowed the `AttributeError`** raised
+  inside the signal handler, so the map stayed one tick wide and reported no
+  error. Fixed to `remove()`; `test_rebuilding_replaces_the_ticks_rather_than_
+  appending` now runs that path on its own.
+- **`get_children` does not exist** on a GTK4 `Box`. The startup probe used it
+  inside a `try`, caught its own `AttributeError`, printed `-1`, and the
+  assertion below reported a *wiring* failure rather than the missing method.
+- **`type(child).__name__` is `"Button"`, not `"GtkButton"`.** Counting
+  `"GtkButton"` found nothing in a map full of ticks. Only plain Python classes
+  report their own name (`"TurnMinimap"`), so a name-based check works for our
+  widgets and silently finds zero for GI's. **Use `isinstance`.**
+- **`get_accessible_property` does not exist** on this build, so an accessible
+  label can be written but not read. `test_the_minimap_itself_is_one_focus_stop_
+  with_a_label` records `update_property` instead - the repo's existing pattern
+  in `test_mode_strip.py`.
+
+### The connection that no test covered
+
+`self._transcript.connect("turn-added", self._on_turn_added)` in `__init__` was
+covered by nothing: the wiring tests bind the methods to a stub and do their own
+`connect`, so **deleting the line left all of them green** (mutation-confirmed).
+The only place the real `__init__` runs is the startup probe, so the probe now
+reports `MINIMAP`, `MINIMAP_TREE`, `MINIMAP_SCROLL` and `MINIMAP_TICKS` - it
+adds a real turn to the real window and counts the ticks. All four now kill
+their mutation.
+
+Two of those assertions were written wrong first and had to be fixed before they
+meant anything: the tree walk followed `get_parent()` **up** from the window
+(where there is no parent) instead of down through children, so it reported a
+correctly attached widget as dropped.

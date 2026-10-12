@@ -704,6 +704,10 @@ class Assistant:
             sink.fire("on_compaction", self._last_elision_notice)
 
     def _note_cloud_turn(self) -> None:
+        # The turn was answered off the machine. Recorded on the turn as well as
+        # announced in the transcript, because the notice is a row in a
+        # conversation and the footer is the line someone reads afterwards.
+        self._turn_cloud = True
         """Say, once per turn, when a provider other than this machine answered.
 
         The cloud fallback is the only path in this app that can put what a
@@ -764,6 +768,12 @@ class Assistant:
                 time.monotonic() - getattr(self, "_turn_started", time.monotonic()), 3),
             "budget_seconds": MAX_TURN_SECONDS,
             "over_budget": bool(getattr(self, "_turn_overran", False)),
+            #: Every tool that ran this turn, in order, failures included.
+            "tools": list(getattr(self, "_turn_tools", [])),
+            #: Characters the model was not shown because a result was clipped.
+            "withheld": int(getattr(self, "_turn_withheld", 0)),
+            #: Whether any part of this turn left the machine.
+            "cloud": bool(getattr(self, "_turn_cloud", False)),
         }
 
     # Not done: keeping a conversation's tools in a stable, appending order for
@@ -916,6 +926,18 @@ class Assistant:
         self._turn_started = time.monotonic()
         self._turn_overran = False
         self._usage = None
+        # **What this turn did, not what the assistant has done all session.**
+        # `_model_calls` and `_model_seconds` accumulate across turns and are
+        # reported as a session figure; a footer's claim about "this turn" needs
+        # its own two lists, or it repeats the running total and the number
+        # grows as you scroll back through the conversation.
+        self._turn_tools: "list[str]" = []
+        #: Characters withheld from *the model* by `_clip_tool_result`. The
+        #: transcript card shows the clipped text too now, so this is the same
+        #: number twice - deliberately, because the claim "the model did not see
+        #: all of that" is the one worth being able to check.
+        self._turn_withheld = 0
+        self._turn_cloud = False
         # Per-tool attempt counts, reset per *round*. See
         # `DEFAULT_TOOL_ATTEMPTS_PER_ROUND` for why not per turn: the tests of
         # record pin sixteen legitimate `ask_user` calls in one turn.
@@ -1108,6 +1130,13 @@ class Assistant:
                         return self._malformed_stop(validation_misses)
                 else:
                     validation_misses = 0
+                # **Recorded before the result**, because a tool that ran and
+                # then failed is still something the turn did - and a footer
+                # listing only the tools that succeeded is exactly the list that
+                # cannot be trusted when you are trying to work out what
+                # happened.
+                self._turn_tools.append(name)
+
                 if on_tool_result:
                     # `ok` is decided here rather than left to the callback to
                     # guess: a card that says "done" over a failed skill is
@@ -1155,7 +1184,22 @@ class Assistant:
                 # fence could take the closing marker with it, and the model would
                 # then be shown untrusted content that reads as trusted - trading a
                 # context problem for the exact hole `provenance` exists to close.
-                result = _clip_tool_result(result)
+                # **The limit passed explicitly, so the withheld amount can be
+                # computed rather than guessed.** `_clip_tool_result` appends a
+                # note of several hundred characters to explain itself, so
+                # `len(clipped) - len(result)` is *negative* and the difference
+                # between the two strings is the note, not the content.
+                clipped = _clip_tool_result(result, MAX_TOOL_RESULT_CHARS)
+                # **"Was it clipped?" is `len(result) > limit`, not
+                # `len(clipped) > len(result)`.** The first version used the
+                # second and silently counted nothing: the note `_clip_tool_result`
+                # appends is about 196 characters, so a result that overflowed by
+                # *more* than that came back **shorter** than it went in, and the
+                # comparison was false. Measured - inlen 1,052,576, outlen
+                # 1,048,772 - and a ten-character overflow would have looked fine.
+                if isinstance(result, str) and len(result) > MAX_TOOL_RESULT_CHARS:
+                    self._turn_withheld += len(result) - MAX_TOOL_RESULT_CHARS
+                result = clipped
                 self._record({"role": "tool", "tool_call_id": call.get("id", ""),
                               "content": provenance.fence(
                                   result, source).text},

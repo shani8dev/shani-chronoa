@@ -9,7 +9,7 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Gdk', '4.0')
 gi.require_version('GLib', '2.0')
 
-from gi.repository import Gtk, Gdk, GLib, Pango
+from gi.repository import Gtk, Gdk, GLib, Pango, GObject
 
 from shani_chronoa import capabilities
 
@@ -970,6 +970,34 @@ class TranscriptView(Gtk.ScrolledWindow):
             parts.append(f"{total:,} tokens")
         if stats.get("over_budget"):
             parts.append("over its time budget")
+
+        # **What the model did not see, in the same line as what it cost.**
+        # `turn_stats` counts the characters a tool result lost to clipping and
+        # whether the turn left the machine. Both are things a reader cannot
+        # infer from the answer, and both are the shape of the confident wrong
+        # answer this repository keeps finding - so they are stated where the
+        # cost is already stated, rather than in a panel nobody opens.
+        withheld = int(stats.get("withheld") or 0)
+        if withheld > 0:
+            parts.append(f"{withheld:,} characters withheld from the model")
+        if stats.get("cloud"):
+            parts.append("answered off this machine")
+
+        # The tools, but **deduplicated and only when there are few enough to
+        # read.** A turn that ran twelve skills is already a wall of tool cards;
+        # repeating their names in the footer adds length without adding
+        # information, so it stops at three and counts the rest.
+        tools = [str(t) for t in (stats.get("tools") or [])]
+        if tools:
+            unique = []
+            for name in tools:
+                if name not in unique:
+                    unique.append(name)
+            shown = ", ".join(unique[:3])
+            if len(unique) > 3:
+                shown += f" and {len(unique) - 3} more"
+            parts.append(f"used {shown}")
+
         label = Gtk.Label(label=" · ".join(parts))
         label.add_css_class("dim-label")
         label.add_css_class("caption")
@@ -1021,6 +1049,7 @@ class TranscriptView(Gtk.ScrolledWindow):
             self._rows.append(row)
             self._footer(row, handler=self._on_turn_footer)
             self._turns.append((role, text))
+            self.emit("turn-added", role)
             self._scroll_to_end()
             return stack
 
@@ -1060,6 +1089,7 @@ class TranscriptView(Gtk.ScrolledWindow):
         else:
             self._rows.append(self._with_copy_button(label, text))
         self._turns.append((role, text))
+        self.emit("turn-added", role)
         self._scroll_to_end()
         return label
 
@@ -1144,6 +1174,15 @@ class TranscriptView(Gtk.ScrolledWindow):
                                         GLib.SOURCE_REMOVE)[1])
 
     # -- finding something in the conversation ---------------------------
+
+    #: Emitted once per turn, after the row is in place. **A signal rather than
+    #: polling**, because the only other way for the minimap to learn the turn
+    #: count is to re-derive it on every scroll tick - work proportional to the
+    #: whole conversation, on every pixel of scrolling, to learn something that
+    #: changed once. The payload is the turn's role, which is all a map needs.
+    __gsignals__ = {
+        "turn-added": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+    }
 
     def visible_turns(self) -> "list[tuple[str, str]]":
         """(role, text) for every turn on screen, in order.

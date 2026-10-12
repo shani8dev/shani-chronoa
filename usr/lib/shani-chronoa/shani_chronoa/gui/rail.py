@@ -117,7 +117,7 @@ class _Section(Gtk.Box):
         self._body.append(bar)
 
     def link(self, text: str, detail: str, surface: str,
-             on_open: Callable[[str], None]) -> None:
+             on_open: Callable[[str], None], icon: str = "") -> None:
         """A row that opens the panel holding the rest of the story.
 
         A rail that reports a fact a person must then go hunting for has moved
@@ -129,6 +129,14 @@ class _Section(Gtk.Box):
         button.add_css_class("flat")
         button.set_has_frame(False)
         button.set_valign(Gtk.Align.START)
+        # **`icon` is a named parameter, not the third positional.** It used to
+        # sit in that slot; the signature lost it and the call sites kept
+        # passing it, so an icon name was being used as the surface name -
+        # measured: the row's tooltip read "Open the preferences-system-symbolic
+        # panel" and clicking it asked the window for a surface that does not
+        # exist. Nothing raised, so nothing looked wrong.
+        if icon:
+            button.set_icon_name(icon)
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         content.append(_label(text))
         if detail:
@@ -223,7 +231,8 @@ class NowRail(Gtk.Box):
                  on_open: Optional[Callable[[str], None]] = None,
                  get_context: Optional[Callable[[], object]] = None,
                  get_artifacts: Optional[Callable[[], object]] = None,
-                 get_events: Optional[Callable[[], object]] = None) -> None:
+                 get_events: Optional[Callable[[], object]] = None,
+                 get_senses: Optional[Callable[[], object]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("now-rail")
         self.set_size_request(RAIL_WIDTH, -1)
@@ -243,6 +252,9 @@ class NowRail(Gtk.Box):
         #: event rules fired, the results were recorded, and nothing ever read
         #: them, so an unattended rule did its work invisibly.
         self.get_events = get_events or (lambda: ())
+        #: What the ambient senses are currently allowed to poll. A callback for
+        #: the same reason as the rest: the rail reads, it does not own.
+        self.get_senses = get_senses or (lambda: ())
 
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -266,12 +278,13 @@ class NowRail(Gtk.Box):
         self._changed = _Section("Changed")
         self._made = _Section("Made")
         self._events = _Section("Triggers")
+        self._sensing = _Section("Sensing")
         self._tasks = _Section("Tasks")
         self._goals = _Section("Goals")
         self._posture = _Section("Posture")
         for section in (self._now, self._context, self._timers, self._changed,
-                        self._made, self._events, self._tasks, self._goals,
-                        self._posture):
+                        self._made, self._events, self._sensing,
+                        self._tasks, self._goals, self._posture):
             inner.append(section)
 
         scroller.set_child(inner)
@@ -420,7 +433,12 @@ class NowRail(Gtk.Box):
                 size = files.human_size(p.stat().st_size) if p.is_file() else "folder"
             except OSError:
                 continue
-            self._made.link(p.name, size, self._icon_for(p), self.on_open)
+            # Same shape as the Triggers row above: the icon belongs to
+            # `icon=`. Passing it positionally named the surface after an icon
+            # theme name, so clicking a file in "Made" asked for a panel that
+            # does not exist.
+            self._made.link(p.name, size, "artifact_store", self.on_open,
+                            icon=self._icon_for(p))
         if len(present) > 6:
             self._made.empty(f"and {len(present) - 6} more in the conversation")
         elif gone:
@@ -481,16 +499,70 @@ class NowRail(Gtk.Box):
             if failed:
                 self._events.empty(f"{label} - {detail}")
             else:
-                # **Four positional arguments, no `surface=` keyword.**
-                # `_Section.link(self, text, detail, surface, on_open)` - passing
-                # `surface=` as well was a duplicate argument, so this raised
-                # `TypeError` on every refresh, `refresh()`'s per-section guard
-                # logged it, and the section rendered empty. Measured: a section
-                # that throws every two seconds looks exactly like one with
-                # nothing to say, which is the swallowing-the-error shape this
-                # repository records repeatedly.
-                self._events.link(label, detail, "preferences-system-symbolic",
-                                  self.on_open)
+                # **`icon=` by name, `surface` is the panel.** An icon name in
+                # the `surface` slot compiled, ran, and quietly opened nothing:
+                # `refresh()`'s per-section guard is there for *raising*
+                # sections, and this one never raised - it just named a surface
+                # that does not exist. Two ways a rail row lies at once, and
+                # both of them look like a row that works.
+                self._events.link(label, detail, "triggers", self.on_open,
+                                  icon="preferences-system-symbolic")
+
+    def _fill_senses(self) -> None:
+        """What the machine is watching right now, and what it is refused.
+
+        **53 senses exist and nothing on screen said which were live.** A user
+        who has turned on location and calendar has no way to check that either
+        is actually polling, and one who has refused something has no way to
+        confirm the refusal took. Both are questions this repository's posture
+        section was written to answer and did not.
+
+        **The count first, the names only when they are few.** A line reading
+        "12 senses are polling" is the thing someone wants at a glance; the list
+        belongs in the panel it links to. With nothing polling it says so rather
+        than showing an empty section - silence would be indistinguishable from
+        a rail that has not refreshed.
+
+        **Denials are counted as well as permissions.** "2 senses are refused"
+        is the honest half of the picture; reporting only what is allowed would
+        make a refusal look like an absence.
+        """
+        self._sensing.clear()
+        try:
+            entries = list(self.get_senses() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: senses unreadable: %s", exc)
+            self._sensing.empty("Could not read what is being watched")
+            return
+        if not entries:
+            self._sensing.empty("No ambient sense is polling")
+            return
+
+        polling = [e for e in entries if getattr(e, "will_poll", False)]
+        refused = [e for e in entries
+                   if not getattr(e, "allowed", True)]
+        name = lambda e: getattr(e, "name", "")           # noqa: E731
+
+        if polling:
+            names = sorted(name(e).replace("_", " ") for e in polling)
+            detail = ", ".join(names[:4])
+            if len(names) > 4:
+                detail += f" and {len(names) - 4} more"
+            self._sensing.link(f"{len(polling)} sense(s) polling", detail,
+                               "senses", self.on_open,
+                               icon="preferences-system-privacy-symbolic")
+        if refused:
+            # **Why, not just how many.** A refusal with a stated reason is
+            # answerable; a bare count makes the reader go and look.
+            reasons = [getattr(e, "denial", "") or getattr(e, "refusal", "")
+                       for e in refused]
+            stated = next((r for r in reasons if r), "")
+            summary = f"{len(refused)} sense(s) refused"
+            if stated:
+                summary += f" - {stated}"
+            self._sensing.empty(summary)
+        if not polling and not refused:
+            self._sensing.empty("No ambient sense is polling")
 
     def _fill_tasks(self) -> None:
         self._tasks.clear()
@@ -610,6 +682,7 @@ class NowRail(Gtk.Box):
                 (self._changed, self._fill_changed),
                 (self._made, self._fill_made),
                 (self._events, self._fill_events),
+                (self._sensing, self._fill_senses),
                 (self._tasks, self._fill_tasks),
                 (self._goals, self._fill_goals),
                 (self._posture, self._fill_posture)):

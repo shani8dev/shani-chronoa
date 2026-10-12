@@ -710,6 +710,15 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         - **this lights up by itself.** If the implementation lands later, the
           mode starts applying with no edit here.
 
+        **It lit up.** `_apply_answer_mode` now exists, in this file, calling
+        `select_llm` - so the branch below is unreachable in this build and the
+        guard is now only insurance against the method being removed again.
+        The guard is kept rather than simplified away: it is the thing that
+        stopped the application from starting at all, and a `hasattr` check
+        costs nothing next to that. `tests/test_answer_mode.py` asserts the
+        warning does **not** fire while the method exists, so "the guard is
+        vestigial" is checked rather than assumed.
+
         **It warns, once, and says which half is missing** - because a mode strip
         showing "In the cloud" on a machine that answered locally is the
         confident-wrong-answer shape, and the person watching it cannot see a
@@ -735,6 +744,56 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 )
             return
         applier()
+
+    def _apply_answer_mode(self) -> None:
+        """Point the answering engine at what `answer-mode` says, right now.
+
+        **This was missing while two callers and a warning existed for it**, and
+        the warning was *false*: it told the reader "the choice is not being
+        applied - the model will answer as it did before that setting existed"
+        while `brain.py` was reading `privacy-mode` and `cloud-fallback-enabled`
+        on every turn. The setting did govern what left the machine; what it
+        did not do is move the engine off the one already loaded.
+
+        That is `BrainMixin.select_llm`, which was written for the Models panel,
+        documented as "switch the answering engine **now**", and had **no product
+        caller at all** - one more of this repository's built-but-unwired
+        methods. So this is wiring, not a decision: the semantics were already
+        written down and tested, and this is the line that finally calls them.
+
+        **The mapping is the strip's own labels, not a new vocabulary.**
+        `_ModeStrip._EGRESS` offers four rows that reduce to three stored modes:
+        "Nothing leaves" and "This machine answers" both mean the engine is
+        local, and "This machine, then cloud" means *start* local - falling back
+        is `_maybe_enable_cloud_fallback`'s job, which is why it maps to local
+        rather than to cloud.
+
+        **Switching only when it would change something.** Rebuilding a cloud
+        chain on every startup to arrive at the engine already running would
+        spend a provider's rate limit to learn nothing.
+
+        **A refusal is logged and left in place.** `select_llm` returns a
+        sentence naming the gate that shut; the previous engine keeps answering,
+        which is the safe direction, but it must not be reported as a success.
+        """
+        mode = (self.config.get("answer-mode", "") or "").strip().lower()
+        if not mode:
+            # Nothing has ever chosen. Leaving the engine alone is right, and
+            # guessing "local" here would override a cloud chain the startup
+            # path legitimately built.
+            return
+        want = "cloud" if mode == "cloud" else "local"
+        try:
+            if self.current_llm_kind() == want:
+                return
+        except Exception:                           # noqa: BLE001
+            logger.debug("answer-mode: the current engine is unreadable",
+                         exc_info=True)
+        problem = self.select_llm(want)
+        if problem:
+            logger.warning(
+                "answer-mode is %r but the engine is still %r: %s", mode,
+                self.current_llm_kind(), problem)
 
     def _on_answer_mode(self, action, value) -> None:
         """Write the chosen mode, then set the action's state from config.

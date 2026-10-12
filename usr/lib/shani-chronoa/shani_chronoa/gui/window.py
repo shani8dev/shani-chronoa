@@ -23,6 +23,7 @@ Adw.init()
 from shani_chronoa import capabilities
 from shani_chronoa import local_llm
 
+from .minimap import TurnMinimap
 from .widgets import (  # noqa: F401
     AssistantState,
     ChronoaOrbWidget,
@@ -1324,7 +1325,32 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # assistant was written and reached nobody. Time and tokens only; the
         # pricing is deliberately left to whoever knows it.
         self._transcript.set_turn_footer_handler(self._turn_stats_for_footer)
-        main_box.append(self._transcript)
+
+        # **The minimap, beside the transcript rather than inside it.** The
+        # transcript is a ScrolledWindow, and the ruler has to stay still while
+        # the conversation moves under it - so it is a sibling, not an overlay,
+        # which also means it cannot be scrolled out of view by accident.
+        #
+        # It jumps by calling the transcript's own `scroll_to_turn`, the same
+        # one search uses. A second way to reach a turn is a second place for
+        # "which turn is this" to be answered differently.
+        self._minimap = TurnMinimap(on_jump=self._minimap_jump)
+        transcript_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL,
+                                 spacing=4)
+        transcript_row.append(self._transcript)
+        transcript_row.append(self._minimap)
+        main_box.append(transcript_row)
+
+        # The map follows the scroll rather than the other way round: a
+        # `value-changed` handler that does a handful of arithmetic and a class
+        # toggle, and which is checked for raising because it runs on every
+        # pixel of every scroll in a long conversation.
+        self._minimap_adjustment = None
+        scroll = self._transcript.get_vadjustment()
+        if scroll is not None:
+            scroll.connect("value-changed", self._on_minimap_scroll)
+            self._minimap_adjustment = scroll
+        self._transcript.connect("turn-added", self._on_turn_added)
 
         # **Escape stops the turn.** The stop-*speaking* button beside the
         # composer has claimed "(Esc)" in its tooltip since before it was wired
@@ -1575,7 +1601,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                                          on_open=self._show_surface,
                                          get_context=self._rail_context,
                                          get_artifacts=self._rail_artifacts,
-                                         get_events=self._rail_events)
+                                         get_events=self._rail_events,
+                                         get_senses=self._rail_senses)
         self._chat_row.append(self._rail)
         # **Hidden, not shrunk, on a narrow window.** At a fraction of its width
         # the rail wraps every label into two and three lines and reads as a
@@ -2617,6 +2644,26 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """Attach the ambient scheduler whose fired rules the rail reports."""
         self._event_source = source
 
+    def _rail_senses(self):
+        """What the ambient scheduler will actually poll, right now.
+
+        **`plan()`, not `ambient_senses()`** - the first is the report of every
+        known sense *and whether it can be polled*, which is what a person
+        asking "is this thing watching me?" needs; the second is only the senses
+        that already have, and says nothing about the ones that do not.
+
+        Called on every rail tick, so it must be cheap and must not raise: the
+        scheduler holds its own lock and `plan()` is a pure read.
+        """
+        source = self._event_source
+        if source is None:
+            return ()
+        try:
+            return source.plan()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: sense plan unavailable: %s", exc)
+            return ()
+
     def _rail_events(self):
         """What the ambient rules have fired.
 
@@ -3153,6 +3200,49 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         except Exception:                               # noqa: BLE001
             logger.warning("could not read the turn's cost", exc_info=True)
             return None
+
+    def _minimap_jump(self, index: int) -> None:
+        """A tick was clicked, or a key pressed on the map.
+
+        **A bad index is refused here rather than passed down.** The map's tick
+        count and the transcript's turn count are equal by construction, but the
+        transcript also holds a placeholder row the map never drew, so "one past
+        the end" is reachable by arithmetic and would raise inside
+        `scroll_to_turn`'s row lookup. `scroll_to_turn` already range-checks;
+        this keeps the failure from being an exception at all.
+        """
+        if not self._transcript.scroll_to_turn(index):
+            logger.debug("minimap: no turn at index %s", index)
+
+    def _on_turn_added(self, _transcript, role: str) -> None:
+        """Keep the map's tick count equal to the conversation's turn count.
+
+        Appended rather than rebuilt: a turn arriving does not move the ticks
+        that are already there, so there is nothing to redraw.
+        """
+        self._minimap.set_turns([r for r, _text in self._transcript.visible_turns()])
+        self._update_minimap_viewport()
+
+    def _on_minimap_scroll(self, _adjustment) -> None:
+        self._update_minimap_viewport()
+
+    def _update_minimap_viewport(self) -> None:
+        """Where the map thinks you are.
+
+        Wrapped because it runs on every `value-changed`: an exception here is a
+        traceback per pixel of scroll, and the map is decoration - it must never
+        be able to stop the conversation being scrolled.
+        """
+        adjustment = self._minimap_adjustment
+        if adjustment is None or self._minimap is None:
+            return
+        try:
+            rows = self._transcript._turn_rows()
+            self._minimap.update_from(
+                adjustment.get_value(), adjustment.get_upper(),
+                adjustment.get_page_size(), rows)
+        except Exception:  # noqa: BLE001
+            logger.debug("minimap: viewport not drawn", exc_info=True)
 
     def _input_text(self) -> str:
         """Everything typed, newlines and all."""
