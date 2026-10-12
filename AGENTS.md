@@ -16744,3 +16744,69 @@ compiler". It is: **this repository's tool-schema budget is dominated by prose,
 and the cost has never been measured per-field.** `tool_select.py` narrows the
 catalogue because it has to; nothing here has asked whether the catalogue could
 be affordable instead.
+
+## The arithmetic that ends this line of investigation: an 8k context holds about fifteen tools (2026-10-12)
+
+The entry above redirected the TSCG experiment towards description length. **The
+arithmetic says that direction cannot work either**, and the measurement needs
+no model at all - `llama-tokenize` over the real schemas is the whole
+instrument.
+
+| how many tool schemas are sent | real tokens | against an 8,192-token context |
+|---:|---:|---|
+| **mean cost of one schema** | **543** | - |
+| 15 | ~8,145 | **the crossing point** |
+| 30 | **20,541** | 2.5x over |
+| 50 | 29,202 | 3.6x over |
+| 100 | 55,338 | 6.8x over |
+| **all 257** | **139,634** | **17x over** |
+
+And descriptions alone - `name: description`, no parameters at all - are
+**28,341 tokens for the first 100 tools**, so prose on its own passes an 8k
+context at roughly **29 tools**.
+
+**Three consequences, and the first retires the experiment above.**
+
+1. **Shortening descriptions cannot make the catalogue affordable.** Even
+   deleting every description leaves 62,636 tokens of parameter schema - still
+   **7.6x over**. So there is no description budget that rescues `bare`, and
+   the experiment the previous entry proposed cannot succeed at this context
+   size however it is run.
+2. **The real ceiling is ~15 schemas, not 131.** "131 tools are too many" is
+   true and also five times too generous; the actual figure is that **six per
+   cent of the action space is expressible at all**.
+3. **This is the point at which the first finding of this research sequence
+   becomes the binding constraint.** arXiv:2609.34971 measured that the *same*
+   task exposed through functionally-equivalent schemas swings success **from
+   complete failure to 97%**. This repository can offer ~15 of 257, and
+   `tool_select.py` chooses which 15 - by "plain word overlap", which that
+   paper identifies as the class that loses the accuracy.
+
+**So the finding is not "the serialisation is wrong" or "the descriptions are
+long". It is that a whitelisted assistant at this scale cannot express its own
+action space**, and every consequence below follows from that:
+
+- the retrieval layer is **load-bearing, not an optimisation** - the 0/62 →
+  56/62 gap recorded on 2026-10-02 is a capacity wall, not a quality regression;
+- **schema serialisation work is aimed at the wrong layer.** TSCG's gains were
+  measured at 20-50 tools and ~10,500 input tokens, i.e. **on a catalogue that
+  already fits**; a 7.2% saving on a catalogue 17x over budget cannot matter,
+  and neither could 57%;
+- the useful form of the TSCG idea, if it is ever pursued, is **narrowing by
+  compilation** - emit only the tools a query can reach - which is what
+  `tool_select` already does by word overlap, and which the same paper says is
+  where the accuracy goes.
+
+**What that implies for the work, stated as a priority rather than a
+conclusion.** The measurement worth making is **how many tools are needed for a
+request to be answerable, and how well the current selector picks them** - not
+whether the schema can be serialised more cheaply. `task_eval`'s `select` config
+already provides the first half; the second is a property of
+`tool_select.ranked()`, and nothing in this repository measures it.
+
+**A methodological note on the probe above, because it is the shape this file
+warns about most.** The first version printed "fits" next to every row
+including the 17x-over one, because it never compared anything against 8,192 -
+the label was a literal in the format string, not a computed verdict. **The
+numbers were right and the verdicts were decoration.** A table that says "fits"
+has to have compared.
