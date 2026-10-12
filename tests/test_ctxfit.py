@@ -558,3 +558,113 @@ class TestTheFloorReproducesOnASecondModel:
             assert costs and max(costs) > worst_q8 * 3, (
                 f"{excluded} is excluded from the ladder but never costs more "
                 f"than q8_0 does, so the exclusion is not earning its keep")
+
+
+class TestTheFloorsCost:
+    """`KV_CACHE_FLOOR` is now `q8_0`, which gives up the `q5_0`/`q4_0` steps. That
+    trade was justified on quality - `q5_0` measured **+8.53%** on Qwen3-0.6B -
+    but the other side of it, what VRAM headroom the floor costs, was unquantified.
+
+    Measured on Qwen3-8B's shape (8 KV heads, head_dim 128, 4.68 GiB weights):
+
+        vram     f16    q8_0    q5_0    q4_0
+        10G     32768   32768   32768   32768
+         9G     16384   32768   32768   32768
+         8G     16384   32768   32768   32768
+         7G      8192   16384   32768   32768
+         6G      4096    8192   16384   16384
+         5G      2048    2048    2048    2048
+
+    **`q8_0` recovers the whole 2x doubling at every band where `f16` fails.**
+    `q5_0` only ever buys the *third* increment, in a narrow band, on the models
+    where that increment costs 8.5% perplexity. So the floor costs the last step
+    of headroom and keeps the first one - which is the step from "cramped" to
+    "usable", and the one that matters.
+    """
+
+    @staticmethod
+    def _info():
+        return {"general.architecture": "qwen3", "qwen3.block_count": 36,
+                "qwen3.attention.head_count": 32,
+                "qwen3.attention.head_count_kv": 8,
+                "qwen3.embedding_length": 4096,
+                "qwen3.attention.key_length": 128,
+                "qwen3.attention.value_length": 128}
+
+    def test_the_floor_step_actually_compresses(self):
+        """The assertion that was missing, and whose absence made its neighbour
+        vacuous.
+
+        `test_the_floor_step_keeps_the_doubling_where_f16_fails` below skips any
+        row where `at_floor == f16`, on the reading that f16 then fits and there
+        is nothing to recover. But `at_floor == f16` is *also* what a floor step
+        that has stopped compressing looks like - inflate `q8_0` to 1.9 bytes per
+        element against f16's 2.0 and it equals f16 at every band, the guard skips
+        all four rows, and the neighbouring test passes without asserting
+        anything. The mutation run for `tools/mutations/floor_cost.py` found
+        exactly that.
+
+        So the compression is asserted on its own first, and then a step that
+        delivers no headroom means the step is broken rather than that f16 fits.
+        """
+        from shani_chronoa import ctxfit
+        bpe = ctxfit.KV_CACHE_BYTES_PER_ELEM
+        ratio = bpe["f16"] / bpe[ctxfit.KV_CACHE_FLOOR]
+        assert ratio >= 1.8, (
+            f"the floor step {ctxfit.KV_CACHE_FLOOR} compresses only "
+            f"{ratio:.2f}x ({bpe[ctxfit.KV_CACHE_FLOOR]} vs {bpe['f16']} bytes "
+            f"per element); it is meant to be the ~2x step and a step that does "
+            f"not compress makes the headroom assertions below vacuous")
+
+    def test_the_floor_step_keeps_the_doubling_where_f16_fails(self):
+        """The property the floor's cost rests on. If this ever stops holding, the
+        floor is buying its quality guarantee at the price of the headroom that
+        matters, and that is a different decision from the one made here.
+
+        Now that `test_the_floor_step_actually_compresses` pins the compression,
+        `at_floor == f16` below can only mean f16 fits - the other reading is
+        already excluded by that test.
+        """
+        from shani_chronoa import ctxfit
+        weights = int(4.68 * 2 ** 30)
+        info = self._info()
+        for vram_gb in (9.0, 8.0, 7.0, 6.0):
+            total = int(vram_gb * 2 ** 30)
+            f16 = ctxfit.context_that_fits(
+                weights, total_bytes=total,
+                per_token=ctxfit.kv_bytes_per_token(info, "f16"))
+            at_floor = ctxfit.context_that_fits(
+                weights, total_bytes=total,
+                per_token=ctxfit.kv_bytes_per_token(info, ctxfit.KV_CACHE_FLOOR))
+            if f16 == at_floor:
+                continue                      # f16 fits; nothing to recover
+            assert at_floor > f16, (
+                f"at {vram_gb} GiB the floor step ({ctxfit.KV_CACHE_FLOOR}) buys "
+                f"nothing over f16: {f16} -> {at_floor}")
+            # And it buys at least a doubling, not a sliver.
+            assert at_floor >= f16 * 2, (
+                f"at {vram_gb} GiB the floor step only bought {f16} -> "
+                f"{at_floor}, which is not the doubling it is there for")
+
+    def test_the_excluded_steps_only_buy_where_the_floor_already_doubled(self):
+        """So the exclusion is the last increment rather than the first one."""
+        from shani_chronoa import ctxfit
+        weights = int(4.68 * 2 ** 30)
+        info = self._info()
+        for vram_gb in (9.0, 8.0, 7.0, 6.0):
+            total = int(vram_gb * 2 ** 30)
+            def ctx_at(t):
+                return ctxfit.context_that_fits(
+                    weights, total_bytes=total,
+                    per_token=ctxfit.kv_bytes_per_token(info, t))
+            at_floor, cheaper = ctx_at(ctxfit.KV_CACHE_FLOOR), ctx_at("q5_0")
+            if cheaper <= at_floor:
+                continue
+            # Where q5_0 buys more, the floor must already have delivered the
+            # first doubling - never be the *only* thing standing between cramped
+            # and unusable.
+            f16 = ctx_at("f16")
+            assert at_floor > f16, (
+                f"at {vram_gb} GiB q5_0 is the only step that helps "
+                f"(f16 {f16}, floor {at_floor}), so excluding it costs the "
+                f"headroom that matters")

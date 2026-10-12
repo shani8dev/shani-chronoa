@@ -7,8 +7,14 @@ types set, two identical runs each:
     f16  59.1719     q8_0  59.1499   (-0.022)
     q5_0 59.2380     q4_0  62.7689   (+3.597, +6.1%)
 
-So `q8_0` and `q5_0` are free - inside the run-to-run noise - and `q4_0` costs
-6.1%. PersonaPlex's RVQ has exactly this control on its compression dial:
+`q4_0` costs 6.1% against that, so the floor was set at `q5_0`.
+
+**That reading was luck and it has since been overturned.** A third model,
+Qwen3-0.6B-Q8_0, measures `q5_0` at **+8.53%** and `q4_0` at **+457%**, both
+reproduced exactly on a confirmation run. `q8_0` is the only step cheap on all
+three (-0.04%, +0.32%, +0.40%), so the floor is `q8_0` now and the ladder is
+`("f16", "q8_0")`. PersonaPlex's RVQ has exactly this control on its compression
+dial:
 `set_num_codebooks` asserts `n >= self.n_q_semantic`, so acoustic fidelity can be
 traded away and meaning never can.
 
