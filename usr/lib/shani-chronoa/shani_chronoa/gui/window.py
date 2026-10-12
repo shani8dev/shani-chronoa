@@ -1,6 +1,7 @@
 """The main window: layout, state, the transcript area and text input; styling, questions, attachments and the conversations menu are mixed in."""
 
 import logging
+import time
 
 import gi
 
@@ -1705,6 +1706,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         made elsewhere is to look again. Reading is cheap - three gsetting
         reads and one module flag - and it happens on focus, not on a timer.
         """
+        self._note_what_happened_while_away()
+
         # **The draft, once per window and never again.** Restoring on *every*
         # focus would put back text someone had deliberately cleared, the moment
         # they clicked away and came back - which is worse than not having the
@@ -1716,6 +1719,80 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._mode_strip.refresh()
         if getattr(self, "_task_card", None) is not None:
             self._task_card.refresh()
+
+    #: Below this, the window was not really away and a catch-up line would be
+    #: noise: alt-tabbing to a terminal for ten seconds is not "coming back".
+    AWAY_MINIMUM_SECONDS = 60
+
+    #: What the rail's sources held the last time the window was looked at.
+    #: `None` until the first focus, because "nothing yet" and "nothing since
+    #: you looked" are different sentences.
+    _away_snapshot = None
+
+    def _away_counts(self) -> tuple:
+        """(files made, rules fired) as the rail's own sources report them.
+
+        **Read through the rail's getters, not a second copy of the state.** A
+        separate tally is one that can disagree with the panel beside it, which
+        is the failure this window has produced before.
+        """
+        try:
+            made = len(self._artifacts)
+        except Exception:                                   # noqa: BLE001
+            made = 0
+        fired = 0
+        source = getattr(self, "_event_source", None)
+        if source is not None:
+            try:
+                fired = len(source.event_results())
+            except Exception:                               # noqa: BLE001
+                fired = 0
+        return made, fired
+
+    def _note_what_happened_while_away(self) -> None:
+        """One line in the transcript saying what changed while you were not here.
+
+        **A count of what grew, not a list of everything.** Nothing here is
+        timestamped, so "since you left" is measured as a delta between two
+        readings of the same sources - which is exact for counting and says
+        nothing about *when*, so the sentence must not imply it did.
+
+        **Silent on the first focus, and when nothing changed.** "0 files and 0
+        rules fired" is worse than nothing: it makes the reader check whether
+        they are looking at the right window.
+
+        **Not shown while the window was barely away.** Alt-tab to a terminal
+        and back should not produce a notice about nothing.
+        """
+        now = time.monotonic()
+        counts = self._away_counts()
+        previous, left_at = self._away_snapshot or (None, None)
+        self._away_snapshot = (counts, now)
+        if previous is None or left_at is None:
+            # **Two conditions, one case.** `left_at is None` *is* the first
+            # look - the snapshot carries both - so the second half of this
+            # condition is the one that does the work. Both are stated because
+            # removing the first does not change behaviour, which was measured:
+            # a mutation deleting it passed all nine tests, and the reason is
+            # recorded here rather than left as an un-caught mutation.
+            return
+        if now - left_at < self.AWAY_MINIMUM_SECONDS:
+            return                       # barely away: alt-tab, not "back"
+        new_files, new_rules = counts[0] - previous[0], counts[1] - previous[1]
+        if not new_files and not new_rules:
+            return
+        parts = []
+        if new_files:
+            parts.append(f"{new_files} file(s) made")
+        if new_rules:
+            parts.append(f"{new_rules} rule(s) fired")
+        away = int(now - left_at)
+        if away >= 3600:
+            span = f"{away // 3600}h away"
+        else:
+            span = f"{away // 60}m away"
+        sentence = f"While you were {span}: " + " and ".join(parts) + "."
+        self.add_notice_row(sentence, kind="away")
 
     def set_state(self, state: AssistantState) -> None:
         """Set the assistant state. The single entry point for it."""

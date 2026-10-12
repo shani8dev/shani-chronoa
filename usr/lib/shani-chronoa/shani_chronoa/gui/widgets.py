@@ -1360,9 +1360,15 @@ class TranscriptView(Gtk.ScrolledWindow):
         # machine, because that is the thing it depicts. `view-convert` was
         # standing in for compaction, where it meant nothing; a justified block
         # of text is what compaction acts on.
+        # An icon that means *the kind of note*. `clock-symbolic` for a catch-up
+        # line, because it is about elapsed time rather than about the
+        # conversation; a third icon for a third kind of housekeeping beats a
+        # chain of `if kind ==` in every caller.
+        icons = {"cloud": "network-transmit-receive-symbolic",
+                 "away": "preferences-system-time-symbolic",
+                 "compaction": "format-justify-fill-symbolic"}
         icon = Gtk.Image.new_from_icon_name(
-            "network-transmit-receive-symbolic" if kind == "cloud"
-            else "format-justify-fill-symbolic")
+            icons.get(kind, icons["compaction"]))
         icon.add_css_class("dim-label")
         row.append(icon)
         label = Gtk.Label(label=sentence)

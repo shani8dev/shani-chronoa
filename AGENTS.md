@@ -17590,3 +17590,42 @@ compared**. What made this one destructive was not the command but that the file
 under test was mine and uncommitted. The correct move for the question I was
 actually asking - "is this failure mine?" - was to swap the *product* files, not
 the test, and to leave the test where it was.
+
+## One line saying what happened while you were not here (2026-10-12)
+
+The rail has seven sections and all of them report *current* state. None of them
+says what happened during the hour the window was closed, which is the moment
+they exist for: someone comes back to a machine that did things unattended and
+has no way to find out what.
+
+**A delta, not a total.** Nothing here is timestamped, so "since you left" is
+measured as the difference between two readings of the same sources - exact for
+counting, silent about *when*, so the sentence must not imply otherwise. It says
+"While you were 2h away: 1 file(s) made and 3 rule(s) fired" and never "since
+you left" as though it knew.
+
+**Read through the rail's getters, not a second tally.** A separate count is one
+that can disagree with the panel beside it.
+
+**The silences are most of the feature**, and three of the four mutations target
+them: nothing on the first look (there is no "since"), nothing on a ten-second
+alt-tab (that is not "coming back"), nothing when nothing happened. *"0 files and
+0 rules fired" is worse than silence* - it makes the reader check whether they
+are looking at the right window.
+
+Notices now pick an icon from a mapping rather than an `if kind ==` in every
+caller, and the new one - `preferences-system-time-symbolic` - was checked with
+`rglob` against Adwaita, because the sibling test that passes for icons missed two
+bad names earlier today.
+
+### A mutation that cannot be caught, because the code says the same thing twice
+
+`previous is None` and `left_at is None` are **the same case** - the snapshot
+carries both - so a mutation deleting the first guard passed all nine tests. It
+is not a missing test; the two conditions are redundant. Both are now stated in
+one `if` with the reason written at the site, because "an un-caught mutation"
+recorded nowhere becomes "an un-caught mutation" read as coverage.
+
+**Also recorded from writing it:** `window.py` has no `from __future__ import
+annotations`, so an import inserted on that anchor put nothing there and left
+`time` undefined - caught by pyflakes, but only because the file was read back.
