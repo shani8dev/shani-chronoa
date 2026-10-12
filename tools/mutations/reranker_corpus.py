@@ -109,7 +109,7 @@ MUTATIONS = [
             'test_the_limit_is_stated_in_what_the_generator_writes',
         ],
         'file': _SOURCE,
-        'old': 'answerable on 111 rows',
+        'old': 'answerable on 111 rows and NOT on the 109',
         'new': 'answerable on some rows',
     },
     {

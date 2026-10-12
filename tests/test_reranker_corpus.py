@@ -359,13 +359,16 @@ class TestTheDeclaredLimitIsTrue:
         monkeypatch.setattr(builder, "OUT", tmp_path / "c.json")
         assert builder.main() == 0
         limit = json.loads((tmp_path / "c.json").read_text())["limit"]
-        assert "111 of 220" in limit, (
-            "the limit must name its own population, in the sentence that "
-            "bounds it - not merely somewhere in the file. A `in` check passes "
-            "when 111 appears twice and one is removed, which is the "
-            "witness-that-cannot-fail trap this set already found once."
+        # The whole bounding sentence, not two substrings. A substring check
+        # lets a mutation drop either number while the other still satisfies it
+        # - which is how the previous revision of this test survived a mutation
+        # that made the limit vague. This is the family AGENTS.md records most
+        # often: a check that cannot fail, discovered only by a mutation run.
+        assert ("answerable on 111 rows and NOT on the 109" in limit), (
+            "the limit must state its own bounded population in one sentence, "
+            "not two numbers a mutation can remove one at a time"
         )
-        assert "NOT on the 109" in limit
+        assert "says nothing about the rest" in limit
 
     def test_the_negative_cap_cannot_silently_exceed_the_offer(self):
         """Why the ordering assertion exists, and what would unmake it.
