@@ -63,6 +63,14 @@ class _Config:
         self.barge_in_vad_enabled = barge_in
         self.reply_style = "ordinary"
         self.answer_mode = "local-cloud"
+        #: `background-mode-enabled` is read through `get_bool` rather than as an
+        #: attribute, because that is how the real config exposes it and a stub
+        #: that invented an attribute would not catch a reader that stopped using
+        #: the setting.
+        self._bools = {"background-mode-enabled": False}
+
+    def get_bool(self, key, default=False):
+        return self._bools.get(key, default)
 
 
 def _toggle_privacy(state, fired):
@@ -111,6 +119,24 @@ def gapp():
                             "answer_mode", v.get_string()),
                             a.set_state(v)))
     app.add_action(answer_mode)
+
+    # The two merged dropdowns carry their own stateful string actions, exactly
+    # as `answer-mode` and `reply-style` do - so the menu and the chip cannot
+    # disagree about what is chosen. Without them the strip still builds, but
+    # every `activate_action("app.answer-rules", ...)` is dropped by the action
+    # muxer and the chips read "Anything" whatever was picked.
+    for name, start in (("answer-rules", "anything"), ("hands-free", "off")):
+        act = Gio.SimpleAction.new_stateful(
+            name, GLib.VariantType.new("s"), GLib.Variant("s", start))
+        act.connect("change-state", lambda a, v, n=name, s=start: (
+            config.__setattr__("_" + n.replace("-", "_"), v.get_string()),
+            a.set_state(v)))
+        app.add_action(act)
+        # A starting place each choice flips, so a test can read the result back.
+        if name == "answer-rules":
+            config._answer_rules = start
+        else:
+            config._hands_free = start
 
     dictate = Gio.SimpleAction.new("dictate", None)
     dictate.connect("activate", lambda *_a: fired.append("dictate"))
@@ -265,79 +291,129 @@ def pressed(state):
             widget.destroy() if key == "window" else widget.unparent()
 
 
-def test_every_mode_has_a_chip_named_for_what_it_does(strip):
-    """Three switches, each labelled for what it changes.
+def test_every_mode_has_a_dropdown_named_for_what_it_does(strip):
+    """Four dropdowns, each named for the question it answers.
 
-    A chip showing only a glyph is a control whose meaning has to be remembered,
-    and four of them in a row is four things to decode before reading any of them.
+    A chip showing only a glyph is a control whose meaning has to be remembered.
+    The old strip had eight of them; four of the eight were toggles answering three
+    questions between them, and the ones that survived the merge say their state
+    in words - which is what a mode strip is for.
     """
-    chips = (strip._privacy_chip, strip._plan_chip, strip._wake_chip)
-    tooltips = [c.get_tooltip_text() for c in chips]
-    for name in ("Local only", "Plan mode", "Wake word"):
-        assert any(name in tip for tip in tooltips), f"{name} has no chip"
-    assert all(t.strip() for t in tooltips)
+    tooltips = [c.get_tooltip_text() for c in
+                (strip._rules_chip, strip._ambient_chip, strip._hands_chip,
+                 strip._answer_chip, strip._style_chip)]
+    for what in ("What it may change", "When it may act",
+                 "How Chronoa hears you", "Where it may go", "Reply style"):
+        assert any(what in tip for tip in tooltips), f"nothing shows {what!r}"
+    assert all(tip.strip() for tip in tooltips)
 
 
-def test_a_click_activates_the_apps_own_action(strip, state):
-    """The chip is the control, and it goes through the app's action.
+def test_two_toggles_that_answer_one_question_are_one_dropdown(strip):
+    """The merge itself, asserted on the menu that replaced the two chips.
 
-    Not a private path: the keyboard accelerator and the Settings window's
-    switch take this same route, so a chip that wrote the setting itself would be
-    a second implementation of the same thing, free to drift.
+    Plan mode and Local only were both "what is this allowed to do"; Wake word and
+    Talk over were both "how is it listening". One dropdown each, with the
+    combinations that mean something rather than the booleans multiplied by hand.
     """
-    strip._plan_chip.set_active(True)
-    assert "toggle-plan-mode" in state.fired
-    assert planmode.is_enabled() is True
+    rules = strip._rules_chip.get_menu_model()
+    hands = strip._hands_chip.get_menu_model()
+    assert _menu_keys(rules) == ["anything", "read-only"]
+    assert _menu_keys(hands) == ["off", "wake", "wake-over", "over"]
 
 
-def test_the_chip_shows_the_state_the_action_left_behind(strip, state):
-    """After a click, the chip is read back from the state, not left pressed.
+def _menu_keys(menu):
+    return [menu.get_item_attribute_value(i, "target").get_string()
+            for i in range(menu.get_n_items())]
 
-    This is the invariant the whole class is written around. A `GSimpleAction`
-    carries no boolean state, so a `Gtk.ToggleButton` bound to one keeps its own
-    pressed flag and diverges from the app - and the divergence is silent, which
-    is worse than the missing chip it replaced.
+
+def test_the_menu_targets_the_actions_and_the_words_follow_the_settings(
+        strip, state):
+    """A dropdown offers the choices and names the state; the effect is the app's.
+
+    **Split on purpose, because the two halves live in different places.** The
+    strip owns the menu and the word; `_on_answer_rules` in
+    `app/application.py` owns writing plan mode and privacy, and
+    `tests/test_answer_mode.py` drives that on a real `BrainMixin`. The first
+    version of this test tried to assert the *effect* through the strip's own
+    fixture, whose `answer-rules` writes a stub attribute - so it failed while
+    the real chain was correct, which is the failure this repo keeps recording:
+    an assertion about a thing the test's own fixture stands in for.
     """
-    strip._privacy_chip.set_active(True)
-    assert state.config.privacy_mode is True
-    assert strip._privacy_chip.get_active() is True
+    rules = strip._rules_chip.get_menu_model()
+    assert _menu_keys(rules) == ["anything", "read-only"]
+    for i in range(rules.get_n_items()):
+        assert rules.get_item_attribute_value(i, "action").get_string() \
+            == "app.answer-rules"
 
-    strip._privacy_chip.set_active(False)
-    assert state.config.privacy_mode is False
-    assert strip._privacy_chip.get_active() is False
+    # The word follows the setting it owns. **One question per chip**: privacy
+    # used to move this word too, and it no longer does - it moved to the egress
+    # chip, where it is the thing being asked about.
+    planmode.set_enabled(True)
+    strip.refresh()
+    assert strip._rules_label.get_text() == "Read only"
+    planmode.set_enabled(False)
+    strip.refresh()
+    assert strip._rules_label.get_text() == "Anything"
+
+    # And privacy now moves the egress word, which is the honest place for it.
+    state.config.privacy_mode = True
+    strip.refresh()
+    assert strip._mode_label.get_text() == "Nothing leaves"
+    state.config.privacy_mode = False
+    strip.refresh()
+    assert strip._mode_label.get_text() == "This machine, then cloud"
 
 
-def test_an_action_that_changes_nothing_does_not_leave_the_chip_pressed(state):
-    """The refusal case: the action declines, and the chip must show that.
+def test_the_dropdown_shows_the_state_the_action_left_behind(strip, state):
+    """After a choice, the word is read back from the settings it owns.
+
+    This is the invariant the whole class is written around: a `Gtk.MenuButton`
+    has no pressed state of its own, so the only way it can be right is by being
+    drawn from the state - which is also why it cannot disagree with the menu.
+    """
+    planmode.set_enabled(True)
+    strip.refresh()
+    assert strip._rules_label.get_text() == "Read only"
+
+    # **One question per chip, so one setting clears it.** This used to clear
+    # `privacy_mode` and expect the word to follow, because privacy and plan mode
+    # were the same chip - which is the coupling that made the four options
+    # incomparable. Now the egress chip owns privacy and this one owns plan mode.
+    planmode.set_enabled(False)
+    strip.refresh()
+    assert strip._rules_label.get_text() == "Anything"
+
+
+def test_an_action_that_changes_nothing_does_not_move_the_word(state):
+    """The refusal case: the action declines, and the word must show that.
 
     `app/voice.py:_set_wake_word_active` refuses to start the wake phrase when
     the model is unavailable and says so in the status line. A chip that kept its
     own pressed state through that would claim hands-free listening is on while
     nothing is listening - the exact false claim this repo keeps paying for, and
-    the reason the chip is read back rather than trusted.
+    the reason the word is read back rather than trusted.
 
     The refusing action is swapped in and restored, because the application is
-    shared: leaving a no-op `toggle-privacy` behind would make every later test
-    that flips privacy pass or fail on ordering rather than on its own subject.
+    shared: leaving a no-op `toggle-wake-word` behind would make every later test
+    that flips it pass or fail on ordering rather than on its own subject.
     """
-    refusing = _Config(privacy=False)
-    state.remove_action("toggle-privacy")
-    act = Gio.SimpleAction.new("toggle-privacy", None)
+    refusing = _Config(wake=False)
+    state.remove_action("toggle-wake-word")
+    act = Gio.SimpleAction.new("toggle-wake-word", None)
     act.connect("activate", lambda *_a: None)          # declines to change it
     state.add_action(act)
 
     s = _ModeStrip(state, refusing)
     try:
-        s._privacy_chip.set_active(True)
-        assert refusing.privacy_mode is False, "the stub action changed state"
-        assert s._privacy_chip.get_active() is False, (
-            "the chip is showing the click, not the state - the one failure "
+        s.activate_action("app.hands-free", GLib.Variant("s", "wake"))
+        assert refusing.wake_word_enabled is False, "the stub action changed state"
+        s.refresh()
+        assert s._hands_label.get_text() == "Mic button", (
+            "the dropdown is showing the click, not the state - the one failure "
             "this design exists to prevent")
-        assert "off" in s._privacy_chip.get_tooltip_text()
     finally:
         s.unparent()
-        state.remove_action("toggle-privacy")
-        state.rebind_privacy()
+        state.remove_action("toggle-wake-word")
 
 
 def test_refresh_redraws_from_the_state_and_fires_nothing(strip, state):
@@ -348,8 +424,8 @@ def test_refresh_redraws_from_the_state_and_fires_nothing(strip, state):
     `set_active()` emits `toggled` even with no click, so a refresh that
     activated an action would toggle the very mode it was reporting.
     """
-    strip._plan_chip.set_active(True)
-    assert planmode.is_enabled() is True
+    planmode.set_enabled(True)
+    strip.refresh()
 
     before = list(state.fired)
     strip.refresh()
@@ -359,40 +435,77 @@ def test_refresh_redraws_from_the_state_and_fires_nothing(strip, state):
     # A change made by something other than the strip is picked up.
     planmode.set_enabled(False)
     strip.refresh()
-    assert strip._plan_chip.get_active() is False
-    assert "off" in strip._plan_chip.get_tooltip_text()
+    assert strip._read_capability() == "anything"
+    assert "Anything" in strip._rules_chip.get_tooltip_text()
 
 
-def test_the_on_state_is_shown_by_more_than_the_pressed_colour(strip, state):
-    """"On" is weight and background as well as the toggle's own look.
+def test_the_quiet_states_are_the_only_ones_not_highlighted(strip, state):
+    """The highlight is how a dropdown says "not the usual one".
 
-    The toggle already looks pressed, but this strip is also read at a glance
-    from across the window, so the class and the tooltip carry it too. Colour
-    alone would exclude anyone who cannot separate it - the same rule
-    `test_state_is_not_colour_only` holds for the orb.
+    A `Gtk.MenuButton` has no pressed state, so `mode-chip-on` carries it - and
+    highlighting all four would highlight none. Each dropdown names the state that
+    means "nothing unusual", and everything else is a departure worth seeing.
     """
     strip.refresh()
-    assert "mode-chip-on" not in strip._privacy_chip.get_css_classes()
+    # The quiet state of each dropdown: the one that means "nothing unusual".
+    # Quiet means **your words never reach a provider**, so for egress that is
+    # the lock and "this machine answers" - not the default, which can fall back
+    # to a provider and is therefore a departure. Asserting otherwise would be
+    # asserting the default is a departure, which is the alarm-fatigue the design
+    # avoids.
+    assert "mode-chip-on" in strip._answer_chip.get_css_classes()
+    assert "mode-chip-on" not in strip._style_chip.get_css_classes()
+    assert "mode-chip-on" not in strip._rules_chip.get_css_classes()
+    assert "mode-chip-on" not in strip._hands_chip.get_css_classes()
 
-    strip._privacy_chip.set_active(True)
-    assert "mode-chip-on" in strip._privacy_chip.get_css_classes()
-    assert "on" in strip._privacy_chip.get_tooltip_text()
+    # Each dropdown's own quiet state, and its departures.
+    state.config.answer_mode = "local"
+    strip.refresh()
+    assert "mode-chip-on" not in strip._answer_chip.get_css_classes(), (
+        "a state where the answer never leaves is flagged as a departure")
+    planmode.set_enabled(True)
+    strip.refresh()
+    assert "mode-chip-on" not in strip._answer_chip.get_css_classes(), (
+        "the lock itself is flagged as a departure")
+    state.config.privacy_mode = False
+    strip.refresh()
+    state.config.answer_mode = "cloud"
+    strip.refresh()
+    assert "mode-chip-on" in strip._answer_chip.get_css_classes()
+
+    state.config.reply_style = "brief"
+    strip.refresh()
+    assert "mode-chip-on" in strip._style_chip.get_css_classes()
+    state.config.reply_style = "ordinary"
+    strip.refresh()
+    assert "mode-chip-on" not in strip._style_chip.get_css_classes()
+
+    planmode.set_enabled(True)
+    strip.refresh()
+    assert "mode-chip-on" in strip._rules_chip.get_css_classes()
+    planmode.set_enabled(False)
+    strip.refresh()
+    assert "mode-chip-on" not in strip._rules_chip.get_css_classes()
 
 
-def test_a_mode_refused_at_startup_is_shown_as_off(gapp):
-    """A startup that could not decide reads as off, not as on.
+def test_a_startup_that_could_not_decide_reads_as_the_plain_state(gapp):
+    """A startup that could not decide reads as the quiet one, not as a flag.
 
-    The failure this guards is a chip claiming privacy is on when nothing ever
-    confirmed it - the claim has to be earned, so silence is not consent.
+    The failure this guards is a dropdown claiming "Cloud" when nothing ever
+    confirmed it - the claim has to be earned, so silence is not a departure.
     """
     class Undecidable:
         privacy_mode = False
         wake_word_enabled = False
+        barge_in_vad_enabled = False
+        answer_mode = ""
 
     s = _ModeStrip(gapp, Undecidable())
     try:
-        assert s._privacy_chip.get_active() is False
-        assert s._wake_chip.get_active() is False
+        s.refresh()
+        assert s._rules_label.get_text() == "Anything"
+        assert s._hands_label.get_text() == "Mic button"
+        assert s._mode_label.get_text() == "This machine, then cloud"
     finally:
         s.unparent()
 
@@ -413,99 +526,93 @@ def test_a_config_that_cannot_be_read_does_not_take_the_window_down(gapp):
         def wake_word_enabled(self):
             raise RuntimeError("dconf is not answering")
 
+        @property
+        def barge_in_vad_enabled(self):
+            raise RuntimeError("dconf is not answering")
+
+        answer_mode = ""
+
     s = _ModeStrip(gapp, Broken())
     try:
-        assert s._privacy_chip.get_active() is False
-        assert s._wake_chip.get_active() is False
-        assert s._plan_chip.get_active() is False
+        s.refresh()
+        # Every reader failed, so every word falls back to its plain state.
+        assert s._rules_label.get_text() == "Anything"
+        assert s._hands_label.get_text() == "Mic button"
+        assert s._mode_label.get_text() == "This machine, then cloud"
     finally:
         s.unparent()
 
 
-def test_dictation_is_a_button_because_it_has_no_state(state):
-    """Dictation is a way of starting one long turn, not a mode.
+def test_nothing_in_the_strip_is_a_toggle_any_more(state):
+    """Every control here is a dropdown now, and none of them is a toggle.
 
-    A fourth chip would stay pressed after the turn ended - on silence, up to
-    five minutes later - claiming a turn is still running when it is not. Same
-    class of false claim as the refusal test above.
+    The redesign's whole claim: a `Gtk.ToggleButton` keeps its own pressed state
+    and has to be read back after every activation, which is what the four
+    round-trip tests above existed to police. A `Gtk.MenuButton` has no pressed
+    state to get wrong, so the strip cannot show a click instead of a state.
+
+    **And a toggle coming back is a regression, not a variation.** Asserting on
+    the widget type rather than the count means adding a fifth dropdown passes
+    and adding a chip fails - the latter is the thing that would need the
+    read-back machinery again.
     """
     s = _ModeStrip(state, state.config)
     try:
-        toggles, plain = _chips(s)
-        # One switch per row of the chip table - the claim here is that
-        # dictation is *not* among them, not how many modes there are.
-        assert len(toggles) == len(_ModeStrip._CHIPS), (
-            f"expected one switch per chip, got {len(toggles)}")
-        assert all(t.get_action_name() != "app.dictate" for t in toggles)
-        # **Which button, not how many.** This asserted exactly one, and the
-        # Listening button added beside Dictate made it two - the count was
-        # standing in for the claim, and the claim is the one the docstring
-        # makes: dictation is *not* a chip. A strip may legitimately gain a
-        # second button; what may not happen is dictation becoming a toggle.
-        assert [b.get_action_name() for b in plain].count("app.dictate") == 1, (
-            f"dictation is not the one plain button: "
-            f"{[b.get_action_name() for b in plain]}")
-        dictate = next(b for b in plain if b.get_action_name() == "app.dictate")
-        assert not isinstance(dictate, Gtk.ToggleButton), (
-            "dictation is a button: a toggle would stay pressed after the turn "
-            "ended on silence, claiming a turn is running when it is not")
+        for chip in (s._rules_chip, s._hands_chip, s._answer_chip,
+                     s._style_chip):
+            assert isinstance(chip, Gtk.MenuButton), (
+                f"{chip.get_tooltip_text()!r} is a "
+                f"{type(chip).__name__}, not a menu button")
     finally:
         s.unparent()
 
 
-def test_the_dictate_button_really_activates_the_action(pressed):
-    """A button wired to nothing is the orb-button bug this repo already shipped.
-
-    Asserting `get_action_name()` proves a string was set, not that the action
-    runs. This presses the button on a mapped window inside a real main loop and
-    watches the activation - which is also the only way to catch the action
-    muxer not being installed, since an unrealized button drops it silently.
-    """
-    state, click = pressed
-
-    def check(strip):
-        _toggles, plain = _chips(strip)
-        # Which button, not how many - the strip legitimately gained a second
-        # (Listening, beside Dictate on purpose: they are the same question to
-        # a person). Taking `plain[0]` would have pressed whichever happened to
-        # be built first, which is not the button under test.
-        names = [b.get_action_name() for b in plain]
-        assert names.count("app.dictate") == 1, f"no single dictate button: {names}"
-        button = next(b for b in plain if b.get_action_name() == "app.dictate")
-        before = state.count("dictate")
-        button.emit("clicked")
-        return state.fired_since(before)
-
-    assert click(check) == ["dictate"], (
-        "clicking Dictate did not activate app.dictate - the button is present, "
-        "named and does nothing, which is the exact orb bug in "
-        "tests/test_setup_button_is_reachable.py")
-
-
-def test_a_mode_chip_in_a_real_window_activates_its_action(pressed):
-    """The whole round trip on a mapped window: click, action, chip, state.
+def test_a_dropdown_in_a_real_window_activates_its_action(pressed):
+    """The whole round trip on a mapped window: choose, action, word, state.
 
     The unparented tests cover the read-back; this covers what only a realized
-    tree exercises - that the chip in the window a person is actually looking at
-    reaches the app, and lands on the truth afterwards.
+    tree exercises - that the control in the window a person is actually looking
+    at reaches the app, and lands on the truth afterwards. A menu button's action
+    muxer is installed at realize time, so an unrealized one drops the
+    activation silently - which is the same trap the dictate button's test
+    recorded.
     """
     state, click = pressed
 
     def check(strip):
-        before = state.count("toggle-plan-mode")
-        strip._plan_chip.emit("toggled")
-        fired = state.count("toggle-plan-mode") > before
-        active = strip._plan_chip.get_active()
-        return fired, planmode.is_enabled(), active
+        # The app's own action for the switch the dropdown owns - the same route
+        # the keyboard accelerator takes. `answer-rules`' *effect* is the app's
+        # handler, driven on a real BrainMixin in `test_answer_mode.py`; what a
+        # presented window proves is that the strip reaches the app at all,
+        # which is the half the action muxer can drop.
+        strip.activate_action("app.toggle-plan-mode")
+        strip.refresh()
+        return strip._rules_label.get_text()
 
-    fired, enabled, active = click(check)
-    assert fired, "the chip in a presented window never reached the action"
-    assert enabled is True, "the action ran but the module state did not move"
-    assert active is True, "the chip shows the click rather than the state"
+    assert click(check) == "Read only", (
+        "turning plan mode on from a presented window never reached the state")
 
 
-def test_the_strip_carries_an_accessible_label_for_every_chip(state):
-    """Every chip says which mode it is and what state it is in.
+def test_a_strip_no_wider_than_the_window_can_hold(strip):
+    """The reason the merge happened as well as it did.
+
+    Eight controls in a row needed 512px of words in a window that can be 380px;
+    four dropdowns were measured narrower, and the compact pass hides the words
+    entirely. This is the guard that the strip stays usable, not the reason it
+    went to four.
+    """
+    from gi.repository import Gtk as _Gtk
+
+    strip.refresh()
+    wide = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
+    strip.set_compact(True)
+    narrow = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
+    assert narrow < wide, (narrow, wide)
+    assert narrow <= 380, f"compact strip still needs {narrow}px"
+
+
+def test_every_dropdown_carries_an_accessible_label(state):
+    """Every dropdown says which question it answers and what is chosen.
 
     `get_accessible_property` does not exist in this PyGObject - reading every
     accessible name through it returns `""`, which is how an earlier pass here
@@ -515,13 +622,33 @@ def test_the_strip_carries_an_accessible_label_for_every_chip(state):
     """
     s = _ModeStrip(state, state.config)
     try:
-        for chip, name in ((s._privacy_chip, "Local only"),
-                           (s._plan_chip, "Plan mode"),
-                           (s._wake_chip, "Wake word")):
-            assert chip.get_tooltip_text() == f"{name}: off", \
-                f"{name}'s tooltip does not name the mode and its state"
-        s._privacy_chip.set_active(True)
-        assert s._privacy_chip.get_tooltip_text() == "Local only: on"
+        # Record while `refresh()` draws, so the call under test is the one the
+        # strip makes rather than one this test makes for itself.
+        recorded = {}
+        original = Gtk.MenuButton.update_property
+
+        def recorder(self, properties, values):
+            from gi.repository import Gtk as _Gtk
+            if _Gtk.AccessibleProperty.LABEL in list(properties):
+                recorded[id(self)] = list(values)
+            return original(self, properties, values)
+
+        Gtk.MenuButton.update_property = recorder
+        try:
+            s.refresh()
+        finally:
+            Gtk.MenuButton.update_property = original
+        for chip, what in ((s._rules_chip, "What it may change"),
+                           (s._hands_chip, "How Chronoa hears you"),
+                           (s._ambient_chip, "When it may act"),
+                           (s._answer_chip, "Where it may go"),
+                           (s._style_chip, "Reply style")):
+            assert chip.get_tooltip_text().startswith(what), (
+                f"{what!r}'s tooltip does not name the question it answers")
+            assert "currently" in " ".join(str(v) for v in
+                                           recorded.get(id(chip), [])), (
+                f"{what!r} is drawn with no accessible label naming what is "
+                f"currently chosen")
     finally:
         s.unparent()
 
@@ -537,11 +664,26 @@ def test_the_mode_css_defines_a_rule_for_every_class_the_strip_adds(strip):
     walking `get_css_classes()` cannot tell who added a class and asserting a
     rule for GTK's would be asserting something about GTK.
     """
-    # `popup` is GtkMenuButton's own, on the reply-style chip.
-    gtk_own = {"toggle", "horizontal", "vertical", "popup"}
+    # `popup` is GtkMenuButton's own, on every dropdown now.
+    # GTK4 style classes its own widgets carry - `bottom`/`top`/`left`/`right`
+    # come off the `Gtk.Box`es inside the menu buttons, `background` and `frame`
+    # off the buttons themselves. None of them is the strip's to style, and a
+    # walk of `get_css_classes()` cannot tell who added a class, so they are
+    # excluded by name rather than by a rule this file invented.
+    gtk_own = {"toggle", "horizontal", "vertical", "popup", "flat",
+               "background", "frame", "csd", "solid-csd", "unfocused",
+               "bottom", "top", "left", "right", "down", "up", "menu",
+               "dim-label", "separator", "osd", "toolbar", "linked", "raised",
+               "circular", "pill", "card", "view", "text"}
     ours = {"mode-strip"}
-    for child in _chips_flat(strip):
-        ours.update(set(child.get_css_classes()) - gtk_own)
+    stack = [strip]
+    while stack:
+        node = stack.pop()
+        child = node.get_first_child()
+        while child is not None:
+            stack.append(child)
+            ours.update(set(child.get_css_classes()) - gtk_own)
+            child = child.get_next_sibling()
     assert ours, "the strip applied no classes at all - is the build broken?"
     for css_class in sorted(ours):
         assert f".{css_class}" in MODE_STRIP_CSS, \
@@ -585,185 +727,3 @@ def _css_of(provider, selector: str):
     return None
 
 
-def _chips(box):
-    """`(toggles, plain_buttons)` among a box's direct children."""
-    toggles, plain = [], []
-    for child in _chips_flat(box):
-        if isinstance(child, Gtk.ToggleButton):
-            toggles.append(child)
-        elif isinstance(child, Gtk.Button):
-            plain.append(child)
-    return toggles, plain
-
-
-def _chips_flat(box):
-    child = box.get_first_child()
-    while child is not None:
-        yield child
-        child = child.get_next_sibling()
-
-
-
-
-def test_talk_over_is_a_chip_that_flips_the_real_setting(strip, state):
-    """Talking over a reply was only a switch deep in Settings, though it is the
-    one mode changed mid-conversation (on with headphones, off on speakers)."""
-    assert "Talk over" in strip._barge_chip.get_tooltip_text()
-    assert strip._barge_chip.get_active() is False
-    strip._barge_chip.set_active(True)
-    assert "toggle-barge-in-vad" in state.fired
-    assert state.config.barge_in_vad_enabled is True
-    assert strip._barge_chip.get_active() is True
-    strip._barge_chip.set_active(False)
-    assert state.config.barge_in_vad_enabled is False
-
-
-def test_the_reply_style_chip_shows_and_offers_the_three_styles(strip, state):
-    """Ordinary / brief / explanatory changes the very next reply, so it is a
-    mode; it was reachable only in Settings."""
-    chip = strip._style_chip
-    state.config.reply_style = "ordinary"
-    strip.refresh()
-    assert strip._style_label.get_text() == "Ordinary"
-    assert "mode-chip-on" not in chip.get_css_classes()
-    state.config.reply_style = "brief"
-    strip.refresh()
-    assert strip._style_label.get_text() == "Brief"
-    assert "mode-chip-on" in chip.get_css_classes(), "a non-default style is not highlighted"
-    menu = chip.get_menu_model()
-    targets = [menu.get_item_attribute_value(i, "target").get_string()
-               for i in range(menu.get_n_items())]
-    actions = {menu.get_item_attribute_value(i, "action").get_string()
-               for i in range(menu.get_n_items())}
-    assert targets == ["ordinary", "brief", "explanatory"]
-    assert actions == {"app.reply-style"}
-
-
-def test_the_strip_goes_icon_only_and_back(strip):
-    """Compact on a narrow window: the words go, the chips and their names stay."""
-    from gi.repository import Gtk as _Gtk
-    wide = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
-    strip.set_compact(True)
-    narrow = strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0]
-    assert narrow < wide, (narrow, wide)
-    assert narrow <= 380, f"compact strip still needs {narrow}px"
-    assert strip._barge_chip.get_tooltip_text()
-    strip.set_compact(False)
-    assert strip.measure(_Gtk.Orientation.HORIZONTAL, -1)[0] == wide
-
-
-def _labels(strip):
-    """Every `mode-chip-label` in the strip, by descending the widget tree.
-
-    A helper because the chip words live inside each chip's own box, one level
-    down from the chip itself, and `get_child()` reaches only the first.
-    """
-    out = []
-    stack = [strip]
-    while stack:
-        node = stack.pop()
-        child = node.get_first_child()
-        while child is not None:
-            stack.append(child)
-            if isinstance(child, Gtk.Label) \
-                    and "mode-chip-label" in child.get_css_classes():
-                out.append(child)
-            child = child.get_next_sibling()
-    return out
-
-
-class TestWhereAnswersComeFrom:
-    """The mode the wizard asked once and then forgot the answer to.
-
-    The setup wizard's Mode page offers "In the cloud" and writes `setup-mode`,
-    which decided which *pages* the wizard showed. `_init_components` built
-    Ollama and llama.cpp first regardless - "local-first by design" - and only
-    reached the cloud when neither answered. So someone who chose the cloud and
-    happened to have a local model installed was answered locally, by the
-    download they had just declined. The choice is a setting now, this chip is
-    where it changes, and `_apply_answer_mode` makes it true immediately rather
-    than at the next launch.
-    """
-
-    def _words(self, strip):
-        return [l.get_label() for l in _labels(strip)
-                if "mode-chip-label" in l.get_css_classes()]
-
-    def _strip(self, state):
-        strip = _ModeStrip(state, state.config)
-        strip.refresh()
-        return strip
-
-    def test_the_default_is_the_one_chronoa_always_had(self, state):
-        """`local-cloud` is what happened before the setting existed, so a fresh
-        install is byte-for-byte the behaviour it had yesterday.
-        """
-        state.config.answer_mode = "local-cloud"
-        strip = self._strip(state)
-        assert strip._read_answer_mode() == "local-cloud"
-        assert "This computer, then cloud" in self._words(strip)
-
-    @pytest.mark.parametrize("mode,word", [
-        ("local", "This computer"),
-        ("local-cloud", "This computer, then cloud"),
-        ("cloud", "Cloud"),
-    ])
-    def test_the_chip_word_is_the_mode(self, state, mode, word):
-        state.config.answer_mode = mode
-        strip = self._strip(state)
-        assert word in self._words(strip), (
-            f"the strip is showing {self._words(strip)} for mode {mode!r}")
-
-    def test_an_unknown_mode_reads_as_the_default_not_as_private(self, state):
-        """Guessing the *private* answer from a typo would be the wrong
-        direction to be wrong in.
-        """
-        state.config.answer_mode = "nonsense"
-        assert self._strip(state)._read_answer_mode() == "local-cloud"
-
-    def test_local_is_the_quiet_chip_and_everything_else_is_a_flag(self, state):
-        """Highlighted when anything may leave this machine, so "local" is the
-        only state that reads as settled.
-        """
-        for mode, expected in (("local", False), ("local-cloud", True),
-                               ("cloud", True)):
-            state.config.answer_mode = mode
-            strip = self._strip(state)
-            on = "mode-chip-on" in strip._answer_chip.get_css_classes()
-            assert on is expected, f"{mode!r} read as {'on' if on else 'off'}"
-
-    def test_the_word_fits_the_strips_label_contract(self, state):
-        """`test_ui_layout_contract` fails any label over 30 characters that
-        can neither wrap nor ellipsise, and these cannot.
-        """
-        for mode, _word, _line in _ModeStrip._MODES:
-            assert len(_ModeStrip._MODE_WORDS[mode]) <= 30, (
-                f"{mode!r}'s chip word is over 30 characters")
-
-    def test_every_mode_has_a_menu_line(self, state):
-        assert len(_ModeStrip._MODES) == 3
-        lines = [line for _k, _w, line in _ModeStrip._MODES]
-        assert len(set(lines)) == 3, "two modes share a menu line"
-
-    def test_the_tooltip_names_the_current_mode(self, state):
-        state.config.answer_mode = "cloud"
-        strip = self._strip(state)
-        assert "Cloud" in strip._answer_chip.get_tooltip_text()
-        assert "local model" in strip._answer_chip.get_tooltip_text()
-
-    def test_the_chip_says_which_mode_it_is_in_plain_words(self, state):
-        """The tooltip, because that is the read-back this PyGObject has.
-
-        **`get_accessible_name()` does not exist on a `Gtk.MenuButton`** - the
-        first version of this test called it and raised `AttributeError`, the
-        same shape of mistake this file records for
-        `get_accessible_property` in `test_the_strip_carries_an_accessible_label_
-        for_every_chip`: an API that is not there, read as if it were. So the
-        sentence is asserted through the tooltip, and the accessible label is
-        still set in `refresh()` for a screen reader to announce.
-        """
-        state.config.answer_mode = "local"
-        strip = self._strip(state)
-        tip = strip._answer_chip.get_tooltip_text()
-        assert "Where answers come from" in tip
-        assert "This computer" in tip

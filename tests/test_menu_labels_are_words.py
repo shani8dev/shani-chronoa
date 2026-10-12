@@ -59,9 +59,10 @@ LONG_TEXT = 30
 #: going unchecked.
 DROPDOWNS = (
     ("reply style", "_STYLES", "_style_chip"),
-    ("answer rules", "_RULES", "_rules_chip"),
+    ("what it may change", "_CAPABILITY", "_rules_chip"),
+    ("when it may act", "_AMBIENT", "_ambient_chip"),
     ("hands free", "_HANDS", "_hands_chip"),
-    ("answer mode", "_MODES", "_answer_chip"),
+    ("where it may go", "_EGRESS", "_answer_chip"),
     ("answer model", None, "_model_chip"),     # built from disk, not a constant
 )
 
@@ -76,6 +77,10 @@ class _Config:
         self.reply_style = "ordinary"
         self.answer_mode = "local-cloud"
         self.model = "small"
+        self._bools = {"background-mode-enabled": False}
+
+    def get_bool(self, key, default=False):
+        return self._bools.get(key, default)
 
 
 def _labels_of(menu):
@@ -137,7 +142,9 @@ def test_every_dropdown_labels_its_items_with_the_word(strip):
         assert _labels_of(menu) == [r[1] for r in rows], (
             f"{what}: the menu labels are not the table's words")
         checked += 1
-    assert checked == len(DROPDOWNS)
+    assert checked == len(DROPDOWNS), (
+        f"the strip grew a dropdown this list does not name: "
+        f"{len(DROPDOWNS)} listed")
 
 
 def test_no_dropdown_label_can_exceed_the_window(strip):
@@ -190,7 +197,7 @@ def test_the_chip_still_explains_the_current_choice(strip):
     """
     chip = strip._rules_chip
     tooltip = chip.get_tooltip_text() or ""
-    word, line = _ModeStrip._RULES[0][1], _ModeStrip._RULES[0][2]
+    word, line = _ModeStrip._CAPABILITY[0][1], _ModeStrip._CAPABILITY[0][2]
     assert word in tooltip, (
         f"the chip tooltip does not name the current choice: {tooltip!r}")
     assert line in tooltip, (

@@ -208,11 +208,13 @@ class _ModeStrip(Gtk.Box):
         # Dictate and the Listening page are not modes and are not here: Dictate
         # is one action and stays with the mic button that shares its subject,
         # and the Listening panel is navigation, which belongs to the sidebar.
-        self._rules_chip = self._rules_chip()
+        self._rules_chip = self._capability_chip()
         self.append(self._rules_chip)
+        self._ambient_chip = self._ambient_chip()
+        self.append(self._ambient_chip)
         self._hands_chip = self._hands_free_chip()
         self.append(self._hands_chip)
-        self._answer_chip = self._answer_mode_chip()
+        self._answer_chip = self._egress_chip()
         self.append(self._answer_chip)
         self._style_chip = self._reply_style_chip()
         self.append(self._style_chip)
@@ -276,26 +278,46 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         return button
 
-    #: What Chronoa is allowed to do, as one choice rather than two booleans.
+    #: What it may **change**, as one choice.
     #:
-    #: **Four independent toggles made sixteen combinations and no "usual".**
-    #: Plan mode and privacy are both *limits*, and a person choosing between
-    #: "may change things" and "must stay local" is making one decision - so they
-    #: are one dropdown with the four combinations that mean something, ordered
-    #: so the unrestricted state comes first.
-    _RULES = (
+    #: **The privacy half of this chip moved to "Where it may go".** This was one
+    #: four-way menu crossing *what it may change* with *what may leave the
+    #: machine*, and those are unrelated questions: "Read only" forbids changing
+    #: things and permits sending them away, "Local only" does the opposite. **So
+    #: the four options could not be ordered against each other** - a person
+    #: choosing between "Read only" and "Local only" cannot tell which is
+    #: stricter, because neither is - and a menu of modes that is not a total
+    #: order is not a choice, it is a puzzle.
+    #:
+    #: Worse, "Local only" decided where answers came from, which the *next* chip
+    #: also decided. The two chips could contradict each other and did: measured,
+    #: `privacy=True` with `answer-mode=cloud` left the neighbour chip reading
+    #: "Cloud" while `_apply_answer_mode` dropped the cloud chain and answered
+    #: locally. One question per chip, and neither can contradict the other.
+    _CAPABILITY = (
         ("anything", "Anything",
-         "Anything it is asked to, on this machine and online",
-         "security-medium-symbolic"),
+         "It may look at things and change them", "security-medium-symbolic"),
         ("read-only", "Read only",
-         "Read only: it may look but must not change anything",
+         "It may look but must not change anything",
          "document-edit-symbolic"),
-        ("local-only", "Local only",
-         "Local only: nothing leaves this machine",
-         "security-high-symbolic"),
-        ("read-local", "Local and read only",
-         "Local and read only: nothing leaves, and it changes nothing",
-         "security-high-symbolic"),
+    )
+
+    #: What it does **when you are not asking**, as one choice.
+    #:
+    #: Surfaced by scanning all 202 schema keys: `background-mode-enabled` gates
+    #: the daemon surface - "Keep Chronoa's automatic rules running in the
+    #: background" - and it decides whether Chronoa acts at all while you are
+    #: away, which is a bigger trust decision than either of the other two chips
+    #: and was not on the strip at all. A mode strip answers "what is this right
+    #: now", and "on-ask" versus "in the background" is the difference between a
+    #: tool and an agent.
+    _AMBIENT = (
+        ("on-ask", "Only when asked",
+         "It acts only in answer to something you asked for",
+         "dialog-question-symbolic"),
+        ("background", "In the background",
+         "Its automatic rules keep running when you are not talking to it",
+         "preferences-system-symbolic"),
     )
 
     #: How it listens, as one choice rather than two booleans.
@@ -319,59 +341,84 @@ class _ModeStrip(Gtk.Box):
          "reply", "media-playback-pause-symbolic"),
     )
 
-    #: Where answers come from, as one choice.
-    _MODES = (
-        ("local", "This computer",
-         "This computer: nothing leaves this machine", "computer-symbolic"),
-        ("local-cloud", "This computer, then cloud",
-         "This computer, then cloud: answer here when you can, reach a "
-         "provider when you cannot", "network-transmit-receive-symbolic"),
+    #: Where it may **go**, as one choice: the answer engine and the egress lock
+    #: together.
+    #:
+    #: **These are one decision, not two.** "Nothing leaves this machine" and
+    #: "answer from here" are the same thing a person means by "keep it local" -
+    #: a question that goes to a provider has left the machine. So the lock and
+    #: the engine are one menu of three, which makes the contradictory pair
+    #: ("Local only" and "Cloud") unrepresentable rather than merely discouraged.
+    #:
+    #: `answer-mode` is untouched underneath: it is a stored setting with three
+    #: real values, and this chip *writes* it alongside `privacy-mode` rather than
+    #: replacing it.
+    _EGRESS = (
+        ("this-machine", "Nothing leaves",
+         "Nothing leaves this machine, not even a question",
+         "security-high-symbolic"),
+        ("local-answers", "This machine answers",
+         "Questions are answered here; it may still look things up",
+         "computer-symbolic"),
+        ("local-then-cloud", "This machine, then cloud",
+         "Answer here when you can, reach a provider when you cannot",
+         "network-transmit-receive-symbolic"),
         ("cloud", "Cloud",
-         "Cloud: answer from a provider even when a local model is installed",
+         "Answer from a provider even when this machine could",
          "network-server-symbolic"),
     )
 
-    def _rules_chip(self) -> Gtk.MenuButton:
-        """What it may do and where it may do it, in one dropdown.
+    def _capability_chip(self) -> Gtk.MenuButton:
+        """What it may change, in one dropdown of two.
 
-        Plan mode was a chip, Local only was a chip, and Settings had both
-        switches. They are the same question - "what is this allowed to do" - and
-        the four combinations are the only ones that mean anything, so a dropdown
-        names the pair in words instead of asking a person to multiply two
-        checkboxes in their head.
+        Two options, which is a toggle wearing a dropdown's clothes - but the
+        alternative is a bare switch whose state is invisible in a screenshot,
+        and this strip's whole argument is that the current mode should be legible
+        at a glance. It is bound to the stateful `app.answer-rules` action, so GTK
+        marks the current one and the chip and the menu cannot disagree.
         """
         button, label, image = self._menu_chip("security-medium-symbolic")
         self._rules_label = label
         self._rules_image = image
         menu = Gio.Menu()
-        for key, word, _line, _icon in self._RULES:
+        for key, word, _line, _icon in self._CAPABILITY:
             menu.append(word, f"app.answer-rules::{key}")
         button.set_menu_model(menu)
-        button.set_tooltip_text(
-            "What Chronoa is allowed to do, and whether anything may leave this "
-            "machine")
+        button.set_tooltip_text("Whether Chronoa may change things, not just read them")
         return button
 
-    def _read_rules(self) -> str:
-        """The current combination, as one word.
+    def _ambient_chip(self) -> Gtk.MenuButton:
+        """Whether it acts when you are not asking, in one dropdown of two."""
+        button, label, image = self._menu_chip("preferences-system-symbolic")
+        self._ambient_label = label
+        self._ambient_image = image
+        menu = Gio.Menu()
+        for key, word, _line, _icon in self._AMBIENT:
+            menu.append(word, f"app.answer-ambient::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text(
+            "Whether Chronoa's automatic rules keep running when you are not "
+            "talking to it")
+        return button
 
-        Read from the two settings it owns rather than from a third, so the
-        Settings window and the shortcut keys cannot disagree with this chip:
-        whichever wrote last, the chip follows.
+    def _read_capability(self) -> str:
+        """The capability choice, read from the module that owns it."""
+        return "read-only" if self._read_plan_mode() else "anything"
+
+    def _read_ambient(self) -> str:
+        """Whether the background rules run, read from the setting that owns it.
+
+        Defaulting to `on-ask` when the read fails is the safe direction: this
+        setting gates a daemon, and guessing "background" because a read raised
+        would start acting on a machine whose owner never asked it to.
         """
         try:
-            local = bool(self._config.privacy_mode)
-            read_only = self._read_plan_mode()
+            running = bool(self._config.get_bool("background-mode-enabled", False))
         except Exception:                               # noqa: BLE001
-            logger.warning("could not read the rules state", exc_info=True)
-            return "anything"
-        if local and read_only:
-            return "read-local"
-        if local:
-            return "local-only"
-        if read_only:
-            return "read-only"
-        return "anything"
+            logger.warning("could not read the background-mode setting",
+                           exc_info=True)
+            return "on-ask"
+        return "background" if running else "on-ask"
 
     def _hands_free_chip(self) -> Gtk.MenuButton:
         """How it hears you, as one dropdown.
@@ -503,41 +550,50 @@ class _ModeStrip(Gtk.Box):
             return "over"
         return "off"
 
-    def _answer_mode_chip(self) -> Gtk.MenuButton:
-        """Where a reply comes from, as a chip showing the current choice.
+    def _egress_chip(self) -> Gtk.MenuButton:
+        """Where it may go: the engine and the egress lock, as one choice.
 
-        **The setup wizard asked this once and then forgot the answer.** The Mode
-        page offers "In the cloud" and writes `setup-mode`, which decides which
-        pages the wizard shows - while `_init_components` builds Ollama and
-        llama.cpp first regardless and only reaches the cloud when neither
-        answers. So someone who chose the cloud and happened to have a local
-        model installed was answered locally, by the download they had just
-        declined. The choice is a setting now (`answer-mode`), this chip is where
-        it changes, and `_apply_answer_mode` makes it true immediately rather
-        than at the next launch.
+        **This chip is the honest one.** It used to be `answer-mode` alone, so
+        that setting "Local only" overrode what it claimed: measured, with privacy
+        on and `answer-mode=cloud` it read "Cloud" while `_apply_answer_mode`
+        dropped the cloud chain and answered locally. A chip that reports a
+        preference the app has overridden is worse than no chip, because it is
+        read as a promise.
 
-        Three values, so a menu rather than a toggle, bound to the stateful
-        `app.answer-mode` action exactly the way the reply style is - GTK draws
-        the menu's items as radio buttons and marks the current one from the
-        action's own state, so the chip and the menu cannot disagree.
+        So the chip derives its word from **both** settings, and offers the three
+        states that are actually reachable rather than the four that are not.
         """
         button, label, image = self._menu_chip("network-transmit-receive-symbolic")
         self._mode_label = label
         self._mode_image = image
         menu = Gio.Menu()
-        for key, word, _line, _icon in self._MODES:
-            menu.append(word, f"app.answer-mode::{key}")
+        for key, word, _line, _icon in self._EGRESS:
+            menu.append(word, f"app.answer-egress::{key}")
         button.set_menu_model(menu)
         return button
 
-    def _read_answer_mode(self) -> str:
+    def _read_egress(self) -> str:
+        """The egress choice, derived from the two settings that together make it.
+
+        **Derived, never stored twice.** The chip's word is a function of
+        `privacy-mode` and `answer-mode` rather than a third setting that has to
+        be kept in step with the two - which is how the strip came to claim a
+        state the app had overridden in the first place.
+        """
         try:
+            if bool(self._config.privacy_mode):
+                return "this-machine"
             mode = str(getattr(self._config, "answer_mode", "") or "")
         except Exception:                               # noqa: BLE001
-            logger.warning("could not read the answer mode", exc_info=True)
-            mode = ""
-        return mode if mode in {row[0] for row in self._MODES} \
-            else "local-cloud"
+            logger.warning("could not read the egress settings", exc_info=True)
+            return "local-then-cloud"
+        # **Every reachable pair maps to exactly one word.** An earlier version
+        # collapsed `local` and `local-cloud` together as "the same egress state",
+        # which was wrong in the only way that matters here: with privacy off and
+        # `answer-mode=local` it read "then cloud" while the app answered locally
+        # and never reached one. Measured, six combinations, before and after.
+        return {"cloud": "cloud",
+                "local": "local-answers"}.get(mode, "local-then-cloud")
 
     def _read_plan_mode(self) -> bool:
         """Read the plan-mode module directly, which is what owns the state.
@@ -601,9 +657,13 @@ class _ModeStrip(Gtk.Box):
         self._syncing = True
         try:
             self._draw(self._rules_chip, self._rules_label,
-                       self._read_rules(), self._RULES,
-                       "What Chronoa may do", quiet=("anything",),
+                       self._read_capability(), self._CAPABILITY,
+                       "What it may change", quiet=("anything",),
                        image=self._rules_image)
+            self._draw(self._ambient_chip, self._ambient_label,
+                       self._read_ambient(), self._AMBIENT,
+                       "When it may act", quiet=("on-ask",),
+                       image=self._ambient_image)
             self._draw(self._hands_chip, self._hands_label,
                        self._read_hands_free(), self._HANDS,
                        "How Chronoa hears you", quiet=("off",),
@@ -612,10 +672,10 @@ class _ModeStrip(Gtk.Box):
             self._draw(self._style_chip, self._style_label,
                        style, self._STYLES, "Reply style",
                        quiet=("ordinary",), image=self._style_image)
-            mode = self._read_answer_mode()
             self._draw(self._answer_chip, self._mode_label,
-                       mode, self._MODES, "Where answers come from",
-                       quiet=("local",), image=self._mode_image)
+                       self._read_egress(), self._EGRESS, "Where it may go",
+                       quiet=("this-machine", "local-answers"),
+                       image=self._mode_image)
             rows = self._model_rows()
             # The menu is rebuilt here rather than once at construction: the
             # rows come from what is on disk, and a model downloaded while the

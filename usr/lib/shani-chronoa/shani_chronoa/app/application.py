@@ -426,7 +426,17 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
     @property
     def _RULES_KEYS(self):
         from shani_chronoa.gui.window import _ModeStrip
-        return {row[0] for row in _ModeStrip._RULES}
+        return {row[0] for row in _ModeStrip._CAPABILITY}
+
+    @property
+    def _EGRESS_KEYS(self):
+        from shani_chronoa.gui.window import _ModeStrip
+        return {row[0] for row in _ModeStrip._EGRESS}
+
+    @property
+    def _AMBIENT_KEYS(self):
+        from shani_chronoa.gui.window import _ModeStrip
+        return {row[0] for row in _ModeStrip._AMBIENT}
 
     @property
     def _HANDS_KEYS(self):
@@ -434,32 +444,81 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         return {row[0] for row in _ModeStrip._HANDS}
 
     def _on_answer_rules(self, action, value) -> None:
-        """Write the four-way "what may it do" choice, then read back.
+        """Write the "what it may change" choice, then read back.
 
-        **Two booleans became four words because the pair of them was one
-        question.** Plan mode and privacy were separate chips and separate
-        Settings switches; a person deciding between "may change things" and
-        "must stay local" is making one decision, and the two toggles left
-        sixteen combinations with no way to say "the usual one" in a glance.
-
-        Privacy is written with its own action so the rest of the app - the
-        cloud chain drop, the status line - goes through the path it already
-        had, rather than a second place that writes the key.
+        **This used to be two questions in one menu.** It crossed *may it change
+        things* with *may anything leave this machine*, which are unrelated - so
+        its four options could not be ordered against each other, and "Local only"
+        decided where answers came from, which the chip beside it also decided.
+        The two could contradict each other and did: with privacy on and
+        `answer-mode=cloud`, this chip's neighbour read "Cloud" while the app
+        answered locally. The privacy half now belongs to `answer-egress`.
         """
         key = value.get_string() if value is not None else ""
         if key not in self._RULES_KEYS:
             logger.warning("unknown answer-rules choice %r", key)
             return
-        local = key in ("local-only", "read-local")
-        read_only = key in ("read-only", "read-local")
-        if local and not self.config.privacy_mode:
-            self._toggle_privacy(None, None)
-        elif not local and self.config.privacy_mode:
-            self._toggle_privacy(None, None)
         from shani_chronoa import planmode
+        read_only = key == "read-only"
         if planmode.is_enabled() != read_only:
             self._toggle_plan_mode(None, None)
         action.set_state(GLib.Variant("s", key))
+        self._refresh_strip()
+
+    def _on_answer_egress(self, action, value) -> None:
+        """Write "where it may go": the egress lock and the engine together.
+
+        **One action because one decision.** "Keep it local" means both that
+        nothing leaves the machine and that questions are answered here, and
+        offering those separately is what let the strip show a cloud answer it was
+        not giving. So the three reachable states are chosen as a pair and the
+        contradictory one - local-only *and* cloud - is not offered rather than
+        offered and ignored.
+
+        `answer-mode` keeps its three stored values underneath; this writes it
+        rather than replacing it, because it is read by the engine and by the
+        wizard.
+        """
+        key = value.get_string() if value is not None else ""
+        if key not in self._EGRESS_KEYS:
+            logger.warning("unknown answer-egress choice %r", key)
+            return
+        if key == "this-machine":
+            mode = "local"
+            self.config.set("privacy-mode", True)
+            self.config.set("cloud-fallback-enabled", False)
+        elif key == "local-answers":
+            mode = "local"
+            self.config.set("privacy-mode", False)
+            self.config.set("cloud-fallback-enabled", False)
+        elif key == "cloud":
+            mode = "cloud"
+            self.config.set("privacy-mode", False)
+            self.config.set("cloud-fallback-enabled", True)
+        else:
+            mode = "local-cloud"
+            self.config.set("privacy-mode", False)
+            self.config.set("cloud-fallback-enabled", True)
+        self.config.set("answer-mode", mode)
+        action.set_state(GLib.Variant("s", key))
+        self._apply_answer_mode()
+        self._refresh_strip()
+
+    def _on_answer_ambient(self, action, value) -> None:
+        """Write "when it may act": only on request, or in the background.
+
+        The setting is `background-mode-enabled`, which gates the daemon surface.
+        It is on the strip because it decides whether Chronoa acts at all while
+        you are away, which is a larger trust question than either other chip and
+        was reachable only from Settings until now.
+        """
+        key = value.get_string() if value is not None else ""
+        if key not in self._AMBIENT_KEYS:
+            logger.warning("unknown answer-ambient choice %r", key)
+            return
+        self.config.set("background-mode-enabled", key == "background")
+        action.set_state(GLib.Variant("s", key))
+        self._sync_background_mode()
         self._refresh_strip()
 
     def _on_hands_free(self, action, value) -> None:
@@ -1053,6 +1112,9 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # actions so the menu and the chip cannot disagree.
         for name, handler, initial in (
                 ("answer-rules", self._on_answer_rules, "anything"),
+                ("answer-egress", self._on_answer_egress,
+                 "local-then-cloud"),
+                ("answer-ambient", self._on_answer_ambient, "on-ask"),
                 ("hands-free", self._on_hands_free, "off"),
                 ("answer-model", self._on_answer_model, "")):
             act = Gio.SimpleAction.new_stateful(

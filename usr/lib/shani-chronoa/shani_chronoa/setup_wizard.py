@@ -519,10 +519,13 @@ _SETUP_ALIASES = {"more": "extras", "code": "eyes", "picture": "imagine",
                   "download": "review", "keys": "cloud-keys", "tts": "voice"}
 
 
-#: Widest a wizard page's content column gets, in px. Wider than the 560px
-#: default window so the default is untouched; narrow enough that a row's title
-#: and its switch stay within one glance.
-WIZARD_MAX_WIDTH = 640
+#: Widest a wizard page's content column gets, in px. **Equal to the 560px
+#: default window, and it has to be.** An `Adw.Clamp` only starts squeezing when
+#: `tightening_threshold` is reached, so a maximum *wider* than the window is no
+#: limit at all - measured, at 640px the `cloud-keys` page asked for 640px of a
+#: 560px window and got a sideways scrollbar, the same defect this file records
+#: as fixed once already at 590px. The same number twice is the point.
+WIZARD_MAX_WIDTH = 560
 
 
 def _register_setup_pages() -> None:
@@ -1329,6 +1332,14 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     def pick_mode(key: str) -> None:
         config.set("setup-mode", key)
+        # **And the setting that actually decides it.** `setup-mode` chose which
+        # pages the wizard showed; `answer-mode` is what the running app reads,
+        # and until 2026-10-12 nothing here wrote it - so "In the cloud" was a
+        # promise about which screens came next while `_init_components` built
+        # Ollama and llama.cpp first regardless. A person who chose the cloud and
+        # happened to have a local model installed was answered locally, by the
+        # download they had just declined.
+        config.set("answer-mode", "cloud" if key == "cloud" else "local-cloud")
         unchoose("brain")
         unchoose("ears")
 

@@ -133,7 +133,8 @@ class TestTheModelDropdown:
         """Adwaita has five icon names this project has already guessed wrong."""
         strip = _strip(gsettings_env, None)
         icon = strip._model_image.get_icon_name()
-        used = {r[3] for r in strip._MODES} | {r[3] for r in strip._RULES}
+        used = ({r[3] for r in strip._EGRESS} | {r[3] for r in strip._CAPABILITY}
+               | {r[3] for r in strip._AMBIENT})
         assert icon in used or icon == "object-select-symbolic", (
             f"{icon} is not one of the icons this strip already uses, and a "
             f"theme lookup that fails draws a blank box")
