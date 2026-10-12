@@ -575,7 +575,13 @@ _PACKAGE_HINTS = {
     "lp": "cups",
     "lpr": "cups",
     "lpstat": "cups",
-    "xdotool": "xdotool",
+    # `xdotool` was here until 2026-10-12 and is **not** a
+    # matrix-derived name: the docstring above says the binary is
+    # not installed on the image that was audited, so pacman's file
+    # database could not confirm it. It is listed once, further down,
+    # under the entries the matrix cannot confirm - which is where
+    # it belongs. It appeared twice, and a duplicate key is always a
+    # dead *earlier* entry, so the table looked right either way.
     "systemctl": "systemd",
     "journalctl": "systemd",
     "localectl": "systemd",
