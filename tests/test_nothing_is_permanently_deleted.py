@@ -427,17 +427,29 @@ class TestTheWholeCallSurface:
         """**The one that closes the gap.** A skill that behaves correctly and is
         then overridden downstream is not fixed, and this repository already
         records `driver_dev`'s check being inherited by the three skills in a
-        module it was written for. So this asserts on `execute_tool_outcome`."""
+        module it was written for. So this asserts on `execute_tool_outcome`.
+
+        **Every assertion carries `out.text`.** The first version said
+        `assert not target.exists()` and, when this failed inside a 34-file sweep,
+        printed `AssertionError: assert not True` - which names neither the skill
+        nor the refusal nor the environment. A refusal lands in the `ran=True`
+        cell by design, so "ran" cannot distinguish a delete from a gate that
+        closed. The message has to carry the sentence the model actually got, or
+        the next person re-derives this from scratch.
+        """
         target = _in_trashbox(a_real_trash, "end-to-end.txt")
         target.write_text("payload\n")
 
         out = execute_tool_outcome("delete_file", {"path": str(target)})
 
         assert out.ran, out.text
-        assert not target.exists()
-        assert (a_real_trash / "files" / "end-to-end.txt").read_text() == "payload\n"
-        assert (a_real_trash / "info" / "end-to-end.txt.trashinfo").is_file()
-        assert out.verdict.value == "verified", out.text
+        assert not target.exists(), f"the file is still there; the skill said: {out.text}"
+        assert (a_real_trash / "files" / "end-to-end.txt").read_text() == "payload\n", (
+            f"the trash holds the wrong bytes; the skill said: {out.text}")
+        assert (a_real_trash / "info" / "end-to-end.txt.trashinfo").is_file(), (
+            f"no restore record, so it cannot be restored; the skill said: {out.text}")
+        assert out.verdict.value == "verified", (
+            f"verdict is {out.verdict.value}, not verified; the skill said: {out.text}")
 
 
 class TestTheOriginalCannotPassThis:
