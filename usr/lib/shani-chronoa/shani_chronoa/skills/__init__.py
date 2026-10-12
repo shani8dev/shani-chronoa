@@ -89,6 +89,88 @@ class Skill(NamedTuple):
 _USER_SKILLS_DIR = files.config_home() / "shani-chronoa" / "skills"
 
 
+#: **Caps on what one skill's schema may declare.**
+#:
+#: `harness-study/laya-decision`'s `laya/structured.py` states the principle and
+#: its own numbers: *"an object of properties, each an enum choice, a boolean, or
+#: a bounded integer scale. **Anything that cannot be answered from a fixed option
+#: set (free strings, arrays, nested objects) is rejected with an error that
+#: names the path**"*, under `MAX_PROPERTIES = 32`, `MAX_OPTIONS = 32`,
+#: `MAX_SCORE_LEVELS = 10`.
+#:
+#: **The principle transferred; the numbers did not, and measuring said so.**
+#: `solve_math` enumerates its hundred arithmetic operations as one enum, so
+#: porting `MAX_OPTIONS = 32` verbatim made the loader skip a **shipped skill** -
+# the registry dropped 257 -> 256 on the first run, which is how the cap was
+#: measured to be wrong. The first measurement was circular too: it took the
+#: maxima over the *registered* registry, which the cap had already filtered, and
+#: reported 24 options because the 100-option skill was gone by then.
+#:
+#: These are therefore measured over every built-in skill **with the cap
+#: bypassed**, then given headroom:
+#:
+#: | what | measured max | cap |
+#: |---|---|---|
+#: | properties | 22 (`browse`) | 32 |
+#: | enum options | **100** (`solve_math`) | **128** |
+#: | nesting depth | 2 | 4 |
+#:
+#: What the caps are for is the next skill, not this one. This repository records
+#: that 131 schemas are already ~19,700 tokens against an 8k local context, and
+#: that a single schema whose required property followed an optional one took the
+#: **whole MCP server** down rather than that one tool. A schema with 200
+#: parameters, or 5,000 options on one enum, is a tool the model can never be
+#: sent, and a registration that should be refused by name rather than accepted
+#: and discovered later.
+_SCHEMA_MAX_PROPERTIES = 32
+_SCHEMA_MAX_OPTIONS = 128
+_SCHEMA_MAX_DEPTH = 4
+
+
+def schema_refusal(schema: object, path: str = "parameters",
+                   depth: int = 0) -> str:
+    """Why `schema` is unusable as a tool schema, or "" when it is fine.
+
+    **A reason rather than a boolean, which is the point of the transfer.** The
+    loader already skips a malformed schema with a warning; with a bool the
+    warning cannot say *which* part was wrong, so a person adding a large schema
+    learns that it did not register and nothing about what to change. Laya's
+    `SchemaError` names the path for the same reason.
+    """
+    if not isinstance(schema, dict):
+        return f"{path} is not an object"
+    if depth > _SCHEMA_MAX_DEPTH:
+        return f"{path} nests past {_SCHEMA_MAX_DEPTH} levels"
+    properties = schema.get("properties")
+    if properties is not None and not isinstance(properties, dict):
+        return f"{path}.properties is not an object"
+    required = schema.get("required")
+    if required is not None and not isinstance(required, list):
+        return f"{path}.required is not a list"
+    if isinstance(properties, dict):
+        if len(properties) > _SCHEMA_MAX_PROPERTIES:
+            return (f"{path} declares {len(properties)} properties, past the "
+                    f"{_SCHEMA_MAX_PROPERTIES} one tool may ask for")
+        for name, prop in properties.items():
+            here = f"{path}.properties.{name}"
+            if not isinstance(prop, dict):
+                return f"{here} is not an object"
+            options = prop.get("enum")
+            if options is not None:
+                if not isinstance(options, list) or not options:
+                    return f"{here}.enum is not a non-empty list"
+                if len(options) > _SCHEMA_MAX_OPTIONS:
+                    return (f"{here} lists {len(options)} options, past the "
+                            f"{_SCHEMA_MAX_OPTIONS} a model may be asked to "
+                            f"choose between in one call")
+            nested = prop.get("properties")
+            if nested is not None:
+                said = schema_refusal(prop, here, depth + 1)
+                if said:
+                    return said
+    return ""
+
+
 def is_valid_schema(schema: object) -> bool:
     """Return True if `schema` is a well-formed Ollama-style function schema.
 
@@ -98,6 +180,11 @@ def is_valid_schema(schema: object) -> bool:
     `required`). This is the single validation used at registration time
     and by the MCP/cloud translators, so a malformed entry is skipped
     deterministically instead of crashing whichever consumer reads it.
+
+    **It also refuses a schema past the caps in `schema_refusal`**, which
+    returns the reason; callers that want to say why a skill was skipped
+    (`test_skill_schema_caps.py`) should read that function rather than
+    re-deriving the numbers.
     """
     if not isinstance(schema, dict):
         return False
@@ -118,6 +205,9 @@ def is_valid_schema(schema: object) -> bool:
             return False
         required = parameters.get("required")
         if required is not None and not isinstance(required, list):
+            return False
+        said = schema_refusal(parameters)
+        if said:
             return False
     return True
 
@@ -144,7 +234,10 @@ def _register(module: object, source: str, tools: list, handlers: dict) -> None:
             logger.warning(f"Skipping malformed skill entry in '{source}': name must be a non-empty string")
             continue
         if not is_valid_schema(skill.schema):
-            logger.warning(f"Skipping malformed skill entry in '{source}': schema for '{name}' is not a valid function schema")
+            function = skill.schema.get("function") if isinstance(skill.schema, dict) else None
+            parameters = function.get("parameters") if isinstance(function, dict) else None
+            why = schema_refusal(parameters) or "not a valid function schema"
+            logger.warning(f"Skipping malformed skill entry in '{source}': schema for '{name}' is {why}")
             continue
         function_name = _schema_function_name(skill.schema)
         if function_name != name:
