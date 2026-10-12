@@ -132,14 +132,28 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 #: establish is the floor; either alone would be a single box's accident.
 KV_CACHE_MEASUREMENTS: "dict[str, dict[str, float]]" = {
     "smollm2-135m-q4_k_m": {"f16": 0.0, "q8_0": -0.04, "q5_0": 0.11, "q4_0": 6.08},
+    "qwen3-0.6b-q8_0": {"f16": 0.0, "q8_0": 0.40, "q5_0": 8.53, "q4_0": 457.58},
     "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 5.81},
 }
 
-KV_CACHE_FLOOR: str = "q5_0"
+#: **The third model moved this floor, which is why the third model was measured.**
+#: Qwen3-0.6B-Q8_0 - smaller than the 8B, larger than the 135M - measures `q5_0` at
+#: **+8.53%** and `q4_0` at **+457%**, both reproduced exactly on a confirmation
+#: run. So `q5_0` is not "a known cost below the cliff"; on that model it costs
+#: more than `q4_0` costs on either of the others. The two-model evidence that put
+#: the floor at `q5_0` was luck.
+#:
+#: `q8_0` is the only step cheap on **all three** (-0.04%, +0.32%, +0.40%), so that
+#: is the floor. The rule it now encodes is stronger than "the worst measured
+#: step": a cache type is usable only if it is cheap on every model the ladder
+#: might be applied to - which is PersonaPlex's `n_q_semantic` bound taken
+#: properly, where the semantic set is what the *worst* case allows rather than
+#: what the average suggests.
+KV_CACHE_FLOOR: str = "q8_0"
 
 #: Best first, and stopping at `KV_CACHE_FLOOR`. See that constant for the
 #: measurement that excludes `q4_0`.
-CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0")
+CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0")
 
 
 def cache_bytes_per_elem(cache_type: Optional[str]) -> float:

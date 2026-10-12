@@ -21,17 +21,7 @@ TEST_FILE = "tests/test_ctxfit.py"
 _CTX = "usr/lib/shani-chronoa/shani_chronoa/ctxfit.py"
 
 MUTATIONS = [
-    {
-        "file": _CTX,
-        "old": 'KV_CACHE_FLOOR: str = "q5_0"\n',
-        "new": 'KV_CACHE_FLOOR: str = "q4_0"\n',
-        # The floor drops to the type that measured +6.1%. The clamp then lets a
-        # caller's longer ladder buy `q4_0` back, which is the whole thing the
-        # floor exists to prevent.
-        "label": "the floor drops to the type that measured 6.1% worse",
-        "expect": ["test_the_floor_is_the_cheapest_type_that_measured_free",
-                   "test_the_ladder_stops_at_the_floor"],
-    },
+    
     {
         "file": _CTX,
         "old": '    ladder = tuple(ladder[:ladder.index(KV_CACHE_FLOOR) + 1]) \\\n        if KV_CACHE_FLOOR in ladder else ladder\n',
@@ -43,16 +33,7 @@ MUTATIONS = [
         "label": "the clamp on the walked ladder is removed",
         "expect": ["test_a_longer_ladder_cannot_buy_past_the_floor"],
     },
-    {
-        "file": _CTX,
-        "old": 'CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0")',
-        "new": 'CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0", "q4_0")',
-        # The ladder reaches below the floor while the constant still says q5_0,
-        # so the two disagree - and the ladder is what the walk uses, so the
-        # measured 6.1% is paid.
-        "label": "the ladder reaches past the floor it declares",
-        "expect": ["test_the_ladder_stops_at_the_floor"],
-    },
+    
 ]
 
 # --- the second model's measurement, and the class that pins both ------------
@@ -79,3 +60,45 @@ SECOND_MODEL_ORDER = {
 }
 
 MUTATIONS = MUTATIONS + [SECOND_MODEL, SECOND_MODEL_ORDER]
+
+# --- the third model, and the floor it moved ------------------------------------
+
+THIRD_MODEL = {
+    "file": _CTX,
+    "old": '    "qwen3-0.6b-q8_0": {"f16": 0.0, "q8_0": 0.40, "q5_0": 8.53, "q4_0": 457.58},\n',
+    "new": "",
+    # The third measurement removed. The floor then rests on two models again -
+    # and the two that looked like evidence put it at q5_0, so this mutation
+    # silently revives a floor the third model overturned.
+    "label": "the third model's measurement is deleted",
+    "expect": ["test_the_floor_is_the_only_step_cheap_on_every_model",
+               "test_the_ordering_is_the_same_on_both_models"],
+}
+
+BACK_TO_Q5 = {
+    "file": _CTX,
+    "old": 'KV_CACHE_FLOOR: str = "q8_0"',
+    "new": 'KV_CACHE_FLOOR: str = "q5_0"',
+    # The floor this repo held before the third model was measured. It is not a
+    # hypothetical regression: it is what the code said until 2026-10-12.
+    "label": "the floor reverts to q5_0",
+    "expect": ["test_the_floor_is_the_only_step_cheap_on_every_model",
+               "test_the_floor_is_the_cheapest_type_that_measured_free"],
+}
+
+Q5_BACK_ON_LADDER = {
+    "file": _CTX,
+    "old": 'CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0")',
+    "new": 'CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0")',
+    # The ladder reaches past the floor, so the +8.53% step becomes reachable
+    # again while the constant still says the floor is q8_0 - the constant and
+    # the walk disagreeing.
+    "label": "the ladder reaches past the q8_0 floor it declares",
+    "expect": ["test_the_ladder_stops_at_the_floor"],
+}
+
+# Two earlier entries tested the floor while it was q5_0; their anchors
+# moved when it did, and BACK_TO_Q5 covers that same regression with an
+# anchor that is live.
+MUTATIONS = MUTATIONS + [SECOND_MODEL, SECOND_MODEL_ORDER, THIRD_MODEL,
+                      BACK_TO_Q5, Q5_BACK_ON_LADDER]

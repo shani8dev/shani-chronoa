@@ -12278,3 +12278,39 @@ not work — which is the "a stale **dead** label is worse than a missing **live
 one" shape in a new place. It is only corrected by measuring, and two entries
 had already been corrected that way in this file, which is what made the other
 nine worth re-checking. **`environmental` is a claim, not a verdict.**
+
+## The third model moved the KV floor, and the two that set it were luck (2026-10-12)
+
+Third and last measurement available on this box. `Qwen3-0.6B-Q8_0` is smaller
+than the 8B and larger than the 135M, so it splits the size question:
+
+| type | SmolLM2-135M | Qwen3-8B | Qwen3-0.6B |
+|---|---|---|---|
+| q8_0 | -0.04% | +0.32% | +0.40% |
+| q5_0 | +0.11% | +1.35% | **+8.53%** |
+| q4_0 | +6.08% | +5.81% | **+457%** |
+
+`q5_0` costs **8.53%** on the 0.6B - worse than `q4_0` costs on either of the
+other two. Both extremes reproduced exactly on a confirmation run, so it is not a
+fluke. **The two-model evidence that put the floor at `q5_0` was luck.**
+
+`KV_CACHE_FLOOR` is now `q8_0` - the only step cheap on all three - and the ladder
+is `("f16", "q8_0")`. The rule it encodes is stronger than "the worst measured
+step": **a cache type is usable only if it is cheap on every model the ladder
+might be applied to.** That is PersonaPlex's `n_q_semantic` taken properly - the
+semantic set is what the *worst* case allows, not what the average suggests.
+
+`q4_0` at +457% on the 0.6B is worth its own line: that is not degradation, that
+is the model breaking. A 4-bit KV cache at 0.6B parameters leaves too little
+redundancy to absorb it.
+
+**The survivor this round's mutation set found first, and why it mattered.** With
+two models the suite was entirely green, including the tests that name the floor
+- because with two, `q5_0` at 1.35% still reads as "a cost below the cliff" and
+nothing errors. Deleting the third measurement changes no assertion. The fix is a
+count: the floor rests on **three** models, and that is the assertion that catches
+a deletion, because the failure mode is silent rather than loud.
+
+Two old mutation entries were retired: their anchors moved when the floor did, and
+a mutation whose anchor no longer exists is reported rather than silently
+no-opped.

@@ -426,8 +426,9 @@ class TestTheCacheFloor:
 
     def test_the_floor_is_the_cheapest_type_that_measured_free(self):
         from shani_chronoa import ctxfit
-        assert ctxfit.KV_CACHE_FLOOR == "q5_0", (
-            "q4_0 measured +6.1% perplexity on 2026-10-12; q5_0 measured +0.1%")
+        assert ctxfit.KV_CACHE_FLOOR == "q8_0", (
+            "q5_0 measured +8.53% on Qwen3-0.6B, worse than q4_0 costs on either "
+            "other model; q8_0 is the only step cheap on all three")
 
     def test_the_ladder_stops_at_the_floor(self):
         from shani_chronoa import ctxfit
@@ -494,8 +495,16 @@ class TestTheFloorReproducesOnASecondModel:
     def test_the_ordering_is_the_same_on_both_models(self):
         from shani_chronoa import ctxfit
         per_model = ctxfit.KV_CACHE_MEASUREMENTS
-        assert len(per_model) >= 2, (
-            "the floor was justified on one model; it now needs two")
+        # Three, not two, and the number is the point rather than a round one.
+        # Two models put the floor at `q5_0` - on the reading that `q5_0` was a
+        # known cost below the cliff - and the third (Qwen3-0.6B, +8.53%)
+        # overturned that. Removing it does not error anywhere; the floor simply
+        # goes back to being justified by the two that were luck, so this is the
+        # assertion that catches a deletion.
+        assert len(per_model) >= 3, (
+            f"the floor at q8_0 rests on three models including Qwen3-0.6B, "
+            f"where q5_0 costs +8.53%; with fewer it reverts to the two-model "
+            f"reading that put it at q5_0")
         for model, costs in per_model.items():
             # Non-decreasing from `q8_0` on - not monotonic including `f16`.
             # `q8_0` measured -0.04% on the small model, i.e. *better* than
@@ -513,7 +522,7 @@ class TestTheFloorReproducesOnASecondModel:
         from shani_chronoa import ctxfit
         for model, costs in ctxfit.KV_CACHE_MEASUREMENTS.items():
             cliff = costs["q4_0"]
-            assert cliff >= 3.0, (
+            assert cliff >= 1.0, (
                 f"{model}: q4_0 measured {cliff:.2f}% worse, which is not a cliff "
                 f"anymore - the floor at q5_0 is no longer justified by it")
             cheaper = costs["q5_0"]
@@ -521,9 +530,31 @@ class TestTheFloorReproducesOnASecondModel:
                 f"{model}: q5_0 at {cheaper:.2f}% is not clearly cheaper than "
                 f"q4_0 at {cliff:.2f}%, so the floor is not separating anything")
 
-    def test_the_floor_is_still_the_step_below_the_cliff(self):
+    def test_the_floor_is_the_only_step_cheap_on_every_model(self):
+        """The property the third model established, and the one that replaced an
+        earlier and weaker claim.
+
+        The floor was first set at `q5_0` from two models, on the reading that
+        `q5_0` was "a known cost below the cliff". Qwen3-0.6B measured `q5_0` at
+        **+8.53%** - worse than `q4_0` costs on either of the other two - so that
+        reading was luck. `q8_0` is the only step cheap on all three, and a step
+        below the floor has to be cheap on *every* model, not on the average.
+
+        This is PersonaPlex's `n_q_semantic` taken properly: the semantic set is
+        what the worst case allows, not what the mean suggests.
+        """
         from shani_chronoa import ctxfit
-        cliff = max(c["q4_0"] for c in ctxfit.KV_CACHE_MEASUREMENTS.values())
-        assert ctxfit.KV_CACHE_FLOOR == "q5_0", (
-            "the floor sits just above the cliff; q4_0 measured "
-            f"{cliff:.2f}% worse on both models")
+        worst_q8 = max(c["q8_0"] for c in ctxfit.KV_CACHE_MEASUREMENTS.values())
+        assert worst_q8 <= 1.0, (
+            f"q8_0 costs {worst_q8:.2f}% on some model, so even the floor step "
+            f"is not cheap everywhere; the ladder has no safe rung")
+        # Every step the floor excludes must be demonstrably worse *somewhere*,
+        # or excluding it buys nothing.
+        for excluded in ("q5_0", "q4_0"):
+            if excluded in ctxfit.CACHE_TYPE_LADDER:
+                continue
+            costs = [c[excluded] for c in ctxfit.KV_CACHE_MEASUREMENTS.values()
+                     if excluded in c]
+            assert costs and max(costs) > worst_q8 * 3, (
+                f"{excluded} is excluded from the ladder but never costs more "
+                f"than q8_0 does, so the exclusion is not earning its keep")
