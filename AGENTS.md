@@ -13763,3 +13763,68 @@ Each `EventEvaluation` carries `signal_status` and `reason`, which names which o
 the two paths was taken and therefore which of two fixes applies. One is a source
 reader reporting unavailable for a path it should accept; the other is a baseline
 being recorded when it should not be, or not recorded when it should.
+
+## ROOT CAUSE: the trigger tests share a real OS lock with the running assistant (2026-10-12)
+
+The previous entry recorded this as "the one datum still missing". **It is not
+missing, and it is the same defect this file records for `GSETTINGS_BACKEND` and
+for `fake_bin`'s `PATH`: a fixture that does not control its environment is
+describing the machine it ran on.**
+
+`runner_lock` is not a test double. `runner_lock.py:1` states its job:
+
+> One process runs the trigger engine: the window, or the background daemon -
+> never both. [...] `flock()` is released by the kernel when the holder exits or
+> crashes, so a dead process can never keep the rules stopped.
+
+and `holds()` **takes** the lock when free, returning False only when another
+process already holds it. `senses/scheduler.py:640` gates the event poll on it:
+
+    if not runner_lock.holds():
+        return []
+
+**Measured, the lock path is not isolated.** `lock_path()` resolves to
+`$XDG_RUNTIME_DIR/shani-chronoa/triggers.lock`, and `grep -n XDG_RUNTIME_DIR
+tests/conftest.py` returns **nothing** - the repo's own autouse `gsettings_env`
+isolates HOME, `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CONFIG_HOME`, but not
+this one. So on this box:
+
+    $ ls -la /run/user/1001/shani-chronoa/triggers.lock
+    -rw------- 1 shrinivaskumbhar shrinivaskumbhar 7 ... triggers.lock
+    $ cat /run/user/1001/shani-chronoa/triggers.lock
+    314967                       <- another process, holding the flock
+    $ pgrep -af shani-chronoa
+    142638 ... shani-chronoa-overlay --socket .../chronoa-cue-container-slack.sock
+
+A real Chronoa process is running. `runner_lock.holds()` therefore returns
+**False**, `_poll_event_rules` returns `[]` before the engine is ever asked, and
+all six `TestTheRealLoopEvaluatesIt` tests fail with `expected exactly one
+dispatch, got []`.
+
+**So the consequence is not "six flaky tests".** It is: **this test class cannot
+pass on a machine where the assistant is actually running** - which is every
+machine that has a user. And it fails *silently in the right direction*: the
+product is behaving exactly as designed (leave the rules alone when another
+engine holds them), and the test is measuring the machine rather than the code.
+
+Corroborating that the product is right and only the test is wrong: the rule arms
+correctly, the baseline poll is correct, `event_seconds` is 0 so the interval gate
+passes, and the injected engine is not None. Every precondition holds except the
+lock, and the lock is the one thing the fixture does not own.
+
+**The fix, which is small and belongs to the test, not the product.** Isolate the
+lock the way `gsettings_env` isolates the stores. Either is sufficient and both
+are already precedented in this file:
+
+- monkeypatch `shani_chronoa.runner_lock.holds` to `lambda: True` in
+  `_scheduler()`, so the fixture drives the engine it just built; or
+- point `XDG_RUNTIME_DIR` at a per-test temp dir, matching the `fake_bin` `PATH`
+  lesson - a probe that does not control its environment is describing the
+  machine it ran on.
+
+The second is stronger because it also covers `release()`, and it is the shape
+this file already recommends. **And `test_the_scheduler_leaves_the_rules_alone_
+without_the_lock` is the negative control that must keep failing when the patch
+is removed** - it is the one test that asserts the gate genuinely refuses, so a
+fixture that hands the lock to everything would quietly delete the property the
+gate exists for. That is the check that makes this fix honest.
