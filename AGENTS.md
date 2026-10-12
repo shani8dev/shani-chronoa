@@ -351,6 +351,29 @@ struck nothing - a claim about the edit I had just made, false at the moment I m
 it. Caught by reading the paragraph back rather than by any test. The strikethrough
 is real now.
 
+### And there was a fifth, in the paragraph I had just corrected
+
+The same audit applied to `not fixed` - the other adjective the instruction names -
+found one more, *inside* the paragraph struck above:
+
+> Not fixed here: each needs a design decision (what surfaces singing a real
+> tune, where a pre-tool check belongs in the dispatch order, what schedules
+> the dream pass)
+
+**All three decisions were made**, and all three are recorded in this file as
+FIXED 2026-10-05: *what surfaces a real tune* -> `skills/sing.py` takes an optional
+`midi_file` (`:268`, `:431`); *where a pre-tool check belongs* -> beside the
+reaction layer at `tools.py:847`; *what schedules the dream pass* -> the daemon's
+own sleep tick at `daemon.py:105`.
+
+**The three bullets above it were struck and this summary under them was not**, so
+the paragraph asserted the opposite of what it had just been corrected to say. That
+is the portal failure again, in miniature: a correction that stops one line short of
+the sentence it contradicts. The first version of that correction was already
+incomplete for the same reason and reading the paragraph back is the only thing
+that found it - no test checks AGENTS.md against the tree, which is the whole
+reason this list rots.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
@@ -6964,10 +6987,25 @@ statement about the 2026-09-18 measurement, not about the tree today.
    **A module with no in-package importer may be a binary's `main`.** Check
    `usr/bin/` and the systemd units before calling anything dead.
 
-   Not fixed here: each needs a design decision (what surfaces singing a real
+   ~~Not fixed here: each needs a design decision (what surfaces singing a real
    tune, where a pre-tool check belongs in the dispatch order, what schedules
    the dream pass), which is the same reason `ipc.py` was removed rather than
-   wired.
+   wired.~~ **All three decisions were made, and all three are recorded above in
+   this file as FIXED 2026-10-05.** Corrected 2026-10-12, by grepping for each
+   noun rather than trusting the sentence:
+
+   - *what surfaces singing a real tune* -> `skills/sing.py` takes an optional
+     `midi_file` and fits it (`sing.py:268`, `:431`).
+   - *where a pre-tool check belongs in the dispatch order* -> beside the
+     reaction layer, at `tools.py:847`.
+   - *what schedules the dream pass* -> the daemon's own sleep tick,
+     `daemon.py:105`, every `SLEEP_EVERY_SECONDS`.
+
+   **This line was in the paragraph corrected in the entry above and was missed by
+   it** - the three bullets were struck and this summary under them was not, so the
+   paragraph still asserted the opposite of what it had just been corrected to say.
+   A correction that stops one line short of the sentence it contradicts is the
+   same failure as the portal entry: the fix did not reach the claim.
 
 4. **Peer-Validated IPC** (P3, 1 day) — **DECIDED AND CLOSED (2026-09-30):
    removed rather than wired in** (roadmap #28). `ipc.py`'s `PeerValidator` was
