@@ -761,3 +761,83 @@ class TestTheSecuritySurface:
         text = security._run({}).content
         assert "NO FILTER CAN BE BUILT" in text
         assert "refused rather than run unfiltered" in text
+
+
+class TestTheArchitectureGuard:
+    """The syscall numbers in `sandbox/seccomp.py` are **literal x86_64
+    numbers**, and `supported_architecture()` refuses to install them anywhere
+    else. Its own docstring says why that is not a preference:
+
+    > These are literal x86_64 numbers, and installing them on aarch64 would deny
+    > whatever syscall happens to occupy index 165 there, which is why `apply()`
+    > refuses rather than guesses.
+
+    `unavailable_reason()` covers it, and `apply()` raises on that reason - so
+    the guard is wired into both the pre-flight and the install. It had **no
+    test at all**, which in this repo means it does not have the guard: a change
+    that dropped the check, or inverted it, would install the table on any
+    machine and deny whatever syscall happened to hold that index.
+
+    What that failure looks like is in this file's own docstring - an inverted
+    arch guard *installs cleanly*, reports `Seccomp: 2`, and then answers
+    `ENOSYS` to every syscall including `write(2)`, so the process dies before
+    it prints anything and every "did the filter install" assertion still
+    passes. Nothing about the symptom points at the architecture.
+    """
+
+    def test_this_machines_table_matches_this_machines_architecture(self):
+        from shani_chronoa.sandbox import seccomp
+        assert seccomp.architecture() in ("x86_64", "aarch64"), seccomp.architecture()
+        assert seccomp.supported_architecture() is (seccomp.architecture() == "x86_64")
+
+    def test_a_foreign_architecture_is_refused_with_the_number_named(self, monkeypatch):
+        from shani_chronoa.sandbox import seccomp
+        monkeypatch.setattr(seccomp.platform, "machine", lambda: "aarch64")
+        assert seccomp.supported_architecture() is False
+        reason = seccomp.unavailable_reason()
+        assert reason, "a foreign architecture must give a reason, not None"
+        assert "aarch64" in reason, reason
+        # The reason is about the *table*, not about the machine being odd - the
+        # wording is what makes it actionable.
+        assert "x86_64" in reason, reason
+
+    def test_installing_on_a_foreign_architecture_raises_rather_than_installing(
+            self, monkeypatch):
+        """The load-bearing half. `apply()` is irreversible by construction, so
+        refusing is the only safe behaviour, and a caller that required the
+        filter must not fall back to running without it."""
+        from shani_chronoa.sandbox import seccomp
+        monkeypatch.setattr(seccomp.platform, "machine", lambda: "aarch64")
+        with pytest.raises(seccomp.SeccompError) as raised:
+            seccomp.apply()
+        assert "aarch64" in str(raised.value), str(raised.value)
+
+    def test_the_architecture_is_not_the_reason_on_a_machine_it_fits(
+            self, monkeypatch):
+        """A guard that answers "unavailable" for the wrong reason passes every
+        assertion above, so this pins *which* reason it was.
+
+        On the architecture it fits, whatever else is true, the reason must not
+        be the architecture one - otherwise the guard fires everywhere and every
+        other unavailability is misattributed.
+        """
+        from shani_chronoa.sandbox import seccomp
+        monkeypatch.setattr(seccomp.platform, "machine", lambda: "x86_64")
+        reason = seccomp.unavailable_reason()
+        if reason is not None:
+            assert "architecture" not in reason, reason
+
+    def test_the_numbers_are_x86_64_and_the_guard_names_the_one_it_cannot_hold(self):
+        """A cross-check the table and the guard agree about the architecture.
+
+        The numbers are the claim and the guard is the control on it; if the
+        table were ever copied from another architecture, the guard would
+        happily accept it and only this test would notice.
+        """
+        from shani_chronoa.sandbox import seccomp
+        numbers = seccomp.blocked_numbers()
+        assert numbers, "the filter blocks some syscalls"
+        assert all(isinstance(n, int) for n in numbers)
+        assert seccomp.supported_architecture() or not numbers, (
+            "the table exists while the architecture is refused - the guard is "
+            "not guarding what the table says")
