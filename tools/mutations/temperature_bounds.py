@@ -92,7 +92,11 @@ MUTATIONS = [
     },
     {
         "file": _L,
-        "old": "    if t != t or t in (float(\"inf\"), float(\"-inf\")):\n        return 1.0\n",
+        # Re-anchored 2026-10-12: the inline `t != t or t in (float("inf"), ...)`
+        # check was consolidated onto `sysfs.finite()` (the shared reader this repo
+        # already records extracting), so the old anchor matched nothing. The guard
+        # is the same one and this mutation removes it.
+        "old": "    if not sysfs.finite(t):\n        return 1.0\n",
         "new": "",
         "label": "NaN and infinity are divided by, so a file holding either "
                  "returns NaN on every probability",
