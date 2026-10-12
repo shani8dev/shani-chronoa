@@ -77,6 +77,134 @@ def set_enabled(on: bool, why: str = "") -> bool:
     return _enabled
 
 
+#: What this turn was *asked* to do and was refused. **The plan, as data.**
+#:
+#: Plan mode's refusal tells the model to describe the steps in prose, and that
+#: prose is the only record: nothing could be ticked off, resumed, or corrected,
+#: and approving it meant asking again in a new turn and hoping the model
+#: re-derived the same steps from its own text.
+#:
+#: This is the same information in the shape `goals.PlannedStep` wants, so the
+#: turn can store a real run instead. Reset per turn by `begin_turn()`.
+_refusals: "list[tuple[str, dict]]" = []
+
+#: Set when the user answers "Keep planning" in this turn, and cleared by
+#: `begin_turn()`. **One answer stands for the turn**, because asking again for
+#: every remaining step would turn "what would you do about this?" into ten
+#: dialogs - which is the opposite of what they asked for. The silence is the
+#: answer, and the steps still land in the stored plan.
+_keep_planning = False
+
+
+def begin_turn() -> None:
+    """Start collecting this turn's plan. Called at the top of every turn.
+
+    **Reset here rather than read at the end**, because the refusal list is
+    per-turn state on a module that outlives turns - a plan would otherwise
+    accumulate every step the session ever refused.
+    """
+    global _refusals, _keep_planning
+    with _lock:
+        _refusals = []
+        _keep_planning = False
+
+
+def record_refusal(tool: str, arguments: "Optional[dict]" = None) -> None:
+    """Note that `tool` was refused, so the turn can store it as a step.
+
+    **Recorded even when the tool was refused for another reason** - consent, an
+    unknown tool, a limit. Any refusal is a thing the user asked for and did not
+    get, and a plan that quietly drops the steps it could not justify is a
+    plan that lies about its own coverage.
+
+    The arguments are copied. They are the caller's dict and the turn carries on
+    after this, so holding the reference would let a later mutation rewrite the
+    step that was recorded.
+    """
+    with _lock:
+        _refusals.append((str(tool),
+                          dict(arguments) if isinstance(arguments, dict) else {}))
+
+
+def refusals() -> "list[tuple[str, dict]]":
+    """`(tool, arguments)` for everything this turn was refused, in order."""
+    with _lock:
+        return [(tool, dict(args)) for tool, args in _refusals]
+
+
+def refused_tools() -> "list[str]":
+    """The refused tool names in order, without duplicates.
+
+    **Duplicates collapsed, order kept.** A plan that lists the same tool five
+    times because the model asked five times is noise; a plan that lists them
+    once each in the order they came is readable.
+    """
+    out: "list[str]" = []
+    for tool, _args in refusals():
+        if tool not in out:
+            out.append(tool)
+    return out
+
+
+#: The options offered when plan mode meets a call it would otherwise refuse.
+#: **"Do it now" first**, because the common answer to "what would you do?"
+#: followed by silence is yes, and a dialog that leads with "no" teaches people
+#: that plan mode is a wall rather than a question.
+ASK_OPTIONS = ("Do it now", "Keep planning")
+
+
+def ask_to_proceed(tool: str, arguments: "Optional[dict]" = None) -> bool:
+    """Put the refused call to the user, and report whether they allowed it.
+
+    **Plan mode asks; it does not only describe.** The refusal used to tell the
+    model to write out the steps in prose and hand the decision back to it -
+    which is the one party with an interest in being wrong about what you want.
+    Now the person is asked, with the actual tool and the actual arguments, and
+    a yes runs the call immediately through the ordinary dispatch path.
+
+    **Everything else is still refused.** No presenter, a dismissed prompt, a
+    timeout, or an answer that is not one of the two words - all of them mean
+    "no answer was given", and this app's own rule is that an unanswered
+    question is never consent. Only a literal "Do it now" proceeds.
+
+    **"Keep planning" records the step** so it ends up in the stored plan; a
+    refusal with no record would be a step the plan does not mention, which is
+    the failure this whole change exists to remove.
+    """
+    detail = ""
+    if isinstance(arguments, dict):
+        keys = ", ".join(sorted(str(k) for k in arguments)[:6])
+        if keys:
+            detail = f" It wanted: {keys}."
+
+    from shani_chronoa import ask_bridge
+
+    global _keep_planning
+    if _keep_planning:
+        # Already answered for this turn. Recorded, not run, and not asked.
+        record_refusal(tool, arguments)
+        return False
+
+    if not ask_bridge.has_presenter():
+        # Nobody to ask is not permission. Same answer `ask_user` gives.
+        record_refusal(tool, arguments)
+        return False
+
+    answer = ask_bridge.ask(
+        f"Plan mode is on, so {tool} was not run. Run it now?{detail}",
+        list(ASK_OPTIONS))
+    if answer == ASK_OPTIONS[0]:
+        return True
+    # **"Keep planning" is a standing answer for the rest of this turn.** It is
+    # about whether this turn should act at all, and the model may well try
+    # nine more tools before it describes anything. Asking each time would make
+    # plan mode noisier than not using it.
+    with _lock:
+        _keep_planning = True
+    record_refusal(tool, arguments)
+    return False
+
+
 def blocked_reason(tool: str) -> str:
     """Why `tool` cannot run right now, or "" if it can.
 
@@ -85,7 +213,7 @@ def blocked_reason(tool: str) -> str:
     """
     if not _enabled:
         return ""
-    from shani_chronoa.capabilities import gated_by
+    from shani_chronoa.capabilities import gated_by  # noqa: F401 - read below
 
     description = ""
     try:
@@ -100,7 +228,27 @@ def blocked_reason(tool: str) -> str:
         logger.debug("Could not read the schema for %s while in plan mode: %s",
                      tool, exc)
 
-    if not gated_by(tool, description):
+    # **Two maintained lists, not one.** The premise here is "a consent key is
+    # the maintained answer to does this change something" - and it is wrong
+    # for exactly the tools that matter most. Measured: plan mode blocked 92
+    # tools and allowed `write_text_file` and `apply_patch`, so entering plan
+    # mode did not stop the model writing your files. Both are in
+    # `MUTATING_TOOLS`, which this function was never reading.
+    from shani_chronoa.capabilities import MUTATING_TOOLS, TALKS_ONLY
+
+    if tool in TALKS_ONLY:
+        # **Asking a question is not touching the machine.** Without this, plan
+        # mode became unusable the moment it started consulting
+        # `MUTATING_TOOLS` - which contains `ask_user`, because a question has
+        # an effect: it appears. Measured: adding `MUTATING_TOOLS` to this
+        # function blocked 133 tools instead of 92, and the first thing it took
+        # away was the ability to ask the user anything.
+        return ""
+    if tool in MUTATING_TOOLS:
+        gated = tool          # any reason is enough; the refusal text is shared
+    else:
+        gated = gated_by(tool, description)
+    if not gated:
         return ""
 
     why = reason()

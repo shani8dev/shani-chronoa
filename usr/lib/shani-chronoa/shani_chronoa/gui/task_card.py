@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 #: `Gtk.IconTheme.has_icon` before it is used, because a missing glyph renders
 #: as an empty box and reads as a rendering bug.
 _STATES = {
+    #: A plan plan mode has made and you have not approved. **Its own state,
+    #: not `pending`** - a plan waiting for a person and a todo waiting to be
+    #: done are different things, and drawing them the same way is how a card
+    #: says "in hand" about something nobody has agreed to.
+    "awaiting": ("dialog-question-symbolic", "waiting for you"),
     "pending": ("radio-symbolic", ""),
     "in_progress": ("content-loading-symbolic", "doing"),
     "blocked": ("dialog-warning-symbolic", "blocked"),
@@ -160,12 +165,69 @@ def _outstanding() -> "list[dict]":
     a list the user switched off is not shown in the chat either, and "the
     store is unreadable" is not shown as "you have no tasks".
     """
+    # **Plans are read first, and are not gated by the todo-list setting.**
+    # They used to be read *after* it, which meant a plan plan mode had just
+    # stored was invisible in every chat where the person had the task list
+    # switched off - its default. Measured by rendering the card: `refresh()`
+    # reported "Nothing outstanding" with a plan in the store.
+    #
+    # The gate is right for todos and wrong for plans: nobody opts into
+    # `todo-list-enabled` by *asking the assistant to work out what it would
+    # do*. A plan is the answer to a question you asked, so hiding it behind an
+    # unrelated setting is hiding the answer.
+    plans = _plans_waiting()
+
     from shani_chronoa import config as config_mod
     if not config_mod.ChronoaConfig().get_bool("todo-list-enabled", False):
-        return []
+        return plans
     from shani_chronoa.skills import todo_list
     items, problem = todo_list.open_tasks()
     if problem or items is None:
         logger.info("task card: %s", problem or "the task list could not be read")
+        return plans
+    outstanding = [item for item in items if item.get("status") != "completed"]
+    outstanding.extend(plans)
+    return outstanding
+
+
+def _plans_waiting() -> "list[dict]":
+    """Plans plan mode made, in the shape `_row` already draws.
+
+    **Without this the plan is invisible.** Plan mode asks, you say "keep
+    planning", and the refusals become a run in the goals store - which the
+    Goals panel and the rail can show, and neither of which is where a person
+    is looking while the assistant is still talking. A plan you cannot see is
+    a plan you cannot correct before it runs.
+
+    **The same dict shape as a todo**, so one `_row` draws both, and the state
+    is `awaiting` so it reads as *waiting for you* rather than *to do*.
+    """
+    try:
+        from shani_chronoa import goals as goals_module
+
+        store = goals_module.GoalStore(goals_module.store_root())
+        runs = store.list()
+    except Exception as exc:  # noqa: BLE001 - a plan that cannot be read is not
+        logger.debug("task card: the goal store is unreadable: %s", exc)
         return []
-    return [item for item in items if item.get("status") != "completed"]
+
+    out = []
+    for run in runs:
+        # **The phase decides, and the reason only identifies which kind of
+        # waiting it is.** The first version checked the reason alone, and
+        # `awaiting_reason` is a *label* that stays put when the run moves on -
+        # so a plan already approved and running still had it, and the card
+        # went on asking you to approve work that was already happening.
+        if run.phase is not goals_module.Phase.AWAITING:
+            continue
+        if run.awaiting_reason != goals_module.PLAN_AWAITING_REASON:
+            continue
+        steps = len(run.steps)
+        out.append({
+            "status": "awaiting",
+            "content": f"{run.goal} - {steps} step"
+                       + ("" if steps == 1 else "s")
+                       + ", nothing has been done",
+            "blocked_by": [],
+        })
+    return out

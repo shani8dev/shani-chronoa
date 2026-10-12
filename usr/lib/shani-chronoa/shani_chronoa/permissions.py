@@ -134,8 +134,13 @@ def explore_refuses(tool_name: str) -> "Optional[str]":
     """
     if _mode != Mode.EXPLORE:
         return None
-    from shani_chronoa.capabilities import READ_ONLY_TOOLS
-    if tool_name in READ_ONLY_TOOLS:
+    # `TALKS_ONLY` lives in `capabilities` because two modules need it and a
+    # second copy in each would drift - and they already had: this function and
+    # `planmode.blocked_reason` each had their own idea of which tools only
+    # talk, and plan mode's version did not exist until a measurement showed it
+    # could not ask the user anything.
+    from shani_chronoa.capabilities import READ_ONLY_TOOLS, TALKS_ONLY
+    if tool_name in READ_ONLY_TOOLS or tool_name in TALKS_ONLY:
         return None
     return (f"Refused: read-only (explore) mode is on, and {tool_name} is not "
             "a read-only tool. Nothing ran. Leave explore mode to change "

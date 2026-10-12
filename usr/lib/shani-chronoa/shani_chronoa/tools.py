@@ -1109,7 +1109,14 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     # this is a fact, which is the only reason the mode is worth having.
     refusal = planmode.blocked_reason(name)
     if refusal:
-        return DispatchResult(refusal, verification.Verdict.UNVERIFIED, False)
+        # **Asked before refused.** Plan mode is a question, not a wall: the
+        # person is offered the call with its arguments, and a yes runs it
+        # immediately through this same function - so consent, sandboxing and
+        # verification all still apply to it. A refusal with no record would be
+        # a step the stored plan does not mention.
+        if not planmode.ask_to_proceed(name, arguments):
+            return DispatchResult(refusal, verification.Verdict.UNVERIFIED,
+                                  False)
 
     # EXPLORE mode is the same fact from the permission layer: a mutating call
     # is refused before any consent question is asked, so a read-only session

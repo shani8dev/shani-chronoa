@@ -22,6 +22,7 @@ Adw.init()
 
 from shani_chronoa import capabilities
 from shani_chronoa import local_llm
+from shani_chronoa import planmode
 
 from .minimap import TurnMinimap
 from .widgets import (  # noqa: F401
@@ -212,20 +213,30 @@ class _ModeStrip(Gtk.Box):
         # and the Listening panel is navigation, which belongs to the sidebar.
         self._rules_chip = self._capability_chip()
         self.append(self._rules_chip)
-        self._permission_chip = self._permission_chip()
-        self.append(self._permission_chip)
-        self._ambient_chip = self._ambient_chip()
-        self.append(self._ambient_chip)
+        self._auto_chip = self._auto_chip()
+        self.append(self._auto_chip)
+        self._plan_chip = self._plan_chip()
+        self.append(self._plan_chip)
         self._presence_chip = self._presence_chip()
         self.append(self._presence_chip)
-        self._hands_chip = self._hands_free_chip()
-        self.append(self._hands_chip)
         self._answer_chip = self._egress_chip()
         self.append(self._answer_chip)
+
+        # **Built, not appended.** Four controls moved off the strip to the
+        # palette (Ctrl+K) because they are set once per task rather than
+        # changed mid-conversation: when it may act unprompted, how it listens,
+        # how it replies, and which model answers. Nine chips in a row is nine
+        # words to read past the one you came to change, and the strip is read
+        # from across the room.
+        #
+        # They are still **built**, because `refresh()` draws them and
+        # `activate_mode` opens them from the palette - a chip that is never
+        # appended but is still constructed and still drawn is one keystroke
+        # from usable, and no reader or test has to know it moved.
+        self._ambient_chip = self._ambient_chip()
+        self._hands_chip = self._hands_free_chip()
         self._style_chip = self._reply_style_chip()
-        self.append(self._style_chip)
         self._model_chip = self._model_chip()
-        self.append(self._model_chip)
         self.refresh()
 
     def _menu_chip(self, icon: str):
@@ -308,15 +319,36 @@ class _ModeStrip(Gtk.Box):
     #: `default` is the quiet one. `dont_ask` is the important row: it does not
     #: mean "act freely", it means **refuse rather than prompt**, and the word
     #: says so. `explore` is plan mode's permission-layer twin.
-    _PERMISSION = (
-        ("default", "Ask first", "Ask before anything that needs permission",
+    #: **Auto: it stops asking.** Two rows, because the third permission value -
+    #: `explore`, read-only - is deliberately not here; it is Settings > Privacy,
+    #: where its stricter meaning is written down, and `buildmode.read_only_note`
+    #: says so for anyone who remembers it on the strip.
+    _AUTO = (
+        ("ask", "Ask first",
+         "It asks before anything that needs permission",
          "dialog-question-symbolic"),
-        ("dont_ask", "No questions",
-         "Risky calls are refused rather than asked about - it will not "
-         "interrupt you, and it will not quietly act either",
-         # `mail-unread-symbolic` is in Adwaita; `search-symbolic` and
-         # `edit-find` variants were considered and only this one ships.
+        ("auto", "Auto",
+         "It does not interrupt you: anything needing permission is refused "
+         "rather than asked about. This is not permission to act freely",
          "mail-unread-symbolic"),
+    )
+
+    #: The **workflow** axis: work out what it would do, without doing it.
+    #: Separate from "what it may change", which is a permission and lives on
+    #: the capability chip. They were one control until "Read only" was
+    #: corrected to mean `explore` rather than plan mode; now they can be
+    #: combined deliberately - read-only *and* planning, or read-only and
+    #: acting - which one control could never do.
+    _PLAN = (
+        # **`emblem-default-symbolic` is not in Adwaita** - it is a Yaru name
+        # and renders as an empty box on plain GNOME. `dialog-question-symbolic`
+        # is wrong for this row too, so this uses the one name in the theme that
+        # means "nothing is happening here".
+        ("working", "Working", "It does what you ask",
+         "media-playback-start-symbolic"),
+        ("plan", "Plan",
+         "It works out what it would do and says so, changing nothing",
+         "document-edit-symbolic"),
     )
 
     #: **`explore` is deliberately not a row here**, and the first version of
@@ -338,11 +370,28 @@ class _ModeStrip(Gtk.Box):
     #: its stricter meaning is written down, and the measurement is recorded
     #: rather than the mode quietly duplicated onto a strip.
 
+    #: **Build, not read-only.** This chip used to say "Anything" / "Read only"
+    #: and to mean plan mode, which conflated a permission with a workflow. It
+    #: now says what the turn is *working on*, and read-only has gone back to
+    #: being what it always was underneath: `permissions.EXPLORE`, in Settings.
     _CAPABILITY = (
-        ("anything", "Anything",
-         "It may look at things and change them", "security-medium-symbolic"),
-        ("read-only", "Read only",
-         "It may look but must not change anything",
+        ("general", "General",
+         "It answers anything, using whatever tools fit the question",
+         "security-medium-symbolic"),
+        # **"Build", not "Code".** The files a person brings this app are often
+        # not source - a .docx, a .csv, a systemd unit - and calling that "code"
+        # promised a programmer's workflow it does not have. "Build" says what
+        # it is for and matches the app's own idiom.
+        #
+        # **`document-edit-symbolic`, because Adwaita ships no build icon at
+        # all.** Measured over every symbolic name in the theme: nothing matches
+        # build, tool, hammer, wrench, construction or gear except
+        # `tools-check-spelling-symbolic`. `system-build-symbolic` and
+        # `applications-development-symbolic` are Yaru names and render as an
+        # empty box on plain GNOME.
+        ("build", "Build",
+         "It is working on your files: reads, searches, edits, and shows what "
+         "changed. It may still use anything else it needs",
          "document-edit-symbolic"),
     )
 
@@ -445,7 +494,32 @@ class _ModeStrip(Gtk.Box):
          "network-server-symbolic"),
     )
 
-    def _permission_chip(self) -> Gtk.MenuButton:
+    def _auto_chip(self) -> Gtk.MenuButton:
+        """Auto: whether it stops interrupting you to ask.
+
+        **The word is not "auto" and the tooltip says what auto means here.**
+        Auto mode *refuses* anything it cannot ask about rather than doing it -
+        so a reader who takes "Auto" as "it will act freely" is wrong by the
+        whole safety model. The chip says what happens instead.
+
+        **It reads the permission module, not the action's state**, because
+        Settings writes `permissions.set_mode` directly and `refresh()` runs on
+        window focus for exactly that.
+        """
+        button, label, image = self._menu_chip("dialog-question-symbolic")
+        self._auto_label = label
+        self._auto_image = image
+        menu = Gio.Menu()
+        for key, word, _line, _icon in self._AUTO:
+            menu.append(word, f"app.answer-permission::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text("Whether it stops you to ask before acting")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Whether Chronoa interrupts you to ask"])
+        return button
+
+    def _plan_chip(self) -> Gtk.MenuButton:
         """How it treats a risky call - ask, refuse, or look only.
 
         **Placed first, before "what may it change", because it is the question
@@ -459,20 +533,21 @@ class _ModeStrip(Gtk.Box):
         is *not* permission to act freely, because "auto" on a mode strip
         invites exactly that reading.
         """
-        button, label, image = self._menu_chip("dialog-question-symbolic")
-        self._permission_label = label
-        self._permission_image = image
+        button, label, image = self._menu_chip("document-edit-symbolic")
+        self._plan_label = label
+        self._plan_image = image
         menu = Gio.Menu()
-        for key, word, _line, _icon in self._PERMISSION:
-            menu.append(word, f"app.answer-permission::{key}")
+        for _key, word, _line, _icon in self._PLAN:
+            # **Both rows activate the same toggle action.** It carries no
+            # value, so there is nothing to set - the chip redraws from
+            # `planmode.is_enabled()` instead. A dropdown whose two items both
+            # say the same action is the honest shape for a toggle.
+            menu.append(word, "app.toggle-plan-mode")
         button.set_menu_model(menu)
-        button.set_tooltip_text(
-            "How Chronoa treats a call that needs permission. This lasts until "
-            "the app restarts, so a quiet mode is never the silent default at "
-            "the next login.")
+        button.set_tooltip_text("Whether it works out what it would do first")
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
-            ["How Chronoa treats a risky call"])
+            ["Whether Chronoa plans before acting"])
         return button
 
     def _capability_chip(self) -> Gtk.MenuButton:
@@ -567,9 +642,43 @@ class _ModeStrip(Gtk.Box):
             logger.warning("could not read the last dream", exc_info=True)
             return "Its last dream could not be read"
 
+    def _read_auto(self) -> str:
+        """Whether auto is on, read from the permission layer that owns it."""
+        try:
+            from shani_chronoa import permissions
+
+            return ("auto" if permissions.get_mode() == permissions.Mode.DONT_ASK
+                    else "ask")
+        except Exception:                               # noqa: BLE001
+            logger.debug("mode strip: the posture is unreadable", exc_info=True)
+            return "ask"
+
+    def _read_plan(self) -> str:
+        """Whether plan mode is on. Read from the module, not the toggle's own
+        state - `toggle-plan-mode` carries no value, so there is nothing on the
+        action to disagree with."""
+        try:
+            return "plan" if planmode.is_enabled() else "working"
+        except Exception:                               # noqa: BLE001
+            logger.debug("mode strip: plan mode is unreadable", exc_info=True)
+            return "working"
+
     def _read_capability(self) -> str:
-        """The capability choice, read from the module that owns it."""
-        return "read-only" if self._read_plan_mode() else "anything"
+        """The capability choice, read from the permission layer that owns it.
+
+        **"Read only" means `explore`.** It used to read `planmode.is_enabled()`,
+        so the chip showed Read only whenever the *workflow* mode was on - and
+        the permission layer's own read-only posture, `explore`, was on no chip
+        at all. The two ideas were sharing one control, and neither could be
+        used without the other.
+        """
+        try:
+            from shani_chronoa import buildmode
+
+            return "build" if buildmode.is_enabled() else "general"
+        except Exception:                               # noqa: BLE001
+            logger.debug("mode strip: build mode is unreadable", exc_info=True)
+            return "general"
 
     def _read_ambient(self) -> str:
         """Whether the background rules run, read from the setting that owns it.
@@ -689,9 +798,24 @@ class _ModeStrip(Gtk.Box):
             # the whole strip raises and the window has no mode strip at all.
             # Measured: exactly this, six tests red with
             # `IndexError: list index out of range` at `_draw`.
-            rows.append(("", "No model",
-                         "No model is installed on this machine",
-                         "object-select-symbolic"))
+            #
+            # **Unless something is active, in which case "No model" is a lie.**
+            # The two can disagree: a model is pointed at by `current.gguf` and
+            # the file it names has been deleted, or `SPECS` does not describe
+            # the key in use. Rendered and measured - the chip said "No model"
+            # while the picker row said the key, and the key was the truthful
+            # one. Naming the active key here is what makes the chip, the row
+            # and the setting file agree, which is three sources that are one
+            # fact.
+            active = local_llm.active() or ""
+            if active:
+                rows.append((active, active, f"{active}: the model in use, "
+                              "which no installed tier describes",
+                              "object-select-symbolic"))
+            else:
+                rows.append(("", "No model",
+                             "No model is installed on this machine",
+                             "object-select-symbolic"))
         return rows
 
     def _read_model(self) -> str:
@@ -737,23 +861,6 @@ class _ModeStrip(Gtk.Box):
             menu.append(word, f"app.answer-egress::{key}")
         button.set_menu_model(menu)
         return button
-
-    def _read_permission(self) -> str:
-        """The posture in force, or `default` when it cannot be read.
-
-        **Never raises.** `refresh()` runs from `__init__`, so a reader that
-        threw would stop the window opening - and a missing permission module
-        must leave the chip on the safe word, not blank it.
-        """
-        try:
-            from shani_chronoa import permissions
-
-            mode = str(permissions.get_mode() or "default")
-        except Exception:                               # noqa: BLE001
-            logger.debug("mode strip: the permission posture is unreadable",
-                         exc_info=True)
-            return "default"
-        return mode if mode in {r[0] for r in self._PERMISSION} else "default"
 
     def _read_egress(self) -> str:
         """The egress choice, derived from the two settings that together make it.
@@ -839,18 +946,26 @@ class _ModeStrip(Gtk.Box):
         """
         self._syncing = True
         try:
+            # **`quiet=("general",)` alongside the renamed table.** The keys
+            # changed from anything/read-only to general/build and this tuple
+            # did not, so `general` matched nothing and the chip was drawn as a
+            # departure in the ordinary case - every window, every refresh.
             self._draw(self._rules_chip, self._rules_label,
                        self._read_capability(), self._CAPABILITY,
-                       "What it may change", quiet=("anything",),
+                       "What it works on", quiet=("general",),
                        image=self._rules_image)
             # **Read live, not from the action's state.** Settings writes the
             # posture straight through `permissions.set_mode`, so an action
             # state would be stale until the next click. `refresh()` runs when
             # the window regains focus, which is when that becomes visible.
-            self._draw(self._permission_chip, self._permission_label,
-                       self._read_permission(), self._PERMISSION,
-                       "How it treats a risky call", quiet=("default",),
-                       image=self._permission_image)
+            self._draw(self._auto_chip, self._auto_label,
+                       self._read_auto(), self._AUTO,
+                       "Whether it interrupts you", quiet=("ask",),
+                       image=self._auto_image)
+            self._draw(self._plan_chip, self._plan_label,
+                       self._read_plan(), self._PLAN,
+                       "Whether it plans first", quiet=("working",),
+                       image=self._plan_image)
             self._draw(self._ambient_chip, self._ambient_label,
                        self._read_ambient(), self._AMBIENT,
                        "When it may act", quiet=("on-ask",),
@@ -1017,6 +1132,124 @@ class _ModeStrip(Gtk.Box):
 
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
                     Adw.ApplicationWindow):
+
+    def _model_row(self) -> Gtk.Widget:
+
+
+
+        """The model picker, on its own row under the composer.
+
+        **A popover of `Adw.ActionRow`s, not a `Gio.Menu` of names.** A menu of
+        names answers one question - what are the choices - and cannot say which
+        is installed, which is answering, or which the quality gate would refuse.
+        All three are things a person wants *before* clicking, and the tier list
+        plus `local_llm.use()` already know all three. See `gui/model_picker.py`.
+
+        **Rebuilt every time the row is shown**, so a model downloaded while the
+        window is open is a new choice rather than a restart.
+        """
+        from shani_chronoa.gui import model_picker
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.add_css_class("composer-model-row")
+        row.set_margin_top(2)
+        row.set_margin_bottom(2)
+        row.set_margin_start(4)
+
+        button = Gtk.MenuButton()
+        button.add_css_class("flat")
+        button.set_tooltip_text(
+            "Which model answers. Switching loads it and restarts the local "
+            "server, so the next reply uses it")
+        button.set_popover(model_picker.ModelPicker(self._app))
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Which model answers. Choose a locally installed model."])
+
+        lead = Gtk.Image.new_from_icon_name("object-select-symbolic")
+        lead.add_css_class("dim-label")
+        lead.set_pixel_size(14)
+        label = Gtk.Label(label="Answers with")
+        label.add_css_class("dim-label")
+        label.add_css_class("caption")
+        which = Gtk.Label(label=self._model_word())
+        which.add_css_class("caption")
+
+        inside = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        inside.append(lead)
+        inside.append(label)
+        inside.append(which)
+        button.set_child(inside)
+        self._model_picker_button = button
+        self._model_picker_word = which
+        self._model_picker_lead = lead
+        row.append(button)
+        self._refresh_model_word()
+        return row
+
+    def _refresh_model_word(self) -> None:
+        """Redraw the chosen model's name under the composer.
+
+        **Called from `_refresh_strip`, not from the handler, on purpose.** The
+        strip and the picker are the same question asked twice - "what is
+        Chronoa right now" - and the first version of this had the handler for
+        the model chip call one refresh and the strip's own handler call another,
+        which is two chances to forget and a way to have the two widgets
+        disagree. One refresh, both widgets.
+
+        **It re-reads the setting rather than being handed the new value.** The
+        row's whole job is to survive `_refresh_model_word` being called before
+        the label exists (during construction) and after the model changed (from
+        the handler); a version taking an argument would have two callers and one
+        of them would pass the old one.
+        """
+        label = getattr(self, "_model_picker_word", None)
+        if label is None:
+            return
+        label.set_label(self._model_word())
+        # **The icon is the half that cannot be a string.** The row leads with
+        # `object-select-symbolic`, which is right for "choose" and wrong for
+        # "this is what is answering". After a switch the glyph has to follow
+        # the word, or the row says one thing in a symbol and another in a
+        # label - the two-widgets-that-disagree failure this file records more
+        # than any other.
+        button = getattr(self, "_model_picker_button", None)
+        if button is not None:
+            button.set_tooltip_text(
+                "Answers with %s. Click to change it - switching loads the "
+                "model and restarts the local server" % self._model_word())
+
+    def _model_word(self) -> str:
+        """The chosen model's word, **taken from the strip's own row table**.
+
+        This used to walk `local_llm.TIERS` itself and pick the label, and the
+        strip walks `SPECS`. Two tables, so two words for one state: on a
+        machine with nothing downloaded the chip said **"No model"** and the row
+        said **"the default model"** - two labels for the absence of a choice,
+        one of which implies a choice was made. Rendered and measured, not
+        inferred.
+
+        **One source, read from the strip.** `_mode_strip._model_rows` already
+        answers exactly this question, returns a placeholder row when the disk
+        is empty, and is the thing the chip is drawn from - so asking it is both
+        the shortest answer and the only one that cannot drift.
+        """
+        try:
+            strip = getattr(self, "_mode_strip", None)
+            rows = strip._model_rows() if strip is not None else ()
+            active = local_llm.active() or ""
+            for key, word, _line, _icon in rows:
+                if key == active:
+                    return word
+            # **An active key the rows do not offer** - a model downloaded
+            # after the rows were built, or one `SPECS` does not describe. The
+            # rows' own words would be a lie here, so the key is shown as it
+            # stands rather than borrowed from a neighbouring tier.
+            return active or rows[0][1]
+        except Exception:  # noqa: BLE001 - an unreadable list is not a blank row
+            logger.debug("the active tier is unreadable", exc_info=True)
+            return "No model"
+
     """The main window: the conversation, and every panel beside it.
 
     A `Adw.ApplicationWindow` inside an `Adw.NavigationSplitView`: the sidebar
@@ -1705,6 +1938,18 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._refresh_undo_button()
 
         input_row.append(self._send_button)
+
+        # **The model picker, under the composer.** Below the field and beside
+        # it rather than on the mode strip, because "which model answers" is
+        # asked at the moment of typing and answered once - not glanced at while
+        # reading a reply. The strip is five words wide and a sixth saying
+        # "Medium (2.5 GB)" is a word nobody reads; down here there is room for
+        # the sentence that goes with it.
+        #
+        # A row of its own rather than packed into `input_row` so the send
+        # button keeps its place and the picker does not fight the composer for
+        # width.
+        main_box.append(self._model_row())
         main_box.append(self._attach_bar)
         # The organ strip sits directly above the composer, always present, so
         # "is it listening right now" is answerable without a menu. It is not
@@ -2984,6 +3229,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 title, section or "Panel", icon,
                 (lambda sid=surface_id: self._show_surface(sid)),
                 group="Panels", weight=0))
+        entries.extend(self._palette_mode_entries())
         for name in slash.names():
             # `system-run-symbolic` rather than `terminal-symbolic`, for the
             # same reason as the conversation icon above.
@@ -2992,6 +3238,113 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 (lambda n=name: self._run_command(f"/{n}")),
                 group="Commands", weight=0))
         return entries
+
+    #: Every mode, by name, **built from the strip's own tables**.
+    #:
+    #: `((table, action, reader), ...)` - the tables are the same tuples the
+    #: chips draw from and the same menus offer, so a mode added to a chip is in
+    #: the palette for free and a mode removed from a chip disappears from here
+    #: too. **A second list of mode names would drift**, and the drift would
+    #: show as a palette entry that sets a mode nothing reads.
+    #: The model chip, in the palette rather than on the strip.
+    #:
+    #: **Added when the other four moved off, and for the same reason.** Its
+    #: rows are the installed tiers read fresh rather than a static table, which
+    #: is why it is not in `_MODE_TABLES` - so moving the static chips to the
+    #: palette would have left the model reachable only by walking to Settings.
+    _MODEL_PALETTE = True
+
+    #: **`_ModeStrip.`-qualified, because the tables live on the strip.** They
+    #: are defined in the other class; naming them bare here would have been a
+    #: `NameError` at import, which is the cheapest possible way to find out.
+    _MODE_TABLES = (
+        (_ModeStrip._CAPABILITY, "answer-rules", "_read_capability"),
+        # Plan is a workflow, not a permission, so it is listed from its own
+        # table even though its action carries no value - the entry still
+        # opens the chip, which is the part that is useful.
+        (_ModeStrip._PLAN, "toggle-plan-mode", "_read_plan"),
+        (_ModeStrip._EGRESS, "answer-egress", "_read_egress"),
+        (_ModeStrip._AMBIENT, "answer-ambient", "_read_ambient"),
+        (_ModeStrip._PRESENCE, "answer-presence", "_read_presence"),
+        # **`hands-free`, not `answer-hands`.** Every other action here is
+        # named `answer-*` and this one is not, so the pattern is a reliable
+        # way to invent a name that does not exist - which is exactly what the
+        # first version of this table did. `test_every_mode_entry_names_a_real_
+        # action` now reads the real action names out of the file.
+        (_ModeStrip._HANDS, "hands-free", "_read_hands_free"),
+        (_ModeStrip._STYLES, "reply-style", "_read_reply_style"),
+    )
+
+    def _palette_mode_entries(self) -> "list":
+        """One palette entry per mode, saying what it is *now*.
+
+        **This is the answer to "what mode am I in?"** Which used to mean
+        reading eight chips word by word. The entry's subtitle carries the
+        current state, so one Ctrl+K and one line answers it - and it is a line
+        that can be copied into a bug report, which a strip cannot.
+
+        Titles are the words the strip shows, so what you see on the strip and
+        what you type in the palette are the same word for the same thing.
+        """
+        from shani_chronoa.gui import palette as palette_module
+
+        out = []
+        # **The model chip, added by hand** because its rows are the installed
+        # tiers read fresh rather than one of the static tables - so when the
+        # other four moved off the strip to here, the model would have been the
+        # only one left reachable only from Settings.
+        try:
+            rows = self._mode_strip._model_rows()
+            if rows:
+                out.append(palette_module.Entry(
+                    "Which model answers", "a locally installed model",
+                    rows[0][3] if len(rows[0]) > 3 and rows[0][3]
+                    else "preferences-system-symbolic",
+                    (lambda: self._mode_strip._model_chip.popup()),
+                    group="Modes", weight=0))
+        except Exception:  # noqa: BLE001 - a missing tier list is not a reason
+            logger.debug("palette: the model rows are unreadable", exc_info=True)
+        for table, action_name, reader_name in self._MODE_TABLES:
+            if not table:
+                continue
+            # **`self._mode_strip`, not `self`.** The readers are methods of
+            # `_ModeStrip`, and the window does not have them - so `getattr`
+            # found nothing, every entry reported the *first* row's state, and
+            # the palette would have answered "what mode am I in?" with the
+            # same answer eight times.
+            strip = getattr(self, "_mode_strip", None)
+            reader = getattr(strip, reader_name, None)
+            try:
+                current = reader() if callable(reader) else ""
+            except Exception:                           # noqa: BLE001
+                current = ""
+            row = next((r for r in table if r[0] == current), None)
+            icon = row[3] if row and len(row) > 3 and row[3] else "preferences-system-symbolic"
+            out.append(palette_module.Entry(
+                table[0][1], row[2] if row else "", icon,
+                (lambda a=action_name: self._activate_mode(a)),
+                group="Modes", weight=0))
+        return out
+
+    def _activate_mode(self, action_name: str) -> None:
+        """Leave a mode's own dropdown open on its current row.
+
+        **One keystroke should not change a mode.** Changing it needs a chosen
+        value, and the dropdown is where the values are; opening it is what
+        makes the palette an index of modes rather than a wall of switches
+        where one stray Enter commits a privacy setting.
+        """
+        chip = {
+            "answer-rules": getattr(self, "_rules_chip", None),
+            "toggle-plan-mode": getattr(self, "_plan_chip", None),
+            "answer-egress": getattr(self, "_answer_chip", None),
+            "answer-ambient": getattr(self, "_ambient_chip", None),
+            "answer-presence": getattr(self, "_presence_chip", None),
+            "hands-free": getattr(self, "_hands_chip", None),
+            "reply-style": getattr(self, "_style_chip", None),
+        }.get(action_name)
+        if chip is not None and hasattr(chip, "popup"):
+            chip.popup()
 
     #: Set by a caller that wants to decide rewinds itself; None means use the
     #: real dialogue. It is a seam for tests, and the seam takes the **action**
@@ -3508,11 +3861,24 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         return True
 
     def _on_window_key_pressed(self, _controller, keyval, _keycode, _state) -> bool:
-        """Escape stops a running turn, and does nothing when none is running.
+        """`?` opens help; Escape stops a running turn and nothing else.
 
         Returns True only when it acted, so Escape keeps its other jobs - closing
         a popover, dismissing a question - everywhere else.
+
+        **`?` needs Shift, so the shifted form is what is tested.** `Gdk.KEY_question`
+        is the key *with* shift; the bare key is a plain `Gdk.KEY_slash`. A check
+        for the bare slash would fire on every `/` typed into the composer, which
+        is how a help window ends up opening over the thing you were typing.
+
+        **It is here because the shortcut was going to be advertised.** The
+        empty state names `?`, and a hint that names a key which is not bound is
+        worse than no hint: a person presses it, nothing happens, and they learn
+        that this interface lies to them.
         """
+        if keyval == Gdk.KEY_question:
+            return self.open_help() is not None
+
         if keyval != Gdk.KEY_Escape:
             return False
         stop = getattr(self, "_turn_stop_button", None)

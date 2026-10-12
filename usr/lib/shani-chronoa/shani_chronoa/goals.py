@@ -374,6 +374,56 @@ def new_run(goal: str, steps, run_id: Optional[str] = None) -> GoalRun:
         steps=tuple(steps), created_at=now, updated_at=now)
 
 
+#: What a run parked by `plan_from_refusals` is waiting for.
+PLAN_AWAITING_REASON = "planned - review it, then approve to run"
+
+
+def plan_from_refusals(goal: str, refusals) -> str:
+    """Store what plan mode refused this turn as a run, and return its id.
+
+    **The plan is made of the calls that were actually refused.** Plan mode
+    tells the model to describe its steps in prose, and a model may do exactly
+    that without ever calling a tool - in which case this stores nothing and
+    returns `""`. That is the honest outcome: a plan assembled from prose the
+    model wrote would be our guess at what it meant, and a stored guess that
+    later *executes* is the worst thing this app could hold.
+
+    So: refused calls become steps, and no refused calls means no run.
+
+    **Parked in `AWAITING`, never `PENDING`.** A run that starts pending and is
+    never driven looks identical to one that is waiting for a person, and the
+    panel would show a plan as though it were under way. `Phase.AWAITING` is the
+    state whose whole meaning is "somebody outside has to answer".
+
+    **Approving it does not bypass consent.** `advance()` runs each step through
+    `tool_executor`, which is `tools.execute_tool` - so every step is gated,
+    prompted and verified exactly as if it had been typed. This stores a
+    *proposal*; it grants nothing.
+    """
+    steps = []
+    for number, (tool, arguments) in enumerate(refusals or (), start=1):
+        if not tool:
+            continue
+        steps.append(PlannedStep(
+            thought=f"Step {number}: {tool} was asked for and refused in plan mode",
+            tool_name=str(tool),
+            tool_arguments=dict(arguments) if isinstance(arguments, dict) else {},
+            variable_name=f"step{number}"))
+    if not steps:
+        return ""
+    run = new_run(goal or "Plan", steps)
+    run = run._replace(phase=Phase.AWAITING,
+                       awaiting_reason=PLAN_AWAITING_REASON)
+    try:
+        GoalStore(store_root()).save(run)
+    except Exception:                                   # noqa: BLE001
+        # A plan that cannot be stored is a plan the user does not get. The
+        # caller decides what to say; raising here would take the turn down.
+        logger.warning("could not store the plan for %r", goal, exc_info=True)
+        return ""
+    return run.id
+
+
 def dependencies_settled(run: GoalRun, step: PlannedStep) -> bool:
     """Every `depends_on` variable has a result. A step started before its
     inputs exist would be run against nothing, so the plan never runs it."""

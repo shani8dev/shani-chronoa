@@ -18,10 +18,18 @@ from shani_chronoa import capabilities
 #: What each mode does, in one sentence, including that it lasts this run. The
 #: subtitle is the only place a user reads before picking, so it has to carry
 #: the whole consequence including its duration.
+#: **"Normal" is gone** - the two postures are called what the strip calls them,
+#: so the same word means the same thing in both places. "Back to normal" also
+#: read as a fourth option nobody had.
 _MODE_SUBTITLES = {
-    "default": "Each risky call asks the first time it happens. Back to Normal when Chronoa restarts.",
-    "dont_ask": "Everything not already allowed is refused on the spot - no prompts. Back to Normal when Chronoa restarts.",
-    "explore": "Any tool that changes something is refused, and reads still work. Back to Normal when Chronoa restarts.",
+    "default": "It asks before anything that needs permission, and waits for "
+               "you. Back to Ask first when Chronoa restarts.",
+    "dont_ask": "It stops interrupting you: anything needing permission is "
+                "refused on the spot rather than asked about. This is not "
+                "permission to act freely. Back to Ask first when Chronoa "
+                "restarts.",
+    "explore": "Any tool that changes something is refused, and reads still "
+               "work. Kept only for a session already in it.",
 }
 
 
@@ -61,10 +69,30 @@ class PrivacyPage:
         says so, which is the difference between a promise and a surprise.
         """
         from shani_chronoa import permissions
-        names = [permissions.Mode.DEFAULT, permissions.Mode.DONT_ASK, permissions.Mode.EXPLORE]
-        labels = ["Normal", "No questions asked (everything risky is a no)",
-                  "Explore first (see only, touch nothing)"]
+
+        # **Two rows, matching the strip's Auto chip exactly.** This combo
+        # offered a third - Explore - that no chip on the strip could show, so
+        # the app had two controls for one axis and one of them offered a mode
+        # you could only reach by hunting through Settings. Explore is still a
+        # mode the dispatcher honours; it is no longer a fourth thing to pick,
+        # and `planmode` is how you get read-only with a question attached.
+        names = [permissions.Mode.DEFAULT, permissions.Mode.DONT_ASK]
+        labels = ["Ask first", "Auto (everything risky is a no)"]
         current = permissions.get_mode()
+        if current == permissions.Mode.EXPLORE:
+            # **Read-only from a previous version of this panel.** Falling back
+            # to the nearest row *and saying so* is the honest reading: the
+            # posture is still explore, and silently showing "Ask first" over it
+            # would claim the machine can change things while it cannot.
+            row = Adw.ComboRow(title="How Chronoa treats a risky call")
+            row.set_model(Gtk.StringList.new(
+                labels + ["Read only (kept from before)"]))
+            row.set_selected(2)
+            row.set_subtitle(
+                "Read only is no longer offered here; the model stays where it "
+                "was. Leave plan mode, or ask in chat, to change things.")
+            group.add(row)
+            return
         row = Adw.ComboRow(title="How Chronoa treats a risky call")
         row.set_model(Gtk.StringList.new(labels))
         row.set_selected(names.index(current) if current in names else 0)

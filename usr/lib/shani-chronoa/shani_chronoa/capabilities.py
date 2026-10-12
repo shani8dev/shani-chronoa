@@ -1300,8 +1300,29 @@ READ_ONLY_TOOLS = frozenset({
 #: gated tool in both sets makes it the first tool to hit both branches at once, and the
 #: two disagree about idempotency. `set_sleep_inhibit` was that tool; keeping the sets
 #: disjoint is what stops the question arising.
+#: Tools that only talk: to the person, or outward. **They change nothing on
+#: this machine**, and both read-only postures must let them through.
+#:
+#: `ask_user` is in `MUTATING_TOOLS` because it has an effect - the question
+#: appears - but that effect is on the conversation, not the disk. A read-only
+#: mode that refuses it is a mode in which nobody can be asked anything, and
+#: that is the defect both `explore` and `plan` had until this set existed:
+#: explore refused `ask_user` because `READ_ONLY_TOOLS` omits it, and plan
+#: refused it the moment plan started consulting `MUTATING_TOOLS`.
+#:
+#: They stay in `MUTATING_TOOLS`, which drives MCP's `read_only_hint` - a
+#: question does prompt a human, and a host is right to know.
+TALKS_ONLY = frozenset({"ask_user", "ask_for_text", "notify", "speak"})
+
 MUTATING_TOOLS = frozenset({
     "write_text_file", "create_directory", "move_or_copy_file",
+    # **`apply_patch` was in neither this list nor any consent key, so plan
+    # mode allowed it** - a mode documented as "may look, but not touch" that
+    # would apply a diff to your files. Its own description gives the reason:
+    # "Runs a dry run by default and **changes nothing until asked**", which is
+    # an admission that it can change things. Adding it here also makes the
+    # MCP `read_only_hint` honest, which is the other consumer of this set.
+    "apply_patch",
     "create_archive", "extract_archive", "set_clipboard", "set_volume",
     "set_mute", "set_brightness", "set_power_profile", "set_privacy",
     "set_timer", "reminders", "open_application", "speak", "ask_user",

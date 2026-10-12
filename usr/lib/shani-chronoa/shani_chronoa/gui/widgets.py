@@ -427,6 +427,7 @@ class HelpWindow(Gtk.Window):
             ordered.append(extra)
 
         rows.append(self._build_tasks(config))
+        rows.append(self._build_shortcuts(config))
         everything = Gtk.Label(label="Everything Chronoa can do")
         everything.add_css_class("title-4")
         everything.set_halign(Gtk.Align.START)
@@ -453,6 +454,77 @@ class HelpWindow(Gtk.Window):
             self._index.append((group_box, indexed))
             rows.append(group_box)
         return rows
+
+    #: What a person can press. **Hand-written, and a test proves it.**
+    #:
+    #: The first version of this comment claimed the list was *read* from the
+    #: app's actions and could not go stale. It is not and it could - it is
+    #: five rows a person typed, which is exactly the failure mode of every
+    #: hand-written shortcuts panel. So instead of claiming otherwise,
+    #: `test_every_shortcut_listed_is_really_bound` checks each row against the
+    #: source that binds it, and a shortcut panel that drifts fails a test.
+    #: The third field is **a search haystack, not a reference to a binding** -
+    #: it goes into `_index` so `filter()` can find the row. Two of these five
+    #: are keyval handlers with no action at all (`?` and Escape), and naming
+    #: them after actions that do not exist is how the next person to read this
+    #: concludes a binding is missing when it is only the label that was wrong.
+    _SHORTCUT_ACTIONS = (
+        ("Ctrl+K", "anything else: every panel, mode and command",
+         "command palette"),
+        ("Ctrl+F", "find in this conversation", "find", "search"),
+        ("?", "this window", "help", "what chronoa can do"),
+        ("F9", "the sidebar", "panels"),
+        ("Escape", "stop what is running", "stop", "cancel"),
+    )
+
+    def _build_shortcuts(self, config) -> Gtk.Box:
+        """What *you* can do, under "What Chronoa can do".
+
+        **The distinction this section exists for.** Everything below it is what
+        the assistant is able to do; nothing on the screen answers what the
+        person at the keyboard can do, and two of these five keys are the only
+        way to reach a control that is deliberately not on the toolbar.
+
+        Grouped like the rest of the window, with the key in its own column, so
+        a shortcut list reads as a list rather than as a paragraph.
+        """
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        box.add_css_class("help-group")
+        heading = Gtk.Label(label="What you can do")
+        heading.add_css_class("help-group-heading")
+        heading.set_halign(Gtk.Align.START)
+        box.append(heading)
+
+        indexed = []
+        for entry in self._SHORTCUT_ACTIONS:
+            key, what = entry[0], entry[1]
+            # Everything after `what` is the row's own search haystack, so a
+            # shortcut can be found by any of its words.
+            row = self._build_shortcut_row(key, what)
+            box.append(row)
+            indexed.append(
+                (row, " ".join(str(part) for part in entry).lower()))
+        self._index.append((box, indexed))
+        return box
+
+    def _build_shortcut_row(self, key: str, what: str) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_margin_start(14)
+        row.set_margin_end(14)
+        row.set_margin_top(3)
+        row.set_margin_bottom(3)
+        label = Gtk.Label(label=key)
+        label.add_css_class("heading")
+        label.add_css_class("caption")
+        label.set_xalign(0.0)
+        label.set_width_chars(9)
+        row.append(label)
+        text = Gtk.Label(label=what)
+        text.set_xalign(0.0)
+        text.set_hexpand(True)
+        text.set_wrap(True)
+        row.append(text)
+        return row
 
     def _build_tasks(self, config) -> Gtk.Box:
         """The jobs first: how Chronoa helps with a day, each one ready to send.
@@ -915,6 +987,25 @@ class TranscriptView(Gtk.ScrolledWindow):
         label.set_halign(Gtk.Align.CENTER)
         self._rows.append(label)
 
+        # **The shortcuts, in the one place a new person is guaranteed to look.**
+        # Ctrl+K is now the home of four mode controls - when it is, nobody will
+        # ever find them, and that is a regression this strip caused. The
+        # placeholder already exists to give a new user something to act on,
+        # and a keyboard shortcut nobody can discover is a control that is not
+        # there.
+        #
+        # **Both keys are named with what they do**, because "Ctrl+K" alone is
+        # not a reason to press it and the palette is called a palette nowhere
+        # else in the interface.
+        keys = Gtk.Label(
+            label="Ctrl+K for anything else  ·  Ctrl+F to find in this "
+                  "conversation  ·  ? for what Chronoa can do")
+        keys.add_css_class("dim-label")
+        keys.add_css_class("caption")
+        keys.set_wrap(True)
+        keys.set_halign(Gtk.Align.CENTER)
+        self._rows.append(keys)
+
         suggestions = capabilities.startup_suggestions(self._caps)
         if suggestions and self._on_suggestion is not None:
             bar = SuggestionBar(
@@ -964,6 +1055,18 @@ class TranscriptView(Gtk.ScrolledWindow):
         wall = stats.get("wall_seconds")
         if isinstance(wall, (int, float)) and wall > 0:
             parts.append(f"{wall:.1f}s")
+            # **Model time, said apart from wall time.** On a local model they
+            # are almost the whole story and are not the same number: wall time
+            # includes the skills this turn ran, and "how much of the wait was
+            # the model" is the question you ask when deciding whether to ask a
+            # smaller tier. `model_seconds` was computed and shown nowhere.
+            #
+            # **Only past two seconds, and only the gap.** Under that the
+            # distinction is one decimal place of noise, and a footer that
+            # reported it would be a footer nobody reads.
+            model = stats.get("model_seconds")
+            if isinstance(model, (int, float)) and model > 0 and wall >= 2.0:
+                parts.append(f"{model:.1f}s of it the model")
         usage = stats.get("usage") or {}
         total = sum(int(v) for v in usage.values() if isinstance(v, (int, float)))
         if total:

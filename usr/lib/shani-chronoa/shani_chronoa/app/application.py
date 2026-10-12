@@ -477,25 +477,40 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         if key not in self._RULES_KEYS:
             logger.warning("unknown answer-rules choice %r", key)
             return
-        from shani_chronoa import planmode
-        read_only = key == "read-only"
-        if planmode.is_enabled() != read_only:
-            self._toggle_plan_mode(None, None)
+        # **"Read only" is `explore`, not plan mode.** It was plan mode, and
+        # that conflated two different ideas under one word: a *permission*
+        # (may it change anything) and a *workflow* (work out what it would
+        # do). The permission is what this chip asks, and `explore` is the
+        # permission layer's own name for it - `permissions.explore_refuses`
+        # is the check that answers it.
+        #
+        # Plan mode is a workflow and now has its own control, so the two can
+        # be combined deliberately rather than by accident: read-only *and*
+        # planning, or read-only and acting.
+        from shani_chronoa import buildmode
+
+        buildmode.set_enabled(key == "build")
         action.set_state(GLib.Variant("s", key))
         self._refresh_strip()
 
     @property
     def _PERMISSION_KEYS(self):
-        """The permission postures the strip and Settings both offer.
+        """The keys the Auto chip and this action accept.
 
-        **Read from `permissions.Mode`, not repeated here.** Settings already
-        writes this same list, and a second copy of three mode names is a second
-        place for the two surfaces to disagree about what a mode is called.
+        **The chip's own keys, checked against the module's modes.** The chip
+        says "ask" and "auto" because those are the two things a person decides;
+        the module calls them `default` and `dont_ask`, which are two things an
+        implementer has to look up. Keeping both lists is the drift this mapping
+        exists to prevent - and the first version checked the action's key
+        against the *module's* names, so "ask" and "auto" were refused and the
+        chip did nothing.
         """
-        from shani_chronoa import permissions
-
-        return (permissions.Mode.DEFAULT, permissions.Mode.DONT_ASK,
-                permissions.Mode.EXPLORE)
+        # **`explore` is not one of them.** It used to be accepted here so that
+        # Settings' combo could reach it through this action, but that combo
+        # writes `permissions.set_mode` directly and never came here - so the
+        # third key was a mode with no control. Read-only is reached in
+        # Settings, or by asking in chat while plan mode is on.
+        return ("ask", "auto")
 
     def _on_answer_permission(self, action, value) -> None:
         """Set how Chronoa treats a risky call: ask, refuse, or look only.
@@ -522,7 +537,18 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             logger.warning("unknown answer-permission choice %r", key)
             action.set_state(GLib.Variant("s", permissions.get_mode()))
             return
-        permissions.set_mode(key)
+        # **The strip's two keys are the permission layer's own two modes.** A
+        # third is accepted and not offered: Settings' combo writes `explore`
+        # through `permissions.set_mode` directly and must keep working, and
+        # read-only deliberately left the strip (see `buildmode.read_only_note`).
+        wanted = {"ask": permissions.Mode.DEFAULT,
+                  "auto": permissions.Mode.DONT_ASK,
+                  "explore": permissions.Mode.EXPLORE}.get(key)
+        if wanted is None:
+            logger.warning("unknown answer-permission choice %r", key)
+            action.set_state(GLib.Variant("s", permissions.get_mode()))
+            return
+        permissions.set_mode(wanted)
         action.set_state(GLib.Variant("s", permissions.get_mode()))
         self._refresh_strip()
 
@@ -732,6 +758,23 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         strip = getattr(window, "_mode_strip", None)
         if strip is not None:
             strip.refresh()
+        # **And the model picker under the composer.** Same question as the
+        # chip, asked at the moment of typing, so it has to redraw from the same
+        # refresh or the row and the strip name different models.
+        #
+        # The two are separate lookups on purpose: `refresh()` is the strip's,
+        # and the picker row is a child of the *window*, not of the strip. An
+        # earlier version put `_refresh_model_word` on `_ModeStrip` - where
+        # nothing called it - and this line looked for it here, so `getattr`
+        # returned None and the redraw silently never happened. The `callable()`
+        # guard is what made that invisible: a refresh that does nothing looks
+        # exactly like a refresh with nothing to do.
+        refresh = getattr(window, "_refresh_model_word", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:  # noqa: BLE001 - a label must not fail a mode
+                logger.debug("model word would not redraw", exc_info=True)
 
     def _apply_answer_mode_if_present(self) -> None:
         """Apply `answer-mode`, if the code that does it exists.
@@ -1390,6 +1433,9 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 ("answer-presence", self._on_answer_presence, ""),
                 ("hands-free", self._on_hands_free, "off"),
                 ("answer-model", self._on_answer_model, ""),
+                # Settings' "How Chronoa treats a risky call" combo writes
+                # `permissions` directly, so this action is for anywhere else
+                # that wants the posture as a first-class, stateful control.
                 ("answer-permission", self._on_answer_permission, "default")):
             act = Gio.SimpleAction.new_stateful(
                 name, GLib.VariantType.new("s"),

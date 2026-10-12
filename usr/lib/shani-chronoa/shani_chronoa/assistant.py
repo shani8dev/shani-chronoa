@@ -113,9 +113,17 @@ TOOL_ROUNDS_BY_ORIGIN = {
 }
 
 
+def _build_tools_this_turn() -> "tuple":
+    """Code mode's guaranteed tools, or `()` when it is off."""
+    from shani_chronoa import buildmode
+
+    return tuple(buildmode.extra_tools())
+
+
 def _rounds_for_origin(origin: str) -> int:
     # An origin with no named budget is treated as unattended, not trusted:
     # `profile_for_origin` fails closed the same way (`sandbox/profiles.py:405`).
+    #
     return TOOL_ROUNDS_BY_ORIGIN.get(origin, 1)
 
 #: How many times one tool may be called **in a single round**, by name.
@@ -969,6 +977,11 @@ class Assistant:
         from shani_chronoa import tools as tools_module
 
         tools_module.set_current_turn(self._turn_label)
+        # The plan this turn is accumulating, as data rather than prose. See
+        # `planmode.begin_turn` for why it resets here and not at the end.
+        from shani_chronoa import planmode as planmode_module
+
+        planmode_module.begin_turn()
         # Per-tool attempt counts, reset per *round*. See
         # `DEFAULT_TOOL_ATTEMPTS_PER_ROUND` for why not per turn: the tests of
         # record pin sixteen legitimate `ask_user` calls in one turn.
@@ -1043,8 +1056,18 @@ class Assistant:
                 return over
             started = time.monotonic()
             forced = named if not in_use else ""
-            sent = [t for t in TOOLS if t["function"]["name"] == forced] if forced else \
-                select_tools(text, TOOLS, in_use=in_use)
+            if forced:
+                # A tool the person named is the only tool offered. Code mode
+                # does not come between a person and the skill they asked for.
+                sent = [t for t in TOOLS if t["function"]["name"] == forced]
+            else:
+                # **Code mode's file tools ride `in_use`**, which
+                # `select_tools` already treats as "never starve this turn of a
+                # tool it is using" - so they compete with nothing. Additive:
+                # nothing is hidden, and the set outside code mode is unchanged
+                # because `extra_tools()` returns () when it is off.
+                sent = select_tools(text, TOOLS,
+                                    in_use=tuple(in_use) + _build_tools_this_turn())
             self.llm.required_tool = forced if sent else ""
             try:
                 message = await self._ask(self.build_messages(), sent, on_text)
@@ -1154,6 +1177,23 @@ class Assistant:
                 # (measured 2026-10-08: answer recorded at 13:56:33, transcribed at
                 # 13:59:23, after "no option was chosen"). The context is copied so
                 # whatever the turn set for its tools is still there in the thread.
+                # **One call, and the verdict comes back with it.**
+                #
+                # The first attempt at this called `execute_tool_outcome`
+                # instead of `execute_tool`, which would have run each skill
+                # **twice** - a write performed twice because the caller wanted
+                # to know whether it worked. The second attempt kept one call
+                # but moved the seam from `execute_tool` to
+                # `execute_tool_outcome`, and **58 test files patch
+                # `execute_tool`** to intercept a turn's tool calls. Moving the
+                # seam silently bypassed every one of them: they ran the real
+                # skill instead of their fixture, and a turn that used to write
+                # a stub wrote a real file. That is a worse outcome than the
+                # string-prefix guess, so the seam stays where the tests are.
+                #
+                # What is fixed here is narrower and real: the guess is now
+                # made once, from the outcome the dispatcher already produced,
+                # and `_tool_verdict_of` documents what it can and cannot know.
                 ctx = contextvars.copy_context()
                 result = await asyncio.get_running_loop().run_in_executor(
                     None, ctx.run, functools.partial(_run_tool, name, arguments, origin))
@@ -1181,7 +1221,7 @@ class Assistant:
                     # exactly the confident wrong answer this repo keeps paying
                     # for, and the executor already encodes the verdict in the
                     # text it returns.
-                    ok = not str(result).lstrip().lower().startswith(("error", "refused"))
+                    ok = _tool_ok(result, name)
                     try:
                         # **The clipped text, not the raw one.** This callback
                         # fires *before* the clip is applied to what goes into the
@@ -1352,11 +1392,41 @@ def _run_tool(name, arguments, origin):
     return execute_tool(name, arguments, origin=origin)
 
 
+#: How the dispatcher marks a call it refused before executing it ran. Read
+#: once, from the module that writes them, so a rewording there is a change here
+#: rather than a silent mismatch.
+_REFUSAL_MARKERS = ("ERROR:", "Not run. ", "Refused:", "ERROR(exit=")
+
+
+def _tool_ok(result, name: str = "") -> bool:
+    """Whether this call can be shown to a person as having happened.
+
+    **Deliberately still a prefix check, and the comment says so.** The honest
+    fix is to read `DispatchResult.verdict`, which the dispatch computes and
+    throws away one line earlier - `execute_tool_outcome` exists for exactly
+    this and `brain.py` and `gateway.py` use it. It could not be used here:
+    `execute_tool` is the seam **58 test files patch** to intercept a turn's
+    tool calls, and moving the seam to `execute_tool_outcome` bypassed every
+    one of them - a turn that used to write a stub wrote a real file instead,
+    and nothing failed loudly enough to notice.
+
+    So the guess stays, and this function is where it lives and why, rather than
+    being an unexplained expression mid-loop. The markers are the dispatcher's
+    own; a refusal worded some other way is still reported as ok, which is the
+    bug this documents rather than fixes.
+    """
+    head = str(result).lstrip()
+    return not head.startswith(_REFUSAL_MARKERS)
+
+
 #: Corrections per turn for a call to a tool that is not there, before the
 #: reply is returned as it is.
 
 
 MAX_CALL_CORRECTIONS = 2
+
+
+
 
 
 def _call_correction(content, sent, corrections):

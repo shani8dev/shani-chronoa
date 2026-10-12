@@ -124,8 +124,8 @@ def gapp():
     # as `answer-mode` and `reply-style` do - so the menu and the chip cannot
     # disagree about what is chosen. Without them the strip still builds, but
     # every `activate_action("app.answer-rules", ...)` is dropped by the action
-    # muxer and the chips read "Anything" whatever was picked.
-    for name, start in (("answer-rules", "anything"), ("hands-free", "off")):
+    # muxer and the chips read "General" whatever was picked.
+    for name, start in (("answer-rules", "general"), ("hands-free", "off")):
         act = Gio.SimpleAction.new_stateful(
             name, GLib.VariantType.new("s"), GLib.Variant("s", start))
         act.connect("change-state", lambda a, v, n=name, s=start: (
@@ -302,7 +302,7 @@ def test_every_mode_has_a_dropdown_named_for_what_it_does(strip):
     tooltips = [c.get_tooltip_text() for c in
                 (strip._rules_chip, strip._ambient_chip, strip._hands_chip,
                  strip._answer_chip, strip._style_chip)]
-    for what in ("What it may change", "When it may act",
+    for what in ("What it works on", "When it may act",
                  "How Chronoa hears you", "Where it may go", "Reply style"):
         assert any(what in tip for tip in tooltips), f"nothing shows {what!r}"
     assert all(tip.strip() for tip in tooltips)
@@ -317,7 +317,7 @@ def test_two_toggles_that_answer_one_question_are_one_dropdown(strip):
     """
     rules = strip._rules_chip.get_menu_model()
     hands = strip._hands_chip.get_menu_model()
-    assert _menu_keys(rules) == ["anything", "read-only"]
+    assert _menu_keys(rules) == ["general", "build"]
     assert _menu_keys(hands) == ["off", "wake", "wake-over", "over"]
 
 
@@ -340,7 +340,7 @@ def test_the_menu_targets_the_actions_and_the_words_follow_the_settings(
     an assertion about a thing the test's own fixture stands in for.
     """
     rules = strip._rules_chip.get_menu_model()
-    assert _menu_keys(rules) == ["anything", "read-only"]
+    assert _menu_keys(rules) == ["general", "build"]
     for i in range(rules.get_n_items()):
         assert rules.get_item_attribute_value(i, "action").get_string() \
             == "app.answer-rules"
@@ -348,12 +348,19 @@ def test_the_menu_targets_the_actions_and_the_words_follow_the_settings(
     # The word follows the setting it owns. **One question per chip**: privacy
     # used to move this word too, and it no longer does - it moved to the egress
     # chip, where it is the thing being asked about.
-    planmode.set_enabled(True)
+    #
+    # **This chip is Build mode.** It read `planmode` and said "Read only"
+    # until the three modes were separated - one control standing in for a
+    # permission and a workflow at once, so it could report either. The word now
+    # follows `buildmode`, and plan mode has its own chip.
+    from shani_chronoa import buildmode
+
+    buildmode.set_enabled(True)
     strip.refresh()
-    assert strip._rules_label.get_text() == "Read only"
-    planmode.set_enabled(False)
+    assert strip._rules_label.get_text() == "Build"
+    buildmode.set_enabled(False)
     strip.refresh()
-    assert strip._rules_label.get_text() == "Anything"
+    assert strip._rules_label.get_text() == "General"
 
     # And privacy now moves the egress word, which is the honest place for it.
     state.config.privacy_mode = True
@@ -371,17 +378,24 @@ def test_the_dropdown_shows_the_state_the_action_left_behind(strip, state):
     has no pressed state of its own, so the only way it can be right is by being
     drawn from the state - which is also why it cannot disagree with the menu.
     """
-    planmode.set_enabled(True)
+    # **This chip follows `buildmode`; plan mode has its own chip.** The test
+    # used to set plan mode and read "Read only" here, because one control was
+    # standing in for a permission and a workflow at once.
+    from shani_chronoa import buildmode
+
+    buildmode.set_enabled(True)
     strip.refresh()
-    assert strip._rules_label.get_text() == "Read only"
+    assert strip._rules_label.get_text() == "Build"
+    assert strip._plan_label.get_text() == "Working", (
+        "building should not turn plan mode on")
 
     # **One question per chip, so one setting clears it.** This used to clear
     # `privacy_mode` and expect the word to follow, because privacy and plan mode
     # were the same chip - which is the coupling that made the four options
-    # incomparable. Now the egress chip owns privacy and this one owns plan mode.
-    planmode.set_enabled(False)
+    # incomparable. Now the egress chip owns privacy and this one owns Build.
+    buildmode.set_enabled(False)
     strip.refresh()
-    assert strip._rules_label.get_text() == "Anything"
+    assert strip._rules_label.get_text() == "General"
 
 
 def test_an_action_that_changes_nothing_does_not_move_the_word(state):
@@ -435,8 +449,8 @@ def test_refresh_redraws_from_the_state_and_fires_nothing(strip, state):
     # A change made by something other than the strip is picked up.
     planmode.set_enabled(False)
     strip.refresh()
-    assert strip._read_capability() == "anything"
-    assert "Anything" in strip._rules_chip.get_tooltip_text()
+    assert strip._read_capability() == "general"
+    assert "General" in strip._rules_chip.get_tooltip_text()
 
 
 def test_the_quiet_states_are_the_only_ones_not_highlighted(strip, state):
@@ -480,12 +494,31 @@ def test_the_quiet_states_are_the_only_ones_not_highlighted(strip, state):
     strip.refresh()
     assert "mode-chip-on" not in strip._style_chip.get_css_classes()
 
-    planmode.set_enabled(True)
+    # **Build, not plan mode.** This chip followed `planmode` and lit up for it
+    # until the two were separated; it now follows `buildmode`, and plan mode
+    # has its own chip which is highlighted by its own state.
+    from shani_chronoa import buildmode
+
+    # **Both states set explicitly.** An earlier test in this file leaves plan
+    # mode on, so the "building does not light the plan chip" check was failing
+    # on the other's state - and it only failed in the file run, not in
+    # isolation, which is the worst way for a test to misbehave.
+    planmode.set_enabled(False)
+    buildmode.set_enabled(True)
     strip.refresh()
     assert "mode-chip-on" in strip._rules_chip.get_css_classes()
-    planmode.set_enabled(False)
+    assert "mode-chip-on" not in strip._plan_chip.get_css_classes(), (
+        "building lit up the plan chip")
+    buildmode.set_enabled(False)
     strip.refresh()
     assert "mode-chip-on" not in strip._rules_chip.get_css_classes()
+
+    planmode.set_enabled(True)
+    strip.refresh()
+    assert "mode-chip-on" in strip._plan_chip.get_css_classes()
+    assert "mode-chip-on" not in strip._rules_chip.get_css_classes(), (
+        "plan mode lit up the Build chip, which is the coupling this removed")
+    planmode.set_enabled(False)
 
 
 def test_a_startup_that_could_not_decide_reads_as_the_plain_state(gapp):
@@ -503,7 +536,7 @@ def test_a_startup_that_could_not_decide_reads_as_the_plain_state(gapp):
     s = _ModeStrip(gapp, Undecidable())
     try:
         s.refresh()
-        assert s._rules_label.get_text() == "Anything"
+        assert s._rules_label.get_text() == "General"
         assert s._hands_label.get_text() == "Mic button"
         assert s._mode_label.get_text() == "This machine, then cloud"
     finally:
@@ -536,7 +569,7 @@ def test_a_config_that_cannot_be_read_does_not_take_the_window_down(gapp):
     try:
         s.refresh()
         # Every reader failed, so every word falls back to its plain state.
-        assert s._rules_label.get_text() == "Anything"
+        assert s._rules_label.get_text() == "General"
         assert s._hands_label.get_text() == "Mic button"
         assert s._mode_label.get_text() == "This machine, then cloud"
     finally:
@@ -587,9 +620,13 @@ def test_a_dropdown_in_a_real_window_activates_its_action(pressed):
         # which is the half the action muxer can drop.
         strip.activate_action("app.toggle-plan-mode")
         strip.refresh()
-        return strip._rules_label.get_text()
+        # **The plan chip, which is where "Read only" used to be read from.**
+        # The rules chip follows Build now, so reading it here would have made
+        # this test pass for the wrong reason if the two ever moved back
+        # together.
+        return strip._plan_label.get_text()
 
-    assert click(check) == "Read only", (
+    assert click(check) == "Plan", (
         "turning plan mode on from a presented window never reached the state")
 
 
@@ -638,7 +675,7 @@ def test_every_dropdown_carries_an_accessible_label(state):
             s.refresh()
         finally:
             Gtk.MenuButton.update_property = original
-        for chip, what in ((s._rules_chip, "What it may change"),
+        for chip, what in ((s._rules_chip, "What it works on"),
                            (s._hands_chip, "How Chronoa hears you"),
                            (s._ambient_chip, "When it may act"),
                            (s._answer_chip, "Where it may go"),
