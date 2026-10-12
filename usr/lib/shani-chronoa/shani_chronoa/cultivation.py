@@ -156,6 +156,88 @@ PRODUCES: Dict[str, str] = {
 }
 
 
+#: The resource axis. A progression says *where you are*; this says *what you
+#: have*, and the two are separate: a cultivator with no 灵气 can be at the last
+#: stage and have produced nothing.
+#:
+#: **Every entry names the function that produces or measures it.** The first
+#: draft of this table was prose - "rare materials are the open weights" - and a
+#: table whose entries are ideas cannot be checked, which is the same defect
+#: `PRODUCES` had until its deciding functions were named in. Each entry is
+#: therefore importable, and `tests/test_cultivation.py` imports them.
+#:
+#: The numbers are measured on this machine and are dated, because a resource
+#: row that quotes a figure nobody re-measured is a claim wearing a table.
+RESOURCES: Dict[str, Dict[str, str]] = {
+    "qi": {  # 灵气 - the ambient input, gathered rather than made
+        "is": "the day's observations: tool calls, verdicts, senses, turns",
+        "from": "distill.harvest_rows",
+        "measured": "11 harvestable (request, tool) pairs on this machine, all "
+                    "of one repeated question; 0 dreams ever written",
+    },
+    "materials": {  # 灵材 - the open weights, and their provenance
+        "is": "another model's weights, plus the licence and digest that say "
+              "whether they may be used",
+        "from": "model_registry.describe",
+        "measured": "identity, licence, uuid and source read off the GGUF "
+                    "header, so a model is described by what is in it",
+    },
+    "furnace": {  # 丹炉 - the thing that refines, and costs time to run
+        "is": "importance-matrix calibration: the same source, re-quantised "
+              "with activations telling it which weights matter",
+        "from": "local_llm.calibrated_quantize",
+        "measured": "751 ms naive against 10.9 s calibrated on SmolLM2-135M",
+    },
+    "elixir": {  # 丹药 - a refined consumable whose effect is read before use
+        "is": "the calibrated build beside the naive one, and the measured "
+              "difference between them",
+        "from": "local_llm.compare_calibration",
+        "measured": "helped / hurt / unchanged, or `not measured` - and a "
+                    "missing measurement is never reported as no-change",
+    },
+    "core": {  # 妖丹 - what is taken out of something trained
+        "is": "an outcome model, a bandit arm or a distilled router: a trained "
+              "component carried out of the log it was fitted to",
+        "from": "learning.train_and_save",
+        "measured": "17,891 labelled calls; ECE 0.430 -> 0.107 and NLL 0.938 -> "
+                    "0.547 on a 2-way cross-fit",
+    },
+    "stone": {  # 灵石 - the budget a thing has to fit inside
+        "is": "memory bandwidth, which is what decode speed actually follows",
+        "from": "local_llm.effective_bandwidth",
+        "measured": "16.5 GiB/s on this i7-1165G7; a 0.6B model is bound by "
+                    "per-token compute and moves less than the hardware can",
+    },
+    "poison": {  # 丹毒 - a refinement that damages the one taking it
+        "is": "an artifact that measured well on the wrong instrument and is "
+              "worse on the task it exists for",
+        "from": "merge.gate",
+        "judged_by": "tools/task_eval.py",
+        "measured": "REAL, and produced this session: a merged Qwen3-0.6B scored "
+                    "4/5 at tool selection where its parent scored 1/5 - four "
+                    "times worse, and 37x slower, while the perplexity corpus "
+                    "called the two close",
+    },
+    "seclusion": {  # 闭关 - the offline pass that consolidates
+        "is": "dream.py's consolidation over the day's activity",
+        "from": "dream.dream",
+        "measured": "never run on this machine; the panel offers it on demand",
+    },
+}
+
+
+def resource_status() -> Dict[str, str]:
+    """`{resource: what is actually known about it}`, every entry populated.
+
+    A resource with no measured figure reads as available, which is the same
+    absence-shaped green this repository keeps recording. So the return value
+    has no empty strings in it: an unmeasured resource says `not measured`, and
+    a missing one says so by its own absence from `RESOURCES`.
+    """
+    return {name: entry.get("measured", "not measured")
+            for name, entry in RESOURCES.items()}
+
+
 class Verdict(NamedTuple):
     """`(unlocked, why)` - never a bare bool.
 

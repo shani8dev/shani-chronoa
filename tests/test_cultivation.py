@@ -88,3 +88,87 @@ def test_the_merge_gate_verdict_the_progression_names_is_one_it_actually_has():
     source = inspect.getsource(merge.gate)
     for verdict in ("better", "no-better", "worse", "unmeasured"):
         assert '"%s"' % verdict in source, verdict
+
+
+# --- the resource axis -------------------------------------------------------
+#
+# A resource table whose entries are prose cannot be checked, which is the same
+# defect `PRODUCES` had until its deciding functions were named. So every entry
+# here must name a function that **actually imports and exists** - if one is
+# renamed, this fails rather than the table quietly becoming a wish list.
+
+def test_every_resource_names_a_function_that_exists():
+    from pathlib import Path
+    """The load-bearing property of the whole table."""
+    import importlib
+    missing = []
+    for name, entry in cultivation.RESOURCES.items():
+        target = entry.get("from", "")
+        module_name, _, symbol = target.rpartition(".")
+        if not module_name or not symbol:
+            missing.append("%s: no function named (%r)" % (name, target))
+            continue
+        try:
+            module = importlib.import_module("shani_chronoa." + module_name)
+        except ImportError as problem:
+            missing.append("%s: %s does not import (%s)" % (name, module_name, problem))
+            continue
+        if not hasattr(module, symbol):
+            missing.append("%s: %s has no %s" % (name, module_name, symbol))
+    for name, entry in cultivation.RESOURCES.items():
+        extra = entry.get("judged_by", "")
+        if extra and "/" in extra:
+            target = Path(cultivation.__file__).resolve().parents[4] / extra
+            if not target.is_file():
+                missing.append("%s: judged_by names %s, which is not a file"
+                               % (name, extra))
+    assert not missing, "resources naming things that are not there: %r" % missing
+
+
+def test_every_resource_says_what_it_is_and_what_it_measured():
+    for name, entry in cultivation.RESOURCES.items():
+        assert entry.get("is", "").strip(), "%s: no description" % name
+        assert entry.get("measured", "").strip(), (
+            "%s: no measured figure. A resource with none reads as available, "
+            "which is the absence-shaped green this suite keeps catching." % name)
+
+
+def test_resource_status_has_no_empty_answers():
+    """Every resource answers, and the ones that are empty say so in words."""
+    status = cultivation.resource_status()
+    assert set(status) == set(cultivation.RESOURCES)
+    for name, answer in status.items():
+        assert answer.strip(), name
+        assert answer.strip() != "not measured", (
+            "%s: RESOURCES claims a measurement and resource_status says there "
+            "is none - one of them is wrong and this is where it shows" % name)
+
+
+def test_an_unmeasured_resource_is_still_listed_rather_than_hidden():
+    """`seclusion` has never run here. It is in the table with that said, not
+    omitted - an absent resource and an unavailable one are different facts and
+    a reader cannot tell them apart from a missing row."""
+    status = cultivation.resource_status()
+    assert "seclusion" in status
+    assert "never run" in status["seclusion"]
+
+
+def test_the_poison_row_is_present_and_names_the_measurement():
+    """丹毒 is not decoration. A refinement that is worse on the task than the
+    thing it was made from is a real failure mode, it happened here, and the
+    row that records it is what stops it being rediscovered as a success."""
+    poison = cultivation.RESOURCES["poison"]
+    assert poison["from"] == "merge.gate"
+    assert "task_eval" in poison["judged_by"]
+    assert "worse" in poison["measured"]
+    # And it must name the number, not the feeling.
+    assert any(ch.isdigit() for ch in poison["measured"])
+
+
+def test_the_progression_and_the_resources_are_separate_axes():
+    """The point of a second axis: a cultivator can reach the last stage with
+    no resources at all, and a table that conflated them would claim otherwise.
+    A stage produces something; a resource is something you have."""
+    assert set(cultivation.STAGES) != set(cultivation.RESOURCES)
+    assert "qi" not in cultivation.STAGES
+    assert "foundation" not in cultivation.RESOURCES
