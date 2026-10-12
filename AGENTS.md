@@ -15457,3 +15457,102 @@ caught that the history stores the result inside a provenance fence
 So the assertion is **containment, not equality** - the two strings differ by the
 fence, and the test now also asserts the fence is still there. Mutation-checked:
 handing the card the raw result again fails it.
+
+## The merge literature, read properly: what it prescribes, and the scale it prescribes it at (2026-10-12)
+
+Asked to research the model-merging field rather than keep measuring blind. The
+`websearch` tool returned **nothing for every query**, so the primary sources
+were fetched directly from arXiv, GitHub and HuggingFace - which is the right
+instrument anyway for this claim class.
+
+**The canon, and what this repository already had.**
+
+| work | what it prescribes | this tree |
+|---|---|---|
+| **Task Arithmetic** (Ilharco et al., ICLR 2023, [arXiv:2212.04089](https://arxiv.org/abs/2212.04089)) | `tau = finetuned - pretrained`, combined by arithmetic | `merge._combine`'s `task_arithmetic` branch - matches |
+| **TIES** (Yadav et al., NeurIPS 2023, [arXiv:2306.01708](https://arxiv.org/abs/2306.01708)) | three steps: TRIM small changes, ELECT SIGN by majority, MERGE only what agrees | all three implemented, and the sign election is by **count** not magnitude, which is the paper's rule |
+| **DELLA** (Deep et al., [arXiv:2406.11617](https://arxiv.org/abs/2406.11617)) | MAGPRUNE - drop by *magnitude rank*, rescale survivors by `1/(1-p)`; **+3.6 over TIES** on their benchmarks | **not implemented**; `merge.py` says so at the trim |
+| **DARE** (Yu et al., ICML 2024, [arXiv:2311.03099](https://arxiv.org/abs/2311.03099)) | random drop + rescale | not implemented |
+| **mergekit** ([EMNLP 2024 industry](https://arxiv.org/pdf/2403.13257)) | ~14 methods; the table classifies each by *# models* and *base required* | 2 of them implemented |
+
+**Two things the literature says that this repository's own measurements
+independently arrived at, which is the strongest form the claim can take.**
+
+1. TIES names its cause as *"disagreement on the sign of a given parameter's
+   values across models"*. Measured on the three lumen adapters: **50.0%**
+   sign-agreement between them - which is the maximum possible sign
+   interference, and exactly what TIES exists to resolve.
+2. DELLA's premise is that **magnitude** is what decides. Measured on the same
+   three adapters: delta norms **0.0732 / 6.5299 / 9.7797**, a **134x spread**,
+   while `alpha/rank` is identical at 2.0. The entire difference is `lora_b`.
+
+**Point 2 is the finding, and it was found the wrong way first.** A chimera
+ladder was read as showing "orthogonality is necessary and not sufficient"
+before the magnitudes were measured; the magnitudes showed the ladder had summed
+one negligible perturbation and two enormous ones. Direction said nothing about
+magnitude. That is retracted in `cultivation.py` and pinned by a test.
+
+**The scale caveat, which is the part most likely to be skipped.** The survey
+([ACM CSUR 2026, arXiv:2408.07666](https://arxiv.org/abs/2408.07666)) flags
+papers using models of size **>= 7B** and notes it - because **almost every
+positive result in the field is at 7B or above**: Llama-3-8B, Mistral-7B,
+Qwen2.5-7B, WizardLM-13B. **Everything measured here is at 1.7B**, which is
+outside the range where any of these methods has been validated. So this
+repository's refusals are consistent with the literature and its *would-be*
+successes would be, too - which is the honest shape of the claim: the methods
+are not known to work at this size, and no result here says otherwise.
+
+**A LoRA-specific literature exists that addresses this failure directly**, and
+is the right thing to read before stacking adapters again: *Unraveling LoRA
+Interference* (arXiv:2505.22934), *LoRI* (arXiv:2504.07448), *Crowded in
+B-Space: Calibrating Shared Directions for LoRA Merging* (arXiv:2604.16826) -
+the last is named for exactly the `lora_b` magnitude spread measured here - and
+*Merging LoRAs like Playing LEGO* (arXiv:2409.16167). **Not read yet, and
+recorded as the next step rather than summarised from its title.**
+
+**Not taken, with reasons.** DELLA and DARE are not implemented here: both are
+*rescaling* methods that need a target density, and this repository has no
+measurement on this box that would say what the density should be - a rescale
+constant nobody measured is the number this file keeps refusing to invent. The
+honest next step is to measure it, not to port it. `mergekit` itself is not a
+dependency: it wants torch, which this box does not have and the repository has
+recorded as absent.
+
+**And the standing limitation still holds**: TIES' sign election is majority by
+*count*, so **two parents are always 1-1** and cannot elect. Three capability
+parents of one ancestor are needed before it can, and this box now has two.
+
+## The GAction count still verifies, and the "every action has a control" claim is not machine-checkable (2026-10-12)
+
+Re-measured while the tree was busy: **27 `Gio.SimpleAction` registrations in the
+shipped tree** (`usr/lib` + `usr/bin`), 27 distinct - exactly the figure recorded
+above. A first pass counted **30** and that was wrong by including
+`tests/`, which registers its own actions; the shipped-tree figure is 27.
+
+The count is checkable. **The claim beside it - "every app action has a control"
+- is not, at least not cheaply**, and measuring it nearly shipped a false finding.
+An AST scan for invocations (`activate_action`, `set_action_name`,
+`set_accels_for_action`, a menu item's detailed action) reported **11 actions with
+no control at all**, including `toggle-plan-mode`. Reading the tree by hand found
+five *different* dispatch shapes an action can be reached by, and the scan knew
+one of them:
+
+| how an action is reached | example |
+|---|---|
+| the Gio API directly | `set_accels_for_action("app.quit", ...)` |
+| **a string-keyed dispatcher** | `_app_toggle("toggle-privacy", a)` in `settings_window/privacy.py` |
+| a table keyed by action name | `"toggle-privacy": config.privacy_mode` in `settings_window/window.py` |
+| **a direct call to the shared handler** | `application.py:469` calls `_toggle_plan_mode(None, None)` |
+| a menu model's `detailed-action` | built from strings |
+
+So the 11 were a scanner limitation, not a defect - the same false-positive family
+as `show_devices` reading dead to an AST scan. **A word-mention scan closes the
+gap and opens another**: it counts prose, and `show-page`'s only "caller" outside
+its declaration is a comment plus a test asserting the *source text* contains the
+string.
+
+Recorded so the next pass does not re-derive the wrong number. What the tree
+actually supports today is the count, and the two D-Bus-only actions named above
+(`show-page`, `show-window`) - both verified to have no in-tree *control*, only an
+existence probe (`app.lookup_action("show-window")`) and a source-text assertion.
+
