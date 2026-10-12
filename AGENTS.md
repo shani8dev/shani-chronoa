@@ -15939,3 +15939,89 @@ The fix is the one `test_window_input_and_copy` already uses: drive the harness
 in a **subprocess**, which is how 10 tests pass in 1.3s in that file. Not done
 here. An abort that ends the run is worse than a failure, so this is recorded as
 work outstanding rather than left to be discovered during a full suite.
+
+## arXiv is reachable from `web_search`, and the query language is the work (2026-10-12)
+
+Follow-on to the two sweep entries above. Both were done by hand with a
+throwaway script against `export.arxiv.org`, because `websearch` returns
+nothing here and the arXiv API answers. That script is now
+`websearch.arxiv_search()` behind `web_search`'s new `source` parameter, and
+**the interesting part was never the HTTP call - it was the query language.**
+
+**The shape, and why arXiv is not just another provider.** `search()` stops at
+the first engine that returns anything, so arXiv in `_FEED_PROVIDERS` would
+answer *every* query that matched a preprint - "the latest news about
+quantization" would return papers and call it results. It is also the third feed
+shape (Atom with an `arxiv:` extension namespace; Google News is RSS) and it
+takes a query language the one-`str`-param table cannot carry. So it is its own
+entry point, sharing `gate()`, `Result` and `format_results` - and
+**`_GROUPS` is unchanged and the registry is still 257**, because this is a
+parameter on an existing skill rather than a new one.
+
+**Four design decisions, each measured against the live API rather than
+argued, and two of them are the opposite of the obvious one.**
+
+| decision | rejected alternative | measurement |
+|---|---|---|
+| **title-scoped** (`ti:`), default | `all:` | "constrained decoding": `ti:` **107** hits topped by *"Constrained Decoding with Speculative Lookaheads"*; `all:` 2,365 topped by *"Computationally Efficient NER Taggers"*. 4-20x fewer hits and every top result on topic. |
+| **conjunction**, not disjunction | `a OR b OR c` | the disjunction returns **406,821** hits topped by *"Cool Outflows and HI absorbers with SKA"*. **Scoping those same terms to `all:` returns the identical 406,821 and the identical top hit** - so the scope is not what saves it, and arXiv's relevance ranking over a disjunction is not what a caller asked for. |
+| **framing words dropped** before querying | quote/AND them | `all:what AND all:new AND all:in AND all:quantized AND all:inference` returns **0**; `all:quantized AND all:inference` returns **2,954**. `all:` is a *full-text* field, so a conjunction is only as good as its weakest term and a question's weakest terms are its framing. |
+| **trailing punctuation stripped** | keep it | `all:inference` → 2,954; `all:inference?` → **0**. One question mark silently empties the result set. |
+
+`ti:` is so much better that "small language models tool use" returns **11**
+hits whose top result is *"Don't Adapt Small Language Models for Tools; Adapt
+Tool Schemas to the Models"* - the PA-Tool paper the sweep above found by hand,
+now found by the tool.
+
+**The greetings are in the stopword list for a measured reason and it is
+almost funny.** `hi` is matched by arXiv's full-text index against
+astrophysics, so "hi, what's the best way to speed up Llama inference on a CPU"
+became `all:hi AND ... AND all:cpu` and returned **0**. Dropping the framing
+words leaves `all:speed AND all:llama AND all:inference AND all:cpu` - **9
+hits, all on topic**.
+
+**The widening ladder, and the ordering that makes it safe.** `ti:` can find
+nothing where `all:` would (measured: `ti:"llama inference" AND ti:cpu` → 0,
+`all:llama AND all:inference AND all:cpu` → 53, all on topic), so the second
+request is a **widening, never a re-ask**: a title is part of the full text, so
+`all:` can only return a superset. It runs only on the empty case. A **pass-through
+query is asked once** - it carries its own field, so there is nothing to widen
+and a second request would be the identical question sent twice, which arXiv's
+terms ask callers not to do.
+
+**Three things the code refuses rather than guesses.** A query with no content
+words is refused before any request: falling back to the raw text returned
+**83,903** hits topped by an unrelated binary-neutron-star paper. A response
+that is not a feed is refused as unreadable rather than reported as "no such
+paper" - and that distinction is why there are **two real captures**,
+`arxiv.atom` and `arxiv-empty.atom`, because a query matching nothing answers
+**HTTP 200 with a well-formed feed carrying `totalResults 0`**, not an empty
+body. And an empty answer **quotes both questions it sent**, because a search
+that returns nothing with no way to see what was asked is the least actionable
+result there is.
+
+**One real bug, found by a test after the suite was already green.** The
+operator check tested `raw.upper()`, which **manufactures** the operator: every
+question containing the word "and" was passed through to arXiv as a boolean
+query and answered with the 406,821-hit disjunction. "cats and dogs" is now a
+conjunction. The docstring says why it is tested against `raw` and never a
+cased copy.
+
+**One real gap in the tests, found by the mutation run.** The feed carries two
+links per entry - `rel="alternate"` (the page) and `rel="related"` (the PDF) -
+and both are https and both end in `v2`, so a scheme-and-suffix assertion
+cannot tell them apart. Answering the PDF is measured and caught now, because
+these URLs are handed to a *text* reader and `webtext.retrieve` on a PDF returns
+nothing readable.
+
+`tests/test_arxiv_search.py` (42) and `tools/mutations/arxiv_search.py` -
+**20 mutations, 20 caught, 0 survivors, 0 equivalent**, run against real
+captures with no network. 268 passed across the web, skill-registry, gate and
+capability suites.
+
+**What this does not claim.** Every number above is arXiv's behaviour on one
+day, and arXiv's ranking is not a benchmark - a different day can order the
+same query differently. The refusal for a query with no content words is a
+judgement, not a measurement, and the stopword list is a hand-kept English
+function-word list that will need adding to; it is not derived, and nothing
+here claims it is complete.

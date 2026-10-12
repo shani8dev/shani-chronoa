@@ -37,6 +37,7 @@ as every other skill does).
 import logging
 import urllib.parse
 
+from shani_chronoa import websearch
 from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.webtext import RetrievalError, render, retrieve
 from shani_chronoa.skills import Skill
@@ -85,9 +86,12 @@ _SCHEMA = {
         "description": (
             "Look something up on the web and return what the pages actually "
             "say: facts, prices, how-tos, anything no more specific tool covers. "
-            "Give a search query, a specific URL, or both. For news headlines "
-            "use news; to click, fill in or book something on a site use browse. "
-            "Requires the web sense to be enabled and privacy mode to be off."
+            "Give a search query, a specific URL, or both. For a scholarly "
+            "question - a paper, a preprint, prior work, 'what does the "
+            "research say' - set source=arxiv and it searches the arXiv preprint "
+            "archive instead of the web. For news headlines use news; to click, "
+            "fill in or book something on a site use browse. Requires the web "
+            "sense to be enabled and privacy mode to be off."
         ),
         "parameters": {
             "type": "object",
@@ -100,11 +104,31 @@ _SCHEMA = {
                     "type": "string",
                     "description": "An absolute http(s) URL to read directly, if you have one.",
                 },
+                "source": {
+                    "type": "string",
+                    "enum": ["web", "arxiv"],
+                    "description": (
+                        "Where to look. 'web' (default) searches the usual "
+                        "engines. 'arxiv' searches the arXiv preprint archive - "
+                        "use it for papers, research and prior work."
+                    ),
+                },
             },
             "required": ["query"],
         },
     },
 }
+
+#: **arXiv is a preprint archive, and the answer says so on every result.**
+#: A preprint is not peer review, not a web page, and not evidence that anything
+#: was published - so a reader who gets twelve titles with no such sentence can
+#: cite one as though it were a journal paper. It is one line, and it is the
+#: whole difference between "here are papers" and "here are things on the
+#: internet".
+_ARXIV_SCOPE = (
+    "These are arXiv preprints: not peer-reviewed, and not the whole of what "
+    "has been published. Open one with web_search before relying on it."
+)
 
 
 def _run(arguments: dict) -> str:
@@ -116,6 +140,20 @@ def _run(arguments: dict) -> str:
     config = ChronoaConfig()
     if not config.sense_allowed("web"):
         return f"Web search is not permitted: {config.sense_allowed_reason('web')}."
+
+    # **The arXiv branch first, and it is the only one that honours `url`.**
+    # Asking arXiv about a URL is not a thing arXiv does, so it is refused by
+    # name rather than answered by searching for the URL's characters - which is
+    # the confidently-wrong answer this skill's own history is about.
+    if (arguments.get("source") or "").strip().lower() == "arxiv":
+        if url:
+            return ("arXiv searches papers, not pages, so a URL cannot be given "
+                    "to it. Use this with a query instead, or fetch the URL "
+                    "itself by leaving source at 'web'.")
+        results, reason, notes = websearch.arxiv_search(query)
+        if reason:
+            return reason
+        return websearch.format_results(query, results, notes) + "\n\n" + _ARXIV_SCOPE
 
     if url:
         target = url
@@ -143,7 +181,6 @@ def _run(arguments: dict) -> str:
         # one that was tried is a reason to try the others rather than a dead
         # end - the fixed-string answer that used to be returned here is exactly
         # what made the old skill useless.
-        from shani_chronoa import websearch
         results, _why, notes = websearch.search(query)
         if results:
             return websearch.format_results(query, results, notes)

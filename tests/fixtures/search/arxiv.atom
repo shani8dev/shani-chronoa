@@ -1,0 +1,102 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/OGeHddzLXw86HKiyTf/tj2v8lQw</id>
+  <title>arXiv Query: search_query=ti:constrained AND ti:decoding&amp;id_list=&amp;start=0&amp;max_results=3</title>
+  <updated>2026-10-12T16:03:11Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=ti:constrained+AND+ti:decoding&amp;start=0&amp;max_results=3&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>3</opensearch:itemsPerPage>
+  <opensearch:totalResults>107</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2412.10418v2</id>
+    <title>Constrained Decoding with Speculative Lookaheads</title>
+    <updated>2025-02-10T22:51:59Z</updated>
+    <link href="https://arxiv.org/abs/2412.10418v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2412.10418v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Constrained decoding with lookahead heuristics (CDLH) is a highly effective method for aligning LLM generations to human preferences. However, the extensive lookahead roll-out operations for each generated token makes CDLH prohibitively expensive, resulting in low adoption in practice. In contrast, common decoding strategies such as greedy decoding are extremely efficient, but achieve very low constraint satisfaction. We propose constrained decoding with speculative lookaheads (CDSL), a technique that significantly improves upon the inference efficiency of CDLH without experiencing the drastic performance reduction seen with greedy decoding. CDSL is motivated by the recently proposed idea of speculative decoding that uses a much smaller draft LLM for generation and a larger target LLM for verification. In CDSL, the draft model is used to generate lookaheads which is verified by a combination of target LLM and task-specific reward functions. This process accelerates decoding by reducing the computational burden while maintaining strong performance. We evaluate CDSL in two constraint decoding tasks with three LLM families and achieve 2.2x to 12.15x speedup over CDLH without significant performance reduction.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-12-09T22:29:57Z</published>
+    <arxiv:comment>NAACL 2025 (main) camera-ready</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Nishanth Nakshatri</name>
+    </author>
+    <author>
+      <name>Shamik Roy</name>
+    </author>
+    <author>
+      <name>Rajarshi Das</name>
+    </author>
+    <author>
+      <name>Suthee Chaidaroon</name>
+    </author>
+    <author>
+      <name>Leonid Boytsov</name>
+    </author>
+    <author>
+      <name>Rashmi Gangadharaiah</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2504.09935v1</id>
+    <title>Constrained Auto-Regressive Decoding Constrains Generative Retrieval</title>
+    <updated>2025-04-14T06:54:49Z</updated>
+    <link href="https://arxiv.org/abs/2504.09935v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2504.09935v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Generative retrieval seeks to replace traditional search index data structures with a single large-scale neural network, offering the potential for improved efficiency and seamless integration with generative large language models. As an end-to-end paradigm, generative retrieval adopts a learned differentiable search index to conduct retrieval by directly generating document identifiers through corpus-specific constrained decoding. The generalization capabilities of generative retrieval on out-of-distribution corpora have gathered significant attention.
+  In this paper, we examine the inherent limitations of constrained auto-regressive generation from two essential perspectives: constraints and beam search. We begin with the Bayes-optimal setting where the generative retrieval model exactly captures the underlying relevance distribution of all possible documents. Then we apply the model to specific corpora by simply adding corpus-specific constraints. Our main findings are two-fold: (i) For the effect of constraints, we derive a lower bound of the error, in terms of the KL divergence between the ground-truth and the model-predicted step-wise marginal distributions. (ii) For the beam search algorithm used during generation, we reveal that the usage of marginal distributions may not be an ideal approach. This paper aims to improve our theoretical understanding of the generalization capabilities of the auto-regressive decoding retrieval paradigm, laying a foundation for its limitations and inspiring future advancements toward more robust and generalizable generative retrieval.</summary>
+    <category term="cs.IR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2025-04-14T06:54:49Z</published>
+    <arxiv:comment>13 pages, 6 figures, 2 tables, accepted by SIGIR 2025 (Proceedings of the 48th International ACM SIGIR Conference on Research and Development in Information Retrieval)</arxiv:comment>
+    <arxiv:primary_category term="cs.IR"/>
+    <author>
+      <name>Shiguang Wu</name>
+    </author>
+    <author>
+      <name>Zhaochun Ren</name>
+    </author>
+    <author>
+      <name>Xin Xin</name>
+    </author>
+    <author>
+      <name>Jiyuan Yang</name>
+    </author>
+    <author>
+      <name>Mengqi Zhang</name>
+    </author>
+    <author>
+      <name>Zhumin Chen</name>
+    </author>
+    <author>
+      <name>Maarten de Rijke</name>
+    </author>
+    <author>
+      <name>Pengjie Ren</name>
+    </author>
+    <arxiv:doi>10.1145/3726302.3729934</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1145/3726302.3729934" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2409.19247v1</id>
+    <title>Edit-Constrained Decoding for Sentence Simplification</title>
+    <updated>2024-09-28T05:39:50Z</updated>
+    <link href="https://arxiv.org/abs/2409.19247v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2409.19247v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We propose edit operation based lexically constrained decoding for sentence simplification. In sentence simplification, lexical paraphrasing is one of the primary procedures for rewriting complex sentences into simpler correspondences. While previous studies have confirmed the efficacy of lexically constrained decoding on this task, their constraints can be loose and may lead to sub-optimal generation. We address this problem by designing constraints that replicate the edit operations conducted in simplification and defining stricter satisfaction conditions. Our experiments indicate that the proposed method consistently outperforms the previous studies on three English simplification corpora commonly used in this task.</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2024-09-28T05:39:50Z</published>
+    <arxiv:comment>Accepted by EMNLP2024-Findings</arxiv:comment>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Tatsuya Zetsu</name>
+    </author>
+    <author>
+      <name>Yuki Arase</name>
+    </author>
+    <author>
+      <name>Tomoyuki Kajiwara</name>
+    </author>
+  </entry>
+</feed>

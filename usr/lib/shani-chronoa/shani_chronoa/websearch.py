@@ -683,6 +683,285 @@ def _parse_googlenews(raw):
     return out, ""
 
 
+# --- arXiv ----------------------------------------------------------------------
+#: arXiv's public API, measured on this box 2026-10-12. **HTTPS works** (so the
+#: `http://` form in arXiv's own documentation is not required), it answers with
+#: **no key**, and it returns **Atom**, so it is a third feed shape rather than a
+#: member of either existing table - and it gets its own entry point rather than a
+#: slot in the chain. The reason is the one below the builder.
+ARXIV_ENDPOINT = "https://export.arxiv.org/api/query"
+
+#: Atom and arXiv's own extension namespace, read off a real response. Written
+#: out rather than guessed: `ET.fromstring` will not match `{atom}entry` against
+#: an unprefixed `entry`, and a namespaced document silently parses to an empty
+#: tree rather than raising, which reads as "arXiv found nothing".
+_ATOM = "{http://www.w3.org/2005/Atom}"
+_ARXIV = "{http://arxiv.org/schemas/atom}"
+
+#: The fields arXiv's own search offers. Used only to recognise a query that is
+#: **already written in arXiv's query language**, so it is passed through rather
+#: than mangled - a caller who knows the syntax gets what they typed.
+_ARXIV_FIELDS = ("all", "ti", "abs", "au", "cat", "co", "jr", "rn", "id", "ac")
+
+#: **Recognised only in upper case, and that is deliberate.** arXiv's operators
+#: are upper-case, so `AND` is the operator while the `and` in "cats and dogs" is
+#: a word. A case-insensitive test would hand "cats and dogs" to the API as a
+#: boolean query and quietly change what was asked.
+_ARXIV_OPERATORS = ("ANDNOT", "AND", "OR")
+
+#: A bare term keeps these; everything else in arXiv's syntax (`:`, `"`, `(`, `)`,
+#: `\`) is reserved and a term carrying one is a query fragment, not a word.
+_TERM = re.compile(r'"[^"]+"|[^\s()]+')
+_RESERVED = re.compile(r'[:\"()\\]')
+
+#: Punctuation stripped from a term's **edges**. Measured, and this is not
+#: tidiness: `all:inference` returns 2,954 papers and `all:inference?` returns
+#: **0**, so a single trailing question mark silently empties the result set.
+_EDGE = ".,;:!?'\u2019"
+
+#: **Words that carry no search intent, dropped before the query is built.**
+#:
+#: `all:` is a *full-text* field, so a conjunction is only as good as its weakest
+#: term, and the weakest terms in a natural question are its framing. Measured on
+#: the real API, every one of these was the difference between an answer and
+#: nothing:
+#:
+#: | query | total hits |
+#: |---|---:|
+#: | `all:quantized AND all:inference` | 2,954 |
+#: | `all:what AND all:new AND all:in AND all:quantized AND all:inference` | **0** |
+#:
+#: No paper contains those five words together, and requiring all five is what a
+#: question *sounds* like but not what it *means*. "Hi, what's the best way to
+#: speed up Llama inference on a CPU" drops to `all:speed AND all:llama AND
+#: all:inference AND all:cpu` - 9 hits, all on topic, measured.
+#:
+#: The greetings are in it for the same reason and are **not** academic words:
+#: "hi" is matched by arXiv's full-text index against astrophysics (`HI
+#: absorbers with SKA`), so a greeting ANDed with a technical term empties the
+#: result set while looking like a content word.
+_ARXIV_STOPWORDS = frozenset("""
+a about all also am an and any are as at be been being best better but by can
+could did do does for from get got good great had has have hello hey hi how i
+if in into is it its just like make many may me might more most much must my
+need new no not now of on one only or other our out over okay ok please see
+show so some still such take than that the their them then there these they
+thing things this those to too up use used using via want way we well were what
+when where which who why will with would you your
+""".split())
+
+#: Enough of an abstract to recognise a paper by, and not enough that twelve
+#: abstracts crowd out the arguments a later turn needs. The other parsers cap at
+#: 400 for the same reason.
+_ARXIV_DESC_CHARS = 420
+
+
+def arxiv_query(text, scope="ti"):
+    """The `search_query` to send for `text`, which may be either shape.
+
+    **This is the part the hand-written script could not do.** A caller of the
+    arXiv API has to know its query language - `ti:`, `au:`, `AND`, quoting -
+    and the first version of this asked the caller for all of it. A model handed
+    the raw syntax gets it wrong, and a person typing a question cannot be
+    expected to know it.
+
+    ### Why `ti:` and not `all:`, which is measured and not preferred
+
+    `all:` searches the **whole paper**, so a conjunction of two ordinary words
+    matches any paper that happens to use both anywhere - and arXiv then ranks
+    by individual term match, which is not the same as relevance to the question.
+    Measured on the real API, same four questions:
+
+    | query | `ti:` total, top result | `all:` total, top result |
+    |---|---|---|
+    | constrained decoding | **107** - *"Constrained Decoding with Speculative Lookaheads"* | 2,365 - *"Computationally Efficient NER Taggers..."* |
+    | small language models tool use | **11** - *"Don't Adapt Small Language Models for Tools; Adapt Tool Schemas..."* | 1,024 - *"Small but Significant..."* |
+    | quantized inference | **187** - *"Quantized Variational Inference"* | 2,954 - *"DietCNN..."* |
+
+    A title is where a paper says what it is about, so a title-scoped
+    conjunction is both narrower and better ordered - 4x to 20x fewer hits, and
+    every top result on topic where `all:`'s top result was a different field.
+
+    ### Why a conjunction and not a disjunction
+
+    Measured: a disjunction of the same seven terms returns **406,821** hits
+    topped by *"Cool Outflows and HI absorbers with SKA"* - and **scoping those
+    same terms to `all:` returns the identical 406,821 and the identical top
+    hit**, so the scope is not what fixes it. A disjunction over common words
+    is arXiv's own default and it ranks by the most distinctive *single* token,
+    which is not what the caller asked. The conjunction is the only form
+    measured to rank correctly, and it is why the answer can be empty.
+
+    A query already in arXiv's language is returned **unchanged**, so the syntax
+    remains reachable to anyone who wants it - including to widen a query this
+    over-constrained.
+    """
+    raw = " ".join(str(text or "").split())
+    if not raw:
+        return ""
+    # **Tested against `raw`, never against `raw.upper()`.** arXiv's operators
+    # are upper-case, so `AND` is the operator and the `and` in "cats and dogs"
+    # is a word - and upper-casing first *manufactures* the operator, so every
+    # question containing the word "and" was handed to the API as a boolean
+    # query and answered with a disjunction. Measured cost of that bug's shape:
+    # a seven-term disjunction returns 406,821 hits topped by a paper about HI
+    # absorbers, which is not an answer to anything anybody asked.
+    if (any("%s:" % field in raw for field in _ARXIV_FIELDS)
+            or any(" %s " % op in raw for op in _ARXIV_OPERATORS)):
+        return raw
+    parts = []
+    for term in _TERM.findall(raw):
+        if term.startswith('"') and term.endswith('"') and len(term) > 2:
+            parts.append("%s:%s" % (scope, term))
+            continue
+        cleaned = _RESERVED.sub("", term).strip('"').strip(_EDGE).lower()
+        # **A contraction is its stem.** "what's" is the stopword "what" with a
+        # possessive, and treating it as a content word is what let a greeting
+        # phrase reach the API intact.
+        stem = cleaned[:-2] if cleaned.endswith("'s") else cleaned
+        if not cleaned or cleaned in _ARXIV_STOPWORDS or stem in _ARXIV_STOPWORDS:
+            continue
+        parts.append("%s:%s" % (scope, cleaned))
+    return " AND ".join(parts)
+
+
+def _parse_arxiv(raw):
+    """(results, reason). Atom, by field name rather than by position.
+
+    **The URL is the `rel="alternate"` link, not `<id>`**, and the difference is
+    not cosmetic: measured, `<id>` is `http://arxiv.org/abs/2407.15508v3` over
+    plain HTTP while the alternate link is `https://...`. A feed that answers
+    `<id>` would put an insecure URL into an answer whose whole job is to be
+    citable.
+
+    A paper's useful facts are not its abstract alone - **who wrote it, when,
+    and from which arXiv category** are what decide whether it is worth
+    reading, so they lead the description and the abstract is the truncated tail.
+    """
+    import xml.etree.ElementTree as ET
+    if not isinstance(raw, (str, bytes)) or not raw:
+        return [], "the feed came back empty"
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as exc:
+        return [], "the feed is not valid XML (%s)" % exc.__class__.__name__
+    out = []
+    for entry in root.iter("%sentry" % _ATOM):
+        title = _clean(entry.findtext("%stitle" % _ATOM) or "")
+        url = ""
+        for link in entry.findall("%slink" % _ATOM):
+            if link.get("rel") == "alternate" and link.get("href"):
+                url = link.get("href")
+                break
+        if not url:
+            # The id is the one field that is always present, so an entry
+            # without the preferred link is still worth returning rather than
+            # dropped - but it is http, and that is the caller's to see.
+            url = _clean(entry.findtext("%sid" % _ATOM) or "")
+        if not title or not url:
+            continue
+
+        published = _clean(entry.findtext("%spublished" % _ATOM) or "")
+        category = entry.find("%sprimary_category" % _ARXIV)
+        if category is None:
+            cat = entry.find("%scategory" % _ATOM)
+            category = cat
+        facts = [published[:4] if len(published) >= 4 else ""]
+        if category is not None and category.get("term"):
+            facts.append(category.get("term"))
+        authors = [_clean(a.findtext("%sname" % _ATOM) or "")
+                   for a in entry.findall("%sauthor" % _ATOM)]
+        authors = [a for a in authors if a]
+        if authors:
+            shown = ", ".join(authors[:3])
+            facts.append(shown + (" et al." if len(authors) > 3 else ""))
+        description = " · ".join(f for f in facts if f)
+        abstract = _clean(entry.findtext("%ssummary" % _ATOM) or "")
+        if abstract:
+            description = ("%s — %s" % (description, abstract)).lstrip(" —")
+        if len(description) > _ARXIV_DESC_CHARS:
+            description = description[:_ARXIV_DESC_CHARS].rstrip() + "..."
+        out.append(Result(title, url, description, "arXiv"))
+    return out, ""
+
+
+def arxiv_search(query, component="skill:web_search"):
+    """(results, reason, notes) over arXiv only.
+
+    **Its own entry point, not a provider in the chain**, and that is a measured
+    decision rather than tidiness. `search()` stops at the first engine that
+    returns anything, so arXiv placed in `_FEED_PROVIDERS` would answer *every*
+    query that matched a preprint - "the latest news about quantization" would
+    return papers and call it results. It is also the third feed shape (Atom with
+    an `arxiv:` extension namespace, where Google News is RSS) and it takes a
+    query language of its own, which the table's one-`str`-param shape cannot
+    carry. A scoped source that cannot be expressed in the shared table gets its
+    own function rather than a half-expressed row in it.
+
+    ### Why it asks twice, and why the second question can only widen
+
+    A title-scoped conjunction can legitimately find nothing where a full-text
+    one would find something - a paper about llama-on-CPU may never put both
+    words in its title. Measured: `ti:"llama inference" AND ti:cpu` returns 0
+    while `all:llama AND all:inference AND all:cpu` returns **53**, every top
+    result on topic. So the second request is a **widening**, never a re-ask: a
+    title is part of the full text, so `all:` can only return a superset. That
+    ordering is why the retry is safe, and why it happens only on the empty case
+    rather than on every query.
+
+    A pass-through query is asked **once** - the caller wrote arXiv's own
+    language and gets exactly that, with no scope substituted underneath it.
+
+    **Zero results after both is a real answer and says so.** Measured: a query
+    matching nothing returns **HTTP 200 with `totalResults 0`** and no entries -
+    so an empty feed here means arXiv has no such preprint, which is not the same
+    claim as "nothing on this exists", and the refusal says which one it is. It
+    also quotes **both queries it sent**, because a search that returns nothing
+    with no way to see what was asked is the least actionable result there is.
+    """
+    refused = gate("Searching arXiv")
+    if refused:
+        return [], refused, []
+
+    scoped = arxiv_query(query, scope="ti")
+    if not scoped:
+        return [], ("Nothing to search arXiv for: the question carries no words "
+                    "that identify a paper, so there is no query to send."), []
+
+    # A pass-through query carries its own field, so asking it twice would ask
+    # the identical question twice. A rebuilt one differs per scope, and that
+    # difference is what makes the second question a widening rather than a
+    # repeat: `ti:` is a subset of `all:`, so `all:` can only return more.
+    alternate = arxiv_query(query, scope="all")
+    widened = None if scoped == alternate else alternate
+
+    asked = []
+    for search_query in ([scoped, widened] if widened else [scoped]):
+        raw, why = _fetch_feed(ARXIV_ENDPOINT, {
+            "search_query": search_query,
+            "start": "0",
+            "max_results": str(_MAX_RESULTS),
+            "sortBy": "relevance",
+        }, component)
+        if why:
+            return [], ("arXiv could not be read (%s). That is the archive being "
+                        "unreachable, which is not a statement about whether any "
+                        "paper exists." % why), []
+        found, why = _parse_arxiv(raw)
+        if why:
+            return [], ("arXiv answered with something this could not read (%s), "
+                        "so no claim is made about what it said." % why), []
+        asked.append(search_query)
+        if found:
+            return found, "", []
+    return [], ("arXiv has no paper matching either question it was asked. "
+                "It was asked %s. arXiv is a preprint archive, so this is an "
+                "answer about preprints and not about whether the web has "
+                "anything on it - try web_search for that, or re-ask with "
+                "arXiv's own syntax (ti:, abs:, au:, AND) to widen it."
+                % "; then ".join(asked)), []
+
+
 _FEED_PARSERS = {
     "Google News": _parse_googlenews,
 }
