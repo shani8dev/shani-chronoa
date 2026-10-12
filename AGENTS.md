@@ -15190,3 +15190,51 @@ path cannot hand it the lock. Verified by mutation both ways: it passes with the
 fix applied, and removing the gate from `scheduler._poll_event_rules` turns it
 red with the source restored byte-identical afterwards.
 
+
+## The artifact block, rendered and looked at (2026-10-12)
+
+`ArtifactBlock` had never been rendered. `test_a_made_file_is_shown.py` proved
+it was *built* - right label text, right buttons, right callbacks - and nothing
+proved any of it reached a screen, which is the gap the organ strip lived in.
+
+Driven over a real `ArtifactBlock` built over a real four-quadrant PNG:
+
+| what | result |
+|---|---|
+| heading | `Made` - rendered, **and read**: clean glyphs, no tofu |
+| file name | `quarter-colours.png` - rendered and read |
+| thumbnail | `MemoryTexture (96, 96)`, all four quadrants at 2304 px each |
+| absent magenta | 0 px - the matcher is not counting everything |
+| empty label | 0 px - a blank string draws nothing |
+| controls | 3 buttons, correct tooltips |
+
+**The source image is four solid quadrants on purpose.** One measurement, not
+four correlated guesses about the same pixels - and a uniform grey box, which is
+what a silently-broken preview looks like, contains exactly one colour and fails
+all four. `test_the_thumbnail_holds_the_picture_not_just_an_image_widget` now
+asserts that in the suite, and it is mutation-checked: replacing the loaded
+picture with a uniform grey texture fails **two** tests, not one.
+
+### Three things the probe found that reading the code did not
+
+1. **A block holds four `Gtk.Image`s, not one.** The three buttons each contain
+   an icon, and a button's icon *is* an image. The first version sampled
+   `images[0]` and would have measured a 16x16 `document-open` glyph and called
+   it the thumbnail. The thumbnail is identified as the one whose paintable is a
+   96x96 texture.
+2. **The button glyphs are still unverified.** Headless, their paintable is
+   `None`, and neither `Gtk.IconTheme.set_default` nor a search path fixes it -
+   both measured. That is a limit of the probe, not a defect: a real Wayland
+   session has a display icon theme and `set_icon_name` resolves. Recorded as
+   unproven rather than assumed, because "the buttons are there" is a different
+   claim from "the buttons show a picture".
+3. **The first column render came out vertically smeared** and looked like a
+   defect in the block. It was not: stacking `append_layout` with `translate` in
+   one snapshot, plus an image viewer stretching a 164x24 PNG into a tall panel.
+   The saved PNG was 164x24 - exactly the viewport. **Checked the file's own
+   dimensions before concluding anything about the pixels.**
+
+The probe lives in `/tmp/opencode/render_artifact.py` and does not survive this
+session. The pixel assertion that mattered is now a test; the recipe is
+`render_count3.py`'s, and a `slot-test` in `shani-testbed` would be the durable
+home for it.

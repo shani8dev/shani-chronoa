@@ -388,3 +388,77 @@ def test_the_skills_that_made_a_file_all_declare_one():
     expected = {"generate_image", "create_document", "convert_document",
                 "take_photo", "analyze_table", "recording"}
     assert expected <= declaring, f"no longer declaring: {sorted(expected - declaring)}"
+
+
+def _sample_colours(path, size=8):
+    """Read a PNG back into a set of the colours it contains.
+
+    Decoded with GdkPixbuf rather than a hand-written decoder: the test needs
+    *which colours are in this picture*, and a PNG undecoder written for that
+    would be thirty lines of code whose own bugs would be indistinguishable from
+    a broken thumbnail.
+    """
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(path))
+    data, channels, stride = pixbuf.get_pixels(), pixbuf.get_n_channels(), pixbuf.get_rowstride()
+    width, height = pixbuf.get_width(), pixbuf.get_height()
+    seen = set()
+    for y in range(0, height, size):
+        for x in range(0, width, size):
+            at = y * stride + x * channels
+            seen.add((data[at], data[at + 1], data[at + 2]))
+    return seen
+
+
+def test_the_thumbnail_holds_the_picture_not_just_an_image_widget(tmp_path):
+    """**The test above checks that a thumbnail widget exists. This checks the
+    pixels inside it.**
+
+    Those are different claims, and the gap between them is exactly the failure
+    this repository keeps paying for: `_thumbnail` catches its own `TypeError`
+    and falls back to no preview at all, so *any* assertion weaker than "the
+    right colours are in there" passes just as happily over a dead primary path.
+    An empty texture is still a texture, and `Gdk.Texture` happily hands out a
+    96x96 blank one.
+
+    The source is four solid quadrants of four distinct colours, so "the image
+    arrived" is one measurement rather than four guesses about the same pixels -
+    and a uniform grey box, which is what a silently-broken preview looks like,
+    contains exactly one colour and fails all four.
+    """
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+
+    try:
+        GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 1, 1)
+    except Exception:                                     # noqa: BLE001
+        pytest.skip("GdkPixbuf is not usable here")
+
+    size, half = 128, 64
+    quadrant_colours = ((255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0))
+    rows = bytearray()
+    for y in range(size):
+        for x in range(size):
+            rows += bytes(quadrant_colours[(0 if x < half else 1) + (0 if y < half else 2)])
+    source = tmp_path / "quadrants.png"
+    pixbuf = GdkPixbuf.Pixbuf.new_from_data(
+        bytes(rows), GdkPixbuf.Colorspace.RGB, False, 8, size, size, size * 3)
+    assert pixbuf.savev(str(source), "png", [], []) is True
+
+    image = _thumbnail_of(blocks.ArtifactBlock([source]))
+    assert image is not None, "no thumbnail at all"
+    paintable = image.get_paintable()
+    assert hasattr(paintable, "save_to_png"), (
+        f"the thumbnail is a {type(paintable).__name__}, which cannot be sampled")
+
+    saved = tmp_path / "thumbnail.png"
+    paintable.save_to_png(str(saved))
+    seen = _sample_colours(saved)
+
+    missing = [c for c in quadrant_colours if c not in seen]
+    assert not missing, (
+        f"the thumbnail does not contain {missing} - it holds {sorted(seen)}, so "
+        f"the preview is not the picture that was made")
