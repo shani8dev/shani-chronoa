@@ -15776,3 +15776,54 @@ substantially moves accuracy, with **both positive and negative effects across
 seven models**, and that prompt-level and schema-level instructions interact
 **non-additively**. That last clause is why the third arm above is necessary
 rather than tidy.
+
+## `gguf` is imported at call time in five places, behind no guard (2026-10-12)
+
+`tests/test_repo_hygiene.py::...test_gguf_is_imported_only_behind_a_guard` is
+**red at HEAD**, and the cause is that `gguf` is imported at *call* time without a
+`try:` in five places:
+
+    adapter.py:140    merge.py:92    merge.py:111    merge.py:468    gguf_write.py:129
+
+All five are already **deferred into a function body** - the mistake is not a
+module-level import. It is that the import is not *guarded*, so on a machine
+without the package the module still loads and the function raises at call time.
+`gguf` is **not packaged anywhere in the ecosystem** (`grep` over `PKGBUILD`,
+`DEBIAN/control` and `../shani-pkgbuilds/` finds nothing) and is **not declared as
+a dependency**, so that is the state on every real install. It is importable on
+this dev box, which is why the tests that exercise it pass here and the
+degradation path has never been measured.
+
+**`ctxfit.py` is the established pattern and it is two lines different.** Its
+`from gguf import GGUFReader` sits inside `try:` with the failure returning
+`None` - so a missing package costs precision, not the call. The test's heuristic
+("the line before the import ends with `:`") accepts that shape, which is why
+`ctxfit.py` passes and these five do not. **The heuristic is right and the test is
+not the thing to change:** a deferred-but-unguarded import is exactly the case
+that produces a traceback instead of an honest answer.
+
+**Recorded rather than fixed, because the subsystem is mid-flight and its owner
+knows.** `cultivation`, `merge`, `adapter` and `gguf_write` have **no caller in the
+product path at all** - not a skill, not imported by `tools.py`, referenced only
+by each other and by tests - and the commit that landed them is titled *"the
+first gate pass in this repo's history, and why it still does not ship"*. Editing
+five sites in a subsystem the owner is actively shaping, to fix a red test that
+only fires on a machine nobody has installed it on, is the wrong trade. The remedy
+is written here so it is mechanical for whoever picks it up.
+
+### And the tree's stray bytecode, cleaned
+
+`test_packaging.py` was **2 failed** on the documented trap: 107 stray `.pyc`
+files in four `__pycache__` directories under `usr/`. None tracked in git (0
+entries), so this was not the committed-bytecode defect. Removed by exact path
+after listing what would go; **28 passed** afterwards.
+
+**One of them was a new leak vector**, worth recording because AGENTS.md's list of
+sources does not include it: `tests/__pycache__/test_no_surface_method_is_
+unreachable.cpython-314.pyc`, created by running
+`sys.path.insert(0, "tests"); import test_no_surface_method_is_unreachable` to
+introspect a test module in a probe. Importing a test module directly leaves
+bytecode exactly as importing the package does, and `PYTHONDONTWRITEBYTECODE=1`
+has to be set on that probe too - it was, on the runs that mattered, but not on
+this one.
+
