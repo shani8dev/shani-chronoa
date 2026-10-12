@@ -137,7 +137,20 @@ def mismatches(adapter: Path, base: Path) -> List[str]:
     answer - and raises only when a file cannot be read at all, because "I could
     not tell" and "they fit" must not be the same value.
     """
-    from gguf import GGUFReader
+    # **Guarded, because `gguf` is not installed on every machine.** It is not
+    # declared as a dependency and is packaged nowhere in this ecosystem, so an
+    # unguarded import here loads this module fine and raises at call time on any
+    # real install. `ctxfit.py` carries the same reader behind a `try:` and
+    # degrades; this one cannot degrade, because an adapter that cannot be read
+    # is not a mismatch *or* a fit - so it says which it is.
+    try:
+        from gguf import GGUFReader
+    except ImportError:
+        raise AdapterMismatch(
+            "the `gguf` package is not installed, so an adapter cannot be read "
+            "here; it is not declared as a dependency and ships in no package "
+            "this ecosystem builds. **I could not tell whether they fit**, which "
+            "is not the same answer as 'they fit'.")
 
     if Path(adapter).read_bytes()[:4] != ADAPTER_MAGIC:
         raise AdapterMismatch(

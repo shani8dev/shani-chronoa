@@ -89,7 +89,15 @@ def _as_declared(value, declared):
     bytes of the word, not the word. Handing that to a STRING writer does not
     pack, and the pack is deferred, so the failure appears as a mystery later.
     """
-    from gguf import GGUFValueType
+    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
+    # unguarded form loads the module and raises at call time on a real install.
+    try:
+        from gguf import GGUFValueType
+    except ImportError:
+        raise MergeRefusal(
+            "the `gguf` package is not installed, so a declared value cannot be "
+            "shaped here; it is not a dependency of this package. **I could not "
+            "tell**, which is not the same as the value being wrong.")
     if declared == GGUFValueType.STRING and hasattr(value, "tolist"):
         raw = value.tolist()
         if isinstance(raw, list) and raw and all(
@@ -108,7 +116,15 @@ def _probe_writer(arch: str):
     added turns "one unnamed key, after the whole blend" into "this key, now".
     """
     import tempfile
-    from gguf import GGUFWriter
+    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
+    # unguarded form raises at call time on a real install.
+    try:
+        from gguf import GGUFWriter
+    except ImportError:
+        raise MergeRefusal(
+            "the `gguf` package is not installed, so a probe writer cannot be "
+            "built here; it is not a dependency of this package. **I could not "
+            "tell**, which is not the same as a key being bad.")
     # **A real file, not `None`.** The first version of this probe passed
     # `None`, and `write_kv_data_to_file()` then failed for every key - so the
     # check rejected 28 perfectly good keys including `general.architecture`, and
@@ -465,7 +481,16 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
     # A tensor whose parent stores it in a float type keeps that type; a
     # quantised one is dequantised and written F16, so the whole merge still has
     # exactly one lossy step.
-    from gguf.quants import GGMLQuantizationType as _T
+    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
+    # unguarded form raises at call time on a real install.
+    try:
+        from gguf.quants import GGMLQuantizationType as _T
+    except ImportError:
+        raise MergeRefusal(
+            "the `gguf` package is not installed, so a tensor's quantisation "
+            "cannot be read here; it is not a dependency of this package. **I "
+            "could not tell**, which is not the same as there being nothing to "
+            "keep.")
     _keep = {_T.F32: gguf_write.GGML_TYPE_F32, _T.BF16: gguf_write.GGML_TYPE_BF16}
 
     hows = set()

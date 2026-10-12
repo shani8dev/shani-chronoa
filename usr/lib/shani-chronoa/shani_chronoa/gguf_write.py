@@ -126,7 +126,15 @@ def kv_section_bytes(path: Path) -> Tuple[bytes, int, int]:
 
     Nothing here interprets a single metadata value - which is the whole point.
     """
-    from gguf import GGUFReader
+    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
+    # unguarded form raises at call time on a real install.
+    try:
+        from gguf import GGUFReader
+    except ImportError:
+        raise GgufFormatError(
+            "the `gguf` package is not installed, so a GGUF header cannot be "
+            "read here; it is not a dependency of this package. **I could not "
+            "tell**, which is not the same as a format error.")
 
     path = Path(path)
     reader = GGUFReader(str(path))
