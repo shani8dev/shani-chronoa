@@ -76,21 +76,38 @@ _HARNESS = textwrap.dedent(
         seen = []
         w.connect("user-input", lambda _wdg, t: seen.append(t))
 
-        w._input_entry.set_text("  spaced question  ")
+        w._set_input_text("  spaced question  ")
         w._send_button.emit("clicked")
         out["via_button"] = seen[-1] if seen else None
-        out["cleared"] = w._input_entry.get_text()
+        out["cleared"] = w.get_input_text()
 
         seen.clear()
-        w._input_entry.set_text("second")
-        w._input_entry.emit("activate")
+        w._set_input_text("second")
+    # **`_on_input_key_pressed(None, Gdk.KEY_Return, 0, 0)`, not
+    # `_input_entry.emit("activate")`.** A `Gtk.TextView` has no `activate`
+    # signal - it raised `TypeError: unknown signal name: activate`, which
+    # abandoned the window mid-harness and turned the rest of these nine
+    # tests into KeyErrors. Enter is wired through an
+    # `EventControllerKey`, and this calls that handler with the arguments
+    # GTK would pass, so the test drives the real path rather than a
+    # substitute for it.
+        w._on_input_key_pressed(None, Gdk.KEY_Return, 0, 0)
         out["via_enter"] = seen[-1] if seen else None
 
+        # **The control for the above**: Shift+Enter must *not* send, because it
+        # is how a person types two lines. Without this, a handler that ignored
+        # the modifier entirely would pass "Enter sends" perfectly.
         seen.clear()
-        w._input_entry.set_text("   " + chr(9) + "  ")
+        w._set_input_text("two" + chr(10) + "lines")
+        w._on_input_key_pressed(None, Gdk.KEY_Return, 0,
+                                 Gdk.ModifierType.SHIFT_MASK)
+        out["via_shift_enter"] = seen[:]
+
+        seen.clear()
+        w._set_input_text("   " + chr(9) + "  ")
         w._send_button.emit("clicked")
         out["whitespace_emitted"] = seen[:]
-        out["whitespace_kept"] = w._input_entry.get_text()
+        out["whitespace_kept"] = w.get_input_text()
 
         # Copy button on assistant turns only.
         w.clear_transcript()
@@ -188,6 +205,16 @@ class TestSendingIsNotEnterOnly:
             "the send button did not deliver the entry's contents"
         )
 
+    def test_shift_enter_types_a_second_line_instead_of_sending(self, ux):
+        """The control for the Enter test.
+
+        Shift+Enter is the only way to type two lines in this composer. A
+        handler that sent on every Return would pass "Enter sends" and silently
+        remove multi-line questions.
+        """
+        assert ux["via_shift_enter"] == [], (
+            f"Shift+Enter sent {ux['via_shift_enter']} instead of a newline")
+
     def test_enter_still_works_and_agrees_with_the_button(self, ux):
         assert ux["via_enter"] == "second"
         assert ux["via_button"] == ux["via_enter"].replace("second", "spaced question")
@@ -226,3 +253,15 @@ class TestRepliesCanBeKept:
             "the icon did not change, so there is no confirmation the copy "
             "happened"
         )
+
+# **`_input_entry` is a `Gtk.TextView`, which has no `set_text` or `get_text`.**
+# Both live on its buffer. Calling them on the widget raises
+# `AttributeError: 'TextView' object has no attribute 'set_text'` inside the
+# harness, the window is abandoned half-built, and every assertion downstream
+# fails on a *missing key* - nine tests here reporting KeyErrors for a send
+# button that works. Measured by running the harness directly; it had been
+# filed as pre-existing, which described the failure accurately and explained
+# none of it.
+#
+# `_set_input_text` is the window's own writer (no focus grab, unlike the public
+# `set_input_text`), and `get_input_text` is its reader.

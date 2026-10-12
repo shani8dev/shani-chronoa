@@ -378,7 +378,7 @@ def test_starting_a_new_conversation_clears_the_composer():
     def step():
         try:
             window = app.window
-            window._input_entry.set_text("half-typed question I never sent")
+            window._set_input_text("half-typed question I never sent")
             before = window.get_input_text()
             app.activate_action("reset-conversation", None)
             box["result"] = (before, window.get_input_text())
@@ -611,3 +611,15 @@ def test_the_diagnostics_panel_reads_sandbox_policy_files(tmp_path, monkeypatch)
         f"a refused file must name the key it did not understand: {detail}")
     assert status in (diagnostics.STATUS_WORKING, diagnostics.STATUS_UNKNOWN), \
         f"the row used a status word outside its own vocabulary: {status!r}"
+
+# **`_input_entry` is a `Gtk.TextView`, which has no `set_text` or `get_text`.**
+# Both live on its buffer. Calling them on the widget raises
+# `AttributeError: 'TextView' object has no attribute 'set_text'` inside the
+# harness, the window is abandoned half-built, and every assertion downstream
+# fails on a *missing key* - nine tests here reporting KeyErrors for a send
+# button that works. Measured by running the harness directly; it had been
+# filed as pre-existing, which described the failure accurately and explained
+# none of it.
+#
+# `_set_input_text` is the window's own writer (no focus grab, unlike the public
+# `set_input_text`), and `get_input_text` is its reader.

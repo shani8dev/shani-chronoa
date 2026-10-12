@@ -15878,3 +15878,64 @@ rows exist to draw exactly that distinction.
 2. **I ran the wrong icon test.** `test_ui_layout_contract.py` passes and covers
    `-symbolic` literals - and it stayed green through both bad names. The
    Adwaita-specific one is the one that catches theme portability.
+
+## Nine failures about a send button that works (2026-10-12)
+
+`test_window_input_and_copy` reported nine failures, all `KeyError`. Recorded as
+pre-existing. The cause was one line of the harness:
+
+```python
+w._input_entry.set_text("  spaced question  ")
+# AttributeError: 'TextView' object has no attribute 'set_text'
+```
+
+**`_input_entry` is a `Gtk.TextView`.** `set_text` and `get_text` live on its
+buffer. The exception was raised inside `on_activate`, the window was abandoned
+half-built, and `out` stopped receiving keys - so every assertion downstream
+failed on a **missing key**, which reads exactly like "the send button is
+broken" and is about nothing of the kind.
+
+Found by extracting `_HARNESS` and running it directly, which is the only way to
+see an exception that a subprocess swallows and a `KeyError` hides. Nine calls
+across five files were calling methods that do not exist on the widget:
+
+| file | call | replacement |
+|---|---|---|
+| `test_window_input_and_copy` | `_input_entry.set_text/get_text` | `_set_input_text()` / `get_input_text()` |
+| `test_attachments` | same | same |
+| `test_pages` | same | same |
+| `test_ui_surfaces` | same | same |
+| `test_slash_menu_opens` | `entry.set_text`, `entry.insert_text` | `entry.get_buffer().*` |
+
+`Gtk.TextView` has **neither** method - `hasattr` says False for both. The
+`test_slash_menu_opens` comment claimed `insert_text` had been a fix for an
+earlier arity mistake, which was never true: the method does not exist either.
+
+`test_window_input_and_copy`: **8 failed / 1 passed -> 10 passed**, and in 1.3s
+rather than 25.7s, because the harness had been dying and waiting out a 20-second
+timeout. Three other files went from failing to fully passing.
+
+**Enter needed a different fix.** `_input_entry.emit("activate")` raised
+`TypeError: unknown signal name: activate` - a `TextView` has no such signal.
+Enter is wired through an `EventControllerKey`, so the test now calls
+`_on_input_key_pressed(None, Gdk.KEY_Return, 0, 0)`: the real handler with the
+arguments GTK would pass, rather than a substitute for it.
+
+**Added the missing control.** Nothing tested that **Shift+Enter does not
+send**, and Shift+Enter is the only way to type two lines in this composer - a
+handler that sent on every Return would pass "Enter sends" and quietly remove
+multi-line questions. Mutation-checked: ignoring the modifier fails exactly one
+test.
+
+### Still not fixed, and deliberately left visible
+
+`test_slash_menu_opens` still cannot run here. Its two API bugs were **masking**
+a third problem: with them fixed the file reaches `app.run()` inside pytest and
+**aborts the process** (`Fatal Python error: Aborted`, in `Gio.run`), which takes
+every test queued behind it down. Run alone it fails with `'NoneType' object has
+no attribute '_input_entry'` - the window never activates.
+
+The fix is the one `test_window_input_and_copy` already uses: drive the harness
+in a **subprocess**, which is how 10 tests pass in 1.3s in that file. Not done
+here. An abort that ends the run is worse than a failure, so this is recorded as
+work outstanding rather than left to be discovered during a full suite.

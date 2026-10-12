@@ -94,11 +94,13 @@ def _type(window, text):
     version of this helper used it and raised on the first real run.)
     """
     entry = window._input_entry
-    entry.set_text("")
-    # `insert_text(text, position)` with position -1 appends, which is where a
-    # keystroke's text lands on an empty field. (Two arities wrong in a row here:
-    # `delete_selection` is GTK3 and `insert_text` needs the position.)
-    entry.insert_text(text, -1)
+    entry.get_buffer().set_text("")
+    # **Both calls go through the buffer.** A `Gtk.TextView` has neither
+    # `set_text` nor `insert_text` - measured on this GTK, both `False` - and the
+    # comment above claimed `insert_text` was a fix for an earlier arity
+    # mistake, which was never true. `insert_text(text, position)` with position
+    # -1 appends, which is where a keystroke's text lands on an empty field.
+    entry.get_buffer().insert_text(text, -1)
     return text
 
 
@@ -189,7 +191,7 @@ def test_typing_a_slash_opens_the_menu_and_its_rows_do_something(monkeypatch):
         # every surface in an idle callback, so `"diagnostics" in
         # window._surface_pages` is true from startup and stayed green with
         # `/diagnostics` neutered (measured: 3 runs, 3 passes, command dead).
-        return (pressed, rows, window._input_entry.get_text())
+        return (pressed, rows, window.get_input_text())
 
     def submit_it(window):
         window._submit_input()
@@ -280,3 +282,15 @@ def test_your_own_commands_are_in_the_menu(monkeypatch, tmp_path):
     assert said.count("/diff") == 1, "a built-in and a same-named file both listed"
     assert "/standup" in " ".join(only_standup)
     assert "/new" not in " ".join(only_standup)
+
+# **`_input_entry` is a `Gtk.TextView`, which has no `set_text` or `get_text`.**
+# Both live on its buffer. Calling them on the widget raises
+# `AttributeError: 'TextView' object has no attribute 'set_text'` inside the
+# harness, the window is abandoned half-built, and every assertion downstream
+# fails on a *missing key* - nine tests here reporting KeyErrors for a send
+# button that works. Measured by running the harness directly; it had been
+# filed as pre-existing, which described the failure accurately and explained
+# none of it.
+#
+# `_set_input_text` is the window's own writer (no focus grab, unlike the public
+# `set_input_text`), and `get_input_text` is its reader.

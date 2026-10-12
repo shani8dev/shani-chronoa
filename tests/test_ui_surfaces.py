@@ -301,7 +301,19 @@ class TestCommandMenuBeforeTheFirstIdle:
         assert menu.get_parent() is None, "control: the idle has already run"
         parents = []
         monkeypatch.setattr(menu, "popup", lambda: parents.append(menu.get_parent()))
-        window._input_entry.set_text("/")
+        window._set_input_text("/")
         window._sync_command_menu()
         assert parents and parents[0] is window._input_entry, (
             "popup() ran on a popover with no parent")
+
+# **`_input_entry` is a `Gtk.TextView`, which has no `set_text` or `get_text`.**
+# Both live on its buffer. Calling them on the widget raises
+# `AttributeError: 'TextView' object has no attribute 'set_text'` inside the
+# harness, the window is abandoned half-built, and every assertion downstream
+# fails on a *missing key* - nine tests here reporting KeyErrors for a send
+# button that works. Measured by running the harness directly; it had been
+# filed as pre-existing, which described the failure accurately and explained
+# none of it.
+#
+# `_set_input_text` is the window's own writer (no focus grab, unlike the public
+# `set_input_text`), and `get_input_text` is its reader.

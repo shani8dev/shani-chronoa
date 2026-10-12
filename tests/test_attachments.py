@@ -64,7 +64,7 @@ _HARNESS = textwrap.dedent('''
         out["after_remove"] = [p.name for p in w._attachments]
         seen = []
         w.connect("user-input", lambda _w, t: seen.append(t))
-        w._input_entry.set_text("summarise this")
+        w._set_input_text("summarise this")
         w._send_button.emit("clicked")
         out["sent"] = seen[-1] if seen else None
         out["cleared"] = [p.name for p in w._attachments]
@@ -109,3 +109,15 @@ def test_sending_carries_the_paths_then_clears_them(win):
     assert win["sent"].startswith("summarise this\n\n[Attached files")
     assert "notes.pdf (application/pdf" in win["sent"] and "photo.png" not in win["sent"]
     assert win["cleared"] == [] and win["bar_hidden_after_send"]
+
+# **`_input_entry` is a `Gtk.TextView`, which has no `set_text` or `get_text`.**
+# Both live on its buffer. Calling them on the widget raises
+# `AttributeError: 'TextView' object has no attribute 'set_text'` inside the
+# harness, the window is abandoned half-built, and every assertion downstream
+# fails on a *missing key* - nine tests here reporting KeyErrors for a send
+# button that works. Measured by running the harness directly; it had been
+# filed as pre-existing, which described the failure accurately and explained
+# none of it.
+#
+# `_set_input_text` is the window's own writer (no focus grab, unlike the public
+# `set_input_text`), and `get_input_text` is its reader.
