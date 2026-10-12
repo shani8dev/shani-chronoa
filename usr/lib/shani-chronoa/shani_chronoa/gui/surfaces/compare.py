@@ -48,6 +48,9 @@ ONLY_ONE = "There is only one conversation to compare."
 UNREADABLE = "Could not read your conversations"
 NO_QUESTIONS = "One of these asked nothing."
 
+#: Read when either side was cut short by the store's message window.
+WINDOW_NOTE = "oldest questions are not counted here"
+
 
 def _store_root(app: Any):
     """Where conversations live.
@@ -84,7 +87,16 @@ def _store_root(app: Any):
 
 
 def _conversations(root) -> "List[tuple[str, str]]":
-    """`(id, title)` newest first, read from the store's own index.
+    """`(id, label)` newest first, labelled so two can be told apart.
+
+    **The label carries the message count**, because two conversations
+    generated from the same first question have the same title - and a pair of
+    drop-downs reading "Fix the build" and "Fix the build" makes it impossible
+    to say which two are being compared. `list_sessions` already counts the
+    messages, so this adds no formatting of its own and needs no date library:
+    a date would mean a fourth `_when()` in this package (there are already
+    three, each for a different type of thing), and the Conversations panel
+    beside it is where dates belong.
 
     **The index, not the files.** Enumerating `*.jsonl` would list a
     conversation whose index entry never got written - an interrupted session -
@@ -103,18 +115,49 @@ def _conversations(root) -> "List[tuple[str, str]]":
     # conversation's name; the first version reimplemented both from the raw
     # index, which is a second answer to "what is this conversation called" and
     # a second one that drifts.
-    return [(str(item.get("id") or ""),
-             str(item.get("title") or "Untitled")) for item in listed]
+    out = []
+    for item in listed:
+        title = str(item.get("title") or "Untitled")
+        try:
+            count = int(item.get("messages") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        label = f"{title} - {count} message" + ("" if count == 1 else "s")
+        out.append((str(item.get("id") or ""), label))
+    return out
 
 
-def _messages(root, sid: str):
+def _messages(root, sid: str) -> "tuple[list, bool]":
+    """`(messages, was_truncated)`.
+
+    **`load()` keeps only the last `MAX_LOADED` messages and says nothing.**
+    That is the right behaviour for opening a transcript, and the wrong one
+    here: this panel exists to answer "have I asked this before?", and a
+    question asked forty turns before the window opens is reported under
+    **"Only in the later"** - a confident *you have not asked this before*
+    built out of a message the reader simply never had.
+
+    So the truncation is detected rather than inherited. Counting the file's
+    own non-blank lines against what came back is one pass over a file this
+    panel has already read, and it does not need `load()` to change.
+    """
     from shani_chronoa import conversation_store
 
     try:
-        return conversation_store.load(conversation_store.session_path(root, sid))
+        path = conversation_store.session_path(root, sid)
+        messages = conversation_store.load(path)
     except Exception as exc:  # noqa: BLE001
         logger.debug("compare: conversation %s is unreadable: %s", sid, exc)
-        return []
+        return [], False
+
+    truncated = False
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            lines = sum(1 for line in handle if line.strip())
+        truncated = lines > len(messages)
+    except Exception as exc:  # noqa: BLE001 - a count that cannot be had is not fatal
+        logger.debug("compare: could not size conversation %s: %s", sid, exc)
+    return messages, truncated
 
 
 def _row(text: str, dim: bool = False) -> Gtk.Label:
@@ -221,8 +264,9 @@ class _CompareView(Gtk.Box):
             return
         old_id = self._selected(self._earlier)
         new_id = self._selected(self._later)
-        result = diff_module.diff_conversations(
-            _messages(self._root, old_id), _messages(self._root, new_id))
+        old_messages, old_cut = _messages(self._root, old_id)
+        new_messages, new_cut = _messages(self._root, new_id)
+        result = diff_module.diff_conversations(old_messages, new_messages)
 
         self._result_box.append(_row(
             f"Earlier asked {result.old_count} question(s); "
@@ -234,8 +278,24 @@ class _CompareView(Gtk.Box):
         # compared against a real one, reported "Earlier asked 1 question(s);
         # later asked 0" and three groups of "None", with nothing saying that
         # one of them is empty. The count line is true and useless.
+        # **`or`, not `and`.** This regressed while the truncation note was
+        # being added: the empty-side message was widened from "both" to "either"
+        # once already, and the same line was rewritten with `and` in a later
+        # patch - putting the original defect back. The sentence says "One of
+        # these", so it fires when *one* of them is empty.
         if not result.old_count or not result.new_count:
             self._result_box.append(_row(NO_QUESTIONS))
+        if old_cut or new_cut:
+            # **Said, not inferred.** "Only in the later" is a claim about what
+            # the person has and has not asked, and it is only as good as the
+            # window behind it.
+            which = "Both" if (old_cut and new_cut) else (
+                "The earlier one" if old_cut else "The later one")
+            self._result_box.append(_row(
+                f"{which} is longer than the window this reads, so its oldest "
+                f"questions are not counted here - a question listed as new may "
+                f"have been asked earlier and fallen outside the window.",
+                dim=True))
         self._result_box.append(_group("Only in the later", result.only_new))
         self._result_box.append(_group("Only in the earlier", result.only_old))
         self._result_box.append(_group("Asked more than once, earlier",

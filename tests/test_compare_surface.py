@@ -206,16 +206,44 @@ def test_the_list_is_newest_first():
     index 0 and 1 - so an oldest-first list would silently compare the wrong
     pair while looking entirely correct."""
     root = _store([_user("a")], [_user("b")], [_user("c")])
-    titles = [t for _sid, t in compare_module._conversations(root)]
-    assert titles[0] == "chat 2", titles
+    labels = [label for _sid, label in compare_module._conversations(root)]
+    assert labels[0].startswith("chat 2"), labels
+
+
+def test_two_conversations_with_the_same_title_can_be_told_apart():
+    """**A pair of drop-downs both reading "Fix the build" makes it impossible
+    to say which two conversations are being compared.** Two conversations
+    generated from the same first question have the same title, which is the
+    common case rather than an edge one - so the label carries the message
+    count, which `list_sessions` already had."""
+    root = _store([_user("a")], [_user("a"), _user("b"), _user("c")])
+    labels = [label for _sid, label in compare_module._conversations(root)]
+    assert len(set(labels)) == len(labels), f"two rows are identical: {labels}"
+    assert all("message" in label for label in labels), labels
+
+
+def test_a_single_message_conversation_is_not_said_to_have_two():
+    root = _store([_user("only")], [_user("a"), _user("b")])
+    labels = [label for _sid, label in compare_module._conversations(root)]
+    # **Located by content, not by index.** The list is newest first, so the
+    # one-message conversation is second - and `labels[0]` was the two-message
+    # one, which is how this passed an assertion it never made.
+    assert any(label.endswith("1 message") for label in labels), labels
+    assert not any("1 messages" in label for label in labels), labels
 
 
 def test_an_untitled_conversation_is_named_rather_than_blank():
     root = _store([_user("a")], [_user("b")])
     sid = store.new_session(root)
     (root / f"{sid}.jsonl").write_text("", encoding="utf-8")
-    titles = [t for _s, t in compare_module._conversations(root)]
-    assert "" not in titles, titles
+    labels = [label for _sid, label in compare_module._conversations(root)]
+    # **The store names it, not this panel.** `list_sessions` already falls back
+    # to "New conversation", so this panel's own "Untitled" never appears for an
+    # empty conversation - the assertion has to be that *something* names it,
+    # or it is testing a branch the store makes unreachable.
+    assert all(label.strip() for label in labels), labels
+    assert len([label for label in labels if label.startswith("New ")]) == 1, (
+        f"the empty conversation is not named: {labels}")
 
 
 # -- what it reports --------------------------------------------------------
@@ -254,6 +282,101 @@ def test_the_count_line_states_both_sides():
     root = _store([_user("a")], [_user("a"), _user("b")])
     text = " ".join(_labels(_page(root).view))
     assert "Earlier asked 1" in text and "later asked 2" in text, text
+
+
+# -- the store's message window --------------------------------------------
+
+
+def _long_conversation(count):
+    """A conversation with `count` user messages, over the window."""
+    root = Path(tempfile.mkdtemp(prefix="chronoa-compare-long-"))
+    sid = store.new_session(root)
+    (root / f"{sid}.jsonl").write_text(
+        "".join(json.dumps(_user(f"question {n}")) + "\n"
+                for n in range(count)), encoding="utf-8")
+    store.set_generated_title(root, sid, "long chat")
+    return root, sid
+
+
+def test_a_long_conversation_is_detected_as_truncated():
+    """`conversation_store.load()` keeps only the last `MAX_LOADED` messages
+    and says nothing. The panel counts what came back, so without this the
+    counts and the lists are quietly about a window rather than the
+    conversation."""
+    from shani_chronoa import conversation_store
+
+    root, sid = _long_conversation(conversation_store.MAX_LOADED + 40)
+    messages, truncated = compare_module._messages(root, sid)
+    assert len(messages) == conversation_store.MAX_LOADED, len(messages)
+    assert truncated is True, "the window cut was not detected"
+
+
+def test_a_short_conversation_is_not_reported_as_truncated():
+    root, sid = _long_conversation(5)
+    messages, truncated = compare_module._messages(root, sid)
+    assert len(messages) == 5
+    assert truncated is False
+
+
+def test_an_unreadable_conversation_is_not_reported_as_truncated():
+    """A failure and a truncation look the same to the reader, and they mean
+    opposite things: one says "nothing here", the other says "not all of it"."""
+    messages, truncated = compare_module._messages("/nonexistent", "nope")
+    assert messages == [] and truncated is False
+
+
+def test_the_panel_says_so_when_a_conversation_is_cut_short():
+    """**"Only in the later" is a claim about what the person has and has not
+    asked.** A question asked forty turns before the window opens is reported
+    as new, which is a confident "you have not asked this before" built out of
+    a message the reader never had."""
+    from shani_chronoa import conversation_store
+
+    root = _store([_user("seed")])
+    sid = store.new_session(root)
+    (root / f"{sid}.jsonl").write_text(
+        "".join(json.dumps(_user(f"question {n}")) + "\n"
+                for n in range(conversation_store.MAX_LOADED + 40)),
+        encoding="utf-8")
+    store.set_generated_title(root, sid, "long chat")
+
+    labels = " ".join(_labels(_page(root).view))
+    assert compare_module.WINDOW_NOTE in labels, (
+        f"a truncated conversation was compared without saying so: {labels}")
+
+
+def test_a_truncation_on_the_earlier_side_is_also_reported():
+    """**The gap mutation C3 walked through.** The long conversation in the
+    test above is the *newest*, so it is the "later" one - which left the
+    earlier side of the `or` completely unexercised, and a panel that mentioned
+    only the later conversation's truncation passed.
+
+    Built the other way round: the long one created **first**, so it is the
+    older conversation and lands in the `earlier` drop-down.
+    """
+    from shani_chronoa import conversation_store
+
+    root = Path(tempfile.mkdtemp(prefix="chronoa-compare-early-"))
+    old_id = store.new_session(root)
+    (root / f"{old_id}.jsonl").write_text(
+        "".join(json.dumps(_user(f"old question {n}")) + "\n"
+                for n in range(conversation_store.MAX_LOADED + 40)),
+        encoding="utf-8")
+    store.set_generated_title(root, old_id, "the long older one")
+    new_id = store.new_session(root)
+    (root / f"{new_id}.jsonl").write_text(
+        json.dumps(_user("recent")) + "\n", encoding="utf-8")
+    store.set_generated_title(root, new_id, "the short newer one")
+
+    labels = " ".join(_labels(_page(root).view))
+    assert compare_module.WINDOW_NOTE in labels, (
+        f"only the later conversation's truncation is reported: {labels}")
+    assert "earlier one is longer" in labels, labels
+
+
+def test_the_panel_does_not_say_so_when_nothing_was_cut():
+    labels = " ".join(_labels(_page(_store([_user("a")], [_user("b")])).view))
+    assert compare_module.WINDOW_NOTE not in labels, labels
 
 
 # -- robustness -------------------------------------------------------------
