@@ -17,7 +17,6 @@ error:
 3. Decoding "a list of ints" as bytes raises on a u32 field, which is also a
    list of ints. Anything outside 0..255 is a number.
 """
-import struct
 from pathlib import Path
 
 import numpy as np

@@ -35,11 +35,10 @@ contradicts itself before it is compared with anything.
 started.
 """
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
-from . import modelfmt
 
 #: The metadata keys that look like they decide compatibility and do not.
 UNRELIABLE_KEYS = ("general.name", "general.tags", "general.finetune",
@@ -177,7 +176,7 @@ def mismatches(adapter: Path, base: Path) -> List[str]:
         # reports, and the synthetic one was believed over the real pair. The
         # fixture is what is wrong: it is built by a different tool than the one
         # that produced the files this module exists to check.
-        fan_in, rank = int(tensor.shape[0]), int(tensor.shape[1])
+        fan_in = int(tensor.shape[0])
         if target[0] != fan_in:
             wrong.append((tensor.name[:-len(".lora_a")], fan_in, target[0]))
     if unknown:
