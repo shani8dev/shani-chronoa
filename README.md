@@ -25,7 +25,7 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **205 callable
+  rather than just chatting about it. **257 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
@@ -38,20 +38,30 @@ the machine unless you switch it twice on purpose.
   verbatim when one is provisioned — the voice directory, down to the voice
   name, is configurable.
 - **Barge-in support** — interrupt a long reply mid-sentence.
-- **Senses** — a perception layer beside `skills/`. **49 senses** deposit
-  *percepts* the assistant can reason about: **24 default on, 25 default
+- **Senses** — a perception layer beside `skills/`. **53 senses** deposit
+  *percepts* the assistant can reason about: **25 default on, 28 default
   off**. The split is deliberate and machine-readable, see
   [the table below](#senses-percepts-and-consent).
 
-  Those two numbers are about the **49 senses that are modules today**, which is
-  what the table lists. The schema holds **74** `<name>-sense-enabled` keys
-  because 18 belong to the *trigger event* types (`screenlock`, `usbplug`,
-  `schedule`, … — `triggers.EVENT_TYPES`) and 7 more are **retired** keys kept
-  because a rename would silently revoke somebody's permission; they still grant
-  their successor through `config._SENSE_CONSENT_ALIASES`. Only 18 of the 74
-  default on, and those 18 are all senses. So "24 on / 25 off" and "24 on / 50
-  off" are both true of different sets, which is worth stating once here rather
-  than leaving a reader to work out which one a given number describes.
+  Those two numbers are about the **53 senses that are modules today**, which is
+  what the table lists. The schema holds **78** `<name>-sense-enabled` keys, and
+  they decompose as 53 senses + 19 *trigger event* types + 7 **retired** keys
+  **− `git`, which is both a sense module and an event type** (78, not 79 — one
+  name is counted twice by that sum). The retired keys (`camera`, `contention`,
+  `cooling`, `link`, `monitors`, `smart`, `thermal`) are kept because a rename
+  would silently revoke somebody's permission; they still grant their successor
+  through `config._SENSE_CONSENT_ALIASES`. Measured: **25 of the 78 default on,
+  and all 25 are senses** — no event type defaults on. So "25 on / 28 off" is true
+  of the senses and "25 on / 53 off" is true of every key. Stating both once here
+  rather than leaving a reader to work out which one a given number describes.
+
+  These numbers are read out of the tree, not trusted from prose:
+  `python3 tests/check_readme_numbers.py` re-derives every one of them from
+  `discover_senses()` and the schema, and fails if they drift. It reported **five
+  problems** when it was last run by hand, four of them counts like these and one
+  the serious one: **`kernellog`, `monitoring`, `polkitpolicy` and `ups` were
+  absent from the table entirely**, so `ups` defaulted on with nothing on the
+  page saying so.
 - **Actuators** — the outbound side, as ordinary whitelisted skills:
   `speak`, `notify`, `clipboard`, `screenshot`, plus pointer/click/type
   behind their own `input-control-enabled` key. There is deliberately no
@@ -157,11 +167,14 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 | `hearing` | utterance | off |
 | `hwmon` | machine-state | off |
 | `idle` | machine-state | off |
+| `kernellog` | machine-state | off |
 | `labnetworks` | machine-state | off |
 | `listeners` | machine-state | off |
 | `location` | machine-state | off |
 | `modelfit` | machine-state | off |
+| `monitoring` | machine-state | off |
 | `ocr` | image_text | off |
+| `polkitpolicy` | machine-state | off |
 | `printing` | machine-state | off |
 | `privilege` | machine-state | off |
 | `rfsense` | machine-state | off |
@@ -170,6 +183,7 @@ presence defaults off: `sessions`, `git`, `web`, `capture`, `vision`,
 | `thermalgrid` | machine-state | off |
 | `vision` | image_description | off |
 | `web` | page | off |
+| `ups` | machine-state | on |
 | `wirelesslink` | machine-state | off |
 
 **The table is generated, and the numbers in the prose above are checked against it.** The 49 rows are `senses.discover_senses()`; the Default column is each `<name>-sense-enabled` key's own `default` in the compiled schema, not a reading of intent. A row here that disagrees with the schema is a bug in the documentation, which is why the two are compared rather than trusted.

@@ -2,6 +2,50 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## The four senses the README's table did not have, and the check nothing ran (2026-10-12)
+
+A chunked suite run found that my chunk-composition had included `tests/check_*.py`
+— **audit scripts, not pytest tests** — and that collecting them killed the run
+with `SystemExit`. Running them as scripts instead found `check_readme_numbers.py`
+reporting **five problems**, one of them serious:
+
+> 4 sense(s) in the tree are absent from the table: ['kernellog', 'monitoring',
+> 'polkitpolicy', 'ups']
+
+`ups` defaults **on**. So the README under-reported by a sense which senses poll by
+default, on the page whose whole job is to say which ones do.
+
+**The root cause is not a stale file, it is a check that is run by nothing.**
+`tests/check_readme_numbers.py` re-derives every number in the README's prose and
+its senses table from `discover_senses()`, `tools.TOOLS` and the gschema - it was
+committed, it was correct, and **no pytest module, no CI workflow and no script
+ever ran it**. `tests/check_capabilities_doc.py` has exactly the same shape and is
+wired by `test_capabilities_doc.py`; this is the same wiring for the other one. **A
+check that is not run is not a check**, which is the sentence in that file that
+made this one necessary.
+
+The table carries the four missing rows now and the prose carries the measured
+counts. **The prose I wrote first was wrong twice, and measuring it is what said
+so**: I wrote "18 event-type keys" and "19 of the 78 default on", where the tree
+says **19** event types and **25** default on - all 25 of them senses, none of them
+event types. The decomposition also does not sum: 53 senses + 19 event types + 7
+retired is **79 keys in a schema holding 78**, because `git` is **both** a sense
+module and an event type and the sum counts it twice. That is stated rather than
+smoothed, because a number that does not sum is the reason to check it.
+
+The four module names are `kernel_log.py` and `polkit_policy.py` while the sense
+names are `kernellog` and `polkitpolicy` - the documented rule that
+`glib-compile-schemas` rejects `_` in key names and discards the **entire** schema
+when it hits one. So a table keyed by the module filename would have missed them a
+second way.
+
+`tests/test_readme_numbers.py` (2) runs the checker for real and carries a
+**negative control**: it edits the README in a *copy* of the tree and asserts the
+checker fails on it and quotes both numbers. The first version had only the
+positive test and could not fail, which is the shape this file records more than
+any other.
+
+
 ## laya's evidence states: `honest()` collapsed "unanswerable" into "no" (2026-10-12)
 
 `harness-study/laya-decision`'s `laya/evidence.py` states the doctrine in its
@@ -12534,3 +12578,45 @@ a detail: the sense is called `kernellog` and the file is `kernel_log.py`,
 deliberately, because the consent key derives from the name and
 `glib-compile-schemas` rejects `_` in a key. A filename-keyed map misses exactly
 the case that prompted it.
+
+## What the q8_0 floor costs, and a guard that made a test vacuous (2026-10-12)
+
+The floor is justified on quality - `q5_0` measured +8.53% on Qwen3-0.6B - so the
+other side of that trade was left unstated: what VRAM headroom does excluding
+`q5_0` actually cost? Measured on Qwen3-8B's shape (8 KV heads, head_dim 128,
+4.68 GiB weights):
+
+    vram     f16    q8_0    q5_0    q4_0
+    10G     32768   32768   32768   32768
+     9G     16384   32768   32768   32768
+     8G     16384   32768   32768   32768
+     7G      8192   16384   32768   32768
+     6G      4096    8192   16384   16384
+     5G      2048    2048    2048    2048
+
+**`q8_0` recovers the whole 2x doubling at every band where `f16` fails.** At 6
+GiB f16 gives 4096 and `q8_0` gives 8192; at 7, 8192 to 16384; at 9, 16384 to
+32768. `q5_0` only ever buys the *third* increment, in a narrow band, on the
+models where that increment costs 8.5% perplexity.
+
+So the floor costs the last step of headroom and keeps the first one - and the
+first is the step from "cramped" to "usable", which is the one that mattered. The
+trade is now quantified on both sides rather than defended on one.
+
+**Then the mutation run found a guard that made one of the new tests vacuous, and
+it was mine.** The doubling test skipped any row where `at_floor == f16`, reading
+that as "f16 fits, nothing to recover". Inflate `q8_0` to 1.9 bytes per element
+against f16's 2.0 and the floor step stops compressing - and then `at_floor ==
+f16` at **every** band, the guard skips all four rows, and the test passes having
+asserted nothing. `tools/mutations/floor_cost.py` reported it as a survivor that
+"failed for another reason", which is how it surfaced: the suite did fail, on the
+*other* cost test, so my `expect` list was wrong rather than the tests missing.
+
+The fix is the assertion that was absent: `test_the_floor_step_actually_compresses`
+pins `bpe(f16)/bpe(floor) >= 1.8` on its own. Once that exists, `at_floor == f16`
+can only mean f16 fits, and the guard below it is excused rather than load-bearing
+for free. A third mutation covers partial compression (1.5, i.e. 1.33x) which is a
+distinct failure mode from "no compression at all" - still ordering-correct, still
+ladder-shaped, just quietly half the headroom.
+
+`tools/mutations/floor_cost.py`: 3 mutations, 3 caught, 0 survivors, 0 equivalent.
