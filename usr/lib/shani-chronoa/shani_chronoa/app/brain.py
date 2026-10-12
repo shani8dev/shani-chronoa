@@ -368,12 +368,29 @@ class BrainMixin:
     def _explain_no_model(self, text: str) -> None:
         """No model answers: the router if it can be sure, the installed model, or setup - never just "not available"."""
         from shani_chronoa import local_llm
+        from shani_chronoa.presence import Presence
         if not self.window:
             return
         if self._router_fallback(text):
             return
         self.window.set_orb_state("error")
         if local_llm.installed() and local_llm.server_binary():
+            # **A person who chose Asleep is not a person waiting for a cold
+            # start.** This branch started the service unconditionally, and it is
+            # the one path that defeated `_use_local_server`'s own guard: the
+            # guard returns False *precisely so that nothing is started*, and
+            # then this ran and started it. Measured with a model installed and a
+            # stub window - the service was started and the response read
+            # "Starting the local model". So "Asleep" was unchoosable *and*, had
+            # it been chosen, would have been ignored here.
+            if getattr(self, "_presence", Presence.ACTIVE) is Presence.SLEEPING:
+                self.window.set_orb_state("error")
+                self.window.set_response(
+                    "The model is asleep, so nothing was started. Press "
+                    "\"Wake up\" in Settings > Models > Right now to load it, "
+                    "or ask again and nothing will happen until you do.")
+                self.window.set_status("The model is asleep")
+                return
             self.window.set_response("Starting the local model - this takes a few seconds the first time. "
                                      "Your question will be answered when it is ready.")
             self.window.set_status("Starting the local model...")

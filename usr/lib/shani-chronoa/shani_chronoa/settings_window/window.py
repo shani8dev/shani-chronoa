@@ -2,6 +2,7 @@
 
 
 import gi
+import logging
 import pathlib
 import re
 import threading
@@ -16,6 +17,8 @@ from .senses import SensesPage
 from .privacy import PrivacyPage
 from .voice import VoicePage
 from .activity import ActivityPage
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -385,9 +388,26 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
 
         Runs off the main loop: stopping a server is a `systemctl` call, and
         waking one waits for a cold start.
+
+        **The cycle is driven by the *chosen* state, not by `detect()`.** It read
+        `detect()`, which answers "is the model resident" and can only ever
+        return ACTIVE or DROWSY - so from a released model the next state was
+        always SLEEPING, `apply()` reported "already not resident" without doing
+        anything, and the button stayed on "Go to sleep" forever. Measured, three
+        identical presses. `Asleep` was offered and could not be reached, and
+        `Wake up` - the label that would have got out of it - never appeared.
+
+        So the choice is what cycles, it is written back to the app on success,
+        and it is what the row reports: SLEEPING is a *decision about behaviour*
+        rather than an observation of memory, which is the only thing `detect()`
+        can see. For ACTIVE and DROWSY the two coincide, so nothing else changes.
         """
         from shani_chronoa import local_llm, presence
-        current = presence.detect(local_llm.is_up)
+        # The choice, falling back to what the machine is doing for an app that
+        # was never asked. `detect()` is the honest default at startup.
+        current = getattr(self.app, "_presence", None)
+        if current is None:
+            current = presence.detect(local_llm.is_up)
         target = current.next()
         row.set_subtitle("Working...")
         button.set_sensitive(False)
@@ -397,10 +417,19 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
                 target, is_up=local_llm.is_up,
                 wake=local_llm.start_service, sleep=local_llm.stop_service)
             def done() -> bool:
-                now = presence.detect(local_llm.is_up)
-                row.set_subtitle(now.detail() if reached
+                if reached:
+                    # **Record the choice, or the next press cycles from the
+                    # machine again and SLEEPING is unreachable a second time.**
+                    # `brain._use_local_server` reads this to decide whether a
+                    # question may start the server, so this line is what makes
+                    # "leave the machine alone" mean anything.
+                    try:
+                        self.app._presence = target
+                    except AttributeError:  # a stub app with no slot for it
+                        logger.debug("presence: the app has no _presence slot")
+                row.set_subtitle(target.detail() if reached
                                  else f"Could not do that: {reason}")
-                button.set_label(now.action())
+                button.set_label(target.action())
                 button.set_sensitive(True)
                 return False
             GLib.idle_add(done)
@@ -432,6 +461,16 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
 
             def done() -> bool:
                 now = presence.detect(local_llm.is_up)
+                # **Asking for the model overrides Asleep.** Without this, a
+                # person who chose "leave the machine alone" and then pressed
+                # "Run the model" would have a running server that the next
+                # question still refused to use - the choice and the machine
+                # disagreeing, which is the exact failure `presence.detect`'s
+                # docstring says it exists to prevent.
+                try:
+                    self.app._presence = presence.Presence.ACTIVE
+                except AttributeError:
+                    pass
                 if problem:
                     row.set_subtitle(f"Could not start it: {problem}")
                 elif answering:
@@ -447,6 +486,29 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
 
         threading.Thread(target=work, daemon=True,
                          name="start-local-model").start()
+
+    def _refresh_presence_row(self) -> None:
+        """Say what the row's two buttons will do, read from the current choice.
+
+        **Both labels were written once at build time and never read again.** So
+        a person who released the model - or chose Asleep - and then opened
+        Settings was shown "Free the model", the verb for a model that is
+        already released, and "Run the model" for one already running. The cycle
+        in particular: `Asleep`'s action is "Wake up", and it could not appear
+        because nothing recomputed it.
+
+        Read off the *choice*, which is what `_cycle_presence` cycles and what
+        `brain` reads - so the label and the behaviour cannot disagree. A machine
+        with no slot for it falls back to what the machine is doing.
+        """
+        from shani_chronoa import local_llm, presence
+        chosen = getattr(self.app, "_presence", None)
+        if chosen is None:
+            chosen = presence.detect(local_llm.is_up)
+        if getattr(self, "_presence_cycle_button", None) is not None:
+            self._presence_cycle_button.set_label(chosen.action())
+        if getattr(self, "_presence_row", None) is not None:
+            self._presence_row.set_subtitle(chosen.detail())
 
     def _model_choices(self, group, title: str, subtitle: str, keys,
                        installed, on_pick, config=None) -> None:
@@ -523,6 +585,11 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
     def _on_window_visible(self, window, _param) -> None:
         if not window.get_visible():
             return
+        # The presence row's two buttons are verbs, so they are only true about
+        # the moment they are read. Releasing the model from the Models panel
+        # leaves "Free the model" on a model that is already released.
+        if getattr(self, "_presence_row", None) is not None:
+            self._refresh_presence_row()
         if self._session_state() != self._approvals_state:
             self._render_session_answers()
         if self._tool_activity_state() != self._tool_state:
@@ -768,6 +835,8 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         group.add(presence_row)
         self._presence_row = presence_row
         self._run_model_button = run_button
+        self._presence_cycle_button = button
+        self._refresh_presence_row()
 
         # What is actually in effect, and why. A tier that guesses should look
         # like a guess, not be presented as a decision.

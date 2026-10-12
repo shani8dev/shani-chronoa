@@ -2,6 +2,111 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## "wire all": `Asleep` was offered and could not be reached, and the fallback started it anyway (2026-10-12)
+
+Asked to wire everything this repo *offers*. `presence.py` documents three states
+and this file records why the third matters: **"`Asleep` means stop it *and* do
+not start it again to answer the next question, which no pair of Run/Stop buttons
+can express."** Measured, it was unreachable and, had it been reached, ignored.
+
+### Defect 1: the cycle read the machine, so the third state never appeared
+
+`_cycle_presence` cycled from `presence.detect(local_llm.is_up)`. `detect()`
+answers *"is the model resident"* - a question about memory - and can only ever
+return ACTIVE or DROWSY, a property `tests/test_presence.py` pins deliberately
+(`test_detection_treats_a_stopped_server_as_drowsy_not_sleeping`). So from a
+released model the target was always SLEEPING, `apply()` answered "already not
+resident" **without doing anything**, and the button stayed on "Go to sleep"
+forever. Measured, three identical presses producing identical subtitles.
+`Wake up` - the action that would have got out of SLEEPING - never appeared.
+
+`self.app._presence` was the missing half: written once at startup from
+`detect()`, read once by `brain._use_local_server`, and **never written again**.
+So the guard implementing "do not start it again" was permanently False.
+
+### Defect 2: the fallback path started it anyway
+
+`_explain_no_model` has its own unconditional `local_llm.start_service()` on the
+branch where a model is installed. Measured with a stub window: the service was
+started and the response read *"Starting the local model"*. So the guard returns
+False *precisely so nothing is started*, and the next statement started it. **A
+guard and the path that defeats it were two functions apart, and the tests
+covered the guard.**
+
+### The model the fix rests on
+
+Two questions the first version conflated, and separating them is the fix:
+
+| | asks | can answer |
+|---|---|---|
+| `presence.detect()` | is the model resident? | ACTIVE, DROWSY |
+| `app._presence` | what did the person choose? | ACTIVE, DROWSY, **SLEEPING** |
+
+SLEEPING is a decision about *behaviour*, so `detect()` cannot see it - which is
+why reporting the machine published a sentence ("the next question loads it
+again") that `brain` now refuses to honour. The cycle is driven by the choice,
+written back on success, and it is what the row reports; `_explain_no_model`
+refuses to start and names the way out; `_run_model` sets ACTIVE because asking
+for the model is the one thing that overrides Asleep.
+
+`tests/test_asleep_is_reachable.py` (11), `tools/mutations/asleep_state.py`.
+
+### Three of nine mutations survived, and they were two different faults
+
+The first run came back **6 caught, 3 survivors**. Reading why, they were **not**
+one fault:
+
+| mutation that survived | what was actually wrong |
+|---|---|
+| the cycle's subtitle reports `detect()` again | the witness called `_refresh_presence_row()`; the mutation is in `_cycle_presence`'s own `done()`. A test that drives the helper is not a test of the site that calls it |
+| `_run_model` no longer sets ACTIVE | nothing pressed the button at all |
+| the on-show refresh removed | `_on_window_visible` was never driven - and it *could not* be: a window built in a test reports `get_visible() == False`, which is its own early return |
+
+**The other two were mis-named witnesses, not missing ones.** The runner reported
+them as *"1 failed, 10 passed ... failed for another reason"* - the mutation broke
+a test, and my `expect` list named a different one. That is its rule 4 doing its
+job (*"a whole-file failure that happens for another reason is reported as caught
+and as mis-named, so the witness list stays honest"*), and it is worth keeping
+apart from the fault above, because the remedy is different: correct the name, do
+not write a new test. A runner that reported both as plain survivors would have
+sent me looking for coverage that already existed.
+
+Three witnesses now drive `_build_models`, `_cycle_presence`, `_run_model` and
+`_on_window_visible` through a real main loop, because the first three report
+through `GLib.idle_add` and a run without one reads the *pre-press* state.
+
+**And my first attempt at fixing them was wrong in a new way.** `_drive()` passed
+the window to an already-bound method, so every test raised
+`takes 3 positional arguments but 4 were given` - six red for a reason that had
+nothing to do with the defect. Then one of them read the row it had built rather
+than the row it drove. Both are recorded because both look like product failures
+in the summary line.
+
+### Read and cleared: every schema enum value in the registry
+
+The same audit turned up a second class - a value the model may emit that no
+branch answers, which is how `bluetooth_call`'s dead `route` alias was found. A
+scan over **243 skill modules and 191 enum values** produced 14 leads, and **all
+14 are false positives**:
+
+| value | what actually handles it |
+|---|---|
+| `browse get_title` / `get_url` | `elif action == "get_title"` |
+| `date_math years` / `days_until` | `unit == "years"`, and the unit arithmetic |
+| `edit_image horizontal` / `vertical` | `arguments.get("flip") == "vertical"` |
+| `input_control '2' '3' '4'` | `button.isdigit() and 1 <= int(button) <= 5` |
+| `vpn_control down` | the `else` of `action == 'up'` |
+| `watch sms` / `call` / `whatsapp` / `female` | the `NOTIFY_TYPES` dict, and `startswith("f")` |
+
+**And the scan itself could not fail twice before it said anything useful.** Its
+first version asked `v in body`, where `body` was every string literal in the
+module - and the enum's own values are in there by construction, so all 191
+passed. The second excluded *every* literal equal to the value, including genuine
+branches like `elif action == "get_title"`, and re-flagged 14. Both are the
+"a control that cannot fail" trap, in a scanner rather than a test, and both are
+recorded so the next pass does not re-derive them: the leads were cleared by
+reading each handler, not by trusting either scan.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
