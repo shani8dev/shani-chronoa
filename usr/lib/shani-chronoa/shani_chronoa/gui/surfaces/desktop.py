@@ -266,13 +266,17 @@ def _tray_sentence() -> str:
     return f"not installed - {why}"
 
 
-def _row(title: str, value: str) -> Gtk.Widget:
+def _row(title: str, value: str, suffix: Optional[Gtk.Widget] = None) -> Gtk.Widget:
     """One row, filled in at construction and never patched afterwards.
 
     `Gtk.Box` has no `set_subtitle` and no `add` (measured on GTK 4), so a row
     built and then given its subtitle would raise on the no-Adw fallback path.
+
+    `suffix` is the control at the end of the row. It is a parameter rather than
+    something patched on later for the same reason as the rest: this module never
+    mutates a row after building it.
     """
-    widget = common.row(_text(title), _text(value))
+    widget = common.row(_text(title), _text(value), suffix)
     widget.add_css_class(ROW_CSS)
     _value_label(widget)
     return widget
@@ -458,6 +462,33 @@ def _gate(config: Any, key: str) -> Tuple[Optional[bool], str]:
     except Exception as exc:  # noqa: BLE001 - an unreadable gate is a closed gate
         logger.debug("reading %s raised", key, exc_info=True)
         return None, f"reading it raised {type(exc).__name__}: {exc}"
+
+
+def _privacy_button(app: Any) -> Gtk.Widget:
+    """The route to the one page that grants both of these keys.
+
+    `global-shortcut-enabled` and `document-search-enabled` are written in
+    `settings_window/privacy.py` and nowhere else, so this is the only button on
+    this panel that reaches something that can change the answer.
+    """
+    return common.wire_page_button(
+        common.open_settings_button("Open Privacy settings", "settings:privacy"),
+        app, "settings:privacy")
+
+
+def _off_button(app: Any, config: Any, key: str) -> Optional[Gtk.Widget]:
+    """The button for `key`, and **only** when the key is off.
+
+    Borrowed from `devices.py`, and for the reason spelled out there: a button
+    on the other states would open Privacy settings and change nothing, which is
+    a worse dead end than the sentence it replaced. A gate that could not be read
+    gets no button either - "could not ask" is not "off", and a button offered on
+    it would claim a certainty the row has just said it lacks.
+    """
+    value, problem = _gate(config, key)
+    if problem or value is None or value:
+        return None
+    return _privacy_button(app)
 
 
 def _shortcut_sentence(config: Any) -> str:
@@ -700,8 +731,10 @@ def build(app: Any) -> Gtk.Widget:
         "Two settings that gate what Chronoa may reach for on your behalf. "
         "Neither is granted here.",
     )
-    _add_row(keyboard, _row("Global shortcut", _shortcut_sentence(config)))
-    _add_row(keyboard, _row("Document search", _document_sentence(config)))
+    _add_row(keyboard, _row("Global shortcut", _shortcut_sentence(config),
+                            _off_button(app, config, SHORTCUT_KEY)))
+    _add_row(keyboard, _row("Document search", _document_sentence(config),
+                            _off_button(app, config, DOCUMENT_KEY)))
     body.append(keyboard)
 
     secrets = common.group(
