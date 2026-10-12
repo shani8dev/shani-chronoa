@@ -12490,3 +12490,47 @@ above would pass on a scan that had stopped working entirely.
 Verified: dropping `handle_data` from the framework allowlist turns the suite
 red with *"is an html.parser callback and is not allowlisted, so every HTML
 parser in this tree reports dead"*.
+
+### Triage: no module is dead, and the tool could not tell for a while
+
+80 dead names is only alarming if some of them live in modules nothing loads.
+Grouped per module, with the registries consulted:
+
+| | modules |
+|---|---:|
+| entirely dead **and** nothing loads it | **0** |
+| entirely dead names, but a registry loads the module | 1 |
+| otherwise-live modules holding dead names | 43 |
+
+**Zero dead modules.** Every one of the 80 is a dead *name* inside a module that
+is live, and most are concentrated: `learning.py` 25/131, `conversation_store.py`
+3/22, `fmdsp.py` 3/11, `guardrail.py` 3/7. The first is the statistics toolbox this
+file already calls one. So "80 dead names" is a much smaller statement than it
+looks, and the framing that would have been wrong is *"dead modules"*.
+
+The one in category A is `senses/kernel_log.py` — **loaded**, since
+`discover_senses()` returns 53 including `kernellog`, and holding one uncalled
+public name (`read_ring`, a public reader the sense's own `_run` does not use).
+
+### Two bugs of mine, both the same shape, and both found by running
+
+- **The triage reported `kernel_log.py` as "entirely dead", and it was live.**
+  The first run had no notion of registry discovery at all: `senses/` and
+  `skills/` are loaded by **directory scan**, so a sense is wired by being
+  *found* and no identifier anywhere in the tree mentions it. Without that, a
+  module nothing registers and a module the registry loads look **identical**,
+  and the question that matters most cannot be asked. `discover_senses()` and
+  `discover_skills()` are now consulted — 297 modules, which is what makes
+  "zero dead modules" a claim rather than an absence.
+- **Then the fix silently did nothing**, because `discovered_modules` is keyed by
+  full relative path and the triage compared those against stripped module names.
+  Two representations of one thing compared as strings, so the exclusion matched
+  nothing and the module stayed in the bucket it had just been proved out of.
+  **An absence presented as a pass** — the same failure this file records for the
+  `heard-sound` sense, in a place nobody would have looked.
+
+Matching is on the names a module **declares**, not its filename, and that is not
+a detail: the sense is called `kernellog` and the file is `kernel_log.py`,
+deliberately, because the consent key derives from the name and
+`glib-compile-schemas` rejects `_` in a key. A filename-keyed map misses exactly
+the case that prompted it.

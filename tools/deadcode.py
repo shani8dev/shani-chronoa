@@ -56,12 +56,21 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-PACKAGE = ROOT / "usr" / "lib" / "shani-chronoa"
+#: The parent `usr/lib/shani-chronoa`, which is where the overlay installs.
+PARENT = ROOT / "usr" / "lib" / "shani-chronoa"
+
+#: **The package itself**, one level down. Scanning `PARENT` recursively finds
+#: everything, which is why the first version's counts were right - and it
+#: silently broke `PARENT / "senses"`, which does not exist, so the discovery
+#: pass found nothing and reported zero without saying so. A wrong path that
+#: yields an empty result is indistinguishable from an empty registry, which is
+#: exactly what the non-empty assertion beside it exists to catch.
+PACKAGE = PARENT / "shani_chronoa"
 
 #: Production roots. `tests/` is scanned separately and never counts as wiring —
 #: a test can prove a name works and still leave it unreachable, which is the
 #: dead-code class this repository records most often.
-PRODUCTION_ROOTS = (PACKAGE, ROOT / "usr" / "bin", ROOT / "tools")
+PRODUCTION_ROOTS = (PARENT, ROOT / "usr" / "bin", ROOT / "tools")
 EXTRA_FILES = (ROOT / "render_ui.py",)
 
 #: Names whose only "caller" is a string the product builds and runs. Two
@@ -185,6 +194,72 @@ def _references(tree: ast.Module) -> "set[str]":
     return names
 
 
+def _discovered_names() -> "set[str]":
+    """Every sense and skill name the live registries actually return.
+
+    Importing the package is the only honest way to ask - it is the loader that
+    decides, and this repository has already been bitten by a hand-maintained
+    list disagreeing with a registry (`_GROUPS`, `GATED`, `GATE_NAMES`, and a
+    duplicate key that silently killed a Help label).
+    """
+    import sys
+    if str(PARENT) not in sys.path:
+        sys.path.insert(0, str(PARENT))
+    names: set[str] = set()
+    try:
+        from shani_chronoa.senses import discover_senses
+        for entry in discover_senses():
+            names.add(entry["name"] if isinstance(entry, dict) else str(entry))
+    except Exception:                                   # noqa: BLE001
+        pass
+    try:
+        from shani_chronoa.skills import discover_skills
+        schemas, _handlers = discover_skills()
+        for schema in schemas:
+            names.add(schema["function"]["name"])
+    except Exception:                                   # noqa: BLE001
+        pass
+    return names
+
+
+def _discovered_modules(names: "set[str]") -> "dict[str, str]":
+    """Module file -> the registry that loads it.
+
+    **A module nobody references by identifier can still be live.** `senses/`
+    and `skills/` are loaded by directory scan, so a sense is wired by being
+    *found*. The first per-module triage reported `senses/kernel_log.py` as
+    "entirely dead" on the strength of 1 dead name out of 1; running the loader
+    answered it at once - `discover_senses()` returns **53**, `kernellog` among
+    them. Without this, a module nothing registers and a module the registry
+    loads look **identical**, so the question that matters most - *is this whole
+    module dead?* - cannot be asked at all.
+
+    **Matching is on the names a module declares, not on its filename.** The
+    sense is called `kernellog` and the file is `kernel_log.py`, deliberately:
+    the consent key is derived from the name and `glib-compile-schemas` rejects
+    `_` in a key. A filename-based map misses exactly the case that prompted it.
+
+    The match is every string the module mentions against the registry, which
+    over-approximates - a module merely *naming* a sense in a docstring would
+    count. That errs toward not calling a module dead, which is the safe
+    direction for a claim this strong.
+    """
+    found: dict[str, str] = {}
+    for directory, registry in ((PACKAGE / "senses", "senses/discover_senses"),
+                                (PACKAGE / "skills", "skills/discover_skills")):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.glob("*.py")):
+            tree = _tree(path)
+            if tree is None:
+                continue
+            literals = {n.value for n in ast.walk(tree)
+                        if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+            if literals & names:
+                found[str(path.relative_to(ROOT))] = registry
+    return found
+
+
 def scan() -> "dict[str, object]":
     production, tests = _files()
     defined: dict[str, list[str]] = {}
@@ -225,6 +300,7 @@ def scan() -> "dict[str, object]":
 
     return {
         "defined": len(defined),
+        "discovered_modules": _discovered_modules(_discovered_names()),
         "production_files": len(production),
         "test_files": len(tests),
         "wired": len(wired),
@@ -252,6 +328,10 @@ def main(argv: "list[str] | None" = None) -> int:
         print(f"    ({name} reads as dead and is not: {reason})")
     for name, reason in sorted(report["framework_callers"].items()):
         print(f"    ({name} reads as dead and is not: {reason})")
+    if not report["discovered_modules"]:
+        print("    !! no loader-discovered module could be identified, so a "
+              "module nothing registers and a module the registry loads look "
+              "identical - do not read 'entirely dead' off this run")
     if report["unparsed"]:
         print(f"    !! {len(report['unparsed'])} file(s) did not parse and "
               f"contributed no names: {', '.join(report['unparsed'])}")
