@@ -691,6 +691,14 @@ real version of it.
    idle and on AC power: summarise long conversations, extract memory-link
    candidates for the user to confirm (entity extraction), and refresh the
    index. Uses the local model only and runs under the daemon.
+   **Partially built, and the built half is not one of the three named above
+   (checked 2026-10-12).** `dream.py` exists, `daemon._dream_tick` runs it while
+   idle, and it reports what it could not read rather than being silent. But it
+   reads the **tool log** and writes a finding: measured, it contains no
+   `summar`, no `link_entities`, and no index refresh - so none of the three
+   things this item names for the useful part has landed. Recorded as the wrong
+   label being worse than a missing one: writing "mostly built" here would point
+   a reader at three capabilities that do not exist.
 5. **Salience and an interrupt policy** (Attention). Score percepts and events
    by change, severity and the user's own rules; decide speak now, notify, or
    hold for the next turn. Do-not-disturb and the rhythm state gate it.
