@@ -14377,3 +14377,72 @@ gives 0/3), and `len(reads) == 202` (a `defaultdict` creating an entry on every
 lookup). In each case the cheap fix was not to correct the number but to **parse
 instead of pattern-match** - and in each case the bad number had already been
 committed to this file as though it were established.
+
+## Presence on the strip, and the moment Chronoa last dreamed (2026-10-12)
+
+`presence.Presence` has three states and the third is the interesting one:
+**SLEEPING is a decision, not an observation.** `detect()` answers "is the model
+resident" and so can only ever return ACTIVE or DROWSY - which is exactly why
+`reconcile()` exists, and why the Settings row is built from the reconciled value
+rather than from `detect()`.
+
+That row was the **only** place the state was visible, on a screen you open
+deliberately, while every other mode lives on the strip. Presence is the largest
+question the window can answer: the rest govern how Chronoa behaves *for the
+person*, this governs whether it is *there*.
+
+**A menu rather than the Settings row's press-button.** That button's label is the
+*next* action, not the current state - correct for a row whose subtitle states the
+condition, wrong for a strip where the word is what survives a screenshot.
+
+**The work runs off the main loop and the choice is recorded only on success.**
+Applying a state stops or starts a service. And `presence.apply` reports
+`(reached, reason)` rather than raising, so a failed stop would leave the model
+loaded while the chip read "Asleep" - the chip reporting a state the machine is not
+in, which is the failure this strip has now hit **four** times.
+
+Verified over all six `chosen`/`is_up` pairs **against `reconcile()`** rather than
+against a table of expected words, which would only prove the table was copied
+correctly. Plus the case that matters most: **Asleep survives a machine that
+happens to be up.**
+
+### Dreaming is a sentence, not a fourth presence state
+
+A pass over the tool-call log is an **activity** that can happen at any of the
+three states, so putting it in `_PRESENCE` would be the category error this file
+records against per-event consents. It is a sentence on the chip instead.
+
+`dream.last_dream()` and `dream.describe_last_dream()` own "when did I last dream",
+rather than leaving the Learning surface's inline glob and the strip to answer it
+separately - **two globs are two places to disagree about which dream is newest.**
+
+**The empty case is a real answer and it says why:** *"the background pass runs only
+while automatic rules are on"* - which is the `When it may act` chip above. Measured
+on this machine: **zero dreams ever written**, against a `tool_calls.log` that exists
+and has content.
+
+**What a dream contains is still unknown, and nothing here claims otherwise.**
+`dream()` has never run on this machine. The Learning surface's on-demand
+"Background passes" button runs it and shows the whole answer.
+
+### Two more icons that do not exist, which is now three times
+
+`user-status-busy-symbolic` and `user-status-idle-symbolic` are **absent from this
+machine** - the third time this session a plausible symbolic name turned out not to
+exist, each time caught by `test_every_surface_icon_exists_on_this_machine`. The
+trio that does exist is `busy -> idle -> offline`, which happens to describe the
+three states. **A symbolic icon name is a guess about another package's contents,
+and this repository has three data points saying the guess is usually wrong.**
+
+Two more bugs of mine, both found by running: `last_dream()` returned the glob's
+**string** rather than a `Path` and crashed on `.stat()`, and `_log_file()` needs an
+explicit argument.
+
+### A coverage number I was reporting from too small a set
+
+An earlier regression grep found **29** files touching the window, strip, wizard or
+app. The real set is **64** - and the 29-file run timed out at 40 minutes without
+finishing, against 65 seconds for 11 files. So for several turns the coverage I
+described was narrower than I believed, which is the same category of error as the
+regex that invented 42 senses: **a number measured with the wrong instrument, then
+repeated as though it were coverage.**
