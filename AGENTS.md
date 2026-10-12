@@ -15827,3 +15827,54 @@ bytecode exactly as importing the package does, and `PYTHONDONTWRITEBYTECODE=1`
 has to be set on that probe too - it was, on the runs that mattered, but not on
 this one.
 
+
+## MathBlock read an attribute it never set (2026-10-12)
+
+`MathBlock.__init__` uses `self.language` in the no-matplotlib fallback and
+never assigns it. `CodeBlock` sets it from `block.language`; `MathBlock` did not.
+So **on every machine without matplotlib the fallback raised
+`AttributeError: 'MathBlock' object has no attribute 'language'`** the moment a
+reply contained an equation - which is exactly the path that method exists to
+serve.
+
+The test asserting this had been failing for as long as it existed and was
+recorded as "pre-existing" rather than fixed. It was not pre-existing behaviour
+to accept; it was a shipped crash nobody had a machine without matplotlib.
+
+Fixed with the same line `CodeBlock` uses. `Block("math", ...)` leaves
+`language` at `""`, and `code_hl.highlight` documents that an unrecognised
+language returns the escaped source unchanged - so the equation renders as the
+LaTeX, as written, in monospace, which is what that fallback's own comment says
+it is for. `test_reply_blocks.py`: 40 passed.
+
+## Three icons that render here and are blank on plain GNOME (2026-10-12)
+
+`test_sidebar_icons_exist_in_adwaita` checks every `-symbolic` name in `gui/`
+against `/usr/share/icons/Adwaita` by `rglob`. Two of the three it found were
+**mine**, added with the command palette hours earlier:
+
+| name | ships in |
+|---|---|
+| `chat-symbolic` | Yaru only - used for the Conversation entry |
+| `terminal-symbolic` | Yaru only - used for the slash commands |
+| `audio-input-microphone-high-symbolic` | Yaru only - wake word (pre-existing) |
+
+All three render correctly here, because GTK falls back to the system theme.
+On plain GNOME they are blank squares, and a blank icon is indistinguishable
+from a control that does nothing.
+
+Fixed to `view-paged-symbolic`, `system-run-symbolic` and
+`audio-volume-high-symbolic`, each verified present in **both** themes by
+`rglob`. The wake-word one could not become the plain
+`audio-input-microphone-symbolic` - push-to-talk already uses it, and the two
+rows exist to draw exactly that distinction.
+
+**Two lessons worth keeping:**
+
+1. **`Gtk.IconTheme.has_icon` is not authoritative here.** It reported
+   `preferences-system-symbolic` as absent from Adwaita when Adwaita ships it.
+   The test's `rglob` over the theme directory is the reliable check, and my
+   rail test used the unreliable one.
+2. **I ran the wrong icon test.** `test_ui_layout_contract.py` passes and covers
+   `-symbolic` literals - and it stayed green through both bad names. The
+   Adwaita-specific one is the one that catches theme portability.

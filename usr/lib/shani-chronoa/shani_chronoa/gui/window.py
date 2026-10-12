@@ -332,12 +332,22 @@ class _ModeStrip(Gtk.Box):
     _HANDS = (
         ("off", "Mic button", "Mic button: listen only while you hold it",
          "audio-input-microphone-symbolic"),
+        # **`audio-volume-high-symbolic`, not `audio-input-microphone-high-symbolic`.**
+        # The `-high` mic is a Yaru name - Adwaita ships only the plain
+        # `audio-input-microphone-symbolic`, which the row above already uses for
+        # push-to-talk, so taking it would erase the distinction between "hold
+        # the button" and "always listening" that these two rows exist to draw.
+        # `audio-volume-high-symbolic` is present in **both** themes and reads as
+        # the always-on state it is standing for.
+        #
+        # The blank was invisible here because GTK falls back to the system
+        # theme; on plain GNOME the wake-word row showed nothing.
         ("wake", "Wake word",
          "Wake word: hands-free, but it will not talk over a reply",
-         "audio-input-microphone-high-symbolic"),
+         "audio-volume-high-symbolic"),
         ("wake-over", "Wake word, talk over",
          "Wake word and talk over: hands-free, and talking interrupts a reply",
-         "audio-input-microphone-high-symbolic"),
+         "audio-volume-high-symbolic"),
         ("over", "Talk over",
          "Talk over only: the mic is not always open, but talking interrupts a "
          "reply", "media-playback-pause-symbolic"),
@@ -2615,8 +2625,16 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             all_surfaces = {}
 
         entries = [
+            # **`view-paged-symbolic`, not `chat-symbolic`** - caught by
+            # `test_sidebar_icons_exist_in_adwaita`, which is right and which I
+            # had not run. `chat-symbolic` is a Yaru name; GTK falls back to the
+            # system theme so it renders fine here and is blank on plain GNOME.
+            # Verified by `rglob` over `/usr/share/icons/Adwaita`, not by
+            # `Gtk.IconTheme.has_icon` - which reported several icons Adwaita
+            # does ship as missing.
             palette_module.Entry("Conversation", "the main window",
-                                 "chat-symbolic", self._show_conversation_page,
+                                 "view-paged-symbolic",
+                                 self._show_conversation_page,
                                  group="Go to", weight=0),
             palette_module.Entry("Quick ask", "one question, no conversation",
                                  "edit-clear-symbolic", self._show_quick_ask_page,
@@ -2642,8 +2660,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 (lambda sid=surface_id: self._show_surface(sid)),
                 group="Panels", weight=0))
         for name in slash.names():
+            # `system-run-symbolic` rather than `terminal-symbolic`, for the
+            # same reason as the conversation icon above.
             entries.append(palette_module.Entry(
-                f"/{name}", "command", "terminal-symbolic",
+                f"/{name}", "command", "system-run-symbolic",
                 (lambda n=name: self._run_command(f"/{n}")),
                 group="Commands", weight=0))
         return entries

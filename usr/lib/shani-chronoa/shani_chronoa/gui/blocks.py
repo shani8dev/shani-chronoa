@@ -465,6 +465,20 @@ class MathBlock(Gtk.Box):
     def __init__(self, block: Block) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.source = str(block.payload)
+        # **`self.language` was read below and never set here.** `CodeBlock` sets
+        # it from `block.language`; `MathBlock` did not, so the no-matplotlib
+        # fallback - which is what every machine without matplotlib gets, and is
+        # exactly the path this method exists to serve - raised
+        # `AttributeError: 'MathBlock' object has no attribute 'language'` the
+        # moment an equation was rendered.
+        #
+        # The test caught it and had been failing for as long as it had existed;
+        # it was recorded as pre-existing rather than fixed. Empty for a math
+        # block, since `Block("math", ...)` leaves `language` at its default -
+        # and `code_hl.highlight` documents that an unrecognised language returns
+        # the escaped source unchanged, which is precisely "the LaTeX, as
+        # written" rather than half-right colouring.
+        self.language = block.language or ""
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         png = math_png(self.source)
         if png is not None:
