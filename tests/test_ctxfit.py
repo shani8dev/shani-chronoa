@@ -405,3 +405,64 @@ class TestTheMoEActiveBytesAreDerivedNotDeclared:
         from shani_chronoa import local_llm
         monkeypatch.setattr(local_llm.os.path, "exists", lambda p: False)
         assert local_llm.bytes_per_token("qwen3-30b-a3b") == 2_200_000_000
+
+
+class TestTheCacheFloor:
+    """`KV_CACHE_FLOOR` is the most compression the KV cache may take, and it is a
+    measurement rather than a preference.
+
+    Measured 2026-10-12 with this repo's own `llama-perplexity` path and its fixed
+    corpus, on SmolLM2-135M-Q4_K_M, `-ctk` and `-ctv` both set, two identical runs
+    each (the numbers repeat exactly):
+
+        f16  59.1719     q8_0  59.1499   (-0.022)
+        q5_0 59.2380     q4_0  62.7689   (+3.597, +6.1%)
+
+    So `q8_0` and `q5_0` are free - inside the run-to-run noise - and `q4_0` costs
+    6.1%. PersonaPlex's RVQ has exactly this control on its compression dial:
+    `set_num_codebooks` asserts `n >= self.n_q_semantic`, so acoustic fidelity can
+    be traded away and meaning never can.
+    """
+
+    def test_the_floor_is_the_cheapest_type_that_measured_free(self):
+        from shani_chronoa import ctxfit
+        assert ctxfit.KV_CACHE_FLOOR == "q5_0", (
+            "q4_0 measured +6.1% perplexity on 2026-10-12; q5_0 measured +0.1%")
+
+    def test_the_ladder_stops_at_the_floor(self):
+        from shani_chronoa import ctxfit
+        ladder = ctxfit.CACHE_TYPE_LADDER
+        assert ladder[-1] == ctxfit.KV_CACHE_FLOOR, ladder
+        assert "q4_0" not in ladder, ladder
+
+    def test_a_longer_ladder_cannot_buy_past_the_floor(self):
+        """The bound is on the *dial*, not on the default ladder, so a caller
+        handing in an extended ladder gets clamped rather than obeyed."""
+        from shani_chronoa import ctxfit
+        weights = int(5.4 * 2 ** 30)
+        info = {"general.architecture": "qwen3", "qwen3.block_count": 36,
+                "qwen3.attention.head_count": 32,
+                "qwen3.attention.head_count_kv": 8,
+                "qwen3.embedding_length": 4096}
+        per_token = ctxfit.kv_bytes_per_token(info)
+        long = ("f16", "q8_0", "q5_0", "q4_0", "q4_1", "q4_1")
+        for context in (2048, 4096, 8192, 32768):
+            chosen = ctxfit.cache_type_for_context(
+                weights, context, total_bytes=int(6 * 2 ** 30),
+                per_token_at_f16=per_token, ladder=long)
+            assert chosen in ("f16", "q8_0", "q5_0"), (context, chosen)
+            assert chosen != "q4_0" and chosen != "q4_1", (context, chosen)
+
+    def test_the_floor_is_still_chosen_when_nothing_else_fits(self):
+        """Nothing fits is not a reason to leave the dial at f16, which would
+        claim a quality level the numbers do not support."""
+        from shani_chronoa import ctxfit
+        info = {"general.architecture": "qwen3", "qwen3.block_count": 36,
+                "qwen3.attention.head_count": 32,
+                "qwen3.attention.head_count_kv": 8,
+                "qwen3.embedding_length": 4096}
+        per_token = ctxfit.kv_bytes_per_token(info)
+        chosen = ctxfit.cache_type_for_context(
+            int(6 * 2 ** 30), 2048, total_bytes=int(6 * 2 ** 30),
+            per_token_at_f16=per_token)
+        assert chosen == ctxfit.KV_CACHE_FLOOR, chosen

@@ -11738,3 +11738,42 @@ Every one of these ran **green** against the fix before I changed the test:
 `tests/test_eval_coverage_refresh.py` (9), `tests/test_task_eval.py` (+6).
 `tools/mutations/task_eval_reply.py` and `tools/mutations/eval_coverage.py` -
 **13 mutations, 13 caught, 0 survivors, 0 equivalent**. 34 sets / 288 anchors.
+
+## The KV cache's quality floor, measured rather than quoted (2026-10-12)
+
+Last round ended with the KV ladder having a physical ceiling but no *quality*
+floor - `cache_type_for_context` would walk to `q4_0` and nothing refused to. The
+refusal was not built because it would have been someone else's write-up, and the
+repo's rule is that a number nobody measured is the confident wrong answer.
+
+It turns out to be measurable here, with the tool this repo already has.
+`llama-perplexity` is installed, accepts `-ctk`/`-ctv`, and `local_llm.perplexity()`
+already feeds it a fixed corpus written into the module. Same corpus, same model
+(SmolLM2-135M-Q4_K_M), both cache types set to the same value, two runs per type -
+and the numbers repeat exactly, so the tool is deterministic on this input:
+
+| type | PPL | delta vs f16 |
+|---|---|---|
+| f16 | 59.1719 | — |
+| q8_0 | 59.1499 | -0.022 |
+| q5_0 | 59.2380 | +0.066 (0.11%) |
+| q4_0 | **62.7689** | **+3.597 (+6.1%)** |
+
+So `q8_0` and `q5_0` are **free** - inside the run-to-run noise of a corpus this
+size - and `q4_0` costs 6.1%. `KV_CACHE_FLOOR = "q5_0"` now clamps the ladder
+before the walk, so the dial can be compressed to the point that measurably does
+not hurt and no further.
+
+That is PersonaPlex's exact control: `set_num_codebooks` asserts
+`n >= self.n_q_semantic` - the RVQ can trade acoustic fidelity away, never meaning.
+
+**The honest limits, because a floor taken further than it deserves is worse than
+no floor:** one **small** model, one corpus, and perplexity - which is not the same
+thing as what a listener notices. A larger model may hold up differently under a
+4-bit cache. What the measurement does settle is the direction and the order of
+magnitude, and `q5_0` is the step below which this box can demonstrate a real cost.
+A better model is a slot run with a bigger checkpoint, and the note says so.
+
+Two of my own errors on the way, both the recurring shape: a docstring claimed the
+clamp adds types it only removes, and a test asserted a one-entry ladder would
+return a type it did not contain.

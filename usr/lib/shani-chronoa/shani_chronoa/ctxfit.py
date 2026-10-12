@@ -76,7 +76,30 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 #: codebooks, so acoustic fidelity can be traded away and meaning never can. The
 #: KV ladder has no such floor, because a floor is a quality claim and this one
 #: would be unmeasured.
-CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0", "q4_0")
+#: The most compression the KV cache may take. `q4_0` is deliberately absent.
+#:
+#: Measured 2026-10-12 with this repo's own `llama-perplexity` path and its own
+#: fixed corpus, on SmolLM2-135M-Q4_K_M, both `-ctk` and `-ctv` set, two identical
+#: runs per type (the numbers repeat exactly, so the tool is deterministic here):
+#:
+#:     f16   59.1719      q8_0   59.1499  (-0.022)
+#:     q5_0  59.2380      q4_0   62.7689  (+3.597, +6.1%)
+#:
+#: So `q8_0` and `q5_0` are **free** - inside the run-to-run noise of a corpus this
+#: size - and `q4_0` costs 6.1%. That is the bottom of the ladder, and it is a
+#: measurement rather than someone's write-up.
+#:
+#: Honest limits on the number, because a floor taken further than it deserves is
+#: worse than no floor: **one small model**, one corpus, and perplexity - which is
+#: not the same thing as what a listener notices. A larger model may hold up
+#: differently under a 4-bit cache. What the measurement does settle is the
+#: direction and the order of magnitude, and `q5_0` is the step *below* which this
+#: box can demonstrate a real cost.
+KV_CACHE_FLOOR: str = "q5_0"
+
+#: Best first, and stopping at `KV_CACHE_FLOOR`. See that constant for the
+#: measurement that excludes `q4_0`.
+CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0")
 
 
 def cache_bytes_per_elem(cache_type: Optional[str]) -> float:
@@ -294,9 +317,19 @@ def cache_type_for_context(
     Returns the cheapest type tried when nothing fits. That is deliberate: the
     caller is already in the "nothing fits" case, and returning `f16` there would
     claim a quality level the numbers do not support.
+
+    `KV_CACHE_FLOOR` clamps the ladder before the walk, so the cheapest tried is
+    the floor whenever the ladder reaches it - which `CACHE_TYPE_LADDER` always
+    does. A caller passing a *shorter* ladder gets what that ladder holds: the
+    floor is a limit on how far down, not a promise that more types exist.
+    PersonaPlex's `set_num_codebooks` bound - `n >= self.n_q_semantic` - applied
+    to the one compression dial this app has.
     """
     if not per_token_at_f16:
         return ladder[0]
+    # Never below the floor, whatever ladder a caller supplies.
+    ladder = tuple(ladder[:ladder.index(KV_CACHE_FLOOR) + 1]) \
+        if KV_CACHE_FLOOR in ladder else ladder
     f16 = cache_bytes_per_elem(ladder[0])
     for cache_type in ladder:
         scaled = int(per_token_at_f16 * cache_bytes_per_elem(cache_type) / f16)
