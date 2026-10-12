@@ -55,6 +55,27 @@ def normalise(text: Any) -> str:
     return folded.strip(_TRAILING).strip()
 
 
+def content_text(value: Any) -> str:
+    """The text of a message's `content`, which is not always a string.
+
+    **A multimodal message stores a list of parts**, `[{...}, {...}]`, and a
+    question sent with a screenshot is stored that way. `normalise` returns ""
+    for a list, so without this every multimodal question vanishes from the
+    comparison and a conversation of them reads as one that asked nothing -
+    which is the confident-wrong-answer shape with a comparison panel's face on
+    it. The store has the same problem and the same answer in
+    `conversation_store._text_of`; this is the same rule, spelled out here so
+    this module does not reach for a private name.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return " ".join(
+            str(part.get("text") or "")
+            for part in value if isinstance(part, dict))
+    return ""
+
+
 def prompts(messages: "List[Dict[str, Any]]") -> "List[str]":
     """What the person asked, in order, normalised.
 
@@ -66,7 +87,7 @@ def prompts(messages: "List[Dict[str, Any]]") -> "List[str]":
     for record in messages or ():
         if not isinstance(record, dict) or record.get("role") != "user":
             continue
-        text = normalise(record.get("content"))
+        text = normalise(content_text(record.get("content")))
         if text:
             out.append(text)
     return out

@@ -218,6 +218,86 @@ def test_update_from_does_nothing_when_there_are_no_ticks():
     widget.update_from(0, 300, 150, [])          # must not raise
 
 
+# -- appending, which is what a running conversation actually does ---------
+
+
+def test_appending_leaves_the_existing_ticks_alone():
+    """**The thing no test checked.** Every earlier test counts ticks, so a map
+    that removed and recreated all of them on each turn agreed with one that
+    only added one - and the rebuilding version is O(turns) per turn, which is
+    quadratic over a conversation.
+
+    Tick *identity* is what separates them, so that is what this asserts.
+    """
+    widget, _ = _minimap()
+    first = _ticks(widget)[0]
+    widget.append_turn("user")
+    assert len(_ticks(widget)) == 5, len(_ticks(widget))
+    assert _ticks(widget)[0] is first, "the first tick was replaced"
+
+
+def test_appending_does_not_disturb_the_viewport_highlight():
+    """Rebuilding every tick replaced the highlighted widget outright, so the
+    viewport highlight silently moved onto a fresh tick that did not have the
+    class until the next `set_viewport`."""
+    widget, _ = _minimap()
+    widget.set_viewport(0, 1)
+    widget.append_turn("user")
+    lit = [i for i, t in enumerate(_ticks(widget))
+           if t.has_css_class("minimap-visible")]
+    assert lit == [0, 1], lit
+
+
+def test_the_first_append_to_an_empty_map_removes_the_placeholder():
+    """A map plus a leftover "No turns yet" label is two states at once."""
+    widget = minimap_module.TurnMinimap()
+    widget.append_turn("user")
+    assert len(_ticks(widget)) == 1, len(_ticks(widget))
+    # **The leftover placeholder**, identified by the tooltip it carries rather
+    # than by its type, so the check fails if a different empty state appears.
+    leftover = [n.get_tooltip_text() for n in widget
+                if n.get_tooltip_text() == "No turns yet"]
+    assert not leftover, "the 'No turns yet' label survived the first turn"
+
+
+def test_appending_twice_to_an_empty_map_leaves_two_ticks():
+    """**The bug this caught.** `_built` was set next to the tick loop, which
+    the empty case returns before - so it stayed False, every `append_turn`
+    re-ran `set_turns(())`, and the tick the previous call had just added was
+    cleared. Measured: two appends left one tick."""
+    widget = minimap_module.TurnMinimap()
+    widget.set_turns(())
+    widget.append_turn("user")
+    widget.append_turn("assistant")
+    assert len(_ticks(widget)) == 2, len(_ticks(widget))
+
+
+def test_a_map_never_built_can_be_appended_to():
+    widget = minimap_module.TurnMinimap()
+    widget.append_turn("user")
+    widget.append_turn("assistant")
+    assert len(_ticks(widget)) == 2, len(_ticks(widget))
+
+
+def test_set_turns_still_replaces_wholesale():
+    """`append_turn` is the incremental path; a reload is a different job and
+    must still be able to replace the whole map."""
+    widget, _ = _minimap()
+    widget.set_turns(("user",))
+    assert len(_ticks(widget)) == 1, len(_ticks(widget))
+
+
+def test_a_freshly_appended_tick_still_jumps_to_its_own_index():
+    """The index is baked in when the tick is built, so a tick made by
+    `append_turn` must carry the *current* count, not a stale or default one."""
+    jumped = []
+    widget = minimap_module.TurnMinimap(on_jump=jumped.append)
+    widget.set_turns(("user",))
+    widget.append_turn("assistant")
+    _ticks(widget)[1].emit("clicked")
+    assert jumped == [1], jumped
+
+
 # -- keyboard ---------------------------------------------------------------
 
 

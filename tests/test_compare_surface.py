@@ -61,8 +61,85 @@ def _user(text):
 
 
 def _page(root):
-    app = SimpleNamespace(_conversation_root=root)
+    # **`_test_conversation_root`, not `_conversation_root`.** The named
+    # override is deliberately spelled so that a stub built to match the code's
+    # own guess cannot stand in for the real answer.
+    app = SimpleNamespace(_test_conversation_root=root)
     return compare_module.build(app)
+
+
+# -- where the panel asks for conversations --------------------------------
+
+
+def test_the_app_has_the_root_this_asks_for():
+    """**This is the test that would have caught the defect the fixture
+    hid.** The first version of `_store_root` guessed application attributes
+    (`_conversation_root` and two others); `ChronoaApplication` has none of
+    them, and every real caller asks `conversation_store.session_dir()`
+    instead. The panel would have said "Could not read your conversations" on
+    every machine - and every test passed, because the fixture was a stub built
+    to match the guess.
+
+    So this asks the application, not a stand-in.
+    """
+    from shani_chronoa.app import ChronoaApplication
+
+    app = ChronoaApplication.__new__(ChronoaApplication)
+    root = compare_module._store_root(app)
+    assert root is not None, (
+        "the panel found no conversation store on the real application")
+    assert hasattr(root, "is_dir") or isinstance(root, str), root
+
+
+def test_the_root_the_panel_asks_for_is_where_conversations_are_written():
+    """One answer to "where does a conversation live", read from the code that
+    writes them - so a rename cannot leave this panel reading an empty store."""
+    from shani_chronoa import conversation_store
+
+    app_root = compare_module._store_root(
+        type("_A", (), {})())
+    assert str(app_root) == str(conversation_store.session_dir()), (
+        f"the panel reads {app_root}, the store writes "
+        f"{conversation_store.session_dir()}")
+
+def test_an_explicit_test_root_still_wins():
+    root = _store([_user("a")], [_user("b")])
+    assert compare_module._store_root(
+        SimpleNamespace(_test_conversation_root=root)) == root
+
+
+def test_a_store_directory_that_cannot_be_resolved_is_reported(monkeypatch):
+    """**The only way this panel has no store now.** It asks
+    `conversation_store.session_dir()`, so there is no "the app did not supply
+    a root" state left to test - and two tests that constructed one by building
+    a bare `SimpleNamespace` were asserting a design that no longer exists.
+
+    What can still fail is the lookup itself: no `XDG_DATA_HOME`, a data home
+    that cannot be created. Then the panel must say so rather than raise, since
+    a raising surface is a hole in the sidebar rather than a message.
+    """
+    from shani_chronoa import conversation_store
+
+    def _boom():
+        raise RuntimeError("no data home")
+
+    monkeypatch.setattr(conversation_store, "session_dir", _boom)
+    labels = _labels(compare_module.build(SimpleNamespace()).view)
+    assert compare_module.UNREADABLE in labels, labels
+
+
+def test_an_unreadable_store_is_reported_rather_than_raising(monkeypatch):
+    """The store exists but cannot be listed - the same failure one layer in,
+    and it must not take the panel with it."""
+    from shani_chronoa import conversation_store
+
+    def _boom(root):
+        raise RuntimeError("the index is corrupt")
+
+    monkeypatch.setattr(conversation_store, "list_sessions", _boom)
+    root = _store([_user("a")], [_user("b")])
+    labels = _labels(_page(root).view)
+    assert compare_module.NEED_TWO in labels, labels
 
 
 # -- registered -------------------------------------------------------------
@@ -109,15 +186,10 @@ def test_one_conversation_is_not_a_comparison():
 
 def test_a_store_that_cannot_be_read_says_so():
     """Not a blank panel: a blank panel is indistinguishable from a bug."""
-    app = SimpleNamespace(_conversation_root="/nonexistent/store")
+    app = SimpleNamespace(_test_conversation_root="/nonexistent/store")
     labels = _labels(compare_module.build(app).view)
     assert compare_module.NEED_TWO in labels or compare_module.ONLY_ONE in labels \
         or compare_module.UNREADABLE in labels, labels
-
-
-def test_an_app_that_cannot_say_where_conversations_live_says_so():
-    app = SimpleNamespace()
-    assert compare_module.UNREADABLE in _labels(compare_module.build(app).view)
 
 
 def test_two_conversations_asking_nothing_is_not_a_crashing_row():

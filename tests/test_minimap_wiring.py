@@ -77,6 +77,20 @@ class _Row:
 # -- the map follows the conversation ---------------------------------------
 
 
+def test_a_turn_added_keeps_the_existing_ticks():
+    """**The wiring the review found.** `_on_turn_added`'s comment said
+    "appended rather than rebuilt" while the code called `set_turns`, which
+    removes and recreates every tick - quadratic over a conversation, and it
+    replaced the highlighted tick outright. Counting ticks cannot see this, so
+    the test compares the widget objects."""
+    window, transcript, _ = _window()
+    before = list(_ticks(window))
+    transcript.add_user_turn("a second question")
+    after = _ticks(window)
+    assert len(after) == len(before) + 1, (len(before), len(after))
+    assert after[:len(before)] == before, "existing ticks were replaced"
+
+
 def test_a_turn_added_grows_the_map_by_one_tick():
     """The wiring's whole job. Without it the map is a fixed three-pixel bar.
 
@@ -166,6 +180,62 @@ def test_no_adjustment_means_no_viewport_but_no_crash():
     window, _, _ = _window()
     window._minimap_adjustment = None
     _bind("_update_minimap_viewport").__get__(window)()   # must not raise
+
+
+# -- the map has to fit ----------------------------------------------------
+
+
+def _stylesheet_provider():
+    """The real stylesheet, applied, because the bug is in the *styled* size."""
+    from gi.repository import Gdk
+
+    provider = Gtk.CssProvider()
+    provider.load_from_data(_stylesheet())
+    Gtk.StyleContext.add_provider_for_display(
+        Gdk.Display.get_default(), provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    return provider
+
+
+def test_a_full_conversation_still_fits_the_window_height():
+    """**A layout bug no unit test could see, because it needs the CSS.** Each
+    tick is a `Gtk.Button`, and a button's height is mostly theme padding - so
+    the map's *minimum* height was about four pixels a tick. GTK cannot
+    allocate a widget below its minimum, so that is a hard floor on the column:
+    at 250 turns it measured **1007px**, and a 900px window cannot honour it,
+    so the composer is pushed off the bottom of a conversation that is well
+    inside the store's own 500-message cap.
+
+    **The turn count is derived, not typed in.** `MAX_LOADED` is 500 messages
+    and a conversation alternates, so 250 is the largest a user can reach; a
+    hardcoded 400 would pass today and quietly stop being true when the cap
+    moves.
+    """
+    from shani_chronoa import conversation_store
+
+    _stylesheet_provider()
+    turns = conversation_store.MAX_LOADED // 2
+    view = minimap_module.TurnMinimap()
+    view.set_turns(["user"] * turns)
+
+    minimum = view.measure(Gtk.Orientation.VERTICAL, -1)[0]
+    # 900px is a conservative small laptop window. A map that cannot fit in one
+    # cannot fit in any, and the composer goes with it.
+    assert minimum <= 900, (
+        f"{turns} ticks need {minimum}px before GTK will shrink them at all, "
+        f"so the transcript row cannot fit a 900px window")
+
+
+def test_a_short_conversation_fills_the_column_rather_than_sitting_at_the_top():
+    """Four thin marks in a 900px column is not a map of the conversation."""
+    _stylesheet_provider()
+    view = minimap_module.TurnMinimap()
+    view.set_turns(["user"] * 4)
+    assert view.get_vexpand(), "the map does not expand to the column height"
+    ticks = [n for n in view
+             if isinstance(n, Gtk.Button) and "minimap-tick" in n.get_css_classes()]
+    assert ticks and all(t.get_vexpand() for t in ticks), (
+        "ticks that do not expand leave the column mostly empty")
 
 
 # -- the stylesheet ---------------------------------------------------------

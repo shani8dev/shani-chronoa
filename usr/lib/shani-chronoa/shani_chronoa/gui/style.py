@@ -507,7 +507,17 @@ class StyleMixin:
             padding-bottom: 4px;
         }
         .minimap-tick {
-            min-height: 3px;
+            /* **One pixel, not three, and the ticks `vexpand`.** Three was the
+               obvious number and it is wrong at scale: GTK cannot allocate a
+               widget less than its minimum, so 250 turns of `min-height: 3px`
+               put a 1007px floor under a column - measured - and a 900px window
+               cannot honour it, so the composer is pushed off the bottom of a
+               conversation that is well inside the 500-message cap. At 1px the
+               floor is one pixel per turn, and `vexpand` hands the rest of the
+               height to the ticks either way: a four-turn conversation gets
+               four thick marks filling the column, a long one gets thin ones
+               that fit. */
+            min-height: 1px;
             background-color: alpha(@theme_fg_color, 0.18);
             border-radius: 2px;
             border: none;

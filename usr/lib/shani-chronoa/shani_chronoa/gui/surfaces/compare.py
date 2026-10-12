@@ -50,18 +50,37 @@ NO_QUESTIONS = "One of these asked nothing."
 
 
 def _store_root(app: Any):
-    """Where conversations live, or None when the app cannot say.
+    """Where conversations live.
 
-    Several paths here have been renamed or added over the session, so this asks
-    for the one it wants and accepts any of the plausible names rather than
-    assuming a single attribute exists.
+    **`conversation_store.session_dir()`, the way the Conversations panel asks.**
+    The first version guessed at application attributes - `_conversation_root`,
+    `conversation_root`, `_sessions_root`, `session_dir` - and the
+    application has **none of them**; every caller in `app/` and in
+    `gui/surfaces/conversations.py` asks the module function instead. So the
+    panel would have found no root and said "Could not read your conversations"
+    on every machine, forever.
+
+    **The tests could not catch it**, because the fixture was a stub built to
+    match the guess. A test that supplies the thing the code asks for proves
+    only that the code can read the thing the test gave it - the real question
+    is what it asks for, and `test_the_app_has_the_root_this_asks_for` now asks
+    the application itself.
+
+    An explicitly supplied root still wins, so a test can point the panel at a
+    fixture store - but it is named `_test_conversation_root` rather than
+    `_conversation_root` so a stub cannot accidentally stand in for the real
+    answer.
     """
-    for name in ("_conversation_root", "conversation_root", "_sessions_root"):
-        root = getattr(app, name, None)
-        if root is not None:
-            return root
-    session_dir = getattr(app, "session_dir", None)
-    return session_dir
+    override = getattr(app, "_test_conversation_root", None)
+    if override is not None:
+        return override
+    from shani_chronoa import conversation_store
+
+    try:
+        return conversation_store.session_dir()
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("compare: the conversation directory is unknown: %s", exc)
+        return None
 
 
 def _conversations(root) -> "List[tuple[str, str]]":
@@ -75,16 +94,17 @@ def _conversations(root) -> "List[tuple[str, str]]":
     from shani_chronoa import conversation_store
 
     try:
-        data = conversation_store.index(root)
+        listed = conversation_store.list_sessions(root)
     except Exception as exc:  # noqa: BLE001 - an unreadable store is a message
-        logger.debug("compare: the conversation index is unreadable: %s", exc)
+        logger.debug("compare: the conversation store is unreadable: %s", exc)
         return []
-    sessions = data.get("sessions") or {}
-    rows = [(str(sid), str((meta or {}).get("title") or "Untitled"))
-            for sid, meta in sessions.items()]
-    rows.sort(key=lambda pair: (str((sessions.get(pair[0]) or {}).get("updated")
-                                   or ""), pair[1]), reverse=True)
-    return rows
+    # **`list_sessions`, not a hand-rolled read of the index.** It already
+    # sorts by `updated` descending and already resolves an untitled
+    # conversation's name; the first version reimplemented both from the raw
+    # index, which is a second answer to "what is this conversation called" and
+    # a second one that drifts.
+    return [(str(item.get("id") or ""),
+             str(item.get("title") or "Untitled")) for item in listed]
 
 
 def _messages(root, sid: str):

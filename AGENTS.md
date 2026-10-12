@@ -18001,3 +18001,67 @@ AST attribute scan cannot reach, of which at least five are demonstrably live, a
 none of which is a dead module.** The five cost nothing to find and each would
 have been "fixed" by someone trusting the number.
 
+
+## Found by reading the diff, not by a failure: a comment that denied its own code
+
+`_on_turn_added` was documented **"Appended rather than rebuilt: a turn arriving
+does not move the ticks that are already there, so there is nothing to redraw"**
+and the line under it called `set_turns`, which **removes and recreates every
+tick**. Three consequences, none of which any test could see:
+
+- **O(turns) per turn**, so quadratic over a conversation - the worst possible
+  place for it, because the cost is paid on the UI thread while a reply is
+  streaming.
+- The **highlighted tick widget was replaced outright**, so the viewport
+  highlight silently moved onto a fresh tick that did not carry the class until
+  the next `set_viewport`.
+- Every existing test **counted** ticks, and a rebuilding map and an appending
+  map have identical counts. Counting cannot see this; **identity** can.
+
+`TurnMinimap.append_turn(role)` now adds one tick, and the tests compare widget
+objects (`after[:len(before)] == before`) rather than lengths.
+
+**The fix for that had a bug in it, and a test caught the bug rather than the
+first measurement.** `_built` was set just before the tick-append loop - which
+the empty-map branch returns *before* - so it stayed False forever on an empty
+map, and every `append_turn` re-ran `set_turns(())`, clearing the tick the
+previous call had added. Measured: **two appends left one tick.** The flag moved
+above the empty case.
+
+### The general lesson, twice over
+
+A test that counts things cannot see anything about *which* things. Every
+minimap test asserted a length; none asserted identity, and the length was
+correct throughout a quadratic implementation. When the question is "did this
+change the thing or make a new one", the assertion has to be `is`, not `len`.
+
+## Two more defects the same review found, both invisible to counting
+
+**The map rebuilt every tick on every turn** - recorded above. The second is a
+layout bug that needs the *stylesheet* to see, which is why no widget unit test
+caught it: a `Gtk.Button` is mostly theme padding, so with `min-height: 3px` the
+map's **minimum** height was about four pixels a tick, and GTK **cannot
+allocate a widget below its minimum**. Measured at the largest conversation the
+store allows (`MAX_LOADED // 2` = 250 turns, a user and an assistant each):
+
+| | before | after |
+|---|---|---|
+| 4 turns | 23px | 15px |
+| 40 turns | 167px | 87px |
+| **250 turns** | **1007px** | **507px** |
+
+1007px is a hard floor on the column. A 900px window cannot honour it, so the
+composer is pushed off the bottom of a conversation that is well inside the
+cap. Fixed with `min-height: 1px` plus `vexpand` on the map and on each tick:
+the floor becomes one pixel a turn, and `vexpand` hands the rest of the height
+to the ticks either way - four thick marks filling a tall column, or thin ones
+that fit.
+
+**`test_a_full_conversation_still_fits_the_window_height` derives the turn
+count** from `MAX_LOADED // 2` rather than typing in a number. A hardcoded 400
+passes today and quietly stops being true when the cap moves - a test that
+asserts a fact about the world has to recompute that fact from the world.
+
+The measurement loads the real stylesheet first, because the size being tested
+only exists once the CSS is applied. A test that measured the widget without it
+would have measured 35 pixels a tick and passed.

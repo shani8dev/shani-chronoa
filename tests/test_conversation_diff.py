@@ -186,6 +186,37 @@ def test_asking_the_same_questions_in_a_different_order_is_not_a_difference():
         "the same two questions, only reordered, should compare as identical")
 
 
+def test_a_multimodal_question_is_still_a_question():
+    """**`content` is not always a string.** A question sent with a screenshot
+    is stored as a list of parts, and `normalise` returns "" for a list - so
+    without this every multimodal question vanished from the comparison and a
+    conversation of them read as one that had asked nothing."""
+    message = {"role": "user", "content": [
+        {"type": "text", "text": "what does this error say?"},
+        {"type": "image", "image": "screenshot.png"}]}
+    # **Normalised, so no question mark.** `normalise` strips trailing
+    # punctuation, and this test asserted the raw wording - which I had already
+    # seen in a direct run, printed as "what does this error say", and read past.
+    assert diff_module.prompts([message]) == ["what does this error say"], \
+        diff_module.prompts([message])
+
+
+def test_two_multimodal_questions_compare_by_their_text():
+    old = [{"role": "user", "content": [{"type": "text", "text": "check this"}]}]
+    new = [{"role": "user", "content": [{"type": "text", "text": "check this"},
+                                        {"type": "image", "image": "b.png"}]}]
+    assert diff_module.diff_conversations(old, new).identical
+
+
+def test_a_part_that_is_not_a_dict_does_not_raise():
+    assert diff_module.content_text([{"text": "a"}, "junk", 7]) == "a"
+
+
+def test_content_that_is_neither_string_nor_list_is_empty():
+    for value in (None, 42, {"text": "x"}):
+        assert diff_module.content_text(value) == "", value
+
+
 # -- repeats ----------------------------------------------------------------
 
 

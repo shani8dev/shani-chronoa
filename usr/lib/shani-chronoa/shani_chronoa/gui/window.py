@@ -3217,10 +3217,15 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _on_turn_added(self, _transcript, role: str) -> None:
         """Keep the map's tick count equal to the conversation's turn count.
 
-        Appended rather than rebuilt: a turn arriving does not move the ticks
-        that are already there, so there is nothing to redraw.
+        **One tick appended, and the comment used to claim that while the code
+        rebuilt the lot.** It called `set_turns`, which removes and recreates
+        every tick - O(turns) per turn, quadratic over a conversation, and it
+        replaces the highlighted tick widget outright, so the viewport's
+        highlight silently moved to a fresh tick that no longer had the class.
+        Nothing tested tick *identity*, only tick count, so a test would have
+        agreed with either version.
         """
-        self._minimap.set_turns([r for r, _text in self._transcript.visible_turns()])
+        self._minimap.append_turn(role)
         self._update_minimap_viewport()
 
     def _on_minimap_scroll(self, _adjustment) -> None:

@@ -98,8 +98,19 @@ class TurnMinimap(Gtk.Box):
         #: then testable without a scrolled window and a real conversation.
         self.on_jump = on_jump or (lambda _index: None)
 
+        # **Fills the column rather than sitting at the top of it.** Without
+        # `vexpand` the map's height is its natural height - four thin marks in
+        # a 900px column on a tall monitor, which is not a map of the
+        # conversation. Each tick expands too, so the height is shared evenly
+        # whatever the turn count.
+        self.set_vexpand(True)
+
         self._ticks: "list[Gtk.Widget]" = []
         self._cursor = -1
+        #: Set by `set_turns`, cleared by `append_turn`. While a turn arrives
+        #: one at a time the map only ever grows, so a reload is never the
+        #: right thing - and doing one anyway is the quadratic version.
+        self._built = False
 
         # **Keyboard, and deliberately not one tab stop per turn.** Two hundred
         # turns is two hundred tab stops between the conversation and the
@@ -115,6 +126,42 @@ class TurnMinimap(Gtk.Box):
             ["Turn minimap. Up and Down move between turns."])
 
     # -- contents ------------------------------------------------------------
+
+    def _make_tick(self, role: str, index: int) -> Gtk.Widget:
+        """One tick, styled by role and carrying its own jump."""
+        tick = Gtk.Button()
+        tick.add_css_class("minimap-tick")
+        tick.add_css_class("minimap-" + str(role))
+        # Not focusable: see the class docstring on why.
+        tick.set_focusable(False)
+        tick.set_vexpand(True)
+        tick.set_size_request(TICK_WIDTH, -1)
+        tick.set_tooltip_text(f"Turn {index + 1}: {role}")
+        tick.connect("clicked", lambda _b, i=index: self.on_jump(i))
+        return tick
+
+    def append_turn(self, role: str) -> None:
+        """Add one tick, leaving every existing tick alone.
+
+        **The path a running conversation actually takes**, and the reason
+        `set_turns` is not simply correct enough for it. `set_turns` removes
+        and recreates every tick, which is O(turns) per turn and therefore
+        quadratic over a conversation - and it replaces the tick widgets
+        themselves, so a tick that was showing as "visible" stops being the
+        one that is highlighted until `set_viewport` runs again.
+
+        A tick added while the empty state is showing replaces it, so the first
+        turn after a fresh window produces a map rather than a map plus a
+        leftover "No turns yet" label.
+        """
+        if not self._built:
+            self.set_turns(())
+        placeholder = self.get_first_child()
+        if placeholder is not None and not self._ticks:
+            self.remove(placeholder)
+        tick = self._make_tick(role, len(self._ticks))
+        self.append(tick)
+        self._ticks.append(tick)
 
     def set_turns(self, roles) -> None:
         """One tick per turn, rebuilt from scratch.
@@ -132,6 +179,12 @@ class TurnMinimap(Gtk.Box):
             # died quietly and the map stayed one tick wide forever.
             self.remove(self.get_first_child())
         self._ticks = []
+        # **Before the empty case, not just before the loop.** Set next to the
+        # loop it was unreachable for an empty map - the empty branch returns
+        # first - so `_built` stayed False, and every `append_turn` re-ran
+        # `set_turns(())`, clearing the tick the previous call had just added.
+        # Measured: two appends to an empty map left **one** tick.
+        self._built = True
 
         roles = list(roles or ())
         if not roles:
@@ -146,14 +199,7 @@ class TurnMinimap(Gtk.Box):
             return
 
         for index, role in enumerate(roles):
-            tick = Gtk.Button()
-            tick.add_css_class("minimap-tick")
-            tick.add_css_class("minimap-" + str(role))
-            # Not focusable: see the class docstring on why.
-            tick.set_focusable(False)
-            tick.set_size_request(TICK_WIDTH, -1)
-            tick.set_tooltip_text(f"Turn {index + 1}: {role}")
-            tick.connect("clicked", lambda _b, i=index: self.on_jump(i))
+            tick = self._make_tick(role, index)
             self.append(tick)
             self._ticks.append(tick)
 
