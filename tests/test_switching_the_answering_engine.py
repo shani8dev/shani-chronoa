@@ -30,6 +30,18 @@ class _Config:
     def cloud_llm_api_keys(self):
         return {}
 
+    def cloud_llm_models(self):
+        """**Added because the test failed without it.**
+
+        `app/brain.py` reads this alongside `cloud_llm_api_keys()` and
+        `cloud_fallback_enabled` when switching to cloud, so a stub missing it
+        made `select_llm("cloud")` raise `AttributeError` - and the test then
+        reported the failure as "could not switch to cloud", which reads like a
+        product defect and was not one. The stub is the thing under test when a
+        stub is incomplete, not the code.
+        """
+        return {}
+
 
 class _Assistant:
     llm = None

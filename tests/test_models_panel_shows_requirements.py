@@ -42,6 +42,34 @@ def _llm_cards():
     return [c for c in surface._cards() if c["kind"] == "llm"]
 
 
+#: **This whole file was machine-dependent, and failed on any box that had not
+#: been benchmarked.** `_requirement_text` is driven by `local_llm
+#: .expected_decode_tps(key)`, which returns nothing when this machine has no
+#: recorded decode rate. With no `tps` the card omits the tok/s clause, and with
+#: no rate the "missing" reason is set, so the card says
+#:
+#:     Needs 2 CPU cores, reads 1.1 GB per token. Not the default here: a
+#:     measured decode rate (no local measurement)
+#:
+#: - which is **correct, and says why**. Three assertions here wanted
+#: `"tok/s here"` and `"default on this machine"`, and failed on a box that had
+#: simply never been measured. The test and the code were committed together in
+#: 43687a1, so it never passed anywhere.
+#:
+#: The fix is to pin the input rather than skip the output: the claim under test
+#: is that a card names its units, qualifies an estimate, and says why a tier is
+#: not the default - not what this particular laptop decodes at. `PINNED_TPS`
+#: makes the first two decidable everywhere.
+PINNED_TPS = 9.8
+
+
+@pytest.fixture(autouse=True)
+def _pinned_decode_rate(monkeypatch):
+    """Give the panel a decode rate, so the card's wording is what is measured."""
+    monkeypatch.setattr(local_llm, "expected_decode_tps",
+                        lambda key: PINNED_TPS, raising=True)
+
+
 def _card(key):
     for card in _llm_cards():
         if card["key"] == key:
