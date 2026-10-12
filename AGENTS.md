@@ -307,6 +307,50 @@ witness that did not fail separately from a survivor, so an over-claimed list is
 visible rather than silent - the same distinction as the "failed for another
 reason" line two entries above, and the reason both are worth the extra output.
 
+## "Grep for `still open`" found four of them, and all four were wrong (2026-10-12)
+
+This file's own instruction, in "Audit-verified known issues":
+
+> This section mixes fixed history with issues that are **still open**, including
+> Critical security ones. Grep it for `not fixed`, `still open`, and your
+> subsystem name before you touch anything.
+
+Following it literally found **eight** matches. Four were false, and each was
+closed by a later entry in this same file that nobody had reconciled with the
+earlier line:
+
+| where | claimed | measured |
+|---|---|---|
+| roadmap #10 | "Shared CI templates, Renovate, conventional commits ... **Still open**" | **all three landed** - `renovate.json` with `config:recommended`; `.github/workflows/` calling `shani8dev/shani-ci-commons/.github/workflows/{lint,test,security}.yml@main`; scope-prefixed conventional commits on the last hundred commits |
+| the midi entry | "**wiring the module to something real is still open**" | `skills/sing.py:273` imports `midi` and fits a `.mid` a caller supplies |
+| the three-modules heading | "**Same class, still open** — three more modules ... nothing that runs imports" | `midi.py` -> `sing.py:273`, `guardrail.py` -> `tools.py:847`, `dream.py` -> `daemon.py:49` + `learning.py:628` |
+| the ui_elements entry | "**Still open:** the RemoteDesktop portal accepts a session and then stalls" | measured **granted in 0.0 s with no dialog at all** - backend version 2, `persist_mode=2`, stored restore token. What it lacks is *targeting*, which is the focus problem and not a stall |
+
+**The fourth is the one worth reading twice.** The entry below it is titled *"The
+portal was wrongfully accused, twice"* and says in as many words that the stall was
+measured wrong - and the earlier line sat there still telling the reader the route
+does not work. A correction that does not reach the claim it corrects is half a
+correction.
+
+**Corrected in place rather than deleted, and struck through rather than marked
+DONE**, because each was done at a different time by a different session and the
+line outlived all of them. That is the stale-label failure this file records for
+`capabilities._GROUPS` and for the unwired list - *a stale "dead" label is worse
+than a missing "live" one* - reached on a **P1** whose own text tells the reader to
+go and do it. The three module bullets are struck with what replaced each.
+
+**And the one that survives is honest and survives for the right reason.** The
+scrolling entry still reads *"Still open, and not to be read as a verdict"*, because
+no pane known to overflow was ever used, so its 0-changed-pixels result "could not
+have failed and the result means nothing either way". That is a correct open item
+and it is left alone.
+
+**A note on method, because the first version of this correction was itself the
+defect.** I wrote *"with its conclusions struck through by the later fixes"* and
+struck nothing - a claim about the edit I had just made, false at the moment I made
+it. Caught by reading the paragraph back rather than by any test. The strikethrough
+is real now.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
@@ -6506,9 +6550,12 @@ a fixed 2: 4 threads were fastest, and 8 were slower again.
   Recorded here because the lesson is sharper than any of the three bugs: **the
   absence of an importer is what hid a syntax-level defect, a factor-of-two
   timing error and an unusable public function from the entire suite.** Adding
-  the test file is done; **wiring the module to something real is still open**,
-  and this entry is the reason to distrust any future "green, so it works"
-  claim about a module with no callers.
+  the test file is done; **the module is wired now** (`skills/sing.py:273`
+  imports it and fits a `.mid` a caller supplies) - see the entry below that
+  landed it. This entry is kept as written because the lesson stands: the absence
+  of an importer is what hid three defects from the entire suite. **Corrected
+  2026-10-12**, by grepping for a real importer rather than trusting this line -
+  a stale "still open" sends the next reader looking for work that is done.
 
 - **`singing.py` + `prosody.py` were dead code; that is FIXED, and this entry is
   kept because the lesson is the point.** They were fully built, unit-tested
@@ -6886,18 +6933,29 @@ statement about the 2026-09-18 measurement, not about the tree today.
    x3), but was a silent no-op against real keys until item 2's fix above
    made the vault aware of them — DONE as of 2026-09-18.**
 
-   **Same class, still open as of 2026-10-05** — three more modules that pass
-   their own tests and that **nothing that runs imports**. Measured, not read:
-   `grep -rn` for a real importer across `usr/lib/shani-chronoa/`, then each
-   candidate opened by hand:
+   **Same class, and all three were wired afterwards** — `midi.py` through
+   `skills/sing.py:273`, `guardrail.py` through `tools.py:847`, `dream.py`
+   through `daemon.py:49` and `gui/surfaces/learning.py:628`. **The three entries
+   below this one say FIXED 2026-10-05 and they are right; this heading said
+   "still open" and was wrong**, which is the stale-label failure this file
+   records elsewhere - corrected 2026-10-12 by grepping for importers instead of
+   trusting the prose. Kept as the original measurement because the *method* is
+   the point: `grep -rn` for a real importer across `usr/lib/shani-chronoa/`,
+   then each candidate opened by hand. What follows is that measurement, with its
+   conclusions struck through by the later fixes.
 
-   - `midi.py` — reads a `.mid` into a `prosody.Melody`. `skills/sing.py` exists
-     and is dispatchable, but it **does not import it**: it takes notes the model
-     supplies. So the "sing me a real tune" path is the one thing still missing
-     from a feature that otherwise works.
-   - `guardrail.py` — a well-formedness check between model and tool. Only
-     referenced in `organism.py`'s metaphor text, which lists it as `BUILT`.
-   - `dream.py` — the offline pass over the day's tool calls.
+   - ~~`midi.py` — reads a `.mid` into a `prosody.Melody`. `skills/sing.py`
+     exists and is dispatchable, but it **does not import it**: it takes notes the
+     model supplies. So the "sing me a real tune" path is the one thing still
+     missing from a feature that otherwise works.~~ **It imports it now**, at
+     `sing.py:273`, and fits the tune a caller supplies.
+   - ~~`guardrail.py` — a well-formedness check between model and tool. Only
+     referenced in `organism.py`'s metaphor text, which lists it as `BUILT`.~~
+     **Wired at `tools.py:847`**, beside the reaction layer, where it turns
+     `speak(text=42)` into one readable sentence instead of a traceback.
+   - ~~`dream.py` — the offline pass over the day's tool calls.~~ **Wired at
+     `daemon.py:49`** and surfaced in the Learning panel; this session found its
+     results were being written silently and that was fixed.
 
    **Two false positives worth remembering**, because a grep-only audit gets
    these exactly backwards: `mcp.py` and `search_provider.py` *also* have no
@@ -6973,10 +7031,20 @@ statement about the 2026-09-18 measurement, not about the tree today.
    (audit-verified 2026-09-18); the master-roadmap #31 "4 repos missing a
    LICENSE" list is stale for this repo.
 
-10. **Shared CI templates, Renovate, conventional commits** (P1, cross-repo)
+10. ~~**Shared CI templates, Renovate, conventional commits** (P1, cross-repo)
     — Adopt `shani-ci-commons` (roadmap #7), add `renovate.json` (roadmap
     #8 — Python repo: pip + GitHub Actions), enforce conventional commits
-    (roadmap #9). Still open. **Correction (2026-09-18):** the "this repo is
+    (roadmap #9). Still open.~~ **All three landed; this said "Still open" and was
+    wrong** — corrected 2026-10-12 by measuring each half rather than trusting the
+    line: `renovate.json` is in the tree with `config:recommended` and a
+    `fix(deps):` commit prefix; `.github/workflows/` calls
+    `shani8dev/shani-ci-commons/.github/workflows/{lint,test,security}.yml@main`
+    instead of hand-rolling its logic; and conventional commits are in force, with
+    a scope prefix and a why-bearing subject on the last hundred commits. Kept
+    struck through rather than marked DONE, because the three were done at
+    different times by different sessions and this line outlived all of them —
+    the stale-label failure this file records, on a P1 its own text tells the
+    reader to go and do. **Correction (2026-09-18):** the "this repo is
     not a git repo" note here was stale even at the time it was written —
     verified this pass: real git history, 9 commits, `git status`/`git log`
     work normally. Whatever blocked git detection during the 2026-09-17
@@ -9264,9 +9332,14 @@ control that was **off-screen** (scrolled into view, focused, wheeled over its o
 column, re-measured between each - the testbed's `a11y_client` sequence); typing
 into a field; `ctrl-alt-f2`; the cue layer's ping, glide and ripple; and a standing
 window border whose pixels were measured (`(53,132,228)` at 255 alpha on the edge,
-`(0,0,0,0)` inside). **Still open:** the RemoteDesktop portal accepts a session and
-then stalls on this box - the route is wired, fails fast at a 5s client timeout, and
-never claims a delivered effect it did not observe. `tools/route_cases.json` has no
+`(0,0,0,0)` inside). ~~**Still open:** the RemoteDesktop portal accepts a session
+and then stalls on this box~~ — **that was wrong, and measured wrong 2026-10-10**:
+the portal is backend version 2 and `persist_mode=2` with a stored restore token
+meant the session was **granted in 0.0 s with no dialog at all**. What it lacks is
+*targeting*, not a connection - it is session-wide and delivers to whatever the
+compositor has focused, which is the focus problem and not a stall. See "The portal
+was wrongfully accused, twice" below; **this line was left standing for as long as
+it was because nothing re-read it against that measurement.** `tools/route_cases.json` has no
 `ui_elements` entry either: the corpus's own note requires every skill in it to
 declare no required parameter, and `action` is required, which is a schema decision
 rather than a typing job.
