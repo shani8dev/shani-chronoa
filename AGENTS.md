@@ -13299,3 +13299,74 @@ now, and the reason is in the docstring.
 `tools/mutations/kv_fourth_model.py`: **5 mutations, 5 caught, 0 survivors, 0
 equivalent.** 86 tests green across the ctxfit, model-requirements and kv-parity
 suites; 43 sets / 359 anchors all match.
+
+## The KV dial's speed axis was never blocked, and the recorded expectation was backwards (2026-10-12)
+
+`ctxfit` carried a note saying the speed axis was unmeasured, because
+`llama-bench` - the right tool - refuses to create a context with a quantized
+cache type on this build (`ctk=f16` rows=1 errors=0, `ctk=q8_0` rows=0 errors=1).
+**The blocked tool was never the only route.** `llama-server` accepts `-ctk q8_0`
+and always has - the ladder has been passing it all along - and
+`local_llm.effective_bandwidth()` already reads a decode rate off a live server.
+The limitation was recorded as though the capability were missing.
+
+The recorded expectation was that a quantized cache *"pays a dequantization cost,
+so a ladder chosen to fit more context could partly give back in `tok/s`"*.
+**Measured, the opposite happens.** Qwen3-1.7B-Q4_K_M (the default tier), `-t 4`
+(physical cores, per the thread finding), a ~3213-token cache so the KV cache is
+~26% of per-token traffic, two interleaved rounds, four samples per type:
+
+| type | tok/s | vs f16 | spread |
+|---|---|---|---|
+| f16 | 6.793 | - | 15.4% |
+| **q8_0** | **8.911** | **+31.2%** | 12.8% |
+| q5_0 | 6.500 | -4.3% | 14.4% |
+| q4_0 | 10.045 | +47.9% | 6.0% |
+
+**And the control that says why, without which the table is a number rather than
+a finding.** The same four types at a ~220-token cache, where the KV cache is a
+rounding error of per-token traffic:
+
+| type | long | short |
+|---|---|---|
+| q8_0 | +31.2% | **-0.09%** |
+| q5_0 | -4.3% | -8.8% |
+| q4_0 | +47.9% | -2.0% |
+
+The advantage **vanishes** when the cache is small, so it is a **cache-traffic
+effect** and not a property of the quantized kernel. The baseline agrees: 13.0
+tok/s at a short cache against 6.8 at a long one, so cache size dominates decode
+rate here. **A control that could have gone either way** - had the advantage
+persisted at a short cache, the reading would have been "quantized caches are
+faster", which is a different and much stronger claim.
+
+`q5_0` breaks the pattern and is why the mechanism is not purely bytes: 0.6875
+B/elem shows no advantage over f16's 2.0 in *either* regime, which a pure traffic
+argument would not predict. **It is recorded as "not distinguishable from f16",
+not "slower"** - -4.3% sits inside its own 14.4% spread.
+
+**The shipped consequence is unusually clean.** `CACHE_TYPE_LADDER` is
+`("f16", "q8_0")`, and the one compressed rung it offers is **+31% decode rate
+and half the KV bytes**. The dial wins on quality (measured cheap on five
+models), on headroom, and on speed simultaneously - at the rung it actually
+hands out. `q5_0` and `q4_0` are not on the ladder, so their figures change
+nothing shipped and are recorded for the next extension.
+
+**What the tests assert, and what they refuse to.** The within-type spread was
+6-15%, so neither percentage is pinned - "q8_0 is 31% faster" is a number nobody
+could reproduce. What is asserted is the property the decision turns on: **the
+rung the ladder offers is not slower than f16, and is beyond half its own
+spread**; the effect vanishes at a short cache; and every measured type carries
+its spread in both directions.
+
+`tools/mutations/kv_speed.py`: **4 mutations, 4 caught, 0 survivors.** Two of the
+four were survivors on the first attempt and both were my tests being wrong, not
+the code. The first asserted that figures inside their spread stay inside it -
+which its own `if delta >= spread: continue` guard made tautological, so it could
+not fail at all. The second checked only that every speed type has a spread; the
+mutation renamed `q4_0`'s entry to `q5_0`, which removes `q4_0` from the dict
+entirely (the later key wins) and orphans its spread - a one-way check passes
+while a measured type has silently vanished. It asserts both directions now.
+
+90 tests green across the ctxfit, model-requirements and kv-parity suites;
+45 sets / 379 anchors.

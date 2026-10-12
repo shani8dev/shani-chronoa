@@ -76,27 +76,52 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 #: codebooks, so acoustic fidelity can be traded away and meaning never can. The
 #: KV ladder has no such floor, because a floor is a quality claim and this one
 #: would be unmeasured.
-#: **The speed axis of this dial is unmeasured, and this is the note that says
-#: so.** `cache_type_for_context` chooses on VRAM fit alone, because quality is
-#: measured (see `KV_CACHE_FLOOR`) and speed is not. That matters more than it
-#: looks: a quantized KV cache pays a dequantization cost, so a ladder chosen to
-#: fit more context could partly give back in `tok/s` - and `min_tps` is what
-#: `requirements_met` gates the tiers on.
+#: **The speed axis, and the hypothesis the measurement overturned.** This note
+#: used to say the axis was unmeasured, on the grounds that `llama-bench` - the
+#: right tool - refuses to create a context with a quantized cache type on this
+#: build (`ctk=f16` rows=1 errors=0, `ctk=q8_0` rows=0 errors=1). It *is*
+#: measurable anyway: `llama-server` accepts `-ctk q8_0` and has all along, and
+#: `local_llm.effective_bandwidth()` already reads a decode rate off a live
+#: server. **The blocked tool was never the only route.**
 #:
-#: Not for want of trying, and the failure is worth writing down so nobody
-#: re-derives it. `llama-perplexity` does no real generation (0.69 ms for 2 tokens
-#: on this model), so it reports a quality figure and no decode rate. `llama-bench`
-#: is the right tool and takes `-ctk`, but **this build refuses to create a context
-#: with a quantized cache type** - measured, `ctk=f16` rows=1 errors=0,
-#: `ctk=q8_0` rows=0 errors=1, `ctk=bf16` rows=1 errors=0. Both types that work
-#: are 2 bytes per element, so it is the quantized path specifically. Meanwhile
-#: `llama-server` and `llama-perplexity` accept `-ctk q8_0` without complaint, so
-#: the limit is this benchmark binary rather than the runtime.
+#: The recorded expectation was that a quantized cache "pays a dequantization
+#: cost, so a ladder chosen to fit more context could partly give back in
+#: `tok/s`". **Measured, the opposite happens.** Qwen3-1.7B-Q4_K_M, `-t 4` (the
+#: thread finding: physical cores), a ~3213-token cache so the KV cache is ~26%
+#: of per-token traffic, two interleaved rounds and four samples per type:
 #:
-#: So the honest statement in the code: quality is measured, VRAM is measured,
-#: and speed is not. If a quantized cache turns out to cost decode rate, the
-#: lever's tradeoff is worse than the numbers here imply, and the place to fix
-#: that is a slot run with a `llama-bench` that will accept the flag.
+#: ====  type    tok/s   vs f16   within-type spread
+#:       f16     6.793        -        15.4%
+#:       q8_0    8.911   +31.2%        12.8%
+#:       q5_0    6.500    -4.3%        14.4%
+#:       q4_0   10.045   +47.9%         6.0%
+#:
+#: And **the control that says why**, which is the half that makes it a finding
+#: rather than a number: the same four types at a ~220-token cache, where the KV
+#: cache is a rounding error of per-token traffic - q8_0 **-0.09%**, q5_0 -8.8%,
+#: q4_0 -2.0%. The advantage is a **cache-traffic effect**: it exists only where
+#: the cache is big enough to matter. The baseline itself says so - 13.0 tok/s at
+#: a short cache against 6.8 at a long one.
+#:
+#: Which is also why q5_0 breaks the pattern. A pure bytes argument predicts
+#: monotonic improvement with compression, and q5_0 (0.6875 B/elem) shows no
+#: advantage over f16 (2.0) in either regime - a per-type dequantization cost
+#: that offsets the traffic saving. **Recorded as "not distinguishable from f16",
+#: not "slower": -4.3% sits inside its own 14% spread.**
+#:
+#: So the shipped consequence is unusually clean. `CACHE_TYPE_LADDER` is
+#: `("f16", "q8_0")`, and the one compressed rung it offers is **+31% decode rate
+#: and half the KV bytes** - the dial wins on quality (measured cheap on five
+#: models), on headroom, and on speed at the same time. `q5_0` and `q4_0` are not
+#: on the ladder, so their figures are recorded for the next ladder extension and
+#: change nothing shipped.
+#:
+#: **Honest limits:** one model, one context pair, CPU-only, `-t 4`, and the
+#: long-context figure carries a 6-15% within-type spread - so the *sign* and the
+#: order of magnitude are settled, and the exact percentage is not. The property
+#: worth asserting is not "q8_0 is 31% faster" (a number this noisy must not be
+#: pinned) but **"the rung the ladder offers is not slower than f16"**, which is
+#: what the decision actually turns on.
 
 #: The most compression the KV cache may take. `q4_0` is deliberately absent.
 #:
@@ -151,6 +176,31 @@ KV_CACHE_MEASUREMENTS: "dict[str, dict[str, float]]" = {
 #: might be applied to - which is PersonaPlex's `n_q_semantic` bound taken
 #: properly, where the semantic set is what the *worst* case allows rather than
 #: what the average suggests.
+#: Decode rate by cache type, as a percentage against the same model and prompt
+#: at f16. Positive is faster. Measured 2026-10-12, Qwen3-1.7B-Q4_K_M (the
+#: default tier), `-t 4`, one server at a time, two interleaved rounds with four
+#: samples per type, `n_predict 32`, `cache_prompt False` so the figure is
+#: generation only and not the ~53 s of prompt evaluation.
+#:
+#: `long` is a ~3213-token cache, where the KV cache is ~26% of per-token traffic;
+#: `short` is a ~220-token cache, where it is a rounding error. **The short
+#: column is the control**: q8_0 goes from +31.2% to -0.09%, which is what
+#: establishes the effect as cache traffic rather than a property of the
+#: quantized kernel. See the note above `KV_CACHE_FLOOR` for the full reasoning.
+KV_CACHE_SPEED: "dict[str, dict[str, float]]" = {
+    "f16": {"long": 0.0, "short": 0.0},
+    "q8_0": {"long": 31.2, "short": -0.09},
+    "q5_0": {"long": -4.3, "short": -8.82},
+    "q4_0": {"long": 47.9, "short": -1.97},
+}
+
+#: The within-type spread measured across the four samples, as a percentage of
+#: the median. Recorded because it is what decides which claims are honest: a
+#: figure smaller than its own spread is not a finding, which is why q5_0's
+#: -4.3% is described as "not distinguishable from f16" rather than "slower".
+KV_CACHE_SPEED_SPREAD: "dict[str, float]" = {
+    "f16": 15.4, "q8_0": 12.8, "q5_0": 14.4, "q4_0": 6.0,
+}
 KV_CACHE_FLOOR: str = "q8_0"
 
 #: Best first, and stopping at `KV_CACHE_FLOOR`. See that constant for the

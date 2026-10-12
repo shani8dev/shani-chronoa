@@ -746,6 +746,130 @@ class TestNoParameterPredictsTheCost:
             f"model, so it is not cheap everywhere the ladder is applied")
 
 
+class TestTheSpeedAxis:
+    """The dial's speed axis, measured rather than assumed - and the two claims
+    its noise permits.
+
+    This axis was recorded as unmeasured because `llama-bench` refuses a
+    quantized cache type on this build. It was measurable all along from
+    `llama-server`, and the recorded expectation - "a quantized cache pays a
+    dequantization cost, so a ladder chosen to fit more context could partly give
+    back in tok/s" - turned out **backwards**: q8_0 is +31% and q4_0 +48% at a
+    ~3213-token cache.
+
+    What these tests deliberately do *not* assert is either percentage. The
+    within-type spread was 6-15%, so a pinned "31%" would be a number nobody can
+    reproduce. What is asserted instead is the property the decision turns on,
+    and the control that establishes the mechanism.
+    """
+
+    def test_the_rung_the_ladder_offers_is_not_slower_than_f16(self):
+        """The decision-relevant property, and the only speed claim worth pinning.
+
+        `CACHE_TYPE_LADDER` is `("f16", "q8_0")`, so q8_0 is the only compressed
+        rung a caller can be handed. If it were slower than f16, the dial would
+        be buying headroom with decode rate - and `min_tps` is what
+        `requirements_met` gates the tiers on. Measured, it is not slower, and
+        this assertion is written so that a regression is caught without
+        depending on a number inside the noise.
+        """
+        from shani_chronoa import ctxfit
+        for rung in ctxfit.CACHE_TYPE_LADDER:
+            if rung == "f16":
+                continue
+            delta = ctxfit.KV_CACHE_SPEED[rung]["long"]
+            assert delta > 0, (
+                f"the ladder offers {rung}, which measured {delta:+}% decode "
+                f"rate against f16 at a long cache - the dial would be buying "
+                f"headroom with the speed `min_tps` gates the tiers on")
+            assert delta > ctxfit.KV_CACHE_SPEED_SPREAD[rung] / 2, (
+                f"{rung} measured {delta:+}% against f16, which is inside its "
+                f"own {ctxfit.KV_CACHE_SPEED_SPREAD[rung]:.1f}% spread, so it "
+                f"is not distinguishable from f16 and the ladder's rung is not "
+                f"earning anything")
+
+    def test_the_effect_vanishes_when_the_cache_is_small(self):
+        """The control, pinned so the mechanism cannot silently change meaning.
+
+        At a ~220-token cache the KV cache is a rounding error of per-token
+        traffic, and q8_0 goes from +31.2% to -0.09%. That is what establishes
+        the speedup as cache traffic rather than a property of the quantized
+        kernel - and without this the table could be re-read as "quantized caches
+        are faster", which is a different and much stronger claim.
+        """
+        from shani_chronoa import ctxfit
+        for rung in ("q8_0", "q4_0"):
+            long_delta = ctxfit.KV_CACHE_SPEED[rung]["long"]
+            short_delta = ctxfit.KV_CACHE_SPEED[rung]["short"]
+            assert short_delta < long_delta / 4, (
+                f"{rung} is {long_delta:+}% at a long cache and "
+                f"{short_delta:+}% at a short one, so the effect does not vanish "
+                f"when the cache is small - it would not be a traffic effect, "
+                f"and the reading of this table would be wrong")
+            assert abs(short_delta) < 5.0, (
+                f"{rung} is {short_delta:+}% at a short cache where the KV cache "
+                f"is a rounding error, so something other than cache traffic is "
+                f"moving the number")
+
+    def test_every_measured_type_carries_its_own_spread(self):
+        """The invariant that decides which claims in this table are honest.
+
+        A figure without its spread is a figure nobody can judge: q5_0's -4.3%
+        reads as "slower" until you know its own spread is 14.4%, and the
+        docstring's wording depends on that pairing. So every type in the speed
+        table must carry a spread entry, and f16 - the baseline everything is
+        measured against - must be exactly zero.
+
+        The first version of this test asserted that figures inside their spread
+        stay inside it, which its own `if delta >= spread: continue` guard made
+        tautological: it could not fail, and the mutation that promoted q5_0 to
+        +19% ran green. This version asserts the invariant instead, which can
+        actually be broken.
+        """
+        from shani_chronoa import ctxfit
+        for rung, figures in ctxfit.KV_CACHE_SPEED.items():
+            assert rung in ctxfit.KV_CACHE_SPEED_SPREAD, (
+                f"{rung} is in the speed table with no spread recorded, so no "
+                f"claim about it can be judged - {figures}")
+            for regime, delta in figures.items():
+                assert isinstance(delta, (int, float)), (
+                    f"{rung}'s {regime} figure is not a number: {delta!r}")
+        # And the reverse direction, which is the half a duplicate key breaks:
+        # renaming one type's entry to another's name removes the first from the
+        # dict entirely (the later key wins) and leaves its spread orphaned, so a
+        # one-way check passes while a measured type has silently vanished.
+        for rung in ctxfit.KV_CACHE_SPEED_SPREAD:
+            assert rung in ctxfit.KV_CACHE_SPEED, (
+                f"{rung} has a spread recorded but no speed figure, so it is "
+                f"either a type that was measured and then dropped from the "
+                f"table, or a duplicate key that overwrote one")
+        assert ctxfit.KV_CACHE_SPEED["f16"] == {"long": 0.0, "short": 0.0}, (
+            "f16 is the baseline every figure is measured against, so it must "
+            "be zero in both regimes or every other number is relative to "
+            f"something else: {ctxfit.KV_CACHE_SPEED['f16']}")
+
+    def test_no_type_outside_its_spread_is_on_the_ladder_unannounced(self):
+        """A rung the ladder offers must be a real effect, not an artefact.
+
+        The ladder hands a caller whatever it returns, so any type on it must be
+        measured beyond its own noise. This is what stops a future ladder
+        extension reaching for a rung the measurement cannot support - `q5_0` and
+        `q4_0` are recorded at -4.3% and +47.9% and are deliberately **not** on
+        the ladder, and the reason is their figure against their spread.
+        """
+        from shani_chronoa import ctxfit
+        for rung in ctxfit.CACHE_TYPE_LADDER:
+            if rung == "f16":
+                continue
+            delta = ctxfit.KV_CACHE_SPEED[rung]["long"]
+            spread = ctxfit.KV_CACHE_SPEED_SPREAD[rung]
+            assert abs(delta) > spread / 2, (
+                f"the ladder offers {rung} at {delta:+}% decode rate with a "
+                f"{spread:.1f}% spread, so its effect is not distinguishable "
+                f"from noise and the ladder is handing out a rung nobody "
+                f"measured")
+
+
 class TestTheFloorsCost:
     """`KV_CACHE_FLOOR` is now `q8_0`, which gives up the `q5_0`/`q4_0` steps. That
     trade was justified on quality - `q5_0` measured **+8.53%** on Qwen3-0.6B -
