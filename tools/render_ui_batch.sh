@@ -57,6 +57,20 @@ TARGETS=("$@")
 [[ -f $RENDERER ]] || { echo "no renderer at $RENDERER" >&2; exit 1; }
 [[ -n ${TARGETS[*]:-} ]] || TARGETS=(panels)
 
+# **The schema, or every consent gate renders a lie.** Without it the app prints
+# "GSettings schema org.shani.chronoa not found - using Python defaults" on every
+# panel and falls back to its Python defaults, so the Skills panel rendered
+# `unknown - this build's settings schema does not declare this key` beside a
+# working toggle for `airplane_mode` - a key that *is* declared. Measured: the
+# key reads its Python default with no schema dir and its real value `False`
+# with one.
+#
+# So a render without this does not merely lose detail, it **states something
+# false about the build**, which is the one thing a picture is for. Set up below,
+# after the sandbox exists, and read from the tree where possible - a compiled
+# schema that has gone stale against its XML is itself a documented failure mode,
+# since every setting then silently takes its Python default.
+
 # A render must not leave state behind, and it must not touch the developer's
 # real one either - `XDG_STATE_HOME` alone is not enough, because a skill writing
 # through `XDG_DATA_HOME` lands in the real `~/.local/share`. Measured: a test
@@ -64,6 +78,23 @@ TARGETS=("$@")
 SANDBOX="$(mktemp -d -t chronoa-render-XXXXXX)"
 mkdir -p "$SANDBOX"/{data,state,config}
 START_DISPLAY=""
+
+# Needs the sandbox, so it is set up here rather than with the other checks
+# above. Read from the tree where a compiled schema is tracked; compile into the
+# sandbox rather than render with none, because no schema does not degrade the
+# picture, it falsifies it.
+SCHEMA_DIR="$REPO/usr/share/glib-2.0/schemas"
+if [[ ! -f $SCHEMA_DIR/gschemas.compiled ]]; then
+    mkdir -p "$SANDBOX/schemas"
+    cp "$REPO"/usr/share/glib-2.0/schemas/*.xml "$SANDBOX/schemas/" 2>/dev/null
+    glib-compile-schemas "$SANDBOX/schemas" 2>/dev/null \
+        && SCHEMA_DIR="$SANDBOX/schemas"
+fi
+[[ -f $SCHEMA_DIR/gschemas.compiled ]] || {
+    echo "no compiled schema - every consent gate would render as 'unknown'," >&2
+    echo "which is a false statement about the build rather than a missing detail" >&2
+    exit 1
+}
 
 cleanup() {
     # Only ever kill the daemon *we* started, by the pid we started it with.
@@ -74,10 +105,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Replace the broadway daemon with a fresh one on a different display.
+#
+# Only ever touches the pid this script started, for the reason in `cleanup()`:
+# `pkill -f gtk4-broadwayd` would match its own command line and would kill a
+# display another session is using.
+recycle_display() {
+    local old_pid="$START_DISPLAY" num
+    [[ -n $old_pid ]] && kill "$old_pid" 2>/dev/null
+    START_DISPLAY=""
+    local sock
+    sock="/run/user/$(id -u)/broadway$((num + 1)).socket"
+    num="$(pick_display)" || return 1
+    start_display "$num" >/dev/null
+    DISP=":$num"
+}
+
 pick_display() {
-    local n
+    local n sock
     for n in $(seq 90 120); do
-        [[ -e "/run/user/$(id -u)/broadway$((n + 1)).socket" ]] && continue
+        sock="/run/user/$(id -u)/broadway$((n + 1)).socket"
+        # **A stale socket blocks its number forever if only its presence is
+        # checked.** `gtk4-broadwayd` removes its socket on a clean exit but not
+        # when it is killed, and this script's own cleanup kills by pid - so a
+        # run interrupted between the two leaves a socket file with nothing
+        # listening on it. `[[ -e ]]` sees that file and skips the number, and
+        # the pool is only :90-:120, so a handful of interrupted runs made every
+        # display number unavailable and the script reported "no free broadway
+        # display" - which names a resource shortage and is actually 41 dead
+        # files.
+        #
+        # So: a socket nobody is listening on is stale and is removed, and a
+        # socket somebody *is* listening on is genuinely in use.
+        if [[ -S $sock ]]; then
+            if ss -xl 2>/dev/null | grep -q "broadway$((n + 1)).socket"; then
+                continue
+            fi
+            rm -f "$sock"
+        fi
         printf '%s' "$n"
         return 0
     done
@@ -118,9 +183,11 @@ render_once() {
             GDK_BACKEND=broadway BROADWAY_DISPLAY="$1" \
             XDG_DATA_HOME="$2/data" XDG_STATE_HOME="$2/state" \
             XDG_CONFIG_HOME="$2/config" \
+            GSETTINGS_SCHEMA_DIR="$9" \
             PYTHONDONTWRITEBYTECODE=1 \
             timeout 300 python3 "$3" "$4" "$5" "$6" "$7" >"$8" 2>&1
     ' _ "$DISP" "$SANDBOX" "$RENDERER" "$target" "$out" "$WIDTH" "$HEIGHT" "$log" \
+        "$SCHEMA_DIR" \
         >/dev/null 2>&1
     [[ -s $out ]]
 }
@@ -128,6 +195,16 @@ render_once() {
 render() {
     local target="$1"
     local out="$2"
+
+    # **The directory a sweep writes into has to exist.** Only `$OUTDIR` itself
+    # was created, so every grouped target - `panels/`, `pages/`, `states/`,
+    # `groups/`, `setup-cloud/` - wrote into a directory that did not exist.
+    # `Gdk.Texture.save_to_png` then returns without writing and without
+    # raising, `[[ -s $out ]]` is false, and the sweep reports **every target as
+    # failed while naming all of them** - which reads exactly like a broken
+    # product and is not one. Measured: `state:composer-text` renders 141,795
+    # bytes run by hand and reports FAIL through this script.
+    mkdir -p "$(dirname "$out")"
 
     if render_once "$target" "$out"; then
         printf '  PASS  %-28s %8s bytes\n' "$target" "$(stat -c%s "$out")"
@@ -143,6 +220,18 @@ render() {
         printf '  PASS  %-28s %8s bytes (second attempt)\n' "$target" "$(stat -c%s "$out")"
         return 0
     fi
+
+    # **Recycle the display before the second attempt.**
+    #
+    # A sweep runs every render against one broadway daemon, and a daemon that
+    # has served a few dozen surfaces stops giving new ones: measured, a 6-state
+    # sweep passed and a 12-state sweep stopped after two, with every later
+    # target reporting "no file written" and nothing in its log. The count is
+    # not fixed, which is exactly why it read as flakiness rather than as a
+    # server that had run out of room - and a second attempt against the *same*
+    # exhausted display cannot succeed, so the retry was reporting a real fault
+    # as a page defect.
+    recycle_display
 
     printf '  FAIL  %-28s no file written\n' "$target"
     local log="$SANDBOX/$(echo "$target" | tr '/:' '__').log"
@@ -167,6 +256,7 @@ render() {
 # records exactly that failure several times over.
 panel_targets() {
     env -u DISPLAY -u WAYLAND_DISPLAY \
+        GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" \
         PYTHONDONTWRITEBYTECODE=1 \
         python3 - "$REPO" <<'PY' 2>/dev/null
 import sys
@@ -178,6 +268,82 @@ Adw.init()
 from shani_chronoa.gui import surfaces
 for name in surfaces.SURFACE_IDS:
     print("panel:" + name)
+PY
+}
+
+# Every *registered page* of every window - the main window's five, Settings'
+# seven sections and the wizard's seventeen - read from the page registry rather
+# than typed, for the same reason the panels are: a hand-kept list of what a
+# registry already knows is a list that rots.
+#
+# `pages.show()` is the same entry point `--show-page=` uses, so what is
+# photographed is what that flag opens. A page id that has drifted from its
+# window fails as REFUSED rather than producing a picture of whatever page
+# happened to be up - which is the property that makes a sweep worth trusting.
+page_targets() {
+    env -u DISPLAY -u WAYLAND_DISPLAY \
+        GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" \
+        PYTHONDONTWRITEBYTECODE=1 \
+        python3 - "$REPO" <<'PY' 2>/dev/null
+import sys
+sys.path.insert(0, sys.argv[1] + "/usr/lib/shani-chronoa")
+import gi
+gi.require_version("Gtk", "4.0"); gi.require_version("Adw", "1")
+from gi.repository import Gtk, Adw          # noqa: F401
+Adw.init()
+from shani_chronoa import pages
+for window in sorted(pages.windows()):
+    pages._ensure_declared(window)
+    for pid in sorted(pages.page_ids(window)):
+        print("page:" + window + ":" + pid)
+PY
+}
+
+# Every *interaction state* - one row of a mode chip selected, the composer with
+# text in it, one organ light lit. Read from the strip's own tables rather than
+# typed, for the reason the panels are: a hand-kept list of what a class already
+# declares is a list that rots.
+#
+# These are the states a first paint cannot show. `panel:` and `page:` photograph
+# a window as it first appears, which is a state nobody spends time in - which
+# row of a chip is highlighted, or whether the composer grows, are decided by
+# state the initial paint never passes through.
+state_targets() {
+    # `--list` on the renderer itself, run as a subprocess. **It has to be a
+    # subprocess and not an import**: render_ui.py calls `app.run()` at module
+    # scope, so importing it *is* a render, and an import-based enumerator
+    # returns nothing while reporting "0 targets" - a result indistinguishable
+    # from an empty registry.
+    python3 "$RENDERER" --list states 2>/dev/null
+}
+
+# Every settings group, by its own visible title.
+#
+# **The seven registered sections are not the window.** The window builds ~25
+# `Adw.PreferencesGroup`s and the section chips only reveal families of them, so
+# a section-routed sweep photographs a fraction of the settings surface - and
+# does so without saying so. These come from the built window's own group titles,
+# which is the same "read it from the code" rule as everywhere else here.
+group_targets() {
+    env -u DISPLAY -u WAYLAND_DISPLAY \
+        GSETTINGS_SCHEMA_DIR="$SCHEMA_DIR" \
+        PYTHONDONTWRITEBYTECODE=1 \
+        python3 - "$REPO" <<'PY' 2>/dev/null
+import sys, re
+from pathlib import Path
+root = Path(sys.argv[1]) / "usr/lib/shani-chronoa/shani_chronoa/settings_window"
+titles, seen = [], set()
+for path in sorted(root.glob("*.py")):
+    src = path.read_text()
+    for m in re.finditer(r'group\(\s*(?:title=)?\s*"([^"]{3,60})"', src):
+        t = m.group(1)
+        if t not in seen:
+            seen.add(t)
+            titles.append(t)
+    for m in re.finditer(r'^\s*(?:[A-Z_]+)\s*=\s*"([^"]{6,60})"\s*$', src, re.M):
+        pass
+for t in titles:
+    print("group:" + t)
 PY
 }
 
@@ -200,8 +366,72 @@ for t in "${TARGETS[@]}"; do
                 fi
             done < <(panel_targets)
             ;;
+        states)
+            while read -r t; do
+                [[ -n $t ]] || continue
+                name="${t#state:}"
+                if render "$t" "$OUTDIR/states/$name.png"; then
+                    ok=$((ok + 1))
+                else
+                    bad=$((bad + 1)); failed+=("$t")
+                fi
+            done < <(state_targets)
+            ;;
+        groups)
+            while read -r t; do
+                [[ -n $t ]] || continue
+                name="$(echo "${t#group:}" | tr ' /' '--')"
+                if render "$t" "$OUTDIR/groups/$name.png"; then
+                    ok=$((ok + 1))
+                else
+                    bad=$((bad + 1)); failed+=("$t")
+                fi
+            done < <(group_targets)
+            ;;
+        pages)
+            # `<window>-<page>` so the three windows do not collide on a bare
+            # page name - `voice` is both a Settings section and a wizard step.
+            while read -r p; do
+                [[ -n $p ]] || continue
+                name="$(echo "${p#page:}" | tr ':' '-')"
+                if render "$p" "$OUTDIR/pages/$name.png"; then
+                    ok=$((ok + 1))
+                else
+                    bad=$((bad + 1)); failed+=("$p")
+                fi
+            done < <(page_targets)
+            ;;
+        setup-cloud)
+            # **The same seventeen wizard pages, in the other branch.** The mode
+            # is chosen on the `mode` page and stored, so the cloud branch is not
+            # reachable by rendering - it has to be *set*. Pre-seeding the
+            # sandbox's keyfile is the whole difference, and it is why the local
+            # and cloud sweeps have to be two runs rather than one: a sweep that
+            # only ever shows one branch has not looked at the branch.
+            #
+            # The group name is the schema's `path`, not its `id` - the app's
+            # own writer uses `[org/shani/chronoa]` and `gsettings` derives it
+            # from the path, so the id spelling is what an unread setting looks
+            # like, and a render that silently defaulted it would photograph the
+            # local branch and call it cloud.
+            mkdir -p "$SANDBOX/config/glib-2.0"
+            printf '[org/shani/chronoa]\nsetup-mode=cloud\n' \
+                >"$SANDBOX/config/glib-2.0/settings.keyfile"
+            chmod 600 "$SANDBOX/config/glib-2.0/settings.keyfile"
+            while read -r p; do
+                [[ -n $p ]] || continue
+                [[ $p == page:setup:* ]] || continue
+                name="$(echo "${p#page:}" | tr ':' '-')"
+                if render "$p" "$OUTDIR/setup-cloud/$name.png"; then
+                    ok=$((ok + 1))
+                else
+                    bad=$((bad + 1)); failed+=("$p")
+                fi
+            done < <(page_targets)
+            ;;
         all)
-            for p in main empty help tool-activity settings; do
+            for p in main empty help shortcuts about tool-activity settings \
+                     quick-ask browser body; do
                 if render "$p" "$OUTDIR/$p.png"; then ok=$((ok + 1)); else bad=$((bad + 1)); failed+=("$p"); fi
             done
             while read -r p; do
@@ -209,6 +439,11 @@ for t in "${TARGETS[@]}"; do
                 name="${p#panel:}"
                 if render "$p" "$OUTDIR/panels/$name.png"; then ok=$((ok + 1)); else bad=$((bad + 1)); failed+=("$p"); fi
             done < <(panel_targets)
+            while read -r p; do
+                [[ -n $p ]] || continue
+                name="$(echo "${p#page:}" | tr ':' '-')"
+                if render "$p" "$OUTDIR/pages/$name.png"; then ok=$((ok + 1)); else bad=$((bad + 1)); failed+=("$p"); fi
+            done < <(page_targets)
             ;;
         *)
             name="${t#panel:}"
