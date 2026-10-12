@@ -4979,14 +4979,54 @@ unmutated code before it was written down:
 - **The verdict is read from the summary line, never the return code** - this box
   segfaults at GTK teardown *after* the summary, and a `-11` read as a test result
   would fail every GTK file.
+- **Do not add a short-summary flag to the pytest call without re-running a set
+  that already passed.** `-rf -rs` together do not mean "report failures and skips":
+  pytest emits the `SKIPPED` short summary and **no `FAILED` lines at all**. Every
+  witness then looks absent, `hit` is empty, and every mutation in every set is
+  reported a survivor - the harness stops detecting failures and still prints a
+  tally. Measured 2026-12 while adding the skip count that `-rs` was supposed to
+  provide; the count now comes from the summary line, which already carries it
+  (`1 failed, 1 passed, 1 skipped`), so there is no flag that can take the
+  failures with it. `test_the_pytest_flags_the_runner_passes_emit_failures` runs
+  pytest both ways on a file with one failure and one skip and *requires* the
+  `-rs` form to lose the failures - so if pytest ever honours both, that test
+  fails and this paragraph can be deleted rather than turning into folklore.
+  **The symptom was caught only by re-running a set the previous run had already
+  measured green** (`5 mutations, 4 caught` becoming `18 mutations, 0 caught`).
+  Re-running something you already know the answer to is the cheapest detector of
+  a harness that has stopped looking.
 - **A mutation is "caught" only when a named witness fails**, and a whole-file
   red for another reason is reported as a survivor *and* names what failed. The
   first run of this found exactly that: a witness named a base id while the
   suite's ids were parametrized, so five tests were failing for the right reason
   and the run said "survivor". Witnesses now match as a prefix of a parametrized
   id, with a `[` guard so `test_foo` does not match `test_foo_bar`.
-- **A set that raises on a rotated anchor still prints the tally** - a set whose
-  anchor rots is a result to fix, not an abort that loses the other sets' answers.
+- **A set that raises does not stop the run, and the tally cannot hide it.** A set
+  whose anchor rots is a result to fix, not an abort that loses the other sets'
+  answers. **This sentence was here before it was true**, and it took a measurement
+  to find that out: `--keep-going` existed and would have continued, but it was off
+  by default and unmentioned, so the first full inventory stopped at
+  `sense_budget` and printed `273 mutations, 261 caught` for **34 of 43 sets** - a
+  finished-looking number for a third of a run. Continuing is now the default and
+  `--stop-on-first-error` is the opt-out; the tally carries `N of M sets`, and a
+  run that falls short prints `INCOMPLETE` saying the count above is partial. The
+  repo's own full-inventory test had been passing `--keep-going` all along, which
+  is how a false claim survived in a file whose whole subject is not claiming
+  things that were not measured.
+- **A survivor says whether its witnesses could run at all.** A witness that
+  *skips* cannot fail, so the summary line's skip count rides along with every
+  survivor and the report says a skip may make it unmeasurable on this machine
+  rather than uncovered. The wording is "may" because a count cannot say *which*
+  witness skipped. `kv_parity`'s lone survivor was exactly this - both named
+  witnesses were the real-GGUF tests, and `CHRONOA_KV_PARITY_MODEL` was unset.
+- **An `equivalent` mutant is a key, not a comment.** The runner has printed
+  `EQUIVALENT [set] label` with a reason for a long time, and ten sets use it. The
+  first full inventory reported three survivors; two were documented equivalents
+  that had explained themselves in prose **where no tool reads it**. A survivor no
+  tool can distinguish from an uncovered guard is the one reading a mutation set
+  must never invite, so every mutation now either names a witness or carries
+  `"equivalent": True` **with** a `why`, and both halves have witnesses
+  (`TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne`).
 - **Nothing here is packaged.** `tools/` is the maintenance surface, as
   `cli_matrix.py` and `task_eval.py` already are.
 - **One run at a time, and a killed run says so.** See below; this is the rule
