@@ -15137,3 +15137,56 @@ the model's prose. The `^` anchor is load-bearing, not decoration.
   fails with `AttributeError: 'MathBlock' object has no attribute 'language'`.
   Verified by swapping in the pre-`ArtifactBlock` `blocks.py` and getting an
   identical failure - it is not a regression from this work.
+
+## The lock fix never landed, and the entry that proved it read as though it had (2026-10-12)
+
+The two entries above diagnose the trigger tests' shared-OS-lock failure and then
+*prove* the remedy: *"isolating `XDG_RUNTIME_DIR` takes the trigger tests from 6
+failures to 137 passed ... The fix is one line and it is in the test, not the
+product."* **Nothing was committed.** `grep -n XDG_RUNTIME_DIR tests/conftest.py`
+returned nothing, today, after both entries.
+
+So the suite was **conditionally green**: it passed only because no Chronoa
+process happened to hold the lock at that moment. Re-measured the same way the
+entry above measured it - hold the flock in another process, run the file:
+
+| state | before | after |
+|---|---|---|
+| lock held by another process | **6 failed, 131 passed** | **137 passed** |
+| lock free | 137 passed | 137 passed |
+
+**And "proved" is not "applied".** The proof ran the file with
+`XDG_RUNTIME_DIR` pointed at an empty directory *on the command line*, which
+exercises the mechanism and changes nothing for the next person who runs
+`pytest`. That is the correction-not-reaching-the-code failure this file records
+four times, in the entry whose whole subject is a fix.
+
+### It is now applied, and per-file rather than in `conftest.py`
+
+`tests/test_trigger_event_reachability.py` has an autouse `_own_runtime_dir`
+fixture, purely additive (42 insertions, 0 deletions).
+
+**The general fix was written first and measured as a regression, which is the
+part worth keeping.** `conftest.py`'s autouse `_hermetic_env` got the same
+isolation and the panel suites came back **54 failed, 148 passed**. The cause is
+a fixture-scope conflict: the module-scoped `broadway` fixture reads
+`XDG_RUNTIME_DIR` **once at module setup** and spawns `gtk4-broadwayd` with its
+socket there, while a function-scoped autouse fixture moves the variable before
+the subprocess runs - so the socket and the client are in different directories,
+and `Adw.init()` fails with `invalid (NULL) pointer instance`. **A module-scoped
+fixture and a function-scoped autouse fixture cannot share one variable.**
+`conftest.py` was reverted byte-identical to HEAD (`git diff --stat` empty).
+
+Making the general fix correct means giving the broadway fixtures a scope
+contract they do not have, across four test files another session is editing.
+The trigger file has no display fixture and is the whole affected population, so
+the narrow fix is the honest one - recorded with its reason rather than left as
+"the general fix was too hard".
+
+**The property that had to survive, and did.** `test_background_mode.py`'s
+`test_the_scheduler_leaves_the_rules_alone_without_the_lock` monkeypatches
+`runner_lock.holds` directly and never touches the filesystem, so isolating the
+path cannot hand it the lock. Verified by mutation both ways: it passes with the
+fix applied, and removing the gate from `scheduler._poll_event_rules` turns it
+red with the source restored byte-identical afterwards.
+
