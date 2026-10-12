@@ -18065,3 +18065,34 @@ asserts a fact about the world has to recompute that fact from the world.
 The measurement loads the real stylesheet first, because the size being tested
 only exists once the CSS is applied. A test that measured the widget without it
 would have measured 35 pixels a tick and passed.
+
+## Two more from reading the Compare panel, both about claims it makes
+
+**Two conversations generated from the same first question have the same
+title**, and the pair of drop-downs then read "Fix the build" twice - so which
+two are being compared is unknowable. That is the common case, not an edge one.
+
+The fix does **not** add a date. There are already three `_when()` functions in
+that package, each formatting a different type of thing, and a fourth would be
+duplication; importing the Conversations panel's private is the same mistake
+`conversation_diff` avoided by spelling out `content_text` rather than reaching
+for `_text_of`. The label carries the **message count** instead - `list_sessions`
+already had it, so this adds no formatting of its own, and conversation length
+is what you want to know when choosing what to compare.
+
+**`conversation_store.load()` keeps only the last `MAX_LOADED` (500) messages
+and says nothing.** That is right for opening a transcript and wrong here:
+this panel exists to answer *"have I asked this before?"*, and a question asked
+forty turns before the window opens is reported under **"Only in the later"** -
+a confident *you have not asked this before*, built out of a message the reader
+never had. The counts have the same problem, more quietly.
+
+So the truncation is **detected, not inherited**: the file's own non-blank
+lines are counted against what `load()` returned, and the panel says which side
+was cut and that a question listed as new may have been asked earlier. One
+extra pass over a file the panel has already read, and it needs no change to
+`load()`.
+
+A failure and a truncation look the same to a reader and mean opposite things -
+"nothing here" versus "not all of it" - so an unreadable conversation is
+explicitly **not** reported as truncated.
