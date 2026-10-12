@@ -536,6 +536,34 @@ done.
 - `ARCHITECTURE-TARGET.md` - the architecture Chronoa is aiming for, every box
   mapped to today's code, and the ordered gap list. Update its row when you
   fill a box; read its Part 4 before building anything it marks 🚫
+- `Third-party studies` - the `../harness-study/HARVEST-*.md` index below.
+  **A harvest is a dated claim about this tree**, not a finding about the repo
+  that was cloned: the named symbol may have moved, and one recorded claim
+  (`HARVEST-2/E-memory-mcp-special.md`'s "threshold gate") was already found
+  false. Check a claim against the code before acting on it.
+
+### Third-party studies - `../harness-study/HARVEST-*.md`
+
+Findings from reading outside harnesses, and **what this repository did about
+each**. Four of these were unlinked from this index when it was added
+(2026-10-12), including a 286-line deep pass, so nothing here depended on having
+read them. `harness-study/` is **not a git repository**, so a harvest nothing
+points at exists on one disk until that disk is reused.
+
+| file | subject | what came of it |
+|---|---|---|
+| `HARVEST-OIU.md` | open-intelligent-ui | five transfers, 7 passes: goal edits, `safeUrl` links, the bounded cache, `clip` |
+| `HARVEST-HERETIC.md` | heretic | one transfer: a measurement reported beside its baseline |
+| `HARVEST-MIMIC.md` | mimic | none taken; **already refused** by `ARCHITECTURE-TARGET.md` |
+| `HARVEST-ECC.md` | everything-claude-code | skill coverage, the durable history read, the sense budget |
+| `HARVEST-LAYA.md` | laya-decision | `EventSink` shape, the confidence floor, `prompt_pieces`, temperature bounds |
+| `HARVEST-AIRLLM.md` | airllm | residency vs runnability; a 297x sparse-vector win |
+| `HARVEST-EDGE0.md` | edge0 | KV width cross-check; bytes-per-token |
+| `HARVEST-EDGE0-DEEP.md` | edge0, deep pass | a hygiene suite that imports nothing; presets as measurements |
+| `HARVEST-PERSONAPLEX.md` | PersonaPlex | the audio-codecode quantizer; the loudness target, measured then built |
+| `HARVEST-DTA.md` | digital-travel-agent | the rules-file refusal; the approval-time replay guard |
+| `HARVEST-BWRAP.md` | bubblewrap | the three sandbox protections that belong to the machine |
+| `HARVEST-MAZE.md` | Maze-AI | nothing; a short negative result |
 
 **Read when your change touches them:**
 - `Rendering the UI to a PNG` — GTK4/Adw init ordering and the capture path
