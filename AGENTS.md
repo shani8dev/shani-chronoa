@@ -15707,3 +15707,72 @@ scores **right tool *and* right arguments**. PA-Tool's reported win is schema
 misalignment; CD's is schema validity. Neither is what this repository measures,
 so a 17% paper gain would not move `task_eval` unless it changed the arguments
 too - **which is the experiment to run before believing either result here.**
+
+## Constrained decoding: the available lever nobody here has used, and the reason to be careful with it (2026-10-12)
+
+Second half of the literature sweep, and it corrects **the recommendation made
+in the entry above**.
+
+**Measured on this box, not inferred.** `llama-server` supports `--grammar`,
+`--grammar-file`, `-j/--json-schema` and `-jf/--json-schema-file`. A grep of the
+**whole shipped package** for `json_schema_to_grammar`, `json-schema-to-grammar`,
+`--grammar`, `grammar` or `response_format` finds **no constrained decoding
+anywhere** - the only `response_format` hits are audio formats in `stt_server.py`
+and `cloud_voice.py`, which are WAV/JSON *encodings*, not decoder constraints.
+
+So the lever the last entry identified exists, ships with the binary already
+installed, is on the hot path of every tool call, and has never been switched on.
+**That is a real gap and it is the cheapest one on the list.**
+
+**And here is the reason to be careful, which is why it corrects rather than
+confirms.** *"Structured Output Collapses Answer Diversity Across 44 Language
+Models"* ([arXiv:2607.18476](https://arxiv.org/abs/2607.18476)) asks 44 models
+the same 31 open-ended prompts, once plainly and once with *"Reply with JSON
+only"*. **No schema, no constrained decoding - just the request.** Results:
+
+- modal answer rises **41% -> 64%**; distinct answers fall **52 -> 36**
+- mean answer-choice surprisal drops **1.80 -> 1.58 bits**
+- the effect is a **sharpener, not a re-indexer** - the chat answer survives in
+  28 of 31 categories
+- defaults are register-indexed: JSON moves **53%** of a model's stable chat
+  defaults, *mostly back to the crowd*
+- **the collapse is in the decoder's response to the register, not in the
+  decoder**: enforcing the schema (`response_format`) compresses **no further
+  than the request** (-0.03 bits)
+
+The register gradient is the part that matters for reading this honestly:
+compression is significant and specific to **JSON** (-0.22 bits, p=.0002) and
+**XML** (-0.19, p=.002), **absent for YAML and CSV**, and **reversed** for an
+arbitrary bracket wrapper (+0.13, p=.009) - which the authors read as pointing
+at tool-use post-training.
+
+**What this means for this repository, stated carefully.**
+
+- **The last entry's claim that constrained decoding is "the single largest
+  measurable lever" was stated too strongly.** It is the largest lever on
+  *schema validity*, and this paper shows the format request alone already buys
+  that part. **What it does not license is expecting better *decisions*** - and
+  this repository's instrument, `task_eval`, scores **right tool and right
+  arguments**, which is a decision.
+- **It is also a caution specific to a whitelisted assistant.** A collapsed
+  distribution means the model falls back on the mode - which for a tool chooser
+  means the *most common tool*, not the *right* one. That is the same shape as
+  the failure this repository already records for `tool_select`'s plain word
+  overlap, arriving from the other direction.
+- **So the honest experiment is narrower than "add constrained decoding".** It is
+  three arms, measured on the same cases: base as-is; the same with a
+  grammar-constrained tool call; and **a control that separates the two causes** -
+  the format request *without* enforcement, since this paper says the request
+  alone does the work. Without that third arm any gain would be attributed to
+  the grammar when the paper says the register may be doing it, and **a check
+  that cannot tell two causes apart is not a check**.
+
+**Two supporting papers for the same area**, recorded not summarised:
+*Grammar-Constrained Decoding for Structured NLP Tasks without Finetuning*
+([2305.13971](https://arxiv.org/abs/2305.13971), the GBNF-origin work) and
+*Schema-Key Wording as an Instruction Channel* ([2604.14862](https://arxiv.org/abs/2604.14862),
+**AACL-IJCNLP 2026**), which finds that **changing only schema-key wording**
+substantially moves accuracy, with **both positive and negative effects across
+seven models**, and that prompt-level and schema-level instructions interact
+**non-additively**. That last clause is why the third arm above is necessary
+rather than tidy.
