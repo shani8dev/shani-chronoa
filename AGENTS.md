@@ -12146,3 +12146,81 @@ figure.
 one MoE tier, and that tier is 17.3 GB - larger than anything measurable here. A
 slot run with a 30B-class checkpoint is the only way to price `q5_0` where the
 ladder is used, and that is recorded rather than approximated.
+
+## Every protection on the sandbox's escape path belongs to somebody else (2026-10-12)
+
+From `../harness-study/HARVEST-BWRAP.md`. bubblewrap's `SECURITY.md` is the
+clearest division of responsibility in sandboxing anywhere in the tree:
+
+> bubblewrap is not a complete, ready-made sandbox with a specific security
+> policy. [...] the level of protection between the sandboxed processes and the
+> host system is entirely determined by the arguments passed to bubblewrap.
+> Whatever program constructs the command-line arguments [...] is responsible
+> for defining its own security model.
+
+Its worked example is **CVE-2017-5226** — a Flatpak app injected keystrokes into
+the parent's terminal with `ioctl(TIOCSTI)` — and bubblewrap's position was that
+this was a **Flatpak** vulnerability, not a bubblewrap one. The primitive
+declines to speak for whoever builds its argv and points at them instead.
+
+Applied to `sandbox/`, which is genuinely good — namespaces, Landlock, and a
+29-syscall seccomp filter — the finding is about what is **not** in it.
+`executor.py:643` passes `--dev-bind /dev /dev`, so **every** device node on the
+host reaches every sandbox; `landlock.py:494` grants `/dev` and
+`_LANDLOCK_ACCESS_FS_IOCTL_DEV`; and `seccomp.py` filters 29 syscalls and
+**never mentions `ioctl`**. Landlock does not mediate DAC. So the safety is
+entirely downstream, and none of it says so anywhere in the source.
+
+**Measured, not reasoned:**
+
+| escape | what actually stops it | whose decision |
+|---|---|---|
+| `ioctl(TIOCSTI)` → the user's terminal | `dev.tty.legacy_tiocsti = 0`; call returns **`EIO`**, bytes never reach the pty | the **kernel's** sysctl |
+| raw block devices (`/dev/nvme0n1`) | `brw-rw---- root:disk`, this user is **not** in `disk`; `O_RDWR` → **`EACCES`** | the **admin's** group membership |
+| `/dev/mapper/control` | `crw------- root:root` → `EACCES` | the **kernel's** device mode |
+| `/dev/snd/controlC0` | nothing — and correctly so, a voice assistant needs audio | — |
+
+Two ordinary pieces of desktop administration flip it, and neither is exotic:
+`sysctl -w dev.tty.legacy_tiocsti=1`, and adding the user to **`disk`** —
+routine on full-disk-encryption installs, which this ecosystem ships.
+
+**Not taken: a seccomp rule blocking `TIOCSTI`.** The machinery is already in the
+file (`seccomp.py` inspects `arg0` for the `ptrace`/`PTRACE_TRACEME` carve-out at
+`:274`), so the rule is ~10 lines. Refused **on the measurement**: the call is
+unreachable on any kernel ≥ 6.2 with the default sysctl, so a rule for it would be
+*counted* as protection while changing nothing — which is the exact mistake this
+entry exists to describe. It becomes worth adding the moment the property lapses,
+and the new test is what notices.
+
+**What was taken is the dependency itself, made tested and per-machine.**
+`tests/test_sandbox_external_properties.py` (3) asserts each external property by
+performing the real operation — a real `ioctl(TIOCSTI)` against a **freshly opened
+pty of its own** (never the user's terminal; injected bytes would be typed into
+whatever they have running), and a real `O_RDWR` on a real block device found by
+globbing `nvme`/`sd`/`vd`/`dm`.
+
+The third assertion is the one that keeps the file honest: **it asserts the
+sandbox does *not* itself block `ioctl`.** Without it a reader could reasonably
+assume the other two describe protections this repository enforces. If someone
+later adds the rule from above, that test fails and says the dependency can be
+retired — which is the moment it stops being a risk.
+
+**Four controls, all run, all biting.** Pretending the kernel accepts `TIOCSTI`;
+pointing the block-device check at an openable node; adding `ioctl` to a copy of
+`seccomp.py`; and denying with **`ENXIO`** instead of `EACCES` — which is the one
+that proves the check distinguishes *"no permission"* from *"there is no device"*,
+a distinction two identical skips would have hidden.
+
+**Two of my own bugs, both the unreachable-path shape this file records most:**
+
+- **The block-device assertion originally `skip`ped when the property *held*.**
+  The strongest of the three claims never asserted — and a machine with no block
+  device at all skipped for the identical reason, so the two cases were
+  indistinguishable in the output. Holding is a **pass**; absent is a skip; open
+  is a fail.
+- **It picked `/dev/acpi_thermal_rel`**, a 0600 *char* device, and skipped on
+  that. Only block devices are the thing at issue, and the glob accepts any device
+  node. A third bug was in the skip message itself: it quoted `patterns`, which is
+  local to the helper — so the one machine the skip exists for raised `NameError`
+  instead of skipping. All three found by running, the last two only by reading the
+  path after the first was fixed.
