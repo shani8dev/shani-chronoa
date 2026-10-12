@@ -26,7 +26,25 @@ import importlib
 
 
 def reading(sense: str) -> str:
-    """The sense's own text. Never raises: a broken sense reads as UNKNOWN."""
+    """The sense's own text. Never raises: a broken sense reads as UNKNOWN.
+
+    **The nose light lives here, because this is the one funnel every
+    machine-state sense goes through** - power, thermal, storage, boots, network,
+    snapshots. `nose` is "feeling the machine" in the taxonomy, and it was in
+    `body.ORGANS` and in `ORGAN_ICONS` with **nothing ever lighting it**:
+    measured, only `ears`, `eyes`, `mouth`, `skin`, `memory` and `hands` were
+    ever passed to the body. So the strip showed the machine's own state as
+    permanently idle while senses were being read.
+
+    A *pulse* rather than a `use`/`done` pair: a sense reading is a single short
+    act with no caller left holding the handle afterwards, and `egress.py` lights
+    `skin` the same way for the same reason.
+    """
+    try:
+        from shani_chronoa import body
+        body.body.pulse("nose", f"reading {sense}"[:80], "")
+    except Exception:                                   # noqa: BLE001
+        pass
     try:
         module = importlib.import_module(f"shani_chronoa.senses.{sense}")
         result = module._run({})

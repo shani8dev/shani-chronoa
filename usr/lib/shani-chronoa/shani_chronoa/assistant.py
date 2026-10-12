@@ -208,6 +208,26 @@ def _seconds(value: float) -> str:
     return f"{value:.1f} seconds"
 
 
+def _lit(organ: str, what: str, detail: str = ""):
+    """Tell the body an organ started. Never raises into the model call."""
+    try:
+        from shani_chronoa import body
+        return body.body.use(organ, what, detail)
+    except Exception:                                   # noqa: BLE001
+        return None
+
+
+def _done(activity) -> None:
+    """Finish an activity started by `_lit`, if it started."""
+    if activity is None:
+        return
+    try:
+        from shani_chronoa import body
+        body.body.done(activity)
+    except Exception:                                   # noqa: BLE001
+        return
+
+
 class Assistant:
     """Runs one user turn through the LLM, executing any tool calls it makes.
 
@@ -717,11 +737,32 @@ class Assistant:
     forced_tool: str = ""
 
     async def _ask(self, messages, tools, on_text):
-        """One model call: streamed when the backend can and a caller wants the words as they come."""
+        """One model call: streamed when the backend can and a caller wants the words as they come.
+
+        **The brain light lives here, because this is the one funnel every model
+        call goes through** - the streaming path and the plain one, and both
+        callers at the two `_ask` sites. Lighting it anywhere else would leave the
+        light dark exactly when the machine is thinking hardest, and lighting it
+        at both return paths would double-count the streamed case, which falls
+        through both.
+
+        `brain` was in `body.ORGANS` and in `ORGAN_ICONS` and **nothing ever lit
+        it** - measured: only `ears`, `eyes`, `mouth`, `skin`, `memory` and
+        `hands` are ever passed to the body. So the strip showed a brain that
+        never lit while the model was answering, which is the one moment its
+        state is worth knowing. The try/except is the same rule `audio.py`
+        follows: an indicator that can take the turn down is the opposite of the
+        point.
+        """
         self._measure_context(messages, tools)
-        if on_text is not None and getattr(self.llm, "stream_supported", False):
-            return await self.llm.chat_message_stream(messages, tools=tools, on_text=on_text)
-        return await self.llm.chat_message(messages, tools=tools)
+        activity = _lit("brain", "thinking", "" if on_text is None else "writing a reply")
+        try:
+            if on_text is not None and getattr(self.llm, "stream_supported", False):
+                return await self.llm.chat_message_stream(
+                    messages, tools=tools, on_text=on_text)
+            return await self.llm.chat_message(messages, tools=tools)
+        finally:
+            _done(activity)
 
     def _measure_context(self, messages, tools) -> None:
         """Record what this request actually costs, for the UI to show.
