@@ -13,6 +13,7 @@ non-empty clipboard reported the READ as FAILED.
 """
 
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -208,3 +209,133 @@ def test_every_post_condition_is_read_only_by_name():
         for verb in ('"set-volume"', '"set-mute"', '"set-timezone"', '"set", SCHEMA_ID', "_run_ppd(\"set",
                      "write_text(", "unlink(", "os.kill(", "rmtree(", "send2trash", '"trash"'):
             assert verb not in src, f"{mod}'s post-condition contains {verb}"
+
+
+# --- a refusal must not certify itself -----------------------------------------
+
+class TestARefusalIsNotVerified:
+    """**The defect: a post-condition that cannot fail on a refusal.**
+
+    `delete_file` reported VERIFIED whenever `not os.path.lexists(target)`, and
+    `move_or_copy_file` reported it whenever the destination existed and the
+    source did not. Both of those are *also* exactly what a refusal leaves
+    behind - and one of those refusals is the commonest one the skill has:
+
+        Could not delete /home/x: it does not exist, so nothing was removed.
+
+    That sentence and `VERIFIED: it is gone` are the same filesystem state
+    reported by two different halves of the same call, and the false one is the
+    one that stops anybody reading further.
+
+    **The signal that separates them is the parent directory's mtime.**
+    Removing a name from a directory updates that directory; a refusal that
+    inspected the filesystem and changed nothing does not. So both skills now
+    require recent parent movement before certifying.
+
+    **Every test here is a pair.** The "refused" and the "really happened"
+    cases differ *only* in the parent directory's mtime, so restoring the old
+    condition - which looked at nothing but the path - fails one half of every
+    pair. A lone assertion that a refusal is not verified would pass on a
+    post-condition that simply always refused.
+
+    **The limitation is stated rather than hidden:** the window is `_FRESH_SECONDS`,
+    so a refusal against a directory modified within it is still certified. That
+    is a window, not a proof. It closes the case that happens in production (the
+    directory has been quiet for minutes; the path was never in it) and cannot
+    close one that happened in the same instant, which is why the constant is
+    named and documented where it lives rather than buried.
+    """
+
+    @staticmethod
+    def _age(path, seconds):
+        """Push a directory's mtime into the past, as if nothing had touched it."""
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    def test_a_path_that_was_never_there_is_not_a_deleted_path(self, tmp_path):
+        target = tmp_path / "never-existed.txt"
+        self._age(tmp_path, 3600)
+        assert _verify("delete_file", {"path": str(target)}).verdict is not Verdict.VERIFIED
+
+    def test_a_real_delete_still_verifies(self, tmp_path):
+        """**The control, and the reason the test above means anything.**
+
+        Same fixture, same call, the only difference being that the directory was
+        touched just now - because a file really was removed from it. If this ever
+        fails, the fix has made `delete_file` unverifiable, which is a worse
+        defect than the one it fixed.
+        """
+        target = tmp_path / "gone.txt"
+        target.write_text("x")
+        target.unlink()
+        assert _verify("delete_file", {"path": str(target)}).verdict is Verdict.VERIFIED
+
+    def test_a_move_of_a_source_that_was_never_there_is_not_a_move(self, tmp_path):
+        src, dst = tmp_path / "nope.txt", tmp_path / "b.txt"
+        dst.write_text("already here\n")
+        self._age(tmp_path, 3600)
+        checked = _verify("move_or_copy_file",
+                          {"source": str(src), "destination": str(dst), "mode": "move"})
+        assert checked.verdict is not Verdict.VERIFIED
+
+    def test_a_real_move_still_verifies(self, tmp_path):
+        """**The control for the move half.** Copied and removed by hand, so the
+        directory is touched exactly as a real move would touch it."""
+        src, dst = tmp_path / "a.txt", tmp_path / "b.txt"
+        src.write_text("payload\n")
+        shutil.move(str(src), str(dst))
+        checked = _verify("move_or_copy_file",
+                          {"source": str(src), "destination": str(dst), "mode": "move"})
+        assert checked.verdict is Verdict.VERIFIED
+
+    def test_a_copy_is_exempt_because_it_writes_a_new_file(self, tmp_path):
+        """Copy writes the destination, so a destination that exists could only
+        have been left by a *successful* copy. Exempting it is a claim, and a
+        claim needs a witness: this is the copy that would be misreported if the
+        exemption were wrong, and the aged directory is what proves the exemption
+        is doing the work rather than the directory having been touched."""
+        src, dst = tmp_path / "a.txt", tmp_path / "b.txt"
+        src.write_text("payload\n")
+        shutil.copy2(str(src), str(dst))
+        self._age(tmp_path, 3600)
+        checked = _verify("move_or_copy_file",
+                          {"source": str(src), "destination": str(dst), "mode": "copy"})
+        assert checked.verdict is Verdict.VERIFIED
+
+    def test_the_refusal_is_named_rather_than_silently_downgraded(self, tmp_path):
+        """UNVERIFIED is the honest direction, so the evidence has to say *why* -
+        an operator reading the audit log cannot tell "this was a refusal" from
+        "this check could not read the filesystem" unless the sentence says."""
+        target = tmp_path / "never-existed.txt"
+        self._age(tmp_path, 3600)
+        evidence = _verify("delete_file", {"path": str(target)}).evidence
+        assert "never there" in evidence, evidence
+
+
+class TestTheRefusalReachesTheModelUncertified:
+    """The same property end to end, through the dispatch the model actually sees.
+
+    A post-condition that is correct in isolation and overridden downstream is
+    not a fix, and this file already records `driver_dev`'s check being inherited
+    by the three skills in a module it was written for. So the verdict is read off
+    `execute_tool_outcome` - the call the model makes - rather than off the
+    check.
+    """
+
+    def test_a_refused_delete_of_a_missing_path_is_not_reported_as_verified(self, tmp_path):
+        from shani_chronoa.tools import execute_tool_outcome
+        from shani_chronoa.config import ChronoaConfig
+
+        # Consent granted, so the refusal is the *skill's own* "it does not exist"
+        # and not the permission gate - the gate would refuse for a different
+        # reason and prove nothing about the post-condition.
+        ChronoaConfig().set("file-delete-enabled", "true")
+        try:
+            target = tmp_path / "never-existed.txt"
+            old = time.time() - 3600
+            os.utime(tmp_path, (old, old))
+            out = execute_tool_outcome("delete_file", {"path": str(target)})
+            assert out.verdict.value != "verified", out.text
+            assert "does not exist" in out.text, out.text
+        finally:
+            ChronoaConfig().set("file-delete-enabled", "false")

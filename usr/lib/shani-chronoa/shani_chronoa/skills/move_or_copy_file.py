@@ -13,9 +13,16 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
+
+#: How recently the *source's parent directory* must have changed for an absent
+#: source to be attributed to this call rather than to a path that was never
+#: there. Generous, because a recursive move of tens of thousands of files takes
+#: tens of seconds and the mtime moves as the last one lands, not the first.
+_FRESH_SECONDS = 300.0
 
 SCHEMA = {
     "type": "function",
@@ -102,7 +109,19 @@ def _run(arguments: dict) -> str:
 
 
 def _post_condition(arguments: dict):
-    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    """The filesystem after the call, read with a fresh stat - not the skill's own report.
+
+    **The freshness check is load-bearing, and it was missing.** For `move`,
+    `destination exists and source is gone` is also exactly what a *refused* move
+    leaves behind: "Could not move /x: it does not exist" against a destination
+    that was already there satisfies both halves. So this reported **VERIFIED for
+    a move that never happened**, which is the same defect `delete_file` had and
+    the reason that one now checks the source's parent directory for recent
+    change before certifying.
+
+    Copy is exempt, and deliberately: it writes a *new* file, so a destination
+    that did not exist before cannot have been left behind by a refusal.
+    """
     mode = (arguments.get("mode") or "move").strip().lower()
     try:
         source = files.resolve(arguments.get("source") or "")
@@ -113,9 +132,31 @@ def _post_condition(arguments: dict):
         destination = destination / source.name
     there = destination.exists()
     left = os.path.lexists(source)
-    ok = there and (not left if mode == "move" else True)
-    return ok, f"destination {'exists' if there else 'missing'}" + (f", source {'still there' if left else 'gone'}"
-                                                                     if mode == "move" else "")
+    evidence = "destination %s" % ("exists" if there else "missing")
+    if mode == "move":
+        evidence += ", source %s" % ("still there" if left else "gone")
+
+    if not there:
+        return False, evidence
+    if mode == "copy":
+        return True, evidence
+    if left:
+        return False, evidence
+
+    # A refused move of a path that was never there leaves exactly the state a
+    # real move leaves, so the source's parent directory is what tells the two
+    # apart: a real move removes a name from it, and a refusal changes nothing.
+    try:
+        moved = time.time() - source.parent.stat().st_mtime
+    except OSError as exc:
+        return None, "could not read the source directory (%s)" % exc
+    if moved > _FRESH_SECONDS:
+        return None, (
+            "%s is absent and its directory has not changed for %d minutes, so "
+            "this is more likely a source that was never there than a move that "
+            "just happened" % (source, int(moved / 60))
+        )
+    return True, evidence + ", and the source directory changed %.1fs ago" % moved
 
 
 # Declared for `verification.verify`; the LLM never supplies this.

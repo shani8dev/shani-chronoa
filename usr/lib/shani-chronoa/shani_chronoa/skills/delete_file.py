@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from pathlib import Path
 
 from shani_chronoa import files
@@ -28,6 +29,12 @@ from shani_chronoa.config import ChronoaConfig
 from shani_chronoa.skills import Skill
 
 _CONSENT_KEY = "file-delete-enabled"
+
+#: How recently the *parent directory* must have changed for a missing path to
+#: be attributed to this call rather than to a path that was never there.
+#: Generous, because a recursive delete of tens of thousands of files takes
+#: tens of seconds and the mtime moves as the last one lands, not the first.
+_FRESH_SECONDS = 300.0
 
 
 def _consent(config: ChronoaConfig) -> tuple[bool, str]:
@@ -132,15 +139,60 @@ def _run(arguments: dict) -> str:
 
 
 def _post_condition(arguments: dict):
-    """The filesystem after the call, read with a fresh stat - not the skill's own report."""
+    """The filesystem after the call, read with a fresh stat - not the skill's own report.
+
+    **Why the parent directory is checked, and why a plain "is it gone" is not
+    enough.** This skill refuses three ways without deleting anything: the
+    consent key is off, the path does not exist, or the directory is not empty
+    and `recursive` was not passed. Two of those leave the filesystem exactly
+    as a successful delete leaves it - in particular the refusal
+
+        "Could not delete /home/x: it does not exist, so nothing was removed."
+
+    satisfies `not lexists(path)` and nothing else. So the original condition
+    reported **VERIFIED for a delete that never happened**, in the most
+    destructive skill in this repository. That is not theoretical: a benchmark
+    that drove this skill against real paths produced exactly that verdict on a
+    refused call, and a false VERIFIED is what stops anybody reading further.
+
+    The signal that separates the two is the **parent directory's mtime**.
+    Removing a name from a directory updates that directory; a refusal that
+    inspected the filesystem and changed nothing does not. So a delete is only
+    certified when the parent moved recently enough to be this call.
+
+    **The window is a window, not a proof.** `_FRESH_SECONDS` is generous - a
+    recursive delete of tens of thousands of files takes tens of seconds - and it
+    has the honest failure mode: a directory modified by something else within
+    the same window can make a never-existed path look deleted. The alternative
+    available here is worse, because the skill runs in a subprocess and there is
+    no channel by which it could tell this module what it found beforehand.
+    """
     try:
         # expand, not resolve: resolving follows a symlink to its target, and a
         # dangling link left behind would then read as removed.
         target = files.expand(arguments.get("path") or "")
     except files.PathProblem:
         return None
-    gone = not os.path.lexists(target)
-    return gone, f"{target} {'is gone' if gone else 'still exists'}"
+
+    if os.path.lexists(target):
+        return False, f"{target} still exists"
+
+    try:
+        moved = time.time() - target.parent.stat().st_mtime
+    except OSError as exc:
+        return None, f"could not read the parent directory ({exc})"
+
+    if moved > _FRESH_SECONDS:
+        # The name is gone and the parent has not been touched for longer than
+        # any single delete of this shape takes. Almost certainly this path was
+        # never there - which is a refusal the caller already has a sentence for,
+        # and reporting it as verified would contradict it.
+        return None, (
+            f"{target} is gone but its directory has not changed for "
+            f"{int(moved / 60)} minutes, so this is more likely a path that was "
+            f"never there than a delete that just happened"
+        )
+    return True, f"{target} is gone and its directory changed {moved:.1f}s ago"
 
 
 # Declared for `verification.verify`; the LLM never supplies this.
