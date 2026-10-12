@@ -44,6 +44,7 @@ TEST_FILE = "tests/test_asleep_is_reachable.py"
 _WIN = "usr/lib/shani-chronoa/shani_chronoa/settings_window/window.py"
 _BRAIN = "usr/lib/shani-chronoa/shani_chronoa/app/brain.py"
 _MODELS = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/models.py"
+_PRESENCE = "usr/lib/shani-chronoa/shani_chronoa/presence.py"
 
 MUTATIONS = [
     {
@@ -182,5 +183,58 @@ MUTATIONS = [
         "expect": ["test_an_asleep_model_is_not_promised_a_wake"],
         "why": "the panel owns Free-the-model but not Wake-up, which lives in "
                "Settings - so without the sentence it is a dead end",
+    },
+    # -- a stored choice must not outlive the machine it was true of ----------
+    {
+        "file": _PRESENCE,
+        "old": "    if chosen is Presence.SLEEPING:\n        return Presence.SLEEPING\n",
+        "new": "    if chosen is Presence.SLEEPING or True:\n        return Presence.SLEEPING\n",
+        "label": "reconcile always answers Asleep, whatever the machine says",
+        "expect": ["test_the_row_does_not_claim_an_unloaded_model_one_a_question_loaded",
+                   "test_the_cycle_reports_the_choice_it_reached",
+                   "test_the_label_and_the_press_agree"],
+        "why": "the row would say Asleep about a machine with nothing running, "
+               "which is the over-refusal direction of the same defect. "
+               "**test_a_released_model_does_not_claim_to_be_loaded used to be "
+               "named here and the runner reported NOT caught** - with the "
+               "mutation applied the row reads Asleep's sentence, which also "
+               "does not contain 'loaded and answering', so the test passes "
+               "either way. It belongs to the *unchanged* mutation below, where "
+               "ACTIVE survives and does say it.",
+    },
+    {
+        "file": _PRESENCE,
+        "old": ("        return Presence.SLEEPING\n"
+                "    return Presence.ACTIVE if is_up() else Presence.DROWSY\n"),
+        "new": ("        return Presence.SLEEPING\n"
+                "    return chosen\n"),
+        "label": "reconcile returns the choice unchanged, so a stale one stands",
+        "expect": ["test_the_row_does_not_claim_an_unloaded_model_one_a_question_loaded",
+                   "test_a_released_model_does_not_claim_to_be_loaded"],
+        "why": "the defect itself: a stored DROWSY outlives the question that "
+               "cold-started the model, and the row claims it is not loaded",
+    },
+    {
+        "file": _WIN,
+        "old": "        chosen = presence.reconcile(chosen, local_llm.is_up)\n",
+        "new": "        pass\n",
+        "label": "the row never reconciles the choice with the machine",
+        "expect": ["test_the_row_does_not_claim_an_unloaded_model_one_a_question_loaded",
+                   "test_a_released_model_does_not_claim_to_be_loaded",
+                   "test_showing_the_window_rereads_the_choice"],
+        "why": "the rule exists and nothing calls it - which is the shape this "
+               "file records for a guard nobody runs",
+    },
+    {
+        "file": _WIN,
+        "old": "        current = presence.reconcile(current, local_llm.is_up)\n"
+               "        target = current.next()\n",
+        "new": "        target = current.next()\n",
+        "label": "the cycle presses from the stored choice, so the verb and the "
+                 "action disagree",
+        "expect": ["test_the_label_and_the_press_agree"],
+        "why": "the row labels from the reconciled value and the press used the "
+               "raw one: with a stale DROWSY and the machine up the button said "
+               "'Free the model' (so Drowsy) and the press went to SLEEPING",
     },
 ]

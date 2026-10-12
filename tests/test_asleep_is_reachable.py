@@ -61,7 +61,7 @@ Adw.init()
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]
                        / "usr" / "lib" / "shani-chronoa"))
 
-from shani_chronoa import local_llm  # noqa: E402
+from shani_chronoa import local_llm, presence  # noqa: E402
 from shani_chronoa.presence import Presence  # noqa: E402
 from shani_chronoa.settings_window import window as settings_window  # noqa: E402
 
@@ -124,21 +124,33 @@ def _drive(window, press, button, row, seconds=20.0):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("start,target", [
-    (Presence.ACTIVE, Presence.DROWSY),
-    (Presence.DROWSY, Presence.SLEEPING),      # the state that was unreachable
-    (Presence.SLEEPING, Presence.ACTIVE),      # the label that never appeared
+@pytest.mark.parametrize("start,machine,target", [
+    # A coherent machine and choice.
+    (Presence.ACTIVE, True, Presence.DROWSY),
+    (Presence.DROWSY, False, Presence.SLEEPING),   # the state that was unreachable
+    (Presence.SLEEPING, False, Presence.ACTIVE),   # the label that never appeared
+    (Presence.SLEEPING, True, Presence.ACTIVE),
+    # And a stale one, which is the ordinary case: a question cold-starts the
+    # model without writing the choice, so DROWSY is stored while the machine is
+    # up. Reconcile makes the effective state ACTIVE, so the next is DROWSY -
+    # the same place "Free the model" on the button says it will go.
+    (Presence.DROWSY, True, Presence.DROWSY),
+    (Presence.ACTIVE, False, Presence.SLEEPING),
 ])
-def test_every_state_in_the_cycle_is_reachable(start, target, monkeypatch):
+def test_every_state_in_the_cycle_is_reachable(start, machine, target, monkeypatch):
     """Pressing the button moves to the next state, whichever one we are in.
 
     The middle row is the defect: from DROWSY the old code also targeted
     SLEEPING, but it *read the machine* to decide where it was, so after the
     first release every press was the same press. Driving the cycle from the
     stored choice is what makes the second and third presses different.
+
+    The `machine` column is what makes the fixture *coherent*: `ACTIVE` with
+    nothing running is a stale choice, and `reconcile` corrects it - which is why
+    it now reaches SLEEPING rather than DROWSY. Both are pinned.
     """
     calls = []
-    monkeypatch.setattr(local_llm, "is_up", lambda: False)
+    monkeypatch.setattr(local_llm, "is_up", lambda: machine)
     monkeypatch.setattr(local_llm, "start_service",
                         lambda: (calls.append("wake"), "")[1])
     monkeypatch.setattr(local_llm, "stop_service",
@@ -151,8 +163,9 @@ def test_every_state_in_the_cycle_is_reachable(start, target, monkeypatch):
     _drive(window, window._cycle_presence, button, row)
 
     assert app._presence is target, (
-        f"from {start.name} the choice ended at {getattr(app, '_presence', None)}; "
-        f"expected {target.name}")
+        f"from {start.name} with the machine "
+        f"{'up' if machine else 'down'} the choice ended at "
+        f"{getattr(app, '_presence', None)}; expected {target.name}")
 
 
 def test_the_model_is_not_started_when_the_choice_is_to_stay_asleep(monkeypatch):
@@ -262,6 +275,65 @@ def test_running_the_model_clears_an_asleep_choice(monkeypatch):
         "runs and the next question still refuses it")
 
 
+
+# ---------------------------------------------------------------------------
+# a stored choice must not outlive the machine it was true of
+# ---------------------------------------------------------------------------
+
+
+def test_the_row_does_not_claim_an_unloaded_model_one_a_question_loaded(monkeypatch):
+    """**The claim my own fix made possible.**
+
+    Storing the choice means it can outlive the fact it was true of. The ordinary
+    sequence: the app starts with nothing running, so `_presence` is DROWSY; a
+    question cold-starts the model, which is `_use_local_server`'s whole point;
+    and the row still reads the *stored* DROWSY and says
+
+        the model is not loaded. The next question loads it again
+
+    about a model that is loaded. That is the exact claim `detect`'s docstring
+    says presence exists not to make, reached from the other side - and it was
+    only possible because the state stopped being re-derived on every read.
+    """
+    monkeypatch.setattr(local_llm, "is_up", lambda: True)
+    app = _App(choice=Presence.DROWSY)
+    window = settings_window.SettingsWindow(app)
+    window._refresh_presence_row()
+    said = window._presence_row.get_subtitle()
+    assert "not loaded" not in said, (
+        "the row says the model is not loaded while it is:\n" + said)
+    assert window._presence_cycle_button.get_label() == "Free the model", (
+        "a loaded model should offer Free the model, not: "
+        + window._presence_cycle_button.get_label())
+
+
+def test_a_released_model_does_not_claim_to_be_loaded(monkeypatch):
+    """The other direction: ACTIVE stored, machine stopped."""
+    monkeypatch.setattr(local_llm, "is_up", lambda: False)
+    app = _App(choice=Presence.ACTIVE)
+    window = settings_window.SettingsWindow(app)
+    window._refresh_presence_row()
+    said = window._presence_row.get_subtitle()
+    assert "loaded and answering" not in said, (
+        "the row claims a loaded model while none is running:\n" + said)
+
+
+def test_asleep_is_not_withdrawn_by_the_machine_coming_up(monkeypatch):
+    """SLEEPING is a decision about behaviour, so the machine starting does not
+    undo it - otherwise nobody could leave the machine alone.
+
+    `_use_local_server` reads `is_up()` *before* its guard, so a machine that is
+    up answers whatever the choice says; the choice only matters when it is down.
+    """
+    monkeypatch.setattr(local_llm, "is_up", lambda: True)
+    app = _App(choice=Presence.SLEEPING)
+    window = settings_window.SettingsWindow(app)
+    window._refresh_presence_row()
+    assert window._presence_cycle_button.get_label() == "Wake up", (
+        "the machine coming up withdrew a deliberate Asleep: "
+        + window._presence_cycle_button.get_label())
+
+
 def test_showing_the_window_rereads_the_choice(monkeypatch):
     """**The on-show refresh, which nothing drove.**
 
@@ -276,11 +348,14 @@ def test_showing_the_window_rereads_the_choice(monkeypatch):
     because the question under test is what the refresh *does*, not what GTK
     thinks of an unmapped window.
     """
+    monkeypatch.setattr(local_llm, "is_up", lambda: False)
     app = _App(choice=Presence.DROWSY)
     window = settings_window.SettingsWindow(app)
     assert window._presence_cycle_button.get_label() == "Go to sleep"
-    # The choice changed underneath the window - the Models panel released it.
-    app._presence = Presence.ACTIVE
+    # The machine changed underneath the window - a question cold-started the
+    # model - and the stored choice is still DROWSY. Both the re-read and the
+    # reconciliation have to happen for the button to say Free the model.
+    monkeypatch.setattr(local_llm, "is_up", lambda: True)
     monkeypatch.setattr(window, "get_visible", lambda: True)
     window._on_window_visible(window, None)
     assert window._presence_cycle_button.get_label() == "Free the model", (
@@ -460,3 +535,29 @@ def test_the_release_tooltip_names_the_asleep_case():
     source = pathlib.Path(models.__file__).read_text(encoding="utf-8")
     assert "unless the model is asleep" in source, (
         "the tooltip still promises a wake Asleep refuses")
+
+
+def test_the_label_and_the_press_agree(monkeypatch):
+    """**The verb and the action, computed from the same value.**
+
+    `_refresh_presence_row` reconciles before it labels the button;
+    `_cycle_presence` used to compute its target from the *stored* choice. With a
+    stale DROWSY and the machine up, the label said `action(ACTIVE)` - "Free the
+    model", which reads as *stop it*, so Drowsy - while the press did
+    `DROWSY.next()`, which is SLEEPING. The person got a state they did not ask
+    for, from a button that described a different one.
+
+    Both halves are asserted: what the button says, and what pressing it reaches.
+    """
+    monkeypatch.setattr(local_llm, "is_up", lambda: True)    # the machine is up
+    monkeypatch.setattr(local_llm, "stop_service", lambda: "")
+    app = _App(choice=Presence.DROWSY)                        # ...and the choice is stale
+    window = settings_window.SettingsWindow(app)
+    window._refresh_presence_row()
+    label = window._presence_cycle_button.get_label()
+    assert label == presence.Presence.ACTIVE.action(), (
+        f"the button should offer Free the model for a loaded model: {label!r}")
+
+    _drive(window, window._cycle_presence, Gtk.Button(), Adw.ActionRow())
+    assert app._presence is presence.Presence.DROWSY, (
+        f"the button said {label!r} but the press reached {app._presence.name}")

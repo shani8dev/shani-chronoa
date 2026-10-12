@@ -83,6 +83,28 @@ def detect(is_up: Callable[[], bool]) -> Presence:
     return Presence.ACTIVE if is_up() else Presence.DROWSY
 
 
+def reconcile(chosen: Presence, is_up: Callable[[], bool]) -> Presence:
+    """Bring a stored choice back in step with the machine.
+
+    **Storing the choice is what makes this necessary.** While the state was
+    re-derived from `detect()` on every read it could not disagree with the
+    machine. Now `_presence` persists, and the ordinary sequence - the app starts
+    with nothing running, a question cold-starts the model, and the row still
+    reads the stored DROWSY - publishes *"the model is not loaded, the next
+    question loads it again"* about a model that is loaded. That is the exact
+    claim `detect`'s own docstring says it exists not to make, reached from the
+    other side.
+
+    SLEEPING is the exception, and deliberately: it is a decision about
+    *behaviour* rather than an observation of memory, so the machine coming up
+    does not withdraw it. `_use_local_server` already reads `is_up()` before its
+    guard, so a machine that is up answers whatever the choice says.
+    """
+    if chosen is Presence.SLEEPING:
+        return Presence.SLEEPING
+    return Presence.ACTIVE if is_up() else Presence.DROWSY
+
+
 def apply(target: Presence,
           *,
           is_up: Callable[[], bool],

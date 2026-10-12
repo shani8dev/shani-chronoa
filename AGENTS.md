@@ -214,6 +214,99 @@ Recorded as a clean result rather than deleted, so the next pass checks the clai
 instead of re-deriving it - and so the two D-Bus actions are not "wired" into a
 menu by someone reading only this table.
 
+## Read and cleared: every config key the code reads is in the schema (2026-10-12)
+
+The reverse direction of the GAction check, and the dangerous one. A key the code
+reads that is **not** in the gschema silently takes its Python default forever -
+which is how `calendar-write-enabled` and `fm-radio-enabled` shipped: both named a
+consent switch, both were refused on every call with a sentence telling the person
+to enable something that had no row in Settings. Both are recorded in
+"Audit-verified known issues". Nothing had re-checked it since.
+
+Measured: **192** `<key>` entries in the gschema, and **39** distinct literals the
+Python tree hands to `config.get/get_bool/get_string/set*` - collected by **AST**,
+so a key named in a comment is not a caller, and only on receivers whose name
+contains `config`.
+
+    keys read by code but absent from the schema: 0
+
+**Two controls, both run, both biting** - the first scan of this shape could not
+fail twice before it said anything, so this one was checked the other way round:
+
+1. six of the literals it found were printed and confirmed present in the schema,
+   so the AST filter is not over-narrow and finding them means something;
+2. an **invented** key (`calendar-write-enabled-typo`) was added to the read set
+   and the scan flagged exactly one - itself. A check that reports 0 is only worth
+   reading if 0 is reachable, and this one reaches it.
+
+The other direction is clean too, and was: every one of the 192 schema keys is
+named somewhere in the package, so there is no setting nothing reads.
+
+## And reconciling one of the two made the label and the press disagree (2026-10-12)
+
+`reconcile` was wired into the row that *labels* the presence button, and nowhere
+else. `_cycle_presence` still computed its target from the **stored** choice.
+
+With a stale DROWSY and the machine up - the ordinary case, since a question
+cold-starts the model and nothing writes the choice back:
+
+| | reads | result |
+|---|---|---|
+| the label the person sees | `action(reconcile(DROWSY, up))` | **"Free the model"** - which reads as *stop it*, so Drowsy |
+| what the press did | `DROWSY.next()` | **SLEEPING** |
+
+So the verb described one action and the handler performed another, and the person
+landed on Asleep having asked for the model to be released. It is the exact failure
+this file records for `presence.action()` - *the button's label is the next action,
+not the current state* - broken one level up, by the label being right and the
+press not following it.
+
+One line: `_cycle_presence` reconciles too, so both halves are computed from the
+same value. `test_the_label_and_the_press_agree` asserts **both** - what the button
+says and what pressing it reaches - because a test that checked only the label
+would have passed all the way through.
+
+### And the reconcile change broke a test of my own, for a reason worth reading
+
+`test_every_state_in_the_cycle_is_reachable` parametrized `(ACTIVE, True)` with the
+machine **down** - an incoherent state, `ACTIVE` with nothing running. Before
+`reconcile` that combination was simply passed through, so the fixture's expected
+`DROWSY` held. After, it is exactly the stale case the rule exists to correct, so
+the press reaches SLEEPING and the assertion failed.
+
+The fixture was wrong rather than the code: it described a state the machine could
+not be in. It now carries a `machine` column and pins **six** combinations - three
+coherent, three stale - because the stale ones are the ones that only exist if
+something forgot to write the choice back. **A test that was passing because its
+fixture described an impossible machine is the same defect as one that cannot
+fail**, and it took a *later* change to expose it.
+
+## The runner named a witness that could not bite, and it was mine (2026-10-12)
+
+The `asleep_state` set came back **16 mutations, 16 caught, 0 survivors** - and one
+line underneath that mattered more than the tally:
+
+    -> NOT caught by test_a_released_model_does_not_claim_to_be_loaded
+
+The mutation makes `reconcile` answer SLEEPING whatever the machine says. I had
+named `test_a_released_model_does_not_claim_to_be_loaded` as one of its witnesses,
+because that test is about a *stale* choice - `ACTIVE` stored with the machine
+down. It asserts `"loaded and answering" not in said`, and with the mutation
+applied the row reads Asleep's own sentence, which does not contain that phrase
+either. **So the test passes with the defect present** - it belongs to the
+*unchanged* mutation, where `ACTIVE` survives reconciliation and does say it.
+
+That is the "a witness that cannot fail" defect, in the one place it is easiest to
+miss: not in a test, in a *list of test names*. A set whose `expect` names tests
+that pass either way reads as well-covered while the mutation it claims to cover
+is covered by a different witness for a different reason.
+
+Removed, with the reason written into the set so the next reader does not re-add
+it. **The mechanism that caught it is worth keeping**: the runner reports a named
+witness that did not fail separately from a survivor, so an over-claimed list is
+visible rather than silent - the same distinction as the "failed for another
+reason" line two entries above, and the reason both are worth the extra output.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit

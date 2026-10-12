@@ -408,6 +408,13 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         current = getattr(self.app, "_presence", None)
         if current is None:
             current = presence.detect(local_llm.is_up)
+        # **Reconciled, for the same reason the row is.** The label a person
+        # reads is built from the reconciled value, so pressing it must cycle
+        # from that value too. With a stale DROWSY and the machine up, the button
+        # said "Free the model" - which reads as *stop it*, so Drowsy - while the
+        # press went straight to SLEEPING. The verb and the action disagreed,
+        # and the person got a state they did not ask for.
+        current = presence.reconcile(current, local_llm.is_up)
         target = current.next()
         row.set_subtitle("Working...")
         button.set_sensitive(False)
@@ -505,6 +512,12 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
         chosen = getattr(self.app, "_presence", None)
         if chosen is None:
             chosen = presence.detect(local_llm.is_up)
+        # **Reconciled, or a stored choice publishes a claim about memory that
+        # stopped being true.** A question cold-starts the model, the stored
+        # choice stays DROWSY, and the row says "the model is not loaded" about a
+        # loaded one - `detect`'s own docstring says presence exists not to do
+        # that, and storing the choice is what made it possible again.
+        chosen = presence.reconcile(chosen, local_llm.is_up)
         if getattr(self, "_presence_cycle_button", None) is not None:
             self._presence_cycle_button.set_label(chosen.action())
         if getattr(self, "_presence_row", None) is not None:
