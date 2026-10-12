@@ -201,3 +201,37 @@ def _senses_row_titles():
         if line.startswith("RESULT"):
             return json.loads(line[6:]).get("rows", [])
     return []
+
+
+class TestTheDerivationCoversTheWholeTable:
+    """**The direction nothing checked.** A sense with a consent key and no module
+    is unreachable: the Senses panel iterates `discover_senses()`, so a key the
+    table carries for a sense that no longer exists becomes a switch nobody can
+    draw. Measured 2026-10-12: 53 registered against 53 in the table, zero in
+    either direction - so this is a guard holding a real invariant, not a
+    description of a defect.
+
+    It is worth the test because the table and the registry are two lists kept
+    in step by hand, and this repo's record of hand-kept lists is that they are
+    "wrong the moment a sense is added, and wrong silently".
+    """
+
+    def test_no_consent_key_names_a_sense_that_does_not_exist(self):
+        registry = senses_registry.discover_senses()
+        orphans = sorted(set(config._SENSE_CONSENT_KEYS) - set(registry))
+        assert not orphans, (
+            "these senses have a consent key and no module, so the Senses panel "
+            "cannot draw a row for them and the key is a switch nobody can find: "
+            + ", ".join(orphans))
+
+    def test_every_registered_sense_has_a_key(self):
+        """The other direction, and the one that makes a *new* sense safe: a
+        sense with no key cannot be granted at all, which is the
+        `sense_allowed`-returns-False path - fail-closed, and a capability that
+        looks present and cannot be turned on."""
+        registry = senses_registry.discover_senses()
+        keyless = sorted(n for n in registry
+                         if not config._consent_key_for(n))
+        assert not keyless, (
+            "these senses are registered and carry no consent key, so no "
+            "switch can grant them: " + ", ".join(keyless))
