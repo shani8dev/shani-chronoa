@@ -48,8 +48,15 @@ code before it was written down:
 4. **A mutation is "caught" only when one of the named tests fails.** A whole-file
    failure that happens for another reason is reported as caught *and* as
    mis-named, so the witness list stays honest.
-5. **`--keep-going` runs every set even when one raises**, so one broken anchor
-   does not hide the rest.
+5. **A set that raises does not stop the run** - it is measured, reported, and
+   the rest still run. `--stop-on-first-error` brings the old behaviour back for
+   when a broken tree is the thing being diagnosed and nine more sets' worth of
+   time would only bury it. *Measured 2026-12:* the first full inventory hit an
+   unmeasurable mutation in `sense_budget` and, on the default, stopped - **9 of
+   43 sets never ran** and the tally still read `273 mutations, 261 caught`, a
+   complete-looking number for a third of a run. So the tally now says how many
+   sets it reached out of how many existed, and an incomplete one is not allowed
+   to read like a clean one.
 6. **Nothing here is packaged.** `tools/` is the repo's maintenance surface, the
    same as `cli_matrix.py` and `task_eval.py`.
 7. **One run at a time, and a killed run says so.** Rules 2 and 7 are both about
@@ -62,6 +69,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -304,6 +312,14 @@ def _failures(test_file: str) -> tuple:
     out = subprocess.run(
         [sys.executable, "-m", "pytest", test_file, "-q",
          "-p", "no:cacheprovider", "--tb=no", "-rf"],
+          # **Do not add `-rs` here.** Measured 2026-12, the hard way: passing
+          # `-rf -rs` together makes pytest emit the SKIPPED short summary and
+          # **no FAILED lines at all** (`-q --tb=no -rf -rs` on a probe with one
+          # failing test prints one `SKIPPED` line and zero `FAILED`). Every
+          # witness then looks absent, `hit` is empty, and **every mutation in
+          # every set is reported as a survivor** - the harness becomes a stamp
+          # that says nothing was caught. The skip count is read from the summary
+          # line instead, which already carries it and costs no flag.
         capture_output=True, text=True, env=_test_env(),
         cwd=str(ROOT), timeout=RUN_TIMEOUT,
     )
@@ -332,6 +348,12 @@ def _failures(test_file: str) -> tuple:
     # That distinction is exactly OmO's #8850 in the other direction - a checker
     # that could not run is not a checker that found nothing, and the only way to
     # tell them apart is to notice the case and say so.
+    # How many tests did the run SKIP? Read from the summary line, which already
+    # reads `1 failed, 1 passed, 1 skipped in 0.00s`. This cannot say *which*
+    # witness skipped - the wording at the call site says "may" for exactly that
+    # reason - but it is enough to tell a measurement in which some witnesses
+    # could not run apart from one where they ran and passed.
+    skipped = 0
     if not summary:
         errored = [l for l in text.splitlines()
                    if "error during collection" in l or " error in " in l
@@ -341,7 +363,10 @@ def _failures(test_file: str) -> tuple:
         raise MutationDidNotParse(
             "pytest produced no summary - the run neither passed nor failed, so "
             "nothing was measured")
-    return failed, summary[-1]
+    counts = re.search(r"(\d+) skipped", summary[-1])
+    if counts:
+        skipped = int(counts.group(1))
+    return failed, summary[-1], skipped
 
 
 def _witness_hit(expect: str, failed: set) -> bool:
@@ -417,7 +442,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             _apply(target, pairs)
             if verbose:
                 print(f"  MUTATED: {entry['label']}")
-            failed, summary = _failures(test_file)
+            failed, summary, skipped = _failures(test_file)
         finally:
             for path2, text in originals.items():
                 path2.write_text(text, encoding="utf-8")
@@ -453,7 +478,17 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             continue
 
         unexplained = _unexplained(failed, entry["expect"])
-        survivors.append((entry["label"], summary, unexplained))
+        measured = summary
+        if skipped:
+            # **Say the run skipped tests rather than implying it covered
+            # them.** "may" because `-rs` names a location and not a test id,
+            # so this cannot claim *which* witness skipped - only that a
+            # measurement in which some of them could not run is not the same
+            # sentence as one where they ran and passed.
+            measured = (f"{summary}, {skipped} skipped - a witness that skips "
+                        f"cannot fail, so this may be unmeasurable on this "
+                        f"machine rather than uncovered")
+        survivors.append((entry["label"], measured, unexplained))
         if verbose:
             print(f"    -> SURVIVOR  ({summary})")
             if unexplained:
@@ -471,8 +506,11 @@ def main(argv=None) -> int:
                         help="list the mutation sets and exit")
     parser.add_argument("--quiet", action="store_true",
                         help="only the final tally")
-    parser.add_argument("--keep-going", action="store_true",
-                        help="run every set even when one raises")
+    parser.add_argument("--stop-on-first-error", action="store_true",
+                        help="abandon the remaining sets when one raises; "
+                             "the default runs them all and reports each "
+                             "failure, so one bad anchor cannot hide the "
+                             "rest")
     parser.add_argument("--wait", type=float, default=0.0, metavar="SECONDS",
                         help="wait this long for another run to finish instead of "
                              "refusing (default: refuse immediately)")
@@ -501,6 +539,7 @@ def main(argv=None) -> int:
 
     started = time.time()
     totals = {"count": 0, "caught": 0}
+    reached = 0
     all_survivors = []
     all_equivalent = []
     failures = []
@@ -521,6 +560,7 @@ def main(argv=None) -> int:
             print("  RECOVERED a previous run's mutations that were never put "
                   "back (it was killed): " + ", ".join(recovered))
         for name in wanted:
+            reached += 1
             if not args.quiet:
                 print(f"=== {name} ===")
             try:
@@ -528,13 +568,14 @@ def main(argv=None) -> int:
             except Exception as exc:  # noqa: BLE001 - one bad set must lose neither
                 failures.append((name, exc))
                 print(f"  ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
-                if not args.keep_going:
+                if args.stop_on_first_error:
                     # **The tally is still printed.** A set that raises on a
                     # rotated anchor is a result, not an abort: the other sets'
                     # answers are still true, and a run that prints nothing reads
                     # as "nothing ran".
                     print()
-                    _report(totals, all_survivors, failures, started, all_equivalent)
+                    _report(totals, all_survivors, failures, started,
+                            all_equivalent, (reached, len(wanted)))
                     return 1
                 continue
             if result.get("empty"):
@@ -549,7 +590,8 @@ def main(argv=None) -> int:
 
     if not args.quiet:
         print()
-    _report(totals, all_survivors, failures, started, all_equivalent)
+    _report(totals, all_survivors, failures, started, all_equivalent,
+            (reached, len(wanted)))
     return 1 if (all_survivors or failures) else 0
 
 
@@ -596,10 +638,28 @@ def _check_anchors(wanted, available) -> int:
     return 0
 
 
-def _report(totals, survivors, failures, started, equivalent=()) -> None:
-    print(f"{totals['count']} mutations, {totals['caught']} caught, "
-          f"{len(survivors)} survivors, {len(equivalent)} equivalent  "
-          f"({time.time() - started:.0f}s)")
+def _report(totals, survivors, failures, started, equivalent=(), sets=None) -> None:
+    """The tally.
+
+    **`sets` is `(reached, available)`, and it is not decoration.** A run that
+    stopped early printed the same line as one that finished - `273 mutations, 261
+    caught` either way - with nothing in the output to say which. That number is
+    the thing people quote, so a number that cannot tell a full inventory from a
+    third of one is worse than no number at all.
+    """
+    reached, available = sets if sets else (None, None)
+    line = (f"{totals['count']} mutations, {totals['caught']} caught, "
+            f"{len(survivors)} survivors, {len(equivalent)} equivalent")
+    if available:
+        line += f", {reached} of {available} sets"
+    print(f"{line}  ({time.time() - started:.0f}s)")
+    if available and reached < available:
+        # **Say it in the tally, not only on stderr.** The stderr line is the first
+        # thing a raising run prints; the tally is the thing that survives into a
+        # commit message. A partial run must not be quotable as a clean one.
+        print(f"  INCOMPLETE: {available - reached} of {available} sets were never "
+              f"run, so the {totals['count']} above is a partial inventory and NOT "
+              f"the full one - re-run without --stop-on-first-error to get the rest")
     for name, label, summary, failed in survivors:
         print(f"  SURVIVOR [{name}] {label}")
         print(f"          {summary}")

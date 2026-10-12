@@ -288,7 +288,7 @@ class TestTheHarnessCanFail:
              "label": "an anchor that no longer exists",
              "expect": ["test_whatever"]},
         ])
-        _run("--keep-going", name, cwd=tmp_path)
+        _run(name, cwd=tmp_path)
         assert target.read_bytes() == before, (
             "the harness left the fixture mutated; a second run would then be "
             "measuring a tree that nobody asked for")
@@ -560,7 +560,7 @@ class TestNoSetIsLeftBehind:
         Deliberate: `python3 tools/mutate.py --quiet`, or
         `pytest -m slow tests/test_mutation_harness_can_fail.py`.
         """
-        out = _run("--quiet", "--keep-going", timeout=3600)
+        out = _run("--quiet", timeout=3600)
         assert out.returncode == 0, (
             "a checked-in mutation set reports a survivor or an error. Fix the "
             "set or the code it aimed at - do not delete the set:\n" + out.stdout)
@@ -680,3 +680,227 @@ class TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne:
             "an unwitnessed, unflagged mutation was NOT reported, so this gate "
             "would pass over exactly the defect it exists to catch"
         )
+
+
+#: One failing test and one skipped test. The pair is the whole point of the class
+#: below: a harness that reports the skip and loses the failure is worse than one
+#: that reports neither, because the tally still looks like a measurement.
+MIXED_TEST = '''from __future__ import annotations
+
+import pytest
+
+
+def test_a_real_failure():
+    assert 1 == 2
+
+
+def test_a_skipped_witness():
+    """The shape every real-GGUF witness in this repo takes without its model."""
+    pytest.skip("CHRONOA_TEST_MODEL is not set")
+'''
+
+
+class TestTheTallyCannotBeQuietlyWrong:
+    """Two ways this harness produced a number that read as a measurement.
+
+    **One of them was mine, made while fixing the other.** Reporting the first full
+    inventory (2026-12), `kv_parity`'s one survivor had both named witnesses
+    *skipped*, so a real-GGUF condition was being reported as an uncovered guard.
+    The fix was to report the skip count - and the way I took it, adding `-rs` to
+    the pytest call, **silently deleted every `FAILED` line**: `-rf -rs` together
+    emit the skip summary and no failures, so `hit` was empty for every mutation in
+    every set and the whole harness reported "nothing is caught". A live run read
+    `18 mutations, 0 caught, 17 survivors`, which is loud, but only because the
+    failure happened to be in the loud direction.
+
+    The skip count now comes from the summary line, which already carries it, so
+    there is no flag that can take the failures with it.
+    """
+
+    def _runner(self):
+        namespace = {"__file__": str(RUNNER)}
+        exec(compile(RUNNER.read_text(encoding="utf-8"), str(RUNNER), "exec"),
+             namespace)
+        return namespace
+
+    def test_a_run_reports_its_failures_and_its_skips_together(self, tmp_path):
+        """The regression guard. Both numbers, from the same run."""
+        ns = self._runner()
+        probe = tmp_path / "test__mixed.py"
+        probe.write_text(MIXED_TEST, encoding="utf-8")
+        ns["STATE_DIR"] = tmp_path / "build" / "mutate"
+        ns["ROOT"] = tmp_path
+        failed, summary, skipped = ns["_failures"](str(probe))
+        names = {name.split("::")[-1].split(" ")[0] for name in failed}
+        assert "test_a_real_failure" in names, (
+            f"the failing test was not reported as failing - the summary line says "
+            f"{summary!r}, and a harness that cannot see a failure cannot tell a "
+            f"caught mutation from an uncovered one")
+        assert skipped == 1, (
+            f"the skipped test was not counted either - summary was {summary!r}")
+
+    def test_the_pytest_flags_the_runner_passes_emit_failures(self, tmp_path):
+        """**The control, and the reason the fix is worded the way it is.**
+
+        This asserts the trap is real rather than folklore, so the comment above it
+        can be trusted later: it runs pytest both ways on the same file and
+        requires the `-rs` form to lose the `FAILED` lines. If a future pytest
+        honours both flags, this test fails and the guard can be simplified.
+        """
+        probe = tmp_path / "test__mixed.py"
+        probe.write_text(MIXED_TEST, encoding="utf-8")
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+
+        def run(*flags):
+            return subprocess.run(
+                [sys.executable, "-m", "pytest", str(probe), "-q",
+                 "-p", "no:cacheprovider", "--tb=no", *flags],
+                capture_output=True, text=True, env=env, cwd=str(tmp_path))
+
+        plain, with_skips = run("-rf"), run("-rf", "-rs")
+        assert "FAILED" in plain.stdout, plain.stdout
+        assert "FAILED" not in with_skips.stdout, (
+            "pytest now honours -rf together with -rs, so the note in "
+            "tools/mutate.py warning that -rs deletes the FAILED lines is stale "
+            "and the skip count can move back to the short summary")
+
+    def test_a_survivor_says_when_its_witnesses_skipped(self, tmp_path):
+        """A witness that skips cannot fail, and the report has to say which kind
+        of survivor this is."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            MIXED_TEST, encoding="utf-8")
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "TOTAL = 3\n",
+            "new": "TOTAL = 4\n",
+            "label": "a constant only a skipped test could have covered",
+            "expect": ["test_a_skipped_witness"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        assert "SURVIVOR" in out.stdout, out.stdout + out.stderr
+        assert "skipped" in out.stdout and "unmeasurable" in out.stdout, (
+            "the survivor does not mention that a test skipped, so a condition "
+            "that was simply absent from this machine reads exactly like a guard "
+            "nobody wrote a test for:\n" + out.stdout)
+        assert "1 skipped" in out.stdout, out.stdout
+
+    def test_a_survivor_in_a_clean_run_is_not_annotated(self, tmp_path):
+        """**The control for the test above.** The annotation must come from the
+        run, not from the wording being unconditional - otherwise it says nothing
+        about any particular survivor."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            "def test_nothing_skips():\n    assert True\n", encoding="utf-8")
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "TOTAL = 3\n",
+            "new": "TOTAL = 4\n",
+            "label": "a constant no test reads",
+            "expect": ["test_a_test_that_does_not_exist"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        assert "SURVIVOR" in out.stdout, out.stdout + out.stderr
+        assert "unmeasurable" not in out.stdout, (
+            "a survivor was annotated as possibly-unmeasurable in a run where "
+            "nothing skipped at all:\n" + out.stdout)
+
+    def _tree(self, tmp_path, test_source=None):
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            test_source or FIXTURE_TEST, encoding="utf-8")
+
+    def _named_set(self, tmp_path, name, mutations):
+        path = tmp_path / "tools" / "mutations" / f"{name}.py"
+        body = ['TEST_FILE = "tests/test__mutation_selfcheck.py"', "",
+                "MUTATIONS = ["]
+        body += [f"    {entry!r}," for entry in mutations]
+        path.write_text("\n".join(body) + "]\n", encoding="utf-8")
+
+    # An anchor that no longer exists. `_apply` refuses it rather than editing
+    # blind, the set raises, and that is the case the default has to survive: it is
+    # how a mutation set rots when its module is edited underneath it.
+    _ROTATED = {
+        "file": "usr/lib/fixture_module.py",
+        "old": "    return sum(items) + 99\n",
+        "new": "    return 0\n",
+        "label": "an anchor that no longer exists",
+        "expect": ["test_whatever"],
+    }
+    _FINE = {
+        "file": "usr/lib/fixture_module.py",
+        "old": "    return sum(items)\n",
+        "new": "    return sum(items) + 1\n",
+        "label": "the fixture's total is off by one",
+        "expect": ["test_the_total_is_what_the_docstring_says"],
+    }
+
+    def test_a_set_that_raises_does_not_hide_the_others(self, tmp_path):
+        """**Measured on the real inventory, 2026-12.** `sense_budget` hit a
+        mutation that could not be measured and the run stopped - 9 of 43 sets
+        never executed, and the tally read `273 mutations, 261 caught`, which is a
+        finished-looking number for a third of a run. A set whose anchor rots is a
+        result to fix; it is not a reason to throw away the other answers.
+        """
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        out = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
+        assert "2 of 2 sets" in out.stdout, (
+            "the run stopped at the first set that raised, so the other one was "
+            "never measured:\n" + out.stdout + out.stderr)
+        assert "ERROR [aaa_rots]" in out.stdout, out.stdout + out.stderr
+        assert "caught by test_the_total" in out.stdout, (
+            "the set after the failing one did not run:\n" + out.stdout)
+
+    def test_a_partial_tally_says_it_is_partial(self, tmp_path):
+        """The other half. Stopping early is defensible when the tree is what is
+        being diagnosed; printing a clean number afterwards is not."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        out = _run("--stop-on-first-error", "aaa_rots", "zzz_runs",
+                   cwd=tmp_path)
+        assert "INCOMPLETE" in out.stdout, (
+            "a run that stopped early printed a tally that reads exactly like a "
+            "finished one, so a partial inventory can be quoted as the full one:\n"
+            + out.stdout)
+        assert "1 of 2 sets" in out.stdout, out.stdout
+
+    def test_a_finished_tally_carries_no_incomplete_warning(self, tmp_path):
+        """**The control.** A warning that fires on every run warns about nothing."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        out = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
+        assert "INCOMPLETE" not in out.stdout, (
+            "a run that reached both sets still claimed to be partial:\n"
+            + out.stdout)
+        assert "2 of 2 sets" in out.stdout, out.stdout
+
+    def test_the_flag_is_the_only_way_to_stop_early(self, tmp_path):
+        """A default nobody can discover is a default nobody can rely on either
+        way, so the opt-out has to exist *and* the default has to be the safe one."""
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        stopped = _run("--stop-on-first-error", "aaa_rots", "zzz_runs",
+                       cwd=tmp_path)
+        default = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
+        assert "INCOMPLETE" in stopped.stdout
+        assert "INCOMPLETE" not in default.stdout
+        assert ("2 of 2" in default.stdout) != ("2 of 2" in stopped.stdout), (
+            "--stop-on-first-error and the default reached the same number of "
+            "sets, so the flag does not do what its help says")
