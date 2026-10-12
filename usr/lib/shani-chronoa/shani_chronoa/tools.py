@@ -1016,6 +1016,12 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
     if scoped_resource is not None:
         allowed, why = permissions.permits(name, scoped_resource)
         if not allowed:
+            # **Say it out loud, not just to the model.** `why` goes back as the
+            # tool result, so the assistant knows and can propose something else -
+            # and before this the person never found out at all, because nothing
+            # on this path touched the UI. A refusal is the single most important
+            # thing this assistant can do to someone, and it happened silently.
+            _notice_refusal(name, scoped_resource, why)
             return DispatchResult(why, verification.Verdict.UNVERIFIED, False)
 
     # A grant the user gave this session opens the tool's own consent key for
@@ -1325,6 +1331,25 @@ def _unlight_hands(activity) -> None:
 
         body.body.done(activity)
     except Exception:                                   # noqa: BLE001
+        pass
+
+
+def _notice_refusal(tool: str, resource: str, why) -> None:
+    """Tell the person their request was declined. Never raises into the dispatch.
+
+    The tool result already carries the reason to the model; this is the same
+    fact to the person. `body.notice` swallows a failing listener, and this
+    wrapper exists because `tools.py` is called from a tool loop where an
+    exception would lose the dispatch entirely.
+    """
+    reason = (why or "").strip().rstrip(".")
+    said = f"Not done: {reason}" if reason else "Not done"
+    if resource and resource != "*":
+        said = f"{said} ({resource[:60]})"
+    try:
+        from shani_chronoa import body
+        body.body.notice(said)
+    except Exception:                                  # noqa: BLE001
         pass
 
 

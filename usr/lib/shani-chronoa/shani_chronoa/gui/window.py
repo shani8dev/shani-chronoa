@@ -987,6 +987,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         return False
 
     def _setup_ui(self) -> None:
+        self._install_body_notices()
+
         main_box = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL,
             spacing=10,
@@ -1807,6 +1809,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         else:
             self._state_label.remove_css_class("dim-label")
             self._state_label.set_tooltip_text("")
+
+    def _install_body_notices(self) -> None:
+        """Show a refusal on the detail line, the way a sound cannot.
+
+        **The hook the body has always wanted.** `tools.py` imports no GUI and
+        has no app reference, so the body is the one process-wide channel from a
+        refusal inside the tool loop to something the person can see - and the
+        organ strip cannot carry it, because a refusal is an *event* and that row
+        has eight lights already.
+        """
+        try:
+            from shani_chronoa import body
+            body.body.set_notice(self.set_status)
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not install the refusal notice",
+                           exc_info=True)
 
     def set_status(self, status: str) -> None:
         """Show a transient notice on the detail line.

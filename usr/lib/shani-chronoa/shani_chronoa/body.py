@@ -141,6 +141,7 @@ class Body:
         self._lock = threading.Lock()
         self._activities: List[Activity] = []
         self._listeners: List[Callable[["Body"], None]] = []
+        self._notice: Optional[Callable[[str], None]] = None
         self._audible: Optional[Callable[[str, str], None]] = None
 
     # -- recording ------------------------------------------------------
@@ -256,6 +257,35 @@ class Body:
                 listener(self)
             except Exception:                          # noqa: BLE001 - see the docstring
                 logger.debug("a body listener failed", exc_info=True)
+
+    def set_notice(self, callback: Optional[Callable[[str], None]]) -> None:
+        """Install the "something the person must know" hook, or None to clear it.
+
+        **A mirror of `set_audible`, because the body is already the one
+        process-wide channel from a refusal in the middle of the tool loop to
+        something the person can see.** `tools.py` imports no GUI and has no app
+        reference - it is four layers down - so without a hook a refusal reaches
+        the model as text and the person never learns it happened.
+
+        Sound was not enough. The organ strip can show a light, and it has eight
+        already, which is the most this row can carry; and a refusal is not a
+        *state* to be represented continuously but an **event**, so the right
+        shape for it was always a transient notice rather than another light.
+        """
+        self._notice = callback
+
+    def notice(self, text: str) -> None:
+        """Tell the person something they would otherwise not find out."""
+        message = (text or "").strip()
+        if not message:
+            return
+        callback = self._notice
+        if callback is None:
+            return
+        try:
+            callback(message)
+        except Exception:                              # noqa: BLE001
+            logger.debug("a body notice listener failed", exc_info=True)
 
     def set_audible(self, callback: Optional[Callable[[str, str], None]]) -> None:
         """Install the sound hook, or None to switch sounds off.
