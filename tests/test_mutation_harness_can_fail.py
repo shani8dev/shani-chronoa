@@ -700,6 +700,17 @@ def test_a_skipped_witness():
 '''
 
 
+#: A fixture that raises during setup, which turns every test that uses it into
+#: an ERROR rather than a FAILED. This is what `-rf` cannot report.
+BROKEN_FIXTURE = """import pytest
+
+
+@pytest.fixture
+def broken():
+    raise RuntimeError("the fixture itself could not set up")
+"""
+
+
 class TestTheTallyCannotBeQuietlyWrong:
     """Two ways this harness produced a number that read as a measurement.
 
@@ -740,29 +751,116 @@ class TestTheTallyCannotBeQuietlyWrong:
             f"the skipped test was not counted either - summary was {summary!r}")
 
     def test_the_pytest_flags_the_runner_passes_emit_failures(self, tmp_path):
-        """**The control, and the reason the fix is worded the way it is.**
+        """**The whole selector table, measured, because the trap is not about one
+        flag.**
 
-        This asserts the trap is real rather than folklore, so the comment above it
-        can be trusted later: it runs pytest both ways on the same file and
-        requires the `-rs` form to lose the `FAILED` lines. If a future pytest
-        honours both flags, this test fails and the guard can be simplified.
+        pytest's short summary is **per-category and last-selector-wins**, so
+        adding a selector does not add to what is reported - it *replaces* it.
+        The runner needed `-rf` for failures and, since 2026-12, `-rfE` for errors
+        too; it briefly needed `-rs` for skips and that silently deleted the
+        `FAILED` lines. One file with one real failure, one skipped test and one
+        fixture error settles all of it at once.
+
+        Asserting the table rather than one anecdote is what makes the next person
+        who adds a selector find out what it costs.
         """
+        # Its own module, because the table needs all three verdicts in one run:
+        # a failure, an ERROR from a raising fixture, and a skip. MIXED_TEST has
+        # the first and third but nothing that *uses* the broken fixture, so
+        # borrowing it here would have measured `-rE` against a file with no
+        # errors in it - and an absence of errors reads exactly like `-rE`
+        # working.
         probe = tmp_path / "test__mixed.py"
-        probe.write_text(MIXED_TEST, encoding="utf-8")
+        probe.write_text(
+            "def test_a_failure():\n    assert 1 == 2\n\n"
+            "def test_an_error(broken):\n    assert True\n\n"
+            "def test_a_skip():\n"
+            "    import pytest\n    pytest.skip('no model')\n",
+            encoding="utf-8")
+        (tmp_path / "conftest.py").write_text(BROKEN_FIXTURE, encoding="utf-8")
         env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 
-        def run(*flags):
-            return subprocess.run(
+        def counts(*flags):
+            out = subprocess.run(
                 [sys.executable, "-m", "pytest", str(probe), "-q",
                  "-p", "no:cacheprovider", "--tb=no", *flags],
-                capture_output=True, text=True, env=env, cwd=str(tmp_path))
+                capture_output=True, text=True, env=env, cwd=str(tmp_path)).stdout
+            return (sum(l.startswith("FAILED") for l in out.splitlines()),
+                    sum(l.startswith("ERROR") for l in out.splitlines()))
 
-        plain, with_skips = run("-rf"), run("-rf", "-rs")
-        assert "FAILED" in plain.stdout, plain.stdout
-        assert "FAILED" not in with_skips.stdout, (
-            "pytest now honours -rf together with -rs, so the note in "
-            "tools/mutate.py warning that -rs deletes the FAILED lines is stale "
-            "and the skip count can move back to the short summary")
+        # (flags) -> (failures, errors). Measured on this pytest, not remembered.
+        assert counts("-rf") == (1, 0), (
+            "-rf no longer reports failures without errors - if this changed, "
+            "re-read tools/mutate.py's note before changing it")
+        assert counts("-rE") == (0, 1), (
+            "-rE no longer suppresses failures, so last-selector-wins is not how "
+            "this pytest behaves and the note in tools/mutate.py is stale")
+        assert counts("-rfE") == (1, 1), (
+            "the runner's own flags no longer report both a failure and an error, "
+            "so a mutation that breaks a fixture would read as a bare survivor "
+            "with nothing failed for another reason")
+        assert counts("-rfE", "-rs") == (0, 0), (
+            "pytest now honours -rfE together with -rs, so the note in "
+            "tools/mutate.py warning that a second selector deletes both is stale")
+
+        # **And the runner has to actually pass them.** The table above measures
+        # pytest, which is indifferent to what this repository does - so a run that
+        # reverted the runner to bare `-rf` left every assertion above green and
+        # nothing here noticed. The flags are read off the runner's own source, so
+        # the flag under test is the one actually used.
+        runner_source = RUNNER.read_text(encoding="utf-8")
+        assert '"-rfE"' in runner_source, (
+            "tools/mutate.py no longer passes -rfE, so a mutation that breaks a "
+            "fixture produces ERROR lines the runner never reads - reported as a "
+            "bare survivor with nothing failed for another reason")
+        # `-rfE -rs` was the actual bug, so the combination is refused outright.
+        assert '"-rs"' not in runner_source, (
+            "tools/mutate.py carries -rs, which suppresses both the FAILED and the "
+            "ERROR lines and turns every mutation in every set into a survivor")
+
+    def test_a_mutation_that_breaks_a_fixture_is_caught_not_a_bare_survivor(self,
+                                                                        tmp_path):
+        """**The false survivor, reproduced.** Found by the first complete
+        inventory: `wizard_mark`'s "the name collision, restored" was reported a
+        plain SURVIVOR while its own summary line read `28 passed, 8 warnings,
+        101 errors` - and the first of those 101 errors *is one of its named
+        witnesses*.
+
+        So the mutation was covered all along. `-rf` reports failures only, a
+        raising fixture turns every test that uses it into an ERROR, none of them
+        were printed, `failed` came back empty, and the harness said "nothing
+        caught this and nothing else failed either" about a mutation that broke a
+        hundred and one things. **The survivor was the harness's own blindness,
+        not a coverage gap**, and the inventory was under-reporting coverage in
+        the direction that makes a suite look worse than it is.
+        """
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        # The test file's own fixture raises, so the mutation is not what breaks
+        # it - what the harness has to notice is that the *witness* lands in the
+        # error list rather than the failure list.
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            "import pytest\n\n"
+            "@pytest.fixture\n"
+            "def broken():\n"
+            "    raise RuntimeError('the fixture could not set up')\n\n"
+            "def test_the_total_is_what_the_docstring_says(broken):\n"
+            "    assert True\n", encoding="utf-8")
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "    return sum(items)\n",
+            "new": "    return sum(items) + 1\n",
+            "label": "covered by a witness that lands in the error list",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run(name, cwd=tmp_path)
+        assert "caught by test_the_total" in out.stdout, (
+            "a mutation whose witness failed was not seen as caught, so the run "
+            "reports a bare survivor for something it actually caught:\n"
+            + out.stdout + out.stderr)
 
     def test_a_survivor_says_when_its_witnesses_skipped(self, tmp_path):
         """A witness that skips cannot fail, and the report has to say which kind
@@ -905,10 +1003,25 @@ class TestTheTallyCannotBeQuietlyWrong:
             "--stop-on-first-error and the default reached the same number of "
             "sets, so the flag does not do what its help says")
 
-    #: A replacement that leaves the file unterminated, so pytest aborts with
-    #: "1 error during collection" and the runner cannot measure the mutation.
-    #: This is the real historical case, not a contrived one: a mutation set whose
-    #: replacement drops a quote produced exactly that.
+    #: A replacement that leaves the file unterminated. **This used to be the
+    #: unmeasurable fixture and stopped being one** when `-rfE` landed: every test
+    #: importing the module now reports an ERROR, the witness is among them, and
+    #: the mutation is correctly *caught*. A broken module is a detection, not an
+    #: absence of measurement, and the harness now says so.
+    _CRASHES = (
+        "import os, pathlib\n\n\n"
+        "def pytest_collection_finish(session):\n"
+        "    src = (pathlib.Path(__file__).parent / 'usr' / 'lib'\n"
+        "            / 'fixture_module.py').read_text()\n"
+        "    if 'CRASH_PYTEST' in src:   # only when a mutation says so\n"
+        "        os._exit(3)\n")
+    _CRASHES_ENTRY = {
+        "file": "usr/lib/fixture_module.py",
+        "old": "TOTAL = 3\n",
+        "new": "TOTAL = 3\nCRASH_PYTEST = True\n",
+        "label": "a mutation after which pytest cannot be measured at all",
+        "expect": ["test_the_total_is_what_the_docstring_says"],
+    }
     _UNPARSEABLE = {
         "file": "usr/lib/fixture_module.py",
         "old": '    """A sum that is checked against a known total."""\n',
@@ -929,7 +1042,10 @@ class TestTheTallyCannotBeQuietlyWrong:
         excluded them. One unmeasurable mutation is a result about that mutation.
         """
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        # pytest dies with no summary at all - the only remaining shape
+        # of "cannot be measured", now that `-rfE` reports errors.
+        (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
+        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert "UNMEASURABLE [aaa_partial]" in out.stdout, (
             "the mutation pytest could not measure was not reported as such:\n"
@@ -939,6 +1055,62 @@ class TestTheTallyCannotBeQuietlyWrong:
             "measurement cost the whole set:\n" + out.stdout)
         assert "2 mutations," in out.stdout, out.stdout
 
+    def test_a_module_that_will_not_parse_names_the_file_that_failed(self,
+                                                                  tmp_path):
+        """**The honest shape of it, which is not the one I first wrote.**
+
+        A mutation that leaves the module unparseable produces
+        `ERROR tests/test__mutation_selfcheck.py` - **a file, not a test id**. So
+        the witness cannot be matched no matter what flags are passed: there is no
+        test run to match *against*. My first version of this test asserted the
+        mutation should be **caught**, which is wrong in both directions - the
+        suite cannot earn a catch for a test that never executed, and claiming one
+        would be exactly the absence-as-coverage this file exists to prevent.
+
+        What the runner owes a reader is a name, and it used to give one that
+        told them nothing: `split("::")[-1].split(" ")[0]` on that line yields the
+        literal word **"ERROR"**, so the report read
+        `failed for another reason: {'ERROR'}` - about a mutation that broke every
+        test in a file. The path is now reported instead.
+        """
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
+        out = _run("aaa_parse", cwd=tmp_path)
+        assert "SURVIVOR [aaa_parse]" in out.stdout, out.stdout
+        assert "test__mutation_selfcheck.py" in out.stdout, (
+            "the collection error did not name the file that could not be "
+            "collected, so a mutation that broke every test in a file reports "
+            "\"failed for another reason\" without saying which file:\n"
+            + out.stdout)
+        assert "{'ERROR'}" not in out.stdout, (
+            "the failed item is the literal word ERROR rather than a path - the "
+            "collection-error parse is reading the category as a test id:\n"
+            + out.stdout)
+
+    def test_the_collection_parse_takes_the_category_word_as_the_regression(self,
+                                                                          tmp_path):
+        """**The control, aimed at the original defect rather than at a variant.**
+
+        Reverting to the pre-fix parse (`split("::")[-1].split(" ")[0]`) means the
+        word `ERROR` becomes a test id, and this test is what notices.
+
+        Two candidate controls were tried and **neither bites**, which is the reason
+        this one is spelled out: `split(" ")[1]` produces the same file path for a
+        collection error and a different wrong answer for a FAILED line, so it does
+        not distinguish the two implementations; and taking the value from
+        `_unexplained` instead tests the same code twice. A control has to fail on
+        the *original* defect, and the original defect was a line beginning `ERROR`
+        with nothing after it that could be a test id.
+        """
+        self._tree(tmp_path)
+        self._named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
+        out = _run("aaa_parse", cwd=tmp_path)
+        assert "{'ERROR'}" not in out.stdout, (
+            "the collection error parsed as a test id, so a reader is told "
+            "\"failed for another reason: {'ERROR'}\" about a mutation that "
+            "broke every test in a file - and that names nothing to act on:\n"
+            + out.stdout)
+
     def test_the_tally_columns_add_up_to_the_mutation_count(self, tmp_path):
         """**The invariant that makes a partial inventory visible by arithmetic.**
 
@@ -947,7 +1119,10 @@ class TestTheTallyCannotBeQuietlyWrong:
         did, it is a documented equivalent, or pytest could not measure it.
         """
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        # pytest dies with no summary at all - the only remaining shape
+        # of "cannot be measured", now that `-rfE` reports errors.
+        (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
+        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         tally = [l for l in out.stdout.splitlines() if " mutations," in l]
         assert tally, out.stdout
@@ -965,7 +1140,10 @@ class TestTheTallyCannotBeQuietlyWrong:
         still not a complete inventory. Those are different sentences and the
         tally has to be able to say both."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        # pytest dies with no summary at all - the only remaining shape
+        # of "cannot be measured", now that `-rfE` reports errors.
+        (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
+        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert "1 of 1 sets" in out.stdout, out.stdout
         assert "INCOMPLETE" in out.stdout, (
@@ -987,7 +1165,10 @@ class TestTheTallyCannotBeQuietlyWrong:
         """A run that could not measure something is not a clean run, and the
         exit code is what a script reads."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_partial", [self._UNPARSEABLE, self._FINE])
+        # pytest dies with no summary at all - the only remaining shape
+        # of "cannot be measured", now that `-rfE` reports errors.
+        (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
+        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert out.returncode != 0, (
             "a run that could not measure one of its mutations exited 0, so a "

@@ -311,7 +311,30 @@ def _failures(test_file: str) -> tuple:
     """(the FAILED test ids, the summary line)."""
     out = subprocess.run(
         [sys.executable, "-m", "pytest", test_file, "-q",
-         "-p", "no:cacheprovider", "--tb=no", "-rf"],
+         "-p", "no:cacheprovider", "--tb=no", "-rfE"],
+          # **`-rfE`, not `-rf`.** Measured 2026-12 from the first complete
+          # inventory: `wizard_mark`'s "the name collision, restored" was
+          # reported a plain SURVIVOR, and its own summary line read
+          # **`28 passed, 8 warnings, 101 errors in 48.98s`** - 101 errors,
+          # of which the first two are the mutation's OWN named witnesses.
+          #
+          # **pytest's short summary is per-category and `-rf` reports failures
+          # only.** A fixture that raises turns every test using it into an
+          # ERROR, `-rf` prints none of them, `failed` comes back empty, and
+          # the verdict is a bare "nothing caught this and nothing else
+          # failed" for a mutation that broke a hundred and one things. With
+          # `-rfE` the same run yields 101 error lines, the witnesses are found,
+          # and the mutation is **caught** - so this was the harness
+          # under-reporting coverage, and the survivor it invented was not a
+          # coverage gap at all.
+          #
+          # The selector is last-one-wins, which is why the `-rs` note below is
+          # not about `-rs`: `-rfE -rs` reports **neither**. Measured across the
+          # whole flag space on a file with one failure and one fixture error:
+          # `-rf` 1 failed / 0 error, `-rE` 0 / 1, `-rfE` 1 / 1, `-ra` 1 / 1,
+          # `-rfE -rs` 0 / 0. `test_the_pytest_flags_the_runner_passes_emit_failures`
+          # holds that table, so the next person to add a selector is told what
+          # it costs before they add it.
           # **Do not add `-rs` here.** Measured 2026-12, the hard way: passing
           # `-rf -rs` together makes pytest emit the SKIPPED short summary and
           # **no FAILED lines at all** (`-q --tb=no -rf -rs` on a probe with one
@@ -331,10 +354,32 @@ def _failures(test_file: str) -> tuple:
     # a fixture that raised during setup, which is exactly what a broken import
     # produces. Same class as `MutationDidNotParse`: a check that could not run
     # is not a check that found nothing.
-    failed = {line.split("::")[-1].split(" ")[0]
-              for line in text.splitlines()
-              if line.startswith(("FAILED", "ERROR"))}
-    summary = [l for l in text.splitlines() if " passed" in l or " failed" in l]
+    failed = set()
+    for line in text.splitlines():
+        if not line.startswith(("FAILED", "ERROR")):
+            continue
+        # **A collection error names a FILE, not a test id.** pytest prints
+        # `ERROR tests/test_selfcheck.py` for a module that will not import, and
+        # `split("::")[-1].split(" ")[0]` on that line yields the literal word
+        # `"ERROR"` - so a mutation that broke every test in a file reported
+        # `failed for another reason: {'ERROR'}`, which names nothing a reader
+        # could act on. Take the path when there is no `::`, so the same line
+        # names the file that could not be collected.
+        if "::" in line:
+            failed.add(line.split("::")[-1].split(" ")[0])
+        else:
+            failed.add(line.split()[-1])
+    # **Anchored at the start, and "error" is in the vocabulary.** Two
+    # defects, both found by running: a run with *only* errors prints
+    # `1 error in 0.01s`, which contains neither " passed" nor " failed",
+    # so the summary list came back empty and the mutation was reported
+    # UNMEASURABLE - when its witness was in the error list all along. And
+    # matching the words anywhere in a line would instead pick up
+    # short-summary entries like `ERROR tests/x.py::t - the error occurred`,
+    # so once `-rfE` was added `summary[-1]` depended on which line pytest
+    # happened to print last. pytest's summary always begins with a count,
+    # so anchor there and name the whole vocabulary.
+    summary = [l for l in text.splitlines() if _SUMMARY.match(l)]
 
     # **A collection error is not a survivor, and it is not "no summary" either.**
     # Measured here: a mutation whose replacement was indented one level too far
@@ -384,6 +429,12 @@ def _witness_hit(expect: str, failed: set) -> bool:
     """
     return expect in failed or any(
         name.startswith(expect + "[") for name in failed)
+
+
+#: pytest's own summary line: `28 passed, 8 warnings, 101 errors in 48.98s`,
+#: `1 error in 0.01s`, `4 passed, 5 skipped in 0.44s`. It always
+#: begins with a count - which is what makes anchoring on it safe.
+_SUMMARY = re.compile(r"^\s*\d+ (passed|failed|error|errors|skipped)")
 
 
 def _unexplained(failed: set, expect: "list[str]") -> set:
