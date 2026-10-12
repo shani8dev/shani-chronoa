@@ -113,7 +113,18 @@ def _switch_row(title: str, subtitle: str, active: bool) -> Gtk.Widget:
 
 
 def build(app) -> Gtk.Widget:
-    config = app.config
+    # **The app's config, or a real one.** This was `app.config` outright and
+    # made `privacy` the only panel of 33 that could not be built by anything
+    # but the full `ChronoaApplication` - so every audit that builds panels with
+    # a stub app, which is how a panel's reachability gets checked at all, got
+    # `_broken_page` instead of the panel. `learning`, `listening` and `models`
+    # already construct one directly; a stub is not good enough here because the
+    # config is written to as well as read, and a switch that looks on and does
+    # nothing is worse than a panel that says it cannot answer.
+    config = getattr(app, "config", None)
+    if config is None:
+        from shani_chronoa.config import ChronoaConfig
+        config = ChronoaConfig()
     page, set_content = common.surface(TITLE, SUBTITLE)
     body = common.page_body(18)
     #: One recorder, so the sidebar's dot says the same word as the row at the
