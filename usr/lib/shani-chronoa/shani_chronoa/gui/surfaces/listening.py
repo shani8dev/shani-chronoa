@@ -41,6 +41,15 @@ from gi.repository import GLib, Gtk  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 SURFACE_ID = "listening"
+#: Listening was the only panel with no section, so it landed in the catch-all -
+#: measured on the real sidebar: six sections, and "Everything else" holding
+#: exactly one row, Listening, under a heading that named no category a person
+#: could act on. Its two siblings in the same job declare "Sensing" (voice.py,
+#: calendar.py), and listening is the third sense of the three: what Chronoa
+#: hears. Declared here rather than added to `DEFAULT_SECTION`, because that table
+#: is the fallback for panels that predate sections and this one never did.
+SECTION = "Sensing"
+
 TITLE = "Listening"
 #: Required by `surfaces.all_surfaces()` (TITLE, ICON, build) - a surface
 #: without one raises AttributeError inside that loop, which takes the
@@ -67,6 +76,9 @@ class _StateRow(Gtk.Box):
         self.value = Gtk.Label(label=initial, xalign=1.0, wrap=True, selectable=True)
         self.append(name)
         self.append(self.value)
+        #: The button, when this fact has one. `None` for every row whose
+        #: answer cannot be changed from anywhere a button can reach.
+        self._route: Optional[Gtk.Widget] = None
 
     def set_state(self, text: str, ok: Optional[bool] = None) -> None:
         """`ok=None` is a fact with no verdict, and giving it one is how a
@@ -78,6 +90,21 @@ class _StateRow(Gtk.Box):
             self.value.add_css_class("success")
         elif ok is False:
             self.value.add_css_class("error")
+
+    def set_route(self, route: Optional[Gtk.Widget]) -> None:
+        """Put `route` at the end of this row, replacing any earlier one.
+
+        **Only ever called with a button that changes the answer.** The caller
+        decides that; this method only places it. Same rule as
+        `gui/surfaces/devices.py`: a button that opens a page and changes
+        nothing is a worse dead end than the sentence it replaced.
+        """
+        if self._route is not None:
+            self.remove(self._route)
+            self._route = None
+        if route is not None:
+            self._route = route
+            self.append(route)
 
 
 class _Row(Gtk.Box):
@@ -157,6 +184,31 @@ def _sandbox_caveat() -> str:
             f"{mb} MB address-space ceiling, which whisper.cpp can crash under. "
             f"The app itself is not under it, so asking in conversation works "
             f"while a skill-run capture may not.")
+
+
+#: The page that grants the sound permission. `heard-sound` is written in
+#: `settings_window/privacy.py` and nowhere else, so this is the only page on
+#: which the answer can change - the same route `gui/surfaces/desktop.py` uses
+#: for the two gates it names there.
+CONSENT_TARGET = "settings:privacy"
+
+
+def _consent_route(app: Any, allowed: Optional[bool]) -> Optional[Gtk.Widget]:
+    """The way out of a refused sound permission, and nothing else.
+
+    **A route only on refusal.** Granted has nothing to fix, so a button there
+    would open Privacy settings and change nothing - the dead end
+    `gui/surfaces/devices.py` calls out by name. `None` is a fact with no
+    verdict, and offering a button on it would claim a certainty the row has
+    just said it lacks. `app is None` is a panel built headless by a test, and
+    `common.wire_page_button` closes over the app it is handed, so there would be
+    nothing to press.
+    """
+    if allowed is not False or app is None:
+        return None
+    return common.wire_page_button(
+        common.open_settings_button("Open Privacy settings", CONSENT_TARGET),
+        app, CONSENT_TARGET)
 
 
 def _consent() -> "tuple[str, Optional[bool]]":
@@ -262,6 +314,18 @@ def build(app: Any = None) -> Gtk.Widget:
         fill(streams, problem)
         can_row.set_state(can, ok)
         consent_row.set_state(consent, consent_ok)
+        # **The refused gate now has a way out of it.** This panel has always
+        # named the switch precisely - "Let Chronoa name a sound when you ask is
+        # off" - and offered nothing to click, which is the dead end
+        # `tests/test_dead_ends_have_buttons.py` was written about. The key is
+        # written in `settings_window/privacy.py` and nowhere else, so that is
+        # the only page that can change it.
+        #
+        # Offered **only** on refusal: granted has nothing to fix, and
+        # `ok=None` is a fact with no verdict to act on. `app is None` is a
+        # panel built headless by a test; `wire_page_button` closes over the app
+        # it is handed, so there would be nothing to press.
+        consent_row.set_route(_consent_route(app, consent_ok))
         caveat_row.set_state(caveat or "not read", None)
         return False
 
