@@ -31,6 +31,35 @@ SLEEP_FIRST_DELAY_SECONDS = 60.0
 SLEEP_EVERY_SECONDS = 600.0
 
 
+def _dream_tick() -> None:
+    """One dream pass, and a log line for every outcome it can have.
+
+    **Three outcomes, not two.** `write_dream()` returns `None` when the pass
+    runs and its result cannot be written to disk, and the old caller's
+    `if written:` was simply false - so that case logged nothing at all, and was
+    as silent as a pass that found nothing to say. Measured, with the destination
+    unwritable: the pass read this machine's whole 18.9 MB log and produced its
+    full 40-line report, and the daemon's log held **no line about it**. A pass
+    that could not be recorded is not a pass that found nothing.
+
+    Named rather than inline in the loop because a block inside a `while` is
+    unreachable from a test, and this is the one piece of the daemon whose
+    failure has to be observable.
+    """
+    from shani_chronoa import dream as dream_module
+    try:
+        written = dream_module.write_dream()
+    except Exception:
+        # Same reasoning as the consolidation pass: a dream that cannot run must
+        # not take down the rules and senses that are the point of the daemon.
+        logger.warning("dream pass failed", exc_info=True)
+        return
+    if written:
+        logger.info("dreamed; wrote %s", written.name)
+    else:
+        logger.info("dreamed, but the result could not be written to disk")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     from shani_chronoa.senses.scheduler import AmbientScheduler
@@ -55,8 +84,9 @@ def main() -> int:
     # day looks like - which skills kept failing, which errors repeat - and that
     # is the same kind of offline reflection as consolidation, over the same
     # evidence, on the same clock. A second timer would mean a second thing to
-    # stop, start and misfire independently.
-    from shani_chronoa import consolidation, dream as dream_module
+    # stop, start and misfire independently. `_dream_tick` holds the pass and
+    # every log line its outcomes can produce.
+    from shani_chronoa import consolidation
     next_sleep = time.monotonic() + SLEEP_FIRST_DELAY_SECONDS
     try:
         while not stop.wait(1.0):
@@ -72,14 +102,7 @@ def main() -> int:
                     # here must not take down the rules and senses that are the
                     # point of running it.
                     logger.warning("consolidation failed", exc_info=True)
-                try:
-                    written = dream_module.write_dream()
-                    if written:
-                        logger.info("dreamed; wrote %s", written.name)
-                except Exception:
-                    # Same reasoning, and separately guarded: a dream that
-                    # cannot run must not also cost the consolidation above.
-                    logger.warning("dream pass failed", exc_info=True)
+                _dream_tick()
     finally:
         scheduler.stop()
         from shani_chronoa import runner_lock

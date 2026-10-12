@@ -54,7 +54,7 @@ import logging
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -208,7 +208,6 @@ def analyse(entries: Sequence[dict]) -> List[Finding]:
                   if str(c.get("origin") or "user") != "user"]
     if len(unattended) >= _MIN_SAMPLE:
         by_origin: Counter = Counter(str(c.get("origin")) for c in unattended)
-        worst = by_origin.most_common(1)[0]
         findings.append(Finding(
             SEV_MEDIUM, "activity with nobody watching",
             f"{len(unattended)} of {total} calls ran unattended "
@@ -354,13 +353,27 @@ def write_dream(path: Optional[Path] = None, out_dir: Optional[Path] = None,
     path = _log_file(path)
     text = dream(path)
     target_dir = out_dir or path.parent
+    stamp = when or "latest"
+    # **Named before the `try`, not inside it.** The first attempt put this
+    # assignment inside, and `ensure_private_dir` - the first statement in the
+    # block - can raise, so the handler referred to a name that had never been
+    # bound and died with `UnboundLocalError` instead of reporting the OSError it
+    # was written for. A failure that corrupts the run rather than reporting
+    # itself is the shape this repository records most often.
+    destination = target_dir / f"dream-{stamp}.txt"
     try:
         files.ensure_private_dir(target_dir)
-        stamp = when or "latest"
-        destination = target_dir / f"dream-{stamp}.txt"
         destination.write_text(text, encoding="utf-8")
         destination.chmod(0o600)
         return destination
     except OSError as exc:
-        logger.debug("dream: could not write the result: %s", exc)
+        # **Warning, not debug.** This used to log at `debug`, so the one line
+        # describing a failed write was invisible at the daemon's INFO level -
+        # and the daemon's caller then had `if written:` false with no
+        # exception fired, so it logged nothing either. Measured: a pass that
+        # read this machine's whole 18.9 MB log, produced its full 40-line
+        # report, and could not record the result left **no trace at all**,
+        # which is indistinguishable from a pass that found nothing to say.
+        logger.warning("dream: the pass ran but its result could not be "
+                       "written to %s: %s", destination, exc)
         return None
