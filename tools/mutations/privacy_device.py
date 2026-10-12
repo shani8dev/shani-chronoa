@@ -79,6 +79,7 @@ MUTATIONS = [
     },
     {
         "label": "an empty string is read as a name that matches nothing",
+        "equivalent": True,
         "file": _SKILL,
         "old": '    if not wanted:\n'
                '        return cameras, ""',

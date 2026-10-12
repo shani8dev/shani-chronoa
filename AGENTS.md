@@ -457,6 +457,50 @@ this repository. The subprocess that measured it was handed a relative `sys.path
 from a different working directory and printed something else entirely. A count that
 is trivially wrong is easier to catch than one that is nearly right.
 
+## Three mutations were reported as survivors because the flag was never set (2026-10-12)
+
+Auditing all **45** sets / **377** mutations for witnesses that over-claim (the
+failure I hit in `asleep_state`, where `expect` named a test that passed either way)
+found the opposite shape: **three mutations with no witness at all.**
+
+| set | mutation |
+|---|---|
+| `history.py[3]` | "a partial first line is not dropped, only its first byte" |
+| `privacy_device.py[5]` | "an empty string is read as a name that matches nothing" |
+| `process_cost.py[4]` | "Average rows are parsed as if they were samples" |
+
+All three are **equivalent mutants**, and each says so, at length, in its `why`:
+
+- a record missing its first byte does not parse, and the reader already skips
+  unparseable lines - the same records by a different route;
+- `"" in "any camera name"` is true for every camera, so the mutant's
+  `device is None` guard hands the matcher an empty string and gets every camera
+  back - the same outcome by an accident of substring semantics;
+- pidstat's Average block carries no `PID` header, so `_parse_table` already rejects
+  it on its own terms; the guard is defence in depth against a layout the tool does
+  not produce.
+
+**So why did the runner report survivors?** It classifies on
+`entry.get("equivalent")` - a flag the mutation never set. An empty `expect` list
+makes `hit` empty, `if hit:` false, and the mutation falls through to the survivor
+branch. The reason was recorded; the flag was not.
+
+That is worth fixing rather than shrugging at, because the runner's own docstring
+names the failure it prevents:
+
+> a runner that only has "caught" and "survivor" forces the author to choose
+> between lying and deleting, which is how a documented equivalent mutant becomes
+> an undocumented missing one
+
+The flag is set on all three now, and the reason stays. **Nothing about the
+mutations changed** - only which line of the report they land on, and which is the
+difference between *this guard has no witness* and *this guard is redundant*.
+
+The audit also came back clean on the checks that matter more: **no set names a
+`TEST_FILE` that does not exist, and no witness anywhere names a test that is not
+in its file** - so the over-claiming I found in my own set is the only instance of
+it in the inventory.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
