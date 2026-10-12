@@ -969,6 +969,35 @@ class ChronoaConfig:
             out[provider] = stored if stored else self.get(key, "")
         return out
 
+    def cloud_llm_models(self) -> dict:
+        """Which model each provider answers with, keyed `<pid>_model`.
+
+        **The key shape is the one `CloudLLMChain` already reads.** It has read
+        `anthropic_model` from that dict since it was written and read nothing for
+        the other eight, so a chosen model was stored under the provider's plain
+        id and never reached a backend. Returning `{"kilo": "..."}` looked right
+        and was read by nothing; returning `{"kilo_model": "..."}` is the key the
+        chain actually looks up. **The first version of this had exactly that
+        bug** - the probe saved a model and the backend still used its default.
+
+        A blank value means "the provider's own `default_model`", so this returns
+        only the choices a person has actually made and an untouched install
+        behaves exactly as it did.
+
+        These are **not** secrets, so unlike the keys they skip the keyring and
+        live in GSettings.
+        """
+        return {"%s_model" % (provider,): self.get(key, "")
+                for provider, key in MODEL_SETTINGS.items()
+                if self.get(key, "").strip()}
+
+    def set_cloud_model(self, provider: str, model: str) -> None:
+        """Record which model this provider answers with. Blank means default."""
+        key = MODEL_SETTINGS.get(provider)
+        if key is None:
+            return
+        self.set(key, (model or "").strip())
+
     def api_key_value(self, key: str) -> str:
         """What Settings shows for an API-key row: the keyring's copy first, then GSettings."""
         from shani_chronoa import secret_store
@@ -997,6 +1026,19 @@ API_KEY_SETTINGS = {
     # rather than being the single secret in this table that is only ever
     # plaintext.
     "custom": "custom-llm-api-key",
+}
+
+
+#: provider id -> the GSettings key holding the **model** that provider answers
+#: with. The same shape as `API_KEY_SETTINGS` above, for the same reason: one
+#: table per axis so a new provider is one line in two places rather than a
+#: search. A blank value means the provider's own `default_model`, so nothing
+#: here changes behaviour for anyone who has not chosen.
+MODEL_SETTINGS = {
+    "llm7": "llm7-model", "kilo": "kilo-model", "blockrun": "blockrun-model",
+    "openai": "openai-model", "anthropic": "anthropic-model",
+    "google": "google-model", "groq": "groq-model",
+    "opencode-zen": "opencode-zen-model", "openrouter": "openrouter-model",
 }
 
 

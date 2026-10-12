@@ -229,45 +229,90 @@
       <summary>Optional LLM7 API key (BYOK)</summary>
       <description>Bring-your-own-key for the LLM7 free cloud gateway. Empty uses anonymous access (no key required); a real key may raise rate limits.</description>
     </key>
+    <key name="llm7-model" type="s">
+      <default>''</default>
+      <summary>LLM7 model Chronoa answers with</summary>
+      <description>Which of LLM7's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
+    </key>
     <key name="kilo-api-key" type="s">
       <default>''</default>
       <summary>Optional Kilo Gateway API key (BYOK)</summary>
       <description>Bring-your-own-key for the Kilo Gateway free cloud gateway. Empty uses anonymous access; Kilo's own rate-limit errors suggest a real key raises the limit.</description>
+    </key>
+    <key name="kilo-model" type="s">
+      <default>''</default>
+      <summary>Kilo Gateway model Chronoa answers with</summary>
+      <description>Which of Kilo Gateway's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
     </key>
     <key name="blockrun-api-key" type="s">
       <default>''</default>
       <summary>Optional BlockRun API key (BYOK)</summary>
       <description>Bring-your-own-key for the BlockRun free cloud gateway. Empty uses anonymous access, which shares a global free-tier quota with every other anonymous user.</description>
     </key>
+    <key name="blockrun-model" type="s">
+      <default>''</default>
+      <summary>BlockRun model Chronoa answers with</summary>
+      <description>Which of BlockRun's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
+    </key>
     <key name="openai-api-key" type="s">
       <default>''</default>
       <summary>OpenAI API key</summary>
       <description>Required to use OpenAI as a cloud LLM fallback - OpenAI has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="openai-model" type="s">
+      <default>''</default>
+      <summary>OpenAI model Chronoa answers with</summary>
+      <description>Which of OpenAI's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
     </key>
     <key name="anthropic-api-key" type="s">
       <default>''</default>
       <summary>Anthropic API key</summary>
       <description>Required to use Anthropic (Claude) as a cloud LLM fallback - Anthropic has no anonymous access. Empty means this provider is skipped.</description>
     </key>
+    <key name="anthropic-model" type="s">
+      <default>''</default>
+      <summary>Anthropic model Chronoa answers with</summary>
+      <description>Which of Anthropic's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
+    </key>
     <key name="google-api-key" type="s">
       <default>''</default>
       <summary>Google Gemini API key</summary>
       <description>Required to use Google Gemini as a cloud LLM fallback - Google has no anonymous access. Empty means this provider is skipped.</description>
+    </key>
+    <key name="google-model" type="s">
+      <default>''</default>
+      <summary>Google Gemini model Chronoa answers with</summary>
+      <description>Which of Google Gemini's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
     </key>
     <key name="groq-api-key" type="s">
       <default>''</default>
       <summary>Groq API key</summary>
       <description>Required to use Groq as a cloud LLM fallback - Groq has no anonymous access. Empty means this provider is skipped.</description>
     </key>
+    <key name="groq-model" type="s">
+      <default>''</default>
+      <summary>Groq model Chronoa answers with</summary>
+      <description>Which of Groq's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
+    </key>
     <key name="openrouter-api-key" type="s">
       <default>''</default>
       <summary>OpenRouter API key</summary>
       <description>Required to use OpenRouter as a cloud LLM fallback - OpenRouter has no anonymous access. A free account key is enough for its ':free' models, which is what Chronoa uses by default. Empty means this provider is skipped.</description>
     </key>
+    <key name="openrouter-model" type="s">
+      <default>''</default>
+      <summary>OpenRouter model Chronoa answers with</summary>
+      <description>Which of OpenRouter's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
+    </key>
     <key name="opencode-zen-api-key" type="s">
       <default>''</default>
       <summary>OpenCode Zen API key</summary>
       <description>Required to use OpenCode Zen as a cloud LLM fallback. Zen's free tier can only be used from within OpenCode itself, so Chronoa uses Zen only with a key of your own. Empty means this provider is skipped.</description>
+    </key>
+    <key name="opencode-zen-model" type="s">
+      <default>''</default>
+      <summary>OpenCode Zen model Chronoa answers with</summary>
+      <description>Which of OpenCode Zen's models answers when this provider is used. Empty means the provider's own default, so nothing changes until a model is picked. The list is read live from the provider at setup time - every one of them speaks the OpenAI shape and answers GET /models with it.</description>
     </key>
     <key name="vision-sense-enabled" type="b">
       <default>false</default>

@@ -1415,6 +1415,125 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         description=", ".join(cloud_llm.PROVIDERS[p].name
                               for p in cloud_llm.DEFAULT_PROVIDER_ORDER if p in cloud_llm.PROVIDERS))
     box.append(free)
+
+    # ── which model answers ─────────────────────────────────────────────
+    # **The page named the provider and never the model.** Someone choosing
+    # "Anthropic" was told which providers can also hear and speak, and nothing
+    # about *what would answer* - and every provider has one model, chosen by us
+    # and changeable by nobody. The chain has read an `anthropic_model` override
+    # since it was written and ignored the other eight, so the capability was
+    # half-present and entirely unreachable.
+    #
+    # Measured 2026-10-12: every provider here speaks the OpenAI wire and answers
+    # `GET /models` with its own list - **64 for llm7, 115 for BlockRun, 83 for
+    # OpenCode Zen, 390 for Kilo, 458 for OpenRouter** - and five of the eight do
+    # it with no key at all, including all three free gateways. So the list is
+    # real, it is live, and it is read in a thread: nine providers at up to 12s
+    # each would freeze the window for a minute and a half.
+    models = Adw.PreferencesGroup(
+        title="Which model answers",
+        description="Read from each provider as you look at this page. Empty "
+                    "means that provider's own default, so nothing here has to "
+                    "be touched.",
+    )
+    box.append(models)
+    pickers: Dict[str, Gtk.DropDown] = {}
+    for provider_id in list(cloud_llm.BYOK_PROVIDER_ORDER) + list(
+            cloud_llm.DEFAULT_PROVIDER_ORDER):
+        provider = cloud_llm.PROVIDERS.get(provider_id)
+        if provider is None:
+            continue
+        row = Adw.ActionRow(
+            title=provider.name,
+            subtitle=f"answers with {provider.default_model} until you pick another")
+        picked = Gtk.DropDown.new_from_strings(["reading the list..."])
+        picked.set_valign(Gtk.Align.CENTER)
+        picked.set_sensitive(False)
+        picked.update_property([Gtk.AccessibleProperty.LABEL],
+                               [f"Model for {provider.name}"])
+        row.add_suffix(picked)
+        row.set_activatable_widget(picked)
+        models.add(row)
+        pickers[provider_id] = picked
+
+    model_status = wrapping("")
+    box.append(model_status)
+
+    def fill() -> None:
+        """One thread walks the providers so the window never blocks."""
+        import threading
+        from gi.repository import GLib
+
+        def work() -> None:
+            from shani_chronoa import cloud_llm as _cl
+            from shani_chronoa.config import ChronoaConfig as _Config
+
+            saved = _Config().cloud_llm_models()
+            listed, refused = 0, []
+            for provider_id, picked in pickers.items():
+                try:
+                    ids, why = _cl.offerable_models(provider_id)
+                except Exception as exc:  # noqa: BLE001 - a report, not a crash
+                    ids, why = [], str(exc)
+                if not ids:
+                    # **The reason is kept, not just the fact.** A dropdown left
+                    # disabled with nothing said reads as "this provider has no
+                    # models"; `why` says which of the two it actually was -
+                    # a 401 because the key is missing, or nothing reachable.
+                    refused.append((provider_id, why))
+                    def leave_off(picked=picked) -> bool:
+                        picked.set_sensitive(False)
+                        return False
+                    GLib.idle_add(leave_off)
+                    continue
+                listed += 1
+                default = _cl.PROVIDERS[provider_id].default_model
+                current = saved.get(provider_id) or default
+                if current not in ids:
+                    ids.insert(0, current)
+
+                def apply(provider_id=provider_id, picked=picked, ids=ids,
+                          current=current) -> bool:
+                    picked.set_sensitive(True)
+                    picked.set_model(Gtk.StringList.new(ids))
+                    picked.set_selected(ids.index(current))
+                    return False
+
+                GLib.idle_add(apply)
+
+            def said() -> bool:
+                if refused:
+                    names = ", ".join(_cl.PROVIDERS[pid].name for pid, _ in refused)
+                    first = refused[0][1]
+                    model_status.set_label(
+                        f"{listed} provider(s) answered with a model list. "
+                        f"These keep their own default: {names} - for example "
+                        f"{names.split(', ')[0]}: {first}")
+                elif listed:
+                    model_status.set_label(
+                        f"{listed} provider(s) answered with a model list.")
+                else:
+                    model_status.set_label(
+                        "No provider answered with a model list - nothing was "
+                        "reachable from here, so each one keeps its default.")
+                return False
+
+            GLib.idle_add(said)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def remember_models() -> None:
+        """Write whatever is selected. **Called by Next as well as Save**, for
+        the same reason the keys are: Next is what people press."""
+        for provider_id, picked in pickers.items():
+            if not picked.get_sensitive():
+                continue
+            item = picked.get_selected_item()
+            if item is None:
+                continue
+            config.set_cloud_model(provider_id, item.get_string())
+
+    fill()
     # A label of its own, not part of the description above: appended there it
     # widened the page to 590px of 560 and gave it a sideways scrollbar.
     box.append(wrapping("Those are chat only: no provider listens or speaks without a key."))
@@ -1435,6 +1554,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             f"Saved {typed} key(s). Chronoa will "
             f"try {', '.join(p for p, v in entered.items() if v) or 'the free gateways'} "
             "when it needs to think.")
+        remember_models()
         _consent_given(config, True)          # asking a cloud model is consent
         # **And now it says whether any of them work.**
         # This page used to end at the sentence above: the key was saved and that
@@ -1490,7 +1610,8 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     keys_next = navigate(box, "ears", skip_label="Skip for now")
     # A key typed and then left behind by pressing Next was silently dropped:
     # only the Save button wrote it. Next is what people press.
-    keys_next.connect("clicked", lambda *_: save() if any(entered.values()) else None)
+    keys_next.connect("clicked", lambda *_: (save() if any(entered.values()) else None,
+                                             remember_models())[1])
     view.add(keys_page)
 
     # ── where should Chronoa think? ─

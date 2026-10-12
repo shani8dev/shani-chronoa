@@ -283,6 +283,131 @@ def _headers(pid: str, key: str) -> dict:
             else {"content-type": "application/json"})
 
 
+def list_models(provider_id: str, timeout: float = 12.0,
+                api_key: str = "") -> "tuple[list[str], str]":
+    """The models a provider offers, and a reason if they could not be listed.
+
+    **Every provider here speaks the OpenAI wire** (the custom one and the six
+    OpenRouter-style gateways), so all of them answer `GET {base_url}/models`
+    with `{"data": [{"id": ...}, ...]}`. Measured on 2026-10-12, unauthenticated,
+    over this machine's own network:
+
+        llm7         200   openai         401   a key is needed
+        kilo         200   groq           401
+        blockrun     200   google         404   its API is not this shape
+        opencode-zen 200
+        openrouter   200
+
+    So **five of the eight give a real list with no key at all**, and the free
+    gateways - the ones a person reaches for first, because nothing needs
+    signing up - are among them. `google` is 404 rather than 401: Gemini's API is
+    not OpenAI-shaped, so it is a different failure and says so.
+
+    **This was already being fetched and thrown away.** `OpenAICompatibleLLM.
+    check_health` does `GET /models` to decide reachability, and nothing has ever
+    consumed the body - so the one live, per-provider model list in reach was
+    fetched on demand and discarded, while every provider was pinned to the
+    single `default_model` in its `CloudProvider`. There was no way for a person
+    to choose a model, and no way for them to be told which one would answer.
+
+    `(ids, "")` on success, `([], reason)` otherwise. **An empty list with no
+    reason is never returned** - "no models" and "could not ask" are different
+    answers and only one of them is true here.
+    """
+    provider = PROVIDERS.get(provider_id)
+    if provider is None:
+        return [], f"no provider is registered as {provider_id!r}"
+    url = provider.base_url.rstrip("/") + "/models"
+    headers = {"User-Agent": "chronoa-cloud-models"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
+                                    timeout=timeout) as response:
+            import json
+            body = json.loads(response.read().decode("utf-8", "replace") or "{}")
+    except Exception as exc:  # noqa: BLE001 - any failure is a report, not a raise
+        return [], f"{url} could not be read ({exc})"
+
+    rows = body.get("data") if isinstance(body, dict) else body
+    if not isinstance(rows, list):
+        return [], f"{url} answered, but with no model list in it"
+    ids = []
+    for row in rows:
+        if isinstance(row, dict) and row.get("id"):
+            ids.append(str(row["id"]))
+        elif isinstance(row, str):
+            ids.append(row)
+    if not ids:
+        return [], f"{url} answered an empty list"
+    # Deduplicated, in the provider's own order - OpenRouter repeats a model
+    # once per pricing variant (`:batch`, `:nitro`), and a menu with the same
+    # name twice is a menu nobody can choose from.
+    seen, out = set(), []
+    for model in ids:
+        if model not in seen:
+            seen.add(model)
+            out.append(model)
+    return out, ""
+
+
+#: How many models a chooser shows. The raw lists are far larger than any person
+#: can scan - OpenRouter answered **458** and Kilo **390** on 2026-10-12 - and a
+#: menu nobody can read is the same as no menu. A caller that wants more can ask
+#: `list_models` directly; this is the bounded view a *setup page* wants.
+_MENU_LIMIT = 12
+
+#: Marks on a model id that mean it costs nothing to run. Measured on the live
+#: lists rather than assumed: OpenRouter's are `:free` variants, Kilo's are
+#: `kilo-auto/free` and `*-free` ids, and OpenCode Zen's are `*-free`.
+_FREE_MARK = (":free", "auto/free", "-free")
+
+
+def offerable_models(provider_id: str, timeout: float = 12.0,
+                      api_key: str = "") -> "tuple[list[str], str]":
+    """`(what a person may pick, why there is none)` - the chosen model first.
+
+    **A bounded, ordered view of a much larger list, and it says so.** Every
+    provider's raw list is 12x to 40x what a menu can hold, so this curates
+    rather than truncates:
+
+    1. the provider's own `default_model` **first**, so the person is choosing
+       either the known-good answer or an alternative to it - never a list that
+       starts at a model nobody has tested;
+    2. then the ones marked free, which is what someone on a free account can
+       actually run;
+    3. then the rest, up to `_MENU_LIMIT`.
+
+    Truncating to the first twelve would have put whichever models the provider
+    happened to list first - measured, `stepfun/step-5-preview` and
+    `anthropic/claude-haiku-5.5` - ahead of every `:free` model, on the one
+    provider whose whole point is that it is free. Ordering by cost puts what a
+    person can use first.
+
+    When the list cannot be read at all, this returns `([], reason)` and the
+    caller falls back to the default - **never to an empty menu**, because a
+    chooser with nothing in it reads as "this provider has no models", which is
+    a claim nobody has made.
+    """
+    provider = PROVIDERS.get(provider_id)
+    if provider is None:
+        return [], f"no provider is registered as {provider_id!r}"
+    ids, why = list_models(provider_id, timeout=timeout, api_key=api_key)
+    if not ids:
+        return [], why
+
+    free, rest = [], []
+    for model in ids:
+        if model == provider.default_model:
+            continue
+        (free if any(mark in model for mark in _FREE_MARK) else rest).append(model)
+
+    ordered = [provider.default_model] + free[: _MENU_LIMIT - 1] \
+        + rest[: max(0, _MENU_LIMIT - 1 - len(free))]
+    return ordered[:_MENU_LIMIT], ""
+
+
 def keys_sentence(probes: dict) -> str:
     """One line a person can act on, from a `probe_keys()` result.
 
@@ -932,7 +1057,14 @@ class CloudLLMChain:
                 continue
             if provider.requires_key and not key:
                 continue
-            backends.append(OpenAICompatibleLLM(provider, api_key=key))
+            # **The provider's own model unless one was chosen.** `anthropic`
+            # has read `anthropic_model` from this dict since the chain was
+            # written; the other seven ignored it entirely, so a person could
+            # pick a model and it was read nowhere. One key shape for the whole
+            # table, which is also what `list_models` makes choosable.
+            overridden = (api_keys or {}).get("%s_model" % (p,), "")
+            backends.append(OpenAICompatibleLLM(provider, api_key=key,
+                                                model=overridden or None))
         self._backends = backends
         self.model = ", ".join(b.model for b in self._backends) or "(none)"
         #: Proxied from whichever backend answered the last call. `assistant.py`
