@@ -69,6 +69,38 @@ states something that is not obvious until it is measured:
 103 passed across the confidence-floor, learning-chain, learning-calibration,
 outcome-model, surface-learning and learning-says-what-a-fit-is-worth suites.
 
+### And the router's out-of-distribution finding, measured here and **not** a defect
+
+Laya's `laya/router.py` documents the reason it routes at all:
+
+> The English checkpoint does not gently degrade off English, it collapses: on
+> 20-option MASSIVE intent it scores 0.100 on Hindi ... and it reports high
+> confidence while doing so (ECE 0.855 on Hindi). Script detection is therefore
+> the primary routing signal.
+
+The analogue to check was `tool_select.select_tools`, whose noise floor is
+`scored[0][0] / 3` - **which collapses to 0 when nothing matches, disabling the
+very filter meant to reject noise.** That was the hypothesis. Measured, it is
+wrong, and the measurement is worth writing down rather than the hypothesis:
+
+| request | top score | tools sent | beyond CORE |
+|---|---|---|---|
+| `zzzz qqqq vwxk plfm tkjb` | **no ranked tools at all** | 3 | **0** |
+| `set the volume to 40 percent` | 18.09 | 9 | 6 |
+| `thanks!` | conversation path | 1 | **0** |
+
+`ranked()` returns only positive scores, so a zero top score means **no entries**
+rather than a zero-ranked list - `floor` falls to 0 and there is nothing for
+`score >= floor` to admit. Pure conversation goes down `wants_a_conversation`. So
+the unmatchable case already returns the smallest honest set, and the fix would
+have been for a case that cannot occur.
+
+**One observation recorded, not fixed:** for "set the volume to 40 percent" the
+top scorer is `calculate` (18.09) with `set_volume` sixth. It is a scoring
+weakness rather than a functional defect - `set_volume` is still in the candidate
+list, and AGENTS.md's own eval measures 14/15 on what the *model* picks from that
+list - so it is left alone rather than tuned against a number nobody is failing.
+
 
 ## laya, second repo: the temperature the reader divides by (2026-10-12)
 
