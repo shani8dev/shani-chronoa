@@ -10,7 +10,7 @@ two paths *differ* — a fact about the filesystem, not about quality.
 So the operation's entire justification went unverified at the only moment
 somebody looks at it, and the report a person saw was:
 
-    Built Q4_K_M at /home/.../-calibrated.gguf
+    Built Q4_K_M at <scratch>-calibrated.gguf
     In use now: Q4_K_M
 
 `adopt_path`'s gate compares the candidate against the model being **replaced**,
