@@ -462,7 +462,59 @@ def _no_organ_may_stay_lit(request):
             "so a failure closes it too.")
 
 
+#: Set by `tools/mutate.py` on the pytest *it* spawns. Absent means this is a
+#: person's run.
+MUTATION_MARKER = "CHRONOA_MUTATION_RUN"
+
+#: Written by `tools/mutate.py` for as long as a run holds the tree, containing
+#: the owner's pid. `build/` is gitignored, so this never lands in a commit.
+RUN_LOCK = Path(__file__).resolve().parent.parent / "build" / "mutate" / "run.lock"
+
+
+def _mutation_in_flight() -> "str | None":
+    """Why this run must not read the tree, or ``None`` when it may.
+
+    **Measured, 2026-10-12**: a mutation run rewrites each source file in place,
+    restores it in a ``finally``, and holds ``run.lock`` for the duration so two
+    *runs* cannot overwrite each other's restore. Nothing stopped a plain
+    ``pytest`` being started beside it - which reads the mutated files and
+    reports **confident failures on code that is correct**: three of them, on a
+    suite that had just been green. The lock made the tree safe for its owner and
+    said nothing to a reader.
+
+    So a stale lock is not a refusal - the runner takes those over and says so -
+    and the runner's own pytest is exempt through ``MUTATION_MARKER``. This
+    duplicates the runner's pid-liveness check rather than importing it:
+    ``tools/mutate.py`` is a script with module-level work in it, and importing
+    it from ``conftest`` would run that in every session. The format being read is
+    one line holding a pid, so two readers of it is a fair trade.
+    """
+    import os
+
+    if os.environ.get(MUTATION_MARKER):
+        return None
+    try:
+        owner = RUN_LOCK.read_text(encoding="utf-8").split()[0]
+        pid = int(owner)
+    except (OSError, IndexError, ValueError):
+        return None                      # no lock, or unreadable: not a hold
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return None                      # stale - the runner takes these over
+    return (
+        f"a mutation run (pid {pid}) is rewriting the source tree right now, so "
+        f"this suite would read mutated code and report failures on code that "
+        f"is correct. Wait for it, or stop it by that pid. If you are that run, "
+        f"{MUTATION_MARKER} is set and this check does not apply.")
+
+
 def pytest_configure(config):
+    held = _mutation_in_flight()
+    if held is not None:
+        # **`pytest.exit`, not a raise.** A raise here is an INTERNALERROR, which
+        # reads as a broken checkout rather than as "wait for the other run".
+        pytest.exit(held, returncode=3)
     config.addinivalue_line(
         "markers",
         "holds_organs: this test leaves a body activity open on purpose - it is "

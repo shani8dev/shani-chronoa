@@ -102,6 +102,14 @@ def sets() -> "dict[str, Path]":
 #: writable place here, so the lock and the journal live beside each other.
 STATE_DIR = ROOT / "build" / "mutate"
 
+#: Set on the pytest **this** module spawns, so `tests/conftest.py` can tell it
+#: apart from a person's run. It has to be a name rather than a literal in two
+#: places: the guard refuses to collect while `run.lock` is held, and without the
+#: marker it would refuse every mutation run - the runner holds the lock on
+#: purpose, so the guard and the runner disagree by construction unless one of them
+#: says which process it is. A test holds the two spellings together.
+MUTATION_MARKER_NAME = "CHRONOA_MUTATION_RUN"
+
 
 class _Busy(Exception):
     """Another run holds the tree."""
@@ -280,6 +288,14 @@ def _test_env() -> dict:
     env["XDG_CONFIG_HOME"] = str(scratch / "config")
     env["XDG_DATA_HOME"] = str(scratch / "data")
     env.setdefault("HOME", os.environ.get("HOME", ""))
+    # **This pytest is the mutation runner's own, and says so.**
+    # `tests/conftest.py` refuses to collect while `run.lock` exists, because a
+    # mutation run rewrites source in place and an ad-hoc run beside it reads
+    # mutated code. Without this marker the runner would be refused by the guard
+    # meant to protect against it - the runner *is* a pytest holding the lock on
+    # purpose. The value is the runner's pid, so the exemption is a fact about a
+    # process rather than a blanket flag anybody could set to get a quiet run.
+    env[MUTATION_MARKER_NAME] = str(os.getpid())
     return env
 
 
