@@ -18303,3 +18303,247 @@ attribute is bound somewhere). A consequence can be checked exactly; a shape in 
 codebase with mixins and external bases cannot, short of resolving every base
 class outside the repo.
 
+
+## A plan is data, not a paragraph
+
+Plan mode's refusal tells the model *"describe the steps instead"*, and that
+prose was the entire record. So nothing could be ticked off, resumed or
+corrected, and approving a plan meant asking again in a new turn and hoping the
+model re-derived the same steps from its own text. Meanwhile `goals.py` already
+had `PlannedStep`, `depends_on`, `Phase.AWAITING` and a persisted store - and
+**nothing connected them.** There were three answers to "where is the plan" in
+one codebase, and the one named *plan mode* kept nothing.
+
+Now: `planmode.record_refusal(name, arguments)` at the dispatch site (the only
+place that has both the tool and the arguments it wanted), `plan_from_refusals`
+in `goals.py`, and the run is parked in `AWAITING` rather than `PENDING`.
+
+### Two properties it had to keep
+
+**The plan is made of the calls that were actually refused.** A model may
+describe steps in prose without calling a tool, and then this stores *nothing*.
+That is the point, not a limitation to paper over: steps assembled from prose
+would be our guess at what it meant, and a stored guess that later executes is
+the worst thing this app could hold. A plan that quietly drops the steps it
+could not justify is a plan that lies about its own coverage.
+
+**Approving it grants nothing.** `advance()` runs each step through
+`tool_executor`, which is `tools.execute_tool` - the same path a typed call
+takes, so every consent key, every prompt and every verification still applies.
+Verified by running a stored step with plan mode on (refused) and off (not
+refused), not by reading the docstring. `plan_from_refusals` writes a
+*proposal*; it is not a permission.
+
+`record_refusal` is called from the dispatch site rather than from
+`blocked_reason`, because `blocked_reason` is asked "can this tool run" and is
+called from tests and from the permission layer's prose - giving it the
+arguments would make every one of those calls a plan step.
+
+## Plan mode asks, rather than describing what it would have done
+
+The refusal told the model *"describe the steps instead"* - which hands the
+decision to the one party with an interest in being wrong about what you want.
+It now puts the call to the user, through `ask_bridge.ask`, with the actual
+tool and the actual arguments named in the question. A "Do it now" runs that
+call immediately **through the same `execute_tool`**, so consent, sandboxing
+and verification all still apply to it - the ask is not a side door round the
+dispatch path, it is a question asked inside it.
+
+**Everything that is not an explicit yes is a refusal.** No presenter, a
+dismissed prompt, a timeout, an empty answer, an answer that is not one of the
+two words - all of them mean *no answer was given*, and the rule this app keeps
+insisting on is that an unanswered question is never consent. This change adds a
+way for a tool to run that did not run before, so the negative cases are the
+whole test file rather than a footnote.
+
+**"Do it now" is the first option.** The common answer to "what would you do
+about this?" followed by silence is yes, and a dialog leading with "no" teaches
+people that plan mode is a wall rather than a question.
+
+**One "Keep planning" stands for the rest of the turn.** Asking again for every
+remaining step turns one question into ten dialogs - the opposite of what was
+asked for. The silence *is* the answer; the steps still land in the stored plan,
+because a refused step that is not recorded is a step the plan does not mention.
+"Do it now" does not silence the next one - that answer was about that call.
+
+**The gate in front of the ask is `blocked_reason`, which is empty when plan
+mode is off.** `ask_to_proceed` itself asks and obeys the answer regardless of
+the mode, so the thing that stops it being a way to run something unasked is
+the refusal check in front of it - which is what the first version of the
+off-mode test got wrong, by asserting the wrong function's return value.
+
+### Why asking from `execute_tool` cannot deadlock
+
+`ask_bridge.ask` blocks on a `threading.Event` with a timeout, and `execute_tool`
+is synchronous, so asking from inside it looks like a deadlock until you check
+where the dispatcher is called. The assistant runs it through
+`run_in_executor(None, ctx.run, ...)` (`assistant.py`), so the call is already
+off the GTK thread and the main thread stays free to show the dialog.
+
+That is not incidental: the comment at that call records the deadlock it caused
+when it did not - the question was answered on 2026-10-08 and only transcribed
+at 13:59:23, after the timeout had reported "no option was chosen". The same
+thread is why `ask_user` works, so the pattern is established rather than
+assumed.
+
+**A refusal is not a validation miss.** The assistant counts results beginning
+`ERROR:`, `Not run. ` and `Refused: ` as a malformed call, and stops after
+three. A plan-mode refusal begins "Plan mode is on", so it does not count -
+which is right, because it is a policy refusal and not a broken call, and the
+`LoopDetector` is what catches a model retrying the same tool.
+
+## The three modes, and the four that were there before
+
+Asked for automode / ultracode / ultrawork, then for the minimum. The two
+requests pull in opposite directions, so the resolution was to find the
+*decisions* inside them and ship three, rather than ship a list of names.
+
+| chip | question | enforced in |
+|---|---|---|
+| **Plan** - Working / Plan | what would you do? | the dispatch path, and it asks |
+| **Auto** - Ask first / Auto | will it stop me to ask? | the permission layer's refusal |
+| **Build** - General / Build | what is it working on? | which tools reach the model |
+
+**The strength of each is different, and the file says so.** Plan is a check in
+`execute_tool`. Auto is a refusal in `permissions`. Build changes which schemas
+reach the model - a strong nudge, **not a gate**. Nothing refuses a general tool
+because Build is on, because that would make a Build turn unable to open a
+browser and the failure would arrive as "I cannot do that" rather than as the
+reason. A mode that hid tools would make some questions unanswerable.
+
+**Build, not Code.** The files people bring this app are often not source - a
+`.docx`, a `.csv`, a systemd unit - and "code" promised a programmer's workflow
+it does not have. The module is `buildmode.py` as well; a module named
+`codemode` implementing a mode called Build is the same mismatch this whole
+change is about.
+
+### What was actually redundant
+
+Not the number of modes - **two controls for one axis**. Settings' permission
+combo and the strip's chip both set `permissions`, and Settings offered a
+third option (`explore`) that **no chip on the strip could show**, so a mode was
+reachable only by hunting through Settings. It is now exactly the chip's two
+options, with a subtitle for a session already in read-only that says where it
+went.
+
+Read-only also stops being a strip chip. It was never really one control: "Read
+only" meant plan mode, so a permission and a workflow shared a word, and the
+chip could report either. It is `permissions.EXPLORE` in Settings, where its
+stricter meaning is written down - and `buildmode.read_only_note()` says so for
+anyone who remembers it on the strip.
+
+### The blank icon, again, and this one was mine
+
+Measuring every symbolic name in Adwaita: **it ships no build, tool, hammer,
+wrench, construction or gear icon at all.** `system-build-symbolic` and
+`applications-development-symbolic` are Yaru names - and so is
+`emblem-default-symbolic`, which this strip had been given for the Plan chip's
+"Working" row one message earlier. The same empty-box bug this repository has
+hit three times, introduced by me while fixing a different one.
+
+## A UX review, and the one thing it turned up
+
+Four chips moved off the strip to the palette, and that created the problem this
+found: **a control whose only path is a keyboard shortcut nobody knows about is
+a control that is not there.**
+
+Checked, and there is no shortcuts surface - `Ctrl+K` and `Ctrl+F` appear in
+this file **only in code comments**. There *is* a `HelpWindow` and a help
+button, and it answers *"what can Chronoa do"*; nothing on screen answered
+*"what can I press"*. So the four modes that just moved there were reachable by
+exactly one person in the history of this codebase: me.
+
+Two fixes, both in the places a new person is guaranteed to look:
+
+- **The empty state names them.** `show_placeholder()` already existed to give
+  a new user something to act on, so it now carries
+  *"Ctrl+K for anything else · Ctrl+F to find in this conversation · ? for what
+  Chronoa can do"* - each described by what it does, because "Ctrl+K" alone is
+  not a reason to press it and the word *palette* appears nowhere else in the
+  interface.
+- **`?` is now bound to help.** It was advertised before it existed, which is
+  worse than not advertising it: a person presses it, nothing happens, and
+  they learn the interface lies to them.
+
+**`?` is tested as `Gdk.KEY_question`, not `Gdk.KEY_slash`.** The shifted key is
+the one delivered with Shift held; the bare slash is what you type into the
+composer every time you write a slash command. A check for the bare slash
+would open the help window over the thing being typed.
+
+### Still missing, and it is the bigger half
+
+`HelpWindow` is a capability list - what Chronoa can do - and nothing tells you
+what *you* can do. The empty-state line covers first run; a person who closes
+the app and comes back has no equivalent. The honest version is a keyboard
+section in `HelpWindow` built from the same tables the strip and palette use,
+so it cannot list a shortcut that was rebound.
+
+## What you can do, next to what Chronoa can do
+
+`HelpWindow` is a capability list: what the assistant is able to do, grouped by
+intent with consent state shown. **Nothing on screen answered what the person at
+the keyboard can do**, and two of the shortcuts that matter are the only route
+to a control that is deliberately not on the toolbar - the four mode chips that
+moved to the palette among them.
+
+There is now a "What you can do" group above "Everything Chronoa can do": five
+rows, the key in its own column, built into the same `_index` the window's own
+filter walks, so searching finds a shortcut like anything else. The empty state
+covers first run and this covers every run after it, which is the half that was
+missing.
+
+### The shortcuts list is hand-written, and three bugs proved it can't be trusted
+
+The section is five typed rows. Its first comment claimed the list was *read
+from the app's actions and could not go stale* - which was false, and was the
+same false promise this file has spent all session removing elsewhere. It now
+says it is hand-written, and a test is what keeps it honest.
+
+Writing that test found three bugs, all mine, and all failing toward **false
+alarm** - which is still an afternoon wasted:
+
+- the table's third field named `show-help` and `turn-stop`, **neither of which
+  is an action**; both are keyval handlers. The field is only a search haystack,
+  but naming actions that do not exist is how the next reader concludes a
+  binding is missing when it is only the label that is wrong.
+- `rglob("window.py")` **matches `settings_window/window.py` first**, so the
+  test read that file and reported Ctrl+K as unbound when it was looking at the
+  wrong `window.py` entirely.
+- `package.parent` instead of `package`, pointing the test at a directory a
+  level too high.
+
+Each is fixed by naming the file, and the lesson recorded once: **a test that
+opens a file by name is only as good as its ability to open the right one.**
+
+## I read a sweep's failures while its chunks were still running, and under-reported by ten (2026-10-13)
+
+A ten-chunk sweep came back with five chunks finished and I collected the failure
+list then: **15 distinct failures across 5 files**. Two chunks were still running.
+One of them, `chunk_aj`, finished ten minutes later with **11 failures of its
+own** - so the true list was **25 across 6 files**, and the ten I missed were all
+`test_voice_loop_live.py` (the parallel-flaky live-audio suite AGENTS.md already
+documents, so no harm came of it, but only by luck).
+
+**The failure was not the sweep's, it was mine: I treated a partial result as a
+complete one.** The chunked runner exists precisely so a crash costs one chunk,
+and it prints *"exited"* per chunk - nothing said *"done"*. A chunked run's result
+is only a result when every chunk has a summary, which is the same distinction the
+mutation runner draws with `N of M sets` and `INCOMPLETE`. It is worth naming
+because the cost here was invisible: the missing ten were all flakes, so the
+omission changed nothing observable, which is how it would have survived.
+
+Two real defects were hiding in the part I did not stop to read, and both were
+fixed after the fact:
+
+- **`compare` could not scroll.** `common.surface()` returns an `Adw.ToolbarView`
+  and `build()` put its view straight into the content slot, so the panel's bottom
+  was unreachable at any window height. Three of the four panels without
+  `common.scrolled` build their own `Gtk.ScrolledWindow`; this one had none. The
+  test was written against `inventory`, which had the same defect.
+- Both were pre-existing rather than introduced by today's status work - the sweep
+  ran against the commit *before* the status slot existed.
+
+**The rule that follows: read a chunked result's chunk count before believing its
+tally.** Six finished and a seventh pending is a 15-failure answer that is really
+a 25-failure one, and there is no way to tell from the number itself.
+
