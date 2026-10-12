@@ -16683,3 +16683,64 @@ and consent gates bound the *consequence*, so an injected document can steer
 *selection* but cannot introduce an executable tool. That bounds the damage; it
 does not mean selection is unmanipulated, and a reader should not record the
 whitelist as a defence against retrieval attacks.
+
+## Measured: TSCG's token saving does not reproduce here, and that redirects the experiment (2026-10-12)
+
+The entry above recorded TSCG as the next experiment. **Before running it, its
+headline claim was measured against this repository's own 257 schemas** - with
+the real tokenizer (`llama-tokenize`) on the real model
+(`Qwen3-1.7B-Q4_K_M`), not with the character heuristic this file uses
+elsewhere.
+
+| serialisation of the full catalogue | real tokens |
+|---|---:|
+| name + description only | **67,928** |
+| the Ollama-style wrapper, name + description | 76,998 |
+| **the full JSON schemas `bare` actually sends** | **139,634** |
+| the same information as structured text | **129,532** |
+
+**TSCG reports 52-57% token savings. The structural conversion saves 7.2%
+here** - and *less* than the `CHARS_PER_TOKEN = 3` heuristic suggested (17.5%),
+because structured text tokenizes less densely per character than JSON's
+punctuation does. **A 7.2% saving does not make 257 tools affordable**: the
+catalogue is 139,634 tokens against an 8k context, so it stays roughly 17x
+over budget either way.
+
+**So the experiment as framed is not worth running, and the reason is
+instructive.** The paper's 52-57% cannot come from serialisation alone, because
+serialisation does not change information content - so it must come from
+*dropping* something, and whatever the eight operators discard is exactly what
+this repository would have to measure separately rather than inherit for free.
+
+**Where the 139,634 tokens actually are, which is the useful part:**
+
+- **descriptions alone are 67,928 tokens** - **49% of the whole catalogue**
+  (median **271 characters**, max **886**)
+- **parameter schemas add 62,636** - the remaining 45%
+
+**The lever is therefore description length, not JSON syntax**, and this
+repository has not measured that. It has the opposite: `AGENTS.md` records that
+"rewriting the `web_search`/`news`/`get_world_time`/`open_file`/`find_files`/
+`calculate` descriptions boundary-first changed nothing measurable (14/15 both)"
+- which is a perfectly good result about *wording* and says nothing about
+*length*. Halving the descriptions is a cheap, local, reversible experiment
+against an instrument that already exists, and it moves the one number that
+`bare`'s 0/62 depends on.
+
+**And a recorded number that does not reproduce, stated rather than smoothed.**
+This file has quoted "**131 tools are ~19,700 tokens**" since 2026-10-02. Under
+this method the equivalent measurement does not land there: scaling the current
+139,634 by the old tool count (131/257) gives ~71,149, which is **3.6x** the
+recorded figure. **The reconciliation is not established** - the recorded number
+may have counted a subset, a different wrapper, or predate the growth in
+description length - and **a number that cannot be reproduced by the obvious
+method should be re-measured rather than defended**. Both figures are given here
+so the next reader does not have to choose between them, and the *conclusion*
+drawn from them is unchanged either way: the catalogue is far past an 8k
+context, which is why `bare` scores 0/62 and `select` scores 56/62.
+
+**What this entry changes.** The TSCG finding is not "adopt a schema
+compiler". It is: **this repository's tool-schema budget is dominated by prose,
+and the cost has never been measured per-field.** `tool_select.py` narrows the
+catalogue because it has to; nothing here has asked whether the catalogue could
+be affordable instead.
