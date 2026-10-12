@@ -133,6 +133,10 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
     def do_startup(self) -> None:
         """Handle application startup."""
         logger.info("Shani Chronoa starting up...")
+        #: Set by `do_shutdown`, read by anything that builds a window. Declared
+        #: here so it exists on a normal run, and read through `getattr` where a
+        #: test's `__new__`-built application may not have it.
+        self._shutting_down = False
         # super().do_startup() mis-marshals the zero-arg vfunc chain-up on
         # this PyGObject build (TypeError + GLib-GIO-CRITICAL, then a
         # segfault) - the explicit class-qualified call works correctly.
@@ -237,6 +241,15 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
 
     def do_shutdown(self) -> None:
         """Release background mic/playback resources before the app exits."""
+        # **Alive is a state with a flag, and building a window requires it.**
+        # A `GLib.idle_add` queued at activation - "offer setup once" for a fresh
+        # install - is still pending when the loop ends before it runs, and the
+        # loop is drained *inside* teardown. So `_open_setup` ran against an
+        # application that had already begun shutting down, and
+        # `Gtk.Window(application=self)` took the interpreter with it: measured
+        # as a segfault in `Gtk.py:575 __init__`, reached from `do_shutdown`, in
+        # a chunked suite run - costing every test file after the one that hit.
+        self._shutting_down = True
         logger.info("Shani Chronoa shutting down...")
         self._stop_global_shortcut()
         for name in ("incoming_calls", "obex_receiver", "watch_companion", "phone_remote",

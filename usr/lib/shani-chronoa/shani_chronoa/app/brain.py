@@ -198,6 +198,7 @@ class BrainMixin:
         # silent no-op against every real key in use.
         for provider_id, key_value in api_keys.items():
             redactor.register(f"cloud_llm_{provider_id}", key_value)
+        cloud_models = self.config.cloud_llm_models()
         provider_order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
         # A hand-typed endpoint joins the chain ahead of the anonymous free
         # providers: the person who wrote an address down has usually written it
@@ -208,6 +209,13 @@ class BrainMixin:
         custom_model = self.config.get("custom-llm-model", "")
         if custom_provider(custom_url, custom_model) is not None:
             provider_order = (CUSTOM_ID,) + provider_order
+        # **The chosen model travels with the key.** `cloud_llm_models()` returns
+        # only what a person has actually picked, so the key names in the dict the
+        # chain reads ("<pid>_model") line up and an untouched install is
+        # unchanged. Without this, a model picked in the setup wizard was stored
+        # and then read by nothing.
+        api_keys = dict(api_keys)
+        api_keys.update(cloud_models)
         cloud_llm = CloudLLMChain(provider_ids=provider_order, api_keys=api_keys,
                                   custom_base_url=custom_url, custom_model=custom_model)
         if not cloud_llm.is_available():
@@ -286,9 +294,11 @@ class BrainMixin:
                 order = BYOK_PROVIDER_ORDER + DEFAULT_PROVIDER_ORDER
                 if custom_provider(custom_url, custom_model) is not None:
                     order = (CUSTOM_ID,) + order
-                chosen = CloudLLMChain(provider_ids=order, api_keys=api_keys,
-                                       custom_base_url=custom_url,
-                                       custom_model=custom_model)
+                chosen = CloudLLMChain(
+                    provider_ids=order,
+                    api_keys={**api_keys, **self.config.cloud_llm_models()},
+                    custom_base_url=custom_url,
+                    custom_model=custom_model)
                 if not chosen.is_available():
                     return ("no cloud provider is reachable: the free gateways are "
                             "rate-limited or down, and no API key is configured for "
