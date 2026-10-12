@@ -18547,3 +18547,99 @@ fixed after the fact:
 tally.** Six finished and a seventh pending is a 15-failure answer that is really
 a 25-failure one, and there is no way to tell from the number itself.
 
+
+
+## The corpus carried arguments all along, and a scan for the wrong spelling hid them (2026-12)
+
+A `tools/` builder concluded **no corpus case carries arguments** and the whole
+model work was re-planned around it: 渡劫 was recorded as blocked because
+`ascension_gate` scores right tool *and* right arguments and nothing carried any.
+The key is **`args`**, not `arguments`. Measured: **111 of the 220 cases carry
+arguments**, over 98 distinct tools, and `task_eval.py:91` reads that key — so
+the gate was gradable the entire time and the reason given for not starting was
+false. Three places repeated the wrong scan: the builder, its own limit
+sentence, and `cultivation.py`.
+
+It is the `price`/`collapse` failure in its purest form — **a scan looks for a
+plausible spelling of a word, finds nothing, and the nothing reads as a fact
+about the tree.** The tell is that it *agreed* with the conclusion it was
+already standing on.
+
+**What it does bound is now measured rather than assumed.** 109 of the 220
+declare no arguments, and through the real scorer a model that calls the right
+tool with an **empty argument dict** scores as fully correct on all 109 — not a
+scoring defect, but it means `Measurement.right` cannot separate an improvement
+on the 111 from a vacuous pass on the 109. The gate's headroom is **111 of 220,
+not 220**.
+
+**And 渡劫's cost is measured: 15.5 hours per epoch.** torch 2.14.1+cpu, peft
+0.21.2, transformers 5.19.0, accelerate 1.15.0 in `cache/cultivate-libs`
+(gitignored, none packaged); Qwen3-1.7B safetensors at `cache/models/`.
+`tools/lora_timing.py` times a real rank-8 LoRA on `q/k/v/o_proj`: **31.8 s per
+optimiser step**, 512 tokens, 8 examples/step, 4 threads, **15.9 GB peak RSS**
+(*ru_maxrss* from the kernel, never estimated from parameter counts). One epoch
+over the 165 training rows is **15.5 hours**, and that is the optimiser alone,
+no evaluation and no checkpointing — a floor. **The conclusion is not "start
+it":** on a machine of this class the path is viable and unattended, and the
+objection is that one epoch buys a number whose grading population is half
+vacuous. The recipe is fixed in the tool with its sources — rank 8, **one
+epoch** (arXiv:2506.14126 measures long expert fine-tuning *degrading* a merge;
+2508.16082 measures a one-epoch task vector as the negative gradient scaled by
+lr), `q/k/v/o_proj`, a seq-cls head not label generation (+2.2–3.3 at 0.6B/1.7B,
+arXiv:2607.03801).
+
+### The corpus builder drifted with the machine's own tool-call log
+
+`ranked()` reads `learned_weights()` → `weights_from_tracker(_tracker())` when
+its `learned` argument is left at `None`, so the corpus was a function of
+**whoever ran the builder and what they had asked for since**. Two builds of one
+commit, minutes apart, no edit between them: **212 and 211** positives inside
+the offered set. Fixed with an explicit `learned={}` — the point at which "no
+learned weights" is said out loud.
+
+### 192 of 204 tools appear exactly once, so a *selector* cannot be trained here
+
+The first framing was a selection corpus and the data retired it: holding out a
+request also holds out its tool, so a classifier trained on the rest never sees
+a description it has one example of. **Ranking transfers** — every tool is
+natural language — and it is what the measurements demand: offered-set recall is
+94.5% and the misses sit at rank 8–41, retrieved then crowded out.
+`tools/build_reranker_corpus.py`: 220 requests → 1662 pairs, negatives from
+`ranked()`'s own top slice because those are the confusers that crowd the answer
+out. **Uniform negatives build a corpus the model passes trivially**, and pass
+every structural check while training nothing.
+
+### The test-design finding worth more than either
+
+The first test file read the shipped `reranker_corpus.json`, so **five of seven
+mutations of the *builder* came back survivors** — a broken builder still leaves
+the last good artefact for a test that reads it. Fixtures now build fresh; the
+one test that reads the file is `test_the_shipped_file_matches_a_fresh_build`,
+which is where "the artefact is stale" belongs.
+
+Two mutations of that set were worth the run on their own: **the truncation
+mutation is an equivalent mutant** because `NEGATIVES=12` against
+`DEFAULT_LIMIT=8` means truncation never fires, and **the limit check survived
+because it asserted `"111" in limit` while the limit names 111 twice.** Both are
+the "a check that cannot fail" trap, and neither was visible until a mutation
+was aimed at it. 8 mutations, 7 caught, 0 survivors, 1 equivalent.
+
+### Same as above: `tool_select` had dropped tools it ranked first, and said nothing
+
+`log ?in` matched **"login"**, so `wants_a_browser` fired on an ordinary
+question, `browse` was protected at **874 of a 1536-token budget**, and
+`fingerprint_status` was dropped *despite ranking first*. The conversation path
+overrode a first-place match on all 3 turns that took it, and **all 3 were
+misses**. Offered-set recall **92.7% → 94.5%** (204/220 → 208/220), 18 tests, 2
+mutants caught. Both fixed and pushed (`b134a15`).
+
+### And the budget-aware protection was tried twice and reverted twice
+
+Making `browse`'s protection conditional on it not starving the answer broke the
+case the protection exists for — "book the cheapest flight on blazedemo.com" lost
+`browse`, the exact failure the module records as measured, and the table went
+*down* to 94.1%. **Not shipped.** Score cannot decide it: `browse` ranks *below*
+`web_search` in both the case that should be protected and the case that should
+not (2.89 vs 21.16). The real discriminator is what the displacement already
+removed, and answering it needs to know what the person is asking to *do* —
+which is the intent layer the research points at, not another heuristic.
