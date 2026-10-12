@@ -526,6 +526,38 @@ def perplexity(path: Path, corpus: Optional[Path] = None) -> Optional[float]:
     **A missing `llama-perplexity` is a `None`, never a pass.** `distill.use()`
     takes the same stance: "installed" and "usable" are different claims, and a
     gate that cannot run must not be a gate that says yes.
+
+    **The default corpus measures fluency, not capability - measured, and the
+    hypothesis about it was wrong.**
+
+    `_CORPUS` is this project's own documentation, so a base language model
+    scores better than a chat model does and the ranking inverts. Qwen3-0.6B,
+    three checkpoints, identical bytes each time:
+
+    | corpus | base | tuned | heretic |
+    |---|---:|---:|---:|
+    | the gate's prose | **48.77** | 76.47 | 77.71 |
+    | 226 requests, plain | **34.74** | 54.84 | 55.60 |
+    | 226 requests, chat-shaped | **2.454** | 2.980 | *2.46* |
+
+    The base wins the first two outright, so "prose flatters the base" is not
+    the whole story. **The spread collapses from 27.7 points to 0.53** once the
+    text is in the shape a chat model was tuned for - the tuned model's
+    disadvantage there is a tenth of what any other corpus says, and the
+    absolute score drops by an order of magnitude because the answers are short
+    and highly predictable.
+
+    So the finding is not that the corpus is unfair to chat models. It is that
+    **the corpus decides the answer**: the same three models rank the same way on
+    all three, but the margin a gate has to clear varies by 50x. A gate scored
+    on prose is demanding a 27-point improvement; one scored on the task corpus
+    is demanding 0.5. `cultivation.py` says perplexity is "a floor, not a
+    verdict" and this is the measurement behind that sentence.
+
+    **Every merge measured on any corpus was refused** - the best was 57.22
+    against a 48.77 parent - so this changes no verdict. It changes what a
+    verdict would have to clear.
+
     """
     # **A path that does not exist is not measurable, and saying so is the whole
     # contract.** The first version logged `path.name` in its own warning, so
