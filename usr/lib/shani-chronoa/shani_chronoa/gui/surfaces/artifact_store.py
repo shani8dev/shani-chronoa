@@ -429,6 +429,18 @@ class _ArtifactStoreView(Gtk.Box):
         search_entry.set_placeholder_text("Search artifacts...")
         search_entry.set_hexpand(True)
         search_entry.connect("changed", self._on_search_text_changed)
+        # **Held, not searched for.** `Clear` used to find this entry by
+        # walking the widget tree for a placeholder containing "Search" - and
+        # the walk called `get_children()`, which **a GTK4 `Gtk.Box` does not
+        # have** (measured: `hasattr(Gtk.Box, "get_children")` is False). So
+        # pressing **Clear** raised
+        # `AttributeError: '_ArtifactStoreView' object has no attribute
+        # 'get_children'` on every press, on a button that is wired at line
+        # 435. The entry is built once, right here, and already connected -
+        # so holding it is exact, and a search for it by its own placeholder
+        # is a second way to answer a question this already knows the answer
+        # to. `tools/member_sweep.py` found it; no test and no lint did.
+        self._search_entry = search_entry
         
         clear_btn = Gtk.Button(label="Clear")
         clear_btn.set_tooltip_text("Clear search")
@@ -516,14 +528,14 @@ class _ArtifactStoreView(Gtk.Box):
         self._apply_filters()
 
     def _find_search_entry(self) -> Optional[Gtk.Entry]:
-        """Find the search entry in the widget hierarchy."""
-        for child in self.get_children():
-            if isinstance(child, Gtk.Box):
-                # Look for the search section by finding a Gtk.Entry with placeholder
-                for subchild in child.get_children():
-                    if isinstance(subchild, Gtk.Entry) and "Search" in subchild.get_placeholder_text():
-                        return subchild
-        return None
+        """The search entry, which `__init__` built and this class holds.
+
+        **Named for what it did, kept for what it is.** It walked the widget
+        tree and matched on the placeholder text; it now returns the reference.
+        Returning `None` rather than raising keeps `Clear` safe on a view whose
+        entry was never built, which is the only case that can reach it now.
+        """
+        return getattr(self, "_search_entry", None)
 
     def _apply_filters(self) -> None:
         """Get the artifacts that match the current filters."""

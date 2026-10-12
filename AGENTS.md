@@ -18874,3 +18874,112 @@ figure (3) pointed at two different problems, and only the snapshot separated
 already committed." When a failing count is much worse than expected, running
 the same test against `git archive HEAD` is the cheapest way to tell which of
 those you are looking at.
+
+## A sweep for "written on one class, called on another" — and it found a second live crash
+
+The picker defect above is a *class* of defect, and pyflakes cannot see any of
+it: `self.foo()` inside a method is a name, and which class owns it is a
+question of inheritance, not of syntax. So `tools/member_sweep.py` asks it for
+every class in the package.
+
+**Result on this tree: 0**, with 2 classes it could not ask about and says so.
+**The control is the only reason that is readable** —
+`tests/test_member_sweep.py` moves `_model_row` back onto `_ModeStrip` and
+requires the sweep to print that name. A checker that has stopped looking prints
+exactly what a working one prints when there is nothing to find.
+
+### It found a second crash on its first run, and it was live
+
+`gui/surfaces/artifact_store.py`'s **Clear** button:
+
+```python
+def _find_search_entry(self):
+    for child in self.get_children():        # Gtk.Box has no get_children
+```
+
+Measured by pressing the real button on a real view:
+
+```
+view built: _ArtifactStoreView
+Clear pressed RAISED: AttributeError: '_ArtifactStoreView' object has no
+                      attribute 'get_children'
+```
+
+**Clear has raised on every press since it was wired**, and this is the same
+GTK3-`get_children` defect this file already records twice — so the record of
+the *class* was right and the gate that was supposed to hold it was a grep, not
+an AST pass.
+
+The fix is not a GTK4 iteration. `__init__` builds the entry, connects it, and
+**then `_find_search_entry` walks the tree looking for it by its placeholder
+text** — a second way to answer a question the class already knew the answer
+to. It holds the reference now, which is exact and O(1).
+
+### The tree-wide gate is "guarded", not "absent" — and the grep version was wrong twice
+
+The first version grepped for `get_children(` and reported **five** sites. Four
+were **comments explaining this very fix**. That is *a scanner whose needle is
+in its own input*, met for the fourth time in as many passes, and the fifth was
+`activity.py`, which is **correct**: it guards the call with
+`hasattr(self._summary, "get_children")`, because `build_summary` returns either
+a plain `Gtk.Box` or a `common.group` and only one has the method.
+
+So the invariant is **every `get_children()` call is guarded by an `hasattr` on
+the same receiver** — not that the call is absent. Requiring absence would have
+failed correct code and been "fixed" by deleting the working guard, which is the
+over-fix this file records for `connect`/`emit`. A **planted** call in a scratch
+tree is required to be found, so the zero means something.
+
+### Four bugs in the sweep itself, and every one reported a real name for the wrong reason
+
+None of these is exotic; all four are the same trap in new clothes.
+
+| the bug | what it reported |
+|---|---|
+| `self.x.y(...)` counted as a call on self | `startswith` as a member `ChronoaWindow` must define |
+| a `@staticmethod`'s first parameter read as `self` | `text.startswith` on `ChronoaWindow` |
+| an attribute *read* counted as a call | `mac` as a method `BluezWatch` must define |
+| **only bare-name bases collected** | `Adw.ApplicationWindow` and `Gtk.Window` **dropped entirely** — so two windows reported their own base class's methods as missing |
+
+The fourth is the instructive one: it made the sweep cry wolf about
+`set_content`, `add_breakpoint`, `present` and `connect`, and the obvious
+response — to believe it — would have been to add methods the classes already
+inherit. **A checker that reports a base class's own methods as missing has
+stopped resolving the base**, and that is the signal to check the resolver.
+
+### And the base is resolved by asking, not by a list
+
+Every remaining name is asked of the installed library with `hasattr` over the
+real `__mro__`, so there is no hand-kept allowlist — which is what this file
+keeps getting wrong (`wpctl` three times, the finite check four times,
+`_SYNONYMS`, `capabilities._GROUPS`). Two rules that cost a round each:
+
+- **`Adw.ApplicationWindow` must be looked up in `Adw`.** Searching the
+  namespaces in dictionary order returned **`Gtk.ApplicationWindow`** — a class
+  of the same name, with fewer members — and reported `set_content` and
+  `add_breakpoint` as missing from a class that has both.
+- **A base it cannot resolve is a third thing, not a finding.** Two classes
+  inherit `BaseHTTPRequestHandler`, which is stdlib. Reported as findings that
+  is crying wolf about names nobody checked; dropped silently it is an absence
+  read as a pass. They are printed as **"could not ask"** and counted in neither
+  column.
+
+### My own mutation runner wrote to the shared tree, and reported three survivors because of it
+
+The first run of the check on the new gates reported **3 mutations, 0 caught**.
+That is the shape of a result that should make you check the harness before the
+code. The runner built its path from a **relative** `usr/lib/...`, so every
+mutation was written to the **real repository** while pytest ran against the
+snapshot — the snapshot never changed, so nothing could fail, and the tree was
+mutated three times plus once more in a probe.
+
+**The `finally` restored every file and `git diff` shows exactly the intended
+change** — verified rather than assumed, and the whole point of `finally` plus a
+journal. But a harness that mutates the shared tree is the exact thing this
+workspace forbids, and it was doing it silently while reporting a clean result.
+
+**A "survivor" is the one measurement whose cause is usually the harness.**
+Re-run one by hand in the directory the test claims to be in before believing
+it: the same mutation, applied there, failed immediately. Paths, not coverage.
+
+**3 mutations, 3 caught** once the path was absolute.
