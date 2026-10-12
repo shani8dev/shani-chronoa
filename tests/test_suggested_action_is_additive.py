@@ -90,6 +90,28 @@ def applied(tmp_path_factory, compiled_schema_dir):
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["PYTHONPATH"] = str(pathlib.Path("usr/lib/shani-chronoa").resolve())
     env["XDG_RUNTIME_DIR"] = str(runtime)
+    # **And the config home, which this fixture did not isolate.** Without it the
+    # subprocess reads *and writes* the developer's real
+    # `~/.config/glib-2.0/settings/keyfile`, because `GSETTINGS_BACKEND=keyfile`
+    # makes every `config.set` land there. The harness's own apply step is the
+    # writer: it turns the suggested senses on, so the first run poisons the well
+    # and every later one finds `missing` empty, writes nothing, and fails
+    # `test_it_writes_something` with "the action wrote nothing at all".
+    #
+    # Measured both ways, same tree, back to back: with `XDG_CONFIG_HOME` and
+    # `XDG_STATE_HOME` pointed at the test's own directories, **4 passed**; as the
+    # repo runs it, **1 failed**. And the contamination is not hypothetical - the
+    # real keyfile carries all four suggested senses set to `true`.
+    #
+    # Same class as the tests that wrote into the real user's `tool_calls.log`,
+    # and the `fake_bin` `PATH` lesson: a fixture that does not control its
+    # environment is describing the machine it ran on.
+    config = work / "config"
+    config.mkdir()
+    env["XDG_CONFIG_HOME"] = str(config)
+    state = work / "state"
+    state.mkdir()
+    env["XDG_STATE_HOME"] = str(state)
     # Same reason as test_missing_settings_surface: the harness builds its own
     # ChronoaConfig in a SUBPROCESS, and without the compiled schema dir it
     # falls back to "using Python defaults" with an empty _valid_keys, so every

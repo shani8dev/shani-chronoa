@@ -271,12 +271,26 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # **Cancel what activation queued.** Every `_queue_idle` source is
         # removed before any component is released, so none of them runs against
         # an application that is being taken apart.
-        for source in list(self._pending_idles):
+        #
+        # `getattr`, not an attribute access, for the same reason the services
+        # below use it: `_pending_idles` is created in `do_startup`, and *this*
+        # is a different lifecycle method. A stub that shuts down without
+        # starting - `tests/conftest.py`'s `stubbed_app` builds the application
+        # with `__new__` and hand-assigns only what a test needs - reaches here
+        # with the attribute absent, and the `AttributeError` costs the real
+        # teardown that follows. Measured: this exact line broke
+        # `test_asyncbridge.py::TestShutdownCleanup::
+        # test_do_shutdown_stops_async_bridge_thread` the moment `_queue_idle`
+        # began tracking source ids, and it is the same defect class as
+        # `MathBlock` reading an attribute it never set.
+        pending = getattr(self, "_pending_idles", None) or ()
+        for source in list(pending):
             try:
                 GLib.source_remove(source)
             except Exception:            # already fired, or a stale id
                 pass
-        self._pending_idles.clear()
+        if getattr(self, "_pending_idles", None) is not None:
+            self._pending_idles.clear()
         logger.info("Shani Chronoa shutting down...")
         self._stop_global_shortcut()
         for name in ("incoming_calls", "obex_receiver", "watch_companion", "phone_remote",

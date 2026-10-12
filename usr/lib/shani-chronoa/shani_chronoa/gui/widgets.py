@@ -791,7 +791,16 @@ class TranscriptView(Gtk.ScrolledWindow):
         gesture = Gtk.GestureClick()
         # Secondary button only: a left-click that popped a menu would fight the
         # text selection the label is explicitly selectable for.
-        gesture.set_button(Gtk.BUTTON_SECONDARY)
+        #
+        # **`Gdk`, not `Gtk`.** `Gtk.BUTTON_SECONDARY` is a GTK 3 constant and
+        # GTK 4 removed it - measured, `hasattr(Gtk, "BUTTON_SECONDARY")` is
+        # False while `Gdk.BUTTON_SECONDARY` is 3. Using the `Gtk` spelling
+        # raised `AttributeError: 'gi.repository.Gtk' object has no attribute
+        # 'BUTTON_SECONDARY'` on every call that attached a handler, which is the
+        # live path: two of `test_regenerate.py`'s tests failed this way and the
+        # gesture is built at :996 with a real handler. The whole class of bug
+        # this repo records as its first.
+        gesture.set_button(Gdk.BUTTON_SECONDARY)
         gesture.connect("pressed", self._on_rewind_pressed, row, index, handler)
         row.add_controller(gesture)
         row._rewind_gestures = list(getattr(row, "_rewind_gestures", ())) + [gesture]
