@@ -728,8 +728,20 @@ class ArtifactBlock(Gtk.Box):
                                 self._on_open, path))
         row.append(_flat_button("edit-copy-symbolic", "Copy this file's path",
                                 self._on_copy_path, path))
-        row.append(_flat_button("folder-download-symbolic", "Save a copy elsewhere",
-                                self._on_save, path))
+        # **No "save a copy" for a directory.** `_saved` reads the source with
+        # `read_bytes()`, which on a folder raises `IsADirectoryError` - caught, as
+        # an `OSError`, and logged, so the button would do nothing and say
+        # nothing. Measured by rendering a real directory artifact rather than by
+        # reading this. "Open" and "copy its path" are both meaningful for a
+        # folder; a single-file copy of one is not, and offering it anyway is a
+        # control that lies about what it can do.
+        #
+        # `is_dir()` rather than `not is_file()` on purpose: a file deleted
+        # between the skill answering and the row being built keeps its button
+        # and fails in the ordinary way, instead of quietly losing it.
+        if not path.is_dir():
+            row.append(_flat_button("folder-download-symbolic",
+                                    "Save a copy elsewhere", self._on_save, path))
         return row
 
     def _thumbnail(self, path: Path):

@@ -163,8 +163,18 @@ def _run(arguments: dict) -> str:
         return f"ImageMagick could not edit {src.name}: {(r.stderr.strip().splitlines() or ['no message'])[-1][:200]}"
     before, after = src.stat().st_size, dst.stat().st_size
     what = ", ".join(done) or f"converted to {fmt}"
-    return (f"Saved {dst.name} ({what}): {after / 1024:.0f} KB, was {before / 1024:.0f} KB. "
-            f"The original is unchanged.")
+    # **The full path, not just the file name.** This said "Saved cat-edited.jpg"
+    # and stopped - which is a person asking to resize a picture left not knowing
+    # where it went, and the directory is exactly the part they cannot guess. It
+    # also made this the one image skill that could not declare what it wrote:
+    # a bare file name says nothing about where the file is, so no amount of
+    # pattern-matching recovers a path from it.
+    # **`files.human_size`, not `{n / 1024:.0f} KB`** - found by running this and
+    # reading the answer: a 64x64 thumbnail came back "0 KB, was 0 KB", which is
+    # a file that plainly exists reported as being no size at all. Anything under
+    # 512 bytes rounds to zero. `take_photo` already used the right helper.
+    return (f"Saved {dst} ({what}): {files.human_size(after)}, "
+            f"was {files.human_size(before)}. The original is unchanged.")
 
 
 
@@ -219,3 +229,16 @@ def _verify_edit_image(arguments: dict, tool=None):
 POST_CONDITION = _verify_edit_image
 
 SKILLS = [Skill(name="edit_image", schema=_SCHEMA, run=_run)]
+
+
+#: This skill's own declaration of what it wrote, read out of the sentence above.
+#: A skill runs in a subprocess, so that sentence is the only channel it has
+#: back to the app - see `files.paths_in` for why there is no alternative.
+#: **This pattern is tied to the sentence above, and that coupling is real.**
+#: Changing the wording to report a readable size instead of "0 KB" - which is
+#: what running it turned up - silently stopped this matching, and the
+#: transcript went back to describing the file instead of showing it. The
+#: attribute was still there, so the "does this skill declare one?" test kept
+#: passing. `test_a_declared_skill_really_declares_what_it_says_it_saved` is
+#: what caught it, by running the skill and reading what came back.
+DECLARES_ARTIFACTS = files.paths_in(r"^Saved (.+?) \(.*\): [^,]+, was ")

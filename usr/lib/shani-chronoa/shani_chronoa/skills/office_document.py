@@ -235,3 +235,12 @@ def _post_condition(arguments: dict):
 POST_CONDITION = _post_condition
 
 SKILLS = [Skill(name="office_document", schema=SCHEMA, run=_run)]
+
+
+#: **This one declares a directory, not a file.** `office_document` extracts the
+#: page images out of a document into a folder, and the folder is the thing the
+#: person wants to go and look at. `ArtifactBlock` renders a directory without a
+#: thumbnail and without a save-a-copy control - a folder cannot be read into
+#: bytes, and offering a button that silently fails is worse than not offering it.
+DECLARES_ARTIFACTS = files.paths_in(r"^Saved \d+ picture\(s\) from .+ to (.+?)\.$")
+

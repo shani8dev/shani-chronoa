@@ -386,8 +386,22 @@ def test_the_skills_that_made_a_file_all_declare_one():
     from shani_chronoa import tools
     declaring = {n for n in tools._HANDLER_FNS if tools._declaration_for(n)}
     expected = {"generate_image", "create_document", "convert_document",
-                "take_photo", "analyze_table", "recording"}
+                "take_photo", "analyze_table", "recording", "edit_image",
+                "office_document"}
     assert expected <= declaring, f"no longer declaring: {sorted(expected - declaring)}"
+
+
+def _walk(widget):
+    stack, out = [widget], []
+    while stack:
+        node = stack.pop(0)
+        out.append(node)
+        if hasattr(node, "get_first_child"):
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+    return out
 
 
 def _sample_colours(path, size=8):
@@ -462,3 +476,70 @@ def test_the_thumbnail_holds_the_picture_not_just_an_image_widget(tmp_path):
     assert not missing, (
         f"the thumbnail does not contain {missing} - it holds {sorted(seen)}, so "
         f"the preview is not the picture that was made")
+
+
+def test_a_declared_skill_really_declares_what_it_says_it_saved(tmp_path):
+    """**A declaration is a regex over the skill's own sentence, so editing the
+    sentence silently undeclares the skill - and no structural test sees it.**
+
+    That is not hypothetical. `edit_image` reported "0 KB, was 0 KB" for
+    anything under 512 bytes, so it was changed to report a real size; its
+    `DECLARES_ARTIFACTS` still existed, so the test asserting that six skills
+    declare one kept passing, and the transcript had quietly gone back to
+    describing files instead of showing them. Found by running the skill and
+    printing what it declared - the declaration was `[]`.
+
+    So the gate is not "does the attribute exist" but "does running the skill
+    produce an artifact". Two skills here are cheap and self-contained; a
+    heavier one would need its binary, which is why the set is explicit rather
+    than every declaring skill.
+    """
+    source = tmp_path / "cat.png"
+    import gi
+    gi.require_version("GdkPixbuf", "2.0")
+    from gi.repository import GdkPixbuf
+    buf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 64, 64)
+    buf.fill(0x804020FF)
+    assert buf.savev(str(source), "png", [], []) is True
+
+    result = tools.execute_tool_outcome(
+        "edit_image", {"path": str(source), "look": "sepia"})
+
+    assert result.artifacts, (
+        f"edit_image ran and said {result.text[:70]!r} but declared nothing - "
+        f"its DECLARES_ARTIFACTS no longer matches its own sentence")
+    for path in result.artifacts:
+        assert path.exists(), f"declared {path}, which is not on disk"
+
+
+def test_a_directory_artifact_does_not_offer_a_save_it_cannot_do(tmp_path):
+    """A folder is a legitimate artifact - `office_document` writes a directory
+    of extracted page images - but `_saved` reads its source with `read_bytes()`,
+    which raises `IsADirectoryError`. That is caught and logged, so the button
+    would fail silently: a control that does nothing and says nothing.
+
+    Measured by rendering a real directory rather than by reading the code, which
+    is the only reason the wording of that log line is known.
+    """
+    folder = tmp_path / "page-images"
+    folder.mkdir()
+    (folder / "image-001.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    block = blocks.ArtifactBlock([folder])
+    tooltips = [b.get_tooltip_text() for b in _walk(block)
+                if isinstance(b, Gtk.Button)]
+
+    assert tooltips, "a directory artifact rendered no controls at all"
+    assert not any("Save a copy" in (t or "") for t in tooltips), (
+        f"a folder still offers save-a-copy: {tooltips}")
+    assert any("Open" in (t or "") for t in tooltips), (
+        f"a folder lost its open control: {tooltips}")
+
+
+def test_a_file_artifact_still_offers_all_three(tmp_path):
+    """The control for the test above: dropping one must not drop them all."""
+    made = tmp_path / "cat-edited.png"
+    made.write_bytes(b"\x89PNG\r\n\x1a\n")
+    tooltips = [b.get_tooltip_text() for b in _walk(blocks.ArtifactBlock([made]))
+                if isinstance(b, Gtk.Button)]
+    assert len(tooltips) == 3, f"a file should have three controls, got {tooltips}"

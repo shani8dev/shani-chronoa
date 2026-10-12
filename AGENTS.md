@@ -15238,3 +15238,59 @@ The probe lives in `/tmp/opencode/render_artifact.py` and does not survive this
 session. The pixel assertion that mattered is now a test; the recipe is
 `render_count3.py`'s, and a `slot-test` in `shani-testbed` would be the durable
 home for it.
+
+## The last two undeclared skills, and a coupling that bit on the first try (2026-10-12)
+
+`edit_image` and `office_document` could not declare by pattern: one answered
+*"Saved cat-edited.jpg (resized): 40 KB"* - a bare file name - and the other
+named a directory. Neither was fixable by writing a cleverer regex.
+
+### `edit_image` was under-informing a person, not just a parser
+
+It never said **where** it saved. Someone asking to resize a picture got back a
+file name and no directory, which is the one part they cannot guess. Printing
+the full path is a better answer on its own terms, and it is what makes the
+declaration possible at all - the skill knew the path all along.
+
+Running it turned up a second defect in the same sentence: **`0 KB, was 0 KB`**
+for anything under 512 bytes, from `{n / 1024:.0f}`. A file that plainly exists,
+reported as being no size at all. `files.human_size` already existed and
+`take_photo` already used it.
+
+### The coupling is real, and it is the fragile part of this design
+
+Changing that wording **silently undeclared the skill.** The attribute was still
+there, so `test_the_skills_that_made_a_file_all_declares_one` kept passing, and
+the transcript went back to describing files instead of showing them. Found by
+running the skill and printing `result.artifacts` - it was `[]`.
+
+So the gate is no longer "does the attribute exist" but "does running the skill
+produce an artifact". Mutation-checked both ways:
+
+| mutation | caught |
+|---|---|
+| `DECLARES_ARTIFACTS` removed from `edit_image` | yes |
+| sentence reworded so `, was ` becomes `(was ` | yes |
+| first attempt: only the *number format* changed, leaving `, was ` intact | **no - the mutation was wrong, not the test** |
+
+The third row is the one worth keeping. It looked like a valid mutation and the
+suite stayed green, because `403 B, was 0 KB` still contains the substring the
+pattern anchors on. A mutation that cannot fail is not a mutation.
+
+### A directory is an artifact, and it needs different controls
+
+`office_document` extracts page images into a *folder*, and the folder is what a
+person wants to go and look at. Rendering one showed a live problem: a directory
+row offered **"save a copy elsewhere"**, which calls `read_bytes()` and so
+raises `IsADirectoryError` - caught as an `OSError` and logged, so the button
+would do nothing and say nothing.
+
+That control is now omitted for directories. `is_dir()` rather than
+`not is_file()`, deliberately: a file deleted between the skill answering and
+the row being built keeps its button and fails in the ordinary way instead of
+quietly losing it. Both directions are tested - a folder has no save control,
+a file keeps all three.
+
+Eight skills now declare, one shared extractor. `office_document` is the first
+that declares a **directory**, and `ArtifactBlock` renders it without a
+thumbnail, which was already correct and is now tested rather than assumed.
