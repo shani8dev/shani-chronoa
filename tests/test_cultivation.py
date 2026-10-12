@@ -749,8 +749,36 @@ def test_the_first_gate_pass_is_recorded_as_the_refusal_it_became():
     assert "ship: true" in said, said[:200]
     assert "52.684" in said and "52.945" in said, "both parents' figures"
     assert "4/5" in said, "the honest instrument's figure"
-    assert "14.4" in said and "4.65" in said, "both timings"
-    assert "tie is a" in said, "and the reason it does not ship"
+    assert "tie" in said, "and the reason it does not ship"
+    assert "reproduced across three independent runs" in said, (
+        "the tie is the robust half and must be recorded as repeated")
+
+
+def test_the_speed_claim_is_recorded_as_a_contention_artifact_and_retracted():
+    """The first write-up read 'a tie at three times the cost' from 14.4 against
+    4.65 s/case. Those were measured ~20 minutes apart while a concurrent session
+    held two llama-servers on a 4-core box, and **the base alone measures 13.11
+    s/case under that load against 4.65 quiet** - a 2.8x swing on the same
+    model. The number was about the contention.
+
+    This test fails if the retraction is deleted, because a reader would
+    otherwise take a contaminated timing as a property of the merge.
+    """
+    said = " ".join(cultivation.TERMS["attunement"]["measured"].split())
+    assert "retracted" in said, said[:220]
+    assert "not measurable on this box" in said
+
+    # **The evidence that proves contamination, asserted as numbers.** A first
+    # version of this test only asserted the phrase "2.8x swing on the same
+    # model", and a mutation that deleted the whole base-vs-load comparison left
+    # the suite green - the phrase survived elsewhere in the sentence while the
+    # figures it rests on were gone. So the two measurements the claim rests on
+    # are required individually: the base quiet, and the same base under load.
+    for figure in ("4.65 quiet", "13.11 s/case", "2.8x swing"):
+        assert figure in said, (
+            "the contamination evidence is incomplete: %r missing. Without the "
+            "base's own variance under load there is nothing showing the timing "
+            "was about contention rather than about the merge." % figure)
 
 
 def test_the_gate_passing_merge_is_refused_by_the_real_gate():
