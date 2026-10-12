@@ -73,6 +73,21 @@ EXTRA_FILES = (ROOT / "render_ui.py",)
 #: that reports the app's entry point dead, and AGENTS.md records
 #: `do_command_line` as *wired* (it attaches `%U` file arguments and `--ask=`).
 FRAMEWORK_CALLERS = {
+    # `html.parser.HTMLParser` calls each of these on a subclass **by name** as it
+    # walks a document. `webtext._TextExtractor` is constructed at webtext.py:367
+    # and fed a page, so all nine of its callbacks run - a scan that cannot see
+    # that reports `handle_data` dead, which is the same false positive as a
+    # dunder, arrived at from a different direction.
+    "handle_starttag": "an html.parser.HTMLParser callback, called by name",
+    "handle_endtag": "an html.parser.HTMLParser callback, called by name",
+    "handle_data": "an html.parser.HTMLParser callback, called by name",
+    "handle_entityref": "an html.parser.HTMLParser callback, called by name",
+    "handle_charref": "an html.parser.HTMLParser callback, called by name",
+    "handle_startendtag": "an html.parser.HTMLParser callback, called by name",
+    "handle_comment": "an html.parser.HTMLParser callback, called by name",
+    "handle_decl": "an html.parser.HTMLParser callback, called by name",
+    "handle_pi": "an html.parser.HTMLParser callback, called by name",
+    "unknown_decl": "an html.parser.HTMLParser callback, called by name",
     "do_command_line": "a GApplication vfunc, dispatched by name from the bus",
     "do_startup": "a GApplication vfunc, dispatched by name from the bus",
     "do_activate": "a GApplication vfunc, dispatched by name from the bus",

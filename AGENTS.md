@@ -12421,7 +12421,7 @@ prose is not a caller):
 | public names in the shipped tree | **2,171** |
 | referenced in the shipped tree | 2,000 |
 | referenced by a test but not the shipped tree | 86 |
-| referenced by nothing at all | **83** |
+| referenced by nothing at all | **80** |
 
 Of the **17** names the list carried: **6 are still dead**, and 11 are not — but
 *not dead* is not *wired*, and the first comparison I ran printed "no longer
@@ -12443,6 +12443,12 @@ already names as the dangerous one.
   an earlier scan. **Found by `test_usr_bin_counts_as_a_caller_and_not_as_an_afterthought`**,
   which is the only reason it is not still broken; it moved the dead count from
   91 to 83.
+- **Every `HTMLParser` callback read as dead** — `handle_data`, `handle_endtag`
+  and `handle_startendtag` in `webtext.py`'s `_TextExtractor`. The class **is**
+  live: it is constructed at `webtext.py:367` and fed a page, and `HTMLParser`
+  calls its callbacks **by name**. Same false positive as a dunder, arrived at
+  from a different direction, and it was found by checking the tool's dead list
+  against names this file independently records — 83 to **80**.
 - Two documented false-positive classes are allowlisted **with their reasons**:
   `apply_filesystem_allowlist` is called from the source string
   `get_landlock_wrapper()` returns, and `do_command_line` is a `GApplication`
@@ -12455,3 +12461,32 @@ counting both doubles every number.
 `tests/test_deadcode_tool.py` (7) pins the two that matter: a docstring naming a
 function is not a caller, and a real call is. Both directions, because a scanner
 that counts everything as wired is as useless as one that counts nothing.
+
+### A scanner that cries wolf is worse than no scanner, so that is the test
+
+`tools/deadcode.py`'s output is only worth reading if it does not report live
+code as dead, and **three separate false-positive classes turned up in its first
+two runs** — dunders, framework vfuncs, and `HTMLParser` callbacks. All three
+are the same shape: something invokes the name without an identifier appearing
+anywhere in our own source.
+
+So the check is against **ground truth the scan was not derived from** — names
+this file independently records as wired, written out rather than recomputed,
+because a check generated from its own input is circular:
+
+| name | what this file records |
+|---|---|
+| `analyze_table` | a skill the matrix-skills suite drives through dispatch |
+| `merge_models` | a Merge models button on the Models panel |
+| `list_streams` | wired as `recording action=streams`, 2026-10-11 |
+| `Router` | distill's router, reached through `tools._HANDLER_FNS` |
+
+**And the control that makes those four mean something:** `check_health` is
+asserted to *still* be reported dead, which this file also records ("genuinely
+uncalled, and consistently so"). An empty dead list satisfies every "is nothing
+live being reported dead?" question, so without that assertion the four tests
+above would pass on a scan that had stopped working entirely.
+
+Verified: dropping `handle_data` from the framework allowlist turns the suite
+red with *"is an html.parser callback and is not allowlisted, so every HTML
+parser in this tree reports dead"*.

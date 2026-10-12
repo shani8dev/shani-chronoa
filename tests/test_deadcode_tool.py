@@ -144,3 +144,70 @@ class TestTheScopeIsDeliberate:
         """The control: the allowlists are not decorative."""
         assert "do_command_line" in dc.FRAMEWORK_CALLERS
         assert "apply_filesystem_allowlist" in dc.GENERATED_CODE_CALLERS
+
+#: Names this repository's own file records as wired, quoted rather than derived
+#: from the scan. If the scan is ever regenerated from its own output these
+#: become circular - so they are written out, and each carries the sentence that
+#: makes it checkable.
+KNOWN_WIRED = [
+    ("analyze_table", "a skill the matrix-skills suite drives through dispatch"),
+    ("merge_models", "a Merge models button on the Models panel"),
+    ("list_streams", "wired as `recording action=streams`, 2026-10-11"),
+    ("Router", "distill's router, reached through tools._HANDLER_FNS"),
+]
+
+#: And the one AGENTS.md calls out by name as genuinely uncalled. Without this
+#: the check above would also be satisfied by a scan whose dead list is empty.
+KNOWN_DEAD = [
+    ("check_health", "AGENTS.md: 'genuinely uncalled, and consistently so'"),
+]
+
+
+@pytest.fixture(scope="module")
+def report(dc):
+    return dc.scan()
+
+
+class TestItDoesNotCryWolf:
+    """A scanner that reports live code as dead is worse than no scanner.
+
+    This is the pair that makes the tool's output worth reading. The three
+    `handle_*` names were caught exactly this way: `webtext._TextExtractor` is an
+    `html.parser.HTMLParser` subclass, constructed at `webtext.py:367`, whose
+    callbacks the stdlib calls **by name** - so a scan with no framework
+    allowlist lists a live HTML parser's three methods as dead.
+    """
+
+    @pytest.mark.parametrize("name,why", KNOWN_WIRED, ids=[n for n, _ in KNOWN_WIRED])
+    def test_a_name_recorded_as_wired_is_not_reported_dead(self, report, name, why):
+        assert name not in report["dead"], (
+            f"{name} is reported dead, and this repository records it as {why}. "
+            f"A name invoked by a framework rather than called by an identifier "
+            f"is the likely cause: check the allowlists before believing the "
+            f"rest of the list."
+        )
+
+    @pytest.mark.parametrize("name,why", KNOWN_DEAD, ids=[n for n, _ in KNOWN_DEAD])
+    def test_a_name_recorded_as_dead_is_still_reported_dead(self, report, name, why):
+        """The control for the four above.
+
+        An empty dead list satisfies every "is nothing live being called dead?"
+        question, which is the shape of a check that cannot fail.
+        """
+        assert report["dead"], "the dead list is empty, so nothing below is checked"
+        assert name in report["dead"], (
+            f"{name} is no longer reported dead, and this repository records it "
+            f"as {why} - either it has been wired since, in which case the list "
+            f"in AGENTS.md should say so, or the scan stopped reporting."
+        )
+
+    def test_the_framework_allowlist_covers_both_dispatch_shapes(self, dc):
+        """Two mechanisms, one shape: the bus calls a GApplication vfunc by name
+        and HTMLParser calls a subclass callback by name. Only one of them being
+        covered would leave the other silently reported."""
+        assert "do_command_line" in dc.FRAMEWORK_CALLERS
+        for callback in ("handle_data", "handle_endtag", "handle_startendtag"):
+            assert callback in dc.FRAMEWORK_CALLERS, (
+                f"{callback} is an html.parser callback and is not allowlisted, "
+                f"so every HTML parser in this tree reports dead"
+            )
