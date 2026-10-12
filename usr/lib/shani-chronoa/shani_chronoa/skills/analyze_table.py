@@ -383,3 +383,12 @@ def _verify_chart(arguments: dict, tool=None):
 POST_CONDITION = _verify_chart
 
 SKILLS = [Skill(name="analyze_table", schema=SCHEMA, run=_run)]
+
+#: **This skill's own declaration of what it wrote**, read out of the sentence
+#: above. A skill runs in a subprocess, so that sentence is the only channel it
+#: has back to the app - see `files.paths_in` for why there is no alternative.
+#: The pattern is deliberately narrow: it matches this skill's *own* wording,
+#: and `tools.artifacts_for` still requires the result to be an absolute path
+#: that exists, so a loose match is dropped rather than rendered.
+DECLARES_ARTIFACTS = files.paths_in(r"chart of \d+ point\(s\) to (.+?)\.$")
+

@@ -209,7 +209,16 @@ def _declaration_for(name: str):
 
 
 def artifacts_for(name: str, result_text: str) -> tuple:
-    """What `name` declared it produced. Empty for everything undeclared."""
+    """What this dispatch produced. Empty for everything undeclared.
+
+    **A skill runs in a subprocess** - `python3 -c` with the arguments
+    interpolated - measured by pid, because a first version used a thread-local
+    ledger inside the skill and it was empty every time. So the answer string is
+    the only channel a skill has back to the app, and the per-module
+    `DECLARES_ARTIFACTS` reads the path out of what that skill said about
+    itself. That is why the declaration lives in the skill rather than in the
+    app: the app cannot ask.
+    """
     produced = _declaration_for(name)
     if produced is None:
         return ()
@@ -1350,8 +1359,17 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
             else checked.suffix
         msg = output + suffix
         msg = _with_feedback(msg, _feedback_for_dispatch)
+        # **Read the declaration from `output`, not `msg`.** This is the path a
+        # subprocessed skill takes, and it used to be built with positional
+        # arguments, so `artifacts` quietly took its `()` default and every
+        # declared file was dropped *here* - after the skill ran, after the
+        # verdict was attached, and with no error anywhere. The sentence is the
+        # skill's own (`output`), so `suffix` and the feedback prefix are left
+        # off deliberately: both are text this repo added, and the declaration
+        # matches against what the skill said.
         return DispatchResult(msg, checked.verdict, True,
-                             checked.evidence)
+                             checked.evidence,
+                             artifacts=artifacts_for(name, output))
     except Exception as e:
         logger.error(f"Tool '{name}' failed: {e}")
         _TRACKER.record_call(name, arguments, f"EXCEPTION: {e}", 0.0, origin=origin)
@@ -1393,6 +1411,19 @@ class ToolOutcome(NamedTuple):
     verdict: verification.Verdict
     evidence: str = ""
     ran: bool = True
+    #: Files this dispatch declared it produced - see `DispatchResult.artifacts`.
+    #:
+    #: **This field was missing, and that made the whole feature dead.** The
+    #: assistant reads `result.artifacts` off whatever `_run_tool` returned, and
+    #: that is a `ToolOutcome` - so `getattr(result, "artifacts", ())` quietly
+    #: answered `()` and every declared picture went nowhere. Found by running
+    #: the real `create_document` and printing the field, not by reading: the
+    #: plumbing was complete and correct at every hop and delivered nothing.
+    #:
+    #: That is this repository's own dead-code class reached through a field
+    #: rather than a module: `DispatchResult` carried the value, `ToolOutcome`
+    #: did not, and nothing anywhere compared the two.
+    artifacts: tuple = ()
 
     @property
     def is_error(self) -> bool:
@@ -1477,4 +1508,5 @@ def execute_tool_outcome(
     """
     result = _dispatch(name, arguments, by_reference=by_reference, origin=origin)
     return ToolOutcome(text=result.text, verdict=result.verdict,
+                       artifacts=result.artifacts,
                        evidence=result.evidence, ran=result.ran)

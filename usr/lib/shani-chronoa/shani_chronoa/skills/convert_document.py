@@ -133,3 +133,12 @@ def _run(arguments: dict) -> str:
 POST_CONDITION = None
 
 SKILLS = [Skill(name="convert_document", schema=_SCHEMA, run=_run)]
+
+#: **This skill's own declaration of what it wrote**, read out of the sentence
+#: above. A skill runs in a subprocess, so that sentence is the only channel it
+#: has back to the app - see `files.paths_in` for why there is no alternative.
+#: The pattern is deliberately narrow: it matches this skill's *own* wording,
+#: and `tools.artifacts_for` still requires the result to be an absolute path
+#: that exists, so a loose match is dropped rather than rendered.
+DECLARES_ARTIFACTS = files.paths_in(r"^Saved (.+?) \(\d+ bytes\) from ")
+

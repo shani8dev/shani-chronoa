@@ -291,3 +291,100 @@ def test_a_star_args_subscriber_is_not_a_mismatch():
 
     assert EventSink(on_tool_start=_Callable()) is not None
     assert EventSink(on_tool_finish=lambda *a: None) is not None
+
+# --------------------------------------------------------------------------
+# the channel: a skill is a subprocess, so the answer string is all it has
+
+
+def test_the_tool_outcome_carries_artifacts(tmp_path):
+    """**The field whose absence made the whole feature deliver nothing.**
+
+    The plumbing was complete and correct at every hop: `DispatchResult` carried
+    `artifacts`, the assistant read `result.artifacts`, the transcript built an
+    artifact block. It delivered nothing because `_run_tool` returns a
+    `ToolOutcome`, which had no such field, so `getattr(result, "artifacts", ())`
+    answered `()` - quietly, at runtime, with no error anywhere. Found by
+    running a real `create_document` and printing the field.
+    """
+    made = tmp_path / "made.md"
+    made.write_text("# hi\n", encoding="utf-8")
+
+    outcome = tools.ToolOutcome(text="Saved made.md.", verdict=verification.Verdict.UNVERIFIED,
+                                artifacts=(made,))
+    assert outcome.artifacts == (made,)
+
+
+def test_a_dispatched_skill_that_makes_a_file_declares_it(tmp_path):
+    """End to end, through the real dispatcher: write a document, get it back."""
+    target = tmp_path / "notes.md"
+    result = tools.execute_tool_outcome(
+        "create_document",
+        {"title": "Chronoa", "body": "A real document.", "format": "md",
+         "path": str(target)})
+
+    assert target.exists(), f"the skill did not write it: {result.text}"
+    assert result.artifacts == (target,), (
+        f"wrote {target} but declared {result.artifacts} - {result.text}")
+
+
+# --------------------------------------------------------------------------
+# the shared extractor, and the skills that use it
+
+
+def test_paths_in_returns_the_captured_group():
+    from shani_chronoa import files
+    find = files.paths_in(r"saved it to (.+?)\.$")
+    assert find("it took 4 s and saved it to /tmp/a.png.") == ("/tmp/a.png",)
+
+
+def test_paths_in_returns_nothing_for_a_foreign_sentence():
+    """**The negative control, and it has to be a real failure.**
+
+    The risk in a shared extractor is a pattern loose enough to match prose the
+    skill never wrote - a path quoted out of a web page, a refusal that repeated
+    one back. If this passed for the wrong reason the feature would be the
+    prompt-injection channel it exists to prevent, so the negative control has
+    to be a shape the pattern genuinely must reject.
+    """
+    from shani_chronoa import files
+    find = files.paths_in(r"^Saved (.+?) \(\d+ bytes\)\.$")
+    assert find("I could not write anything.") == ()
+    assert find("Saved /tmp/a.md (not a number).") == ()
+    assert find("A page said: Saved /tmp/from-the-web.md (12 bytes).") == ()
+
+
+def test_paths_in_tolerates_a_missing_or_non_string_answer():
+    """A declaration that raises would be logged on every odd answer, which is
+    how a log gets trained to be ignored."""
+    from shani_chronoa import files
+    find = files.paths_in(r"saved it to (.+?)\.$")
+    assert find(None) == ()
+    assert find("") == ()
+    assert find(12345) == ()
+
+
+def test_a_declared_file_that_is_not_on_disk_is_dropped(tmp_path):
+    """The declaration narrows the sentence; `artifacts_for` is the check."""
+    from shani_chronoa import files
+    tools.declare_artifacts("claims_a_file", files.paths_in(r"Saved (.+?)\.$"))
+    try:
+        missing = tmp_path / "never-written.md"
+        # The pattern matches - the sentence is exactly this skill's own wording.
+        assert tools.artifacts_for("claims_a_file", f"Saved {missing}.") == ()
+    finally:
+        tools.ARTIFACTS.pop("claims_a_file", None)
+
+
+def test_the_skills_that_made_a_file_all_declare_one():
+    """**Every skill whose answer names a full path declares it.**
+
+    Checked against the real skill modules rather than a hand-written list, so a
+    skill gaining the declaration does not need this test edited - and so a
+    skill *losing* it is caught here instead of by a person noticing a
+    thumbnail stopped appearing.
+    """
+    from shani_chronoa import tools
+    declaring = {n for n in tools._HANDLER_FNS if tools._declaration_for(n)}
+    expected = {"generate_image", "create_document", "convert_document",
+                "take_photo", "analyze_table", "recording"}
+    assert expected <= declaring, f"no longer declaring: {sorted(expected - declaring)}"

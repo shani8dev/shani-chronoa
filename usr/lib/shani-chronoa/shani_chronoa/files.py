@@ -844,3 +844,48 @@ def withheld_note(what: str, count: int, widen: str = "") -> str:
     plural = "" if count == 1 else "s"
     return (f"... and {count} more {what}{plural} not shown."
             + (f" {widen}" if widen else ""))
+
+
+def paths_in(pattern: str):
+    """Build an artifact declaration from a regex over this skill's own answer.
+
+    **A skill runs in a subprocess, so its answer string is the only channel it
+    has back to the app.** `tools` runs a skill by interpolating the arguments
+    into a `python3 -c` program (measured by pid during a real dispatch), so a
+    thread-local ledger written inside the skill is a different process's memory
+    and can never be read back. A declaration therefore has to read the path out
+    of what the skill said about itself.
+
+    This lives here rather than in `tools` so a skill can use it at module scope:
+    `tools` imports the skills, and a skill that imported `tools` back would get
+    a half-built module - which once made `generate_image` fail to load outright.
+
+    It is deliberately *not* a trust boundary. The pattern only narrows which
+    part of the sentence is a path; `tools.artifacts_for` then requires the path
+    to be absolute and present on disk, so a wrong match is dropped rather than
+    rendered. Reading a file because a model quoted a path is the thing this
+    whole mechanism exists to prevent.
+
+    `pattern` should capture the path in group 1. Non-matching or malformed
+    answers yield `()`, never an exception - a declaration that raises would be
+    logged on every such answer, which is noise that trains you to ignore it.
+    """
+    import re
+
+    compiled = re.compile(pattern)
+
+    def declare(result_text):
+        if not isinstance(result_text, str):
+            return ()
+        try:
+            found = compiled.search(result_text)
+        except re.error:                      # pragma: no cover - compile-time
+            return ()
+        if found is None:
+            return ()
+        try:
+            return (found.group(1),)
+        except IndexError:                    # pragma: no cover - author's bug
+            return ()
+
+    return declare

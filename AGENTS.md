@@ -15060,3 +15060,80 @@ decision rather than a mechanical connection - and inventing one would be the
 confident wrong answer this entry is about. Recorded so the next reader does not
 read the sibling's wiring as evidence about both.
 
+
+## A skill is a subprocess, so its answer string is the only channel it has (2026-10-12)
+
+### The design that could not work, and the first run that proved it
+
+Artifacts (files a skill made, rendered as a thumbnail in the transcript) were
+declared with a thread-local ledger: the skill recorded its output paths while
+it still held them, and `tools` drained the ledger immediately after the handler
+returned, on the same thread, with nothing awaited in between. That reasoning
+was sound and the implementation was correct. Every dispatch still came back
+empty.
+
+**A skill does not run in this process.** `tools` interpolates the arguments
+into a `python3 -c` program and runs it, so the skill body executes in a
+different process and its in-process state cannot cross back except through its
+answer string. Measured by printing `os.getpid()` on both sides of a real
+`create_document` dispatch - the traced `produced()` never fired in the caller's
+process. The ledger was deleted; there was nothing to fix, because the state
+simply does not travel.
+
+So `DECLARES_ARTIFACTS` reads the path back out of the sentence the skill wrote
+about itself, and that is now a property of the architecture rather than a
+preference. `edit_image` is the case that proves why it has to be the skill's own
+wording and not a heuristic: it answers *"Saved cat.jpg (resized): 40 KB"* - a
+bare file name with no directory - so no amount of pattern-matching recovers a
+path from it.
+
+### Three fields, two of them dead, and the plumbing looked complete
+
+Adding `artifacts` is a five-hop change, and the hops were all wired. It still
+delivered nothing, twice:
+
+1. **`ToolOutcome` had no `artifacts` field.** The assistant reads
+   `result.artifacts` off whatever `_run_tool` returned, and that is a
+   `ToolOutcome`. `getattr(result, "artifacts", ())` answered `()` - quietly, at
+   runtime, with no error at any hop.
+2. **The subprocessed dispatch dropped it.** The in-process return passed
+   `artifacts=`; the post-condition return built `DispatchResult` with
+   *positional* arguments, so the field took its `()` default. Found by spying
+   on every `DispatchResult` the dispatcher builds, which printed
+   `artifacts=()` with `artifacts_for` never having been called.
+
+The second is this repository's own dead-code class reached through a field
+instead of a module, and the only reason it was caught is that a real dispatch
+was run and its output printed. Nothing about reading the diff would have shown
+either one.
+
+### The negative control had to be able to fail
+
+`files.paths_in` is the shared extractor, so each skill declares with one line
+rather than a near-copy. Its test asserts that a loose pattern would be
+dangerous - and it is:
+
+| pattern | `I could not write anything.` | `Saved /tmp/a.md (not a number).` | `A page said: Saved /tmp/from-the-web.md (12 bytes).` |
+|---|---|---|---|
+| `^Saved (.+?) \(\d+ bytes\)\.$` | `()` | `()` | `()` |
+| `Saved (.+?) \(\d+ bytes\)` | `()` | `()` | **`('/tmp/from-the-web.md',)`** |
+
+The loose one pulls a path out of a sentence that *quotes a web page* - which is
+the whole reason a file is rendered from a declaration rather than scraped from
+the model's prose. The `^` anchor is load-bearing, not decoration.
+
+### State of this feature
+
+- Six skills declare: `generate_image`, `create_document`, `convert_document`,
+  `take_photo`, `analyze_table`, `recording`. One shared extractor, six lines.
+- `edit_image` and `office_document` still declare nothing, for the reason above:
+  one names a bare file name, the other names a *directory*. Neither can be
+  converted by pattern, and inventing a path for them would be fabricating it.
+- Mutation-checked: reverting the post-condition fix fails
+  `test_a_dispatched_skill_that_makes_a_file_declares_it`. 22 tests in
+  `tests/test_a_made_file_is_shown.py`.
+- Pre-existing and unrelated, recorded so it is not re-investigated:
+  `test_reply_blocks.py::TestWidgetsFor::test_math_falls_back_to_the_source_when_matplotlib_is_absent`
+  fails with `AttributeError: 'MathBlock' object has no attribute 'language'`.
+  Verified by swapping in the pre-`ArtifactBlock` `blocks.py` and getting an
+  identical failure - it is not a regression from this work.
