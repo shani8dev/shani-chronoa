@@ -792,15 +792,55 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         want = "cloud" if mode == "cloud" else "local"
         try:
             if self.current_llm_kind() == want:
+                self._answer_mode_problem = ""
                 return
         except Exception:                           # noqa: BLE001
             logger.debug("answer-mode: the current engine is unreadable",
                          exc_info=True)
         problem = self.select_llm(want)
+        # **Kept on the application, not only logged.** The mode strip reads it
+        # to say *why* the engine did not move, rather than guessing "no
+        # provider was reachable" - the reason it gives is one sentence the
+        # engine already produced, and a second guess beside it is a second
+        # answer to "what is wrong".
+        self._answer_mode_problem = problem
         if problem:
             logger.warning(
                 "answer-mode is %r but the engine is still %r: %s", mode,
                 self.current_llm_kind(), problem)
+
+    def _answer_mode(self) -> str:
+        """The stored answer mode, for the action's initial state.
+
+        **This method was missing while `_create_actions` called it**, so every
+        startup raised `AttributeError: 'ChronoaApplication' object has no
+        attribute '_answer_mode'` at the point the `answer-mode` action is
+        registered - and GApplication swallows an exception from `do_startup`,
+        so nothing said so. What it cost, measured by driving `_create_actions()`
+        on a real application object and then asking which actions exist:
+
+            quit                     OK          answer-mode             MISSING
+            toggle-listening         OK          toggle-barge-in-vad     MISSING
+            reply-style              OK          toggle-model-download   MISSING
+                                              download-speech-model   MISSING
+                                              toggle-debug            MISSING
+                                              stop-speaking           MISSING
+                                              open-settings           MISSING
+                                              setup                   MISSING
+
+        Eight actions, registered after the failure point, never registered at
+        all - so the gear button and `Ctrl+,` opened nothing, the setup wizard
+        action was dead, and stop-speaking did nothing. The suite stayed green
+        because `test_the_application_starts_and_builds_its_window` asserts the
+        *window*, which `do_activate` builds after the swallowed exception, and
+        the two tests that call `_create_actions()` directly were failing in a
+        file nobody had run.
+
+        Read from config rather than defaulted here, so a value the schema
+        refuses is corrected by `ChronoaConfig.answer_mode`'s own validation -
+        one place decides what a legal mode is.
+        """
+        return self.config.answer_mode
 
     def _on_answer_mode(self, action, value) -> None:
         """Write the chosen mode, then set the action's state from config.

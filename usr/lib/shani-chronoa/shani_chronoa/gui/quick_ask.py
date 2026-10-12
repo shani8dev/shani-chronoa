@@ -168,6 +168,19 @@ class QuickAskWindow(Gtk.Window):
         become a conversation — the answer comes back through `on_ask` and is
         dropped rather than recorded.
 
+        **Corrected 2026-10-13: "dropped rather than recorded" was true of the
+        default and false as a promise.** `ask_now` fills the field and calls
+        `_on_activate`, which is the typed path, and `_on_activate` reads the
+        keep checkbox - so with the box on the turn *is* written, by whichever
+        caller last left it on. The sentence described the default rather than
+        the contract, and a caller relying on "leaves no trace" would have been
+        relying on UI state nobody set. The true contract is: **the same path as
+        typing a question, so the keep checkbox applies exactly as it does
+        there** - and the box is off by default, which is what the original
+        sentence was describing. Measured, by driving this method for the first
+        time it had ever been executed: `test_a_kept_checkbox_is_honoured_here_
+        as_it_is_when_typing` pins both halves.
+
         **This docstring used to claim `--ask=` called it, and it does not.**
         `--ask=` goes through the main window's own `submit_text()`, so the
         question and its answer *are* recorded in the transcript, which is the

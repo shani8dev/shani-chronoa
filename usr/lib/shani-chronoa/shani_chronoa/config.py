@@ -886,6 +886,28 @@ class ChronoaConfig:
         return got if got in ("ordinary", "brief", "explanatory") else "ordinary"
 
     @property
+    def answer_mode(self) -> str:
+        """The stored answer mode, or 'local' when it is unset or unknown.
+
+        **This property was missing while `app/application.py:836` read it**, so
+        `_on_answer_mode` raised `AttributeError` on the path that sets the
+        action's state from config - and, one line later in the same file,
+        `_create_actions` called a `self._answer_mode()` that did not exist
+        either, which aborted action registration partway through and left eight
+        actions unregistered at every startup. See the `_answer_mode` docstring
+        for what that cost.
+
+        Three values, matching what `_on_answer_egress` writes and what the strip
+        offers: the schema declares `local`, `local-cloud` and `cloud`, and the
+        strip's four rows reduce to those three because "Nothing leaves" and
+        "This machine answers" both mean *answer here*. Anything else - a hand
+        edited keyfile, a value from a build that offered more - falls back to
+        `local`, the conservative direction and the schema's own default.
+        """
+        got = (self.get("answer-mode", "local") or "local").strip().lower()
+        return got if got in ("local", "local-cloud", "cloud") else "local"
+
+    @property
     def notification_enabled(self) -> bool:
         """Get notification status."""
         return self.get_bool("notification-enabled", True)

@@ -299,3 +299,94 @@ class TestTheApplicationWiring:
         action.activate(None)
         assert app._quick_ask_window is not None, "the action did not open the popup"
         app._quick_ask_window.close()
+
+class TestAskNow:
+    """`ask_now` - the path for a caller that already holds a question.
+
+    **Three lines no test had ever executed.** The method is documented as having
+    no caller in the tree (its own docstring says so, and records that `--ask=`
+    goes through the main window's `submit_text()` instead, so the question *is*
+    recorded - the right behaviour for a desktop shortcut). It answers a different
+    question, one that should leave no trace, and `tools/deadcode.py` reports it
+    dead. Dead-and-deliberate is a real category here - `encode_rejection` and
+    `open_settings_button` are the same shape - but untested-and-unwired is how
+    three defects hid in `midi.py`, so it was driven for real before being
+    witnessed.
+
+    Driven for the first time it works: the question is asked, the window is
+    presented, and nothing is kept.
+    """
+
+    def _window(self, **kwargs):
+        asked, kept = [], []
+
+        def on_ask(text, done):
+            asked.append(text)
+            done(kwargs.pop("answer", "Lisbon is 14:32"))
+
+        return QuickAskWindow(on_ask=on_ask,
+                              on_keep=lambda q, a: kept.append((q, a))), asked, kept
+
+    def test_it_asks_the_question_it_was_handed(self):
+        window, asked, _kept = self._window()
+        window.ask_now("what time is it")
+        assert asked == ["what time is it"], asked
+        assert window._answer.get_text() == "Lisbon is 14:32"
+
+    def test_the_question_arrives_in_the_field_first(self):
+        """The field is filled and then read, so the question a caller supplied
+        and the question that was asked are the same string. A version that
+        presented the window and left the field empty would ask nothing."""
+        window, asked, _kept = self._window()
+        window.ask_now("is the disk full")
+        assert window._entry.get_text() == "is the disk full"
+        assert asked == ["is the disk full"], asked
+
+    def test_it_shows_the_window(self):
+        window, _asked, _kept = self._window()
+        window.ask_now("anything")
+        assert window.get_visible(), "the popup was not presented"
+
+    def test_it_leaves_no_trace(self):
+        """**The whole point of this path.** `on_keep` is what writes a turn into
+        the conversation, and a question handed to `ask_now` is one the caller
+        meant to have answered without recording. `_on_activate` reads the keep
+        checkbox, which is off by default - so a version that passed the keep box
+        on, or that called `_on_answer` with keep=True, would write the turn
+        anyway and this is the test that would catch it."""
+        window, _asked, kept = self._window()
+        window._keep.set_active(False)
+        window.ask_now("something private")
+        assert kept == [], f"a question meant to leave no trace was kept: {kept}"
+
+    def test_a_kept_checkbox_is_honoured_here_as_it_is_when_typing(self):
+        """**The corrected contract, and the test that found the old claim.**
+
+        `ask_now`'s docstring used to promise the answer "is dropped rather than
+        recorded". It is not: `ask_now` fills the field and calls `_on_activate`,
+        which is the typed path, and `_on_activate` reads the keep checkbox. So
+        with the box on the turn is written - by whichever caller last left it
+        on, which nobody set.
+
+        The first version of this test asserted the opposite, that the box was
+        *not* honoured, and failed - which is how the discrepancy surfaced. The
+        true contract is that `ask_now` is the same path as typing, so the
+        checkbox applies exactly as it does there. What the original sentence
+        was describing is the default: the box is off, so nothing is kept.
+        """
+        window, _asked, kept = self._window()
+        window._keep.set_active(True)
+        window.ask_now("something private")
+        assert [q for q, _a in kept] == ["something private"], (
+            "the keep box was ignored, so ask_now is NOT the same path as typing")
+
+    def test_it_is_still_reachable_by_name(self):
+        """The seam, pinned so the docstring's "no caller in the tree today"
+        cannot silently become untrue. The method must exist with this name and
+        take the text, because that is the contract its docstring describes and
+        the one a future caller would be written against."""
+        import inspect
+        assert hasattr(QuickAskWindow, "ask_now")
+        assert list(inspect.signature(QuickAskWindow.ask_now).parameters)[1:] == ["text"], (
+            "ask_now's signature changed; its docstring describes a caller that "
+            "hands it a question in one string")
