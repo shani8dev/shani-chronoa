@@ -195,12 +195,26 @@ def build(app: Any) -> Gtk.Widget:
         "token from its own environment, so Chronoa never holds it - which is "
         "why there is no token field here.")
     body.append(bridge_group)
+    unaccepted = []
     for channel in CHANNELS:
         listening = channel in gateways
         _add(bridge_group, common.row(
             CHANNEL_NAMES[channel],
             ("Chronoa is accepting it" if listening else
              f"not accepted - add '{channel}' to Gateways in Settings, Privacy")))
+        if not listening:
+            unaccepted.append(channel)
+    if unaccepted:
+        # **One button for the group, not one per row.** The fix is the same
+        # edit to the same list for every channel, so a button on each would be
+        # three identical buttons leading to one page. `gateways` is written by
+        # `settings_window/privacy.py`'s `_gateway_rows` and nowhere else, so
+        # that page is the only place the answer can change - and this sentence
+        # has been naming it with nothing to press since the panel was written.
+        _add(bridge_group, common.wire_page_button(
+            common.open_settings_button("Open Privacy settings",
+                                        "settings:privacy"),
+            app, "settings:privacy"))
     _add(bridge_group, common.row(
         "Running bridges",
         "; ".join(bridges) if bridges else "none running for this user"))
