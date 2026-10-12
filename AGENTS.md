@@ -17909,3 +17909,95 @@ said nothing.
 The selectors and the results also live in **separate boxes now**: the first
 version cleared results by index (`children[2:]`), assuming the two drop-downs
 are always first. Reordering the layout by one row would have deleted a control.
+
+## Two defects the Compare panel's own tests could not see
+
+Both were found by asking *what does this code ask the real application for*,
+rather than by reading the code again. The fixture was a stub built to match
+the guess, so every test passed against a panel that would not have worked on
+any machine.
+
+**The panel guessed at attributes the application does not have.**
+`_store_root` looked for `_conversation_root`, `conversation_root`,
+`_sessions_root` and `session_dir` on the app. `ChronoaApplication` has **none
+of them** - every caller in `app/` and in `gui/surfaces/conversations.py` asks
+`conversation_store.session_dir()`. So the panel resolved no root and rendered
+**"Could not read your conversations" on every machine, forever**. Now it asks
+the module function the way every other caller does, and the override a test
+uses is spelled `_test_conversation_root` so a stub cannot stand in for the
+real answer again.
+
+The witness is `test_the_app_has_the_root_this_asks_for`, which constructs a
+bare `ChronoaApplication` and asks *it* - not a stand-in, and not the fixture.
+`test_the_root_the_panel_asks_for_is_where_conversations_are_written` reads the
+store's own answer so a rename cannot leave this panel reading an empty store.
+
+**The listing was a second answer to a question that already had one.** It read
+the raw index and reimplemented the newest-first sort and the untitled-conversation
+name. `conversation_store.list_sessions()` has done both since it was written.
+Two implementations of "what is this conversation called" is two that drift, and
+the panel's would have been the one nobody looked at.
+
+**`content` is not always a string.** A question sent with a screenshot is
+stored as a list of parts, and `normalise` returned `""` for a list - so every
+multimodal question vanished from the comparison, and a conversation of them
+read as one that had asked nothing. That is the confident-wrong-answer shape
+wearing a comparison panel's face. The store hits this in
+`conversation_store._text_of`; `content_text()` is the same rule, spelled out
+here rather than reaching for a private name.
+
+### The pattern, named
+
+Three of this feature's checks failed for the same reason: **test data or a stub
+chosen without checking it could distinguish the behaviour from its opposite.**
+
+- a fixture app carrying the attribute the code guessed at;
+- "first, second, third", already alphabetical, so sorting changed nothing;
+- `set_selected(99)`, clamped by GTK, so the state the test named was
+  unreachable.
+
+A test that cannot produce the failure it describes is not evidence. The check
+that catches this class is cheap and belongs in the same file: *build the real
+thing and ask it*, rather than building a thing shaped like it.
+
+## deadcode.py's count is a ceiling, and five live names are inside it (2026-10-13)
+
+Re-run today: **80** dead names across 44 modules. The number moves - 79, 81, 81,
+80 across four runs this week - and the *triage* has not changed in any of them:
+**no module is entirely dead**, every name is a dead name inside a live module.
+The framing that would be wrong is "80 dead names", and the framing that is right
+is the module question.
+
+**But the count is a ceiling, not a measurement, and the reason is now verified in
+five specific places.** `tools/deadcode.py` documents its own rule - *"String
+constants are not scanned, which is what removes the prose false positives"* - so
+any name reached by a **string** reads as dead to it. Of today's 80, **32 appear
+quoted somewhere** in the package or tests, which is an upper bound on how many
+are live that way.
+
+Verified live by string, each read out of the code rather than inferred:
+
+| name | the mechanism |
+|---|---|
+| `show_devices` | `phone_link.py:370`'s `getattr` string tuple |
+| `speaking_row` | `voice.py`'s `_FORWARDED` `setattr(page, name, getattr(...))` |
+| `webkit_version`, `activity_text` | called inside subprocess harnesses held as strings in two test files |
+| `context_report` | `gui/window.py:1978`'s `getattr(assistant, "context_report", None)`, then **called** - `report() if callable(report) else None` |
+
+`context_report` is the newest and the most instructive, because it is *fully
+wired and displayed*: `assistant.py:841` computes the `context_meter.Report` on
+every request, `_rail_context` reads it through that `getattr`, and window.py:1602
+passes it to the rail as `get_context=`. 34 tests across the context-meter and
+now-rail suites pass on top of it. A scanner reports it dead because the seam is a
+string.
+
+**And the bound is not the count either** - a quoted name can still be dead.
+`set_suggestion_handler` appears quoted exactly once, in a `window.py` docstring
+explaining its sibling's pattern, and has no caller of any kind. Quoted means
+*check*, not *live*.
+
+So the honest statement of what `deadcode.py` produces today is: **80 names an
+AST attribute scan cannot reach, of which at least five are demonstrably live, and
+none of which is a dead module.** The five cost nothing to find and each would
+have been "fixed" by someone trusting the number.
+
