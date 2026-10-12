@@ -423,6 +423,40 @@ alone precisely because step 2 was run on them: the scrolling entry still reads
 "not to be read as a verdict" because no pane known to overflow was used, and the
 tool_select scoring weakness is a scoring matter rather than a functional defect.
 
+## "Fix all", third: the counts the file states, re-run (2026-10-12)
+
+The same method applied to the numeric claims, which are the cheapest to check and
+the ones nobody checks:
+
+| claim | measured | |
+|---|---|---|
+| `tools.TOOLS` | **257** | ✓ - and README's wired checker passes on it |
+| `discover_senses()` | **53** | ✓ - 53 table rows, 25 on / 28 off |
+| `discover_skills()` | **257** schemas, **257** handlers | ✓ |
+| public names in the shipped tree | **2,173** | was 2,171 |
+| referenced in the shipped tree | **2,003** | was 2,000 |
+| referenced by a test but not by it | **86** | ✓ |
+| referenced by nothing at all | **79** | was **80** |
+
+Re-run with `tools/deadcode.py --json`. The scatter is small and real - the tree has
+grown since that entry - and the **triage did not change**, which is the part worth
+trusting: 1 entirely-dead module, and it is `kernel_log.py`, which the sense registry
+loads as **`kernellog`**.
+
+**That last one was re-checked rather than assumed, because it is the false positive
+this entry already warns about.** The module is `kernel_log.py` and the sense is
+`kernellog`, so any lookup keyed on the *filename* misses it - which is exactly the
+trap recorded two paragraphs below, where the first version of the tool reported
+`kernel_log.py` as "entirely dead" while it was live. My own re-derivation hit the
+same wall and printed "0 registry-loaded", and reading the entry is what said why.
+The correction is to match on the name the module **declares**, which is what the
+tool now does.
+
+**And `discover_skills()` measured 3 the first time**, which is not a number about
+this repository. The subprocess that measured it was handed a relative `sys.path`
+from a different working directory and printed something else entirely. A count that
+is trivially wrong is easier to catch than one that is nearly right.
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit
@@ -13122,10 +13156,17 @@ prose is not a caller):
 
 | | count |
 |---|---:|
-| public names in the shipped tree | **2,171** |
-| referenced in the shipped tree | 2,000 |
+| public names in the shipped tree | **2,173** |
+| referenced in the shipped tree | 2,003 |
 | referenced by a test but not the shipped tree | 86 |
-| referenced by nothing at all | **80** |
+| referenced by nothing at all | **79** |
+
+*(The first three and the last were 2,171 / 2,000 / 86 / **80** when this was
+written. Re-run 2026-10-12 with `tools/deadcode.py --json` - the tree has grown and
+the scatter is real: +2 defined, +3 wired, -1 dead. The **triage below did not
+change**, and that is the part worth trusting: 1 entirely-dead module, and it is
+`kernel_log.py`, which the sense registry loads as `kernellog` - the filename/name
+mismatch this entry already warns about, re-checked rather than assumed.)*
 
 Of the **17** names the list carried: **6 are still dead**, and 11 are not — but
 *not dead* is not *wired*, and the first comparison I ran printed "no longer
@@ -13206,7 +13247,7 @@ Grouped per module, with the registries consulted:
 | entirely dead names, but a registry loads the module | 1 |
 | otherwise-live modules holding dead names | 43 |
 
-**Zero dead modules.** Every one of the 80 is a dead *name* inside a module that
+**Zero dead modules.** Every one of the 79 is a dead *name* inside a module that
 is live, and most are concentrated: `learning.py` 25/131, `conversation_store.py`
 3/22, `fmdsp.py` 3/11, `guardrail.py` 3/7. The first is the statistics toolbox this
 file already calls one. So "80 dead names" is a much smaller statement than it
