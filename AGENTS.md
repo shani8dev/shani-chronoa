@@ -242,6 +242,36 @@ fail twice before it said anything, so this one was checked the other way round:
 The other direction is clean too, and was: every one of the 192 schema keys is
 named somewhere in the package, so there is no setting nothing reads.
 
+## And a consent key with no row, guarded on the row side too (2026-10-12)
+
+The section above checks a key the code reads **is in the schema**. This is the half
+it does not reach: a key that is in the schema and has **no row in Settings**, so the
+switch the refusal tells a person to turn is on no screen. That is the `heard-sound`
+defect verbatim, and `calendar-write-enabled` and `fm-radio-enabled` are the same
+class. Three have shipped, and nothing guarded it.
+
+`tests/test_every_gate_has_a_row.py` now does. Two populations, because a scan that
+treats them alike reports noise:
+
+- a **hand-written** row is a literal in `settings_window/`'s source;
+- a sense's row is **generated** - `senses.py`'s `_build_senses` walks
+  `discover_senses()` and adds one switch per registered sense.
+
+Measured 2026-10-12: **18 of 18** event keys are literals with hand-written rows,
+**2 of 53** sense keys are, and the 51 rest are derived. Registered senses 53, consent
+table 53, zero mismatch in either direction. So both populations are covered and the
+invariant between the table and the registry is pinned from both sides.
+
+**The false defect this nearly shipped, because it is the instructive half.** After
+the literals scan I concluded the 18 event keys had no row at all - `senses.py` has no
+reference to EVENT and `_build_senses` iterates the sense registry. Both true, and the
+conclusion false: all 18 are literals with rows. I had checked *one* derivation path,
+stopped, and let a plausible finding stand until I counted. A real finding and a
+plausible one are told apart by the count, and the first version of the scan was loud
+enough in the other direction - it reported 53 unreachable keys, every sense in the
+registry, all of them on screen - that I nearly "fixed" it by adding 53 literals to the
+settings window.
+
 ## And reconciling one of the two made the label and the press disagree (2026-10-12)
 
 `reconcile` was wired into the row that *labels* the presence button, and nowhere
