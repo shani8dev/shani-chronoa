@@ -1363,7 +1363,17 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._input_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"])
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
-        self._input_entry.connect("key-pressed", self._on_input_key_pressed)
+        # **A `Gtk.EventControllerKey`, not a `key-pressed` signal.**
+        # `Gtk.TextView` has no such signal: `key-pressed` is the GTK 3 name and
+        # GTK 4 widgets take an event controller instead. Connecting to it
+        # raised `TypeError: unknown signal name: key-pressed` the moment the
+        # window was built, and every test that constructs the window errored -
+        # measured as 8 failures and 11 errors once anything did. The two suites
+        # I ran before committing this never built the composer, and the test
+        # written for it checks the source text, so both were blind to it.
+        composer_keys = Gtk.EventControllerKey()
+        composer_keys.connect("key-pressed", self._on_input_key_pressed)
+        self._input_entry.add_controller(composer_keys)
         self._input_entry.get_buffer().connect("changed", self._on_input_changed)
         # The command menu: cline has a `SlashCommandMenu`, kimi-cli a
         # decorator registry, and here a list of names that each run something
@@ -1418,7 +1428,23 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self.add_controller(drop)
 
         input_row.append(self._attach_button)
-        input_row.append(self._input_entry)
+        # **The overlay, not the text view.** The migration to a `Gtk.TextView`
+        # built `composer = Gtk.Overlay()`, gave the entry a real placeholder-less
+        # field - and then appended `self._input_entry` here, so the overlay was
+        # never given either of its children and `self._input_placeholder` had
+        # **no parent at all**. Measured on a built window: the hint reported
+        # `get_visible() == True` while not being in the tree, so the composer
+        # had **no placeholder** and the "Type a message…" prompt had been lost.
+        #
+        # `tests/test_composer_and_escape.py::test_the_placeholder_is_replaced_
+        # not_dropped` has asserted against this since the migration was
+        # committed, and was red from that commit - the two suites run before it
+        # were committed never built a window, which is the third time this
+        # session that "no test exercised it" turned out to mean "no test could
+        # have failed either".
+        composer.set_child(self._input_entry)
+        composer.add_overlay(self._input_placeholder)
+        input_row.append(composer)
         input_row.append(self._stop_button)
         # **Stopping the turn, which the button above does not do.** That one is
         # `app.stop-speaking` - it stops the *voice* after the answer is made,

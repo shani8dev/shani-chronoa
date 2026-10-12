@@ -40,6 +40,29 @@ def _src():
     return WINDOW.read_text(encoding="utf-8")
 
 
+def _window():
+    """**A real window, built here, because source greps cannot see the tree.**
+
+    Every other check in this file reads `window.py` as text, and that is the
+    shape that let a **committed** defect through: the `Gtk.Overlay` built for
+    the hint was never given either of its children, `self._input_placeholder`
+    had no parent, and the composer had no placeholder at all - while
+    `test_the_placeholder_is_replaced_not_dropped` sat red from that commit.
+
+    The greps are not worthless and they are kept, but they cannot answer *"is
+    the hint in the window"*, only *"is the word `add_overlay` somewhere in the
+    file"*. A substring is present or absent; a widget is **parented or not**.
+    So the two claims that are about the tree are made against a built window.
+    """
+    from gi.repository import Gtk
+
+    from shani_chronoa.gui.window import ChronoaWindow
+
+    app = Gtk.Application(application_id="test.chronoa.composer")
+    app.register(None)
+    return ChronoaWindow(app)
+
+
 def test_what_an_entry_cannot_do_is_see_it_not_store_it():
     """**The premise, measured rather than asserted - and it was wrong.**
 
@@ -129,14 +152,46 @@ def test_the_placeholder_is_replaced_not_dropped():
     still works and something smaller quietly stops being there.
     """
     src = _src()
-    assert "set_placeholder_text" not in src, (
-        "a placeholder is being set on something that has no placeholder")
-    assert "Gtk.Overlay()" in src
-    assert "add_overlay(self._input_placeholder)" in src, (
-        "the hint label is built but never placed, so the composer has no "
+    # **Scoped to the composer, and the first version was not.** The assertion
+    # read `set_placeholder_text not in src` over the whole window module, and
+    # `self._search_entry` - a `Gtk.SearchEntry`, which really does have a
+    # placeholder - made it fail on correct code. So the claim this test is
+    # actually about is narrower than the one it checked: *the composer* is a
+    # `Gtk.TextView` and must not be given a placeholder. Scoping it that way is
+    # a stronger check, not a weaker one, because a placeholder set anywhere near
+    # `_input_entry` still trips it while the search field is left alone.
+    offenders = [line for line in src.splitlines()
+                 if "_input_entry" in line and "set_placeholder_text" in line]
+    assert not offenders, (
+        f"a placeholder is being set on the composer, which is a TextView and "
+        f"has none: {offenders}")
+
+    # **Driven, not grepped.** `Gtk.Overlay()` appearing in the file says
+    # nothing about whether the hint is *in* the window, which is the claim.
+    from gi.repository import Gtk
+
+    win = _window()
+    hint = win._input_placeholder
+    entry = win._input_entry
+    assert hint.get_parent() is not None, (
+        "the hint label was built but never placed, so the composer has no "
         "placeholder and nothing was lost silently")
-    assert "self._input_placeholder.set_visible(not self._input_text())" in src, (
+    assert isinstance(hint.get_parent(), Gtk.Overlay), (
+        f"the hint sits on a {type(hint.get_parent()).__name__}, not in the "
+        f"overlay that was built for it")
+    assert entry.get_parent() is hint.get_parent(), (
+        "the field and its hint are not in the same overlay, so the hint is "
+        "drawn somewhere the field is not")
+
+    # And the whole cycle, on the built window: shown when empty, hidden on the
+    # first character, shown again when cleared.
+    buffer = entry.get_buffer()
+    assert hint.get_visible(), "the hint is not shown while the composer is empty"
+    buffer.set_text("hello")
+    assert not hint.get_visible(), (
         "the hint never hides once there is text")
+    buffer.set_text("")
+    assert hint.get_visible(), "the hint did not come back when the field cleared"
 
 
 def test_undo_and_the_turn_stop_remain_reachable_by_mouse():

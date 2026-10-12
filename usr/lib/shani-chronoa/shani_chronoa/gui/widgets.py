@@ -1,6 +1,7 @@
 """The window's building blocks: the orb, the transcript, the suggestion bar and the help window - and the assistant states they show."""
 
 import enum
+import logging
 
 import gi
 
@@ -13,6 +14,8 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 from shani_chronoa import capabilities
 
 from . import blocks as reply_blocks
+
+logger = logging.getLogger(__name__)
 
 
 class AssistantState(enum.Enum):
@@ -635,7 +638,54 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._current_assistant = None
         self._blocks: Gtk.Box | None = None
         self._block_text = ""
+        self._connect_theme_changes()
         self.show_placeholder()
+
+    def _connect_theme_changes(self) -> None:
+        """Re-colour the code blocks when the desktop switches light/dark.
+
+        **One connection for the whole transcript, owned here** rather than by
+        each `CodeBlock`. A block connecting its own bound method to
+        `Adw.StyleManager` - a process-wide singleton that outlives every
+        widget - would keep itself alive for the life of the app, and a long
+        conversation is a lot of blocks.
+
+        libadwaita is imported inside the method rather than at module scope
+        because this module is usable without it. Failing to connect costs a
+        stale palette; it does not cost a window that will not open.
+        """
+        try:
+            import gi
+            gi.require_version("Adw", "1")
+            from gi.repository import Adw
+            Adw.StyleManager.get_default().connect(
+                "dark-changed", self._on_dark_changed)
+        except Exception:                               # noqa: BLE001
+            logger.info("no libadwaita style manager; code keeps its first palette")
+
+    def _on_dark_changed(self, _manager=None) -> None:
+        """Walk the transcript and re-render anything that can be re-rendered.
+
+        The whole subtree, not just the direct children of `_blocks`: a turn is
+        a container holding its `CodeBlock`s, so a first-child-only walk would
+        find nothing and report success.
+        """
+        if self._blocks is None:
+            return
+        stack = [self._blocks]
+        while stack:
+            node = stack.pop()
+            refresh = getattr(node, "refresh_highlight", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:                       # noqa: BLE001
+                    logger.warning("a code block would not re-render",
+                                   exc_info=True)
+            child = node.get_first_child() if hasattr(node, "get_first_child") else None
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
 
     def set_suggestion_handler(self, handler) -> None:
         self._on_suggestion = handler

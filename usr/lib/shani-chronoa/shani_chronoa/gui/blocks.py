@@ -51,6 +51,7 @@ gi.require_version('Pango', '1.0')
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # type: ignore
 
 from shani_chronoa import markdown_lite
+from shani_chronoa.gui import code_hl
 
 logger = logging.getLogger(__name__)
 
@@ -393,12 +394,27 @@ class CodeBlock(Gtk.Box):
         scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
         scroller.set_max_content_height(260)
         body = Gtk.Label()
-        body.set_markup(f"<tt>{markdown_lite.escape(self.code)}</tt>")
         body.add_css_class("reply-code")
         body.set_selectable(True)
         body.set_xalign(0.0)
+        self._body = body
+        self.refresh_highlight()
         scroller.set_child(body)
         self.append(scroller)
+
+    def refresh_highlight(self) -> None:
+        """Re-render the code, with the palette for the theme in force right now.
+
+        **Called at construction and again whenever the desktop switches
+        between light and dark.** The second is not polish: `code_hl`'s two
+        palettes are disjoint in luminance - no colour can be legible on both a
+        white and a dark background - so a block built under one theme is
+        unreadable under the other. `TranscriptView` owns the one connection
+        and walks its blocks, because a block connecting itself to a
+        process-wide singleton would keep itself alive for the life of the app.
+        """
+        self._body.set_markup(
+            f"<tt>{code_hl.highlight(self.code, self.language)}</tt>")
 
     def _on_copy(self, button: Gtk.Button) -> None:
         _copy_to_clipboard(button, self.code)
@@ -468,7 +484,8 @@ class MathBlock(Gtk.Box):
             # box that says "equation unavailable" would be less useful than the
             # LaTeX, which a person can read.
             label = Gtk.Label()
-            label.set_markup(f"<tt>{markdown_lite.escape(self.source)}</tt>")
+            label.set_markup(
+                f"<tt>{code_hl.highlight(self.source, self.language)}</tt>")
             label.add_css_class("reply-code")
             label.set_selectable(True)
             label.set_xalign(0.0)
@@ -678,11 +695,45 @@ class ToolCallCard(Gtk.Box):
         icon = Gtk.Image.new_from_icon_name(
             "object-select-symbolic" if ok else "dialog-warning-symbolic")
         row.append(icon)
+        # **Whether it worked was an icon and nothing else.** A screen reader
+        # reached this row as "file write, path=/tmp/report.pdf" with no word
+        # saying whether it happened - measured: the card set no accessible
+        # label on itself, only its toggle and the copy button have one.
+        #
+        # And an icon is not enough for a sighted reader either, because the two
+        # are the same size, the same weight and sit in the same place, so
+        # whether a tool call *failed* is a distinction you have to already know
+        # how to read. That is the claim-without-a-mechanism shape this
+        # repository keeps finding, in a place nobody had looked: two dead
+        # controls and a lying chip were all worse than this, and this one was
+        # hiding in plain sight on every tool call the assistant has ever made.
+        #
+        # Both icons do ship in Adwaita and Yaru, checked rather than assumed -
+        # the same check that found `audio-input-microphone-high-symbolic` present
+        # only in Yaru.
+        icon.set_tooltip_text("This worked" if ok else "This did not work")
+        row.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"{name.replace('_', ' ')}: "
+             + ("this worked" if ok else "this did not work")])
         title = Gtk.Label(label=name.replace("_", " "))
         title.add_css_class("heading")
         title.set_hexpand(True)
         title.set_xalign(0.0)
         row.append(title)
+        if not ok:
+            # **Visible, because an icon is not a word.** Both icons ship in
+            # Adwaita and Yaru, so this is not about a missing glyph - it is
+            # that the only difference between a tool call that wrote the file
+            # and one that silently did not is a symbol a person has to already
+            # know how to read. `verification.Verdict` may know more; this says
+            # the one thing a person can act on.
+            outcome = Gtk.Label(label="did not work")
+            outcome.add_css_class("dim-label")
+            outcome.set_tooltip_text(
+                "Chronoa says this call did not succeed. Its answer below "
+                "explains why, if it did.")
+            row.append(outcome)
         summary = ", ".join(f"{key}={value}" for key, value in self.arguments.items())
         if len(summary) > 60:
             # **`markdown_lite.clip`, not a hard slice.** The arguments are

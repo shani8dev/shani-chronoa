@@ -14733,3 +14733,116 @@ Two habits follow, and the second is the one that generalises:
   the author's progress, not the code. For a file whose mtime is minutes old,
   "unwired" is a claim about the session, not the repository.
 
+## Code in a reply is coloured, and GtkSourceView was the wrong answer (2026-10-12)
+
+Asked whether `gtksourceview` could be a dependency. Measured it on both target
+distributions first, and **the answer changed twice** - so the measurement is the
+entry.
+
+### What Arch actually ships
+
+`gtksourceview5`, `extra`, **5.22.0-1**, and cheap in a way the raw PKGBUILD does
+not suggest: of its 13 declared dependencies **GTK4 already pulls 9**, so the
+marginal cost is `hicolor-icon-theme`, `libxml2` and `pcre2`. I first told the
+user "12 dependencies" from the raw list, which was **wrong as an argument** - the
+cost was never the reason.
+
+**And it cannot highlight.** Arch's PKGBUILD is a vanilla `meson install` with
+nothing added for language specs, and `pkgname` is only `gtksourceview5` +
+`-docs`. The shipped package contains:
+
+    usr/share/gtksourceview-5/language-specs/language.dtd
+    usr/share/gtksourceview-5/language-specs/language.rng
+    usr/share/gtksourceview-5/language-specs/language2.rng
+
+- the **schema** for writing a `.lang`, and **zero** language definitions. The
+GTK3 line ships **173**. Identical on Ubuntu 5.18, so it is upstream and not a
+packaging drop.
+
+Meanwhile the two mechanical reasons to want the widget are **already there**:
+`CodeBlock` is a selectable label inside a 260px scroller. And it is
+**read-only** - an editor widget answers "I want to type here", which a
+transcript does not.
+
+`python-pygments` **2.21.0** is in Arch `extra` and would highlight today with no
+authoring. Not taken: shipped code here uses the standard library, and `sox` is
+already an optdepend rather than a hard one for the same reason.
+
+### Why the palette is per-theme, and it is arithmetic
+
+Not a preference. For **4.5:1** a colour's relative luminance must be
+**<= 0.1833** against white and **>= 0.2544** against Adwaita's dark `#242424`.
+**Those bounds are disjoint**, so **no single colour is legible on both themes** -
+a one-palette highlighter is wrong on one of them, which is the
+light-theme-hex-on-a-dark-desktop defect this file already records once in the
+Diff panel. Ten candidate colours were measured before the palettes were chosen;
+none cleared both, and that is what the arithmetic predicts.
+
+`gui/code_hl.py` asks `Adw.StyleManager` which theme is in force, and
+`TranscriptView` owns **one** `dark-changed` connection that re-renders. A block
+connecting its own bound method to a process-wide singleton would keep itself
+alive for the life of the app, and a long conversation is many blocks. The walk
+is over the **subtree**, because a turn is a container holding its blocks - a
+first-child-only walk finds nothing and reports success.
+
+### One scanner, ten tables
+
+A tokenizer per language is sixteen near-copies of the same loop, which is the
+shape this file records biting twice (`wpctl` three times, the finite check four
+times). The scanner is written once; a language is a table. Diff gets its own
+seven-line loop because it is per-line rather than per-token, which is less
+general than contorting `Spec` with three fields only it would read.
+
+Token text is escaped **after** tokenising and **before** it enters a tag, so
+model-supplied markup cannot escape into the label, and nothing a model writes is
+ever inside an attribute - a test asserts every `<span>` carries exactly one
+attribute and that it is a colour from our own table. An unrecognised language
+returns escaped code **unchanged**: no half-right colouring.
+
+### Three defects of my own, all found by running it
+
+- **A plain-text branch that swallowed to end-of-line.** A four-line Python
+  sample carrying a keyword, a comment, a string, a number and a call produced
+  **1 span instead of 6** - an indented comment was inside a "plain" run and
+  never seen. Fixed by emitting one character at a time.
+- **An infinite loop on the first newline.** `code.find("\n", i)` returns `i`
+  when `code[i]` *is* that newline, so the run was empty and `i` never advanced.
+  **A highlighter that hangs is worse than one that does not colour.**
+- **A double-`else`** that is a `SyntaxError`, and a `Spec` whose `keywords` had
+  no default.
+
+And an inverted assertion in the test: I asserted the two luminance bounds
+*overlap* when the entire point is that they are disjoint. pyflakes found a
+`Gtk.Label.get_markup()` that does not exist in the same run.
+
+### The control this file's own lesson applies to
+
+The contrast assertions only check each palette against **its own** background, so
+**one palette copied twice passes all of them**. `test_the_two_palettes_are_
+genuinely_two` asserts each palette **fails** on the other's - which is what makes
+the theme switch load-bearing rather than decorative, and is the difference
+between a contrast check and a proof of the switch.
+
+The round-trip uses `Gtk.Label.get_text()`, not `get_label()`. `get_label()`
+returns the markup source whether or not Pango parsed it, so an assertion against
+it passes on a label the toolkit silently refused - the control this file already
+had to learn when the Diff panel's fills were measured on words that were never
+coloured. The block test uses **all three** read-backs (`get_use_markup`,
+`get_label`, `get_text`) because each answers a different question.
+
+**Mutations, five, all run and all caught**: one palette copied twice; token text
+no longer escaped; the plain-text run restored; an unknown language silently
+coloured as Python; and the theme walk narrowed to direct children.
+
+### What this does not establish
+
+**It is a lexer, not a parser.** A `#` inside a Python string is handled the way a
+lexer handles it, not the way Python does; so is a `"""` opened inside a comment.
+`.lang` specs get that right and a lexer will not, and the honest comparison
+between the two is not "specs are more code" but "specs are a state machine".
+
+**Nothing was rendered and looked at.** Every gate here is structural - a
+round-trip, a contrast ratio, a tag shape. This repository records twice that a
+widget can pass every check and still be unreadable: the organ strip passed its
+width test while rendering as one run-on string, and the voice-style row was
+inspected only after shipping.
