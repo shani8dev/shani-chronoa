@@ -448,3 +448,101 @@ def kv_width_disagreement(path, model_info: dict) -> Optional[str]:
         return None
     return kv_width_disagreement_from_shapes(
         [(name, shape) for name, shape in sorted(shapes.items())], model_info)
+
+
+def expert_bytes_per_token(model_info: dict, file_bytes: int) -> Optional[int]:
+    """What one generated token reads for a mixture-of-experts, from the header.
+
+    **Why a second route exists at all.** `local_llm.REQUIRES` carries
+    `active_bytes` as a *hardcoded* number for the one MoE tier, marked
+    `measured: False`, and `requirements_met()` refuses it as a default on exactly
+    that basis - *"a number nobody measured is the confident wrong answer this repo
+    keeps recording"*. So a Qwen3-30B-A3B cannot be the default on any machine, and
+    there is no way for it to become one, because **nothing reads the file to find
+    out.** `bytes_per_token()` returns the declared constant, or the file size for
+    a dense model, and nothing in between.
+
+    The header says it. A MoE checkpoint carries its own routing topology, and
+    these are gguf-py's own field names (`gguf/constants.py`), not ones remembered
+    from a model card:
+
+        {arch}.expert_count                 total experts per layer
+        {arch}.expert_used_count            experts routed per token
+        {arch}.expert_feed_forward_length   each expert's FFN width
+        {arch}.expert_shared_feed_forward_length   the always-on expert, if any
+        {arch}.feed_forward_length          the dense-layer FFN width
+        {arch}.leading_dense_block_count    layers before the MoE ones start
+
+    Per generated token the weights touched are, per layer, the attention
+    projections plus **only the routed experts** - so the arithmetic is
+    `used x 3 x ffn x embedding` where a dense model would be the whole file. That
+    is the whole reason a 30B can decode like a 3B, and it is exactly the number
+    `bytes_per_token()` needs and currently hardcodes.
+
+    `bytes_per_weight` is taken from the file, not assumed: the caller passes
+    `file_bytes` and the parameter count this derives, so the ratio is the file's
+    own quantization rather than a table's. It is a mean over the *dense* parameter
+    count of the same shape, which is the one part of the model the header does
+    describe exactly.
+
+    Returns None when the header is not a MoE, or is missing any field the
+    arithmetic needs - which means *not a MoE* rather than *a MoE of unknown size*,
+    and the caller falls back to what it had.
+    """
+    info = model_info or {}
+    arch = str(info.get("general.architecture") or "")
+    if not arch:
+        return None
+
+    def key(name: str):
+        return info.get(f"{arch}.{name}")
+
+    layers = _int(key("block_count"))
+    embedding = _int(key("embedding_length"))
+    used = _int(key("expert_used_count"))
+    expert_ffn = _int(key("expert_feed_forward_length"))
+    if not (layers and embedding and used and expert_ffn):
+        return None
+
+    dense_ffn = _int(key("feed_forward_length"))
+    shared_ffn = _int(key("expert_shared_feed_forward_length"))
+    leading_dense = min(_int(key("leading_dense_block_count")), layers)
+
+    # Attention projections per layer: Q, K, V and O, each embedding x embedding.
+    # K and V are smaller than Q and O under grouped attention, but the header's
+    # head counts decide that and an over-estimate here is the safe direction - it
+    # makes the tier look slower, never faster.
+    attention = 4 * embedding * embedding
+
+    moe_layers = layers - leading_dense
+    if moe_layers <= 0:
+        return None                      # all-dense: not the case this is for
+
+    # SwiGLU has three matrices per expert (gate, up, down).
+    routed = used * 3 * expert_ffn * embedding
+    shared = 3 * shared_ffn * embedding if shared_ffn else 0
+    dense_layer = attention + (3 * dense_ffn * embedding if dense_ffn else 0)
+
+    # **The file stores every expert, and the per-weight cost has to be paid
+    # against all of them.** The first version of this divided the file by the
+    # *active* parameter count, which undercounts by the expert ratio - twelve-fold
+    # for Qwen3-30B-A3B - so the derived figure came out 8x too large and the
+    # cross-check below caught it. Two counts, then: everything the file holds
+    # (which sets the bytes-per-weight), and what one token actually touches.
+    total_experts = _int(key("expert_count"))
+    # Without the total expert count there is no stored count, so there is no
+    # bytes-per-weight to pay the active share against - and guessing one would
+    # put a made-up denominator under a number the tier's default depends on.
+    # Returning None means *cannot derive*, which is the caller's fallback case.
+    if not total_experts or total_experts < used:
+        return None                      # nonsense routing: not a reading
+    stored = total_experts * 3 * expert_ffn * embedding + shared
+    total_params = leading_dense * dense_layer + moe_layers * (attention + stored)
+    active_params = leading_dense * dense_layer + moe_layers * (attention + routed + shared)
+    if total_params <= 0 or file_bytes <= 0:
+        return None
+    # Bytes per weight, from the file against the parameters it actually holds.
+    # This is the file's own mean quantization, which is the honest figure for a
+    # Q4_K_M and does not need the type name decoded.
+    per_weight = file_bytes / float(total_params)
+    return int(active_params * per_weight)

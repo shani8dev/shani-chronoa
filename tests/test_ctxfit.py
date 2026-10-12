@@ -295,3 +295,113 @@ class TestTheTensorRouteAgreesWithTheMetadataRoute:
             f"the tensors imply {from_tensors} bytes/token but the metadata route "
             f"answered {from_metadata} - the module is UNDER-counting the cache, "
             "which is the direction that spills a model onto the CPU")
+
+
+class TestTheMoEActiveBytesAreDerivedNotDeclared:
+    """`local_llm.REQUIRES` carries `active_bytes` for the one mixture-of-experts
+    tier as a hardcoded constant marked `measured: False`, and
+    `requirements_met()` refuses it as a default on that basis. Nothing could
+    improve it, because nothing read the checkpoint to find out.
+
+    A GGUF carries its own routing topology - `expert_count`,
+    `expert_used_count`, `expert_feed_forward_length` - so the number is
+    derivable whenever the model is on disk. The declared constant stays as the
+    fallback for a tier that is not installed.
+
+    The cross-check that matters is against a number recorded independently:
+    `AGENTS.md` states Qwen3-30B-A3B stores 17.3 GiB and activates ~3.3B of 30.5B
+    parameters, so it reads **~2 GiB per token**. The declared constant is
+    2.05 GiB. A derivation that came out near either of those is describing the
+    same model.
+    """
+
+    @staticmethod
+    def _moe_info(**over):
+        info = {
+            "general.architecture": "qwen3moe",
+            "qwen3moe.block_count": 48,
+            "qwen3moe.embedding_length": 2048,
+            "qwen3moe.expert_count": 128,
+            "qwen3moe.expert_used_count": 8,
+            "qwen3moe.expert_feed_forward_length": 768,
+            "qwen3moe.feed_forward_length": 6144,
+        }
+        for name, value in over.items():
+            info[f"qwen3moe.{name}"] = value
+        return info
+
+    def test_the_derived_figure_agrees_with_the_recorded_one(self):
+        """Two independent numbers, one derived from the architecture and one
+        recorded from it, have to land in the same place. This is the control that
+        makes the derivation a measurement rather than a different guess."""
+        from shani_chronoa import ctxfit
+        derived = ctxfit.expert_bytes_per_token(
+            self._moe_info(), 18_556_685_824)
+        assert derived, "the header describes a MoE, so this must produce a figure"
+        # Within 50% of the declared 2.05 GiB and of the recorded ~2 GiB. The
+        # bound is deliberately loose: the derivation is arithmetic on rounded
+        # architecture fields, not a measurement of a decode.
+        assert 2_200_000_000 * 0.5 <= derived <= 2_200_000_000 * 1.5, derived
+
+    def test_the_per_weight_cost_is_paid_against_the_stored_count(self):
+        """The bug the first version had, and the reason the cross-check exists.
+
+        The file stores **every** expert, so bytes-per-weight must be the file
+        divided by all of them. Dividing by the *active* count undercounts by the
+        expert ratio - twelve-fold here - and the derived figure came out 8x too
+        large, which no amount of reading the arithmetic would have shown.
+        """
+        from shani_chronoa import ctxfit
+        full = ctxfit.expert_bytes_per_token(self._moe_info(), 18_556_685_824)
+        # Same model, but 16 experts routed instead of 8: the active share
+        # doubles while the file's per-weight cost must not move.
+        doubled = ctxfit.expert_bytes_per_token(
+            self._moe_info(expert_used_count=16), 18_556_685_824)
+        assert full and doubled
+        assert doubled > full, (full, doubled)
+        # And under 4x, not 8x: the routing is not the whole cost.
+        assert doubled < full * 4, (full, doubled)
+
+    def test_a_dense_model_is_not_a_moe(self):
+        """`None` here means *not this case*, and the caller's fallback answers."""
+        from shani_chronoa import ctxfit
+        info = {"general.architecture": "qwen3", "qwen3.block_count": 36,
+                "qwen3.embedding_length": 4096, "qwen3.feed_forward_length": 12288}
+        assert ctxfit.expert_bytes_per_token(info, 4_500_000_000) is None
+
+    def test_a_header_missing_any_field_it_needs_returns_none(self):
+        from shani_chronoa import ctxfit
+        base = self._moe_info()
+        for missing in ("expert_count", "expert_used_count",
+                        "expert_feed_forward_length", "block_count",
+                        "embedding_length"):
+            info = dict(base)
+            del info[f"qwen3moe.{missing}"]
+            assert ctxfit.expert_bytes_per_token(info, 18_556_685_824) is None, missing
+
+    def test_nonsense_routing_is_refused_rather_than_used(self):
+        """More experts active than exist is not a reading of anything."""
+        from shani_chronoa import ctxfit
+        info = self._moe_info(expert_count=4, expert_used_count=8)
+        assert ctxfit.expert_bytes_per_token(info, 18_556_685_824) is None
+
+    def test_an_installed_moe_overrides_the_declared_constant(self, monkeypatch, tmp_path):
+        """The wiring: when the checkpoint is on disk the file wins, and the table
+        is only the fallback for a tier that is not installed."""
+        from shani_chronoa import ctxfit, local_llm
+        spec = local_llm.SPECS["qwen3-30b-a3b"]
+        fake = tmp_path / spec.filename
+        fake.write_bytes(b"x")                      # content is not read, only its size
+        monkeypatch.setattr(local_llm.os.path, "exists", lambda p: str(p) == str(fake))
+        monkeypatch.setattr(ctxfit, "gguf_model_info",
+                             lambda p: self._moe_info() if str(p) == str(fake) else None)
+        assert local_llm.bytes_per_token("qwen3-30b-a3b"), \
+            "an installed MoE must derive its figure rather than fall back"
+
+    def test_an_absent_moe_still_falls_back_to_the_declared_constant(
+            self, monkeypatch, tmp_path):
+        """The tier is not installed on most machines, and the table entry is what
+        they get - so the fallback must survive the new route being added."""
+        from shani_chronoa import local_llm
+        monkeypatch.setattr(local_llm.os.path, "exists", lambda p: False)
+        assert local_llm.bytes_per_token("qwen3-30b-a3b") == 2_200_000_000

@@ -1251,6 +1251,19 @@ def bytes_per_token(key: str) -> Optional[int]:
     if spec is None or not spec.size_bytes:
         return None
     declared = REQUIRES.get(key, {}).get("active_bytes")
+    # **The file wins over the table.** `active_bytes` for the one MoE tier was a
+    # hardcoded constant marked `measured: False`, and nothing could improve it
+    # because nothing read the checkpoint to find out. A GGUF carries its own
+    # routing topology, so whenever the model is on disk the number is derived
+    # from it; the constant remains the fallback for a tier that is not installed.
+    try:
+        info = ctxfit.gguf_model_info(spec.filename) \
+            if os.path.exists(spec.filename) else None
+        derived = ctxfit.expert_bytes_per_token(info, spec.size_bytes) if info else None
+    except Exception:  # noqa: BLE001 - a table entry must never cost the figure
+        derived = None
+    if derived:
+        return derived
     return int(declared) if declared else spec.size_bytes
 
 

@@ -11225,3 +11225,104 @@ So the same lesson as the `cache/data-home` miss, from the other side: a grep fo
 `module.function(` finds cross-module callers and silently drops the ones inside
 the defining module. For a function in a large file, the search has to include the
 bare `function(` form.
+
+## mimic: the generated skill, and the rule that already refused it (2026-10-12)
+
+`harness-study/mimic` (`littledivy/mimic`, `8cf998a`, 743 lines, MIT) is the
+whole premise of this repo turned inside out: capture an app's traffic, and have
+a model write the Python client, so nobody writes the client.
+
+    capture traffic   ->   extract auth   ->   generate client
+      (mitmproxy)         (mimic.Session)      (an AI reads the endpoints)
+
+**Five candidates checked, none taken, and the headline one was already
+refused.** Write-up: **`../harness-study/HARVEST-MIMIC.md`**.
+
+The refusal is not mine and predates the clone. `ARCHITECTURE-TARGET.md:547`:
+*"Skill learning | 🚫 | new skills are code a person adds; a self-written skill
+would break the whitelist"*, and `:736` repeats it. `mimic.App` is subclassed
+with `self.get()/self.post()` and a `HOST` — which is **how a whitelist member
+is defined**. A model emitting one is not a feature; it is a new member of the
+whitelist, chosen and parameterised by the same pass that read network traffic.
+Same reason `Boundaries` refuses a generic shell-exec tool, and same reason it
+marks an MCP *client* ⚠️ ask-first: it needs its own trust story first.
+
+The other four closed on measurement, not on taste:
+
+- **`DROP` (headers the HTTP layer owns) is already structural.** `netjson.py`
+  sets exactly `{"User-Agent": ...}` and lets httpx own the rest; no call site
+  in the tree accepts caller-supplied headers. Narrowing a path that never
+  widens is this file's own recorded failure in the other direction.
+- **"Retry only when the credential actually changed" has nothing to apply to.**
+  No retry loop on any HTTP path — the `retry|attempt` grep hits are `Thread.run`
+  and `asyncio.run` by attribute name. `cloud_llm` is further along anyway,
+  classifying payment-required / auth / rate-limit and never probing a provider
+  it cannot authenticate.
+- **"Find the newest authenticated request"** has no analogue: Chronoa's tokens
+  are env-supplied and the *bridge's*, per `channel_bridge.py:13` ("Chronoa
+  never sees a Telegram or WhatsApp token"), so none can go stale the way a
+  replayed capture does.
+- **The dependency-chaining prompt rule is already enforced rather than
+  asked for.** `goals.py:378` *refuses to start* a step whose `depends_on`
+  variables do not exist; mimic's prompt only says "chain the calls".
+
+`unpin.py` has no analogue at all — it hooks TLS verification inside an iOS app
+so a proxy can read its plaintext. Not a gap and not a TODO: Chronoa is a client
+of *published* public interfaces, and that code defeats a security control on
+someone else's device.
+
+**What would move it**, recorded so the next pass starts there rather than at
+the clone: a digest a person then reviews and commits by hand keeps the rule
+exactly as written — it says skills are code a *person writes*, not code a person
+*typed*. The existing seam of that shape is `cli_matrix.py --scaffold`, which
+writes a skill from a command's man-page flags and marks anything not read-only
+generated-disabled. Same shape, documented source instead of observed traffic.
+
+One adjacent question this raised and **did not verify**, so it is not a claim:
+`CloudLLMChain.__init__` reads its keys once (`cloud_llm.py:906-935`) and bakes
+them into the backends, so a key rotated while the app runs waits for the chain
+to be rebuilt. Whether that is a defect depends on `_maybe_enable_cloud_fallback`
+re-running on a key change — a question about this tree, with nothing to do with
+mimic.
+
+## The MoE tier's bytes-per-token is derived now, not declared (2026-10-12)
+
+`local_llm.REQUIRES` carried `active_bytes: 2_200_000_000` for the one
+mixture-of-experts tier, marked `measured: False`, and `requirements_met()` refuses
+that tier as a default on exactly that basis - *"a number nobody measured is the
+confident wrong answer this repo keeps recording"*. Nothing could improve it,
+because **nothing read the checkpoint to find out**: `bytes_per_token()` returned
+the declared constant, or the file size for a dense model, and there was nothing in
+between.
+
+A GGUF carries its own routing topology, and the field names are gguf-py's own
+(`gguf/constants.py`), not remembered from a model card:
+`expert_count`, `expert_used_count`, `expert_feed_forward_length`,
+`expert_shared_feed_forward_length`, `feed_forward_length`,
+`leading_dense_block_count`. `ctxfit.expert_bytes_per_token()` derives what one
+token touches - the attention projections plus **only the routed experts** - and
+`bytes_per_token()` now prefers it whenever the checkpoint is on disk, with the
+declared constant remaining the fallback for a tier that is not installed.
+
+**The cross-check that made it a measurement rather than a different guess.** The
+AGENTS.md records independently that Qwen3-30B-A3B stores 17.3 GiB and activates
+~3.3B of 30.5B parameters, so it reads **~2 GiB per token**. The declared constant
+is 2.05 GiB. The derivation lands at **1.52 GiB** - 74% of the declared figure,
+and the same order as the independently-recorded one.
+
+**The first version was wrong by 8x, and only the cross-check showed it.** The
+bytes-per-weight cost was divided by the *active* parameter count, but the file
+stores **every expert** - a twelve-fold undercount for this model - so the derived
+figure came out at 17.28 GiB, above the file's own size, which is the kind of wrong
+no amount of reading the arithmetic reveals. Two counts now: everything the file
+holds, which sets the per-weight cost, and what one token touches.
+
+`measured` stays `False`, and deliberately so: the flag gates the **decode rate**,
+which still needs a live model. What this changes is that the tier's blocker is now
+honestly the decode rate alone, rather than the decode rate *and* an estimate
+nothing could improve.
+
+Two of my own test bugs on the way, both the shape that recurs: the override helper
+applied its overrides **unprefixed**, so every override silently changed nothing and
+three tests passed for the wrong reason; and the fixture used `spec.filename.name`
+on a plain string.
