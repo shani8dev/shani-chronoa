@@ -13639,3 +13639,66 @@ while a measured type has silently vanished. It asserts both directions now.
 
 90 tests green across the ctxfit, model-requirements and kv-parity suites;
 45 sets / 379 anchors.
+
+## The three unexplained failures, and what a chunked sweep actually found (2026-10-12)
+
+Earlier today this file recorded three full-suite failures as **unexplained**, and
+recorded that the CPU-contention hypothesis was disproved. They are now explained,
+and the explanation was in this repository the whole time.
+
+**`tests/conftest.py`'s `_mutation_in_flight` documents the identical incident**,
+with the same signature:
+
+> a mutation run rewrites each source file in place, restores it in a `finally`,
+> and holds `run.lock` for the duration so two *runs* cannot overwrite each
+> other's restore. Nothing stopped a plain `pytest` being started beside it -
+> which reads the mutated files and reports **confident failures on code that is
+> correct**: three of them, on a suite that had just been green.
+
+Three failures, on a previously-green suite. That is the finding.
+
+**I have not proved it, and the difference matters.** The run was killed before
+the summary, so the three tests were never identified. What is established is the
+mechanism, that it is documented here, that it produces exactly this signature,
+and that the symptom cannot have been CPU load. It is recorded as the mechanism
+with the signature, not as an identification.
+
+### What the chunked sweep found, and the gap in the guard
+
+12 chunks, one log each, serial (parallel shards are recorded as making the GUI
+tests flaky): **6695 passed, 11 failed.** Re-run serially in their own process,
+which this file requires before a chunked failure is believed:
+
+| file | in chunk | alone | verdict |
+|---|---|---|---|
+| `test_sidebar_toggle.py` | 2 failed | **7 passed** | order-dependent, as this file records |
+| `test_surface_export.py` | 1 failed | **48 passed** | order-dependent |
+| `test_trigger_event_reachability.py` | 7 failed | **6 failed** | genuine, against committed code |
+| `test_ui_layout_contract.py[cloud-keys]` | 1 failed | **1 failed** | genuine |
+
+**None of the eleven is in any file this session touched.** The trigger layer has
+zero references to `ctxfit` or the KV cache, and both the test and its source
+match `HEAD` - so these are pre-existing failures against committed code, not
+anyone's in-flight work and not this session's. `TestTheRealLoopEvaluatesIt`'s six
+failures are all `expected exactly one dispatch, got []`: a real loop that
+dispatches nothing. They arrived with `8886b63` and are recorded there by name so
+somebody can pick them up.
+
+**And three chunks were never tested at all.** Chunks 3, 4 and 5 were refused by
+the mutation lock - *"a mutation run (pid 164432) is rewriting the source tree
+right now, so this suite would read mutated code and report failures on code that
+is correct"* - because the concurrent session was running mutation sets throughout.
+~130 files went unmeasured, so 6695 passed is a floor, not the suite.
+
+### The gap worth knowing, which is why chunking is not only about crash cost
+
+`_mutation_in_flight` runs in `pytest_configure`, i.e. **once, at session start**.
+A mutation run that begins *while a suite is already running* is not caught - and
+that is precisely the case a single 40-minute run is exposed to and a chunked run
+is not, because each chunk is a fresh session that re-arms the guard. So the
+chunking this file already recommends for crash cost has a second property it
+never claimed: **it re-checks the tree lock between every 43 files.**
+
+A single long run can still be told a clean tree at its start and then read
+mutated code for the following forty minutes. Nothing in the tree can close that
+from inside the suite; the guard's own docstring is the warning.
