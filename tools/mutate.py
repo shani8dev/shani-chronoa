@@ -414,6 +414,41 @@ def _failures(test_file: str) -> tuple:
     return failed, summary[-1], skipped
 
 
+def _collected_ids(test_file: str) -> set:
+    """Every test id `test_file` actually has.
+
+    **This is what makes `expect` a claim that can be checked.** A witness that
+    names no test is a witness that cannot fail, and until now the only signal was
+    the runner's "NOT caught by" line - true information, read by nobody on the way
+    past. Measured 2026-12 over all 44 sets via one complete inventory: **42
+    witnesses were reported NOT-caught and 41 of them exist** - so the class is
+    narrow, but the two it found are real and both sit in one mutation's expect
+    list: `test_the_reasons_are_not_about_a_lock_file` exists **nowhere**, and
+    `TestTheHookActuallyFires` is a **class**, not a test id.
+
+    Collection only, once per set, no test is run - `--collect-only` costs a
+    fraction of a second, against a mutation that costs one full test-file run
+    each.
+    """
+    out = subprocess.run(
+        [sys.executable, "-m", "pytest", test_file, "--collect-only", "-q",
+         "-p", "no:cacheprovider"],
+        capture_output=True, text=True, env=_test_env(),
+        cwd=str(ROOT), timeout=RUN_TIMEOUT,
+    )
+    # **The bare method name, because that is what `_failures` stores.** The
+    # verdict set holds `line.split("::")[-1]`, so `expect` entries are bare names
+    # like `test_a_stale_lock_is_not` while `--collect-only` prints full ids like
+    # `tests/x.py::TestClass::test_a_stale_lock_is_not`. Comparing the two across
+    # that boundary marks every witness in the collection as stale - which is what
+    # the first version did, and it is the same "two representations of one thing
+    # compared as strings" error recorded in AGENTS.md for `discovered_modules`.
+    return {line.strip().rsplit("::", 1)[-1]
+            for line in out.stdout.splitlines()
+            if line.strip() and "::" in line
+            and not line.startswith(("ERROR", "FAILED", "="))}
+
+
 def _witness_hit(expect: str, failed: set) -> bool:
     """Does `expect` name one of the tests in `failed`?
 
@@ -483,7 +518,23 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
     survivors = []
     equivalent = []
     unmeasurable = []
+    stale_witnesses = []
     originals = {}
+    try:
+        collected = _collected_ids(test_file)
+    except Exception as exc:  # noqa: BLE001 - a set whose collection fails is
+        # reported, not fatal: the mutations it holds are still measurable
+        # because they run the file, a *reader* of it, not a collector of it.
+        print(f"  WARNING: could not collect {test_file}: {exc}", file=sys.stderr)
+        collected = set()
+    # **Once per set, not per mutation.** Every `expect` entry is checked against
+    # the ids the test file actually has, so a witness that names nothing is an
+    # error rather than a line in the log nobody reads. `hit` can only tell you a
+    # witness did not fire; it can never tell you it *could* not.
+    for entry in mutations:
+        for witness in entry.get("expect") or []:
+            if not _witness_hit(witness, collected):
+                stale_witnesses.append((witness, entry["label"]))
     for entry in mutations:
         target = ROOT / entry["file"]
         originals.setdefault(target, target.read_text(encoding="utf-8"))
@@ -565,7 +616,8 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
                 print(f"       failed for another reason: {unexplained}")
     return {"set": name, "count": len(mutations), "caught": caught,
             "survivors": survivors, "equivalent": equivalent,
-            "unmeasurable": unmeasurable}
+            "unmeasurable": unmeasurable,
+            "stale_witnesses": stale_witnesses}
 
 
 def main(argv=None) -> int:
@@ -614,6 +666,7 @@ def main(argv=None) -> int:
     all_survivors = []
     all_equivalent = []
     all_unmeasurable = []
+    all_stale_witnesses = []
     failures = []
     try:
         lock = _Lock(timeout=args.wait)
@@ -648,7 +701,7 @@ def main(argv=None) -> int:
                     print()
                     _report(totals, all_survivors, failures, started,
                             all_equivalent, (reached, len(wanted)),
-                            all_unmeasurable)
+                            all_unmeasurable, all_stale_witnesses)
                     return 1
                 continue
             if result.get("empty"):
@@ -660,14 +713,17 @@ def main(argv=None) -> int:
             all_equivalent.extend((name,) + e for e in result.get("equivalent", []))
             all_unmeasurable.extend((name,) + u
                                     for u in result.get("unmeasurable", []))
+            all_stale_witnesses.extend((name,) + r
+                                       for r in result.get("stale_witnesses", []))
     finally:
         lock.__exit__(None, None, None)
 
     if not args.quiet:
         print()
     _report(totals, all_survivors, failures, started, all_equivalent,
-            (reached, len(wanted)), all_unmeasurable)
-    return 1 if (all_survivors or failures or all_unmeasurable) else 0
+            (reached, len(wanted)), all_unmeasurable, all_stale_witnesses)
+    return 1 if (all_survivors or failures or all_unmeasurable
+                 or all_stale_witnesses) else 0
 
 
 def _check_anchors(wanted, available) -> int:
@@ -770,7 +826,7 @@ def _check_anchors(wanted, available) -> int:
 
 
 def _report(totals, survivors, failures, started, equivalent=(), sets=None,
-             unmeasurable=()) -> None:
+             unmeasurable=(), stale_witnesses=()) -> None:
     """The tally.
 
     **`sets` is `(reached, available)`, and it is not decoration.** A run that
@@ -789,11 +845,12 @@ def _report(totals, survivors, failures, started, equivalent=(), sets=None,
     reached, available = sets if sets else (None, None)
     line = (f"{totals['count']} mutations, {totals['caught']} caught, "
             f"{len(survivors)} survivors, {len(equivalent)} equivalent, "
-            f"{len(unmeasurable)} unmeasurable")
+            f"{len(unmeasurable)} unmeasurable, "
+            f"{len(stale_witnesses)} stale witness(es)")
     if available:
         line += f", {reached} of {available} sets"
     print(f"{line}  ({time.time() - started:.0f}s)")
-    if available and (reached < available or unmeasurable):
+    if available and (reached < available or unmeasurable or stale_witnesses):
         # **Say it in the tally, not only on stderr.** The stderr line is the first
         # thing a raising run prints; the tally is the thing that survives into a
         # commit message. A partial run must not be quotable as a clean one.
@@ -804,6 +861,9 @@ def _report(totals, survivors, failures, started, equivalent=(), sets=None,
                  if available - reached else "")
               + (f"{len(unmeasurable)} mutation(s) could not be measured at all "
                  f"and are listed below; " if unmeasurable else "")
+              + (f"{len(stale_witnesses)} witness(es) named a test that does not "
+                 f"exist, so they could never have fired; "
+                 if stale_witnesses else "")
               + "nothing was measured for them either way")
     for name, label, summary, failed in survivors:
         print(f"  SURVIVOR [{name}] {label}")
@@ -817,6 +877,10 @@ def _report(totals, survivors, failures, started, equivalent=(), sets=None,
     for name, label, exc in unmeasurable:
         print(f"  UNMEASURABLE [{name}] {label}")
         print(f"          {type(exc).__name__}: {exc}")
+    for name, witness, label in stale_witnesses:
+        print(f"  STALE WITNESS [{name}] {witness}")
+        print(f"          named on the mutation {label!r}, and nothing in that "
+              f"set's test file has that id - so it could never have fired")
     for name, exc in failures:
         print(f"  ERROR [{name}] {type(exc).__name__}: {exc}")
 

@@ -70,6 +70,19 @@ def test_the_total_is_what_the_docstring_says():
 '''
 
 
+def _named_set(tmp_path, name, mutations):
+    """A mutation set written under `name`, over the fixture's own test file.
+
+    At module level, because two classes build sets and a second copy is a second
+    thing to keep in step.
+    """
+    path = tmp_path / "tools" / "mutations" / f"{name}.py"
+    body = ['TEST_FILE = "tests/test__mutation_selfcheck.py"', "",
+            "MUTATIONS = ["]
+    body += [f"    {entry!r}," for entry in mutations]
+    path.write_text("\n".join(body) + "]\n", encoding="utf-8")
+
+
 def _run(*args, cwd=REPO, timeout=600):
     return subprocess.run(
         [sys.executable, str(RUNNER), *args],
@@ -920,12 +933,6 @@ class TestTheTallyCannotBeQuietlyWrong:
         (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
             test_source or FIXTURE_TEST, encoding="utf-8")
 
-    def _named_set(self, tmp_path, name, mutations):
-        path = tmp_path / "tools" / "mutations" / f"{name}.py"
-        body = ['TEST_FILE = "tests/test__mutation_selfcheck.py"', "",
-                "MUTATIONS = ["]
-        body += [f"    {entry!r}," for entry in mutations]
-        path.write_text("\n".join(body) + "]\n", encoding="utf-8")
 
     # An anchor that no longer exists. `_apply` refuses it rather than editing
     # blind, the set raises, and that is the case the default has to survive: it is
@@ -953,8 +960,8 @@ class TestTheTallyCannotBeQuietlyWrong:
         result to fix; it is not a reason to throw away the other answers.
         """
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
-        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        _named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        _named_set(tmp_path, "zzz_runs", [self._FINE])
         out = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
         assert "2 of 2 sets" in out.stdout, (
             "the run stopped at the first set that raised, so the other one was "
@@ -967,8 +974,8 @@ class TestTheTallyCannotBeQuietlyWrong:
         """The other half. Stopping early is defensible when the tree is what is
         being diagnosed; printing a clean number afterwards is not."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
-        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        _named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        _named_set(tmp_path, "zzz_runs", [self._FINE])
         out = _run("--stop-on-first-error", "aaa_rots", "zzz_runs",
                    cwd=tmp_path)
         assert "INCOMPLETE" in out.stdout, (
@@ -980,8 +987,8 @@ class TestTheTallyCannotBeQuietlyWrong:
     def test_a_finished_tally_carries_no_incomplete_warning(self, tmp_path):
         """**The control.** A warning that fires on every run warns about nothing."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
-        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        _named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        _named_set(tmp_path, "zzz_runs", [self._FINE])
         out = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
         assert "INCOMPLETE" not in out.stdout, (
             "a run that reached both sets still claimed to be partial:\n"
@@ -992,8 +999,8 @@ class TestTheTallyCannotBeQuietlyWrong:
         """A default nobody can discover is a default nobody can rely on either
         way, so the opt-out has to exist *and* the default has to be the safe one."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_rots", [self._ROTATED])
-        self._named_set(tmp_path, "zzz_runs", [self._FINE])
+        _named_set(tmp_path, "aaa_rots", [self._ROTATED])
+        _named_set(tmp_path, "zzz_runs", [self._FINE])
         stopped = _run("--stop-on-first-error", "aaa_rots", "zzz_runs",
                        cwd=tmp_path)
         default = _run("aaa_rots", "zzz_runs", cwd=tmp_path)
@@ -1045,7 +1052,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         # pytest dies with no summary at all - the only remaining shape
         # of "cannot be measured", now that `-rfE` reports errors.
         (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
-        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
+        _named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert "UNMEASURABLE [aaa_partial]" in out.stdout, (
             "the mutation pytest could not measure was not reported as such:\n"
@@ -1074,7 +1081,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         test in a file. The path is now reported instead.
         """
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
+        _named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
         out = _run("aaa_parse", cwd=tmp_path)
         assert "SURVIVOR [aaa_parse]" in out.stdout, out.stdout
         assert "test__mutation_selfcheck.py" in out.stdout, (
@@ -1103,7 +1110,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         with nothing after it that could be a test id.
         """
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
+        _named_set(tmp_path, "aaa_parse", [self._UNPARSEABLE])
         out = _run("aaa_parse", cwd=tmp_path)
         assert "{'ERROR'}" not in out.stdout, (
             "the collection error parsed as a test id, so a reader is told "
@@ -1122,7 +1129,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         # pytest dies with no summary at all - the only remaining shape
         # of "cannot be measured", now that `-rfE` reports errors.
         (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
-        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
+        _named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         tally = [l for l in out.stdout.splitlines() if " mutations," in l]
         assert tally, out.stdout
@@ -1143,7 +1150,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         # pytest dies with no summary at all - the only remaining shape
         # of "cannot be measured", now that `-rfE` reports errors.
         (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
-        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
+        _named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert "1 of 1 sets" in out.stdout, out.stdout
         assert "INCOMPLETE" in out.stdout, (
@@ -1156,7 +1163,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         """**The control.** A column that is always printed must not always warn,
         or the warning says nothing about any particular run."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_fine", [self._FINE])
+        _named_set(tmp_path, "aaa_fine", [self._FINE])
         out = _run("aaa_fine", cwd=tmp_path)
         assert "0 unmeasurable" in out.stdout, out.stdout
         assert "INCOMPLETE" not in out.stdout, out.stdout
@@ -1168,7 +1175,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         # pytest dies with no summary at all - the only remaining shape
         # of "cannot be measured", now that `-rfE` reports errors.
         (tmp_path / "conftest.py").write_text(self._CRASHES, encoding="utf-8")
-        self._named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
+        _named_set(tmp_path, "aaa_partial", [self._CRASHES_ENTRY, self._FINE])
         out = _run("aaa_partial", cwd=tmp_path)
         assert out.returncode != 0, (
             "a run that could not measure one of its mutations exited 0, so a "
@@ -1180,7 +1187,7 @@ class TestTheTallyCannotBeQuietlyWrong:
         because that is a statement about the file the remaining mutations are
         aimed at rather than about one run."""
         self._tree(tmp_path)
-        self._named_set(tmp_path, "aaa_rots", [self._ROTATED, self._FINE])
+        _named_set(tmp_path, "aaa_rots", [self._ROTATED, self._FINE])
         out = _run("aaa_rots", cwd=tmp_path)
         assert "ERROR [aaa_rots]" in out.stdout, out.stdout
         assert "caught by test_the_total" not in out.stdout, (
@@ -1337,3 +1344,135 @@ MUTATIONS = [
         out = _run("--check-anchors", "probe", cwd=tmp_path)
         assert out.returncode != 0, out.stdout
         assert "occurs 0 times" in out.stdout, out.stdout
+
+
+class TestAWitnessThatNamesNothingIsAnErrorNotALogLine:
+    """A witness that names no test is a witness that cannot fail.
+
+    **Found by reading one complete inventory's own output.** The runner already
+    told us, per mutation, which of a mutation's named witnesses did NOT fire -
+    42 of them across 44 sets. Checking all 42 against the tree: **41 exist.** So
+    the class is narrow, and the two it found are real, and both are in one
+    mutation's expect list:
+
+        test_the_reasons_are_not_about_a_lock_file   # exists nowhere
+        TestTheHookActuallyFires                    # a CLASS, not a test id
+
+    The runner was already printing that information, in the middle of a
+    mutation run, on its way past. `hit` can tell you a witness did not fire; it
+    can never tell you it *could* not. This closes that.
+
+    **And the first version over-fired**, which is the reason the false-positive
+    controls below are not optional. `_collected_ids` returned pytest's full ids
+    (`tests/x.py::TestClass::test_name`) while `expect` entries and `_failures`'
+    verdict set both use the **bare** method name - so every witness in the
+    collection was marked stale at once. That is the "two representations of one
+    thing compared as strings" error recorded in AGENTS.md for
+    `discovered_modules`, arrived at from a new direction.
+    """
+
+    def _set(self, tmp_path, witnesses):
+        """A set with a witness list to interrogate, over a real test file."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "sys.path.insert(0, str(Path(__file__).resolve().parent.parent"
+            " / 'usr' / 'lib'))\n\n"
+            "import fixture_module  # noqa: E402\n\n"
+            # **The tests have to be able to *catch*, so the stale witness is the
+            # only thing left that can make the run non-zero.** With `assert True`
+            # the mutation was also a survivor and the exit code was non-zero for
+            # a reason a control could not separate from the one under test - a
+            # control that cannot distinguish its own subject.
+            "def test_one():\n"
+            "    assert fixture_module.TOTAL == 3\n\n"
+            "def test_two():\n"
+            "    assert fixture_module.TOTAL == 3\n\n"
+            "class TestARealClass:\n"
+            "    def test_inside_a_class(self):\n"
+            "        assert fixture_module.TOTAL == 3\n",
+            encoding="utf-8")
+        _named_set(tmp_path, "probe", [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "TOTAL = 3\n",
+            "new": "TOTAL = 4\n",
+            "label": "one mutation, named witnesses under test",
+            "expect": witnesses,
+        }])
+        return _run("probe", cwd=tmp_path)
+
+    def test_a_witness_naming_nothing_is_an_error(self, tmp_path):
+        out = self._set(tmp_path, ["test_one",
+                                    "test_a_witness_that_does_not_exist"])
+        assert "STALE WITNESS" in out.stdout, (
+            "a witness naming a test that exists nowhere was not reported:\n"
+            + out.stdout)
+        assert out.returncode != 0, (
+            "a set naming a witness that cannot fire exited 0, so a script would "
+            "read it as clean:\n" + out.stdout)
+
+    def test_the_reason_says_it_could_never_have_fired(self, tmp_path):
+        """**The control.** The line has to say *why*, not only that it is stale -
+        "no test has that id" and "the test is there but never fires" are opposite
+        findings with opposite fixes."""
+        out = self._set(tmp_path, ["test_one",
+                                    "test_a_witness_that_does_not_exist"])
+        assert "could never have fired" in out.stdout, out.stdout
+
+    def test_a_witness_that_names_a_class_is_an_error(self, tmp_path):
+        """**The second real case.** `TestARealClass` exists, and it is not a test
+        id - a class is not a test, and a witness naming one cannot match."""
+        out = self._set(tmp_path, ["test_one", "TestARealClass"])
+        assert "STALE WITNESS" in out.stdout, out.stdout
+        assert "TestARealClass" in out.stdout, out.stdout
+
+    def test_a_witness_that_exists_is_not_flagged(self, tmp_path):
+        """**The false-positive control, and the version that failed first.**"""
+        out = self._set(tmp_path, ["test_one"])
+        assert "STALE WITNESS" not in out.stdout, (
+            "a witness naming a real test was reported as stale, so the "
+            "collection and the comparison disagree about what a test id is:\n"
+            + out.stdout)
+
+    def test_a_witness_inside_a_class_is_not_flagged(self, tmp_path):
+        """And the collection's own ids, kept whole. `expect` uses the bare method
+        name, which is what `_failures` stores too."""
+        out = self._set(tmp_path, ["test_inside_a_class"])
+        assert "STALE WITNESS" not in out.stdout, out.stdout
+
+    def test_a_witness_named_by_a_base_id_across_parametrization_is_not_flagged(
+            self, tmp_path):
+        """**The prefix rule survives.** `test_foo` matches `test_foo[case]`, so a
+        base-id witness against a parametrized test is not stale - and flagging it
+        would break every set that uses the rule on purpose."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "tests").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        (tmp_path / "tests" / "test__mutation_selfcheck.py").write_text(
+            "import pytest\n\n"
+            "@pytest.mark.parametrize('n', [1, 2])\n"
+            "def test_a_parametrized_case(n):\n    assert n\n",
+            encoding="utf-8")
+        _named_set(tmp_path, "probe", [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "TOTAL = 3\n",
+            "new": "TOTAL = 4\n",
+            "label": "named by its base id",
+            "expect": ["test_a_parametrized_case"],
+        }])
+        out = _run("probe", cwd=tmp_path)
+        assert "STALE WITNESS" not in out.stdout, (
+            "a base-id witness against a parametrized test was flagged, so the "
+            "prefix rule this harness documents on purpose is broken:\n"
+            + out.stdout)
+
+    def test_a_set_whose_file_has_no_witnesses_is_not_flagged(self, tmp_path):
+        out = self._set(tmp_path, [])
+        assert "STALE WITNESS" not in out.stdout, out.stdout
