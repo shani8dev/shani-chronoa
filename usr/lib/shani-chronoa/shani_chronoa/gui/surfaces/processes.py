@@ -171,13 +171,31 @@ class _Page:
     def _row(self, item: "running.Running") -> Gtk.Widget:
         """One running thing: what it holds, and either a Stop or the reason."""
         state = "Running" if item.running else "Stopped"
+        # **A button only while there is something to stop.**
+        #
+        # This used to build one either way: `label="Stop" if item.running else
+        # "Stopped"`, then `set_sensitive(item.running)`. Measured on the built
+        # panel, a row read:
+        #
+        #     Local model server    your RAM - the local model server. Stopped.
+        #                            [BUTTON] Stopped
+        #
+        # Three defects in two lines. The button is labelled with a **state, not
+        # an action**, so the control says what is true rather than what it
+        # does. It restates `{state}`, which is already in the subtitle. And it
+        # is disabled, so pressing it does nothing at all - a control that cannot
+        # act, which is the thing this repo removes wherever it finds one. The
+        # subtitle already says "Stopped", so the button was two ways of saying
+        # nothing and one way of pressing nothing.
+        #
+        # A stopped item keeps its suffix `None`, which is the same shape as a
+        # row that cannot be stopped at all - the reason is named in the row, as
+        # the comment below already does.
         button: Optional[Gtk.Button] = None
-        if item.stop is not None:
-            button = Gtk.Button(label="Stop" if item.running else "Stopped")
+        if item.stop is not None and item.running:
+            button = Gtk.Button(label="Stop")
             button.set_valign(Gtk.Align.CENTER)
-            button.set_tooltip_text(
-                f"Stop {item.label.lower()}" if item.running else "Already stopped")
-            button.set_sensitive(item.running)
+            button.set_tooltip_text(f"Stop {item.label.lower()}")
             button.connect("clicked", lambda _b, i=item, b=button:
                            self._stop_one(i, b))
         row = common.row(item.label,
@@ -186,12 +204,44 @@ class _Page:
         if button is None:
             # Name it in the row, not only in a tooltip: the reason a control is
             # missing is more useful than the absence of one.
-            question = (item.why_not
-                        or "this one cannot be stopped without quitting Chronoa")
-            for label in _labels(row):
-                if item.label in (label.get_text() or ""):
-                    label.set_tooltip_text(question)
-                    break
+            # **"Cannot be stopped" is only true of a running item with no
+            # stop.** A stopped item has no button because there is nothing to
+            # stop, which is a different fact, and the subtitle above already
+            # says it - so this branch names the reason or says nothing further
+            # rather than telling somebody a stopped thing cannot be stopped.
+            question = item.why_not or (
+                "" if not item.running
+                else "this one cannot be stopped without quitting Chronoa")
+            # **The reason a control is missing is said on screen.**
+            #
+            # This branch set it as a tooltip and stopped there - while the
+            # comment two lines above said "Name it in the row, not only in a
+            # tooltip". The comment was right and the code was not: measured on
+            # the built panel, a row that could not be stopped read
+            #
+            #     Wake-word listening   your microphone - listening for the wake
+            #                          phrase. Running.
+            #
+            # and said nothing at all about why there was no Stop button. A
+            # tooltip is invisible to a keyboard, to a screen reader, and to
+            # anyone who is not hovering - so the sentence that existed to
+            # explain a missing control was itself unreachable.
+            #
+            # It goes in the subtitle, where the state is, and the tooltip stays
+            # for the hover wording.
+            if question:
+                for label in _labels(row):
+                    if item.label in (label.get_text() or ""):
+                        label.set_tooltip_text(question)
+                        break
+                subtitle = row.get_subtitle() or ""
+                row.set_subtitle(f"{subtitle} {question}")
+            elif _labels(row):
+                for label in _labels(row):
+                    if item.label in (label.get_text() or ""):
+                        label.set_tooltip_text(
+                            "this one cannot be stopped without quitting Chronoa")
+                        break
         return row
 
     # --- stopping -----------------------------------------------------------
