@@ -859,10 +859,27 @@ class _ModelSurface(Gtk.Box):
                 f"{len(engines)} engines available",
                 f"{origin}; {available} of {len(engines)} engines "
                 f"can run it. {chosen}")
-        return self.status_recorder.row(
+        # **The same button its own sibling branch offers, six lines above.**
+        #
+        # The branch at "no engine is available to run it" returns
+        # `self._with_setup(widget)`, which appends the "Set Chronoa up" button -
+        # the only thing in the app that downloads a model. This branch, three
+        # lines later, returned a bare `status_recorder.row` and got nothing.
+        #
+        # Measured on the rendered panel with the gate shut:
+        #
+        #     Needs attention
+        #     qwen3:4b - no engine available - chosen for this computer's hardware
+        #     tier; none of the 3 engines can run it
+        #     [BUTTON] Reload
+        #
+        # One button, and it re-reads the same answer. The row names a problem a
+        # person cannot act on, and the fix - the wizard - is the one route this
+        # panel already knows how to open, two branches up.
+        return self._with_setup(self.status_recorder.row(
             common.STATUS_ATTENTION,
             f"{model or '(none chosen)'} - no engine available",
-            f"{origin}; none of the {len(engines)} engines can run it")
+            f"{origin}; none of the {len(engines)} engines can run it"))
 
     def _with_setup(self, widget: Gtk.Widget) -> Gtk.Widget:
         """A status row plus the one button that can act on it.
