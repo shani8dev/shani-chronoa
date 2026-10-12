@@ -14846,3 +14846,67 @@ round-trip, a contrast ratio, a tag shape. This repository records twice that a
 widget can pass every check and still be unreadable: the organ strip passed its
 width test while rendering as one run-on string, and the voice-style row was
 inspected only after shipping.
+
+## Five mutations, and the ninth witness that could not fail (2026-10-12)
+
+The commit above recorded the syntax-highlighting gates as **not**
+mutation-verified. They are now, and the verification produced two findings worth
+more than the tally.
+
+### A harness that hangs looks exactly like a harness that buffers
+
+Four attempts produced **no output at all**, and I read that as buffering. It was
+not: **mutation 3 restores the infinite loop**, so pytest never completes and
+prints nothing. The harness was not slow or silent - it was stuck, and the
+300-second timeout was the only thing that ever said so.
+
+**That cost four turns and I blamed the wrong thing each time.** The symptom is
+identical to a buffering pipe and to a slow cold tree, and the distinguishing
+evidence is the one I did not look for: a run that *should* take 0.7s and takes
+300s is not buffering, it is hung. This file already records the mirror - *"a
+check that could not run is not a check that found nothing"* - and this is the
+same sentence about a **test run** rather than a check.
+
+### Five mutations, five caught - and one only after the witness was rewritten
+
+| mutation | verdict |
+|---|---|
+| one palette copied twice | CAUGHT - 2 failed |
+| token text no longer escaped | CAUGHT - 9 failed |
+| plain text swallowed to end of line | CAUGHT **by hanging** - the mutant never finishes |
+| unknown language coloured as Python | CAUGHT - 1 failed |
+| theme walk narrowed to direct children | **SURVIVED**, then CAUGHT |
+
+**The survivor was my test, and it is the ninth of its kind this session.** It
+built a `CodeBlock`, buried it a level down, called `_on_dark_changed()`, and
+asserted the text was unchanged and the markup held a span. Both hold - because
+**the block is already coloured by its own constructor**. The assertions passed
+for code that never re-rendered, which is the recorded *"a witness that cannot
+fail"* in a file where it has now happened nine times.
+
+The fix is to make the two states **differ**: build under one theme, switch
+`_is_dark`, then assert the markup came back carrying the *other* palette's
+colours. That can only happen if the walk reached the block. Re-run against the
+mutation: **1 failed, 65 passed**.
+
+**A test that renders at construction cannot detect a failure to re-render**,
+and any assertion about a post-hoc refresh needs something that changes between
+the two moments. That is the generalisable half, and it is the same lesson as
+`Report.honest()`'s `near-miss` branch: a fixture that cannot reach the code it
+claims to measure measures the fixture.
+
+### The harness rewrote the shared tree, and a concurrent session read it
+
+The first attempt applied each mutation **in place**, in a tree two sessions work
+in. A second session's pytest (`XDG_STATE_HOME=/tmp/opencode/chl`, PID 530466)
+started running my new test file **while mutation 3 was applied** - so it would
+have read deliberately broken code and reported failures on correct code. That is
+the exact incident `conftest.py`'s `_mutation_in_flight` documents and cannot
+prevent from inside a suite, and **I caused it**.
+
+Stopped by killing my own driver **by PID** (never by name - the workspace rule),
+and both files restored byte-identical. The rerun copies the package to a temp
+tree and mutates there, so the shared tree is never rewritten at all. **A
+mutation harness in a shared tree should not touch the shared tree**, and the
+lock in `tools/mutate.py` guards two mutation runs from each other rather than
+guarding either from a plain `pytest`.

@@ -305,32 +305,48 @@ def test_a_block_re_renders_when_the_theme_changes():
         language = "python"
         payload = 'def f():\n    # note\n    return "<b>"\n'
 
-    view = TranscriptView()
-    block = reply_blocks.CodeBlock(_B())
-    # bury it one level down, which is where a turn puts it
-    row = Gtk.Box()
-    row.append(block)
-    view._blocks = Gtk.Box()
-    view._blocks.append(row)
+    payload = str(_B.payload)
+    # **Build in the light theme, then switch and ask for the dark one.** The
+    # first version of this test built the block and asserted its text was
+    # unchanged and its markup held a span - and it **passed with the walk
+    # narrowed to direct children**, because the block is already coloured by
+    # its constructor. The assertions held for code that never re-rendered,
+    # which is the recorded "a witness that cannot fail" and the ninth of this
+    # session.
+    #
+    # The fix is to make the two states *differ*: assert the markup is rebuilt
+    # with the other palette's colours. That can only happen if the walk
+    # reached this block, so the test is now a witness rather than a tautology.
+    scheme = {"dark": False}
+    original = code_hl._is_dark
+    code_hl._is_dark = lambda: scheme["dark"]
+    try:
+        view = TranscriptView()
+        block = reply_blocks.CodeBlock(_B())
+        row = Gtk.Box()
+        row.append(block)                      # buried a level down, as a turn is
+        view._blocks = Gtk.Box()
+        view._blocks.append(row)
 
-    # **Three read-backs, because each answers a different question.**
-    # `get_use_markup()` says markup is in effect at all; `get_label()` returns
-    # the markup *source*, which proves a span was emitted; `get_text()`
-    # returns the *parsed* text, which is the only one of the three that can
-    # tell markup which failed to parse from markup which rendered. Asserting
-    # only `get_label()` would pass on a label Pango had silently refused -
-    # the control this file's docstring is about.
-    assert block._body.get_use_markup(), "the block rendered no markup"
-    assert "<span" in block._body.get_label(), (
-        f"the block emitted no token spans: {block._body.get_label()!r}")
-    assert block._body.get_text() == str(_B.payload)
+        light_comment = code_hl._ON_LIGHT["comment"]
+        dark_comment = code_hl._ON_DARK["comment"]
+        built_light = block._body.get_label()
+        assert light_comment in built_light, (
+            f"the block did not build with the light palette: {built_light!r}")
+        assert dark_comment not in built_light
 
-    view._on_dark_changed()
-    # The walk reached the buried block and left it valid: same text, still
-    # coloured.
-    assert block._body.get_text() == str(_B.payload), (
-        f"re-rendering changed the text to {block._body.get_text()!r}")
-    assert "<span" in block._body.get_label(), (
-        "the walk reported success but left the block uncoloured - a "
-        "first-child-only walk would have found nothing and said nothing")
-    assert block._body.get_use_markup()
+        scheme["dark"] = True
+        view._on_dark_changed()
+
+        rebuilt = block._body.get_label()
+        assert rebuilt != built_light, (
+            "the walk reported success and the block's markup is byte-identical: "
+            "it was never re-rendered, so a direct-children-only walk passes "
+            "this test for the wrong reason")
+        assert dark_comment in rebuilt, (
+            f"the block was re-rendered without the dark palette: {rebuilt!r}")
+        # and it is still correct text, still markup, still parsed
+        assert block._body.get_text() == payload
+        assert block._body.get_use_markup()
+    finally:
+        code_hl._is_dark = original
