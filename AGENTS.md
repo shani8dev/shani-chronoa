@@ -14214,3 +14214,166 @@ the confident wrong answer this file keeps recording.
 before any of this** and is 6 failed after it - measured back to back in one
 command, so the concurrent session's commits could not have moved HEAD between the
 two. This change fixes seven and introduces none.
+
+## One question per chip: the mode strip's two chips could contradict each other (2026-10-12)
+
+Two chips on the mode strip answered overlapping questions, and both were wrong in
+a way that only showed when a setting moved.
+
+**The answers chip lied.** With `privacy-mode` on and `answer-mode=cloud`, the chip
+read **"Cloud"** while `_apply_answer_mode` dropped the cloud chain and answered
+locally. Measured across all six reachable privacy/engine pairs. A chip reporting a
+preference the app has overridden is worse than no chip, because it reads as a
+promise - and the override is silent, so nothing ever corrects it.
+
+**"What Chronoa may do" was not one question.** Its four options crossed *may it
+change things* with *may anything leave*: "Read only" forbids changing and permits
+sending away, "Local only" does the reverse. **So the four could not be ordered
+against each other** - you cannot tell which is stricter, because neither is - and
+a menu of modes that is not a total order is not a choice, it is a puzzle. Worse,
+"Local only" also decided where answers came from, which the chip beside it also
+decided, so the two could be set to disagree.
+
+Now one question per chip, and no pair can disagree:
+
+    What it may change   Anything | Read only
+    When it may act      Only when asked | In the background
+    Where it may go      Nothing leaves | This machine answers |
+                         This machine, then cloud | Cloud
+
+The egress lock and the engine are **one menu**, so "local only *and* cloud" is
+unrepresentable rather than offered and ignored. The chip's word is **derived** from
+both settings, never stored separately - a third setting to keep in step with the
+other two is exactly how the original lied. `answer-mode` keeps its three stored
+values; the new action writes it rather than replacing it.
+
+**"When it may act" is new, and it came from scanning the schema.** All 202 keys
+were categorised for this work. `background-mode-enabled` gates the daemon surface
+and decides whether Chronoa acts at all while you are away - a larger trust
+question than either other chip, and reachable only from Settings.
+
+### Three bugs of my own, caught by running rather than by reading
+
+- **`preferences-system-run-symbolic` does not exist on this machine.** Found by
+  `test_every_surface_icon_exists_on_this_machine`; switched to one that does.
+- **`quiet=("this-machine",)` was wrong.** It marked the *lock* as the state
+  meaning "nothing unusual", while the actual default highlighted as a departure.
+  Quiet means *your words never reach a provider* - which is the lock **and**
+  local-answers, both, and not the default, which can fall back to a provider.
+- **The first egress mapping collapsed `local` and `local-cloud`**, which read
+  "then cloud" while answering locally only: **the same lie, smaller.** Four exact
+  states instead, verified over all six reachable pairs.
+
+### The earlier root cause for the menu labels, retracted again here
+
+The entry above about `_MODES` menu lines called the cause "one string doing two
+jobs". **That was wrong, and so was the fix it implied** (split one string in two).
+There were always two strings: the tables are `(key, word, line, icon)` and carried
+a short word from the start, while every consumer bound it as `_word` - this file's
+own convention for *deliberately unused* - and used the long line as the menu label.
+The fix was one word per site. GTK was probed rather than assumed: `GtkPopoverMenu`
+renders `label` and nothing beside it, so terse labels are the only shape that both
+fits and says what it means.
+
+## Nothing declared the dependencies between settings, so two of them were half-written (2026-10-12)
+
+Asked "do we get to know what indicates the dependency?" - **nothing did.** No
+`depends_on`, no `requires`, no prerequisite table, no schema annotation across all
+202 keys.
+
+An audit for functions touching more than one setting found **4,551 pairs**, and
+almost all are noise: `settings_window/privacy.py:89` enumerates the whole settings
+surface, so every key appears beside every other. **A co-reading is not a
+dependency.** What makes a pair one is that *one key's value is decided by
+another's*, so the sharp signal is a **multi-write** - and there are **11**. None
+of the eleven was written down anywhere.
+
+Reading that list found two real defects, and they were the same defect twice.
+`privacy-mode` is not a preference beside `answer-mode`; it is **the lock that
+decides whether a provider is reachable**, and `_apply_answer_mode` returns early
+while it is on. So writing `answer-mode` alone writes half a decision.
+
+- **Two actions owned the same mapping.** `_on_answer_mode` and `_on_answer_egress`
+  each mapped their own key vocabulary onto the same three settings and could
+  disagree. `_on_answer_mode` is still registered and reachable over D-Bus, so
+  `app.answer-mode = "local"` put the egress lock on behind the strip's back. It now
+  translates its key and defers - one mapping, not two.
+- **The wizard wrote half a decision.** `pick_mode` set `answer-mode=cloud` and left
+  `privacy-mode` alone, so choosing "In the cloud" on a locked machine reported a
+  choice the app then ignored - the same defect as the chip that read "Cloud" under a
+  local-only rule, one layer down, reached from the wizard instead of the strip.
+
+`tests/test_setting_dependencies.py` pins both. **The test was the thing that kept
+not working, three times, and only running the mutation revealed each:**
+
+1. It first asked whether a multi-write *site exists*, not whether it writes the
+   *right keys*. Deleting the two dependent writes from `pick_mode` left it green.
+2. Then it asked which functions write two or more settings. Adding a single
+   `config.set` back into `_on_answer_mode` left it green - one extra key on top of a
+   delegation is not a multi-write, so the scan never saw the second writer. The
+   claim that bites is "does not write the mapping itself", not "writes several".
+3. Comparing key sets then **failed on my own abbreviated list**, which is what a
+   hand-maintained list looks like. It is now generated from the parser.
+
+**A suite-order failure was mine too.** This file originally drove the real handlers
+on a real `GApplication`, and importing `shani_chronoa.app.application` leaves the
+session bus such that a later `app.register(None)` fails with
+`GDBus.Error:org.freedesktop.DBus.Error:NoReply` - five tests in
+`test_model_selector_chip.py`, 25 seconds each, turning a 0.49s file into 104s.
+Measured rather than guessed: this file's parser test plus theirs is 6 passed, and
+adding the handler test made it 4 failed. I first blamed GSettings schema caching
+and that hypothesis was **wrong**; measuring it is what redirected me. Both
+invariants are now checked structurally, with no `GApplication` instantiated.
+
+## No setting is dead, and the reason my scan said otherwise six times (2026-10-12)
+
+All 202 keys audited for "is anything reading this?" - **six rounds of false alarms
+before one true result: 162 unreachable, 74, 23, 9, and finally 0.**
+
+    config.get_double("speech-rate")          a read list that stopped at get_bool
+    config.sense_allowed(self.consent_key)    the name is a field, not a literal
+    SENSE_NAMES is the panel's 16             the registry is SENSES: 53, across 57 modules
+    trigger event types                       they resolve through _consent_key_for too
+    _CONSENT_KEY = "cleanup-enabled"          read through a name
+    TIMBRE_KEYS, SETTING, provider map        keys inside tables
+
+**Reading the machine panel's `SENSE_NAMES` instead of the `SENSES` registry
+invented 42 senses that do not exist.** It is a legitimate list to read and the
+wrong one for this question, and nothing says so at either end.
+
+**Conclusion: no setting in this repository is dead, and none is write-only.**
+The finding is the hazard underneath six wrong answers: **a setting's reachability
+depends on appearing in one of roughly eight tables scattered across modules, and
+nothing documents that list.** So the next person who adds a key to the schema and a
+switch to Settings gets a control that is silently inert.
+
+`tests/test_every_setting_is_reachable.py` closes it, and **over-approximates on
+purpose**: a key counts as reachable if mentioned *anywhere* in the package, or
+derivable from a registered sense or event. That cannot produce a false alarm,
+because a key nobody mentions really is inert. It deliberately will **not** catch
+"written but never read" - that case needs the eight mechanisms enumerated
+individually, which is what failed six times - and `test_setting_dependencies.py`
+covers it where it can be stated soundly. The sense half **calls the real
+`_consent_key_for`** rather than rebuilding its rule, because rebuilding it was
+round three.
+
+Verified by mutation: adding a setting nothing reads turns the gate red, naming the
+key. Schema restored byte-identical.
+
+**Two of that file's own controls failed on first run, and both were my mistakes.**
+One asserted the resolver finds keys the literal scan misses - it finds none,
+because `capabilities.GATED` spells them all out, so the assertion is now that the
+resolver is *not broken*. The other compared its fake schema against a key set
+captured before the patch, so it could never have fired. Written down because a
+control that cannot fail is not a control, and mine were two of them.
+
+### The measurement lesson, which is the transferable part
+
+Three times this stretch, a number was wrong because I measured badly and then wrote
+it down as though it were a measurement: `42/87/70` for the `_MODES` lines (an
+uncommitted working tree, not the commit), a "105 characters" figure for `_STYLES`
+(a regex matching greedily across rows and concatenating three strings, where `ast`
+gives 0/3), and `len(reads) == 202` (a `defaultdict` creating an entry on every
+lookup). In each case the cheap fix was not to correct the number but to **parse
+instead of pattern-match** - and in each case the bad number had already been
+committed to this file as though it were established.
