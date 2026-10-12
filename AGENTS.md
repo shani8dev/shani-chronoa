@@ -5644,41 +5644,50 @@ restores the file it mutated and the journal covers `tools/mutate.py` too.
 
 **The first complete inventory, and the survivor that was the harness's own
 blindness.** Run to completion 2026-12 across **43 sets, 357 mutations**:
-**341 caught, 2 survivors, 14 equivalent** (1833s). The arithmetic closes —
-341 + 2 + 14 = 357 — which is what the `unmeasurable` column and the
-equivalents-as-keys fixes make checkable, and why those two commits were worth
-the re-run.
+**341 caught, 2 survivors, 14 equivalent** (1833s). Re-run with the fixed
+runner across **44 sets, 372 mutations**: **357 caught, 1 survivor, 14
+equivalent, 0 unmeasurable** (1818s). Both tallies add up — 341+2+14=357 and
+357+1+14+0=372 — which is what the `unmeasurable` column and the
+equivalents-as-keys fixes make checkable, and why both commits were worth the
+re-run.
 
-**One of the two survivors was not a coverage gap.** `wizard_mark`'s "the name
-collision, restored" was reported a plain SURVIVOR while its own summary line
-read `28 passed, 8 warnings, 101 errors` — **and the first two of those 101
-errors are the mutation's own named witnesses.** The runner passed `-rf`, and
-pytest's short summary is **per-category**: `-rf` reports failures only, a raising
-fixture turns every test using it into an ERROR, `-rf` prints none of them,
-`failed` comes back empty, and the verdict is "nothing caught this and nothing
-else failed either" about a mutation that broke a hundred and one things. `-rfE`
-fixes it and the mutation is **caught by both its witnesses**, verified on the
-live tree (`wizard_mark` 1 survivor → **0**). So the inventory was
-**under-reporting coverage**, which is the direction that makes a suite look
-worse than it is and sends people hunting for tests that already exist.
+**The second run is the one to trust, and the first is kept because it is what
+found the defect.** `wizard_mark`'s "the name collision, restored" was reported a
+plain SURVIVOR over a summary line reading `28 passed, 8 warnings, 101 errors` —
+and the first two of those 101 errors are **the mutation's own named
+witnesses**. The runner passed `-rf`, and pytest's short summary is
+**per-category**: `-rf` reports failures only, a raising fixture turns every test
+using it into an ERROR, `-rf` prints none of them, `failed` comes back empty, and
+the verdict is "nothing caught this and nothing else failed either" about a
+mutation that broke a hundred and one things. `-rfE` fixes it and the mutation is
+**caught by both its witnesses**, so the inventory was **under-reporting
+coverage** — the direction that makes a suite look worse than it is and sends
+people hunting for tests that already exist.
 
-**Two more fell out of the same investigation.** A run with *only* errors prints
-`1 error in 0.01s`, which contains neither " passed" nor " failed" — so such a
-mutation was reported UNMEASURABLE when its witness was in the error list all
-along; the summary is anchored at a count now, with `error` in the vocabulary.
-And `ERROR tests/x.py` is a **file**, not a `file::test_id`, so the old parse
-yielded the literal word `"ERROR"` as a test id and a mutation that broke every
-test in a file reported `failed for another reason: {'ERROR'}` — naming nothing
-to act on.
+Two more fell out of the same investigation. A run with only errors prints
+`1 error in 0.01s` (no " passed", no " failed"), so those were reported
+UNMEASURABLE when the witness was in the error list all along; the summary is
+anchored at a count now. And `ERROR tests/x.py` is a **file**, not a
+`file::test_id`, so the old parse yielded the word **`"ERROR"`** as a test id and
+a mutation that broke every test in a file reported
+`failed for another reason: {'ERROR'}` — naming nothing to act on.
+
+**And `--check-witnesses` closed a third.** The runner already printed which
+named witnesses did not fire — 42 across the sets — and nobody read it. Checking
+all 42: **41 exist, and the two that do not are renames the set never
+followed.** `mutate_guard` had named three witnesses on one mutation and caught
+its target with **one**; the other two were real and load-bearing and had been
+unable to fire. **532 witnesses across 45 sets all resolve now.**
 
 **What is still not claimed.** That the full inventory is green: the remaining
 survivor is `kv_parity`'s "the caller discards what the check said", whose two
 real-GGUF witnesses both **skip** without `CHRONOA_KV_PARITY_MODEL` — so it is
-**unmeasured here**, not proven uncovered. The figure above is for the **14:00
-snapshot of 43 sets**; there are 44 now (`asleep_state` landed mid-run), so it is
-not a claim about this tree today. `--list` and `--check-anchors` are the two
-things a fresh clone can verify in seconds; the full run is the slow, deliberate
-half, and the incomplete run is now one that says it is incomplete.
+**unmeasured here**, not proven uncovered, and the tally line now says so. The
+figure is for a **44-set snapshot**; there are 45 now (`kv_speed` landed
+mid-run), so it is not a claim about this tree today. `--list`,
+`--check-anchors` and `--check-witnesses` are the three things a fresh clone can
+verify in seconds; the full run is the slow, deliberate half, and the incomplete
+run is now one that says it is incomplete.
 
 `build/` is gitignored for the runner's redirected `XDG_*` directories - a
 mutation run must not write into the developer's real home, which is the same
