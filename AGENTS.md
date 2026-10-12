@@ -13987,3 +13987,68 @@ verdict this file records repeatedly: the failure text names the product, not th
 machine. The chunked sweep found it only because a chunk happened to run while a
 real Chronoa process held the lock, and it is the reason a red test must be
 re-run serially and in its own environment before it is believed.
+
+## A model selector on the mode strip, and the two ways I broke it (2026-10-12)
+
+The mode strip answered four questions - what Chronoa may do, how it hears you,
+who answers, how it talks - and **none of them said which model**. "Where answers
+come from" offered local / local-then-cloud / cloud, and there was **no
+model-choice app action in the tree at all**. The model lived only in the Models
+panel and Settings, which is the gap the strip's own docstring says it exists to
+close: *"a mode that removes capabilities without saying so reads as a bug the
+first time the assistant declines something that was explicitly permitted."*
+
+A fifth dropdown, **"Which model answers"**, reading `local_llm.active()` for the
+word and `local_llm.installed()` for the menu.
+
+**It is the only control on the strip with a real effect**, and that is why it is
+more than the other four. Every other chip writes a setting the next turn reads.
+This one points `current.gguf` - and the running `llama-server` keeps the weights
+it already loaded, so a handler that only renamed the symlink would leave the chip
+reading "8B" while the 1.7B was answering: the two-widgets-that-disagree failure
+this file records repeatedly. So `answer-model` runs `use()`, the quality gate,
+then `stop_service()` **before** `start_service()` (two servers on one port is a
+silent failure where the first keeps answering), on `gateway.off_the_main_loop` -
+a cold start plus `llama-perplexity` takes seconds and the window must not freeze.
+
+Measured on this box: `installed()` -> `['qwen3-1.7b', 'qwen3-8b']`, the chip
+reads **1.7B**, the menu has **2** items, and the quiet state is
+`recommended()`'s answer rather than a name chosen in the file.
+
+### Two ways I broke it, both found by running rather than reading
+
+1. **An empty table took the whole strip down.** `_draw` reads `table[0]` for the
+   current row, and the four static tables are written down so they never hit it -
+   this one is built from what is on disk, so **a machine with no model installed
+   crashed the mode strip and therefore the window**. `IndexError: list index out
+   of range`, six tests red. The empty state is a row now ("No model"), which is
+   the absence-shaped-verdict rule applied to a table.
+2. **My own file swap reverted my own fix.** To measure "is this pre-existing?", I
+   saved my version to `/tmp`, restored HEAD's, ran, and copied mine back - but the
+   backup had been taken *before* the menu fix landed, so the swap silently
+   restored the version with no menu. The chip passed my probe and then failed the
+   suite for a bug I had already fixed. **A backup is a snapshot in time, not a
+   handle on "my latest".**
+
+### What is measured, and what is not
+
+`tests/test_model_selector_chip.py` (5): the menu offers exactly what is installed
+and nothing else, the word is the tier answering now, only the recommended tier is
+quiet, a machine with no model says so rather than raising, and the icon is one
+this repo already uses.
+
+**Not verified:** the action's own behaviour - the restart, the gate's refusal,
+the off-main-loop dispatch. That needs a mutation set driving `answer-model`
+against a stubbed `local_llm`, and it is recorded rather than claimed. The strip's
+behaviour is verified; the handler behind it is not yet.
+
+**Not surfaced:** the switch's outcome is logged, not shown. A person watching
+sees the strip redraw and nothing more until the next reply comes back from the
+new model. Announcing it wants a surface that can say "loading" for as long as a
+cold start takes, and a toast claiming a switch happened before it did would be
+the confident wrong answer this file keeps recording.
+
+**Pre-existing, and not mine:** `tests/test_mode_strip.py` was **13 failed at HEAD
+before any of this** and is 6 failed after it - measured back to back in one
+command, so the concurrent session's commits could not have moved HEAD between the
+two. This change fixes seven and introduces none.

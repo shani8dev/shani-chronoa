@@ -20,6 +20,7 @@ from gi.repository import Gtk, Gdk, Gio, GLib, GObject, Adw, Pango
 Adw.init()
 
 from shani_chronoa import capabilities
+from shani_chronoa import local_llm
 
 from .widgets import (  # noqa: F401
     AssistantState,
@@ -174,94 +175,87 @@ class _ModeStrip(Gtk.Box):
     hundred seconds later.
     """
 
-    #: (attribute, label, icon, action, how to read the state). Kept as a table
-    #: because the strip is rebuilt from it and a chip added by copy-paste is a
-    #: chip whose tooltip and its read-back can drift apart.
-    _CHIPS = (
-        ("_privacy_chip", "Local only", "security-high-symbolic",
-         "toggle-privacy", "_read_privacy"),
-        ("_plan_chip", "Plan mode", "document-edit-symbolic",
-         "toggle-plan-mode", "_read_plan_mode"),
-        ("_wake_chip", "Wake word", "audio-input-microphone-symbolic",
-         "toggle-wake-word", "_read_wake_word"),
-        # Talking over a reply. It existed only as a switch deep in Settings,
-        # yet it is the one mode a person flips mid-conversation: on with
-        # headphones, off on speakers, where with no echo cancellation Chronoa
-        # hears itself and stops.
-        ("_barge_chip", "Talk over", "media-playback-pause-symbolic",
-         "toggle-barge-in-vad", "_read_barge_in"),
-    )
-
     def __init__(self, application, config=None) -> None:
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
         self.add_css_class("mode-strip")
         self.set_halign(Gtk.Align.CENTER)
         #: The application is passed in rather than read from
-        #: `Gtk.Application.get_default()`. That global is process-wide, so a
-        #: strip built while *any* other application happens to be the default
-        #: activates its actions on the wrong one - measured: `tests/
-        #: test_mode_strip.py` passed alone and failed every activation when run
-        #: beside `test_window_ux.py`, whose fixture is the default by then.
-        #: `SidebarPage(self._app, ...)` a few lines up takes it the same way.
+        # `Gtk.Application.get_default()`. That global is process-wide, so a
+        # strip built while *any* other application happens to be the default
+        # activates its actions on the wrong one - measured: `tests/
+        # test_mode_strip.py` passed alone and failed every activation when run
+        # beside `test_window_ux.py`, whose fixture is the default by then.
         self._app = application
         self._config = config
-        #: True while `refresh()` is writing the chips. `set_active()` emits
-        #: `toggled` even when nothing was clicked, so without this the strip
-        #: would activate its own actions every time it redrew - the loop
-        #: `set_can_answer()` and the organ strip both avoid by only ever
-        #: being written from one direction.
+        #: True while `refresh()` writes. A `Gtk.MenuButton` has no pressed
+        # state to fight this, so the guard is kept only for re-entry from a
+        # widget repainting mid-write.
         self._syncing = False
-        for attribute, label, icon, action, reader in self._CHIPS:
-            chip = self._chip(label, icon, action)
-            chip.connect("toggled", self._on_toggled, action)
-            setattr(self, attribute, chip)
-            self._readers = getattr(self, "_readers", {})
-            self._readers[attribute] = getattr(self, reader)
-            self.append(chip)
+        # **Four toggles became two dropdowns, and the two loose buttons moved.**
+        # The strip had eight controls in a row - Local only, Plan mode, Wake
+        # word, Talk over, Reply style, Answering, Dictate, Listening - and three
+        # of them answered the same question. Plan mode and Local only are both
+        # "what is this allowed to do"; Wake word and Talk over are both "how is
+        # it listening". Four independent booleans also mean sixteen combinations
+        # and no way to say "the usual one" in a glance.
+        #
+        # A dropdown names the state in words, which is what a mode strip is for:
+        # the chip's *word* changes, so it is visible at a glance and legible in
+        # a screenshot, and at the compact width the icon carries it. Nothing is
+        # hidden - every old control is still an app action, still in the menu
+        # that owns it, still in Settings.
+        #
+        # Dictate and the Listening page are not modes and are not here: Dictate
+        # is one action and stays with the mic button that shares its subject,
+        # and the Listening panel is navigation, which belongs to the sidebar.
+        self._rules_chip = self._rules_chip()
+        self.append(self._rules_chip)
+        self._hands_chip = self._hands_free_chip()
+        self.append(self._hands_chip)
+        self._answer_chip = self._answer_mode_chip()
+        self.append(self._answer_chip)
         self._style_chip = self._reply_style_chip()
         self.append(self._style_chip)
-        self.append(self._dictate_button())
-        # Beside Dictate on purpose: they are the same question to a
-        # person - "listen to me for a long turn" and "listen to what
-        # is playing" - and the Listening page answers the second.
-        # Two panels away behind a sidebar click is how a capability
-        # nobody finds stays unfound.
-        self.append(self._listening_button())
+        self._model_chip = self._model_chip()
+        self.append(self._model_chip)
         self.refresh()
 
-    def _chip(self, label: str, icon: str, action: str) -> Gtk.ToggleButton:
-        """One switch: an icon and its word, in a toggle that is the control.
+    def _menu_chip(self, icon: str):
+        """The shell every dropdown shares: a button, a label, an image.
 
-        The word is in the chip rather than only in the tooltip because a chip
-        showing only a glyph is a control whose meaning has to be remembered, and
-        four of them in a row is four things to decode before reading any of
-        them.
+        **One shell, so the four dropdowns cannot drift apart.** The first
+        version built each by hand and the reply-style chip had a second label
+        and its own box construction, which is how a row ends up with two
+        different paddings nobody chose.
+
+        The image comes back because **the icon follows the state**: "This
+        # computer" and "Cloud" are different pictures, and icons that say what
+        # they mean are legible when the words are hidden.
         """
-        chip = Gtk.ToggleButton()
-        chip.add_css_class("mode-chip")
+        button = Gtk.MenuButton()
+        button.add_css_class("mode-chip")
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         image = Gtk.Image.new_from_icon_name(icon)
         image.set_pixel_size(13)
         box.append(image)
-        text = Gtk.Label(label=label)
-        text.add_css_class("mode-chip-label")
-        box.append(text)
-        chip.set_child(box)
-        chip.set_tooltip_text(
-            f"{label}: off. Click to turn it on "
-            f"(the {action} action, the same one the shortcut uses)"
-        )
-        chip.update_property([Gtk.AccessibleProperty.LABEL],
-                             [f"{label} mode, currently off"])
-        return chip
+        label = Gtk.Label(label="")
+        label.add_css_class("mode-chip-label")
+        box.append(label)
+        button.set_child(box)
+        return button, label, image
+
 
     #: style -> (chip word, menu line). Words a person picks by, not the keys.
     _STYLES = (
         # Under 30 characters each: the layout contract fails any label longer
-        # than that which can neither wrap nor ellipsise, and menu items do neither.
-        ("ordinary", "Ordinary", "Ordinary: the usual answer"),
-        ("brief", "Brief", "Brief: just the answer"),
-        ("explanatory", "Explanatory", "Explanatory: adds the why"),
+        # than that which can neither wrap nor ellipsise, and menu items do
+        # neither.
+        ("ordinary", "Ordinary", "Ordinary: the usual answer",
+         "format-justify-left-symbolic"),
+        ("brief", "Brief", "Brief: just the answer",
+         "format-justify-right-symbolic"),
+        ("explanatory", "Explanatory", "Explanatory: adds the why",
+         "format-justify-fill-symbolic"),
     )
 
     def _reply_style_chip(self) -> Gtk.MenuButton:
@@ -273,21 +267,279 @@ class _ModeStrip(Gtk.Box):
         reachable only in Settings although it changes the very next reply,
         which is the definition of a mode this strip exists for.
         """
-        button = Gtk.MenuButton()
-        button.add_css_class("mode-chip")
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        image = Gtk.Image.new_from_icon_name("format-justify-left-symbolic")
-        image.set_pixel_size(13)
-        box.append(image)
-        self._style_label = Gtk.Label(label="Ordinary")
-        self._style_label.add_css_class("mode-chip-label")
-        box.append(self._style_label)
-        button.set_child(box)
+        button, label, image = self._menu_chip("format-justify-left-symbolic")
+        self._style_label = label
+        self._style_image = image
         menu = Gio.Menu()
-        for key, _word, line in self._STYLES:
+        for key, _word, line, _icon in self._STYLES:
             menu.append(line, f"app.reply-style::{key}")
         button.set_menu_model(menu)
         return button
+
+    #: What Chronoa is allowed to do, as one choice rather than two booleans.
+    #:
+    #: **Four independent toggles made sixteen combinations and no "usual".**
+    #: Plan mode and privacy are both *limits*, and a person choosing between
+    #: "may change things" and "must stay local" is making one decision - so they
+    #: are one dropdown with the four combinations that mean something, ordered
+    #: so the unrestricted state comes first.
+    _RULES = (
+        ("anything", "Anything",
+         "Anything it is asked to, on this machine and online",
+         "security-medium-symbolic"),
+        ("read-only", "Read only",
+         "Read only: it may look but must not change anything",
+         "document-edit-symbolic"),
+        ("local-only", "Local only",
+         "Local only: nothing leaves this machine",
+         "security-high-symbolic"),
+        ("read-local", "Local and read only",
+         "Local and read only: nothing leaves, and it changes nothing",
+         "security-high-symbolic"),
+    )
+
+    #: How it listens, as one choice rather than two booleans.
+    #:
+    #: **Wake word and Talk over are both "how is it listening".** One opens the
+    #: hands-free phrase; the other lets a reply be interrupted. They were two
+    #: toggles and they interact - talking over a reply only matters when the mic
+    #: is already open - so the pair is one menu with the combinations that mean
+    #: something.
+    _HANDS = (
+        ("off", "Mic button", "Mic button: listen only while you hold it",
+         "audio-input-microphone-symbolic"),
+        ("wake", "Wake word",
+         "Wake word: hands-free, but it will not talk over a reply",
+         "audio-input-microphone-high-symbolic"),
+        ("wake-over", "Wake word, talk over",
+         "Wake word and talk over: hands-free, and talking interrupts a reply",
+         "audio-input-microphone-high-symbolic"),
+        ("over", "Talk over",
+         "Talk over only: the mic is not always open, but talking interrupts a "
+         "reply", "media-playback-pause-symbolic"),
+    )
+
+    #: Where answers come from, as one choice.
+    _MODES = (
+        ("local", "This computer",
+         "This computer: nothing leaves this machine", "computer-symbolic"),
+        ("local-cloud", "This computer, then cloud",
+         "This computer, then cloud: answer here when you can, reach a "
+         "provider when you cannot", "network-transmit-receive-symbolic"),
+        ("cloud", "Cloud",
+         "Cloud: answer from a provider even when a local model is installed",
+         "network-server-symbolic"),
+    )
+
+    def _rules_chip(self) -> Gtk.MenuButton:
+        """What it may do and where it may do it, in one dropdown.
+
+        Plan mode was a chip, Local only was a chip, and Settings had both
+        switches. They are the same question - "what is this allowed to do" - and
+        the four combinations are the only ones that mean anything, so a dropdown
+        names the pair in words instead of asking a person to multiply two
+        checkboxes in their head.
+        """
+        button, label, image = self._menu_chip("security-medium-symbolic")
+        self._rules_label = label
+        self._rules_image = image
+        menu = Gio.Menu()
+        for key, _word, line, _icon in self._RULES:
+            menu.append(line, f"app.answer-rules::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text(
+            "What Chronoa is allowed to do, and whether anything may leave this "
+            "machine")
+        return button
+
+    def _read_rules(self) -> str:
+        """The current combination, as one word.
+
+        Read from the two settings it owns rather than from a third, so the
+        Settings window and the shortcut keys cannot disagree with this chip:
+        whichever wrote last, the chip follows.
+        """
+        try:
+            local = bool(self._config.privacy_mode)
+            read_only = self._read_plan_mode()
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the rules state", exc_info=True)
+            return "anything"
+        if local and read_only:
+            return "read-local"
+        if local:
+            return "local-only"
+        if read_only:
+            return "read-only"
+        return "anything"
+
+    def _hands_free_chip(self) -> Gtk.MenuButton:
+        """How it hears you, as one dropdown.
+
+        The two toggles it replaces are both about the microphone, and a person
+        choosing between them is really saying "I want to talk to it without my
+        hands" - which the four-word menu says outright instead of asking them to
+        compose it.
+        """
+        button, label, image = self._menu_chip("audio-input-microphone-symbolic")
+        self._hands_label = label
+        self._hands_image = image
+        menu = Gio.Menu()
+        for key, _word, line, _icon in self._HANDS:
+            menu.append(line, f"app.hands-free::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text("How Chronoa hears you")
+        return button
+
+    def _model_chip(self) -> Gtk.MenuButton:
+        """Which model answers, in one dropdown.
+
+        **The fifth question, and the one this strip could not answer at all.**
+        "Where answers come from" says *local* or *cloud*; it never says *which
+        model* - and the model is the most consequential thing about what Chronoa
+        is right now, because `local_llm.TIERS` is picked by measured bandwidth
+        and the harness is what makes a small model work at all. It lived only in
+        the Models panel and Settings, which is the gap this strip's own docstring
+        says it exists to close.
+
+        **Only installed tiers are offered.** `TIERS` holds six and a box with one
+        model has one choice, so an uninstalled tier is a download and not a mode -
+        offering it would put a dead item in a menu whose whole job is to say what
+        is true right now.
+
+        **And it is the one control here with a real effect**, which is why its
+        action restarts the service: `use()` points `current.gguf`, but the running
+        `llama-server` keeps the weights it already loaded, so a chip that only
+        renamed the symlink would read "8B" while the 1.7B was answering - the
+        two-widgets-that-disagree failure this file records repeatedly. A restart
+        is slow, so it runs off the main loop and reports what happened rather
+        than appearing to do nothing.
+        """
+        button, label, image = self._menu_chip("object-select-symbolic")
+        self._model_label = label
+        self._model_image = image
+        button.set_tooltip_text(
+            "Which model answers. Switching loads it and restarts the local "
+            "server, so the next reply uses it")
+        return button
+
+    def _default_model_key(self) -> str:
+        """The tier this machine would pick by itself, for the quiet highlight.
+
+        Not a hardcoded name: it is whatever `recommended()` says, so the strip
+        flags a *departure* from the machine's own default rather than from a
+        word this file chose. Falls back to the tier `TIERS` marks as the
+        default, and to nothing at all if neither answers - a chip with no quiet
+        state highlights everything, which is the same as highlighting nothing.
+        """
+        for name in ("recommended", "default_tier"):
+            getter = getattr(local_llm, name, None)
+            if callable(getter):
+                try:
+                    got = getter()
+                except Exception:                       # noqa: BLE001
+                    continue
+                if isinstance(got, str) and got:
+                    return got
+                if got:
+                    return getattr(got, "key", "") or ""
+        return ""
+
+    def _model_rows(self) -> "list[tuple]":
+        """`(key, word, line, icon)` for every installed tier.
+
+        The word is the tier's size, under the 30-character ceiling
+        `tests/test_ui_layout_contract.py` enforces on every chip label - a menu
+        item can neither wrap nor ellipsise. The line is `TIERS`' own description,
+        so the menu says what the tier is for rather than only its size.
+        """
+        rows = []
+        for key, spec in getattr(local_llm, "SPECS", {}).items():
+            if key not in local_llm.installed():
+                continue
+            word = key.split("-")[-1].upper() if "-" in key else key
+            line = getattr(spec, "note", "") or word
+            rows.append((key, word, f"{word}: {line}", "object-select-symbolic"))
+        if not rows:
+            # **A machine with no model downloaded is a state, not a crash.**
+            # `_draw` reads `table[0]` for the current row, and the four static
+            # tables above never hit it because they are written down - this one
+            # is built from what is on disk, so an empty disk has to answer or
+            # the whole strip raises and the window has no mode strip at all.
+            # Measured: exactly this, six tests red with
+            # `IndexError: list index out of range` at `_draw`.
+            rows.append(("", "No model",
+                         "No model is installed on this machine",
+                         "object-select-symbolic"))
+        return rows
+
+    def _read_model(self) -> str:
+        try:
+            return local_llm.active() or ""
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the model in use", exc_info=True)
+            return ""
+
+    def _read_hands_free(self) -> str:
+        try:
+            wake = bool(self._config.wake_word_enabled)
+            barge = bool(self._config.barge_in_vad_enabled)
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the hands-free state", exc_info=True)
+            return "off"
+        if wake and barge:
+            return "wake-over"
+        if wake:
+            return "wake"
+        if barge:
+            return "over"
+        return "off"
+
+    def _answer_mode_chip(self) -> Gtk.MenuButton:
+        """Where a reply comes from, as a chip showing the current choice.
+
+        **The setup wizard asked this once and then forgot the answer.** The Mode
+        page offers "In the cloud" and writes `setup-mode`, which decides which
+        pages the wizard shows - while `_init_components` builds Ollama and
+        llama.cpp first regardless and only reaches the cloud when neither
+        answers. So someone who chose the cloud and happened to have a local
+        model installed was answered locally, by the download they had just
+        declined. The choice is a setting now (`answer-mode`), this chip is where
+        it changes, and `_apply_answer_mode` makes it true immediately rather
+        than at the next launch.
+
+        Three values, so a menu rather than a toggle, bound to the stateful
+        `app.answer-mode` action exactly the way the reply style is - GTK draws
+        the menu's items as radio buttons and marks the current one from the
+        action's own state, so the chip and the menu cannot disagree.
+        """
+        button, label, image = self._menu_chip("network-transmit-receive-symbolic")
+        self._mode_label = label
+        self._mode_image = image
+        menu = Gio.Menu()
+        for key, _word, line, _icon in self._MODES:
+            menu.append(line, f"app.answer-mode::{key}")
+        button.set_menu_model(menu)
+        return button
+
+    def _read_answer_mode(self) -> str:
+        try:
+            mode = str(getattr(self._config, "answer_mode", "") or "")
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the answer mode", exc_info=True)
+            mode = ""
+        return mode if mode in {row[0] for row in self._MODES} \
+            else "local-cloud"
+
+    def _read_plan_mode(self) -> bool:
+        """Read the plan-mode module directly, which is what owns the state.
+
+        Not through `ChronoaConfig`: plan mode is a process-wide switch with its
+        own module and its own setter, so asking a second time through settings
+        is how the two come to disagree.
+        """
+        from shani_chronoa import planmode
+        return bool(planmode.is_enabled())
 
     #: Below this window width the chips show icons only. Measured: with words
     #: the strip needs 512px, the window can be 380px, and between the two the
@@ -313,175 +565,109 @@ class _ModeStrip(Gtk.Box):
         except Exception:                               # noqa: BLE001
             logger.warning("could not read the reply style", exc_info=True)
             style = "ordinary"
-        return style if style in {k for k, _w, _l in self._STYLES} else "ordinary"
+        return style if style in {row[0] for row in self._STYLES} else "ordinary"
 
-    def _dictate_button(self) -> Gtk.Button:
-        """The long-turn control, which has no state to hold."""
-        button = Gtk.Button()
-        button.add_css_class("mode-chip")
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        image = Gtk.Image.new_from_icon_name("media-playback-start-symbolic")
-        image.set_pixel_size(13)
-        box.append(image)
-        text = Gtk.Label(label="Dictate")
-        text.add_css_class("mode-chip-label")
-        box.append(text)
-        button.set_child(box)
-        button.set_action_name("app.dictate")
-        button.set_tooltip_text(
-            "Dictate one long turn - up to five minutes, ending on a longer "
-            "silence than an ordinary turn (Ctrl+Shift+D)"
-        )
-        button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Dictate: start one long listening turn"])
-        return button
 
-    def _listening_button(self) -> Gtk.Button:
-        """Open the Listening page: what an application is playing, and whether
-        it can be transcribed.
-
-        **Not a second copy of the page.** It navigates through `pages.show`,
-        the mechanism `navigate_page` uses, so there is one implementation of
-        "where this page is" and not two that can drift.
-        """
-        from shani_chronoa import pages
-
-        button = Gtk.Button()
-        button.add_css_class("mode-chip")
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        image = Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic")
-        image.set_pixel_size(13)
-        box.append(image)
-        text = Gtk.Label(label="Listening")
-        text.add_css_class("mode-chip-label")
-        box.append(text)
-        button.set_child(box)
-        button.set_tooltip_text(
-            "What an application is playing, and whether it can be transcribed "
-            "it can be transcribed - a call in a browser, a video, a podcast")
-        button.update_property(
-            [Gtk.AccessibleProperty.LABEL],
-            ["Listening: what is playing and whether it can be "
-             "transcribed"])
-
-        def open_page(_button: Gtk.Button) -> None:
-            # A dead button must not take the window down with it - the same
-            # reading `common.navigate_page`'s log-on-failure gives.
-            try:
-                if not pages.show("main:listening", application=self._app,
-                                  config=self._config):
-                    logger.warning("no Listening page to open; the button had "
-                                   "nowhere to go")
-            except Exception:  # noqa: BLE001 - a button is not a crash site
-                logger.warning("could not open the Listening page", exc_info=True)
-
-        button.connect("clicked", open_page)
-        return button
 
     # -- the state, read from whoever owns it ---------------------------
 
-    def _read_privacy(self) -> bool:
-        try:
-            return bool(self._config.privacy_mode)
-        except Exception:                               # noqa: BLE001
-            # A config that cannot answer must not take the window down over a
-            # chip. False is the safe reading: the local-only claim is the one
-            # that has to be earned, so an unreadable setting is shown as off.
-            logger.warning("could not read the privacy-mode setting",
-                           exc_info=True)
-            return False
 
-    def _read_plan_mode(self) -> bool:
-        try:
-            from shani_chronoa import planmode
-            return bool(planmode.is_enabled())
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not read the plan-mode state", exc_info=True)
-            return False
 
-    def _read_wake_word(self) -> bool:
-        try:
-            return bool(self._config.wake_word_enabled)
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not read the wake-word setting", exc_info=True)
-            return False
 
-    def _read_barge_in(self) -> bool:
-        try:
-            return bool(self._config.barge_in_vad_enabled)
-        except Exception:                               # noqa: BLE001
-            logger.warning("could not read the barge-in setting", exc_info=True)
-            return False
 
     # -- keeping the chips honest ---------------------------------------
 
     def refresh(self) -> None:
-        """Redraw every chip from the state that owns it.
+        """Redraw every dropdown from the state that owns it.
 
-        Called on construction, after every toggle, and when the window regains
+        Called on construction, after every choice, and when the window regains
         focus - because the Settings window flips the same settings through the
-        same actions, and a chip that only refreshed on its own click would go on
-        saying "off" for a setting that is on.
+        same actions, and a dropdown that only refreshed on its own pick would go
+        on saying "off" for a setting that is on.
+
+        **Each dropdown is drawn from its own table, not from a shared loop.**
+        The strip used to walk one `_CHIPS` table of `(attribute, label, icon,
+        action, reader)`; that shape only works while every control is a toggle
+        with a boolean, and it is the reason the merge took as long as it did.
         """
         self._syncing = True
         try:
-            for attribute, label, _icon, _action, _reader in self._CHIPS:
-                chip = getattr(self, attribute)
-                on = self._readers[attribute]()
-                chip.set_active(on)
-                if on:
-                    chip.add_css_class("mode-chip-on")
-                else:
-                    chip.remove_css_class("mode-chip-on")
-                chip.set_tooltip_text(f"{label}: {'on' if on else 'off'}")
-                chip.update_property(
-                    [Gtk.AccessibleProperty.LABEL],
-                    [f"{label} mode, currently {'on' if on else 'off'}"])
-            style_chip = getattr(self, "_style_chip", None)
-            if style_chip is not None:
-                style = self._read_reply_style()
-                word = next(w for k, w, _l in self._STYLES if k == style)
-                self._style_label.set_text(word)
-                # Highlighted like an "on" chip when it is not the default, so a
-                # brief or explanatory setting is visible at a glance.
-                if style == "ordinary":
-                    style_chip.remove_css_class("mode-chip-on")
-                else:
-                    style_chip.add_css_class("mode-chip-on")
-                style_chip.set_tooltip_text(
-                    f"Reply style: {word}. Applies from the next reply.")
-                style_chip.update_property(
-                    [Gtk.AccessibleProperty.LABEL], [f"Reply style, currently {word}"])
+            self._draw(self._rules_chip, self._rules_label,
+                       self._read_rules(), self._RULES,
+                       "What Chronoa may do", quiet=("anything",),
+                       image=self._rules_image)
+            self._draw(self._hands_chip, self._hands_label,
+                       self._read_hands_free(), self._HANDS,
+                       "How Chronoa hears you", quiet=("off",),
+                       image=self._hands_image)
+            style = self._read_reply_style()
+            self._draw(self._style_chip, self._style_label,
+                       style, self._STYLES, "Reply style",
+                       quiet=("ordinary",), image=self._style_image)
+            mode = self._read_answer_mode()
+            self._draw(self._answer_chip, self._mode_label,
+                       mode, self._MODES, "Where answers come from",
+                       quiet=("local",), image=self._mode_image)
+            rows = self._model_rows()
+            # The menu is rebuilt here rather than once at construction: the
+            # rows come from what is on disk, and a model downloaded while the
+            # window is open is a new mode, not a new install somebody has to
+            # restart to see. Without this the chip is a label with no menu -
+            # measured, `get_menu_model()` returned None and the dropdown had
+            # nothing to open.
+            menu = Gio.Menu()
+            for key, _word, line, _icon in rows:
+                menu.append(line, f"app.answer-model::{key}")
+            self._model_chip.set_menu_model(menu)
+            # Only a tier that is actually installed can be the quiet one - on a
+            # machine whose default is not downloaded, every installed tier is a
+            # departure and the strip should say so rather than leave one quiet
+            # by accident.
+            offered = tuple(r[0] for r in rows)
+            default = self._default_model_key()
+            self._draw(self._model_chip, self._model_label,
+                       self._read_model(), rows,
+                       "Which model answers",
+                       quiet=(default,) if default in offered else (),
+                       image=self._model_image)
         finally:
             self._syncing = False
 
-    def _on_toggled(self, button: Gtk.ToggleButton, action: str) -> None:
-        """A chip was clicked: run the app's own action, then read back.
+    def _draw(self, chip, label, current, table, what, quiet=(),
+              image=None) -> None:
+        """One dropdown: the word, the icon, the highlight, from its table.
 
-        Not `set_action_name`. A `GSimpleAction` carries no boolean state, so a
-        toggle button bound to one keeps its own pressed state, flips it
-        locally, and diverges from the app - a chip that reads "on" for a plan
-        mode that was refused because the wake word was unavailable is worse
-        than no chip at all. So the action is activated explicitly and the chip
-        is then written from the truth.
+        **`quiet` names the states that are not flagged.** Highlighting every
+        chip would highlight none - four alarms read as silence - so each
+        dropdown says which state means "nothing unusual": local for the answer
+        mode, ordinary for the reply style, anything for the rules, mic button
+        for listening.
+
+        A `Gtk.MenuButton` carries no pressed state of its own, so the highlight
+        is the *only* thing saying this is not the usual one - and the word and
+        the icon carry it too, which is what makes the strip readable from across
+        the window and legible in a screenshot.
+
+        **An empty table is a refused draw, not a crash.** A table with no rows
+        is a widget built from a source that errored, and `table[0]` on it is an
+        `IndexError` inside `refresh()` - which runs from `__init__`, so the
+        window would not open at all. Every reader already returns a known key,
+        so this is the belt to their braces.
         """
-        if self._syncing:
+        if not table:
             return
-        app = self._app
-        if app is None:
-            # No application (a surface or a test built the strip alone): the
-            # chip goes back to what the state says rather than keeping a press
-            # nothing acted on.
-            self.refresh()
-            return
-        try:
-            app.activate_action(action, None)
-        finally:
-            # Whatever the action decided - including "refused, here is why" -
-            # the chip ends on the answer and not on the click.
-            self.refresh()
-
+        row = next((r for r in table if r[0] == current), table[0])
+        word, line = row[1], row[2]
+        label.set_text(word)
+        if image is not None and len(row) > 3 and row[3]:
+            image.set_from_icon_name(row[3])
+        if current in quiet:
+            chip.remove_css_class("mode-chip-on")
+        else:
+            chip.add_css_class("mode-chip-on")
+        chip.set_tooltip_text(f"{what}: {word}. {line}")
+        chip.update_property(
+            [Gtk.AccessibleProperty.LABEL], [f"{what}, currently {word}"])
 
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
                     Adw.ApplicationWindow):

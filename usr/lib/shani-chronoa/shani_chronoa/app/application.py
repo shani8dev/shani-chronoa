@@ -137,6 +137,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         #: here so it exists on a normal run, and read through `getattr` where a
         #: test's `__new__`-built application may not have it.
         self._shutting_down = False
+        self._pending_idles: "set[int]" = set()
         # super().do_startup() mis-marshals the zero-arg vfunc chain-up on
         # this PyGObject build (TypeError + GLib-GIO-CRITICAL, then a
         # segfault) - the explicit class-qualified call works correctly.
@@ -239,6 +240,23 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             return False
         GLib.idle_add(act)
 
+    def _queue_idle(self, work):
+        """Queue `work` on the next idle turn, and remember the source id.
+
+        **Remembering is the point.** An idle queued at *activation* is still
+        pending if the loop ends before it runs, and the loop is drained inside
+        teardown - so the work fires while the application is being taken apart.
+        `_open_setup` refuses during shutdown and that catches the case this was
+        written for, but a guard at the callee is one check on one path; a
+        *cancelled* source is cancelled on every path, including the ones nobody
+        has thought of yet.
+
+        Returns the id, so a caller can cancel one thing early.
+        """
+        source = GLib.idle_add(work)
+        self._pending_idles.add(source)
+        return source
+
     def do_shutdown(self) -> None:
         """Release background mic/playback resources before the app exits."""
         # **Alive is a state with a flag, and building a window requires it.**
@@ -250,6 +268,15 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # as a segfault in `Gtk.py:575 __init__`, reached from `do_shutdown`, in
         # a chunked suite run - costing every test file after the one that hit.
         self._shutting_down = True
+        # **Cancel what activation queued.** Every `_queue_idle` source is
+        # removed before any component is released, so none of them runs against
+        # an application that is being taken apart.
+        for source in list(self._pending_idles):
+            try:
+                GLib.source_remove(source)
+            except Exception:            # already fired, or a stale id
+                pass
+        self._pending_idles.clear()
         logger.info("Shani Chronoa shutting down...")
         self._stop_global_shortcut()
         for name in ("incoming_calls", "obex_receiver", "watch_companion", "phone_remote",
@@ -389,10 +416,182 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         if style in self.REPLY_STYLES:
             self.config.set("reply-style", style)
         action.set_state(GLib.Variant("s", self.config.reply_style))
+        self._refresh_strip()
+
+    #: The words each menu offers, read from the strip so the app validates
+    #: against the menu the person is actually looking at. **A second copy here
+    #: would be a second thing to get wrong**: the first version of the two
+    #: handlers referenced `_RULES` and `_HANDS` as though they were local names
+    #: and raised `NameError` on every click.
+    @property
+    def _RULES_KEYS(self):
+        from shani_chronoa.gui.window import _ModeStrip
+        return {row[0] for row in _ModeStrip._RULES}
+
+    @property
+    def _HANDS_KEYS(self):
+        from shani_chronoa.gui.window import _ModeStrip
+        return {row[0] for row in _ModeStrip._HANDS}
+
+    def _on_answer_rules(self, action, value) -> None:
+        """Write the four-way "what may it do" choice, then read back.
+
+        **Two booleans became four words because the pair of them was one
+        question.** Plan mode and privacy were separate chips and separate
+        Settings switches; a person deciding between "may change things" and
+        "must stay local" is making one decision, and the two toggles left
+        sixteen combinations with no way to say "the usual one" in a glance.
+
+        Privacy is written with its own action so the rest of the app - the
+        cloud chain drop, the status line - goes through the path it already
+        had, rather than a second place that writes the key.
+        """
+        key = value.get_string() if value is not None else ""
+        if key not in self._RULES_KEYS:
+            logger.warning("unknown answer-rules choice %r", key)
+            return
+        local = key in ("local-only", "read-local")
+        read_only = key in ("read-only", "read-local")
+        if local and not self.config.privacy_mode:
+            self._toggle_privacy(None, None)
+        elif not local and self.config.privacy_mode:
+            self._toggle_privacy(None, None)
+        from shani_chronoa import planmode
+        if planmode.is_enabled() != read_only:
+            self._toggle_plan_mode(None, None)
+        action.set_state(GLib.Variant("s", key))
+        self._refresh_strip()
+
+    def _on_hands_free(self, action, value) -> None:
+        """Write the "how it hears you" choice, then read back.
+
+        Wake word and talk over are both about the microphone, and they interact -
+        talking over a reply only matters when the mic is already open - so the
+        pair is one menu with four words rather than two booleans a person has to
+        multiply. Each switch keeps its own action and its own consent, so this
+        only decides which of the four combinations is being asked for.
+        """
+        key = value.get_string() if value is not None else ""
+        if key not in self._HANDS_KEYS:
+            logger.warning("unknown hands-free choice %r", key)
+            return
+        wake = key in ("wake", "wake-over")
+        over = key in ("over", "wake-over")
+        if bool(self.config.wake_word_enabled) != wake:
+            self._toggle_wake_word(None, None)
+        if bool(self.config.barge_in_vad_enabled) != over:
+            self._toggle_barge_in_vad(None, None)
+        action.set_state(GLib.Variant("s", key))
+        self._refresh_strip()
+
+    def _on_answer_model(self, action, value) -> None:
+        """Switch which model answers, then restart the local server.
+
+        **The only control on the mode strip with a real effect.** Every other
+        chip writes a setting the next turn reads. This one points `current.gguf`
+        at another tier, and the running `llama-server` keeps the weights it
+        already loaded - so a handler that only renamed the symlink would leave
+        the chip reading "8B" while the 1.7B was still answering. That is the
+        two-widgets-that-disagree failure this repo records repeatedly, and it is
+        why the restart is part of the action rather than a follow-up somebody
+        might forget.
+
+        **The restart runs off the main loop.** A cold start takes seconds and the
+        quality gate before it runs `llama-perplexity`, so doing either here would
+        freeze the window - the same reason the Models panel and the rebuild
+        button work on a worker. `gateway.off_the_main_loop` is the named helper,
+        so a test can assert the dispatch rather than only its outcome.
+
+        **Refusals are named, never swallowed.** An uninstalled tier is a download
+        and not a mode, so it is refused by name; and `use()`'s quality gate can
+        refuse a switch that would make replies measurable worse, which is the
+        gate that made "installed" and "usable" different claims.
+
+        The outcome is **logged, not surfaced**. A person watching the window sees
+        the strip redraw and nothing else until the next reply comes back from
+        the new model, and announcing it wants a surface that can say "loading"
+        for as long as a cold start takes. Recorded as the next step rather than
+        faked with a toast that claims a switch happened before it did.
+        """
+        from shani_chronoa import local_llm
+        from shani_chronoa.gateway import off_the_main_loop
+
+        key = value.get_string() if value is not None else ""
+        installed = local_llm.installed()
+        if key not in installed:
+            logger.warning(
+                "answer-model: %r is not installed on this machine (installed: "
+                "%s), so it is a download and not a mode", key, installed)
+            return
+
+        def swap() -> None:
+            try:
+                verdict = local_llm.use(key)
+                if not verdict.get("promote"):
+                    logger.warning(
+                        "answer-model: the quality gate refused %s - %s",
+                        key, verdict.get("why"))
+                    return
+                # Order matters: the old server is stopped before the new one
+                # starts, because two servers on one port is a silent failure
+                # where the first keeps answering.
+                local_llm.stop_service()
+                local_llm.start_service()
+                logger.info("answer-model: now answering with %s", key)
+            except Exception:                           # noqa: BLE001
+                # A failed switch leaves the previous model in place, which is
+                # the safe direction - but it must say so rather than log a
+                # success the machine never reached.
+                logger.error("answer-model: switching to %s failed", key,
+                             exc_info=True)
+
+        off_the_main_loop(swap, "answer-model")
+        action.set_state(GLib.Variant("s", key))
+        self._refresh_strip()
+
+    def _refresh_strip(self) -> None:
+        """Redraw the mode strip after an action wrote its setting.
+
+        One line in three handlers was three chances to forget, and the reply
+        style already had this inline - so it is named here and used everywhere.
+        """
         window = getattr(self, "window", None)
         strip = getattr(window, "_mode_strip", None)
         if strip is not None:
             strip.refresh()
+
+    def _on_answer_mode(self, action, value) -> None:
+        """Write the chosen mode, then set the action's state from config.
+
+        Read back rather than echoed, for the same reason as the reply style: a
+        value the schema refuses leaves the setting where it was and the menu
+        must then show that, not the click.
+
+        **The mode takes effect now, not at the next restart.** Privacy mode is
+        the lever that already exists for "nothing leaves this machine", so
+        `local` and `cloud` are written through it, and the cloud chain is built
+        or dropped immediately rather than the next time the app starts. Before
+        this, the wizard's "In the cloud" was a promise about the next launch -
+        while the machine in front of you kept answering locally.
+        """
+        mode = value.get_string() if value is not None else ""
+        if mode in {k for k, _w, _l in self.ANSWER_MODES}:
+            if mode == "cloud":
+                # Cloud is the opt-in that sends prompts off the machine, and it
+                # never activates from a single switch alone - so this one is
+                # written *with* the privacy switch that gates it.
+                if self.config.privacy_mode:
+                    self.config.set("privacy-mode", False)
+                self.config.set("cloud-fallback-enabled", True)
+            elif mode == "local":
+                self.config.set("privacy-mode", True)
+            else:
+                self.config.set("privacy-mode", False)
+                self.config.set("cloud-fallback-enabled", True)
+            self.config.set("answer-mode", mode)
+        action.set_state(GLib.Variant("s", self.config.answer_mode))
+        self._apply_answer_mode()
+        self._refresh_strip()
 
     def _on_show_page(self, _action, parameter) -> None:
         """`app.show-page('settings:privacy')`, over D-Bus as well as in-process.
@@ -477,7 +676,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 self._release_hidden_hold()
             # A fresh install cannot think, hear or speak naturally yet: offer setup once.
             if not self._start_hidden:
-                GLib.idle_add(lambda: (self._open_setup() if self._setup_needed() else None, False)[1])
+                self._queue_idle(lambda: (self._open_setup() if self._setup_needed() else None, False)[1])
         elif not self._start_hidden:
             self.window.present()
             self._release_hidden_hold()
@@ -523,7 +722,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             GLib.idle_add(lambda: (self.activate_action("reset-conversation", None), False)[1])
         if "--setup" in args[1:]:
             # `shani-chronoa --setup`: open first-run setup now, done or not
-            GLib.idle_add(lambda: (self._open_setup(), False)[1])
+            self._queue_idle(lambda: (self._open_setup(), False)[1])
         return 0
 
     def _init_components(self) -> None:
@@ -577,6 +776,13 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self._use_local_server()
         if not self._ollama_available:
             self._maybe_enable_cloud_fallback()
+        # **And the stored mode, which until 2026-10-12 was asked once by the
+        # wizard and then ignored.** `_init_components` built local first
+        # unconditionally - "local-first by design" - so a person who chose
+        # "In the cloud" at setup was answered locally whenever a local model
+        # happened to be installed. The mode is a setting now and this is where
+        # it is honoured; privacy mode still wins over it above.
+        self._apply_answer_mode()
         # Say so on the window, not only in the log. With nothing installed the
         # state line read "Ready" while the line under it read "LLM unavailable":
         # two states, one screen, one of them false - and "Ready" is the label the
@@ -830,6 +1036,30 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             GLib.Variant("s", self.config.reply_style))
         reply_style_action.connect("change-state", self._on_reply_style)
         self.add_action(reply_style_action)
+
+        # Where a reply comes from. Three values, so it is the same stateful
+        # action shape as the reply style, and it is in the mode strip for the
+        # same reason a person flips it mid-conversation: "answer here" and
+        # "answer from anywhere" are different questions and the Setup wizard
+        # asked the second once and then forgot the answer.
+        answer_mode_action = Gio.SimpleAction.new_stateful(
+            "answer-mode", GLib.VariantType.new("s"),
+            GLib.Variant("s", self._answer_mode()))
+        answer_mode_action.connect("change-state", self._on_answer_mode)
+        self.add_action(answer_mode_action)
+
+        # What it may do, and how it listens: both were four chips' worth of
+        # toggles and are now one choice each, carried as stateful string
+        # actions so the menu and the chip cannot disagree.
+        for name, handler, initial in (
+                ("answer-rules", self._on_answer_rules, "anything"),
+                ("hands-free", self._on_hands_free, "off"),
+                ("answer-model", self._on_answer_model, "")):
+            act = Gio.SimpleAction.new_stateful(
+                name, GLib.VariantType.new("s"),
+                GLib.Variant("s", initial))
+            act.connect("change-state", handler)
+            self.add_action(act)
 
         barge_in_vad_action = Gio.SimpleAction.new("toggle-barge-in-vad", None)
         barge_in_vad_action.connect("activate", self._toggle_barge_in_vad)
