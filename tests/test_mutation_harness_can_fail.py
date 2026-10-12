@@ -1013,3 +1013,146 @@ class TestTheTallyCannotBeQuietlyWrong:
         assert "INCOMPLETE" not in out.stdout, (
             "a set that was reached and reported an ERROR is not an incomplete "
             "inventory:\n" + out.stdout)
+
+
+class TestTheCheapHalfCannotClaimWhatItDidNotCheck:
+    """`--check-anchors` is the half that runs every time, so it is the half whose
+    output is quoted most.
+
+    It prints **"43 set(s), 359 anchors, all still match the code"**, and two
+    things could make that a complete-looking sentence about an incomplete check:
+
+    - **A set with nothing in it.** `MUTATIONS = []` - or no `MUTATIONS` key at
+      all - contributed zero anchors and then still appeared in the set count, so
+      the line read as an inventory of 43 things. The *full* run says "N has no
+      mutations"; the cheap half said nothing. An absence presented as a pass.
+    - **`zip` truncating to the shorter of two lists.** A pair-anchor written
+      with two `old` strings and one `new` checks one anchor and applies one
+      edit, and the anchor count simply comes out lower - with no error anywhere,
+      because `_apply` truncates the same way.
+
+    **Both are latent today**, which is why this is a gate rather than a fix: 43
+    sets, 359 mutations declared, 359 anchors checked, none empty, none
+    mismatched. That measurement is also the cross-check the old line could not
+    make for itself, so the count and the total are printed together now.
+    """
+
+    def _bare(self, tmp_path, body):
+        """A mutation-set file written verbatim, for shapes `_write_fixture_set`
+        cannot express."""
+        path = tmp_path / "tools" / "mutations" / "probe.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return "probe"
+
+    def test_a_set_declaring_nothing_is_reported_not_counted_as_checked(self,
+                                                                    tmp_path):
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, 'TEST_FILE = "tests/x.py"\nMUTATIONS = []\n')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, (
+            "a set with an empty MUTATIONS list passed the anchor check:\n"
+            + out.stdout)
+        assert "NOT checked" in out.stdout, out.stdout
+        assert "MUTATIONS = []" in out.stdout, (
+            "the report does not say *why* the set was skipped, so a reader "
+            "cannot tell an empty set from a missing key:\n" + out.stdout)
+
+    def test_a_set_with_no_mutations_key_at_all_is_reported_too(self, tmp_path):
+        """**The other shape.** Absent and empty are different facts and the
+        message distinguishes them, because a set whose `MUTATIONS` line was
+        deleted is a different accident from one that was emptied."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, 'TEST_FILE = "tests/x.py"\nSOMETHING_ELSE = 1\n')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, out.stdout
+        assert "no MUTATIONS" in out.stdout, out.stdout
+
+    def test_a_mismatched_pair_anchor_is_reported_rather_than_truncated(self,
+                                                                     tmp_path):
+        """Two anchors and one replacement. `zip` drops the second silently."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, '''TEST_FILE = "tests/x.py"
+MUTATIONS = [
+    {"file": "usr/lib/fixture_module.py",
+     "old": ["TOTAL = 3\\n", "    return sum(items)\\n"],
+     "new": ["TOTAL = 4\\n"],
+     "label": "two anchors, one replacement",
+     "expect": ["test_nothing"]},
+]
+''')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, (
+            "a pair-anchor with mismatched lengths passed, which means zip() "
+            "checked one anchor and reported the set clean:\\n" + out.stdout)
+        assert "2 anchor(s) but 1 replacement(s)" in out.stdout, out.stdout
+
+    def test_a_matched_pair_anchor_is_accepted(self, tmp_path):
+        """**The control for the test above.** A pair-anchor of *equal* length is
+        the supported shape - two loops that are not adjacent and must change
+        together - so the new check must not refuse it."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, '''TEST_FILE = "tests/x.py"
+MUTATIONS = [
+    {"file": "usr/lib/fixture_module.py",
+     "old": ["TOTAL = 3\\n", "    return sum(items)\\n"],
+     "new": ["TOTAL = 4\\n", "    return sum(items) + 1\\n"],
+     "label": "two adjacent loops, two anchors",
+     "expect": ["test_the_total_is_what_the_docstring_says"]},
+]
+''')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode == 0, out.stdout
+        assert "2 anchors of 1 declared mutations" in out.stdout, out.stdout
+
+    def test_a_real_set_still_passes_and_both_numbers_are_printed(self, tmp_path):
+        """**The control for the whole class.** Without this, every test above
+        would also pass against a check that refuses everything."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        name = _write_fixture_set(tmp_path, [{
+            "file": "usr/lib/fixture_module.py",
+            "old": "    return sum(items)\n",
+            "new": "    return sum(items) + 1\n",
+            "label": "the fixture's total is off by one",
+            "expect": ["test_the_total_is_what_the_docstring_says"],
+        }])
+        out = _run("--check-anchors", name, cwd=tmp_path)
+        assert out.returncode == 0, out.stdout
+        assert "1 anchors of 1 declared mutations" in out.stdout, (
+            "the count and the total are not printed together, so a reader "
+            "cannot cross-check them:\n" + out.stdout)
+
+    def test_a_rotted_anchor_is_still_reported(self, tmp_path):
+        """**And the pre-existing guarantee survives the additions.** These
+        checks were added on top of rot detection, not in place of it."""
+        (tmp_path / "tools" / "mutations").mkdir(parents=True)
+        (tmp_path / "usr" / "lib").mkdir(parents=True)
+        (tmp_path / "usr" / "lib" / "fixture_module.py").write_text(
+            FIXTURE, encoding="utf-8")
+        self._bare(tmp_path, '''TEST_FILE = "tests/x.py"
+MUTATIONS = [
+    {"file": "usr/lib/fixture_module.py",
+     "old": "    return sum(items) + 99\\n",
+     "new": "    return 0\\n",
+     "label": "an anchor that no longer exists",
+     "expect": ["test_nothing"]},
+]
+''')
+        out = _run("--check-anchors", "probe", cwd=tmp_path)
+        assert out.returncode != 0, out.stdout
+        assert "occurs 0 times" in out.stdout, out.stdout

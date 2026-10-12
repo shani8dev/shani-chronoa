@@ -633,12 +633,26 @@ def _check_anchors(wanted, available) -> int:
     disagree about a tree that is fine.
     """
     rotted = []
+    silent = []
     checked = 0
+    declared = 0
     for name in wanted:
         namespace = {}
         exec(compile(available[name].read_text(encoding="utf-8"),
                      str(available[name]), "exec"), namespace)
-        for entry in namespace.get("MUTATIONS") or []:
+        mutations = namespace.get("MUTATIONS")
+        if not mutations:
+            # **A set with nothing in it is a set that was not checked, and this
+            # half used to report it as one that was.** `MUTATIONS = []` - or no
+            # `MUTATIONS` at all - contributes zero anchors and then still appears
+            # in the set count, so "43 sets, 359 anchors, all still match the
+            # code" reads as a complete inventory of 43 things. The full run says
+            # "N has no mutations"; the cheap half said nothing at all.
+            silent.append(f"{name} declares "
+                          f"{'MUTATIONS = []' if mutations is not None else 'no MUTATIONS'}")
+            continue
+        for entry in mutations:
+            declared += 1
             target = ROOT / entry["file"]
             if not target.is_file():
                 rotted.append(f"{name}: {entry['label']} -> "
@@ -646,7 +660,21 @@ def _check_anchors(wanted, available) -> int:
                 continue
             text = target.read_text(encoding="utf-8")
             old, new = entry["old"], entry["new"]
-            pairs = list(zip(old, new)) if isinstance(old, list) else [(old, new)]
+            if isinstance(old, list):
+                # **`zip` truncates to the shorter, silently.** A pair-anchor
+                # written with two `old` and one `new` checks one anchor and
+                # applies one edit, and the anchor count simply comes out lower -
+                # with no error, and `_apply` truncating the same way. So the
+                # mismatch is reported rather than absorbed.
+                if len(old) != len(new):
+                    rotted.append(
+                        f"{name}: {entry['label']} - {len(old)} anchor(s) but "
+                        f"{len(new)} replacement(s); zip() would drop the rest "
+                        f"and check less than the set declares")
+                    continue
+                pairs = list(zip(old, new))
+            else:
+                pairs = [(old, new)]
             for i, (before, _after) in enumerate(pairs, 1):
                 checked += 1
                 count = text.count(before)
@@ -658,7 +686,29 @@ def _check_anchors(wanted, available) -> int:
         print("a mutation set's anchor has rotted. Fix the set or the code it "
               "aimed at - do not delete the set:\n" + "\n".join(rotted))
         return 1
-    print(f"{len(wanted)} set(s), {checked} anchors, all still match the code")
+    # **Both numbers are printed and neither is asserted against the other.**
+    # They are anchors and mutations, and a *pair* of anchors for one mutation -
+    # which this harness supports on purpose, for the two loops that are not
+    # adjacent and must change together - makes them differ **on correct code**.
+    #
+    # Measured 2026-12 on this tree: 359 mutations, 361 anchors, the difference
+    # being `edit_file.py`'s "a single line is treated as a quote" and
+    # `file_locks.py`'s "the device is read as decimal instead of hex", two
+    # anchors each. An earlier note here claimed the two numbers were equal and
+    # that no set used a pair-anchor; that was a reading error, and it would have
+    # made this look like a vacuous gate rather than an actively wrong one.
+    # Printing both is what lets a reader notice a set that lost a mutation; a
+    # `checked != declared` gate would fire the day a set legitimately grew a
+    # pair-anchor, which is the shape this harness exists partly to support.
+    if silent:
+        print(f"{len(wanted)} set(s), {checked} anchors of {declared} declared "
+              f"mutations, all still match the code - BUT {len(silent)} set(s) "
+              f"declared nothing and were NOT checked:")
+        for line in silent:
+            print(f"    {line}")
+        return 1
+    print(f"{len(wanted)} set(s), {checked} anchors of {declared} declared "
+          f"mutations, all still match the code")
     return 0
 
 
