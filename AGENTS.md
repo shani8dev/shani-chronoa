@@ -17297,3 +17297,63 @@ by module, and only the module question - *is this a dead name or a dead module?
 - turned the number into a finding. 81, 44 and 15 were all noise until the last
 one.
 
+
+## Chronoa did not start at all, and 1,600 tests did not notice (2026-10-12)
+
+`do_startup` → `_init_components` → `self._apply_answer_mode()` →
+`AttributeError`. **That method is defined nowhere in `app/`.** Startup raised,
+`do_activate` never ran, `sense_scheduler` stayed `None`, and no window ever
+appeared.
+
+The cause is a half-landed feature. `application.py` was committed with the
+*calls*; the *callee* lived only in an uncommitted `brain.py`, so the working
+tree was self-consistent and the commit was not. A static pass over `app/` puts
+the gap at exactly four missing things:
+
+| missing | where it should be |
+|---|---|
+| `_apply_answer_mode` | `BrainMixin` |
+| `_answer_mode` | `BrainMixin` |
+| `ChronoaConfig.answer_mode` | `config.py` |
+| the `answer-mode` key | the gschema |
+
+So the GAction is registered and drives a chain that does not exist - invoking
+it would crash too. `tests/test_answer_mode.py`, which `test_mode_strip.py:336`
+defers to for exactly this, was untracked and is gone.
+
+**`git restore .` is what exposed it**, and it is worth being exact about that:
+the inconsistency was already committed, but the app *worked* because an
+uncommitted file supplied the missing half. Restoring discarded it. The hazard
+was flagged before the restore and the restore was authorised anyway - so this
+is the outcome of that decision, not a surprise.
+
+### The fix is a guard that says so, not a deleted call
+
+`_apply_answer_mode_if_present()` at both call sites. **Not** deletion:
+
+- deleting them would write `answer-mode` and never honour it - a setting that
+  does nothing, which is the exact failure `test_setting_dependencies.py` is
+  written to catch;
+- this **lights up by itself** if the implementation ever lands.
+
+It warns **once**, naming the setting and its value, because a mode strip showing
+"In the cloud" on a machine that answered locally is the confident-wrong-answer
+shape. The first version printed `answer-mode is set to '?'` - it read
+`config.answer_mode`, which does not exist either - so the warning named the
+setting it was complaining about without saying what the setting was.
+
+### The gate nobody had
+
+`tests/test_the_application_starts.py` starts the application in a subprocess
+and asserts the window and the scheduler exist. Every other test builds widgets
+directly, and the harness tests that *do* start the app had their own
+`AttributeError` swallowed into *"produced no result"*, which four tests reported
+as a pre-existing failure.
+
+**Two mutations, two caught:** at `HEAD` all three tests fail; demoting the
+warning to `logger.debug` fails one - which is precisely the silent version of
+the same defect.
+
+Four failures in `test_setting_dependencies.py` are **pre-existing and not
+mine**: verified by swapping `HEAD`'s `application.py` back in and getting the
+identical four. They are the same feature - `answer-mode` has no writer at all.

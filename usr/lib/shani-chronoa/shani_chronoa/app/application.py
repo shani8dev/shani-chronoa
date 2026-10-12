@@ -520,7 +520,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self.config.set("cloud-fallback-enabled", True)
         self.config.set("answer-mode", mode)
         action.set_state(GLib.Variant("s", key))
-        self._apply_answer_mode()
+        self._apply_answer_mode_if_present()
         self._refresh_strip()
 
     def _on_answer_presence(self, action, value) -> None:
@@ -690,6 +690,51 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         strip = getattr(window, "_mode_strip", None)
         if strip is not None:
             strip.refresh()
+
+    def _apply_answer_mode_if_present(self) -> None:
+        """Apply `answer-mode`, if the code that does it exists.
+
+        **Chronoa did not start at all without this.** `_init_components` called
+        `self._apply_answer_mode()` directly, and that method is **defined
+        nowhere in `app/`** - it lived only in an uncommitted `brain.py`, while
+        the caller in this file was committed. `do_startup` raised
+        `AttributeError`, `do_activate` never ran, `sense_scheduler` was None,
+        and the window never appeared.
+
+        A `hasattr` guard rather than deleting the two call sites, because:
+
+        - **deleting them would be a silent lie** - `answer-mode` would be
+          written by `_on_answer_egress` and never honoured, which is exactly
+          the "a setting that does nothing" failure this file's own tests are
+          written against.
+        - **this lights up by itself.** If the implementation lands later, the
+          mode starts applying with no edit here.
+
+        **It warns, once, and says which half is missing** - because a mode strip
+        showing "In the cloud" on a machine that answered locally is the
+        confident-wrong-answer shape, and the person watching it cannot see a
+        missing method. Written as a warning rather than an exception because the
+        alternative is an application that will not open, which is worse than
+        one that opens and says it is running the old behaviour.
+        """
+        applier = getattr(self, "_apply_answer_mode", None)
+        if applier is None:
+            if not getattr(self, "_answer_mode_warned", False):
+                self._answer_mode_warned = True
+                # **`config.get`, not `config.answer_mode`.** The property does
+                # not exist either - `answer-mode` is in neither the gschema nor
+                # `config.py` - so the first version of this warning printed
+                # "answer-mode is set to '?'", which tells the person reading the
+                # log nothing about the setting it is complaining about.
+                logger.warning(
+                    "answer-mode is %r but _apply_answer_mode is not "
+                    "implemented in this build, so the choice is not being "
+                    "applied - the model will answer as it did before that "
+                    "setting existed",
+                    self.config.get("answer-mode", "(unset)"),
+                )
+            return
+        applier()
 
     def _on_answer_mode(self, action, value) -> None:
         """Write the chosen mode, then set the action's state from config.
@@ -920,7 +965,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         # "In the cloud" at setup was answered locally whenever a local model
         # happened to be installed. The mode is a setting now and this is where
         # it is honoured; privacy mode still wins over it above.
-        self._apply_answer_mode()
+        self._apply_answer_mode_if_present()
         # Say so on the window, not only in the log. With nothing installed the
         # state line read "Ready" while the line under it read "LLM unavailable":
         # two states, one screen, one of them false - and "Ready" is the label the
