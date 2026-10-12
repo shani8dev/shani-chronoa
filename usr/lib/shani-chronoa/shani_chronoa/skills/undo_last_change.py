@@ -128,13 +128,70 @@ def recent_changes() -> "list[tuple[Path, str, str]]":
     return out
 
 
+#: Set on the child by `tools.execute_tool`, beside the consent grant, so the
+#: skill process knows which turn asked it to write. **The only channel there
+#: is**: a skill runs as `python3 -c`, so anything the app holds in memory is a
+#: different process's memory. The consent grant already travels this way, which
+#: is why this is an `env` entry beside it rather than an argument.
+TURN_ENV = "CHRONOA_TURN"
+
+#: How long a `turn` value may be before it is refused. The value is written
+#: into a file a person may read, so an unbounded one is a way to put arbitrary
+#: bytes into the ring; 64 characters is far more than any turn label needs.
+MAX_TURN_CHARS = 64
+
+
+def current_turn() -> str:
+    """The turn this skill is running inside, or "" when none was set.
+
+    **Normalised, and refused rather than trusted.** The value arrives from the
+    environment, so it is treated as text to be checked rather than as an
+    identifier: a newline would put a second line in the ring file, and an
+    unbounded value would let a caller put anything there.
+    """
+    raw = os.environ.get(TURN_ENV, "")
+    if not isinstance(raw, str):
+        return ""
+    cleaned = " ".join(raw.split())
+    return cleaned[:MAX_TURN_CHARS]
+
+
+def changes_for_turn(turn: str) -> "list[str]":
+    """Paths this turn changed, newest last, without duplicates.
+
+    **Attribution is only ever as good as the label, so an unattributed change
+    is not claimed by anybody.** Entries with no `turn` - written by a skill
+    called directly, or by a build before this existed - are simply not
+    returned, rather than being folded into whichever turn asked. A file listed
+    as changed by a turn that did not change it is worse than no list.
+    """
+    want = " ".join(str(turn or "").split())[:MAX_TURN_CHARS]
+    if not want:
+        return []
+    out: "list[str]" = []
+    for entry in _load():
+        if str(entry.get("turn") or "") != want:
+            continue
+        path = str(entry.get("path") or "")
+        if path and path not in out:
+            out.append(path)
+    return out
+
+
 def record_preimage(path: Path, content: bytes) -> str:
     """Store `content` as the pre-image of `path`. Returns a note for the user.
 
     A file too large to keep, or one whose bytes could not be encoded, is
     skipped with an explanation rather than stored partially - a pre-image
     that is a truncated file is a pre-image that restores corruption.
+
+    **`turn` is read from the environment, not passed in.** The caller is
+    usually a skill running in a child process, which has no other way to learn
+    which turn is asking - and an argument would have to be threaded through
+    every writing skill to reach here, which is a change to a dozen files and a
+    default for each.
     """
+    turn = current_turn()
     if len(content) > MAX_PREIMAGE_BYTES:
         return (
             f"Too large to record a pre-image of "
@@ -143,11 +200,15 @@ def record_preimage(path: Path, content: bytes) -> str:
         )
     try:
         entry = {"path": str(path), "at": time.time(), "content": content.decode("utf-8")}
+        if turn:
+            entry["turn"] = turn
     except UnicodeDecodeError:
         # A binary file (a .docx, .xlsx, an image) is kept as base64, so the
         # office and image skills' edits are as undoable as a text edit.
         entry = {"path": str(path), "at": time.time(),
                  "content_b64": base64.b64encode(content).decode("ascii")}
+        if turn:
+            entry["turn"] = turn
     entries = _load()
     entries.append(entry)
     del entries[:-RING_SIZE]

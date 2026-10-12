@@ -497,6 +497,16 @@ class StyleMixin:
             border-left: 1px solid alpha(@theme_fg_color, 0.12);
         }
 
+        /* A chosen mode that is not the mode in force. **Red rather than a
+           second colour**, because this is the only rule in the stylesheet
+           that reports a failure rather than a state, and it should not look
+           like the others. The tooltip carries the sentence; this makes it
+           findable without hovering, which is the difference between a
+           warning and a tooltip. */
+        .mode-disagrees {
+            border-bottom: 2px solid @error_color;
+        }
+
         /* The turn minimap. **Width and contrast are the whole design**: a
            ruler has to be findable in peripheral vision and ignorable when you
            are reading, so it is three pixels wide, and every tick is a faint

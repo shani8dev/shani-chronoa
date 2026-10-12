@@ -164,6 +164,56 @@ def test_the_footer_is_silent_for_a_local_turn():
     assert "off this machine" not in _footer(cloud=False)
 
 
+# -- what this turn wrote to your machine ----------------------------------
+
+
+def _footer_with_changed(paths, **kwargs):
+    stats = {"model_calls": 2, "wall_seconds": 3.5,
+             "usage": {"prompt": 900, "completion": 110},
+             "changed": list(paths)}
+    stats.update(kwargs)
+    return _footer_text(stats)
+
+
+def test_the_footer_says_how_many_files_the_turn_wrote():
+    """"What did *this* turn do to my machine" had no answer before: the
+    pre-image ring recorded every change but not whose it was."""
+    said = _footer_with_changed(["/home/u/a.txt"])
+    assert "changed 1 file" in said, said
+
+
+def test_several_files_are_said_in_the_plural():
+    said = _footer_with_changed(["/home/u/a.txt", "/home/u/b.txt"])
+    assert "changed 2 files" in said, said
+
+
+def test_a_turn_that_wrote_nothing_does_not_say_changed_nothing():
+    """A clause on every turn that says nothing is noise on every turn."""
+    said = _footer_with_changed([])
+    assert "changed" not in said, said
+
+
+def test_the_files_are_counted_rather_than_listed():
+    """A path in a footer is unreadable at that width, and the count is the
+    thing a reader wants; the Diff panel is one click away for the names."""
+    said = _footer_with_changed(["/home/u/some/deep/path.txt"])
+    assert "/home/u" not in said, said
+
+
+def test_a_turn_may_change_files_and_run_tools_and_go_off_machine():
+    """All three at once is the ordinary case for a real turn, and the footer
+    has to carry all of it rather than one clause winning."""
+    said = _footer_with_changed(["/home/u/a.txt"], withheld=9000, cloud=True,
+                                tools=["edit_image"])
+    assert "changed 1 file" in said, said
+    assert "9,000 characters withheld" in said, said
+    assert "off this machine" in said, said
+    assert "used edit_image" in said, said
+
+
+# -- the tools -------------------------------------------------------------
+
+
 def test_the_tools_are_deduplicated_and_capped():
     """"used read_log, read_log, read_log" is longer and says less."""
     said = _footer(tools=["read_log"] * 3 + ["edit_image", "scan_document",

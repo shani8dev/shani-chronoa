@@ -212,6 +212,8 @@ class _ModeStrip(Gtk.Box):
         # and the Listening panel is navigation, which belongs to the sidebar.
         self._rules_chip = self._capability_chip()
         self.append(self._rules_chip)
+        self._permission_chip = self._permission_chip()
+        self.append(self._permission_chip)
         self._ambient_chip = self._ambient_chip()
         self.append(self._ambient_chip)
         self._presence_chip = self._presence_chip()
@@ -298,6 +300,44 @@ class _ModeStrip(Gtk.Box):
     #: `privacy=True` with `answer-mode=cloud` left the neighbour chip reading
     #: "Cloud" while `_apply_answer_mode` dropped the cloud chain and answered
     #: locally. One question per chip, and neither can contradict the other.
+    #: How a risky call is treated. **Read live from `permissions`**, so the
+    #: chip and the Settings combo row cannot disagree - Settings writes the
+    #: posture through `permissions.set_mode` without going through an action,
+    #: and `refresh()` runs on window focus precisely so the chip catches up.
+    #:
+    #: `default` is the quiet one. `dont_ask` is the important row: it does not
+    #: mean "act freely", it means **refuse rather than prompt**, and the word
+    #: says so. `explore` is plan mode's permission-layer twin.
+    _PERMISSION = (
+        ("default", "Ask first", "Ask before anything that needs permission",
+         "dialog-question-symbolic"),
+        ("dont_ask", "No questions",
+         "Risky calls are refused rather than asked about - it will not "
+         "interrupt you, and it will not quietly act either",
+         # `mail-unread-symbolic` is in Adwaita; `search-symbolic` and
+         # `edit-find` variants were considered and only this one ships.
+         "mail-unread-symbolic"),
+    )
+
+    #: **`explore` is deliberately not a row here**, and the first version of
+    #: this table had it. Measured across all 256 tools, with both modes on:
+    #:
+    #: | | blocks | read-only? |
+    #: |---|---|---|
+    #: | plan mode (`gated_by`, the consent-keyed set) | 92 | yes |
+    #: | explore (`READ_ONLY_TOOLS`) | 168 | yes |
+    #: | both | 77 | |
+    #: | neither | 73 | |
+    #:
+    #: Two read-only controls side by side, differing on 168 tools with no
+    #: visible way to tell which is which, is worse than one. And explore
+    #: refuses **`ask_user`** - so in explore mode the app cannot ask you a
+    #: question - along with `backup_status`, `accessibility` and `alarm`,
+    #: which cannot change the machine either. That is a defect in explore's
+    #: calibration, not a reason to advertise it: it stays in Settings, where
+    #: its stricter meaning is written down, and the measurement is recorded
+    #: rather than the mode quietly duplicated onto a strip.
+
     _CAPABILITY = (
         ("anything", "Anything",
          "It may look at things and change them", "security-medium-symbolic"),
@@ -404,6 +444,36 @@ class _ModeStrip(Gtk.Box):
          "Answer from a provider even when this machine could",
          "network-server-symbolic"),
     )
+
+    def _permission_chip(self) -> Gtk.MenuButton:
+        """How it treats a risky call - ask, refuse, or look only.
+
+        **Placed first, before "what may it change", because it is the question
+        that decides whether you are interrupted.** The capability chip answers
+        *how much* it may do; this one answers *whether it will ask*. A person
+        who has set "No questions" and is then surprised by a refusal should
+        have been able to see that from the window, not only from Settings.
+
+        **The word is the claim.** "No questions" says what happens - a call
+        that needs permission is refused - and the tooltip spells out that this
+        is *not* permission to act freely, because "auto" on a mode strip
+        invites exactly that reading.
+        """
+        button, label, image = self._menu_chip("dialog-question-symbolic")
+        self._permission_label = label
+        self._permission_image = image
+        menu = Gio.Menu()
+        for key, word, _line, _icon in self._PERMISSION:
+            menu.append(word, f"app.answer-permission::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text(
+            "How Chronoa treats a call that needs permission. This lasts until "
+            "the app restarts, so a quiet mode is never the silent default at "
+            "the next login.")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["How Chronoa treats a risky call"])
+        return button
 
     def _capability_chip(self) -> Gtk.MenuButton:
         """What it may change, in one dropdown of two.
@@ -668,6 +738,23 @@ class _ModeStrip(Gtk.Box):
         button.set_menu_model(menu)
         return button
 
+    def _read_permission(self) -> str:
+        """The posture in force, or `default` when it cannot be read.
+
+        **Never raises.** `refresh()` runs from `__init__`, so a reader that
+        threw would stop the window opening - and a missing permission module
+        must leave the chip on the safe word, not blank it.
+        """
+        try:
+            from shani_chronoa import permissions
+
+            mode = str(permissions.get_mode() or "default")
+        except Exception:                               # noqa: BLE001
+            logger.debug("mode strip: the permission posture is unreadable",
+                         exc_info=True)
+            return "default"
+        return mode if mode in {r[0] for r in self._PERMISSION} else "default"
+
     def _read_egress(self) -> str:
         """The egress choice, derived from the two settings that together make it.
 
@@ -756,6 +843,14 @@ class _ModeStrip(Gtk.Box):
                        self._read_capability(), self._CAPABILITY,
                        "What it may change", quiet=("anything",),
                        image=self._rules_image)
+            # **Read live, not from the action's state.** Settings writes the
+            # posture straight through `permissions.set_mode`, so an action
+            # state would be stale until the next click. `refresh()` runs when
+            # the window regains focus, which is when that becomes visible.
+            self._draw(self._permission_chip, self._permission_label,
+                       self._read_permission(), self._PERMISSION,
+                       "How it treats a risky call", quiet=("default",),
+                       image=self._permission_image)
             self._draw(self._ambient_chip, self._ambient_label,
                        self._read_ambient(), self._AMBIENT,
                        "When it may act", quiet=("on-ask",),
@@ -782,6 +877,7 @@ class _ModeStrip(Gtk.Box):
                        self._read_egress(), self._EGRESS, "Where it may go",
                        quiet=("this-machine", "local-answers"),
                        image=self._mode_image)
+            self._note_engine_disagreement()
             rows = self._model_rows()
             # The menu is rebuilt here rather than once at construction: the
             # rows come from what is on disk, and a model downloaded while the
@@ -806,6 +902,82 @@ class _ModeStrip(Gtk.Box):
                        image=self._model_image)
         finally:
             self._syncing = False
+
+    def _note_engine_disagreement(self) -> None:
+        """Say so when the chosen egress mode is not the mode in force.
+
+        **The strip answers "what is it allowed to be", and the Models panel
+        answers "what is answering".** That split is deliberate and right - but
+        since `_apply_answer_mode` started *moving* the engine, the two can now
+        disagree, and before anything moved they could not.
+
+        Two ways, and the second is the one that matters:
+
+        - chose **Cloud**, and this machine is answering. Usually a provider
+          was unreachable; the applier's refusal is named rather than guessed.
+        - chose **Nothing leaves** or **This machine answers**, and a **cloud
+          provider is answering**. That is the privacy promise failing, and it
+          is the case where saying nothing is worst.
+
+        **Appended to the chip's own tooltip and marked with a class**, rather
+        than added as a row: the strip is six words wide, and a seventh chip
+        saying "answering: local" would be read as a seventh permission rather
+        than as an observation about the one beside it.
+        """
+        reader = getattr(self._app, "current_llm_kind", None)
+        if reader is None:
+            return
+        try:
+            actual = str(reader() or "")
+        except Exception:                               # noqa: BLE001
+            # No engine to compare against. A strip that cannot check is a
+            # strip that says nothing, which is the status quo and not worse.
+            return
+        if actual not in ("local", "cloud"):
+            return
+
+        chosen = self._read_egress()
+        row = next((r for r in self._EGRESS if r[0] == chosen), None)
+        word = row[1] if row else "this mode"
+        self._answer_chip.remove_css_class("mode-disagrees")
+
+        # **Which disagreements are failures, stated once.**
+        #
+        # | chosen | answering | a failure? |
+        # |---|---|---|
+        # | Cloud | this machine | **yes** - you asked for a provider |
+        # | This machine, then cloud | this machine | no - that is the point |
+        # | This machine, then cloud | a provider | no - "when you cannot" |
+        # | Nothing leaves / This machine answers | a provider | **yes** - the privacy promise |
+        #
+        # The first version of this asked "did the user want cloud?" and
+        # treated `local-then-cloud` as wanting it, which flagged a local engine
+        # under the one mode whose entire description is *answer here*. And it
+        # only cleared the mark on `local`/`local`, so a cloud engine that
+        # caught up with a cloud choice stayed flagged forever.
+        strict_local = chosen in ("this-machine", "local-answers")
+        if actual == "cloud":
+            # A cloud answer is only a failure under the two modes that
+            # promised this machine would answer. Under "This machine, then
+            # cloud" it is what the person asked for.
+            if not strict_local:
+                return
+            message = ("You chose to answer on this machine, but a cloud "
+                       "provider is answering - nothing you type is going "
+                       "there. Open Models to switch back.")
+        elif chosen != "cloud":
+            # Local answering, and local was either required or preferred.
+            return
+        else:
+            detail = str(getattr(self._app, "_answer_mode_problem", "") or "") \
+                or "no provider was reachable"
+            message = (f"You chose {word}, but this machine is answering: "
+                       f"{detail}.")
+        self._answer_chip.add_css_class("mode-disagrees")
+        self._answer_chip.set_tooltip_text(
+            f"{self._answer_chip.get_tooltip_text() or 'Where it may go'}. "
+            f"{message}")
+        logger.warning("mode strip: %s", message)
 
     def _draw(self, chip, label, current, table, what, quiet=(),
               image=None) -> None:

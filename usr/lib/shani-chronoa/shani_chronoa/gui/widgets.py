@@ -983,6 +983,16 @@ class TranscriptView(Gtk.ScrolledWindow):
         if stats.get("cloud"):
             parts.append("answered off this machine")
 
+        # **What this turn wrote to your machine**, in the same line as what it
+        # cost and what it did not see. The pre-image ring records which turn
+        # made each change precisely so this can be said; before that, the only
+        # answer available was session-wide, and a session-wide answer to "what
+        # did *this* turn do to my files" is not an answer.
+        changed = [str(c) for c in (stats.get("changed") or ())]
+        if changed:
+            parts.append(f"changed {len(changed)} file"
+                         + ("" if len(changed) == 1 else "s"))
+
         # The tools, but **deduplicated and only when there are few enough to
         # read.** A turn that ran twelve skills is already a wall of tool cards;
         # repeating their names in the footer adds length without adding

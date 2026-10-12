@@ -18096,3 +18096,174 @@ extra pass over a file the panel has already read, and it needs no change to
 A failure and a truncation look the same to a reader and mean opposite things -
 "nothing here" versus "not all of it" - so an unreadable conversation is
 explicitly **not** reported as truncated.
+
+## The mode strip now checks itself against the engine that is answering
+
+Landing `_apply_answer_mode` created a gap rather than closing one. The strip
+answers *"what is Chronoa allowed to be"*; the Models panel answers *"what is
+answering"*. That split is deliberate and still right - but until the applier
+existed nothing **moved**, so the two could not disagree and nothing was
+watching for it. Now they can, and the direction that matters is the privacy
+one: a person who chose **Nothing leaves**, with a cloud provider answering, and
+no line anywhere on screen saying so.
+
+`_note_engine_disagreement()` runs at the end of every `refresh()` and says so
+only when the disagreement is a **failure**:
+
+| chosen | answering | a failure? |
+|---|---|---|
+| Cloud | this machine | **yes** - you asked for a provider |
+| This machine, then cloud | this machine | no - that is the point of it |
+| This machine, then cloud | a provider | no - "when you cannot" |
+| Nothing leaves / This machine answers | a provider | **yes** - the privacy promise |
+
+**The first version got two rows of that table wrong**, and both were caught by
+running it rather than reading it:
+
+- it asked *"did the user want cloud?"* and counted `local-then-cloud` as
+  wanting it - so it flagged a local engine under the one mode whose entire
+  description is *answer here*;
+- it cleared the mark only on `local`/`local`, so a cloud engine that caught up
+  with a cloud choice stayed flagged **forever**. A warning that cannot clear is
+  noise, and noise is how a real warning stops being read.
+
+The refusal reason is read from `app._answer_mode_problem`, which
+`_apply_answer_mode` now records. **The engine already produced a sentence saying
+what went wrong**; a second guess beside it would be a second answer to the same
+question.
+
+The mark is a **css class and a tooltip, not a seventh chip** - a chip reading
+"answering: local" would be read as a seventh permission rather than as an
+observation about the one beside it. The tooltip carries the sentence; the rule
+carries the finding, because a warning that exists only in a tooltip is a
+warning nobody sees.
+
+## Which turn wrote which file
+
+**The gap:** the pre-image ring - the mechanism behind undo - stored
+`{path, at, content}` and **no turn**. So the Diff panel knew every change ever
+made and nothing could say whose it was. "What did *this* turn do to my
+machine" had no answer; the only one available was session-wide, and a
+session-wide answer to a question about one turn is not an answer.
+
+That matters more here than in a chatbot. This app writes to your machine, and
+the pre-image ring is the only thing standing between it and an unrecoverable
+edit.
+
+**The label crosses the subprocess boundary in `argv`, not in memory.** A skill
+runs as `python3 -c`, so the only channel to the child is the one the consent
+grant already uses: `argv = ["env", KEY=VALUE, ...]`. `execute_tool` now appends
+`CHRONOA_TURN=<label>` to that same `env` invocation - *beside* the grant, not
+as a second `env`, because two `env` invocations work and make the reader
+wonder which one wins.
+
+The child is told **which turn asked, and nothing else**. It is a label in a
+log, not a way back into the app; the answer string remains the only thing that
+comes back. `TURN_ENV` lives with the reader (the skill) and is imported at the
+point of use, so the two ends cannot drift - and a top-level import of a skill
+from `tools` is the direction that once handed a skill a half-built module.
+
+**The environment value is treated as text to check, not as an identifier**:
+whitespace collapsed, capped at 64 characters. It comes from the environment and
+lands in a file a person may read, so a newline in it would put a second line
+there.
+
+**Cleared in a `finally` on the turn.** A label left behind attributes the
+*next* turn's writes to this one - so the one turn the user cancelled would
+appear to have rewritten whatever the following turn did.
+
+### Attribution is never guesswork
+
+An entry with no label - a skill called directly, or a build from before this
+existed - **belongs to nobody**. It is not folded into whichever turn asks. A
+file listed as changed by a turn that did not change it is worse than no list
+at all, and `changes_for_turn` is written to make that impossible rather than
+to make the common case convenient. The one file the app itself writes
+unattributed stays fully undoable through `recent_changes()`; adding a key to
+the ring cost nobody their ability to put a file back.
+
+The footer counts rather than listing: a path is unreadable at that width, the
+count is what a reader wants, and Diff is one click away for the names.
+
+## The modes that exist, and the one you could not see
+
+Asked what modes this app has. The honest inventory:
+
+| mode | where it lives | enforced where | on the strip? |
+|---|---|---|---|
+| **Plan mode** | `/plan` | `execute_tool` — the dispatch path, not the prompt | yes ("Read only") |
+| **Explore** | Settings → Privacy | `permissions.explore_refuses()` | **no** |
+| **Don't ask** | Settings → Privacy | refuses rather than prompting | **no** |
+
+**There is no code mode, no ULW, and no automode.** `dont_ask` is the closest
+thing to an auto mode, and it is the opposite of what the name suggests: a call
+that needs permission and cannot be asked about is **refused on the spot**, not
+performed.
+
+Plan mode is worth reading as a model: it refuses the consent-keyed set,
+derived from `capabilities.gated_by` rather than from a second hand-kept list,
+and it is enforced in the dispatcher rather than asked for in the prompt -
+because a prompt instruction is a promise the model may or may not keep and a
+check in the dispatch path is a fact.
+
+### The gap: two of the three were invisible from the window
+
+The strip answers *"what is Chronoa allowed to be"*. It did not answer *"will
+it ask me first?"* - and the answer to that can be **no**. So a person who had
+set "No questions" in Settings, and then watched Chronoa refuse an action
+without asking, had no way to connect the two: the setting lived behind a
+Settings window, and the conversation was where the surprise happened.
+
+Now the posture is a chip, placed **before** "what it may change" because it is
+the question that decides whether you get interrupted.
+
+Three things it deliberately does not do:
+
+- **It does not say "auto".** "Auto" on a mode strip reads as *it may act
+  freely*, which is the opposite of this mode. The word is "No questions" and
+  the tooltip says risky calls are **refused** rather than asked about.
+- **It does not persist.** `permissions` keeps the posture in memory only, so
+  a mode that never asks cannot become the silent default at the next unattended
+  login. Putting it on the strip must not make it look sticky, so the tooltip
+  says it lasts until the app restarts, and a test fails if `permissions` ever
+  grows a `save()`.
+- **It does not repeat the mode names.** `_PERMISSION` and `_PERMISSION_KEYS`
+  are both checked against `permissions.Mode`, and a test asserts the strip's
+  three rows and the action's three keys are the same tuple.
+
+`search-symbolic` was the first icon for the Explore row and **is not in
+Adwaita** - the empty box that reads as a rendering bug. `edit-find-symbolic` is,
+checked with `rglob` over the theme directory rather than `has_icon`, which has
+been wrong before.
+
+## Measuring `explore` before putting it on the strip — and not putting it there
+
+The first version of the permission-posture chip offered three rows, `explore`
+among them, beside the "Read only" chip that *is* plan mode. Measured across all
+**256** tools with both modes on:
+
+| | blocks | tools neither blocks |
+|---|---|---|
+| plan mode (`gated_by`, the consent-keyed set) | **92** | 73 |
+| explore (`READ_ONLY_TOOLS`) | **168** | |
+| both | 77 | |
+
+So two read-only controls on one strip, differing on 168 tools, with nothing on
+screen to say which is which. **And explore refuses `ask_user`** - in explore
+mode the app cannot ask you a question - along with `backup_status`,
+`accessibility` and `alarm`, none of which can change the machine.
+
+That is a **defect in explore's calibration**, not a reason to advertise it.
+It stays in Settings, where its stricter meaning is written down, and the strip
+carries only what answers a question the strip is for.
+
+**The exclusion is witnessed by the measurement, not by a comment.**
+`test_the_reason_explore_is_off_the_strip_is_still_true` re-derives both counts
+and asserts explore still refuses `ask_user` and still blocks far more than
+plan mode. If that calibration is ever fixed, the test fails and the row
+becomes worth reconsidering - instead of a comment in a table quietly rotting
+into a false justification.
+
+The strip's two rows are also asserted to be a **subset** of what the action
+accepts, not equal to it: Settings still writes `explore`, and the strip is not
+the only door.

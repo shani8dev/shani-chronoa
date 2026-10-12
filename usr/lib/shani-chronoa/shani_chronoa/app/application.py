@@ -484,6 +484,48 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         action.set_state(GLib.Variant("s", key))
         self._refresh_strip()
 
+    @property
+    def _PERMISSION_KEYS(self):
+        """The permission postures the strip and Settings both offer.
+
+        **Read from `permissions.Mode`, not repeated here.** Settings already
+        writes this same list, and a second copy of three mode names is a second
+        place for the two surfaces to disagree about what a mode is called.
+        """
+        from shani_chronoa import permissions
+
+        return (permissions.Mode.DEFAULT, permissions.Mode.DONT_ASK,
+                permissions.Mode.EXPLORE)
+
+    def _on_answer_permission(self, action, value) -> None:
+        """Set how Chronoa treats a risky call: ask, refuse, or look only.
+
+        **It was in Settings and nowhere else, which made it invisible from the
+        window that does the asking.** Three postures existed - `default`,
+        `dont_ask`, `explore` - and the one you could not see from the
+        conversation was `dont_ask`, the only one that answers "it will not ask
+        me before doing this" with *no*.
+
+        **It is not persisted, and this must not change that.** `permissions`
+        deliberately keeps the posture in memory only, so a mode that suppresses
+        prompts cannot become the silent default at the next unattended login.
+        Putting it on the strip does not make it survive a restart, and a chip
+        that looked sticky would be the worst outcome - so the tooltip says so.
+
+        **An unknown key is refused, never treated as the permissive one.** A
+        typo in a safety mode must not mean "ask nothing".
+        """
+        from shani_chronoa import permissions
+
+        key = value.get_string() if value is not None else ""
+        if key not in self._PERMISSION_KEYS:
+            logger.warning("unknown answer-permission choice %r", key)
+            action.set_state(GLib.Variant("s", permissions.get_mode()))
+            return
+        permissions.set_mode(key)
+        action.set_state(GLib.Variant("s", permissions.get_mode()))
+        self._refresh_strip()
+
     def _on_answer_egress(self, action, value) -> None:
         """Write "where it may go": the egress lock and the engine together.
 
@@ -1347,7 +1389,8 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 ("answer-ambient", self._on_answer_ambient, "on-ask"),
                 ("answer-presence", self._on_answer_presence, ""),
                 ("hands-free", self._on_hands_free, "off"),
-                ("answer-model", self._on_answer_model, "")):
+                ("answer-model", self._on_answer_model, ""),
+                ("answer-permission", self._on_answer_permission, "default")):
             act = Gio.SimpleAction.new_stateful(
                 name, GLib.VariantType.new("s"),
                 GLib.Variant("s", initial))

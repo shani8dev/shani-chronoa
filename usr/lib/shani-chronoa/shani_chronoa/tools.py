@@ -83,6 +83,35 @@ _SANDBOX = SandboxExecutor()
 # full history appended to ~/.local/share/shani-chronoa/logs/tool_calls.log)
 _TRACKER = ToolTracker()
 
+#: The turn now running, used only to label the child's environment. Set by the
+#: assistant around a turn and cleared in a `finally`; **not** read by the turn
+#: logic itself, and not anything the child can send back.
+_CURRENT_TURN = ""
+
+
+def set_current_turn(turn: str) -> str:
+    """Label subsequent tool calls with `turn`. Returns the previous label.
+
+    A module global rather than a parameter on `execute_tool` because the call
+    site is the assistant's inner loop, deep in a `for` over rounds, and a
+    threaded argument would have to be threaded through every tool wrapper
+    between here and the child. The value is read once per call and never
+    retained, so two turns in one process cannot leak into each other -
+    `clear_current_turn` runs in the assistant's `finally`.
+    """
+    global _CURRENT_TURN
+    previous, _CURRENT_TURN = _CURRENT_TURN, " ".join(str(turn or "").split())
+    return previous
+
+
+def clear_current_turn() -> None:
+    set_current_turn("")
+
+
+def current_turn() -> str:
+    """The turn label for this process, or "" when none is set."""
+    return _CURRENT_TURN
+
 logger.info(f"Loaded {len(_HANDLER_FNS)} skill(s): {', '.join(sorted(_HANDLER_FNS)) or '(none)'}")
 
 
@@ -1302,12 +1331,33 @@ def _dispatch_inner(name: str, arguments: dict, by_reference: bool = False,
         )
         argv = ["python3", "-c", program]
 
+    # **Beside the consent grant, not instead of it.** `env NAME=value` may
+    # only be repeated by listing it again, so the turn label is appended to
+    # the same `env` invocation rather than starting a second one - a second
+    # `env` would work, and would make the reader wonder which one wins.
+    env_prefix: "list[str]" = []
     if granted_key:
         # Set on the child, not on this process. The dispatcher runs many calls
         # in one process, so a value set here would be whichever call happened
         # to be in flight - exactly the class of bug where a grant meant for
         # one tool silently opens another.
-        argv = ["env", f"{config_mod.CONSENT_GRANT_ENV}={granted_key}", *argv]
+        env_prefix.append(f"{config_mod.CONSENT_GRANT_ENV}={granted_key}")
+    # **Imported here, not at the top.** The name lives with the reader - the
+    # skill that stores it - so the two cannot drift, and a top-level import of
+    # a skill from `tools` is the direction that already caused a skill to get
+    # a half-built module once.
+    from shani_chronoa.skills.undo_last_change import TURN_ENV
+
+    turn = current_turn()
+    if turn:
+        # **Only what is needed for attribution.** The child is told which turn
+        # asked, so a file it writes can be listed against that turn; it is not
+        # told anything about the conversation. This is a label in a log, not a
+        # channel back into the app - the skill's answer string remains the only
+        # thing that comes back.
+        env_prefix.append(f"{TURN_ENV}={turn}")
+    if env_prefix:
+        argv = ["env", *env_prefix, *argv]
 
     try:
         exit_code, output, duration_ms = _SANDBOX.execute(argv, config)

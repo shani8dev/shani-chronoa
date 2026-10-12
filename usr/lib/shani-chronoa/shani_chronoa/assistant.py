@@ -774,7 +774,29 @@ class Assistant:
             "withheld": int(getattr(self, "_turn_withheld", 0)),
             #: Whether any part of this turn left the machine.
             "cloud": bool(getattr(self, "_turn_cloud", False)),
+            #: Files this turn wrote, read from the pre-image ring. **Only
+            #: what carries this turn's own label** - an entry written by a
+            #: skill called directly belongs to nobody, and a file listed here
+            #: that this turn did not write is a worse lie than no list.
+            "changed": self._turn_changed_files(),
         }
+
+    def _turn_changed_files(self) -> "list[str]":
+        """Files this turn wrote, or `[]` if the ring cannot be read.
+
+        Read through the same helper the skills write with, so the list and the
+        undo ring can never disagree about what happened.
+        """
+        label = str(getattr(self, "_turn_label", "") or "")
+        if not label:
+            return []
+        try:
+            from shani_chronoa.skills.undo_last_change import changes_for_turn
+
+            return list(changes_for_turn(label))
+        except Exception:                               # noqa: BLE001
+            logger.debug("could not read this turn's file changes", exc_info=True)
+            return []
 
     # Not done: keeping a conversation's tools in a stable, appending order for
     # the prompt cache. Measured on both images (2026-10-02, Qwen3-0.6B, CPU):
@@ -938,6 +960,15 @@ class Assistant:
         #: all of that" is the one worth being able to check.
         self._turn_withheld = 0
         self._turn_cloud = False
+        #: Labels the tools this turn runs, so a file they write can be listed
+        #: against the turn that wrote it. Set around the turn and cleared in
+        #: the `finally`, because a label left behind would attribute the next
+        #: turn's writes to this one.
+        self._turn_label = "turn-%d" % (int(getattr(self, "_turn_seq", 0)) + 1)
+        self._turn_seq = int(getattr(self, "_turn_seq", 0)) + 1
+        from shani_chronoa import tools as tools_module
+
+        tools_module.set_current_turn(self._turn_label)
         # Per-tool attempt counts, reset per *round*. See
         # `DEFAULT_TOOL_ATTEMPTS_PER_ROUND` for why not per turn: the tests of
         # record pin sixteen legitimate `ask_user` calls in one turn.
@@ -970,6 +1001,13 @@ class Assistant:
             # through here unchanged.
             self.close_interrupted_turn("interrupted")
             raise
+        finally:
+            # **Cleared on every exit, including the interrupted one.** A label
+            # left behind would attribute the *next* turn's writes to this one -
+            # so the one turn that got cancelled would appear to have rewritten
+            # whatever the following turn did. That is precisely the claim this
+            # exists to make true.
+            tools_module.clear_current_turn()
 
     async def _run_turn(
         self,
