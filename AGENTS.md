@@ -18267,3 +18267,39 @@ into a false justification.
 The strip's two rows are also asserted to be a **subset** of what the action
 accepts, not equal to it: Settings still writes `explore`, and the strip is not
 the only door.
+
+## The general form of the startup bug is not machine-checkable here, and that is the finding (2026-10-13)
+
+After `_answer_mode` cost eight actions, the obvious next step was a scanner for
+the general shape: *a `self.X` load where X is bound nowhere in the class or its
+bases.* The existing guard -
+`tests/test_sense_labnetworks.py::test_every_name_it_uses_is_imported` - checks
+unbound **`Name`s** only, so it structurally cannot see an `Attribute`, which is
+the entire difference between what it caught and what it missed.
+
+**Written and measured, it reports 54 files.** Almost all of it is two kinds of
+noise, and neither is fixable from inside a scanner:
+
+| noise | example |
+|---|---|
+| **external bases** | `Gtk.Application`'s `add_action`, `activate`, `hold`, `lookup_action`; `Gtk.Widget`'s `add_css_class`, `append`, `set_tooltip_text`; `BaseHTTPRequestHandler`'s `client_address`, `path`, `send_error` |
+| **mixin cross-references** | `VoiceMixin` reading `self._async` and `self._submit`, `BrainMixin` reading `self.config` - bound on `ChronoaApplication`, which the mixin is *mixed into*, never on the mixin itself |
+
+The real defect is in there - `application.py` lists `ChronoaApplication._answer_mode`
+- but it is one line in a list that also contains `activate` and `add_action`, and
+nobody will find it. **A scanner that reports 54 files is worse than no scanner**,
+which is the same conclusion `open_surfaces` reached for skill candidates and
+`list-audit.py` reached for name lists: a lead list nobody can work through is a
+lead list nobody works.
+
+**What was built instead is narrow and sound:** `tests/test_every_app_action_is_registered.py`
+pins the **complete** set of 36 actions by stubbing `add_action` and driving
+`_create_actions()` once. It needs no display, it fails on a hole *and* on a quiet
+addition, and reproducing the original defect makes every test in it fail.
+
+The reason the narrow version works is the thing the wide one lacks: it asserts a
+**consequence** (these 36 names are registered) rather than a **shape** (this
+attribute is bound somewhere). A consequence can be checked exactly; a shape in a
+codebase with mixins and external bases cannot, short of resolving every base
+class outside the repo.
+
