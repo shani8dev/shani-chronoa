@@ -12041,3 +12041,78 @@ which is the noise a compression cannot buy. The claim is non-decreasing from
 `tools/mutations/kv_floor.py`: 5 mutations, 5 caught, 0 survivors, including a
 new pair that pins the second model's figure - dropping its `q4_0` below the
 cliff, and making a *lighter* compression cost more than a heavier one.
+
+## A registry vocabulary prompt makes transcription worse, and the worst case is a perfect one (2026-10-12)
+
+whisper.cpp's `--prompt` is the only lever for teaching a general model this
+system's vocabulary, and it is the kind of thing that appears to work. Measured
+against the real binary and the real model — `ggml-base-q5_1.bin` from
+`shani-install-media/test-env/cache/whisper-models/`, ten sentences rendered by
+`espeak-ng`, three prompt conditions over **the same audio**.
+
+The corpus is deliberately **two populations**: sentences whose hard words come
+from this system's own catalogue (`archive`, `screen reader`, `symbolic links`,
+`btrfs`), and ordinary English with nothing to teach. A vocabulary prompt that
+works should lift the first and leave the second alone; one that lifts both is
+changing the decoding rather than recognising anything, and this reports the split
+rather than an average that would hide it.
+
+| prompt | domain WER | ordinary WER | all |
+|---|---:|---:|---:|
+| none | 31.4% | 26.5% | **29.0%** |
+| `"Chronoa."` | 42.5% | 21.5% | 32.0% |
+| registry vocabulary (77 words) | 36.8% | 37.2% | **37.0%** |
+
+**Per sentence, the registry prompt helped 1, harmed 4, and tied 5** — and the two
+largest harms are on a **domain** sentence and on a sentence it transcribed
+*perfectly*:
+
+| sentence | no prompt | 77-word prompt |
+|---|---:|---:|
+| Extract the **archive** into my downloads folder | 29% | **57%** |
+| Remind me to buy milk at six | **0%** | **29%** |
+| Lock the screen now | 25% | 50% |
+| List the broken **symbolic links** in my home | 12% | 25% |
+| Dismiss the **screen reader** for a moment | 29% | **14%** |
+
+So it does work *as a dictionary* — "a green reader" → "a screen reader",
+"in my poem" → "in my home" — and costs more than it gains, because **whisper
+mirrors the prompt's shape as well as its words**. 77 period-separated fragments
+produced `extract. archive in to my download folder.` on the sentence whose
+vocabulary it was supposed to be helping. A prompt is a style transfer with a
+dictionary attached.
+
+**Do not ship this.** The repo's own rule is that a measurement which says no is
+worth recording so nobody re-derives it, and this is the clearest instance in the
+file: the idea is plausible, the implementation is trivial, and it is net-negative.
+
+### What this does NOT establish, stated rather than implied
+
+**A length sweep over the same content prefix was run and it is noise.** Domain
+WER moved +2.5, −0.4, **−5.4**, −0.4, +5.4 across prompt lengths of 2, 6, 16, 40
+and 77 words — not a curve, and not monotonic in either population. With five
+sentences per cell a 5-point swing is under two words. **So no prompt length is
+shown to help**, including the 16-word one that looked best on the domain
+population. The honest summary is two conditions, not six.
+
+The absolute numbers are also **not comparable to the voice measurements elsewhere
+in this file**: this uses `espeak-ng` defaults, where the file records `+f3` at
+0.39 and `+m3` at 0.27 on a different corpus. Only the *relative* comparison
+holds — same audio, same voice, same model, one variable.
+
+### Three API facts, each found by running the binary rather than remembering it
+
+- **`-oj` writes `<input-filename>.json`, extension included** — `s00.wav.json`,
+  not `s00.json`. `with_suffix(".json")` is the wrong call and looks right.
+- **`transcription` is a list of segments**, each a dict with a `text`, not the
+  string its key name suggests. Joined with a space; each carries a leading one.
+- **`discover_skills()` returns `(schemas, handlers)`**, a two-tuple. Indexing the
+  first element as a list of schemas works; treating the return as the list does
+  not.
+
+**Durability gap, recorded rather than papered over:** the experiment is a
+throwaway script, and this repository's rule is that a one-off is lost. It needs
+`shani-testbed/slot-tests/` with the corpus and the two conditions, since that
+repo already holds the whisper model cache. Not built here — a slot run to verify
+it is a different piece of work from the question, and the answer is already
+negative enough to act on.
