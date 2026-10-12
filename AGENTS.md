@@ -18835,3 +18835,42 @@ all of them, and a turn that wrote a stub wrote a real file instead. That is a
 migration with its own review, not an edit, and it is why `_tool_ok()` exists
 as a named function carrying the limitation rather than as an unexplained
 expression in the middle of the tool loop.
+
+## The permission-posture chip is 3-red at HEAD, and the in-flight rework orphans its test (2026-10-13)
+
+Running `tests/test_permission_posture_chip.py` against a clean `git archive HEAD`
+snapshot (not the dirty tree) gives **3 failed, 13 passed**; against the working
+tree it is **14 failed**. The eleven extra are the other session's in-flight
+`gui/window.py` rewrite, which deletes `_permission_chip`, `_read_permission` and
+`_PERMISSION` from `_ModeStrip` outright. But the **three that are red at HEAD**
+are a committed defect, not a consequence of that rewrite, and all three are
+defects in the chip itself:
+
+- `test_the_posture_offers_exactly_the_three_modes_that_exist` - `_PERMISSION` has
+  two rows (`default`, `dont_ask`) but `permissions.Mode` has three; `explore` is
+  not offered. So a user on the strip cannot select `explore` at all.
+- `test_the_chip_follows_the_posture_settings_changes` - `_read_permission()`
+  returns `default` where the test expects it to follow a live `explore`.
+- `test_the_tooltip_says_the_posture_does_not_survive_a_restart` - the tooltip
+  never says the posture does not persist across restarts.
+
+**The in-flight rework addresses all three** - it replaces the static `_PERMISSION`
+table with a menu built from the live permission layer (`app.answer-permission::`,
+reading `permissions.get_mode()`), which is exactly what the three tests are
+asking for. So the rework is not gratuitous; it is fixing real committed bugs.
+
+**The handoff that matters: committing that rewrite will take this file from
+3-red to 14-red**, because the whole test targets the retired `_ModeStrip` chip
+attributes. Whoever commits the rewrite should either port the test to the new
+menu or `git rm tests/test_permission_posture_chip.py` if the chip is genuinely
+gone - not leave it as 14 orphans. I did not edit any of this: `gui/window.py` is
+the other session's in-flight file, and the correct fix for the three HEAD-red
+failures is the rewrite already under way, not a patch on top of it.
+
+**The transferable lesson: a suite's result depends on the tree it ran against,
+so "is it red?" needs the tree named.** The dirty-tree figure (14) and the HEAD
+figure (3) pointed at two different problems, and only the snapshot separated
+"red because of uncommitted work in flight" from "red because of something
+already committed." When a failing count is much worse than expected, running
+the same test against `git archive HEAD` is the cheapest way to tell which of
+those you are looking at.
