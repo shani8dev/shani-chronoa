@@ -633,24 +633,26 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         this, the wizard's "In the cloud" was a promise about the next launch -
         while the machine in front of you kept answering locally.
         """
-        mode = value.get_string() if value is not None else ""
-        if mode in {k for k, _w, _l in self.ANSWER_MODES}:
-            if mode == "cloud":
-                # Cloud is the opt-in that sends prompts off the machine, and it
-                # never activates from a single switch alone - so this one is
-                # written *with* the privacy switch that gates it.
-                if self.config.privacy_mode:
-                    self.config.set("privacy-mode", False)
-                self.config.set("cloud-fallback-enabled", True)
-            elif mode == "local":
-                self.config.set("privacy-mode", True)
-            else:
-                self.config.set("privacy-mode", False)
-                self.config.set("cloud-fallback-enabled", True)
-            self.config.set("answer-mode", mode)
+        # **One mapping, not two.** This handler and `_on_answer_egress` used to
+        # each write the same three settings (`answer-mode`, `privacy-mode`,
+        # `cloud-fallback-enabled`) from their own key vocabulary - and could
+        # therefore disagree. Measured, both were live: this is still a registered
+        # action reachable over D-Bus, so `app.answer-mode = "local"` would put
+        # the egress lock on behind the strip's back. A dependency that exists in
+        # two copies is a dependency that will diverge, so this now translates its
+        # key and defers to the one that owns the writing.
+        #
+        # The translation is the old behaviour exactly: `local` meant "nothing
+        # leaves" here, which is the egress lock, and `local-answers` - a state the
+        # old vocabulary could not express - did not exist.
+        egress = {"local": "this-machine",
+                  "local-cloud": "local-then-cloud",
+                  "cloud": "cloud"}.get(
+                      value.get_string() if value is not None else "")
+        if egress is None:
+            return
+        self._on_answer_egress(action, GLib.Variant("s", egress))
         action.set_state(GLib.Variant("s", self.config.answer_mode))
-        self._apply_answer_mode()
-        self._refresh_strip()
 
     def _on_show_page(self, _action, parameter) -> None:
         """`app.show-page('settings:privacy')`, over D-Bus as well as in-process.

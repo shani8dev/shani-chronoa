@@ -1339,7 +1339,20 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         # Ollama and llama.cpp first regardless. A person who chose the cloud and
         # happened to have a local model installed was answered locally, by the
         # download they had just declined.
+        # **Writing `answer-mode` alone was not enough, and the dependency was
+        # invisible.** `answer-mode` is not what decides whether the cloud is
+        # reachable: `privacy-mode` is the lock that gates it, and
+        # `_apply_answer_mode` returns early while it is on. So choosing "In the
+        # cloud" on a machine where the lock was set left the wizard reporting
+        # that it had chosen the cloud while the app answered locally - the same
+        # class of defect as the strip chip that read "Cloud" under a local-only
+        # rule, one layer down and reached from the wizard instead of the strip.
+        #
+        # Nothing declared that dependency, so nothing could check it. It is
+        # written explicitly here instead, next to the setting that needs it.
         config.set("answer-mode", "cloud" if key == "cloud" else "local-cloud")
+        config.set("privacy-mode", False)
+        config.set("cloud-fallback-enabled", True)
         unchoose("brain")
         unchoose("ears")
 
