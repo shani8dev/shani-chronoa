@@ -51,10 +51,31 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
     "iq4_nl": 0.5625,
 }
 
-#: The cache types worth trying, cheapest first. `q4_0`/`iq4_nl` are the floor
-#: and there is nothing cheaper in llama.cpp; `f32` is excluded because it is
-#: more expensive than the default and would only be chosen by someone asking
-#: for it explicitly.
+#: The cache types worth trying, best first. `f16` is llama.cpp's default and the
+#: one the whole table assumes; below it, `q8_0` at 0.5625 of f16's bytes is the
+#: near-lossless step, and `q4_0` at 0.28125 is the floor - there is nothing
+#: cheaper in llama.cpp. `f32` is excluded because it costs more than the default
+#: and would only ever be chosen by someone asking for it explicitly.
+#:
+#: **Every entry here is one the installed binary accepts, measured rather than
+#: assumed (2026-10-12).** A type this build did not have would reach
+#: `server_args()` as `-ctk <type>`, fail llama-server's argument parser, and take
+#: the model down at start - a silent failure whose only symptom is a server that
+#: never comes up. Probed against the real `/usr/bin/llama-server`, and the probe
+#: has power because a bogus type is refused at argument-parse time
+#: (`error while handling argument "--cache-type-k": Unsupported cache type:`),
+#: before any model is loaded. All nine llama.cpp types - `f16`, `bf16`, `q8_0`,
+#: `q5_1`, `q5_0`, `q4_1`, `q4_0`, `iq4_nl`, `f32` - are accepted by this build,
+#: so every entry in the ladder is safe to pass.
+#:
+#: Not verified, and deliberately not asserted: which of these costs *quality*.
+#: `q8_0` is the widely-reported near-lossless step and `q4_0` the visible one,
+#: but nobody here has measured it, so nothing in this file refuses to use `q4_0`
+#: on that basis. PersonaPlex's RVQ has the control this repo would want and
+#: cannot build - `set_num_codebooks` is bounded *below* by the semantic
+#: codebooks, so acoustic fidelity can be traded away and meaning never can. The
+#: KV ladder has no such floor, because a floor is a quality claim and this one
+#: would be unmeasured.
 CACHE_TYPE_LADDER: "tuple[str, ...]" = ("f16", "q8_0", "q5_0", "q4_0")
 
 

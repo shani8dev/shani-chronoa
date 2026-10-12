@@ -11523,3 +11523,43 @@ external plugins (would refuse the exact case
 AGPL-3.0, unlike everything else in `harness-study/`. **No code was taken** —
 the transfer is a discipline, and `compare_calibration` shares no structure with
 any line of heretic's.
+
+## personaplex's quantizer is the audio codec, and the KV ladder has no semantic floor (2026-10-12)
+
+Asked to check PersonaPlex's quantization. `moshi/moshi/quantization/` exists and
+is exhaustive - `vq.py`, `core_vq.py`, `base.py`, `SplitResidualVectorQuantizer` -
+but it is **not weight quantization**. It is the residual vector quantizer of the
+Mimi/SoundStream audio codec: `dimension`, `bins`, `codebook_offset`, an EMA decay
+over codebooks, `codes` of shape `[B, K, T]`. It turns waveform into discrete
+tokens. Nothing in it transfers to a GGUF/llama.cpp weight path, and nothing in it
+needs to.
+
+What *does* transfer is the shape of `set_num_codebooks`:
+
+```python
+def set_num_codebooks(self, n: int):
+    assert n >= self.n_q_semantic and n <= self.total_codebooks
+```
+
+**A two-sided bound, where the lower one is semantic.** The RVQ can trade acoustic
+fidelity away, never meaning - so a quality knob that is bounded by what the thing
+it compresses is *for*, not only by what it costs.
+
+`CACHE_TYPE_LADDER` in `ctxfit.py` has the upper half and not the lower one:
+`cache_type_for_context` will walk all the way to `q4_0`, and nothing refuses to.
+That is the control this repo would want, and it is **not built**, because the
+floor would be a quality claim nobody here has measured. `q8_0` is the
+widely-reported near-lossless step and `q4_0` the visible one; asserting either
+from someone else's write-up is the confident-wrong-answer shape. Recorded at the
+ladder instead, so the next reader sees the missing floor and why it is missing.
+
+**What the pass did settle: the ladder's lower end is supported, measured.** Every
+entry reaches `server_args()` as `-ctk <type>`, and a type this build did not have
+would fail llama-server's argument parser and take the model down at start - the
+only symptom being a server that never comes up. Probed against the real
+`/usr/bin/llama-server`; the probe has power because a bogus type is refused at
+argument-parse time (`error while handling argument "--cache-type-k":
+Unsupported cache type: nonsense_xyz`), before any model is loaded, so the test
+could distinguish accepted-from-rejected. **All nine llama.cpp types** - `f16`,
+`bf16`, `q8_0`, `q5_1`, `q5_0`, `q4_1`, `q4_0`, `iq4_nl`, `f32` - are accepted, so
+every entry in the ladder is safe to pass on this build.
