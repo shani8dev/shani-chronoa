@@ -17,7 +17,8 @@ that calls them dead is a scanner that gets deleted. So a name mentioned anywher
 in the package or the tests, as a word, counts as reachable.
 
 Measured on the fixed tree: 309 surface methods across 35 modules, none
-unreachable. That count is asserted too, because a scan over a path that does not
+unreachable - `common.rows_of`, recorded below. Those counts are asserted too,
+because a scan over a path that does not
 exist examines zero modules, reports zero orphans, and passes forever - the
 negative-control failure this repo has recorded more than once.
 """
@@ -79,20 +80,37 @@ def _index(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
     So a file that *defines* a name is not evidence about anyone else's method of
     that name, and is excluded from the count of its uses.
 
-    **And the second version counted prose.** A name mentioned in a comment or a
-    docstring read as a caller, which is the mirror-image mistake: measured, a
-    `TranscriptView` handler is named exactly once outside its own definition -
-    in a `window.py` docstring explaining a pattern - and a raw-text scan calls
-    it live. It is dead. **Comments and docstrings are dropped here; every other
+    **And a mention in prose is not a use either.** A name named in a comment or
+    a docstring reads as a caller, which is the mirror-image mistake: measured, a
+    `TranscriptView` handler is named exactly once outside its own definition - in
+    a `window.py` docstring explaining a pattern - and a raw-text scan calls it
+    live. It is dead. **Comments and docstrings are dropped here; every other
     string literal is kept**, because that is where the live seams actually are:
     `phone_link.py:370` dispatches `show_devices` through a `getattr` string
     tuple, `voice.py`'s `_FORWARDED` carries `speaking_row` into `setattr`, and
     `webkit_version` / `activity_text` are called from inside subprocess
     harnesses held as strings in two test files. Dropping strings - which is
     `tools/deadcode.py`'s deliberate rule - calls all four dead.
+
+    **And this file excludes itself.** A reachability scan that lives inside the
+    tree it measures will always find itself: naming a finding in a docstring
+    puts the name in the source, `_all_files` reads it, and the dead thing reads
+    as live. Measured **three times in this one file** - `set_suggestion_handler`
+    named in the control, then in the control's expected value, then in
+    `_index`'s own docstring; and `common.rows_of` named four times when the
+    module-level population was added. Each time the assertion it was written to
+    make passed for the wrong reason, which is worse than failing.
+
+    So the fix is structural rather than per-name: **this file is not in the
+    index.** Composing names at runtime was the first attempt and it was the
+    wrong fix - it made the docstrings unreadable to defend against something the
+    exclusion handles for every future name at once.
     """
+    skip = {pathlib.Path(__file__).resolve()}
     per_file = []
     for f in _all_files(pkg, tests):
+        if f.resolve() in skip:
+            continue
         try:
             text = f.read_text()
         except (OSError, ValueError):
@@ -194,11 +212,35 @@ def surface_methods(pkg: pathlib.Path = PKG):
                 yield path, fn.lineno, fn.name, (ast.get_docstring(fn) or "")
 
 
+@functools.lru_cache(maxsize=None)
+def surface_helpers(pkg: pathlib.Path = PKG):
+    """(module, line, name, docstring) for every **module-level** public function
+    in a surface module - the population the class scan above cannot see.
+
+    **This was a real blind spot, and it hid a dead helper.** `common.rows_of`
+    had no caller of any kind and no test, and the first version of this file
+    judged only class methods, so it never appeared. Measured: 85 module-level
+    public helpers across the 35 surface modules, exactly one unreachable.
+
+    `build` in every module is dispatched by *string* - the surfaces registry
+    looks it up by name - so it has to still count as reachable. It does: 769
+    mentions against 43 definition lines. That is the same string-dispatch case
+    `show_devices` and `speaking_row` established, and it is why this scan reads
+    strings at all.
+    """
+    for path in surface_modules(pkg):
+        for fn in [n for n in ast.parse(path.read_text()).body
+                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            if fn.name.startswith("_"):
+                continue
+            yield path, fn.lineno, fn.name, (ast.get_docstring(fn) or "")
+
+
 def unreachable_methods(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
     """Names whose only mention in the whole tree is their own definition."""
     index = _index(pkg, tests)
     found = []
-    for path, lineno, name, _doc in surface_methods(pkg):
+    for path, lineno, name, _doc in list(surface_methods(pkg)) + list(surface_helpers(pkg)):
         if not _is_used(name, path, index):
             found.append(f"{path.name}:{lineno} {name}()")
     return found
@@ -215,8 +257,18 @@ class TestNoSurfaceMethodIsUnreachable:
         assert len(modules) > 10, (
             f"only {len(modules)} surface modules found under "
             f"{PKG / 'gui' / 'surfaces'} - a green result below would mean nothing")
-        checked = list(surface_methods())
-        assert len(checked) > 100, f"only {len(checked)} surface methods examined"
+        methods = list(surface_methods())
+        helpers = list(surface_helpers())
+        assert len(methods) > 100, f"only {len(methods)} surface methods examined"
+        # **The module-level half is what hid `common.rows_of`.** Without this
+        # assertion the scan could silently stop looking at module functions and
+        # the test would stay green, which is the same defect one population down.
+        assert len(helpers) > 50, (
+            f"only {len(helpers)} module-level helpers examined - the scan is "
+            f"not looking at the population `common.rows_of` was hidden in")
+        assert len(methods) + len(helpers) > 350, (
+            f"{len(methods)} methods + {len(helpers)} helpers is fewer than the "
+            f"390 this scan measured; one of the two populations is being missed")
 
     def test_no_surface_method_is_reachable_by_nothing(self):
         orphans = unreachable_methods()
@@ -337,12 +389,13 @@ class TestNoSurfaceMethodIsUnreachable:
         assert unreachable_methods() == []
 
     def test_a_name_named_only_in_a_docstring_is_not_a_use(self):
-        """**The control for the false positive the first version had.**
+        """**The control for the prose false positive.**
 
-        A method in `gui/widgets.py` is dead, and it is named exactly once
-        outside its own definition - in a `window.py` docstring explaining the
-        pattern `None` follows. A raw-text scan counts that word and calls the
-        method live; measured, the first version of this file did.
+        `TranscriptView.set_suggestion_handler` is dead - `tools/deadcode.py`
+        reports it, and it has no caller of any kind, not even a test - and it is
+        named exactly once outside its own definition, in a `window.py` docstring
+        explaining the pattern `None` follows. A raw-text scan counts that word
+        and calls the method live.
 
         So the extractor drops docstrings, and this asserts it does, against a
         real dead method rather than a fixture. If the tokenising ever stops
@@ -350,23 +403,21 @@ class TestNoSurfaceMethodIsUnreachable:
         `test_no_surface_method_is_reachable_by_nothing` stays green, which is
         what makes it worth having.
 
-        **The name is composed, and that is not decoration.** Spelling it here
-        would put it in this file's source, which `_all_files` reads and counts -
-        so the control would manufacture the very caller it asserts is absent.
-        Measured: the first version of this test named the method four times and
-        failed with `assert 3 == 0`, every count coming from its own docstring.
-        A control that names its subject is a control that cannot fail.
+        **The name is spelled plainly, and that is only safe because
+        `_index` excludes this file.** It was composed at runtime in an earlier
+        version, on the grounds that naming it here would manufacture the caller
+        it asserts is absent. That was true and it was the wrong fix: it made the
+        docstrings unreadable to defend against one name, when the exclusion
+        handles every future name at once. The guard below is what proves the
+        exclusion is actually in effect rather than merely claimed.
         """
-        name = "set_" + "suggestion_" + "handler"
-        # guard that the composition is right AND that the name is not spelled
-        # anywhere in this file, which is what makes the assertion below mean
-        # something: `_all_files` reads this file too, so a literal here would be
-        # counted as a caller of the very method under test.
-        assert name == "".join(("set", "_", "suggestion", "_", "handler"))
-        assert name not in pathlib.Path(__file__).read_text(), (
-            f"{name} is spelled in this test's own source, so the scan would "
-            f"count the control as a caller")
+        name = "set_suggestion_handler"
         index = _index()
+        # The exclusion is load-bearing: without it this file's own prose is a
+        # caller, and the assertion below passes for the wrong reason.
+        assert all(f.name != pathlib.Path(__file__).name for f, _u, _d, _x in index), (
+            "this test file is in its own index, so its docstrings count as "
+            "callers and the assertion below cannot fail")
         total = sum(u.get(name, 0) - d.get(name, 0)
                     for _f, u, _defined, d in index)
         assert total == 0, (

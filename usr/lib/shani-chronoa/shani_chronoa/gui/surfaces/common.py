@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 import re
 import textwrap
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 import gi
 
@@ -1008,18 +1008,3 @@ def clear(container: Gtk.Widget) -> None:
         following = child.get_next_sibling()
         container.remove(child)
         child = following
-
-
-def rows_of(container: Gtk.Widget) -> List[Gtk.Widget]:
-    """Every row-like child of a group, in order.
-
-    `Adw.PreferencesGroup` is a `Gtk.ListBox`, so its rows are its children; a
-    plain box built by `group()` holds whatever was appended. One helper for
-    both, because a surface's tests should not have to know which one it got.
-    """
-    out: List[Gtk.Widget] = []
-    child = container.get_first_child()
-    while child is not None:
-        out.append(child)
-        child = child.get_next_sibling()
-    return out
