@@ -23,16 +23,44 @@ lab has no incentive to check.
 | 筑基 Foundation | a base model, digest-pinned | size + sha256 match (`local_llm.verify`) |
 | 感知 Perception | observations from the day's log | the log was read, and what it says is bounded |
 | 淬炼 Refinement | a distilled router | agreement with the human ≥ `MIN_AGREEMENT` (0.5) **and** it beats the majority-tool baseline |
-| 同化 Attunement | a merge of sibling weights | perplexity beats **every** measured parent (`merge.gate`) |
+| 同化 Attunement | a merge of sibling weights | perplexity beats **every** measured parent, *at the same quantisation* (`merge.gate` → `better`) |
 | 渡劫 Ascension | a LoRA adapter alongside the base | measured on a held-out split, and reversible without a rewrite |
 | 长生 Immortality | a signed, provenance-bearing record | `learning.verify_model` passes, and rollback exists |
 
 **Ascension before Attunement, deliberately.** An adapter is ~20 MB and loads
 *alongside* the base - no container rewriting, no re-quantisation, reversible by
 dropping a file. A merge is the whole model again, at 1.1 GB, behind a metadata
-round-trip that is not yet correct (see the measured failure below). Both add
-capability; only one of them is currently trustworthy, so the progression starts
-where the trustworthy thing is.
+round-trip that had to be fixed before anything could be measured. Both add
+capability, and the ordering was chosen while only one of them worked.
+
+**Corrected 2026-10-12: the container is no longer the blocker, and this
+section said otherwise.** It claimed the round-trip was "not yet correct" and
+pointed at a measured failure further down that was **never there** - the
+sentence referred forward to itself. What was actually true then, and is fixed
+now (`723f997`, `1e67057`):
+
+- `gguf_write` copies the parent's metadata section byte for byte. Rebuilding it
+  through `gguf-py`'s typed writer lost 15 of 31 keys - every `qwen3.*` one - so
+  `llama-quantize` refused the file outright. Measured: a 310-tensor Qwen3-0.6B
+  blends into 1143 MiB of F16 in 28 s and `llama-quantize` produces 378 MiB of
+  Q4_K_M from it, which had never once succeeded.
+- **113 of those 310 tensors are F32** - every norm vector and bias - while the
+  197 weight matrices are Q8_0. Writing them all F16 gives a file that *loads*
+  and then dies computing with `dst: f32, src0: f32, src1: f16`.
+- The gate was comparing a Q4_K_M merge against Q8_0 parents, so it charged the
+  whole requantization cost to the merge: an **identity** merge - lambda = [1, 0],
+  bit-identical to the base - was refused for being 13.6% worse than the base.
+
+**So Attunement is no longer blocked by mechanics. It is blocked by
+arithmetic, which is a different and more honest kind of blocked.** Measured on
+the one sibling pair available (`Qwen3-0.6B-Base` 48.770 against `Qwen3-0.6B`
+76.469, same corpus, 57% apart), every interpolated point lands *between* them
+and beats neither. TIES exists for exactly that, and whether it helps on this
+pair is being measured rather than assumed.
+
+**What is still true, and is why the ordering has not changed:** Ascension is
+still the cheaper lever, and a merge still rewrites 1.1 GB to add what a 20 MB
+adapter adds alongside.
 
 **The five prohibitions. This is the part that matters.**
 
@@ -65,7 +93,12 @@ the weakest signal available and the one this repo uses most, because it is the
 one that is cheap and reproducible. It is close to useless for "is this better":
 a merge can improve perplexity and be worse at the only thing it was for.
 `merge.gate` is therefore a *floor*, not a verdict - it can stop a regression,
-and nothing more. The measures that actually track usefulness already exist here
+and nothing more. **It has three verdicts, and the middle one is the one that
+matters most here:** `worse` (refused, quality lost), `no-better` (refused, *"it
+has cost disk and added nothing"*) and `better`. A tie with the better parent is
+neither success nor failure, and a gate with only "better than" and "worse than"
+reports a tie as a win - which is how a number reads as a result when nothing
+distinguished it. The measures that actually track usefulness already exist here
 and are better than perplexity: does the router beat the majority-tool baseline,
 does a tool's claim survive verification, does the dream produce findings a
 person acts on.
@@ -105,11 +138,18 @@ STAGES: Tuple[str, ...] = (
 )
 
 #: What each stage must produce, in the words the gate uses.
+#:
+#: Each sentence names **the function that decides it**, because a stage whose
+#: gate is described only in prose is a stage nothing can check: the first
+#: version of this table said "beats every measured parent" with no reference to
+#: `merge.gate` at all, and no test could have noticed, because no test
+#: imported the module.
 PRODUCES: Dict[str, str] = {
     "foundation": "a base model whose size and sha256 match the pin",
     "perception": "bounded observations from a window of the day's log",
     "refinement": "a router that beats the majority-tool baseline",
-    "attunement": "a merge that beats every measured parent",
+    "attunement": "a merge whose `merge.gate` verdict is `better` - at the "
+                   "same quantisation as its parents, which is not automatic",
     "ascension": "a reversible adapter that measures on a held-out split",
     "immortality": "a signed record whose digest verifies and whose prior "
                    "version still exists",
