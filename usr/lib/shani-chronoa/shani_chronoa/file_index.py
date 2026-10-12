@@ -193,7 +193,8 @@ def _which(binary: str) -> bool:
     return shutil.which(binary) is not None
 
 
-def _walk(root: pathlib.Path, problems: List[str]):
+def _walk(root: pathlib.Path, problems: List[str],
+          declined: "Optional[List[str]]" = None):
     """Files under `root`, skipping the cache/data directories by name.
 
     A generator rather than a list so a truncated walk does not first materialise
@@ -215,6 +216,13 @@ def _walk(root: pathlib.Path, problems: List[str]):
         for entry in entries:
             if entry.is_dir() and not entry.is_symlink():
                 if entry.name in SKIP_DIRS:
+                    # **Named, not silently passed.** Measured before this: a
+                    # directory with one text file and three cache-shaped
+                    # directories reported `indexed: 1, examined: 1, skipped: 0`
+                    # - three directories absent from every field, so a reader
+                    # concluded the tree held one file. It held four.
+                    if declined is not None:
+                        declined.append(entry.name)
                     continue
                 stack.append(entry)
                 continue
@@ -250,6 +258,8 @@ def index_directory(root, progress=None, embed=True, db=None):
         seen = set()
         added = updated = skipped = 0
         problems: List[str] = []
+        declined: List[str] = []
+        degraded: List[str] = []
         embedder = local_embed.embed if embed else None
 
         # **Two passes, because embedding is a round trip and a round trip per
@@ -266,7 +276,7 @@ def index_directory(root, progress=None, embed=True, db=None):
         pending: List[dict] = []
         examined = 0
         truncated = False
-        for path in _walk(root, problems):
+        for path in _walk(root, problems, declined):
             examined += 1
             if examined > WALK_CEILING:
                 # **Stops and says so.** A home directory can hold millions of
@@ -355,7 +365,7 @@ def index_directory(root, progress=None, embed=True, db=None):
                     # with files - a vector written against the wrong file is a
                     # search that finds the wrong thing silently.
                     missing = len(chunk) - len(reply)
-                    problems.append(
+                    degraded.append(
                         f"the embedding server answered for {len(reply)} of "
                         f"{len(chunk)} files; the other {missing} are "
                         f"keyword-searchable only")
@@ -363,10 +373,16 @@ def index_directory(root, progress=None, embed=True, db=None):
                         vectors[index] = local_embed.to_blob(
                             local_embed.normalise(vector))
                 else:
-                    for item in chunk:
-                        problems.append(
-                            f"{pathlib.Path(item['path']).name}: no embedding "
-                            f"server, so it is keyword-searchable only")
+                    # **One entry, not one per file, and not in `problems`.**
+                    # Measured before this: a 20-file directory produced **20**
+                    # identical `problems` lines, and the skill renders
+                    # `problems` under "Not readable:" - so files that indexed
+                    # perfectly were reported as unreadable. A 500-file
+                    # directory would have produced 500 lines about llama.cpp,
+                    # which is the cache-noise defect again in a new place.
+                    degraded.append(
+                        f"no embedding server answered, so {len(chunk)} "
+                        f"file(s) in this run are keyword-searchable only")
             for item, vector in zip(chunk, vectors):
                 db.execute("DELETE FROM docs WHERE path=?", (item["path"],))
                 db.execute("DELETE FROM docs_fts WHERE path=?", (item["path"],))
@@ -415,6 +431,8 @@ def index_directory(root, progress=None, embed=True, db=None):
                   "embedded": embed and db.execute(
                       "SELECT COUNT(*) FROM docs WHERE vector IS NOT NULL").fetchone()[0] > 0,
                   "truncated": truncated, "examined": examined,
+                  "skipped_directories": sorted(set(declined)),
+                  "degraded": degraded,
                   "problems": problems}
         return report
     finally:

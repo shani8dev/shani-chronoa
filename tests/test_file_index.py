@@ -377,7 +377,14 @@ class TestTheEmbeddingIsBatched:
             (root / f"h{index}.txt").write_text(f"the btrfs rollback needs slot {index}\n")
         report = F.index_directory(root, embed=True)
         assert report["indexed"] == 8, report
-        assert report["problems"], "a short batch was not reported"
+        # **`degraded`, not `problems`.** A short batch is a *degradation* - the
+        # files were read and indexed, some just have no vector - and `problems`
+        # means a file that could not be read at all. The witness moved with the
+        # field, and the property it witnesses (a short batch is reported rather
+        # than silently misaligned) is unchanged.
+        assert report["degraded"], "a short batch was not reported"
+        assert not any("h0" in p or "h1" in p for p in report["problems"]), (
+            "a file that indexed fine is in `problems`, which means unreadable")
 
 
 class TestTheSemanticHalf:
@@ -809,3 +816,71 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         empty.mkdir()
         F.index_directory(empty, embed=False, db=db)
         assert F.status(db=db)["indexed"] == 1, F.status(db=db)
+
+
+class TestTheReportSaysWhatItLeftOut:
+    """Three fields the report did not have, and one of them was a lie.
+
+Measured before: a directory with one text file plus `.cache/`, `node_modules/`
+and `.git/` reported `indexed: 1, examined: 1, skipped: 0` - three directories
+absent from every field, so a reader concluded the tree held one file. It held
+four. And the embedding degradation was reported **per file** into `problems`,
+which the skill renders under "Not readable:", so a 20-file directory of perfectly
+readable files produced 20 identical "Not readable: <name>: no embedding server"
+lines.
+    """
+
+    def _tree(self, tmp_path):
+        root = tmp_path / "notes"
+        root.mkdir()
+        (root / "a.txt").write_text("the wifi box")
+        for directory, name in ((".cache", "j.txt"), ("node_modules", "d.txt"),
+                                (".git", "c.txt")):
+            (root / directory).mkdir()
+            (root / directory / name).write_text("x")
+        return root
+
+    def test_the_walker_names_the_directories_it_declined(self, tmp_path):
+        report = F.index_directory(self._tree(tmp_path), embed=False)
+        assert report["skipped_directories"] == [".cache", ".git", "node_modules"], (
+            report["skipped_directories"])
+        assert report["indexed"] == 1, report
+
+    def test_a_clean_directory_says_so_rather_than_saying_nothing(self, tmp_path):
+        """The control on the other side: a field that is absent when empty is a
+        field nobody can tell from a field that failed."""
+        root = tmp_path / "clean"
+        root.mkdir()
+        (root / "a.txt").write_text("note")
+        assert F.index_directory(root, embed=False)["skipped_directories"] == []
+
+    def test_a_file_that_reads_fine_is_never_called_unreadable(self, tmp_path, monkeypatch):
+        """**The bug the field split fixes.** A file that was read and indexed
+        without an embedding is *degraded*, not unreadable, and `problems` means
+        the second. Rendering the first under the second's heading is the
+        confident-wrong-answer shape."""
+        from shani_chronoa import local_embed
+        root = self._tree(tmp_path)
+        monkeypatch.setattr(local_embed, "embed",
+                            lambda texts, **k: None)      # no server at all
+        report = F.index_directory(root, embed=True)
+        assert report["indexed"] == 1, report
+        # the one text file is indexed and NOT in problems
+        assert not any("a.txt" in p for p in report["problems"]), report["problems"]
+        assert report["degraded"], "the missing embedding was not reported at all"
+
+    def test_the_degradation_is_one_entry_not_one_per_file(self, tmp_path, monkeypatch):
+        """**Measured before: 20 files produced 20 identical problems entries.**
+        A count is a rate, and a rate that grows with the directory is noise."""
+        from shani_chronoa import local_embed
+        root = tmp_path / "many"
+        root.mkdir()
+        for index in range(20):
+            (root / f"f{index}.txt").write_text(f"the wifi box {index}")
+        monkeypatch.setattr(local_embed, "embed", lambda texts, **k: None)
+        report = F.index_directory(root, embed=True)
+        assert len(report["degraded"]) == 1, (
+            f"{len(report['degraded'])} entries for 20 files - a per-file "
+            "entry is the cache-noise defect in a new place")
+        assert "20" in report["degraded"][0], report["degraded"]
+        assert report["indexed"] == 20, report

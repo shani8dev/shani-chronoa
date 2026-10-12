@@ -95,6 +95,26 @@ def _run(arguments: dict):
             shown = "; ".join(problems[:6])
             more = f" (+{len(problems) - 6} more)" if len(problems) > 6 else ""
             head += f" Not readable: {shown}{more}."
+        # **Degraded is not failed.** `problems` means a file that could not be
+        # read; `degraded` means a file that was read and indexed without an
+        # embedding. Rendering the second under the first's heading reported
+        # perfectly-indexed files as unreadable - measured, a 20-file directory
+        # produced 20 identical "Not readable: <name>: no embedding server"
+        # lines, because the old code put one entry per file into `problems`.
+        degraded = report.get("degraded") or []
+        if degraded:
+            head += " " + ". ".join(degraded[:2]) + ". "
+        declined = report.get("skipped_directories") or []
+        if declined:
+            # **Named, so "not readable" and "not entered" cannot be confused.**
+            # Before this the sentence read `2 new, 0 changed, 0 not readable`
+            # about a directory holding five files in cache-shaped directories,
+            # and a reader concluded there had been two.
+            shown = ", ".join(declined[:6])
+            more = f" and {len(declined) - 6} more" if len(declined) > 6 else ""
+            head += (f" Left out by design: {shown}{more} - cache, build and "
+                     "repository directories, which are the machine's and not "
+                     "yours. Name one directly to index it.")
         return head
 
     # action == "search"
