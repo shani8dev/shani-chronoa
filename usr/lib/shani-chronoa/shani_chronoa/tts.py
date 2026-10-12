@@ -724,9 +724,10 @@ class PiperTTS:
             # engine further below target than the numbers ask for - which is what
             # the first version of this did, and it showed up as `piper` landing
             # 1.9 dB under target for no reason the measurement explained.
-            allowed = PEAK_CEILING_DBFS - peak
-            if gain > allowed:
-                gain = allowed
+            if gain > 0:
+                allowed = PEAK_CEILING_DBFS - peak
+                if gain > allowed:
+                    gain = allowed
             if abs(gain) < LOUDNESS_TOLERANCE_DB:
                 return ""
             staged = wav_path + ".loud.wav"

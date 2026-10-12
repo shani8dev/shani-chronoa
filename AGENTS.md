@@ -11086,3 +11086,47 @@ voice_prompt_path`) and `:157` **raises** for a voice prompt that does not exist
 rather than defaulting. Both are already the house rule - guard the reload, refuse
 rather than default - and both are the things to check first if a persona/voice
 switch is ever built here.
+
+## personaplex: the loudness target, and it turned out to be needed (2026-10-12)
+
+First pass over `harness-study/personaplex` (NVIDIA's full-duplex speech-to-speech
+model) concluded the loudness normalisation it does - `normalize_audio(...,
+-24.0)` on every voice prompt - was **not** a Chronoa gap: the style table's
+loudness spread measured -0.06 to +0.97 dB, inside the 1 dB JND, so the harness
+never got the measurement that mattered.
+
+`cache/data-home` has what the first pass lacked: a Piper voice, the Kokoro model
+and the sherpa-onnx binary, all installed once into the git-ignored cache. Measured
+through `PiperTTS.synthesize_to_bytes`, one sentence per engine:
+
+| engine | RMS before | RMS after | peak after |
+|---|---|---|---|
+| espeak-ng | -19.89 | -19.90 | -4.06 |
+| piper | **-18.86** | -20.00 | -1.51 |
+| kokoro | **-24.69** | -20.00 | -4.56 |
+
+**A 5.83 dB spread,** against a just-noticeable-difference of about 1 dB - so
+choosing a voice engine changed perceived loudness by roughly a factor of two, and
+`piper` arrived at **-0.00 dBFS peak**: full scale, no headroom, so a
+positive-gain EQ from a voice style would clip it. Both are the axis PersonaPlex
+normalises for, and neither had a Chronoa equivalent.
+
+`PiperTTS.apply_loudness()` now runs beside `apply_timbre()`, at the boundary where
+the "not an engine" steps already live (the text normaliser's own comment says why):
+`TARGET_RMS_DBFS = -20.0`, `PEAK_CEILING_DBFS = -3.0`, a 1 dB deadband so an engine
+already on target is not re-encoded. **After: 0.10 dB spread across all three
+engines.** A failure never costs a reply - it returns a reason naming what could not
+be measured, exactly as `apply_timbre` does.
+
+**The bug the measurement caught, in my own first version.** The peak ceiling was
+applied to *every* gain, so `piper` - which needs a **cut** - was held 1.9 dB below
+target for no reason the numbers explained. A cut never raises a peak, so the
+ceiling belongs to lifts only. `test_a_cut_is_not_held_back_by_the_ceiling` pins it,
+and a mutation restores the wrong version to prove the test can fail.
+
+The second trap was the fixture: `tests/conftest.py`'s `_hermetic_env` redirects
+`XDG_DATA_HOME` to a scratch dir, so the engines physically installed in
+`cache/data-home` are invisible to any test that just looks - and the engine
+measurements skipped on a box that had all three. `in_that_graph` already links the
+cache in for the other measured-engine tests; the new test does the same without
+the PipeWire graph it does not use.

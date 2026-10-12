@@ -15,7 +15,7 @@ did, and which showed up as `piper` landing 1.9 dB under target for no reason th
 measurement explained), and claiming a change it did not make.
 """
 
-TEST_FILE = "tests/test_voice_loop_live.py"
+TEST_FILE = "tests/test_tts_loudness.py"
 
 _TTS = "usr/lib/shani-chronoa/shani_chronoa/tts.py"
 
