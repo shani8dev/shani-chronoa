@@ -94,10 +94,23 @@ EMPTY_DETAIL = (
 )
 
 NO_STORE_TITLE = "The assistant's memory is not available to this window"
+#: **Said in plain language, not in the code's own words.**
+#:
+#: This read: "The application object handed to this page carries no percept
+#: store, so nothing could be listed. That is a failure to read, not an absence of
+#: remembered facts, and it is deliberately not drawn as an empty list."
+#:
+#: The **distinction it carries is right and is kept** - an unreadable memory is
+#: not an empty one, and drawing it as an empty list would tell somebody
+#: Chronoa remembers nothing, which is the wrong answer. What was wrong was the
+#: wording: "the application object handed to this page" and "percept store" are
+#: what the module calls its own variables, and a person reading this page does
+#: not have them. Measured on the rendered panel, this sentence appeared above
+#: the empty state, so it was the first thing read.
 NO_STORE_DETAIL = (
-    "The application object handed to this page carries no percept store, so "
-    "nothing could be listed. That is a failure to read, not an absence of "
-    "remembered facts, and it is deliberately not drawn as an empty list."
+    "Chronoa could not reach its memory just now, so nothing could be listed. "
+    "That is not the same as remembering nothing - it is a failure to read rather "
+    "than an empty memory, and the two are not shown the same way."
 )
 
 UNREADABLE_ICON = "dialog-warning-symbolic"
@@ -455,14 +468,14 @@ class _MemorySurface(Adw.NavigationPage):
         if self._store is None:
             self._content.append(self.status_recorder.row(
                 common.STATUS_UNKNOWN,
-                "The percept store is not reachable",
+                "Chronoa's memory could not be reached",
                 NO_STORE_DETAIL))
         else:
             percepts, error = _read(self._store)
             if percepts is None:
                 self._content.append(self.status_recorder.row(
                     common.STATUS_ATTENTION,
-                    "The percept store could not be read",
+                    "Chronoa's memory could not be read",
                     error or "unknown error"))
             elif not percepts:
                 self._content.append(self.status_recorder.row(
@@ -498,7 +511,7 @@ class _MemorySurface(Adw.NavigationPage):
         percepts, error = _read(self._store)
         if percepts is None:
             self._content.append(
-                self._status(UNREADABLE_ICON, "The percept store could not be read", error)
+                self._status(UNREADABLE_ICON, "Chronoa's memory could not be read", error)
             )
             return
         if not percepts:

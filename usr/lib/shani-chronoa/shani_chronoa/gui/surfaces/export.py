@@ -146,9 +146,10 @@ STATUS_CSS = "export-status"
 BANNER_CSS = "export-banner"
 EMPTY_CSS = "export-empty"
 
+#: "memory", not "percept store": the second is the module's name for it.
 NO_STORE_REASON = (
-    "this window has no percept store, so what Chronoa believes cannot be "
-    "read from here"
+    "Chronoa's memory is not reachable from this window, so what it believes "
+    "cannot be read from here"
 )
 NO_CONVERSATION_REASON = (
     "there is no open conversation yet - the first thing you say becomes one"

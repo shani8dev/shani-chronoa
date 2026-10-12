@@ -474,10 +474,27 @@ class TestFacts:
         assert document.text.count(FACT_TEXT) == 0, document.text
 
     def test_a_missing_store_is_a_reason_not_a_crash(self):
+        """A missing store gives a sentence, not an exception.
+
+        **The third assertion used to be `"no percept store" in reason`, which
+        pinned the sentence to the module's own vocabulary** - and the sentence on
+        screen read "this window has no percept store, so what Chronoa believes
+        cannot be read from here". It said "percept store" to a person, which is
+        what the module calls the variable.
+
+        Rewriting it in plain language failed this line, which is the right way
+        round: the line asserted the wording it was written against, and line
+        above it (`reason == surface.NO_STORE_REASON`) had already pinned the
+        constant. What is left asserts the thing the test is named for - that
+        there *is* a reason - and the one thing the sentence must not do, which is
+        imply the memory is empty when in fact it could not be read.
+        """
         document, reason = surface.facts_export(None)
         assert document is None
         assert reason == surface.NO_STORE_REASON
-        assert "no percept store" in reason
+        assert reason and "cannot be read" in reason, reason
+        assert "empty" not in reason.lower(), (
+            f"an unreadable memory must not be described as an empty one: {reason!r}")
 
     def test_a_store_that_raises_says_so(self):
         class _Exploding:
