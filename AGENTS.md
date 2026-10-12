@@ -14534,3 +14534,111 @@ one test disturbing another.** Nothing here checks order-independence.
 
 It is also why the full sweep has never completed in this session, which is the one
 claim this work cannot yet make.
+
+## Four things were built and wired to nothing (2026-10-12)
+
+Asked what the main UI should add, the answer kept being **controls that already
+existed and reached nobody.** Every one of these was measured, not inferred.
+
+**A turn could be stopped, but only while Chronoa was asking permission.**
+`Decision.CANCEL` was fixed on 2026-10-06 and `turn_cancelled()` has been read by
+the tool loop ever since; nothing outside the approval prompt could *reach* it. So
+a turn that was thinking, streaming or mid-skill had no control at all, and a
+person who asked something that went wrong had two options: wait, or quit.
+`permissions.cancel_turn()` now files **the same decision the dialog files** -
+session-scoped under `*`, because the tool loop has the turn and not the
+`(action, resource)` key - and the button is driven from `set_state()`, the single
+entry point for turn state, so it cannot end up built-but-never-shown.
+
+**It stops before the next action, and the tooltip says so.** Cancelling a
+`chat_message` mid-stream leaves half an answer in the transcript. A stop that
+claims a hard kill it cannot perform is the same defect as a chip that reports a
+state the app has overridden.
+
+**`turn_stats()` was computed every turn and read by nothing.** Measured: zero
+callers outside its own definition. The assistant already timed every model call
+and summed the token usage each backend reports - *"Ollama counts them beside the
+message, the cloud providers send a `usage` block, and all three were thrown
+away"* - and showed the result to nobody. Now a dim line under each turn.
+**Time and tokens, never money**, because with cloud fallback on a per-call price
+depends on the provider and the model, and a figure invented at the display layer
+would be worse than none. **Read when the turn is appended and never cached**,
+since the totals are for the turn in progress.
+
+**Undo existed and had no place.** `undo_last_change` is **global** - it undoes the
+last change, and its own docstring separates that from "revert to some earlier
+state I happened to have in mind". A button on a card would say "undo this" and
+undo something else, so it lives in the composer, takes its label from
+`recent_changes()`, **asks the skill's own consent gate**, and reports **the
+skill's words** because the ring can move between drawing the label and pressing it.
+**Hidden when there is nothing to undo** - measured, `recent_changes()` is `[]`
+here, so a merely-disabled button would be a permanent dead control.
+
+**And `set_regenerate_handler()` exists and the app never calls it**, so "Ask that
+again" is a third control wired to nothing, beside the stop-*speaking* button at
+1361 which is created hidden and never revealed.
+
+**The through-line: this codebase builds capabilities and forgets to surface them.**
+That is the shape of all four, and of the two dead organ lights found earlier in
+the same stretch.
+
+## Escape stops a turn; the composer takes two lines (2026-10-12)
+
+Escape now stops a running turn, **returning False when nothing is running** so it
+keeps its other jobs - a shortcut that does nothing when nothing is running is the
+claim-without-mechanism this file keeps finding. This also makes true a claim that
+has sat in the composer since before anything was wired: the stop-*speaking*
+button's tooltip says "(Esc)" on a button that can never appear.
+
+The composer is a `Gtk.TextView`, which the code itself called "a separate piece of
+work". **Enter sends, Shift+Enter is a newline** - without either, a person who
+cannot reach the Send button can do neither. A `Gtk.TextView` has no placeholder,
+so the hint is a label inside an `Gtk.Overlay` *in* the field rather than beside it,
+hidden on the first character: a label to the left reads as a caption, not as the
+prompt GTK was drawing.
+
+**And the claim justifying the migration was wrong.** It said a `Gtk.Entry`
+"cannot hold a newline at all". Measured: `Gtk.Entry().set_text("one\ntwo")` gives
+back `"one\ntwo"`. What it cannot do is **show** one - one line, no wrapping, no
+vertical growth - so a three-line request sat in a field one line tall and could not
+be read or edited. The migration stands; the reason did not. Same shape as the
+42/87/70 figures and the 105-character regex: plausible, asserted, and only measured
+when a test contradicted it.
+
+**Ctrl+Z was deliberately not bound to file-undo.** A `Gtk.TextView` owns an undo
+stack, so Ctrl+Z inside the composer undoes what you typed - which is standard.
+Binding file-undo to the same key would take the text undo away, which is a
+regression dressed as a feature.
+
+## The fixture written to detect order-dependence was causing it (2026-10-12)
+
+The suite leaked **12 GB into /tmp** in one run - `/tmp/ties-*` and `/tmp/three-*`
+at 6 GB each - and once a 16 GB tmpfs fills, unrelated tests fail with
+`OSError: [Errno 122] Disk quota exceeded` while copying the schema, which has
+nothing to do with the cause. It happened three times in one session, and each time
+it looked like a code failure rather than a full filesystem.
+
+The cause is ordinary: **14 `tempfile.mkdtemp()` call sites are not inside a
+`with`**, so nothing removes them - `conftest.py:68`, `test_browser.py:143`,
+`test_every_gate_has_a_row.py:159`, `test_git_write.py:168`,
+`test_landlock.py:170` and `:176`, `test_oom_score.py:336`,
+`test_organism_doc.py:94`, `test_readme_numbers.py:59`,
+`test_sandbox_core_dumps.py:119` and `:122`, `test_skill_workbench.py:92`,
+`test_voice_loop_live.py:107`, `test_windows_gnome_live.py:64`.
+
+**A session fixture now reclaims them, and only them.** Verified by planting three
+directories: the two owned prefixes were removed and an unrelated one survived.
+
+**The first version of that list included `pytest-of-`, and it caused the very
+order-dependence this stretch kept hitting.** It deleted
+`/tmp/pytest-of-<user>` at the end of whichever session finished first, including
+the directory the next run was using - measured
+`FileNotFoundError: /tmp/pytest-of-shrinivaskumbhar/pytest-0`, which appeared as
+**101 errors in whichever file ran second and a clean pass run alone**. Removed:
+pytest manages its own retention, so leave its directories to it. Re-verified
+afterwards on all three properties.
+
+**That is the fourth time this session that a check I wrote was itself the defect**
+- the settings key-set, the light-gate wrapper, the inverted emptiness guard, and
+now this. A gate that cannot fail is worse than no gate, and a gate that fails for
+the wrong reason is worse still, because it teaches you to distrust green.
