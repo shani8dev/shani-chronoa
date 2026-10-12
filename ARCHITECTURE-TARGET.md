@@ -677,6 +677,16 @@ real version of it.
    folders. Check that `sqlite-vec` is packaged in Arch before using it;
    otherwise brute-force cosine search in Python is enough at this scale. No
    Qdrant or Chroma (Part 4).
+   **Two of the three built (2026-10-12).** Conversations
+   (`conversation_store._fill_vectors`, `_by_meaning`) and opted-in folders
+   (`file_index.py`: `index_directory`, `search`, `EMBED_CHUNK`,
+   `SIMILARITY_FLOOR`) both store vectors beside FTS5 and merge by reciprocal
+   rank, and the folders half now has the My files panel so it is reachable
+   without a tool call. **What is left is memory facts**, and
+   `senses/memory.py`'s own docstring is explicit that there is no embedding
+   model, vector index or similarity code in it at all - so "what do I remember
+   about X" is the one of the three still keyword-only, which is the difference
+   this item exists to close. The honest status is two thirds, not none.
 4. **Idle-time consolidation** (Consolidate, Dream: the useful part). While
    idle and on AC power: summarise long conversations, extract memory-link
    candidates for the user to confirm (entity extraction), and refresh the
