@@ -15556,3 +15556,76 @@ actually supports today is the count, and the two D-Bus-only actions named above
 (`show-page`, `show-window`) - both verified to have no in-tree *control*, only an
 existence probe (`app.lookup_action("show-window")`) and a source-text assertion.
 
+
+## An artifact you can look at without leaving the conversation (2026-10-12)
+
+"Open" hands the file to the desktop, which for a picture means leaving the app
+and coming back to a conversation you have lost your place in. `ArtifactBlock`
+now expands a preview **in place**, and offers the control only where there is
+something to show - a zip gets none, because a control that opens something
+unexpected is worse than no control.
+
+Pictures are sized from the file's own dimensions and capped at 480px: the cost
+is the decoded surface, not the width on screen. Text previews stop at 200 lines
+**and say so** - showing 200 lines of a 40,000-line log with no note reads as
+"this is the file", and the reader draws a conclusion from a truncated thing.
+
+Rendered and looked at: the four-quadrant image came back at full size, the
+markdown preview showed its content. 6 tests.
+
+## Ctrl+K: one list of everywhere you can go (2026-10-12)
+
+244 skills, every panel, every slash command, the mode switches. The sidebar
+search filters *only* panels and sits somewhere you have to be. The palette
+gathers four sources and is refreshed **on open**, not cached at construction -
+panels come and go.
+
+Nothing is offered that cannot be chosen: an entry with no callback is dropped,
+because a palette row that reports nothing when pressed is the same defect as a
+button wired to nothing, and easier to hit here because the entries come from
+four places that can each be empty.
+
+**Two bugs, both invisible until the window was built:**
+
+1. `ListBox.select_row` takes a `ListBoxRow`, not the child widget - and in GTK
+   4 the child's parent is *not* that row, so comparing parents never matched.
+   `_selected_index()` answered -1 for a visibly selected row and **Enter did
+   nothing at all**. Measured with `first_child.get_parent() is
+   get_selected_row()`: False. Resolved by walking indices against
+   `get_row_at_index`.
+2. `ListBox.scroll_to_child` does not exist in GTK 4. `Gtk.Widget.scroll_to`
+   instead.
+
+Panel titles come from `surfaces.all_surfaces()`, **not** the sidebar's stored
+title: `sidebar.py` does `(row, title.lower(), icon, section)` because its search
+compares against it, so reading that field offered "my files" and "meetings" where
+the panel says "My files" and "Meetings".
+
+Four mutations caught: unrunnable entries kept, selection by parent (the bug
+above), a typo falling back to the full list, and arrow keys not wrapping.
+
+## Fired rules were real and invisible (2026-10-12)
+
+`AmbientScheduler.event_results()` had **no caller anywhere in `usr/`**. An event
+rule could fire a skill, change a setting or run a command, and the window showed
+no sign of it. The rail now has a **Triggers** section, read on the existing
+two-second tick - the scheduler keeps a bounded list under its own lock and says
+it is safe from any thread, so no cross-thread hop is needed.
+
+A rule that was **refused** is shown as refused, not omitted: a declined action
+is something a person decided, and listing only successes makes it look like
+nothing happened.
+
+**A section that throws must not look empty.** The first version called
+`self._events.link(label, detail, icon, on_open, surface="triggers")` against
+`_Section.link(self, text, detail, surface, on_open)` - `surface` twice, so a
+`TypeError` on *every* refresh. `refresh()`'s guard caught it and logged it, and
+the section rendered empty, which is indistinguishable from "no rules fired".
+The guard now writes into the section, and pairs each filler with its section
+explicitly - inferring the name from `fill.__name__` meant the guard did nothing
+for any wrapper, which is what happened when it was tested.
+
+**Still not true, and recorded rather than papered over:** percept rules have no
+unattended caller. `rules.py` says so itself - `fire_all` and `evaluate_many`
+have exactly one caller, `shani-chronoa-sense trigger run`. This section shows
+**event** rules, which `AmbientScheduler` does drive.

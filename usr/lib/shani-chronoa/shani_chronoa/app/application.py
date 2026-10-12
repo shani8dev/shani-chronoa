@@ -779,6 +779,10 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             if self.assistant:  # reopening the app shows the conversation it was in
                 self.window.show_conversation(self.assistant.visible_turns())
             self.attach_regenerate()
+            # **The rail now reads fired rules.** `event_results()` had no
+            # caller anywhere in `usr/`, so an event rule could run a skill or
+            # change a setting with nothing on screen to say so.
+            self.window.set_event_source(self.sense_scheduler)
             # A rejected device outranks the ordinary status: it explains why
             # the microphone the user picked is not the one in use.
             self.window.set_status(

@@ -697,6 +697,8 @@ class ArtifactBlock(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self.add_css_class("reply-block")
         self._paths = [Path(p) for p in paths]
+        #: Open previews, keyed by path, so a second click can close the first.
+        self._previews: "dict[str, Gtk.Widget]" = {}
 
         heading = Gtk.Label(label="Made" if len(self._paths) == 1 else
                             f"Made {len(self._paths)} files")
@@ -742,7 +744,140 @@ class ArtifactBlock(Gtk.Box):
         if not path.is_dir():
             row.append(_flat_button("folder-download-symbolic",
                                     "Save a copy elsewhere", self._on_save, path))
+        # Preview is offered only where there is something to show. "Open" hands
+        # the file to the desktop, which for a picture means leaving the app and
+        # coming back to a conversation you have lost your place in.
+        if self._preview_kind(path) is not None:
+            button = _flat_button("view-more-symbolic",
+                                  f"Preview {path.name}", self._on_preview, path)
+            row.append(button)
         return row
+
+    #: Suffixes a preview can honestly show. Anything else gets no control rather
+    #: than a viewer that opens something unexpected.
+    TEXT_SUFFIXES = (".md", ".txt", ".html", ".htm", ".json", ".csv", ".log",
+                     ".toml", ".ini", ".cfg", ".yaml", ".yml", ".xml", ".py",
+                     ".sh", ".js", ".ts", ".css", ".sql", ".desktop")
+
+    def _preview_kind(self, path: Path):
+        """``"image"``, ``"text"``, or None when there is nothing to preview."""
+        try:
+            if path.is_dir():
+                return None
+            suffix = path.suffix.lower()
+        except OSError:
+            return None
+        if suffix in self.IMAGE_SUFFIXES:
+            return "image"
+        if suffix in self.TEXT_SUFFIXES:
+            return "text"
+        return None
+
+    def _on_preview(self, button: Gtk.Button, path: Path) -> None:
+        """Show it here, or hide it again.
+
+        **The preview lives inside the row's own card**, so it expands in place
+        in the conversation rather than opening a window over it. Toggling
+        rather than opening is what keeps the reader's place: an "open" that
+        leaves the app is the thing this is avoiding.
+        """
+        existing = getattr(self, "_previews", {}).get(str(path))
+        if existing is not None:
+            parent = existing.get_parent()
+            if parent is not None:
+                parent.remove(existing)
+            self._previews.pop(str(path), None)
+            button.set_icon_name("view-more-symbolic")
+            button.set_tooltip_text(f"Preview {path.name}")
+            return
+        widget = self._build_preview(path)
+        if widget is None:
+            button.set_sensitive(False)
+            return
+        self._previews[str(path)] = widget
+        self.append(widget)
+        button.set_icon_name("view-conceal-symbolic")
+        button.set_tooltip_text(f"Hide the preview of {path.name}")
+
+    def _build_preview(self, path: Path):
+        kind = self._preview_kind(path)
+        if kind == "image":
+            return self._image_preview(path)
+        if kind == "text":
+            return self._text_preview(path)
+        return None
+
+    #: How much of a text file to show, in lines. A 40,000-line log in the
+    #: transcript is a denial of service on the scroll position, and the point
+    #: of a preview is to recognise the file, not to read it here.
+    PREVIEW_LINES = 200
+
+    def _image_preview(self, path: Path):
+        """The picture, large enough to actually look at.
+
+        **Sized from the file's own dimensions, capped at 480px.** A thumbnail
+        scaled to fit a 96px box cannot answer "is this the right picture"; this
+        can. And a genuinely enormous image is still capped, because the cost
+        here is the decoded surface, not the width on screen.
+        """
+        try:
+            from gi.repository import GdkPixbuf
+            info = GdkPixbuf.Pixbuf.get_file_info(str(path))
+            if info is None:
+                return None
+            width, height = info[1], info[2]
+            longest = max(width, height) or 1
+            scale = min(480.0 / longest, 1.0)
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(path), max(int(width * scale), 1), max(int(height * scale), 1),
+                True)
+        except Exception as exc:                                   # noqa: BLE001
+            logger.info("no preview for %s: %s", path.name, exc)
+            return None
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        image = Gtk.Image.new_from_paintable(Gdk.Texture.new_for_pixbuf(pixbuf))
+        image.set_halign(Gtk.Align.START)
+        frame.set_child(image)
+        frame.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            [f"Preview of {path.name}, {width} by {height} pixels"])
+        return frame
+
+    def _text_preview(self, path: Path):
+        """The first `PREVIEW_LINES` lines, and a truthful note when cut."""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                lines = []
+                for index, line in enumerate(handle):
+                    if index >= self.PREVIEW_LINES:
+                        lines.append(f"... cut off at {self.PREVIEW_LINES} lines. "
+                                     f"Open the file to read the rest.")
+                        break
+                    lines.append(line.rstrip("\n"))
+        except OSError as exc:
+            logger.info("no preview for %s: %s", path.name, exc)
+            return None
+        if not lines:
+            return None
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_max_content_height(280)
+        scroller.set_propagate_natural_height(True)
+        # Monospace and selectable, because the reason to preview a file in a
+        # conversation is to copy something out of it.
+        view = Gtk.TextView()
+        view.set_editable(False)
+        view.set_monospace(True)
+        view.set_wrap_mode(Gtk.WrapMode.NONE)
+        view.get_buffer().set_text("\n".join(lines))
+        frame = Gtk.Frame()
+        frame.add_css_class("artifact-preview")
+        frame.set_child(scroller)
+        scroller.set_child(view)
+        frame.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"Preview of {path.name}"])
+        return frame
 
     def _thumbnail(self, path: Path):
         """A scaled preview, or nothing at all.

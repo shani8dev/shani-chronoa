@@ -187,11 +187,27 @@ def _thumbnail_of(block):
     return first if isinstance(first, Gtk.Image) else None
 
 
-def test_a_made_file_is_shown_with_its_three_controls(a_real_file):
+#: The controls an artifact row is expected to carry. **Asserted as a set, not
+#: as a count.** A bare `== 3` went stale the moment preview was added and
+#: started failing for no reason a reader could see; a set names what the row is
+#: *for*, so adding a control is a deliberate edit to this line rather than a
+#: silent breakage somewhere else.
+ARTIFACT_CONTROLS = ("Open ", "Copy this file's path", "Save a copy elsewhere",
+                     "Preview ")
+
+
+def _control_names(block):
+    return [b.get_tooltip_text() for b in _walk(block)
+            if isinstance(b, Gtk.Button) and b.get_tooltip_text()]
+
+
+def test_a_made_file_is_shown_with_its_four_controls(a_real_file):
     block = blocks.ArtifactBlock([a_real_file])
-    assert len(_buttons(block)) == 3, (
-        "a made file needs open / copy path / save a copy - the controls "
-        "CodeBlock already has for code")
+    names = _control_names(block)
+    # A made file is openable, its path is copyable, a copy is saveable and it
+    # can be previewed - the controls CodeBlock already has for code.
+    assert all(any(n.startswith(c) for n in names) for c in ARTIFACT_CONTROLS), (
+        f"missing a control, got {names}")
     labels = [w for w in _widgets(block) if isinstance(w, Gtk.Label)]
     assert any(a_real_file.name in (w.get_label() or "") for w in labels)
 
@@ -203,7 +219,9 @@ def test_a_real_image_gets_a_thumbnail_and_a_broken_one_does_not(a_real_file,
     broken = tmp_path / "not-really.png"
     broken.write_bytes(PNG)                 # right extension, not a real image
     assert _thumbnail_of(blocks.ArtifactBlock([a_real_file])) is None
-    assert len(_buttons(blocks.ArtifactBlock([broken]))) == 3, (
+    broken_names = _control_names(blocks.ArtifactBlock([broken]))
+    assert all(any(n.startswith(c) for n in broken_names)
+               for c in ARTIFACT_CONTROLS), (
         "a file with no thumbnail must still be openable and copyable - the "
         "name is what a person can act on")
 
@@ -248,7 +266,9 @@ def test_the_card_renders_artifacts_and_shows_nothing_without_them(a_real_file):
                                "Made a picture.", True, artifacts=(a_real_file,))
     made = _blocks_in(card)
     assert len(made) == 1, f"a declared artifact rendered no file row: {_blocks_in(card)}"
-    assert len(_buttons(made[0])) == 3
+    made_names = _control_names(made[0])
+    assert all(any(n.startswith(c) for n in made_names) for c in ARTIFACT_CONTROLS), (
+        f"the declared artifact's row lost a control: {made_names}")
 
     plain = blocks.ToolCallCard("get_datetime", {}, "It is noon.", True)
     assert not _blocks_in(plain), (
@@ -536,10 +556,12 @@ def test_a_directory_artifact_does_not_offer_a_save_it_cannot_do(tmp_path):
         f"a folder lost its open control: {tooltips}")
 
 
-def test_a_file_artifact_still_offers_all_three(tmp_path):
-    """The control for the test above: dropping one must not drop them all."""
+def test_a_file_artifact_offers_every_control(tmp_path):
+    """The control for the directory test above: dropping one must not drop
+    them all. A set rather than a count, for the reason on ARTIFACT_CONTROLS."""
     made = tmp_path / "cat-edited.png"
     made.write_bytes(b"\x89PNG\r\n\x1a\n")
-    tooltips = [b.get_tooltip_text() for b in _walk(blocks.ArtifactBlock([made]))
-                if isinstance(b, Gtk.Button)]
-    assert len(tooltips) == 3, f"a file should have three controls, got {tooltips}"
+    names = _control_names(blocks.ArtifactBlock([made]))
+    missing = [c for c in ARTIFACT_CONTROLS
+               if not any(n.startswith(c) for n in names)]
+    assert not missing, f"a file lost {missing}; it has {names}"

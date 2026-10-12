@@ -174,6 +174,37 @@ class RailBreakpoint:
         return breakpoint
 
 
+def _describe_event(outcome) -> "tuple[str, str, bool]":
+    """(label, detail, failed) from whatever a fired rule handed back.
+
+    **Read defensively, because the shapes here are not uniform and none of them
+    are this function's to guarantee.** A fire result is a small record from
+    another subsystem; `getattr` with defaults means an unfamiliar one renders as
+    a bare line rather than taking the rail down - and the rail refreshing every
+    two seconds is exactly where an exception would be both easy to cause and
+    expensive to notice.
+    """
+    name = (getattr(outcome, "rule_name", None)
+            or getattr(outcome, "name", None)
+            or getattr(outcome, "rule", None) or "")
+    action = (getattr(outcome, "action", None)
+              or getattr(outcome, "what", None) or "")
+    refused = bool(getattr(outcome, "refused", False))
+    failed = bool(getattr(outcome, "failed", False))
+    detail = (getattr(outcome, "detail", None)
+              or getattr(outcome, "reason", None)
+              or getattr(outcome, "error", None) or "")
+    label = str(name or action or "").strip()
+    if not label and not detail:
+        return ("", "", False)
+    if not label:
+        label = "A rule fired"
+    note = str(detail or action or "").strip()
+    if refused:
+        note = note or "asked first, and was turned down"
+    return (label, note[:80], failed or refused)
+
+
 class NowRail(Gtk.Box):
     """The right-hand rail. `refresh()` rebuilds it from the stores.
 
@@ -191,7 +222,8 @@ class NowRail(Gtk.Box):
                  get_tool: Optional[Callable[[], str]] = None,
                  on_open: Optional[Callable[[str], None]] = None,
                  get_context: Optional[Callable[[], object]] = None,
-                 get_artifacts: Optional[Callable[[], object]] = None) -> None:
+                 get_artifacts: Optional[Callable[[], object]] = None,
+                 get_events: Optional[Callable[[], object]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.add_css_class("now-rail")
         self.set_size_request(RAIL_WIDTH, -1)
@@ -205,6 +237,12 @@ class NowRail(Gtk.Box):
         #: already been through `tools.artifacts_for`, so they are absolute and
         #: present by the time they arrive here.
         self.get_artifacts = get_artifacts or (lambda: ())
+        #: Triggered rules, from the ambient scheduler. A callback like the rest:
+        #: the rail reads, it does not own. **This exists because
+        #: `AmbientScheduler.event_results()` had no caller anywhere in `usr/`** -
+        #: event rules fired, the results were recorded, and nothing ever read
+        #: them, so an unattended rule did its work invisibly.
+        self.get_events = get_events or (lambda: ())
 
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -227,11 +265,13 @@ class NowRail(Gtk.Box):
         self._timers = _Section("Timers")
         self._changed = _Section("Changed")
         self._made = _Section("Made")
+        self._events = _Section("Triggers")
         self._tasks = _Section("Tasks")
         self._goals = _Section("Goals")
         self._posture = _Section("Posture")
         for section in (self._now, self._context, self._timers, self._changed,
-                        self._made, self._tasks, self._goals, self._posture):
+                        self._made, self._events, self._tasks, self._goals,
+                        self._posture):
             inner.append(section)
 
         scroller.set_child(inner)
@@ -407,6 +447,51 @@ class NowRail(Gtk.Box):
             return "text-x-generic-symbolic"
         return "document-open-symbolic"
 
+    def _fill_events(self) -> None:
+        """Rules that fired on their own, most recent first.
+
+        **The whole point of this section is that it used to read nothing.**
+        `AmbientScheduler.event_results()` had no caller anywhere in `usr/`: an
+        event rule could fire a skill, change a setting, or run a command and
+        the window showed no sign of it - the automation was real and invisible,
+        which is the worst of both.
+
+        Newest first, same as "Made", for the same reason: the thing that just
+        happened is the one being looked for.
+
+        **A rule that refused is shown as having refused**, not omitted. A
+        trigger that asked and was turned down is an action someone declined, and
+        a rail that listed only successes would make it look like nothing
+        happened at all.
+        """
+        self._events.clear()
+        try:
+            results = list(self.get_events() or ())
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: event results unreadable: %s", exc)
+            self._events.empty("Could not read what the rules did")
+            return
+        if not results:
+            self._events.empty("No rule has fired on its own")
+            return
+        for outcome in reversed(results[-6:]):
+            label, detail, failed = _describe_event(outcome)
+            if not label:
+                continue
+            if failed:
+                self._events.empty(f"{label} - {detail}")
+            else:
+                # **Four positional arguments, no `surface=` keyword.**
+                # `_Section.link(self, text, detail, surface, on_open)` - passing
+                # `surface=` as well was a duplicate argument, so this raised
+                # `TypeError` on every refresh, `refresh()`'s per-section guard
+                # logged it, and the section rendered empty. Measured: a section
+                # that throws every two seconds looks exactly like one with
+                # nothing to say, which is the swallowing-the-error shape this
+                # repository records repeatedly.
+                self._events.link(label, detail, "preferences-system-symbolic",
+                                  self.on_open)
+
     def _fill_tasks(self) -> None:
         self._tasks.clear()
         config = config_mod.ChronoaConfig()
@@ -513,13 +598,33 @@ class NowRail(Gtk.Box):
     def refresh(self) -> None:
         """Rebuild every section. Never raises: a rail that cannot be built
         must leave the window exactly as it was."""
-        for fill in (self._fill_now, self._fill_context, self._fill_timers,
-                     self._fill_changed, self._fill_made, self._fill_tasks,
-                     self._fill_goals, self._fill_posture):
+        # **Section and filler paired, not inferred.** The first version walked
+        # the fillers alone and recovered the section from `fill.__name__`, which
+        # is `_fill_events` for the real thing and `_explode` for any wrapper -
+        # so the guard silently did nothing exactly when it was being tested. A
+        # guard that cannot find its section cannot report on it.
+        for section, fill in (
+                (self._now, self._fill_now),
+                (self._context, self._fill_context),
+                (self._timers, self._fill_timers),
+                (self._changed, self._fill_changed),
+                (self._made, self._fill_made),
+                (self._events, self._fill_events),
+                (self._tasks, self._fill_tasks),
+                (self._goals, self._fill_goals),
+                (self._posture, self._fill_posture)):
             try:
                 fill()
             except Exception as exc:  # noqa: BLE001
+                # **And said so in the section, not only in the log.** A section
+                # that raises on every two-second refresh is indistinguishable
+                # from one with nothing to report, which is how the duplicate
+                # `surface=` argument below went unnoticed. The log line is right
+                # and insufficient: nobody is reading the log at two-second
+                # intervals.
                 logger.warning("rail: %s failed: %s", fill.__name__, exc)
+                section.clear()
+                section.empty("Could not read this section")
 
 
 def _human_seconds(seconds: float) -> str:

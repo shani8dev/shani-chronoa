@@ -1202,6 +1202,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         #: What this session's skills declared they made, newest last.
         self._artifacts: list = []
         self._rail_row = None
+        self._build_palette()
         self._rail_toggle = Gtk.ToggleButton()
         self._rail_toggle.set_icon_name("sidebar-show-right-symbolic")
         self._rail_toggle.add_css_class("flat")
@@ -1556,7 +1557,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                                          get_tool=self._rail_tool,
                                          on_open=self._show_surface,
                                          get_context=self._rail_context,
-                                         get_artifacts=self._rail_artifacts)
+                                         get_artifacts=self._rail_artifacts,
+                                         get_events=self._rail_events)
         self._chat_row.append(self._rail)
         # **Hidden, not shrunk, on a narrow window.** At a fraction of its width
         # the rail wraps every label into two and three lines and reads as a
@@ -2490,6 +2492,33 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if getattr(self, "_rail", None) is not None:
             self._rail.refresh()
 
+    #: Set from the application once it exists; before that the rail has no
+    #: scheduler to read and says so rather than showing an empty section that
+    #: looks like "nothing has fired".
+    _event_source = None
+
+    def set_event_source(self, source) -> None:
+        """Attach the ambient scheduler whose fired rules the rail reports."""
+        self._event_source = source
+
+    def _rail_events(self):
+        """What the ambient rules have fired.
+
+        **Reads `AmbientScheduler.event_results()`, which had no caller anywhere
+        in `usr/`** - rules fired unattended and the window showed nothing. The
+        scheduler keeps a bounded list under its own lock and says it is safe
+        from any thread, which is what lets the two-second rail tick read it
+        directly rather than the tick crossing into the scheduler's thread.
+        """
+        source = self._event_source
+        if source is None:
+            return ()
+        try:
+            return source.event_results()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("rail: event results unavailable: %s", exc)
+            return ()
+
     def _rail_artifacts(self):
         return list(self._artifacts)
 
@@ -2524,6 +2553,108 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _on_regenerate_clicked(self) -> None:
         if self._regenerate is not None:
             self._regenerate()
+
+    def _build_palette(self) -> None:
+        """Ctrl+K, and the one list of everywhere you can go.
+
+        Built here rather than by the palette itself because the entries are
+        this window's business: its pages, the surfaces its sidebar is showing,
+        and the slash commands it can run. The palette only knows how to list
+        and filter what it is given.
+
+        **Gathered on open, not cached at construction** - panels come and go,
+        and a palette offering one that no longer exists is the stale-list
+        failure this repository keeps finding.
+        """
+        from shani_chronoa.gui import palette as palette_module
+
+        self._palette = palette_module.CommandPalette(on_close=self._close_palette)
+        self._palette.set_entries(self.palette_entries())
+        self._palette.set_visible(False)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_palette_key)
+        self.add_controller(keys)
+
+    def _on_palette_key(self, _controller, keyval, _keycode, state) -> bool:
+        """Ctrl+K or Cmd+K opens, Escape closes.
+
+        `Gdk.ModifierType.CONTROL_MASK` is the modifier bit on every platform and
+        a Mac keyboard delivers Command as it, so one binding covers both.
+        """
+        if keyval in (Gdk.KEY_k, Gdk.KEY_K) and bool(
+                state & Gdk.ModifierType.CONTROL_MASK):
+            self._toggle_palette()
+            return True
+        if keyval == Gdk.KEY_Escape and self._palette.get_visible():
+            self._close_palette()
+            return True
+        return False
+
+    def _toggle_palette(self) -> None:
+        if self._palette.get_visible():
+            self._close_palette()
+            return
+        self._palette.set_entries(self.palette_entries())
+        self._palette.set_visible(True)
+        self._palette.focus_search()
+
+    def _close_palette(self) -> None:
+        self._palette.set_visible(False)
+        self.focus_input()
+
+    def palette_entries(self):
+        """Everywhere the palette can take you, from the window's own sources."""
+        from shani_chronoa.gui import commands as slash
+        from shani_chronoa.gui import palette as palette_module
+        from shani_chronoa.gui import surfaces
+
+        try:
+            all_surfaces = dict(surfaces.all_surfaces())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("palette: surfaces unreadable: %s", exc)
+            all_surfaces = {}
+
+        entries = [
+            palette_module.Entry("Conversation", "the main window",
+                                 "chat-symbolic", self._show_conversation_page,
+                                 group="Go to", weight=0),
+            palette_module.Entry("Quick ask", "one question, no conversation",
+                                 "edit-clear-symbolic", self._show_quick_ask_page,
+                                 group="Go to", weight=1),
+        ]
+        for surface_id in surfaces.SURFACE_IDS:
+            row = self._sidebar_page._surface_rows.get(surface_id)
+            if row is None:
+                # **Not in this window's sidebar is not an error** - a panel can
+                # be registered and unavailable. Listing it anyway would offer a
+                # row that opens nothing.
+                continue
+            _row, _lowered, icon, section = row
+            # **`all_surfaces()`, not the sidebar's stored title.** The sidebar
+            # lowercases it on the way in - `sidebar.py` does
+            # `(row, title.lower(), icon, section)` because its search compares
+            # against it - so a palette reading that field offers "my files" and
+            # "meetings" where the panel says "My files" and "Meetings". The
+            # surface's own title is the one a person recognises.
+            title = all_surfaces.get(surface_id, (_lowered, icon, None))[0]
+            entries.append(palette_module.Entry(
+                title, section or "Panel", icon,
+                (lambda sid=surface_id: self._show_surface(sid)),
+                group="Panels", weight=0))
+        for name in slash.names():
+            entries.append(palette_module.Entry(
+                f"/{name}", "command", "terminal-symbolic",
+                (lambda n=name: self._run_command(f"/{n}")),
+                group="Commands", weight=0))
+        return entries
+
+    def _show_conversation_page(self) -> None:
+        self._close_palette()
+        self._show_surface("conversation")
+
+    def _show_quick_ask_page(self) -> None:
+        self._close_palette()
+        self._show_surface("quick-ask")
 
     def set_rewind_handler(self, handler) -> None:
         """Attach (or detach) what secondary-clicking a turn does.
