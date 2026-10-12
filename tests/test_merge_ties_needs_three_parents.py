@@ -41,6 +41,41 @@ def test_the_fallback_is_reachable_so_the_note_is_about_the_code_not_prose():
     assert abs(out[0]) == 1.0, "and it must carry one parent's full change"
 
 
+def test_three_parents_agreeing_beat_a_dissenter_regardless_of_magnitude():
+    """The preconditon the method exists for, at the extreme.
+
+    Two parents push +1 and one pushes -10. By magnitude the dissenter should
+    win; by count the majority should. TIES counts, so the majority wins - and
+    this is the case a two-parent merge cannot express at any magnitude.
+    """
+    import numpy as np
+    out = merge._combine(
+        np.array([0.0]),
+        [(np.array([1.0]), 1.0), (np.array([1.0]), 1.0), (np.array([-10.0]), 1.0)],
+        "ties", 1.0, 1.0)
+    assert out[0] == 1.0, (
+        "magnitude must not decide the vote; got %r" % out[0])
+
+
+def test_one_parent_against_two_is_the_same_case_the_paper_describes():
+    """Sanity on the other side: the *single* dissent is dropped, not averaged.
+
+    Under plain averaging the dissenter moves the result to (1 + 1 - 10) / 3;
+    under TIES it does not count at all.
+    """
+    import numpy as np
+    vectors = [(np.array([1.0]), 1.0), (np.array([1.0]), 1.0),
+               (np.array([-10.0]), 1.0)]
+    plain = merge._combine(np.array([0.0]), vectors, "task_arithmetic", 1.0, 1.0)
+    consensus = merge._combine(np.array([0.0]), vectors, "ties", 1.0, 1.0)
+    # **Not -8/3.** `task_arithmetic` *sums* the task vectors; the division by the
+    # agreeing count is TIES' "disjoint mean" step, so averaging it is comparing
+    # two different things and the control would have passed for the wrong
+    # reason. 1 + 1 - 10 = -8, and TIES returns 1.0.
+    assert plain[0] == -8.0, "the control must be summing for this to mean anything"
+    assert consensus[0] == 1.0, "the dissent must be excluded, not summed in"
+
+
 def test_three_parents_do_resolve_by_count():
     """The case the paper is about, and the one this implementation can do."""
     import numpy as np
