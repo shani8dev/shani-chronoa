@@ -17748,3 +17748,66 @@ Two of those assertions were written wrong first and had to be fixed before they
 meant anything: the tree walk followed `get_parent()` **up** from the window
 (where there is no parent) instead of down through children, so it reported a
 correctly attached widget as dropped.
+
+## answer-mode: the warning was the bug, and the missing method was already written
+
+`_apply_answer_mode` was missing while **two callers and a warning** existed for
+it. The warning was not merely useless - **it was false**:
+
+> answer-mode is 'cloud' but _apply_answer_mode is not implemented in this build,
+> so the choice is not being applied - the model will answer as it did before
+> that setting existed
+
+while `brain.py` was reading `privacy-mode` and `cloud-fallback-enabled` on
+**every turn**. The setting did govern what left the machine; what it did not do
+was move the engine off the one already loaded.
+
+**The method was already written.** `BrainMixin.select_llm(what)` is documented
+as *"Switch the answering engine now"* - it was written for the Models panel and
+had **no product caller at all**. So landing this was wiring, not invention, and
+the thing I had refused to guess at in an earlier session was already settled by
+a docstring and a test suite.
+
+**The mapping is the strip's own labels.** `_ModeStrip._EGRESS` offers four rows
+that reduce to the three values the gschema now declares:
+
+| row | stored | engine |
+|---|---|---|
+| Nothing leaves | `local` | local |
+| This machine answers | `local` | local |
+| This machine, then cloud | `local-cloud` | **local** |
+| Cloud | `cloud` | cloud |
+
+`local-cloud` maps to *local* deliberately: "answer here when you can, reach a
+provider when you cannot" is *start* local, and the fallback is
+`_maybe_enable_cloud_fallback`'s job. Mapping it to cloud would answer every
+question remotely while the chip said "This machine, then cloud".
+
+**Switching only when it would change something** - rebuilding a cloud chain on
+every startup to arrive at the engine already running spends a provider's rate
+limit to learn nothing. **A refusal is logged and the engine left in place**,
+never reported as a success.
+
+### The guard test stopped testing anything
+
+`test_a_missing_applier_warns_rather_than_failing_silently` relied on
+`_apply_answer_mode` being defined nowhere, so the guard took its missing
+branch. The moment the method landed, `getattr` found it, called it, warned
+about nothing - and the test failed **for having been right**. The guard's
+missing branch is now reached by shadowing the method with `None`, which is the
+only way to exercise a `hasattr` guard whose method exists.
+
+`tests/test_answer_mode.py` (destroyed once already, by my own
+`git show HEAD:<file> > <file>`) asserts both directions: the warning does not
+fire while the method exists *and the guard actually calls it*, and it still
+fires when the method is genuinely gone. **Insurance that is only ever checked
+in the present case cannot tell a working guard from a dead one.**
+
+### A comment that described a path the code cannot take
+
+The first draft said the empty-mode branch was the ordinary startup and that
+guessing `local` would override a legitimate cloud chain. The gschema gives
+`answer-mode` a default of `'local'`, so `config.get` never returns empty in the
+real application - the branch is reachable only from a config whose compiled
+schemas predate the key. Corrected in `7a59930`; a comment that describes a path
+the code cannot take misleads whoever reads it next.
