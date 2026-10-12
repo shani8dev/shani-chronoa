@@ -97,6 +97,61 @@ def open_runs(store: Optional[goals.GoalStore] = None) -> List[goals.GoalRun]:
                   key=lambda r: r.created_at, reverse=True)
 
 
+#: The switch that lets a goal be saved at all, named by the settings row that
+#: writes it - `settings_window/privacy.py`, the only place it is written.
+GOALS_KEY = "goals-enabled"
+
+_HOW_TO = ("Ask Chronoa to plan something in steps and save it as a goal. It is "
+           "listed here, and nothing runs until you start it.")
+_WHERE_IT_IS = ("Ask Chronoa to plan something in steps and save it as a goal "
+                "(Settings, Privacy: 'Let Chronoa keep multi-step goals'). It is "
+                "listed here, and nothing runs until you start it.")
+
+
+def _empty_copy(route: Optional[Gtk.Widget]) -> str:
+    """Which of the two copies the empty state shows.
+
+    A named decision rather than an inline conditional at the call site, because
+    the difference is not visible in the string constants: a test asserting on
+    `_HOW_TO`'s *content* passes whether or not the panel ever uses it. That is
+    not hypothetical - the first version of
+    `tests/test_goals_offers_the_switch_it_names.py` asserted exactly that, and
+    pointing the call site permanently at `_WHERE_IT_IS` left it green.
+    """
+    return _HOW_TO if route is not None else _WHERE_IT_IS
+
+
+def _grant_route(app: Any) -> Optional[Gtk.Widget]:
+    """The way to turn the goal permission on, when it is off.
+
+    This panel used to print "(Settings, Privacy: 'Let Chronoa keep multi-step
+    goals')" in its empty state and **never read the setting** - no `get_bool`
+    anywhere in the module - so it named the switch without knowing whether the
+    person had already flipped it. That is the dead end
+    `tests/test_dead_ends_have_buttons.py` was written about, third occurrence
+    here after `desktop.py` and `listening.py`.
+
+    **Only when the gate is actually off**, and `None` when it cannot be read:
+    granted has nothing to fix, and "could not ask" is not "off" - offering a
+    button on it would claim a certainty the panel does not have. An unreadable
+    setting falls back to the sentence, which is the honest thing when nothing
+    is known.
+    """
+    config = getattr(app, "config", None)
+    check = getattr(config, "get_bool", None)
+    if not callable(check):
+        return None
+    try:
+        if bool(check(GOALS_KEY, False)):
+            return None
+    except Exception:  # noqa: BLE001 - an unreadable gate is not a granted one
+        logger.debug("reading %s raised", GOALS_KEY, exc_info=True)
+        return None
+    return common.wire_page_button(
+        common.open_settings_button("Open Privacy settings", "settings:privacy"),
+        app, "settings:privacy")
+
+
 class _GoalsSurface:
     def __init__(self, app: Any, set_content) -> None:
         self._app = app
@@ -162,11 +217,13 @@ class _GoalsSurface:
             self._body.append(self.status_recorder.row(
                 common.STATUS_OK, "No goals saved",
                 "nothing is queued, so nothing here can run"))
+            # **The button replaces the parenthetical rather than joining it.**
+            # Naming where a switch lives *and* offering a way there says the
+            # same thing twice, and the sentence is the half that goes stale.
+            route = _grant_route(self._app)
             self._body.append(common.empty_state(
                 ICON, "No goals yet",
-                "Ask Chronoa to plan something in steps and save it as a goal "
-                "(Settings, Privacy: 'Let Chronoa keep multi-step goals'). It is "
-                "listed here, and nothing runs until you start it."))
+                _empty_copy(route), route))
             return
         self._body.append(self.status_recorder.row(
             common.STATUS_ATTENTION if waiting else common.STATUS_OK,
