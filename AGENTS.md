@@ -2,6 +2,56 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## laya's hooks: `EventSink` refuses a field that is not a callable (2026-10-12)
+
+`harness-study/laya-decision`'s `laya/hooks.py` opens with the rule:
+
+> a plain callable is only accepted on the single-event `on_predict_start=`
+> parameters, because `hooks=` reads for method names and a bare function has
+> none.
+
+An API that introspects must refuse the shape it cannot introspect, rather than
+accept it and never call it. Chronoa learned the same lesson in
+`skills/__init__.py`, where `run=lambda a: ...` passed `callable()` and then
+failed on **every** call in a subprocess - and fixed it at the loader, not at the
+caller.
+
+`events.EventSink` had the same shape unchecked. Measured, `EventSink(on_text="not a
+function")` built **cleanly** and the TypeError arrived at the call site - mid-turn,
+after the model had run and the tool had been called. `__post_init__` now refuses
+any field that is neither a callable nor None, naming the field and the type and
+saying why the refusal is at construction.
+
+Every construction site in the tree passes a real callable
+(`app/conversation.py`, `events.fan_in`, the streaming tests), so this is defence
+at the seam and not a behaviour change - asserted rather than assumed, by
+`test_a_callable_object_builds`, because the obvious implementation of this guard
+(`isinstance(value, type(lambda: None))`) refuses a bound method and a callable
+object, and the GUI sink in another process is exactly that.
+
+Three ways to write the guard wrongly, each of which lets a real defect through:
+`if value:` (0 and "" are falsy, so they pass as None), one field checked out of
+six (the unchecked one fails), and `return` instead of `raise` (a bad sink is built
+and the turn runs with a dead stream).
+
+`tests/test_sink_shape.py` (16), `tools/mutations/sink_shape.py` (**8 caught, 0
+survivors**). 80 passed across the sink, streaming, harvest-tranche and task-eval
+suites.
+
+**Two of the eight mutations were malformed the first time** - both replaced one
+line inside a parenthesised `raise` and left the continuation dangling, which is a
+SyntaxError. The runner's `MutationDidNotParse` (added earlier this session)
+reported it as an error rather than counting it as a survivor, which is the only
+reason both were noticed before they were committed. A mutation that cannot parse
+is not a mutation.
+
+**And the third iteration of one of them was a survivor for a real reason:** my
+test asserted the refusal names the *field* and the *type*, and the mutation kept
+the type and dropped the *reason*. A refusal that says what is wrong and nothing
+about why it is being caught here is a refusal nobody can act on - the assertion
+that would have caught it says `"before the turn runs" in said`.
+
+
 ## laya's confidence floor, and the reward its one caller fed it (2026-10-12)
 
 `harness-study/laya-decision`'s `laya/confidence.py` names the hazard precisely:

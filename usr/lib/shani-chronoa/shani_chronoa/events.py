@@ -44,6 +44,38 @@ class EventSink:
     #: a settings key they may have forgotten.
     on_cloud_turn: Optional[Callable[[str], None]] = None
 
+    def __post_init__(self) -> None:
+        """Refuse a field that is not a callable and not None, at construction.
+
+        **The alternative is a TypeError at the call site, mid-turn.** A sink
+        built from anything read at runtime - a config value, a JSON payload, a
+        name a test spells wrong - would construct cleanly and then fail on the
+        first event, which is the worst place to find a wiring mistake: the model
+        has already run, the tool has already been called, and the exception
+        arrives in the middle of producing a reply.
+
+        `harness-study/laya-decision`'s `laya/hooks.py` states the rule this
+        follows: *"a plain callable is only accepted on the single-event
+        `on_predict_start=` parameters, because `hooks=` reads for method names
+        and a bare function has none."* An API that introspects its inputs must
+        refuse the shape it cannot introspect rather than accept it and never
+        call it. Chronoa learned the same lesson in `skills/__init__.py`, where
+        `run=lambda a: ...` passed `callable()` and failed on **every** call in a
+        subprocess - the fix there was at the loader, not at the caller.
+
+        Every construction site in the tree passes a real callable, so this is
+        defence at the seam and not a behaviour change.
+        """
+        for field_name in ("on_tool_start", "on_tool_finish", "on_text",
+                          "on_state", "on_compaction", "on_cloud_turn"):
+            value = getattr(self, field_name)
+            if value is not None and not callable(value):
+                raise TypeError(
+                    f"EventSink.{field_name} must be a callable or None, not "
+                    f"{type(value).__name__}: {value!r:.40}. A sink is built "
+                    f"once, before the turn runs; a value that is not callable "
+                    f"would raise here instead of in the middle of a reply.")
+
     def fire(self, what: str, *args) -> None:
         """Invoke one event, and never let a broken sink break the turn."""
         fn = getattr(self, what, None)
