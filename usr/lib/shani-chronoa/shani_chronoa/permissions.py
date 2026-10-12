@@ -172,8 +172,8 @@ def _bypass_immune_set() -> frozenset:
     from shani_chronoa import capabilities
 
     # Both sources, because thirteen skills gate themselves with their own
-    # `_CONSENT_KEY` rather than through `GATED` (`trash_file`, `set_theme`,
-    # `lock_screen` and the rest). Reading only `GATED` missed every one of
+    # `_CONSENT_KEY` rather than through `GATED` (`set_theme`, `lock_screen`
+    # and the rest). Reading only `GATED` missed every one of
     # them, so a self-gating destructive skill - which is what `cleanup_apply`
     # is - was answerable from a standing grant it had never been asked about.
     # The four names this used to hardcode are in that scan already, and a

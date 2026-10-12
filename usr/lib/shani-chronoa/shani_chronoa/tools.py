@@ -307,7 +307,6 @@ def _tool_failure_result(message: str) -> "DispatchResult":
 #: Skills not listed fall through with `None` and are unaffected by rules.
 _RESOURCE_ARGUMENT = {
     "delete_file": "path",
-    "trash_file": "path",
     "move_or_copy_file": "source",
     "write_text_file": "path",
     "read_text_file": "path",
@@ -467,7 +466,7 @@ def _replay_key(name: str, arguments, origin: str):
 
     Four things are in the key and each earns its place:
 
-    - **the tool name**, or `delete_file` and `trash_file` collide;
+    - **the tool name**, so two tools taking the same argument are two calls;
     - **the arguments**, canonicalised with sorted keys so `{"a":1,"b":2}` and
       `{"b":2,"a":1}` are one call rather than two. `repr` is the fallback for a
       value json cannot serialise, so an exotic argument makes the key

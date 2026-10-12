@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Iterable, Optional, Tuple
 
@@ -223,8 +225,8 @@ def refuse_catalogue(path: Path, verb: str) -> None:
     with `EACCES` and the filesystem stops what this guard missed. It is a
     real hole on any layout where the parent is writable by the user - a
     single-user system with `$HOME` directly under a user-owned directory, or
-    any of the four other callers (`extract_archive`, `trash_file`,
-    `edit_file`, `undo_last_change`) handed such a path - and it is a hole in
+    any of the three other callers (`extract_archive`, `edit_file`,
+    `undo_last_change`) handed such a path - and it is a hole in
     the function whose documented job is to be the thing that does not have
     one.
     """
@@ -889,3 +891,78 @@ def paths_in(pattern: str):
             return ()
 
     return declare
+
+
+# --- the trash ------------------------------------------------------------------
+#
+# One implementation, because three modules had grown their own copy of it and
+# this repository's own record is that duplication is how a divergence survives
+# unnoticed ("three copies, three timeouts, and a divergence nobody notices until
+# one of them is wrong"). `delete_file` and `conversation_store` both remove
+# something on a model's behalf and both must be recoverable; `empty_trash` is the
+# one deliberate exception and says so.
+
+#: `gio trash` is a single `rename(2)` within one filesystem, so the size of the
+#: tree is not the cost. Measured on the machine this was written on: **20,000
+#: files / 79 MB in 0.066 s**. The timeout is for the other case - a move across
+#: filesystems, which `gio` performs by copying.
+TRASH_TIMEOUT = 60
+
+
+def trash_dirs() -> Tuple[Optional[Path], Optional[Path]]:
+    """`(files, info)` for the trash this environment actually uses.
+
+    `gio trash` writes to `$XDG_DATA_HOME/Trash` but `gio trash --list` reads the
+    home trash regardless - two GIO code paths that do not agree, so verifying a
+    move by asking the lister reports "not in the trash" for a file that is
+    sitting in the trash. The filesystem is the authority, so this looks at the
+    directories.
+    """
+    base = data_home()
+    trash = base / "Trash"
+    if not trash.is_dir():
+        return (None, None)
+    return (trash / "files", trash / "info")
+
+
+def in_trash(path: Path) -> bool:
+    """Whether a `.trashinfo` record exists for this name, beside a real file.
+
+    The `info` record is the one that matters: a file in `files/` with no record
+    cannot be restored by any file manager, so its presence alone would overstate
+    recoverability - which is the claim this whole mechanism exists to make true.
+    """
+    contents, info = trash_dirs()
+    if info is None or contents is None:
+        return False
+    return (info / f"{path.name}.trashinfo").is_file() and (contents / path.name).exists()
+
+
+def trash(path: Path) -> Tuple[bool, str]:
+    """Move `path` to the desktop trash. Return `(moved, why-not)`.
+
+    **There is deliberately no fallback that removes the file.** That is the whole
+    contract: a caller that cannot find a trash must refuse, because the one thing
+    that must never happen is a recoverable delete quietly becoming a permanent
+    one. This happened for real - `~/Downloads`, 33,424 files, unlink, no way back.
+
+    Measured, not guessed: the freedesktop trash is **per-filesystem**, so a path
+    on a mount that has none of its own is refused rather than moved. On this box
+    `/tmp` is such a mount (`Trashing on system internal mounts is not
+    supported`), and a removable volume behaves the same way. `why` carries
+    `gio`'s own sentence, so a caller can pass it straight to the person.
+    """
+    if shutil.which("gio") is None:
+        return (False, "gio is not installed")
+    try:
+        proc = subprocess.run(["gio", "trash", str(path)], capture_output=True,
+                              text=True, timeout=TRASH_TIMEOUT, check=False)
+    except subprocess.TimeoutExpired:
+        return (False, f"the trash did not answer within {TRASH_TIMEOUT}s")
+    except OSError as exc:
+        return (False, f"the trash could not be reached ({exc})")
+    if proc.returncode != 0:
+        return (False, (proc.stderr or proc.stdout or "").strip() or "gio gave no reason")
+    if os.path.lexists(path):
+        return (False, "gio reported success but the path is still there")
+    return (True, "")

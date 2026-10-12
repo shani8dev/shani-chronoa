@@ -35,6 +35,55 @@ def _stub(bindir, name, script):
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+@pytest.fixture(autouse=True)
+def delete_consent_granted(gsettings_env):
+    """`file-delete-enabled` on for this file, and off again afterwards.
+
+    **`delete_file` checks consent before it inspects anything**, so a test that
+    drives the skill itself and forgets this measures the *gate* and concludes the
+    delete is broken. That is not hypothetical: it is what the first version of
+    the two tests below did, and the failure read "the delete did not happen".
+
+    **`gsettings_env` is load-bearing and its absence is silent.** `conftest`'s is
+    not autouse, so without asking for it the schema is not found, `set()` writes
+    nothing, and the key reads back False - a consent fixture that grants
+    nothing and reports no error. The round-trip is asserted below for that reason.
+
+    The consent key is off again on the way out so nothing leaks into another
+    file - the same rule the `earlier tests left the microphone switch on` entry
+    records.
+    """
+    from shani_chronoa.config import ChronoaConfig
+    config = ChronoaConfig()
+    config.set("file-delete-enabled", "true")
+    granted_ok = config.get_bool("file-delete-enabled", False)
+    yield
+    config.set("file-delete-enabled", "false")
+    assert granted_ok, (
+        "consent did not take, so a delete that was refused by the gate would read "
+        "as a broken delete"
+    )
+
+
+@pytest.fixture
+def real_trash(tmp_path, monkeypatch):
+    """A trash on the same filesystem as the files being trashed.
+
+    `gio trash` refuses to move anything across a filesystem boundary, and
+    `conftest` redirects `XDG_DATA_HOME` into a scratch directory that has no
+    `Trash/` in it. So without this, every delete test in the suite reaches a
+    machine "with no trash to look in" and measures the environment rather than
+    the skill - which is how a correct post-condition reads as broken. Both halves
+    live under `tmp_path` so they share a device.
+    """
+    home = tmp_path / "home"
+    trash = home / ".local" / "share" / "Trash"
+    (trash / "files").mkdir(parents=True)
+    (trash / "info").mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(home / ".local" / "share"))
+    return trash
+
+
 @pytest.fixture
 def bindir(tmp_path, monkeypatch):
     d = tmp_path / "bin"
@@ -95,13 +144,27 @@ def test_create_directory(tmp_path):
     assert _verify("create_directory", {"path": str(tmp_path / "nope")}).verdict is Verdict.FAILED
 
 
-@pytest.mark.parametrize("module", ["delete_file", "trash_file"])
-def test_removed_means_gone(tmp_path, module):
-    f = tmp_path / "x"
+def test_removed_means_gone(tmp_path, real_trash):
+    """**This test asserted the defect, and is one reason the defect survived.**
+
+    It removed a file with `f.unlink()` and required `VERIFIED` - which is exactly
+    the filesystem state a refusal leaves behind, so it pinned the check that
+    could not fail. The file is trashed properly now, through `gio`, so a restore
+    record exists and the check has something real to attest.
+
+    **One case rather than a parametrised pair**, because there is one removal
+    skill now: two names for one action is the duplicate this repository deletes
+    modules for.
+    """
+    from shani_chronoa.skills import delete_file
+
+    f = real_trash.parent.parent / "x.txt"
     f.write_text("x")
-    assert _verify(module, {"path": str(f)}).verdict is Verdict.FAILED
-    f.unlink()
-    assert _verify(module, {"path": str(f)}).verdict is Verdict.VERIFIED
+    assert _verify("delete_file", {"path": str(f)}).verdict is Verdict.FAILED
+
+    delete_file._run({"path": str(f)})
+    assert not f.exists(), "the refusal above said it was still there"
+    assert _verify("delete_file", {"path": str(f)}).verdict is Verdict.VERIFIED
 
 
 def test_a_dangling_symlink_is_not_gone(tmp_path):
@@ -203,7 +266,7 @@ def test_every_post_condition_is_read_only_by_name():
     import inspect
     import importlib
     for mod in ("volume", "set_mic_mute", "power_profile", "set_timezone", "control_service", "kill_process",
-                "create_directory", "delete_file", "trash_file", "write_text_file", "move_or_copy_file",
+                "create_directory", "delete_file", "write_text_file", "move_or_copy_file",
                 "do_not_disturb", "clipboard"):
         src = inspect.getsource(importlib.import_module(f"shani_chronoa.skills.{mod}").POST_CONDITION)
         for verb in ('"set-volume"', '"set-mute"', '"set-timezone"', '"set", SCHEMA_ID', "_run_ppd(\"set",
@@ -257,17 +320,21 @@ class TestARefusalIsNotVerified:
         self._age(tmp_path, 3600)
         assert _verify("delete_file", {"path": str(target)}).verdict is not Verdict.VERIFIED
 
-    def test_a_real_delete_still_verifies(self, tmp_path):
+    def test_a_real_delete_still_verifies(self, real_trash):
         """**The control, and the reason the test above means anything.**
 
-        Same fixture, same call, the only difference being that the directory was
-        touched just now - because a file really was removed from it. If this ever
-        fails, the fix has made `delete_file` unverifiable, which is a worse
-        defect than the one it fixed.
+        **Trashed through `gio`, not unlinked by hand.** The first version called
+        `target.unlink()`, which leaves no restore record - so the new
+        post-condition correctly refuses to verify it, and the control was
+        measuring its own shortcut. A real delete leaves a `.trashinfo`, and that
+        difference is the whole point of the check.
         """
-        target = tmp_path / "gone.txt"
+        from shani_chronoa.skills import delete_file
+
+        target = real_trash.parent.parent / "gone.txt"
         target.write_text("x")
-        target.unlink()
+        delete_file._run({"path": str(target)})
+        assert not target.exists(), "the delete did not happen"
         assert _verify("delete_file", {"path": str(target)}).verdict is Verdict.VERIFIED
 
     def test_a_move_of_a_source_that_was_never_there_is_not_a_move(self, tmp_path):
@@ -302,40 +369,31 @@ class TestARefusalIsNotVerified:
                           {"source": str(src), "destination": str(dst), "mode": "copy"})
         assert checked.verdict is Verdict.VERIFIED
 
-    def test_the_refusal_is_named_rather_than_silently_downgraded(self, tmp_path):
+    def test_the_refusal_is_named_rather_than_silently_downgraded(self, real_trash):
         """UNVERIFIED is the honest direction, so the evidence has to say *why* -
         an operator reading the audit log cannot tell "this was a refusal" from
-        "this check could not read the filesystem" unless the sentence says."""
-        target = tmp_path / "never-existed.txt"
-        self._age(tmp_path, 3600)
+        "this check could not read the filesystem" unless the sentence says.
+
+        **This needs a trash that exists and does *not* hold the path**, which is
+        what makes the refusal legible. The first version ran with no trash at all,
+        so the evidence said "this machine has no trash to look in" - honest, and
+        about the environment rather than about the refusal.
+        """
+        target = real_trash.parent.parent / "never-existed.txt"
         evidence = _verify("delete_file", {"path": str(target)}).evidence
-        assert "never there" in evidence, evidence
+        assert "restore record" in evidence, evidence
+        assert "gone" in evidence, evidence
 
 
-class TestTheRefusalReachesTheModelUncertified:
-    """The same property end to end, through the dispatch the model actually sees.
-
-    A post-condition that is correct in isolation and overridden downstream is
-    not a fix, and this file already records `driver_dev`'s check being inherited
-    by the three skills in a module it was written for. So the verdict is read off
-    `execute_tool_outcome` - the call the model makes - rather than off the
-    check.
-    """
-
-    def test_a_refused_delete_of_a_missing_path_is_not_reported_as_verified(self, tmp_path):
-        from shani_chronoa.tools import execute_tool_outcome
-        from shani_chronoa.config import ChronoaConfig
-
-        # Consent granted, so the refusal is the *skill's own* "it does not exist"
-        # and not the permission gate - the gate would refuse for a different
-        # reason and prove nothing about the post-condition.
-        ChronoaConfig().set("file-delete-enabled", "true")
-        try:
-            target = tmp_path / "never-existed.txt"
-            old = time.time() - 3600
-            os.utime(tmp_path, (old, old))
-            out = execute_tool_outcome("delete_file", {"path": str(target)})
-            assert out.verdict.value != "verified", out.text
-            assert "does not exist" in out.text, out.text
-        finally:
-            ChronoaConfig().set("file-delete-enabled", "false")
+# The end-to-end case - a refused delete arriving at `execute_tool_outcome` as
+# something other than `verified` - moved to
+# `tests/test_nothing_is_permanently_deleted.py`, which holds the same assertion
+# with a consent fixture that **asserts its own round-trip**.
+#
+# It is not duplication to be tidied; it was the third copy of one consent grant.
+# This file's fixture grants `file-delete-enabled`, the test below had its own
+# `ChronoaConfig()` dance, and the two disagreed - the call was refused by the
+# *gate*, whose sentence is not the one under test, and the failure read as a
+# defect in the delete. Two owners of one state is this repository's own
+# "a second implementation is a second thing that can disagree", and here it was
+# two test fixtures rather than two code paths.

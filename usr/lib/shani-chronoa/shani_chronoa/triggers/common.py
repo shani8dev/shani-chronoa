@@ -107,7 +107,7 @@ _ORIGIN = ORIGIN_UNATTENDED
 # does not agree with is not a way through.
 _DESTRUCTIVE_ACTUATORS = frozenset({
     "kill_process", "control_service", "manage_mount", "lock_screen",
-    "delete_file", "empty_trash", "trash_file", "power_profile",
+    "delete_file", "empty_trash", "power_profile",
 })
 
 # One actuator is refused on both paths with **no** opt-in at all, and the
@@ -125,8 +125,8 @@ _DESTRUCTIVE_ACTUATORS = frozenset({
 # equal to it. Every other destructive actuator is still checked twice more -
 # once by `capabilities.gated_by`, and once by the skill itself, which refuses
 # on its own consent key when it runs (`delete_file` reads
-# `file-delete-enabled`, `kill_process` `process-kill-enabled`, `trash_file`
-# `file-delete-enabled`, `empty_trash` `trash-empty-enabled`, `lock_screen`
+# `file-delete-enabled`, `kill_process` `process-kill-enabled`, `empty_trash`
+# `trash-empty-enabled`, `lock_screen`
 # `screen-lock-enabled`). `write_text_file` has neither gate, so one grant to
 # arm a single rule would buy recurring unattended overwrites with no second
 # line of defence.

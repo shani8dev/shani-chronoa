@@ -873,8 +873,8 @@ def safe_to_run_unattended(name: str) -> bool:
       `assistant.py` already carries a standing rule against exactly that -
       *"never run a tool with arguments the model did not give"* - because
       `{}` once handed a small model its own error back.
-    - **Nothing destructive.** `delete_file` and `trash_file` declare no
-      required parameter (they take their path through the argfile envelope),
+    - **Nothing destructive.** `delete_file` declares no required parameter
+      (it takes its path through the argfile envelope),
       so the first gate alone waves them through - and a skill that deletes
       something must never be chosen by a 4 MB classifier. `web_search`
       reaches the internet, so it is excluded the same way.

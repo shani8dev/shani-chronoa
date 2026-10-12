@@ -952,7 +952,7 @@
     <key name="file-delete-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa delete files</summary>
-      <description>When true, Chronoa may permanently delete files and directories it is asked to remove. Off by default, and separate from the general file-access permission: reading a directory and removing what is in it are different risks. Delete is not reversible through Chronoa itself - the filesystem's trash is not used.</description>
+      <description>When true, Chronoa may delete files and directories it is asked to remove. Off by default, and separate from the general file-access permission: reading a directory and removing what is in it are different risks. Nothing is deleted permanently - everything goes to the desktop trash, where it can be restored, so this switch is about removing something from where it is rather than destroying it. Emptying the trash is a separate permission, because that is the step that makes it unrecoverable.</description>
     </key>
     <key name="process-kill-enabled" type="b">
       <default>false</default>

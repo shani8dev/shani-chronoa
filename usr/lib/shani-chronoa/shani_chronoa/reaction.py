@@ -236,7 +236,7 @@ def destructive_tools() -> frozenset:
     caller forgetting an argument.
     """
     return frozenset({
-        "delete_file", "trash_file", "move_or_copy_file", "write_text_file",
+        "delete_file", "move_or_copy_file", "write_text_file",
         "edit_file", "create_directory", "empty_trash", "kill_process",
         "control_service", "remove_file", "replace_file",
     })

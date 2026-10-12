@@ -492,10 +492,20 @@ def delete(root: Path, ref: str) -> str:
         sid = _resolve(data, ref)
         if not sid:
             return ""
-        try:
-            (root / f"{sid}.jsonl").unlink()
-        except FileNotFoundError:
-            pass
+        path = root / f"{sid}.jsonl"
+        if path.exists():
+            # To the trash, not `unlink`. Nothing in this project removes anything
+            # permanently, and a saved conversation is the user's own history.
+            #
+            # **What "recoverable" means here is narrower than for a file**, and
+            # the skill's own answer says so: the transcript comes back out of the
+            # trash, but the index entry below does not, so the conversation does
+            # not reappear in the app on its own. Claiming a full undo here would
+            # be the confident wrong answer.
+            from shani_chronoa import files as _files
+            _moved, _why = _files.trash(path)
+            if not _moved:
+                return ""
         _purge_from_search(root, sid)  # deleted means gone from the search index too, now
         del data["sessions"][sid]
         if data["active"] == sid:

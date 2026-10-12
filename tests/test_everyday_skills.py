@@ -63,8 +63,24 @@ from shani_chronoa.skills import (  # noqa: E402
 
 
 @pytest.fixture
-def granted():
-    """A config with every new action consent explicitly switched on."""
+def real_trash(tmp_path, monkeypatch):
+    """A trash on the same filesystem as the files being trashed, so `gio` will
+    move them. `conftest`'s `XDG_DATA_HOME` has no `Trash/` in it."""
+    trash = tmp_path / "trashbox" / "share" / "Trash"
+    (trash / "files").mkdir(parents=True)
+    (trash / "info").mkdir(parents=True)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "trashbox" / "share"))
+    return trash
+
+
+@pytest.fixture
+def granted(gsettings_env):
+    """A config with every new action consent explicitly switched on.
+
+    **`gsettings_env` is load-bearing.** It is not autouse, so without asking for
+    it the GSettings schema is not found, `set()` writes nothing, and every key
+    reads back False - a consent fixture that grants nothing and reports no error.
+    """
     config = ChronoaConfig()
     config.set("privacy-mode", "false")
     for key in ("file-delete-enabled", "process-kill-enabled",
@@ -147,14 +163,28 @@ class TestTheDestructiveGates:
         assert "Deleted" in out and "permanent" in out
         assert not victim.exists()
 
-    def test_delete_refuses_a_non_empty_directory_without_recursive(self, tmp_path, granted):
+    def test_a_non_empty_directory_goes_as_one_recoverable_item(self, tmp_path, granted, real_trash):
+        """**This test asserted the opposite, and it was right to.**
+
+        It required `"Refusing"` and the word `recursive` for a non-empty
+        directory - which was true while `delete_file` used `shutil.rmtree` and
+        `rmtree` needs `recursive`. `gio trash` moves a whole directory as one
+        unit, so there is nothing left to refuse and nothing left to ask for, and
+        the flag was removed rather than deprecated.
+
+        So the assertion inverts: the directory goes, and it goes **whole**.
+        """
         delete_file.ChronoaConfig = lambda: granted
         try:
-            tree = tmp_path / "t"
+            tree = real_trash.parent.parent / "t"
             (tree / "sub").mkdir(parents=True)
+            (tree / "sub" / "leaf.txt").write_text("leaf")
             out = delete_file._run({"path": str(tree)})
-            assert "Refusing" in out and "recursive" in out
-            assert tree.exists()
+            assert "trash" in out.lower(), out
+            assert not tree.exists(), "the directory should have left its original path"
+            restored = real_trash / "files" / "t"
+            assert restored.is_dir(), "and be one directory again, not a pile of files"
+            assert (restored / "sub" / "leaf.txt").read_text() == "leaf"
         finally:
             delete_file.ChronoaConfig = ChronoaConfig
 

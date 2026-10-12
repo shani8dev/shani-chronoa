@@ -255,7 +255,7 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "write_text_file": ("Files", "Write a text file"),
     "create_directory": ("Files", "Create a folder"),
     "move_or_copy_file": ("Files", "Move or copy"),
-    "delete_file": ("Files", "Delete"),
+    "delete_file": ("Files", "Delete a file or folder, recoverably from the trash"),
     "open_file": ("Files", "Open a file"),
     "list_processes": ("Processes and windows", "Running processes"),
     # Beside list_processes and process_cost: both answer "what is running and
@@ -466,7 +466,6 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "extract_archive": ("Files", "Unpack a tar, zip, 7z, rar or cab archive"),
     # Read-only: it opens the archive and writes nothing.
     "list_archive": ("Files", "List what is inside an archive, without extracting it"),
-    "trash_file": ("Files", "Move a file or folder to the trash, recoverably"),
     "set_theme": ("Appearance", "Switch the desktop between light and dark"),
     "desktop_setting": ("Appearance", "Read or change a desktop setting (animations, clock, cursor, touchpad...)"),
     "set_wallpaper": ("Appearance", "Change the desktop wallpaper"),
