@@ -64,9 +64,21 @@ def _compile_repo_schema() -> str:
     point pytest gives us, so there is no window in which the variable is
     unset.
     """
-    import tempfile
-
-    directory = Path(tempfile.mkdtemp(prefix="chronoa-schema-"))
+    # **Under `build/`, not `/tmp` - and the reason is cross-process.**
+    #
+    # A `/tmp/chronoa-schema-*` directory is deleted by the reclaimer below, and
+    # a liveness guard *inside this process* is not enough: two concurrent runs
+    # each see only their own `GSETTINGS_SCHEMA_DIR`, so whichever finishes first
+    # removes the other's live schema. Measured, and not as a theory - on
+    # 2026-10-12 `COMPILED_SCHEMA_DIR` for a running session pointed at a
+    # directory that had already been collected, so every consent key in that
+    # whole session silently read its Python default.
+    #
+    # `build/` is gitignored, is per-checkout rather than per-machine, and is not
+    # a directory the reclaimer scans. The pid in the name keeps two runs from
+    # compiling into the same place.
+    directory = REPO_ROOT / "build" / f"test-schema-{os.getpid()}"
+    directory.mkdir(parents=True, exist_ok=True)
     for xml in SCHEMA_SRC.glob("*.xml"):
         shutil.copy2(xml, directory)
     result = subprocess.run(["glib-compile-schemas", str(directory)],
@@ -167,22 +179,53 @@ def _reclaim_the_temp_dirs_this_suite_makes():
     Fixing fourteen call sites one at a time would leave the next one to be
     written the same way, and this suite is not short-lived. So this removes what
     was made, at the end of the session, and only what this suite made.
+
+    **And it must never remove what THIS run is still using.** That is not
+    hypothetical: the schema directory is built at conftest import with
+    `prefix="chronoa-schema-"`, and `"chronoa-"` is the first entry in
+    `_OWNED_TMP_PREFIXES` - so this reclaimer deleted the live compiled schema at
+    the end of whichever session finished first. Measured on 2026-10-12, and the
+    signature is the nastiest kind: **every consent key then silently reads its
+    Python default**, because `ChronoaConfig` logs one warning
+    ("GSettings schema not found - using Python defaults"), writes nothing, and
+    reads False. A run with no schema at all reported **48 teardown errors and
+    34 failures** and named nothing about the schema.
+
+    Removing the prefix from the list would fix it and leak every `chronoa-schema-*`
+    a dead run left behind, which is the reclaimer's actual purpose. **The guard is
+    on liveness rather than on the name**: a directory this session's own
+    environment still points at is never collected, whatever it is called. That
+    is also the general form - the reclaimer is allowed to remove what this suite
+    made, and what this suite is *still using* is not that.
     """
     import shutil
 
     yield
 
+    in_use = set()
+    for var in ("GSETTINGS_SCHEMA_DIR", "XDG_DATA_HOME", "XDG_STATE_HOME",
+                "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_CACHE_HOME"):
+        value = os.environ.get(var)
+        if value:
+            in_use.add(os.path.realpath(value))
+
     removed = 0
+    kept = 0
     for entry in Path(tempfile.gettempdir()).iterdir():
         if not entry.is_dir() or not entry.name.startswith(_OWNED_TMP_PREFIXES):
             continue
         try:
+            if os.path.realpath(entry) in in_use:
+                kept += 1
+                continue
             shutil.rmtree(entry, ignore_errors=True)
             removed += 1
         except OSError:
             pass
     if removed:
         print(f"\n[conftest] reclaimed {removed} temp directories from /tmp")
+    if kept:
+        print(f"[conftest] kept {kept} still in use by this run")
 
 
 @pytest.fixture(scope="session", autouse=True)
