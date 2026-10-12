@@ -17152,3 +17152,42 @@ exist, three of them invented at the keyboard and "corrected" into the next
 wrong API, is what a *check* is for. `hasattr(Gtk.TextView(), "set_text")` is
 False and costs nothing; the traceback's `Did you mean` suggestion is how
 `do_insert_text` became the next wrong guess.
+
+## A sweep for the bug class, because four of them happened (2026-10-12)
+
+Today produced **four** instances of one shape: a method belonging to one widget
+class called on another. `Gtk.TextView` has no `set_text`, no
+`set_placeholder_text` and no `insert_text`; `Gtk.TextBuffer` has no
+`insert_text`; `Gtk.BUTTON_SECONDARY` is GTK 3 and GTK 4 moved it to `Gdk`.
+
+None of them fail at import. They raise `AttributeError` when the line is
+*reached* - which, in a `GLib` callback, means GTK **aborts the process** rather
+than letting pytest see it. So the failure mode is a crashed interpreter, which
+reads as a harness problem and is not one.
+
+`tools/widget_api_sweep.py` infers each variable's type from its constructor
+(`entry = Gtk.TextView()`) and checks every method called on it against that
+class. The first version hard-coded the names `_input_entry`, `entry` and
+`_name`, which is a list of my own mistakes rather than a class - and it found
+exactly the three defects those three names lead to.
+
+**Last run: 786 widget-typed call sites across 1096 files, none suspect.**
+
+That sentence is only worth reading because the detector is proven on synthetic
+input, and the control is in its own docstring:
+
+| input | flagged |
+|---|---|
+| `SearchEntry.set_placeholder_text`, `TextView.set_wrap_mode` | nothing |
+| `TextView.set_placeholder_text` | `view.set_placeholder_text` |
+| `Label.set_icon_from_icon_name` | `label.set_icon_from_icon_name` |
+
+A sweep that cannot find a planted bug reports the same clean result as one that
+works. That is the same lesson as the blank-image probe and the rows-per-turn
+invariant, arriving by a third route.
+
+**Not yet a gate.** It is a script, and the obvious follow-up is a test wrapping
+it - but the tree had five pytest processes and two mutation runs in flight, so
+running anything would have meant reading code that was being rewritten. It is
+committed as a runnable analyser rather than an unverified test, which is the
+lesser evil and is said so rather than left implicit.
