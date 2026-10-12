@@ -604,7 +604,8 @@ class PrivacyPage:
             page, "Cloud providers that require a key",
             "Anthropic, OpenAI, Google and Groq all rejected an unauthenticated request "
             "when tested live, so a key here is mandatory rather than optional. Tried ahead "
-            "of the free providers when set.",
+            "of the free providers, from the next time the cloud fallback activates - "
+            "not to a running session.",
         )
         for label, key in (
             ("Anthropic (Claude) API key", "anthropic-api-key"),
@@ -655,7 +656,8 @@ class PrivacyPage:
         custom = self._group(
             page, "Your own model server",
             "Any OpenAI-compatible server - LM Studio, vLLM, llama-server on another "
-            "machine. Tried first when the cloud fallback is on.",
+            "machine. Tried first when the cloud fallback is on, which - like a key "
+            "above - is from its next activation and not to a running session.",
         )
         self._entry(custom, "Server address", "e.g. http://192.168.1.20:8080/v1",
                     config.get("custom-llm-base-url", ""),

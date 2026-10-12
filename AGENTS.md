@@ -11326,3 +11326,70 @@ Two of my own test bugs on the way, both the shape that recurs: the override hel
 applied its overrides **unprefixed**, so every override silently changed nothing and
 three tests passed for the wrong reason; and the fixture used `spec.filename.name`
 on a plain string.
+
+## A pasted cloud key does not take effect now, and two of three groups said it did (2026-10-12)
+
+Raised by the `mimic` study (`../harness-study/HARVEST-MIMIC.md`), which asked
+what reconstructs an HTTP client from observed traffic and turned up a live
+question in this tree while being answered. **Full write-up is Part 4 there;
+this is the finding.**
+
+`CloudLLMChain.__init__` reads `cloud_llm_api_keys()` **once** and bakes each key
+into the backend it constructs (`cloud_llm.py:906-935`). Measured by reading the
+callers, not assumed - exactly four things rebuild that chain:
+
+| trigger | site |
+|---|---|
+| application startup | `app/application.py:566` |
+| privacy toggle, **and only when no local model answers** | `app/brain.py:60` |
+| switching the cloud fallback on | `app/brain.py:325` |
+| `set_cloud_choice("cloud")` - which *does* re-read the keys | `app/brain.py:272-289` |
+
+Typing a key into Settings is not on that list. The row saves it, the Settings
+window shows it saved, and the running chain keeps what it was built with.
+
+**And this is a copy defect, not a new requirement.** "Free cloud providers" has
+always carried the clause:
+
+> Applies when the cloud fallback next activates, **not to a running session**.
+
+The two groups below it said *"Tried ahead of the free providers when set"* and
+*"Tried first when the cloud fallback is on"*. Both read as immediate, and the
+gap is widest on **"Cloud providers that require a key"** - there a key is the
+difference between the chain having an Anthropic/OpenAI/Google/Groq member and
+having none at all, and `distill.py` already records what that looks like from
+the user's side: *"a machine with a configured provider reported 'no language
+model is configured' while the key sat right there."* "Your own model server" had
+the same gap, and it is the group `app/brain.py:249` itself warns is chosen
+**once at startup**.
+
+All three carry the clause now. **`tests/test_settings_credential_timing.py`
+(4), 6 mutations, 6 caught** - and two of the three checks exist because of what
+the controls found, which is the part worth keeping:
+
+- **The reverse check was vacuous until the control ran it.** It asserted only
+  that no group *outside* `CREDENTIAL_GROUPS` was found - which a scan matching
+  **nothing** satisfies trivially. Replacing `_CREDENTIAL_WORDS` with a phrase no
+  description uses left it green. It asserts **both** directions now, so the scan
+  is its own control. *An absence presented as a pass is the same defect as an
+  absence presented as a failure.*
+- **The word list was wrong in a way only that control exposed.** It matched on
+  `"api key"`, which is a **row title**, not a description: all 28 group
+  descriptions were read off the built window and **two of the three** groups
+  never matched. Corrected to what the text actually says.
+
+There is also a **false positive worth keeping as a control**: "Test the keys"
+contains "keys" and "server", and it is deliberately excluded - it asks for
+nothing and exercises keys already stored, so demanding the activation clause of
+it would be the same defect in the opposite direction. A mutation widening the
+word list to catch it fails two tests.
+
+**The test file this first went into was rewritten underneath me** (302 -> 841
+lines, a different subject, the concurrent session's), which is the hazard this
+section already records once. Restoring over their work was not an option and a
+path operation was not on the table, so it is a **standalone file** with its own
+harness instead. And **that same session's commit `ef19d0f` swept this file's
+uncommitted `mimic` note into their commit** - the identical measurement already
+recorded for `ec6b295` above. Nothing is lost and the note is in `HEAD`; the
+split needs a history rewrite under a live session, which is a person's decision
+and not a mechanical fix.
