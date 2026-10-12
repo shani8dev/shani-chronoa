@@ -103,3 +103,55 @@ def test_the_body_notice_hook_is_the_same_shape_as_the_sound_hook():
     assert "Optional" in body.Body.set_notice.__doc__ or \
         "None to clear it" in (body.Body.set_notice.__doc__ or ""), (
         "set_notice no longer documents that None clears the hook")
+
+def test_a_refusal_is_kept_because_the_next_question_is_why(notices):
+    """**Why a history, when the notice itself already said the reason.**
+
+    The notice is transient, and it is overwritten. The question a person
+    actually has is not "did it refuse" but "why didn't it just do it" - and by
+    the time they think to ask, the detail line has been replaced by whatever
+    came next. `inventory` carries the standing gaps, but a refusal is
+    per-request and belongs nowhere else.
+    """
+    body.body._notices.clear()
+    try:
+        _notice_refusal("file_delete", "/tmp/a", "that path is outside the session")
+        _notice_refusal("process_kill", "systemd-timesyncd", "killing is not allowed")
+        kept = body.body.notices()
+        assert len(kept) == 2, f"expected both refusals kept, got {kept}"
+        assert "session" in kept[0] and "killing" in kept[1]
+    finally:
+        body.body._notices.clear()
+
+
+def test_the_history_is_bounded(notices):
+    """A process that runs for weeks cannot keep an unbounded list of strings.
+
+    Unbounded is a slow leak holding notices nobody will read. The bound is a
+    named attribute rather than a literal in the slice, so the test and the code
+    cannot disagree about how many.
+    """
+    body.body._notices.clear()
+    try:
+        for i in range(body.Body.NOTICE_HISTORY + 5):
+            body.body.notice(f"refused tool_{i}")
+        kept = body.body.notices()
+        assert len(kept) == body.Body.NOTICE_HISTORY, (
+            f"kept {len(kept)} of {body.Body.NOTICE_HISTORY + 5} notices")
+        assert kept[-1] == f"refused tool_{body.Body.NOTICE_HISTORY + 4}", (
+            f"the newest notice was dropped rather than the oldest: {kept[:2]}...")
+    finally:
+        body.body._notices.clear()
+
+
+def test_the_history_is_a_copy(notices):
+    """A caller cannot edit the record by mutating what it was handed."""
+    body.body._notices.clear()
+    try:
+        body.body.notice("refused something")
+        held = body.body.notices()
+        held.append("something that never happened")
+        assert body.body.notices() == ["refused something"], (
+            "the history handed out a reference rather than a copy")
+    finally:
+        body.body._notices.clear()

@@ -142,6 +142,7 @@ class Body:
         self._activities: List[Activity] = []
         self._listeners: List[Callable[["Body"], None]] = []
         self._notice: Optional[Callable[[str], None]] = None
+        self._notices: List[str] = []
         self._audible: Optional[Callable[[str, str], None]] = None
 
     # -- recording ------------------------------------------------------
@@ -258,6 +259,11 @@ class Body:
             except Exception:                          # noqa: BLE001 - see the docstring
                 logger.debug("a body listener failed", exc_info=True)
 
+    def notices(self) -> "list[str]":
+        """The recent notices, oldest first. A copy, so a caller cannot mutate it."""
+        with self._lock:
+            return list(self._notices)
+
     def set_notice(self, callback: Optional[Callable[[str], None]]) -> None:
         """Install the "something the person must know" hook, or None to clear it.
 
@@ -274,11 +280,29 @@ class Body:
         """
         self._notice = callback
 
+    #: How many past notices are kept. Bounded because this is a process that
+    #: runs for weeks: unbounded, it is a slow leak holding strings nobody will
+    #: read. Twenty is a session's worth - a person asking "why did it not just
+    #: do it?" is usually asking about something recent, and the transient line
+    #: has already covered the last one.
+    NOTICE_HISTORY = 20
+
     def notice(self, text: str) -> None:
-        """Tell the person something they would otherwise not find out."""
+        """Tell the person something they would otherwise not find out.
+
+        **Also kept, because a transient notice answers the wrong question.** The
+        notice says *that* a request was declined; the question a person actually
+        has next is *why*, and by the time they think to ask, the line has been
+        overwritten by something else. `inventory` carries the standing gaps, but
+        a refusal is per-request and belongs nowhere else.
+        """
         message = (text or "").strip()
         if not message:
             return
+        with self._lock:
+            self._notices.append(message)
+            if len(self._notices) > self.NOTICE_HISTORY:
+                del self._notices[:len(self._notices) - self.NOTICE_HISTORY]
         callback = self._notice
         if callback is None:
             return
