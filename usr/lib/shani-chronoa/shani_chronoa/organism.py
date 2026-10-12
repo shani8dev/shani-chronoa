@@ -191,8 +191,10 @@ INVENTORY: Tuple[Organ, ...] = (
           "consolidation: turning a long conversation into something usable",
           ("consolidation.py", "compression.py"), BUILT,
           missing="an extractive digest and a queue of proposed facts, both "
-                  "written without calling a model; no dream, and nothing "
-                  "proposes while a conversation is still in progress"),
+                  "written without calling a model; a dream runs over the "
+                  "tool-call log (`dream.py`, on the daemon tick, and gated on "
+                  "`background-mode-enabled`), but nothing proposes while a "
+                  "conversation is still in progress"),
     Organ("learning", "Memory and learning", "Synaptic plasticity",
           "learning from how a call went - the outcome, whether it was approved, undone",
           ("learning.py", "tool_tracking.py", "tool_select.py"), BUILT,
