@@ -14574,9 +14574,27 @@ skill's words** because the ring can move between drawing the label and pressing
 **Hidden when there is nothing to undo** - measured, `recent_changes()` is `[]`
 here, so a merely-disabled button would be a permanent dead control.
 
-**And `set_regenerate_handler()` exists and the app never calls it**, so "Ask that
+~~**And `set_regenerate_handler()` exists and the app never calls it**, so "Ask that
 again" is a third control wired to nothing, beside the stop-*speaking* button at
-1361 which is created hidden and never revealed.
+1361 which is created hidden and never revealed.~~
+**That is wrong, and it was the second time this stretch I asserted a control was
+unwired by reading a call site rather than following the call.** `app/
+conversation.py:172` defines `attach_regenerate()`, which calls
+`window.set_regenerate_handler(self._regenerate if self.assistant else None)`, and
+`application.py:780` calls `attach_regenerate()`. So "Ask that again" **is** wired,
+and deliberately so - *"with no assistant there is no answer to take back, so the
+transcript is left without the control rather than given a button that reports
+nothing."*
+
+The stop-*speaking* button is still real: created hidden at 1361, and nothing in
+this stretch found anything that calls `set_visible` on it. But that is now a
+claim about **one** button, not three, and it should have been measured by
+searching for `set_visible` rather than asserted from the constructor.
+
+**Six wrong premises this session**, and the shape is always the same: a plausible
+reading of the code that nobody ran anything to check. The settings audit (six
+rounds), the light gate (wrapper resolution), the inverted emptiness guard, the
+`Gtk.Entry` newline claim, "no way to stop a turn", and this.
 
 **The through-line: this codebase builds capabilities and forgets to surface them.**
 That is the shape of all four, and of the two dead organ lights found earlier in
