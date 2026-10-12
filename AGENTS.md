@@ -12391,3 +12391,67 @@ a deletion, because the failure mode is silent rather than loud.
 Two old mutation entries were retired: their anchors moved when the floor did, and
 a mutation whose anchor no longer exists is reported rather than silently
 no-opped.
+
+## The dead-code list conflated three states, and the instrument that made it a question is gone (2026-12)
+
+The unwired list above warns about itself: *"note it still rots, and the scan
+has to be re-run rather than believed."* The scan that produced it was an AST
+pass run from a scratchpad, so it is gone, and what remained was a hand-kept
+list — the failure this file records for `capabilities._GROUPS`, `GATED`,
+`GATE_NAMES` and `test_skill_gates_are_enforced._IMPL`.
+
+**Grepping the list proved it cannot be re-measured that way.** Each of these
+reads as "wired" and is not:
+
+| name | what a text search found |
+|---|---|
+| `price` | 51 hits, all the English word |
+| `collapse` | 55 hits, mostly `border-collapse:collapse` in CSS |
+| `describe_captured` | a **local variable** in `senses/vision.py:285` |
+| `capability_for` | a string in `capabilities.py:40`, not a call |
+| `within` | `tools/singing_demo.py` only, and `tools/` is **not packaged** |
+
+### Three states, and the list used one word for all of them
+
+Re-measured by `tools/deadcode.py` (new; AST, with string constants skipped so
+prose is not a caller):
+
+| | count |
+|---|---:|
+| public names in the shipped tree | **2,171** |
+| referenced in the shipped tree | 2,000 |
+| referenced by a test but not the shipped tree | 86 |
+| referenced by nothing at all | **83** |
+
+Of the **17** names the list carried: **6 are still dead**, and 11 are not — but
+*not dead* is not *wired*, and the first comparison I ran printed "no longer
+dead" for all eleven, which was itself the error. **Eight** are **test-referenced**
+(proven to work, unreachable at runtime) and only **three** have a shipped-tree
+caller. So **eleven of seventeen entries were wrong**, in the direction this file
+already names as the dangerous one.
+
+### The tool's own first run had three defects, and its own test caught the worst
+
+- **Every dunder read as dead.** `__add__`, `__repr__`, `__call__`,
+  `__post_init__` are invoked by the interpreter, never by name — a list of dead
+  code that is a statement about Python. Public-names-only is the filter that
+  removes them.
+- **`usr/bin/` was scanned as zero files.** All ten launchers are **extensionless**
+  (`shani-chronoa-lab-network`, no `.py`), and they are the privileged half:
+  `netprovision.revalidate` and `read_envelope` are called by exactly one of them
+  and by nothing else, which is the false positive this file already records from
+  an earlier scan. **Found by `test_usr_bin_counts_as_a_caller_and_not_as_an_afterthought`**,
+  which is the only reason it is not still broken; it moved the dead count from
+  91 to 83.
+- Two documented false-positive classes are allowlisted **with their reasons**:
+  `apply_filesystem_allowlist` is called from the source string
+  `get_landlock_wrapper()` returns, and `do_command_line` is a `GApplication`
+  vfunc the bus dispatches by string — a scan that misses the second calls the
+  app's own entry point dead, and this file records it as wired.
+
+`pkg/` is excluded because it is a stale copy, not the canonical package, and
+counting both doubles every number.
+
+`tests/test_deadcode_tool.py` (7) pins the two that matter: a docstring naming a
+function is not a caller, and a real call is. Both directions, because a scanner
+that counts everything as wired is as useless as one that counts nothing.
