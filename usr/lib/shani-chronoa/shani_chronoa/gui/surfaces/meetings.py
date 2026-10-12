@@ -150,6 +150,11 @@ class _MeetingsView(Gtk.Box):
         meetings when they have three. So the sentence names both halves.
         """
         common.clear(self._status_slot)
+        # **On every path.** A gate applied only where the switch is on is a gate
+        # that applies nowhere it matters: the early `return` below is precisely
+        # the consent-off branch, so a call placed after it was measured as doing
+        # nothing at all.
+        self._apply_record_gate()
         found = meeting.list_recordings()
         if not _consent(self._app):
             if found:
@@ -178,6 +183,30 @@ class _MeetingsView(Gtk.Box):
             f"{len(found)} meeting(s) kept",
             f"newest: {newest['name']} ({newest['bytes'] // 1024} kB), in "
             f"{meeting.recordings_dir()}"))
+
+    def _apply_record_gate(self) -> None:
+        """**The Record button says whether it can act, before it is pressed.**
+
+        `_recording_possible` was written for exactly this and then never called
+        — a method with a docstring about gating the Record button, sitting beside
+        a button that stayed live and refused you only after you pressed it. It is
+        the same shape as the unscheduled `_tick`: written, documented, reachable
+        by nothing.
+
+        A greyed button with the reason in its tooltip is a different sentence
+        from a button that refuses on click. One is a panel that will not pretend;
+        the other is an invitation followed by a refusal.
+        """
+        if self._recording:
+            return
+        if not self._recording_possible():
+            self.record.set_sensitive(False)
+            self.record.set_tooltip_text(
+                f"Recording is turned off - turn on '{CONSENT_KEY}' in Settings")
+            self.duration.set_sensitive(False)
+            return
+        self.record.set_tooltip_text("Start recording a meeting")
+        self.duration.set_sensitive(True)
 
     # -- the record row ------------------------------------------------------
 
@@ -332,8 +361,10 @@ class _MeetingsView(Gtk.Box):
         # the gap between that and its next 250ms tick.
         self._stop_tick()
         self.record.set_active(False)
-        self.record.set_sensitive(True)
-        self.duration.set_sensitive(True)
+        # **Re-apply the gate, not a blanket enable.** `set_sensitive(True)`
+        # here brought Record back live with `meeting-enabled` shut off, which
+        # would undo the greyed button the status line just promised.
+        self._apply_record_gate()
         self.stop.set_sensitive(False)
         self.elapsed.set_label("")
 

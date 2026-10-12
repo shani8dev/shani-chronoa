@@ -230,6 +230,30 @@ elif case == "meetings_clock":
         meeting.capture = real
         toggle.set_active(False)
 
+elif case == "meetings_record_gate_off":
+    store = meeting.recordings_dir()
+    (store / "meeting-20261011-090000.wav").write_bytes(b"RIFF" + b"\0" * 4096)
+    page = meetings.build(App(**{"meeting-enabled": False}))
+    toggle = [w for w in _descend(page)
+              if isinstance(w, Gtk.ToggleButton)][0]
+    rows = [w for w in _descend(page) if isinstance(w, Gtk.Button)]
+    transcribe = [b for b in rows if b.get_label() == "Transcribe"][0]
+    notes = [b for b in rows if b.get_label() == "Notes"][0]
+    say(record_sensitive=toggle.get_sensitive(),
+        record_tooltip=toggle.get_tooltip_text(),
+        buttons=[b.get_label() or "" for b in rows],
+        transcribe_sensitive=transcribe.get_sensitive(),
+        notes_sensitive=notes.get_sensitive())
+
+elif case == "meetings_record_gate_on":
+    store = meeting.recordings_dir()
+    (store / "meeting-20261011-090000.wav").write_bytes(b"RIFF" + b"\0" * 4096)
+    page = meetings.build(App(**{"meeting-enabled": True}))
+    toggle = [w for w in _descend(page)
+              if isinstance(w, Gtk.ToggleButton)][0]
+    say(record_sensitive=toggle.get_sensitive(),
+        record_tooltip=toggle.get_tooltip_text())
+
 elif case == "routines_listed":
     # Three routines, one of them named with a bare ampersand - which is how
     # `common.row`'s escaping was found: `Adw.ActionRow` parses its title as
@@ -588,3 +612,42 @@ class TestTheNewSurfacesAreReadable:
         assert out["stopped"], (
             "the label was still alive after the recording ended: "
             + " | ".join(out["values"]))
+
+
+class TestTheRecordButtonSaysBeforeItRefuses:
+    """`_recording_possible` was written to gate the Record button and never
+    called — a method with a docstring about the gate, beside a button that stayed
+    live and refused only on click.
+
+    **Measured before:** `meeting-enabled=False` built a panel whose Record button
+    was `sensitive=True` with the tooltip "Start recording a meeting". A person
+    pressed it, and the panel told them no. A greyed button naming the setting is
+    a different sentence from an invitation followed by a refusal.
+
+    And the asymmetry is the point: `_recording_possible`'s docstring is explicit
+    that `Transcribe` and `Notes` do **not** consult it, because reading back a
+    meeting recorded before the switch went off needs no microphone. So the same
+    shelf buttons have to stay live.
+    """
+
+    def test_record_is_greyed_and_says_why_with_consent_off(self, broadway, tmp_path):
+        out = _run(broadway, "meetings_record_gate_off", tmp_path)
+        assert not out["record_sensitive"], (
+            "Record was live with meeting-enabled off; it refuses only on click")
+        assert "meeting-enabled" in out["record_tooltip"], out["record_tooltip"]
+
+    def test_the_shelf_still_works_with_consent_off(self, broadway, tmp_path):
+        """**The trap in fixing the first one.** Gating everything that touches a
+        meeting refuses to read back a meeting the person recorded before turning
+        the switch off — which is not what "let Chronoa record" means."""
+        out = _run(broadway, "meetings_record_gate_off", tmp_path)
+        words = " ".join(out["buttons"])
+        assert "Transcribe" in words and "Notes" in words, words
+        assert out["transcribe_sensitive"] and out["notes_sensitive"], words
+
+    def test_a_granted_switch_means_a_live_button(self, broadway, tmp_path):
+        """The control on the other side: a gate that is always closed is a gate
+        nobody can tell from a broken one."""
+        out = _run(broadway, "meetings_record_gate_on", tmp_path)
+        assert out["record_sensitive"], out["record_tooltip"]
+        assert "Settings" not in out["record_tooltip"], out["record_tooltip"]
