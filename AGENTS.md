@@ -14997,3 +14997,61 @@ lost - and the fix is a `slot-test` in `shani-testbed`, where a real display and
 the image's own Python exist. Not built here. What is durable is the recipe
 above and the measurement, and a future pass should re-run it rather than trust
 the numbers.
+
+## The reachability scan counted prose, and its control named its own subject (2026-10-12)
+
+Follow-up to the entry above. The word-mention scan landed this session had the
+**mirror-image** mistake of the one it was built to fix, and measuring it found
+both halves at once.
+
+**The false positive.** `TranscriptView.set_suggestion_handler` is dead -
+`tools/deadcode.py` reports it, and it has no caller of any kind, not even a test
+- and it is named exactly once outside its own definition: a `window.py`
+docstring explaining the pattern `None` follows. A raw-text scan counts that
+word and calls the method live. So the extractor tokenises now and drops
+comments and docstrings.
+
+**Why strings are still kept, because dropping them is the other error.**
+Dropping *all* string literals - deadcode.py's deliberate rule - calls **four
+live methods dead**:
+
+| name | how it is reached |
+|---|---|
+| `show_devices` | a `getattr` string tuple at `phone_link.py:370` |
+| `speaking_row` | `voice.py`'s `_FORWARDED` `setattr(page, name, getattr(...))` |
+| `webkit_version` | called inside a subprocess harness held as a string, `tests/test_browser_window_probe.py` |
+| `activity_text` | the same, `tests/test_browse_in_app.py` |
+
+None of the four appears as a code token anywhere. So the rule is **prose goes,
+dispatch strings stay**, and both directions are asserted against real names,
+because either alone is satisfiable by a scanner that is simply broken.
+
+**And the control for this named its own subject, twice.** Spelling the dead
+method in the test puts it in the test's source, which `_all_files` reads and
+counts - so the control manufactured the very caller it asserts is absent.
+Measured: the first version named it four times and failed `assert 3 == 0`, every
+count from its own docstring. Moving the name out of the test body failed again
+at 3, because the module-level `_index` docstring still spelled it. The name is
+composed at runtime now with a guard asserting it is absent from the file's own
+text. **A control that names its subject is a control that cannot fail** - the
+same trap as the enum scan that found its own literals, the grep that matched
+its own comment, and `price`/`collapse` matching English words.
+
+Three mutations, all caught, both files restored byte-identical afterwards:
+prose counted again (1), all strings dropped (2), a true orphan on the real tree
+via `_record_row`'s call site (1).
+
+### Recorded, not fixed: the sibling that is wired and the one that is not
+
+`TranscriptView` carries **two** near-identical methods.
+`set_regenerate_handler` is wired - `gui/window.py` attaches it at
+`set_regenerate_handler`, and this file already records the false claim that it
+was not. `set_suggestion_handler` is wired to **nothing at all**: no caller in
+`usr/`, none in `tests/`, no string, no launcher. Its only mention anywhere is
+the docstring that explains its sibling's pattern.
+
+Not wired here, because what a *suggestion* handler should do is a product
+decision rather than a mechanical connection - and inventing one would be the
+confident wrong answer this entry is about. Recorded so the next reader does not
+read the sibling's wiring as evidence about both.
+
