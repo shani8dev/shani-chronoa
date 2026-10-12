@@ -23,6 +23,7 @@ import gi  # noqa: E402
 gi.require_version("Gtk", "4.0")
 
 from shani_chronoa.gui import widgets as widgets_module  # noqa: E402
+from shani_chronoa.gui import window as window_module  # noqa: E402
 
 
 def _transcript():
@@ -270,6 +271,7 @@ def test_one_row_per_turn_survives_a_rewind():
 # letters - measured: `test.chronoa.rewind.1` fails
 # `g_application_id_is_valid` outright.
 _DIGITS = str.maketrans("0123456789", "abcdefghij")
+_APP = None
 _NAMES = (str(i).zfill(6).translate(_DIGITS) for i in itertools.count())
 
 
@@ -287,9 +289,18 @@ def _window():
 
     from shani_chronoa.gui.window import ChronoaWindow
 
-    app = Gtk.Application(
-        application_id="test.chronoa.rewind." + next(_NAMES))
-    return ChronoaWindow(app)
+    # **One application for the whole file, not one per test.** Each
+    # `Gtk.Application` created here is another claim on the process's identity,
+    # and building several is how `test_transcript_scroll` started failing when
+    # this file grew past three windows - it passed alone, passed in its own
+    # file, and failed only alongside these. Measured by removing this file's
+    # tests and watching the failure go away, which is the shape of evidence
+    # that says "interference" rather than "a defect in transcript_scroll".
+    global _APP
+    if _APP is None:
+        _APP = Gtk.Application(
+            application_id="test.chronoa.rewind." + next(_NAMES))
+    return ChronoaWindow(_APP)
 
 
 def test_a_refused_rewind_leaves_the_transcript_alone():
@@ -324,6 +335,12 @@ def test_an_agreed_rewind_cuts_the_screen_and_offers_the_edit():
     window._transcript.add_assistant_turn("second answer")
 
     window.connect("rewind-history", lambda _w, _t: True)
+    # **The seam says yes.** Rewinding now asks before discarding, and the real
+    # dialogue is asynchronous - so without this these tests exercise the
+    # *refused* branch and pass by asserting nothing happened. That is exactly
+    # what happened when the confirmation was added: both went red, and the
+    # reason was that they had never been asked anything.
+    window._rewind_confirm = lambda preview, text, on_yes: (on_yes(), True)[1]
     window._transcript.set_rewind_handler(window._on_rewind_requested)
 
     window._on_rewind_requested(2, "second question")
@@ -349,6 +366,7 @@ def test_the_history_is_asked_before_the_screen_is_cut():
     window._transcript.add_user_turn("second question")
 
     order = []
+    window._rewind_confirm = lambda preview, text, on_yes: (on_yes(), True)[1]
     window.connect("rewind-history", lambda _w, _t: (order.append("history"), True)[1])
     window._transcript.set_rewind_handler(window._on_rewind_requested)
     window._on_rewind_requested(2, "second question")
@@ -419,3 +437,174 @@ def test_the_gesture_is_removed_when_the_handler_is_detached():
         left.extend(getattr(child, "_rewind_gestures", ()))
         child = child.get_next_sibling()
     assert not left, f"{len(left)} gestures survived detaching the handler"
+
+
+# --------------------------------------------------------------------------
+# rewinding is destructive, so it says what it discards first
+
+
+def _built_transcript():
+    view = widgets_module.TranscriptView()
+    view.add_user_turn("first question")
+    view.add_assistant_turn("first answer")
+    view.add_user_turn("second question")
+    view.add_assistant_turn("second answer")
+    return view
+
+
+def _filled(window):
+    """A window with four turns on it and a cleared transcript."""
+    window._transcript.clear()
+    window._transcript._turn_start.clear()
+    window._transcript.add_user_turn("first question")
+    window._transcript.add_assistant_turn("first answer")
+    window._transcript.add_user_turn("second question")
+    window._transcript.add_assistant_turn("second answer")
+    return window
+
+
+def test_the_preview_counts_what_a_rewind_would_discard(tmp_path):
+    """**Turns are not the whole of what goes.**
+
+    A tool call is a widget inside its own turn, and a made file is inside a
+    tool card - so "4 turns" said over a rewind that also throws away a tool
+    call and a file understates it, and understating a destructive action is
+    the direction that makes it feel cheaper than it is.
+    """
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import GdkPixbuf
+
+    view = _built_transcript()
+    made = tmp_path / "cat.png"
+    buf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 32)
+    buf.fill(0x2266CCFF)
+    assert buf.savev(str(made), "png", [], []) is True
+    view.add_tool_call("generate_image", {}, "Saved it.", True, (made,))
+    view.add_user_turn("third question")
+    view.add_assistant_turn("third answer")
+
+    preview = view.rewind_preview(1)
+    assert preview["ok"]
+    # Six turns in total, rewinding from index 1 discards the five after it.
+    # (The first version asserted 6 - the count *including* the turn kept.)
+    assert preview["turns"] == 5, preview
+    assert preview["tool_calls"] == 1, preview
+    assert preview["artifacts"] == 1, preview
+    assert "tool call" in preview["sentence"], preview["sentence"]
+    assert "file" in preview["sentence"], preview["sentence"]
+
+
+def test_the_preview_of_a_turn_that_is_not_there_is_not_zero():
+    """A caller must not be able to ask about nothing and be told "nothing"."""
+    view = _built_transcript()
+    for bad in (-1, 99, "two", None):
+        assert view.rewind_preview(bad)["ok"] is False
+
+
+def test_one_file_declared_twice_is_counted_once(tmp_path):
+    """Double-counting makes a rewind look *more* destructive than it is, which
+    teaches people to confirm without reading."""
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import GdkPixbuf
+
+    view = _built_transcript()
+    made = tmp_path / "cat.png"
+    buf = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 32, 32)
+    buf.fill(0x2266CCFF)
+    buf.savev(str(made), "png", [], [])
+    view.add_tool_call("a", {}, "", True, (made,))
+    view.add_tool_call("b", {}, "", True, (made,))
+
+    assert view.rewind_preview(0)["artifacts"] == 1
+
+
+def test_a_declined_rewind_removes_nothing():
+    """**The property the whole confirmation exists for.**
+
+    The window cuts only what the model has already agreed to give up, and only
+    after a yes. A "no" must leave the conversation exactly as it was - and the
+    history must not have been rewound either, or the two are out of step in
+    the direction this codebase keeps paying for.
+    """
+    window = _filled(_window())
+    asked = []
+    window._rewind_confirm = lambda preview, text, on_yes: (
+        asked.append(preview["sentence"]) or False)
+    rewinds = []
+    window.connect("rewind-history", lambda _w, text: rewinds.append(text) or True)
+
+    window._on_rewind_requested(2, "second question")
+
+    assert asked, "nothing was asked, so nothing was decided"
+    assert rewinds == [], "the history was rewound after a declined rewind"
+    assert len(window._transcript.visible_turns()) == 4, (
+        f"a declined rewind changed the transcript: "
+        f"{window._transcript.visible_turns()}")
+    assert window.get_input_text() == "", (
+        "a declined rewind put the question back in the composer")
+
+
+def test_an_accepted_rewind_cuts_the_screen_and_the_history():
+    window = _filled(_window())
+    window._rewind_confirm = lambda preview, text, on_yes: (on_yes(), True)[1]
+    rewinds = []
+    window.connect("rewind-history", lambda _w, text: rewinds.append(text) or True)
+
+    window._on_rewind_requested(2, "second question")
+
+    assert rewinds == ["second question"], "the history was not rewound"
+    assert window._transcript.visible_turns() == [
+        ("user", "first question"), ("assistant", "first answer")]
+    assert window.get_input_text() == "second question"
+
+
+def test_a_dialog_that_cannot_ask_refuses():
+    """**"Could not ask" must never read as "yes".**
+
+    A guard that treats an unavailable dialogue as consent is the same defect as
+    the one this file keeps fixing, in the direction that discards work.
+    """
+    window = _filled(_window())
+
+    def _broken(preview, text, on_yes):
+        raise RuntimeError("no dialog available")
+
+    window._rewind_confirm = _broken
+    rewinds = []
+    window.connect("rewind-history", lambda _w, text: rewinds.append(text) or True)
+    try:
+        window._on_rewind_requested(2, "second question")
+    except RuntimeError:
+        pass      # a seam that raises is the caller's problem, not consent
+    assert rewinds == [], "a dialogue that failed still rewound the history"
+    assert len(window._transcript.visible_turns()) == 4
+
+
+def test_the_dialog_acts_on_a_yes_and_only_on_a_yes():
+    """**The load-bearing claim, and it was untested for a while.**
+
+    The answer handling lived in a closure inside `_ask_rewind_dialog`; changing
+    the comparison made the rewind impossible in the shipped app and every test
+    stayed green, because the only test on it checked the *signature* of the
+    method. Checking that the action is handed over is not the same claim as
+    checking that it is ever called.
+    """
+    import inspect
+
+    signature = inspect.signature(window_module.ChronoaWindow._ask_rewind_dialog)
+    assert list(signature.parameters) == ["self", "preview", "text", "on_yes"], (
+        f"the dialog must be handed the action: {list(signature.parameters)}")
+
+    ran = []
+    window = _window()
+    window_module.ChronoaWindow._rewind_responded(window, "rewind",
+                                                  lambda: ran.append("yes"))
+    assert ran == ["yes"], f"a Rewind answer did not rewind: {ran}"
+
+    for cancel in ("cancel", "", "close"):
+        ran.clear()
+        window_module.ChronoaWindow._rewind_responded(window, cancel,
+                                                      lambda: ran.append("yes"))
+        assert not ran, f"{cancel!r} rewound anyway: {ran}"

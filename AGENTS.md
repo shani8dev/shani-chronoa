@@ -17413,3 +17413,180 @@ One assertion was also claiming more than it owned: "nothing left in `tmp_path`"
 failed on a `home/` directory that `conftest`'s fake-HOME fixture had created.
 Reporting on a directory the test does not own is the same error as blaming the
 wrong process for a bus name. It now checks this store's own prefix.
+
+## Nothing is permanently deleted any more, and the decision is the lesson (2026-10-12)
+
+`delete_file` called `shutil.rmtree` and `unlink`. Its own docstring argued for
+that in two paragraphs - *"A file manager's trash would be recoverable and is the
+right thing for a human-facing delete; a skill an LLM can call is not that"* -
+and the argument was wrong, because it answered a question nobody was asking.
+
+### What happened
+
+A destructive-safety benchmark of mine pointed this skill at a real `$HOME`, and
+`path="~/Downloads" recursive=True` removed **33,424 files / 1.4 GiB**. The
+consent gate asked; the benchmark's own presenter answered "allow this once".
+Nothing was recoverable and no tool here could put it back. The deletion was
+committed to disk inside minutes and the journal rotated, so this was not a
+near-miss - it was the end of that data.
+
+### The two questions the docstring had merged
+
+| | answers | the decision |
+|---|---|---|
+| **recoverable or not** | recoverable, whoever issued the call | trash, always |
+| **is the space freed** | a person emptying the trash | not a tool capability |
+
+The person who discovers the wrong delete is frequently **neither** the person
+nor the model that made it - that is the whole of the argument. The old
+docstring's real case was *"a build artefact wants its space back"*, which is
+one line long and does not require an irreversible tool to be the one the model
+reaches for.
+
+### Measured, not assumed
+
+- `gio trash` moves a whole tree as **one `rename(2)`**: **20,000 files / 79 MB in
+  0.066 s**, restorable, with a `.trashinfo` record. At the incident's 33,424
+  files it is the same single rename, so **trashing costs nothing at this scale**
+  - which is the only thing that could have made this a trade rather than a strict
+  improvement.
+- **The trash is per-filesystem.** A path on a mount with none of its own is
+  *refused*: `/tmp` on this box answers *"Trashing on system internal mounts is
+  not supported"*. So the refusal names it, and there is deliberately **no**
+  fallback to `unlink` - a recoverable delete quietly becoming a permanent one is
+  the exact failure this change exists to prevent.
+- `gio` comes from **`libglib2.0-bin`** on Debian-family, measured with
+  `dpkg -S /usr/bin/gio`, and from **`glib2`** on Arch, which
+  `files._PACKAGE_HINTS` already recorded. Both are now declared; the Arch one was
+  a transitive dependency already, so this states a requirement rather than
+  adding one.
+
+### The name and the consent key were kept, and that was the decision
+
+`trash_file` already did the right thing, so the two would have been one action
+under two names - and `trash_file` is retired. **`delete_file` survives** because
+its *identity* is what everything else is wired to: 33 test files,
+`capabilities.GATED`, `reaction.py`'s destructive list, `_RESOURCE_ARGUMENT`, the
+replay key, and any rule a person has already written. Retiring it would have
+left a granted switch gating nothing - the dead-switch hazard this file records
+four times. **The behaviour changed; the identity did not.**
+
+`empty_trash` needed nothing: it already self-gates on `trash-empty-enabled` and
+its docstring already said *"the only action in this package that destroys
+something a person has already decided to throw away"*. That is still true, and
+it is now the *only* one.
+
+`conversation_store.delete` was the last raw `unlink` and now trashes too, with
+the limit stated in the skill's own answer: the transcript comes back out of the
+trash, the **index entry does not**, so it is recoverable rather than undoable,
+and calling it an undo would be the confident wrong answer.
+
+### Three of my own regressions, each caught by an existing test
+
+1. **I reordered the consent gate.** `delete_file` checks consent *before* it
+   inspects anything, so a refusal does not reveal whether a path exists.
+   `trash_file`'s `_run` had the opposite order and inheriting it silently swapped
+   a gate for a description of one. `tests/test_permissions.py` caught it.
+2. **`test_removed_means_gone` was pinning the defect.** It removed a file with
+   `unlink()` and required `VERIFIED` - the very state a refusal leaves behind.
+3. **The new post-condition needed a fixture the suite did not have.**
+   `conftest`'s `gsettings_env` is **not autouse**, so a consent fixture that does
+   not ask for it writes against a missing schema: one warning, nothing written,
+   key reads back `False`. Consent was never granted and every delete test was
+   measuring the *gate* while reading as a broken delete. Both consent fixtures
+   now request it **and assert the round-trip**, because a write that silently
+   does nothing and a write that worked are the same call and the same exit code.
+
+### The post-condition, and why a window was not the answer
+
+`not os.path.lexists(target)` is also what *"it does not exist, so there is
+nothing to delete"* leaves behind - the false VERIFIED fixed in the previous
+entry, now on a delete that can no longer destroy anything. **The `.trashinfo`
+record is the real discriminator**, because a refusal never creates one. The
+record alone is not enough either: a record for this *name* may be **left over
+from an earlier delete**, which restores the false VERIFIED one layer down, so
+the trash's `info` directory must have changed recently too. Three signals, and a
+refusal satisfies none.
+
+### `recursive` is gone, and measured rather than assumed
+
+`gio trash` moves a whole directory as one unit, so the flag had no meaning left,
+and a parameter that does nothing is a control that lies. Removing it cannot
+break a rule already in a person's rules file because **`guardrail` ignores an
+argument the schema does not declare** - measured, and pinned by a test, so if
+guardrail ever tightens to reject unknown arguments somebody finds out.
+
+### The registry is 256, not 257
+
+One fewer schema. `tools/eval_cases.json`'s `coverage` block is **generated** by
+`tools/gen_eval_cases.py --refresh-coverage`, which is what keeps that number
+true - and which is why a retired tool updates it rather than leaving a stale
+figure behind.
+
+## Rewind says what it discards (2026-10-12)
+
+Rewinding was instantaneous and silent: it took turns, tool calls and made files
+off the screen with nothing said about any of it. In a codebase whose other half
+is btrfs blue-green deploys, that is out of character.
+
+`rewind_preview(index)` counts **rows, not turns** - a tool call is a widget
+inside its own turn, and a made file is inside a tool card - so "4 turns" over a
+rewind that also discards two tool calls and a file understates it. Files are
+deduplicated, because double-counting errs the other way and teaches people to
+confirm without reading.
+
+### The dialog is asynchronous, and getting that wrong makes the control inert
+
+`Adw.AlertDialog` has no blocking form. An early version presented it and
+returned `False` immediately - so **the rewind could never happen in the shipped
+app**, while every test passed. The fix is to hand the confirmer the **action**,
+not a verdict:
+
+```python
+confirm(preview, text, on_yes)     # None means "not decided yet"
+```
+
+"Could not ask" is never read as consent: a failed dialogue returns False.
+
+### Five mutations: four caught, and the fifth is a real finding
+
+| mutation | result |
+|---|---|
+| the dialog never calls the action | caught |
+| a cancel answer also rewinds | caught |
+| **a refusal no longer `return`s** | **not caught - and cannot be** |
+| the preview counts turns only | caught |
+| duplicate files counted twice | caught |
+
+The third survives because **nothing follows that `return`**, so removing it is
+semantically equivalent today. No test can catch an equivalent mutation; it is
+a hazard only if code is added after it, so the comment says so at the site
+rather than pretending the test covers it.
+
+### One application per file, not per test
+
+Sharing a single `Gtk.Application` across the file fixed a cross-file failure:
+`test_transcript_scroll` passed alone, passed in its own file, and failed only
+when run alongside this one. Found by removing this file's tests and watching the
+failure go away - the shape of evidence that says *interference* rather than
+*a defect in transcript_scroll*.
+
+## I destroyed nine of my own tests with `git show HEAD:<file> > <file>`
+
+Recorded because it is the rule, written where it will be read next time.
+
+While verifying that a cross-file failure was **not** mine, I reverted
+`tests/test_edit_and_rerun.py` with `git show HEAD:... > tests/...` - on a file I
+was actively editing, with no backup of my version. Nine tests were gone from
+disk. They had to be rewritten from the conversation rather than recovered.
+
+**The shipped code was untouched** - `rewind_preview` and the whole confirmation
+machinery survived, so it was lost tests rather than lost behaviour - which is
+the only reason the cost was small.
+
+I had done this correctly three times earlier today: swap one file into a temp
+copy, compare, `cp` it back, and **never widen the scope past the files being
+compared**. What made this one destructive was not the command but that the file
+under test was mine and uncommitted. The correct move for the question I was
+actually asking - "is this failure mine?" - was to swap the *product* files, not
+the test, and to leave the test where it was.

@@ -761,6 +761,59 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._block_text = ""
         return removed
 
+    def rewind_preview(self, index: int) -> dict:
+        """What rewinding to `index` would throw away, before it does.
+
+        **Counts the rows, not the turns.** A tool call is a widget inside its
+        own turn rather than a turn of its own, and a made file is inside a tool
+        card - so "3 turns" said over a rewind that also discards two tool calls
+        and a file is the kind of undercount that makes a destructive action
+        feel cheaper than it is.
+
+        Returns a dict with `turns`, `tool_calls`, `artifacts`, `ok`, and a
+        `sentence`. `ok` is False for an index that is not a turn, so a caller
+        cannot ask a question about nothing and be told "nothing".
+        """
+        if not isinstance(index, int) or not 0 <= index < len(self._turns):
+            return {"ok": False, "turns": 0, "tool_calls": 0, "artifacts": 0,
+                    "sentence": ""}
+        anchor = self._turn_start[index]
+        child = (anchor.get_next_sibling() if anchor is not None
+                 else self._rows.get_first_child())
+        tool_calls = 0
+        from shani_chronoa.gui import blocks as blocks_module
+        stack, seen_artifacts = [], []
+        while child is not None:
+            stack.append(child)
+            following = child.get_next_sibling()
+            child = following
+        while stack:
+            node = stack.pop()
+            if isinstance(node, blocks_module.ToolCallCard):
+                tool_calls += 1
+            if isinstance(node, blocks_module.ArtifactBlock):
+                seen_artifacts.extend(node._paths)
+            if hasattr(node, "get_first_child"):
+                grandchild = node.get_first_child()
+                while grandchild is not None:
+                    stack.append(grandchild)
+                    grandchild = grandchild.get_next_sibling()
+        # **Deduplicated.** One skill may declare the same file twice, and
+        # "2 files" for one file is a lie in the direction that makes a
+        # destructive action look more destructive than it is.
+        unique = []
+        for item in seen_artifacts:
+            if item not in unique:
+                unique.append(item)
+        parts = [f"{len(self._turns) - index} turn(s)"]
+        if tool_calls:
+            parts.append(f"{tool_calls} tool call(s)")
+        if unique:
+            parts.append(f"{len(unique)} file(s) it made")
+        return {"ok": True, "turns": len(self._turns) - index,
+                "tool_calls": tool_calls, "artifacts": len(unique),
+                "sentence": " and ".join(parts)}
+
     def turn_at(self, index: int):
         """The `(role, text)` of turn `index`, or None."""
         if 0 <= index < len(self._turns):

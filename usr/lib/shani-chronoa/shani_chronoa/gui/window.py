@@ -2697,6 +2697,65 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 group="Commands", weight=0))
         return entries
 
+    #: Set by a caller that wants to decide rewinds itself; None means use the
+    #: real dialogue. It is a seam for tests, and the seam takes the **action**
+    #: rather than a verdict - see `_on_rewind_requested`.
+    _rewind_confirm = None
+
+    def _confirm_rewind(self, preview: dict, text: str, on_yes):
+        """Ask about a destructive rewind. True/False if decided now, else None.
+
+        **None means "not decided yet", and is never read as consent.** A guard
+        that treats "could not ask" as "yes" is the same defect as the one this
+        file keeps fixing, so a dialogue that fails to appear refuses.
+        """
+        confirm = self._rewind_confirm or self._ask_rewind_dialog
+        return confirm(preview, text, on_yes)
+
+    def _rewind_responded(self, response: str, on_yes) -> None:
+        """The dialog's answer, as a method so it can be driven directly.
+
+        **Extracted because "the dialog calls the action" is the load-bearing
+        claim and it was untested.** An earlier version compared
+        `response == "rewind"` inside a closure; changing that string made the
+        rewind impossible in the shipped app and 26 tests stayed green, because
+        the only test on it checked the *signature* of the dialog method.
+
+        The cancellation branch matters as much: "Keep everything" must not
+        rewind, and neither must the dialog closing without a choice.
+        """
+        if response == "rewind":
+            on_yes()
+
+    def _ask_rewind_dialog(self, preview: dict, text: str, on_yes):
+        """The real confirmation. Non-modal, defaulted to cancel.
+
+        **`on_yes()` is called from the response handler**, because GTK 4 has no
+        blocking dialog API - an earlier version returned `False` immediately
+        after `present()` and the rewind could therefore *never* happen in the
+        real app while every test still passed. That is the inert-control defect
+        in its purest form, and it is why the action is a parameter.
+        """
+        try:
+            from gi.repository import Adw
+
+            dialog = Adw.AlertDialog.new(
+                "Rewind from this turn?",
+                f"This removes {preview['sentence']}. It cannot be undone.")
+            dialog.set_default_response(1)
+            dialog.add_response("cancel", "Keep everything")
+            dialog.add_response("rewind", "Rewind")
+
+            dialog.connect("response",
+                           lambda d, name: self._rewind_responded(name, on_yes))
+            dialog.present(self)
+            self._rewind_dialog = dialog
+            return None
+        except Exception:                                   # noqa: BLE001
+            logger.warning("could not ask for rewind confirmation; refusing",
+                           exc_info=True)
+            return False
+
     def _show_conversation_page(self) -> None:
         self._close_palette()
         self._show_surface("conversation")
@@ -2746,6 +2805,37 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """
         if self._transcript.turn_at(index) is None:
             return
+        preview = self._transcript.rewind_preview(index)
+        if not preview["ok"]:
+            return
+
+        # **Ask before discarding, not after.** Rewinding is destructive and was
+        # originally instantaneous and silent: it took turns, tool calls and
+        # files off the screen with nothing said about any of it. In a codebase
+        # whose other half is btrfs blue-green deploys, a control that discards
+        # work without saying what it discards is out of character.
+        #
+        # **Before the history rewind, not after** - the history is the
+        # irreversible half, and confirming after it has happened is a notice
+        # rather than a question.
+        #
+        # `confirm` is handed the *action*, not a verdict: an `Adw.AlertDialog`
+        # is asynchronous, so the answer arrives after this method has returned.
+        # A design that waited for a bool here would have to block the loop, and
+        # a design that treated "no answer yet" as "no" would make the rewind
+        # permanently inert while looking entirely correct.
+        # The `return` under `decided is False` is **load-bearing by accident if
+        # it is missing**: nothing currently follows it, so a refusal is honoured
+        # only because this is the last statement. Stated explicitly so the next
+        # thing added here cannot silently turn "Keep everything" into a rewind.
+        decided = self._confirm_rewind(preview, text,
+                                       lambda: self._perform_rewind(index, text))
+        if decided is False:
+            self.set_status("Nothing was removed.")
+            return
+
+    def _perform_rewind(self, index: int, text: str) -> None:
+        """History first, transcript second, then the question back in the box."""
         if not self.emit("rewind-history", text):
             self.set_status("That turn is too old to rewind to - earlier parts "
                             "of this conversation have been compressed.")
