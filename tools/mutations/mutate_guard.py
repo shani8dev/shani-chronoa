@@ -41,8 +41,16 @@ MUTATIONS = [
         "old": "    if os.environ.get(MUTATION_MARKER):\n        return None\n",
         "new": "    return None\n    if os.environ.get(MUTATION_MARKER):\n        return None\n",
         "label": "the guard never consults the lock, so it refuses nothing at all",
-        "expect": ["test_a_live_lock_is_a_refusal", "test_the_reasons_are_not_about_a_lock_file",
-                   "TestTheHookActuallyFires"],
+        "expect": ["test_a_live_lock_is_a_refusal",
+                   # Was "test_the_reasons_are_not_about_a_lock_file", which
+                   # exists nowhere - the test was renamed to this and the set
+                   # followed neither. Was also "TestTheHookActuallyFires", a
+                   # class, which is not a test id.
+                   "test_the_reason_is_about_what_is_happening_not_a_filename",
+                   # Was "TestTheHookActuallyFires", which is the **class** - not
+                   # a test id, so it could never match. The test inside it that
+                   # witnesses this mutation is this one.
+                   "test_configure_exits_while_a_run_holds_the_tree"],
     },
     {
         "file": _CONFTEST,
