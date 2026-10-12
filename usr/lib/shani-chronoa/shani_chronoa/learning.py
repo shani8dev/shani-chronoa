@@ -38,7 +38,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple
 
 #: One logger for the whole engine. The three merged modules each defined their
 #: own; three loggers for one subsystem means three places to look and three
@@ -3149,11 +3149,114 @@ _SHIFT_MAX = 8.0
 _MIN_CALIBRATION = 30
 
 
+def _is_number(value: Any) -> bool:
+    """A real number, with bools excluded.
+
+    **`True`/`False` are excluded on purpose.** `temperature or 1.0` already maps
+    them to 1.0 by luck - a bool is truthy for `True` and falsy for `False` - so
+    today they read as the *identity* rather than as a fitted temperature. That is
+    the right answer for the wrong reason, and the reason stops holding the moment
+    a caller divides by a rounded value: laya, whose decision model this port comes
+    from, records the same trap in `laya/common.py`'s `clamp_temperature`
+    ("`True`/`False` used to float to 1.0/0.0 here and read as fitted/sharpening
+    temperatures").
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def clamp_temperature(value: Any,
+                      lo: Optional[float] = None,
+                      hi: Optional[float] = None) -> float:
+    """A temperature the reader may divide by: confined to `_T_RANGE`, or identity.
+
+    **The fit already bounds itself and the reader did not.** `fit_calibration`
+    searches `math.log(_T_RANGE[0])` to `math.log(_T_RANGE[1])`, so a fitted
+    temperature is legal by construction. But a temperature out of a *model file*
+    is a different thing, and this repository has a measured precedent for a file
+    that verified its own digest and held garbage: the unbalanced weights once
+    made `to_dict`'s `round(v, 6)` write zeros, and the file then predicted 0.3333
+    for every verdict on every input.
+
+    Measured, feeding the reader values a file could hold:
+
+    | T | top probability | verdict |
+    |---|---|---|
+    | 0.05 (the fitter's floor) | 0.9975 | legal |
+    | **1e-06** (just below it) | **1.000000** | **saturated** |
+    | 20.0 (the fitter's ceiling) | 0.3378 | legal |
+    | 0 / True | 0.4260 | the identity, by luck of `or` |
+    | `"0.5"` | `TypeError` | **a crash** |
+
+    So a hand-edited or older file has two ways to be wrong and neither was
+    caught: **below the floor the calibrated probability saturates to 1.0**, so
+    `Report.honest()`'s detected gate and `recommend()` act on certainty that
+    nothing earned - which is laya's issue #394 ("publishes that same 0.24 as
+    0.4993, so a threshold applied to these numbers still selects below model
+    accuracy"); and a **non-numeric temperature raises TypeError** out of the
+    read path, where every other failure in this module falls back to identity.
+
+    Non-numbers, NaN and infinities return the identity rather than raising,
+    because a model that cannot be read is not a model that is wrong - and a file
+    that cannot be parsed must not take the outcome model down with it.
+    """
+    lo = _T_RANGE[0] if lo is None else lo
+    hi = _T_RANGE[1] if hi is None else hi
+    if not _is_number(value):
+        return 1.0
+    try:
+        t = float(value)
+    except (TypeError, ValueError):        # pragma: no cover - _is_number covered it
+        return 1.0
+    if t != t or t in (float("inf"), float("-inf")):
+        return 1.0
+    # **Zero is the identity, and it is not the fitter's floor.** `temperature or
+    # 1.0` used to make 0 read as 1.0 by the accident of `or`, and naive clamping
+    # would make 0 read as `_T_RANGE[0]` - the *sharpest* legal temperature. That
+    # is a regression for a class this file has measured: unbalanced weights once
+    # made `to_dict`'s `round(v, 6)` write zeros, and the file then predicted
+    # 0.3333 for every verdict. Clamped, that same file would predict ~0.997 and
+    # read as certainty, so 0 stays the identity.
+    if t == 0.0:
+        return 1.0
+    return max(lo, min(hi, t))
+
+
+def clamp_shift(value: Any) -> "List[float]":
+    """A prior-shift vector confined to `_SHIFT_MAX`, identity where it is not.
+
+    The fit clamps as it goes; a shift out of a file was used as-is. One pair of
+    bounds, in one place, is the point - laya states it for the same pair
+    ("There is no second pair of bounds in this module").
+    """
+    if not isinstance(value, (list, tuple)) or not value:
+        return []
+    out: List[float] = []
+    for term in value:
+        if not _is_number(term):
+            return []
+        try:
+            term = float(term)
+        except (TypeError, ValueError):    # pragma: no cover - _is_number covered it
+            return []
+        if term != term or term in (float("inf"), float("-inf")):
+            return []
+        out.append(max(-_SHIFT_MAX, min(_SHIFT_MAX, term)))
+    return out
+
+
 def calibrated(logits: Sequence[float], temperature: float = 1.0,
                shift: Optional[Sequence[float]] = None) -> List[float]:
-    """softmax(logits / temperature + shift)."""
-    t = temperature or 1.0
-    s = shift or [0.0] * len(logits)
+    """softmax(logits / temperature + shift), with the temperature the reader may divide by.
+
+    **Both bounds are applied here, in the reader**, not only in the fit. A
+    temperature out of a model file is the only way a value outside `_T_RANGE`
+    reaches this function, and the measured consequence was saturation: `clamped
+    = calibrated([0.9, 0.4, 0.6], 1e-06)` returns a top probability of 1.000000
+    on every input, which is a certainty nothing earned.
+    """
+    t = clamp_temperature(temperature)
+    bounded = clamp_shift(shift) if shift is not None else None
+    s = bounded if bounded else [0.0] * len(logits)
     return _exp([z / t + b for z, b in zip(logits, s)])
 
 

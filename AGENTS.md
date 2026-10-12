@@ -2,6 +2,90 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## laya, second repo: the temperature the reader divides by (2026-10-12)
+
+The first clone was the wrong Laya - the notification command center, which gave
+`prompt_pieces`. The one meant was **the decision model**
+(`harness-study/laya-decision`, `NandhaKishorM/laya`): a 421M-parameter
+non-autoregressive System-1 model on a ModernBERT-large backbone, Apache-2.0,
+which returns typed decisions in one forward pass - `choice` (a distribution over
+options), `score` (a distribution over an ordered rubric) and a calibrated
+P(true) - in about 33 ms on CPU.
+
+Its own `AGENTS.md` reads like this file's: *"Do NOT introduce a dependency on a
+hosted service"*, *"If a change moves numbers, report the before and after"*,
+*"Leave one runnable check behind for non-trivial logic."*
+
+### The transfer: one pair of bounds, and the read path had none
+
+`laya/calibrate.py` states the rule:
+
+> Fitted temperatures go through `clamp_temperature` and therefore `TEMP_MIN,
+> TEMP_MAX` from `laya.common`, **the same guard checkpoint load uses.** There is
+> no second pair of bounds in this module.
+
+Chronoa **already had temperature-scaling calibration** (`learning.fit_calibration`,
+`cross_fit_calibration`, `calibration_metrics`; measured ECE 0.430 -> 0.107, NLL
+0.938 -> 0.547). It also already bounded the *fit*: the golden-section search runs
+`log(_T_RANGE[0])` to `log(_T_RANGE[1])`, so a fitted temperature is legal by
+construction. What it had **none of** was a bound on the *read* path - and a
+temperature out of a model file is the only way one outside the range reaches
+`calibrated()`.
+
+**Measured, feeding the reader what a file could hold:**
+
+| T | top probability before | after |
+|---|---|---|
+| 0.05 (`_T_RANGE`'s floor) | 0.9975 | 0.9975 |
+| **1e-06** | **1.000000** | 0.997482 |
+| 20.0 (the ceiling) | 0.3378 | 0.3378 |
+| `"0.5"` | **`TypeError`** | the identity |
+| 0 / `True` | 0.4260, by luck of `or` | 0.4260, by rule |
+
+Two failures, both the shape this file records: **below the floor the calibrated
+probability saturated to 1.0**, so `Report.honest()`'s `detected` gate and
+`recommend()` act on a certainty nothing earned - laya's own issue #394 (*"publishes
+that same 0.24 as 0.4993, so a threshold applied to these numbers still selects
+below model accuracy"*); and **a non-numeric temperature raised `TypeError`** out of
+the read path, where every other failure in this module falls back to identity.
+
+The precedent for the file-being-garbage is this file's own: unbalanced weights
+once made `to_dict`'s `round(v, 6)` write **zeros**, and the file - which verified
+its own digest - predicted 0.3333 for every verdict on every input.
+
+### The design call the naive fix gets wrong, and the mutation that pins it
+
+Clamping 0 to `_T_RANGE[0]` would make the **sharpest legal temperature** out of a
+value that means "rounded away": the zeros-file would go from predicting 0.3333 on
+everything to predicting ~0.997, which is a certainty instead of a flat model. So
+**0 is the identity**, not the floor. `test_zero_and_true_still_read_as_the_identity`
+is the witness and the mutation that removes the rule fails it.
+
+`True` and `False` keep returning the identity too, now by an explicit
+`_is_number` rather than by the accident of `temperature or 1.0` - laya records the
+same trap in `laya/common.py` ("`True`/`False` used to float to 1.0/0.0 here and
+read as fitted/sharpening temperatures").
+
+**And what the clamp does not do:** `_SHIFT_MAX` is 8.0 in logits, and clamping to
+it still saturates on a small spread. Laya's own wording for the asymmetry is
+recorded here: *"The clamp bounds the damage; it does not calibrate anything."*
+
+`tests/test_temperature_bounds.py` (13), `tools/mutations/temperature_bounds.py`
+(**7 caught, 0 survivors, 1 equivalent documented**). 190 passed across the
+temperature-bounds, outcome-model, learning-calibration, learning-chain,
+learning-says-what-a-fit-is-worth, reply-style, prompt-pieces, calibration,
+distill, surface-learning and tool-outcome suites; 35 sets / 296 anchors all match.
+
+**Four of the eight mutations were once survivors of my own making**, and each is
+a different way a control that cannot fail disguises itself: a bool mutation
+aimed at the *call site* (inert - `float(True)` is 1.0 either way, so the witness
+had to be on `_is_number` itself); a shift guard whose `try/except` below it
+already catches the same case (kept, documented equivalent); a "second pair of
+bounds" mutation that added a constant nothing read (deleted rather than counted);
+and a floor witness using one example with one label, which `len(set(labels))`
+already refuses, so removing the floor changed nothing it measured.
+
+
 ## laya: the system prompt is now tunable, and the safety sentence has no door (2026-10-12)
 
 `harness-study/laya` cloned and studied (a local-first AI notification centre;
