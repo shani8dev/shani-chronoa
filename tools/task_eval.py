@@ -197,6 +197,71 @@ def classify_reply(text: str) -> str:
 #: miss, short enough that 226 cases do not produce a report nobody opens.
 REPLY_EXCERPT_CHARS = 200
 
+#: The id prefix `gen_eval_cases.py` gives a case it derived from a schema rather
+#: than from a transcript. Read out of the ids rather than a second hand-kept
+#: list of which cases are real, because that list would rot exactly like
+#: `coverage.skills_total` did.
+_GENERATED_PREFIX = "generated-"
+
+
+#: **What a run measured, so two runs can be told apart.**
+#:
+#: `harness-study/laya-decision`'s `laya/evals.py` states the rule this ports:
+#:
+#: > `compare` reads `overall` and nothing else, so a run that says nothing about
+#: *what it measured* makes a gate that can only compare arithmetic. Every report
+#: therefore carries a run identity in `config` ... and `EvalReport.comparable_to`
+#: refuses a comparison between two runs that are not the same measurement. The
+#: identity is deliberately free of anything time-bearing, so a report stays
+#: byte-reproducible for a fixed runner.
+#:
+#: Chronoa already paid for not having it: AGENTS.md records `test_task_eval`
+#: failing on **a stale skill count** - a comparison made against a different set
+#: of cases reading as a regression. `results[config]` carried `cases`,
+#: `right_tool` and `mean_seconds`, and nothing that said *which* cases those
+#: were, so any two runs looked like two measurements of the same thing.
+#:
+#: The digest is over the **ids and requests in canonical order**, not the file
+#: bytes: reordering a file is not a different measurement, and editing a comment
+#: inside a case is not either. What must change it is the set of things asked, or
+#: what was asked. Time and paths are excluded so a report stays
+#: byte-reproducible.
+#:
+#: `generated` is in the identity because the corpus already says 149 of its 226
+#: cases are machine-derived: a score over a set that changes by generated cases
+#: is a score over a different corpus, even at the same count.
+
+
+def run_identity(cases: "list[dict]") -> tuple:
+    """`(n, sha256, generated)` - what this run measured, in one comparable value."""
+    import hashlib
+
+    canonical = sorted((str(c.get("id") or ""), str(c.get("request") or ""))
+                       for c in cases)
+    sha = hashlib.sha256(repr(canonical).encode("utf-8")).hexdigest()[:16]
+    generated = sum(1 for cid, _ in canonical if cid.startswith(_GENERATED_PREFIX))
+    return len(cases), sha, generated
+
+
+def comparable(a: dict, b: dict) -> "tuple[bool, str]":
+    """Whether two per-config results are two measurements of the same thing.
+
+    **Refuses rather than comparing, which is the whole point.** `comparable_to`
+    exists so a gate cannot report a regression from a set that changed - and a
+    caller that ignores the answer gets what it had before, which is a comparison
+    of two numbers that were never about the same questions.
+    """
+    for side, r in (("this run", a), ("that run", b)):
+        if "identity" not in r:
+            return False, f"{side} carries no measurement identity"
+    if a["identity"] == b["identity"]:
+        return True, "the same cases"
+    left, right = a["identity"], b["identity"]
+    if left[0] != right[0]:
+        return False, f"different cases: {left[0]} measured against {right[0]}"
+    return False, (f"the same number of cases but not the same cases: "
+                   f"{left[1]} against {right[1]}")
+
 
 def build_llm(config: str, cloud: str):
     from shani_chronoa import cloud_llm, local_llm
@@ -273,6 +338,7 @@ async def run(configs, cases, cloud: str, repeat: int, pause: float = 0.0) -> di
         n = len(measured)
         results[config] = {
             "cases": n,
+            "identity": run_identity([r for r in rows if not r.get("unavailable")]),
             "not_measured": len(rows) - n,
             "right_tool": sum(r["tool"] for r in measured),
             "right_call": sum(r["args"] for r in measured),
@@ -288,6 +354,27 @@ def markdown(results: dict) -> str:
     for config, r in results.items():
         lines.append(f"| {config} | {r['right_tool']}/{r['cases']} | **{r['right_call']}/{r['cases']}** | "
                      f"{r['mean_seconds']} | {r.get('not_measured', 0)} |")
+    # **Say what the corpus is, next to the scores that depend on it.**
+    # Measured 2026-10-12: **149 of the 226 cases are machine-generated**, and
+    # each says so in its own `note` - "the wording is a starting point, not a
+    # transcript". So a score over this corpus is partly measured on phrasings no
+    # person typed, which matters most for exactly the question a refusal rate is
+    # being asked here to settle: whether the model declines things a person would
+    # actually ask for. `coverage.skills_asserted` counts *which skills* have a
+    # case and cannot see this, because both populations name the same skills.
+    # Omitted, a reader cannot tell a number about people from one about a
+    # generator.
+    for config, r in results.items():
+        rows = [row for row in r["rows"] if not row.get("unavailable")]
+        if not rows:
+            continue
+        generated = [row["id"] for row in rows if row["id"].startswith(_GENERATED_PREFIX)]
+        if generated:
+            lines += ["", f"{config}: {len(generated)} of {len(rows)} cases are "
+                          f"machine-generated starting points rather than "
+                          f"transcripts, so these scores are partly measured on "
+                          f"phrasings no person typed."]
+
     fails = {}
     for config, r in results.items():
         for row in r["rows"]:
@@ -301,31 +388,84 @@ def markdown(results: dict) -> str:
     # **A refusal rate beside the accuracy, because accuracy alone cannot see
     # this.** "no tool" is the same word for declining the request and for
     # promising it and never doing it, and the fix for each is different.
-    said = {}
+    #
+    # **Counted over the misses only**, which is what the heading says and what
+    # makes the number diagnostic. A refusal is only *interesting* on a case the
+    # model failed: counted across every case it is diluted by the ones that
+    # worked, so "0 refusals" over 226 rows reads as "this model never declines"
+    # when the 47 it failed are exactly where a decline would show. The first
+    # version counted everything, and a single-case run made the difference
+    # visible - `time` scored `tool: True` with `reply: "empty"`, so a table over
+    # all rows reports the model as silent on a case it answered correctly.
+    said, r_rows = {}, {}
     for config, r in results.items():
-        for row in r["rows"]:
-            if row.get("unavailable") or not row.get("reply"):
-                continue
-            said.setdefault(config, {}).setdefault(row["reply"], []).append(row["id"])
+        r_rows[config] = r["rows"]
+        misses = [row for row in r["rows"] if not row["args"] and not row.get("unavailable")]
+        if not misses:
+            continue
+        counts = {}
+        for row in misses:
+            if row.get("reply"):
+                counts.setdefault(row["reply"], []).append(row["id"])
+        # **No table at all when nothing was recorded.** A row with no `reply`
+        # means this build did not write the field, and a table of zeros reads as
+        # "measured, and there were none" - the same absence-shaped substitution
+        # `classify_reply` refuses when it meets an empty string. The count of
+        # misses is still reported by the Misses list above, so nothing is lost.
+        if not counts:
+            continue
+        said[config] = (counts, len(misses))
     if said:
-        lines += ["", "What the model said when it did not act", "",
-                  "| config | refusals | narrations | empty | plain answers |"]
-        lines.append("|---|---|---|---|---|")
+        lines += ["", "What the model said on the cases it missed", "",
+                  "| config | of N misses | refusals | narrations | empty | plain answers |",
+                  "|---|---|---|---|---|---|"]
         for config in sorted(said):
-            counts = said[config]
+            counts, total = said[config]
             lines.append(
-                f"| {config} | {len(counts.get(REPLY_REFUSAL, []))} | "
+                f"| {config} | {total} | {len(counts.get(REPLY_REFUSAL, []))} | "
                 f"{len(counts.get(REPLY_NARRATION, []))} | "
                 f"{len(counts.get(REPLY_EMPTY, []))} | "
                 f"{len(counts.get(REPLY_ANSWER, []))} |")
+        # **The words, beside every classification.** A keyword scorer is a claim
+        # about text, and heretic's own `print_responses` exists for the same
+        # reason: the number is not auditable without seeing what it counted.
+        # Without this the reader has to re-run the model to find out whether a
+        # case was really a refusal, which is the same measurement twice.
         for config in sorted(said):
-            bad = said[config].get(REPLY_REFUSAL) or []
-            if bad:
-                lines += ["", f"{config}: refused outright - " + ", ".join(sorted(bad))]
-            gaps = said[config].get(REPLY_NARRATION) or []
-            if gaps:
-                lines += ["", f"{config}: said it would act and did not - "
-                              + ", ".join(sorted(gaps))]
+            counts, _ = said[config]
+            # **Every classified miss, not just the two alarming ones.** The
+            # first version listed refusals and narrations only, so an `empty` or
+            # `answer` miss was counted in the table with no way to see which
+            # case - and `answer` is the one worth reading, because it means the
+            # model said something and it still did not act.
+            for state, label in ((REPLY_REFUSAL, "refused outright"),
+                                 (REPLY_NARRATION, "said it would act and did not"),
+                                 (REPLY_EMPTY, "said nothing at all"),
+                                 (REPLY_ANSWER, "answered, but called no tool")):
+                if not counts.get(state):
+                    continue
+                lines += ["", f"{config}: {label} - "
+                              + ", ".join(sorted(counts[state]))]
+                for row in r_rows[config]:
+                    if row["id"] in counts[state]:
+                        lines.append(f"  - `{row['id']}`: "
+                                     f"{(row.get('text') or '').strip()[:120] or '(no text)'}")
+
+    # **And, separately, how often the model said nothing at all** - a different
+    # question from either of the above, and the one this file's own measurement
+    # turned up. A thinking model spends its budget on `reasoning_content` and
+    # leaves `content` empty, so this counts rows that *acted correctly* and
+    # still said nothing, which the miss table above cannot see by construction.
+    for config, r in results.items():
+        rows = [row for row in r["rows"] if not row.get("unavailable") and row.get("reply")]
+        if not rows:
+            continue
+        silent = [row["id"] for row in rows if row["reply"] == REPLY_EMPTY]
+        if silent:
+            lines += ["", f"{config}: {len(silent)} of {len(rows)} replies carried no text "
+                          f"at all (a thinking model emits reasoning instead) - "
+                          + ", ".join(sorted(silent)[:20])
+                          + (" ..." if len(silent) > 20 else "")]
     return "\n".join(lines) + "\n"
 
 

@@ -11906,3 +11906,51 @@ So the code now says it plainly: quality measured, VRAM measured, **speed not**,
 and why. If a quantized cache turns out to cost decode rate, the lever's tradeoff
 is worse than the numbers imply, and the place to settle it is a slot run with a
 `llama-bench` that will accept the flag.
+
+## The refusal rate, measured: zero, on both populations (2026-10-12)
+
+`../harness-study/HARVEST-HERETIC.md` Part 0 said the verdict on heretic's
+capability rested on an **inference** - `task_eval` scoring 56/62 argues the model
+does not over-refuse, but that measures tool *selection*, not refusal. This is the
+measurement that replaces it, run against the real `llama-server` with
+**Qwen3-1.7B-Q4_K_M**, `select` config, 60 cases sampled every 3rd across the
+corpus.
+
+| population | n | right tool **and** arguments | **refusals** | narrations |
+|---|---:|---:|---:|---:|
+| **hand-written** (what a person says) | 24 | 22 — **92%** | **0** | **0** |
+| machine-generated | 36 | 31 — 86% | **0** | **0** |
+
+**So heretic's premise does not hold here, and it is now measured rather than
+argued.** Its case is *over-refusal*, and this model declined **zero** of sixty -
+and the same on the 24 cases whose wording a person actually typed. The tool
+accuracy (92% hand-written) sits inside the 90% this file already records for
+`select`, so the run is ordinary, not anomalous.
+
+**And the seven misses are a different problem, which the split makes visible:**
+
+    processes                     empty     process_cost({})
+    chat-explain                  empty     called ask_user
+    generated-git-inspect         empty     vcs_status({"path": "."})
+    generated-login-history       empty     find_recently_modified({...})
+    generated-ask-user            answer    no tool
+    generated-convert-media       answer    no tool
+    generated-move-or-copy-file   answer    no tool
+
+Not one is a refusal. Four are the **wrong tool for the request** (`process_cost`
+for "what is running", `vcs_status` for "which branch is this work on") and three
+are no call at all. **This model is not over-cautious here; it is imprecise** -
+so the effort belongs in `tool_select`'s descriptions and the corpus, not in model
+choice. That is the opposite of what an over-refusal finding would have implied,
+and it is the reason the measurement was worth running.
+
+**And one more fact, which is why `classify_reply` has an `empty` state at all:**
+**57 of 60 replies carried no text whatsoever.** The model emits
+`reasoning_content` and either calls a tool or nothing, leaving `content` empty. A
+refusal-marker check that scored silence as compliance would have reported this
+model as perfectly compliant *and* as never having spoken — and `markdown` now
+prints that number on its own line rather than inside the miss table, because a
+row that did nothing wrong is not a miss.
+
+Raw output: `test-env/eval-out/` convention — the JSON carries `reply` and `text`
+per case, which is what made the split possible after the fact.
