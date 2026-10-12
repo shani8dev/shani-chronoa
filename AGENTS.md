@@ -16025,3 +16025,146 @@ same query differently. The refusal for a query with no content words is a
 judgement, not a measurement, and the stopword list is a hand-kept English
 function-word list that will need adding to; it is not derived, and nothing
 here claims it is complete.
+
+## A second sweep, run through the tool this session shipped, and the one finding that argues against porting it (2026-10-12)
+
+The two entries above were crawled by hand with a throwaway script. That
+script is now `web_search(source="arxiv")` (commit `6f0c77e`), so this sweep ran
+**through the shipped code** - `arxiv_query()` built every query and
+`_parse_arxiv()` parsed every feed. Seventeen queries across sixteen topics,
+plus five abstracts and the GitHub API.
+
+**One caveat about using it for this, because it is a real limit of the shipped
+tool.** The builder is tuned for a *specific question* - a title-scoped
+conjunction - and it is the **wrong instrument for discovery**. Measured on the
+first batch: `ti:constrained AND ti:decoding AND ti:language AND ti:model`
+(what the builder makes of "constrained decoding language model") returned six
+hits, and **five of the eight broad queries returned zero**. A sweep therefore
+has to pass arXiv syntax through explicitly (`abs:"constrained decoding" AND
+abs:"language model"`), which the pass-through path supports and which is why
+that path exists. **The tool is good at answering a question and bad at
+surveying a field, and it does not pretend otherwise.**
+
+**And one probe artifact, recorded because the failure mode would be fatal if
+it were the tool's.** One `id_list=2505.17612` fetch returned a 6G
+telecommunications paper; arXiv says that ID is *"Distilling LLM Agent into
+Small Models"*, and **five repeats through the shipped fetch-and-parse were
+stable**. So the mismatch was in my probe, not in the parser - but a citation
+tool that can name the wrong paper is the one failure this feature cannot have,
+and this is the measurement that says it does not.
+
+### Tool-schema bias is the strongest external evidence yet for this repository's `tool_select`
+
+*Action-Space Shaping for LLM Agents* ([arXiv:2609.34971](https://arxiv.org/abs/2609.34971))
+is the empirical follow-up to the PA-Tool paper the first sweep found, and it
+states the claim the first sweep could only assert:
+
+> *"a tool schema is not the action space of an agent; it is merely one
+> interface representation of it"*
+
+and measures it across **eleven LLMs (two closed) and up to 32 schema
+variants**: **success rates range from complete failure to 97% depending
+solely on the schema**. Three further findings that decide what to do here:
+
+- the tasks, actions and reachable states are held fixed, "so any change in
+  success is attributable to the interface alone";
+- **"training repairs a schema variant only when that variant appears in the
+  training data"** - so fine-tuning does not buy immunity, and the merge/adapter
+  path this session spent its measurements on cannot address it either;
+- **difficulty cannot be predicted, it must be sampled** - "it requires running
+  a small sample of the target queries".
+
+`tool_select.py` is 257 hand-worded schemas plus a synonym table, and this
+repository already carries a living instance of the effect: `AGENTS.md` records
+that `past-chat` failed because the model put the search words in `which`, and
+that **giving `query` its own parameter description fixed it 3/3**. That is one
+schema variant at the edge of the 0-97% range, observed by accident. The paper
+says the range is that wide.
+
+### Constrained decoding: the objection now has two independent sources
+
+*AdapTrack* ([arXiv:2510.17376](https://arxiv.org/abs/2510.17376)) makes the
+same split the diversity paper made, from the decoding side rather than the
+register side:
+
+> *"there is a severe limitation of constrained decoding, that it distorts the
+> model's output intent, forcing it to produce code that may satisfy the
+> constraint but does not match the development intent and is therefore
+> incorrect"*
+
+up to **7.84% on HumanEval, 6.42% on MBPP, 38.93%** on API completion. So
+"constrained decoding is safe" and "constrained decoding costs you decisions"
+now come from two unrelated methods, and the three-arm experiment the previous
+entry recommends is the right one for a *second* reason: it needs an arm that
+measures intent distortion, not only schema validity.
+
+**And the instrument for it exists and is maintained.**
+*JSONSchemaBench* ([arXiv:2501.10868](https://arxiv.org/abs/2501.10868)) is 10K
+real-world JSON schemas evaluated against **six frameworks including
+`llamacpp` and `XGrammar`** - `github.com/guidance-ai/jsonschemabench`, 101
+stars, last pushed 2026-09-28. The deferred experiment now has a named
+benchmark that already covers the engine this repository would use, which
+removes the last reason it is still deferred.
+
+*The Sharpening Mechanism* ([arXiv:2412.01951](https://arxiv.org/abs/2412.01951))
+is the formalisation behind the previous entry's *"a sharpener, not a
+re-indexer"*: self-improvement as concentrating mass on sequences the model can
+already verify. It is the citation that finding deserves.
+
+### STAR removes the stated blocker on the merge path - and the measurement says the port is still not free
+
+The previous merge entry refuses DELLA and DARE for one reason: *"both are
+rescaling methods that need a target density, and this repository has no
+measurement on this box that would say what the density should be - a rescale
+constant nobody measured is the number this file keeps refusing to invent."*
+
+*STAR* ([arXiv:2502.10339](https://arxiv.org/abs/2502.10339), **NAACL 2025**)
+solves exactly that: it truncates small spectral components and then applies
+"an **automatic** parameter rescaling scheme to **retain the nuclear norm of
+the original matrix**", is "robust to hyperparamater choice" (sic), and
+"requires no additional inference on original training data". **The constant is
+computed from the matrix it rescales**, which is what the refusal said was
+missing. `github.com/IBM/STAR` is Apache-2.0 and was pushed **2026-10-10**.
+
+**So the blocker is gone, and then measured.** STAR's core is reachable here:
+`merge.py` already dequantises parents to f32 and blends in numpy, **numpy
+2.3.5 is present and torch is not**, and SVD needs no training stack. Measured
+on a real tensor from `cache/merge-scratch/merge-0_3-f16.gguf`:
+
+| what | measured |
+|---|---|
+| tensors with **no spectral structure** | **113 of 310 are 1-D** (biases and norms); `np.linalg.svd` raises `LinAlgError` on every one |
+| full SVD, `blk.0.attn_k.weight`, 2048x1024 f32 | **4.41 s** |
+| its spectrum | **flat** - the largest singular value holds **0.7%** of the nuclear norm; the top 10% of them hold 20% |
+| truncate to 50% of directions | Frobenius 51.68 -> 47.58, and the nuclear norm falls 1446.3 -> 1016.4 |
+| so the rescale factor | **x1.4230** - a 42% inflation of everything kept |
+| truncate to 90% / 99% | x1.0293 / x1.0012 |
+
+**So the honest reading is two-sided and neither half is the headline.** The
+conceptual blocker is genuinely removed: the density need not be invented.
+But on a **flat-spectrum** weight the derived constant is a **42% magnitude
+inflation**, and this is the same 1.7B model whose every merge measurement has
+been a refusal - so a spectral truncation that inflates half its directions by
+42% is not obviously the next experiment either. **Porting STAR is now
+unblocked and unpromising on this model**, which is a different sentence from
+the one recorded before and worth more than the port would have been.
+
+**What would change the reading:** a weight whose spectrum actually decays (a
+`W_q`/`W_k` matrix on a larger checkpoint, not an attention projection on a 1.7B
+model), where truncation at 99% would need a factor near 1.0012. **Not
+measured here, and named rather than assumed.**
+
+### Not taken
+
+Distillation-with-MCP-boxes ([AgentDistill](https://arxiv.org/abs/2506.14728)),
+`Search, Do not Guess` ([arXiv:2604.04651](https://arxiv.org/abs/2604.04651)),
+*Distilling LLM Agent into Small Models with Retrieval and Code Tools*
+([arXiv:2505.17612](https://arxiv.org/abs/2505.17612)), the KV-cache-quantisation
+line (KIVI, SKVQ, Cocktail, WindowQuant) and the prefix-cache line: all
+recorded from their titles and abstracts, **none built**, and each would need its
+own measurement first. The router and cascade papers (RouterBench,
+LLMRouterBench) bear on `distill.py`'s starved router but none reports a result
+this repository could reproduce on **11 rows**.
+
+**Also not measured:** arXiv's ranking moves day to day, and every "N hits"
+figure above is one day's answer, not a property of the corpus.
