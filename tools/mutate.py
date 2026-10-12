@@ -691,7 +691,7 @@ def _check_anchors(wanted, available) -> int:
     # which this harness supports on purpose, for the two loops that are not
     # adjacent and must change together - makes them differ **on correct code**.
     #
-    # Measured 2026-12 on this tree: 359 mutations, 361 anchors, the difference
+    # Measured 2026-12 on this tree: 366 mutations, 368 anchors, the difference
     # being `edit_file.py`'s "a single line is treated as a quote" and
     # `file_locks.py`'s "the device is read as decimal instead of hex", two
     # anchors each. An earlier note here claimed the two numbers were equal and
@@ -700,6 +700,12 @@ def _check_anchors(wanted, available) -> int:
     # Printing both is what lets a reader notice a set that lost a mutation; a
     # `checked != declared` gate would fire the day a set legitimately grew a
     # pair-anchor, which is the shape this harness exists partly to support.
+    #
+    # **Count these two numbers by the same method before comparing them.** An
+    # independent probe that skipped `tools/mutations/harness.py` - itself a real
+    # set of 7 - reported 359 and 361 against this function's 366 and 368, and
+    # looked like a disagreement between two measurements until the omission was
+    # found. Two methods that count different things do not cross-check anything.
     if silent:
         print(f"{len(wanted)} set(s), {checked} anchors of {declared} declared "
               f"mutations, all still match the code - BUT {len(silent)} set(s) "

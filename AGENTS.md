@@ -5009,13 +5009,19 @@ unmutated code before it was written down:
 - **A pair-anchor makes `checked` and `declared` differ on correct code**, so
   never assert they are equal. They count anchors and mutations, and the pair
   shape — two loops that are not adjacent and must change together — exists on
-  purpose. Measured on this tree: **359 mutations, 361 anchors**, the difference
+  purpose. Measured on this tree: **366 mutations, 368 anchors**, the difference
   being `edit_file.py`'s "a single line is treated as a quote" and
   `file_locks.py`'s "the device is read as decimal instead of hex". I wrote the
   gate first, then a comment claiming the numbers happened to be equal "because
   no set uses one" — **a reading error, and it would have made an actively wrong
   gate look vacuous.** Both numbers are printed so a reader can cross-check them;
   neither is asserted against the other.
+  *(An earlier note here said "359 mutations, 361 anchors". That was an
+  independent probe that skipped `tools/mutations/harness.py` — which is a real
+  set of 7, and which `sets()` counts. 359+7 and 361+7 are 366 and 368, so the
+  two methods agree exactly once the omission is accounted for. **A count taken
+  by a second method is worth nothing until you have shown the two methods count
+  the same thing**, which is the check I skipped.)*
 - **Assert that a mutation changes behaviour, not merely that its anchor matched
   once.** The arithmetic control above was `all_unmeasurable.extend(...[:1])`
   against a fixture set holding exactly **one** unmeasurable mutation - so the
