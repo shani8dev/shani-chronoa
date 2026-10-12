@@ -1212,6 +1212,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         #: What this session's skills declared they made, newest last.
         self._artifacts: list = []
         self._rail_row = None
+        #: Draft persistence: a timeout id, and a flag meaning "we are restoring,
+        #: do not save what we are reading".
+        self._draft_timeout = None
+        self._draft_source = False
+        #: The draft is restored once per window, not on every focus.
+        self._draft_restored = False
         self._build_palette()
         self._rail_toggle = Gtk.ToggleButton()
         self._rail_toggle.set_icon_name("sidebar-show-right-symbolic")
@@ -1699,6 +1705,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         made elsewhere is to look again. Reading is cheap - three gsetting
         reads and one module flag - and it happens on focus, not on a timer.
         """
+        # **The draft, once per window and never again.** Restoring on *every*
+        # focus would put back text someone had deliberately cleared, the moment
+        # they clicked away and came back - which is worse than not having the
+        # feature at all, because it looks like the app is ignoring them.
+        if not self._draft_restored:
+            self._draft_restored = True
+            self.restore_draft()
         if self._mode_strip is not None:
             self._mode_strip.refresh()
         if getattr(self, "_task_card", None) is not None:
@@ -1800,11 +1813,27 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         except Exception:            # noqa: BLE001 - never leave the user unable to close
             enabled = False
         if not enabled:
+            # **Flushed before the close proceeds.** The pending save is ten
+            # seconds of debounce, so a window closed within ten seconds of the
+            # last keystroke would otherwise discard exactly the text it was
+            # written to protect. Saving on close is not redundant with the
+            # debounce - it is what makes the debounce safe.
+            self._flush_draft_now()
             return False
         self._app.hold()
         self._holding = True
         self.set_visible(False)
+        # Hidden rather than closed, but still "gone" from the person's point of
+        # view, and still a moment they might not come back from.
+        self._flush_draft_now()
         return True
+
+    def _flush_draft_now(self) -> None:
+        """Write any pending draft immediately, and disarm the timer."""
+        if self._draft_timeout is not None:
+            GLib.source_remove(self._draft_timeout)
+            self._draft_timeout = None
+            self._flush_draft()
 
     def show(self) -> None:
         """Bring the window back, releasing the hold the close-request took."""
@@ -2977,6 +3006,57 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _on_input_changed(self, _buffer) -> None:
         self._input_placeholder.set_visible(not self._input_text())
         self._sync_command_menu()
+        self._note_draft()
+
+    #: A draft is saved at most this many seconds after the last keystroke. Ten
+    #: is long enough that a fast typist produces one write per pause rather
+    #: than one per character, and short enough that closing the window within
+    #: ten seconds of stopping still has the text.
+    DRAFT_SAVE_SECONDS = 10
+
+    def _note_draft(self) -> None:
+        """Remember what is typed, so a crash or a close does not lose it.
+
+        **A `GLib.timeout`, cancelled and restarted on every keystroke**, rather
+        than a write per character: an assistant sitting idle while someone
+        thinks would otherwise write a file a second for as long as they
+        thought. Flushed on shutdown, where "in ten seconds" would be a lie.
+        """
+        if self._draft_source:
+            return                      # restoring; do not save what we are reading
+        if self._draft_timeout is not None:
+            GLib.source_remove(self._draft_timeout)
+        self._draft_timeout = GLib.timeout_add_seconds(
+            self.DRAFT_SAVE_SECONDS, self._flush_draft)
+
+    def _flush_draft(self) -> bool:
+        from shani_chronoa import composer_draft
+
+        self._draft_timeout = None
+        composer_draft.save(self._input_text())
+        return GLib.SOURCE_REMOVE
+
+    def restore_draft(self) -> None:
+        """Put the saved text back, without that act saving it again."""
+        from shani_chronoa import composer_draft
+
+        text = composer_draft.load()
+        if not text:
+            return
+        self._draft_source = True
+        try:
+            self._set_input_text(text)
+        finally:
+            self._draft_source = False
+
+    def clear_draft(self) -> None:
+        """The text is on its way; it is no longer a draft."""
+        from shani_chronoa import composer_draft
+
+        if self._draft_timeout is not None:
+            GLib.source_remove(self._draft_timeout)
+            self._draft_timeout = None
+        composer_draft.clear()
 
     def _on_input_key_pressed(self, _view, keyval, _keycode, state) -> bool:
         """Enter sends; Shift+Enter is a newline.
@@ -3041,6 +3121,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if not text:
             return
         self._set_input_text("")
+        # **Cleared here, before anything else can fail.** Every path below this
+        # line can return early - a slash command, a question being answered - and
+        # a draft that outlives the turn it started would restore text that has
+        # already been asked.
+        self.clear_draft()
         if self._run_command(text):
             return
         if self._pending_question is not None:

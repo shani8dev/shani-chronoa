@@ -17357,3 +17357,59 @@ the same defect.
 Four failures in `test_setting_dependencies.py` are **pre-existing and not
 mine**: verified by swapping `HEAD`'s `application.py` back in and getting the
 identical four. They are the same feature - `answer-mode` has no writer at all.
+
+## The typed text survives a crash (2026-10-12)
+
+`composer_draft.py` and its window wiring. Compose a long question, the daemon
+restarts or the window closes, and it is gone - the cheapest missing thing in an
+app meant to be open all day, and the first of the eight that the tree wipe
+destroyed.
+
+**Debounced, not per-keystroke.** Ten seconds, cancelled and restarted on every
+change: an assistant sitting idle while someone thinks would otherwise write a
+file a second for as long as they thought. `0600`, same directory as the
+sessions, written temp-then-`os.replace` so a crash leaves the *previous* draft
+rather than a half-written one - the asymmetry `conversation_store.append()`
+deliberately does not need, because an append cannot lose the whole file and a
+replace can.
+
+**Flushed on close**, which is what makes the debounce safe: a window closed
+within ten seconds of the last keystroke would otherwise discard exactly the
+text the feature exists to protect.
+
+**Restored once per window, never on every focus.** Restoring on each focus puts
+back text someone deliberately cleared the moment they clicked away and came
+back - worse than not having the feature, because it looks like the app is
+ignoring them.
+
+### Two of my four mutations survived, both the same mistake
+
+| mutation | first run | after fixing the test |
+|---|---|---|
+| the save timer is never armed | caught | caught |
+| **close no longer flushes** | **survived** | caught |
+| restore loops into saving itself | caught | caught |
+| **the draft is not cleared on send** | **survived** | caught |
+
+Both survivors were the same error: **testing the method instead of the
+behaviour.** The close test called `_flush_draft_now()` directly, so it passed
+with the call to it deleted from `close`. The send test asserted the composer
+was empty - which `_set_input_text("")` does anyway - so it passed with
+`clear_draft()` deleted from `_submit_input`.
+
+And the send test had a second fault found while fixing it: **the draft file did
+not exist before the send**, because the debounce had not fired, so clearing it
+was a no-op either way. Now it is written first, standing in for the ten seconds
+elapsed, and the precondition is asserted rather than assumed.
+
+Three API facts, all measured, all in one afternoon: a `Gtk.TextView` has
+neither `set_text` nor `insert_text`; a D-Bus name segment may not begin with a
+digit (`id(object())` usually does, and fails
+`g_application_id_is_valid`); and `wake_word_enabled` is a read-only property, so
+it cannot be shadowed on the instance either - a data descriptor on the class
+wins, so the config has to be replaced.
+
+One assertion was also claiming more than it owned: "nothing left in `tmp_path`"
+failed on a `home/` directory that `conftest`'s fake-HOME fixture had created.
+Reporting on a directory the test does not own is the same error as blaming the
+wrong process for a bus name. It now checks this store's own prefix.
