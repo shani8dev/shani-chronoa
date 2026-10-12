@@ -95,12 +95,18 @@ def _type(window, text):
     """
     entry = window._input_entry
     entry.get_buffer().set_text("")
-    # **Both calls go through the buffer.** A `Gtk.TextView` has neither
-    # `set_text` nor `insert_text` - measured on this GTK, both `False` - and the
-    # comment above claimed `insert_text` was a fix for an earlier arity
-    # mistake, which was never true. `insert_text(text, position)` with position
-    # -1 appends, which is where a keystroke's text lands on an empty field.
-    entry.get_buffer().insert_text(text, -1)
+    # **The buffer, and `insert`, not `insert_text`.** A `Gtk.TextView` has
+    # neither `set_text` nor `insert_text` - measured, both `False` - and moving
+    # the calls to `get_buffer()` was only half the fix: a `Gtk.TextBuffer` has
+    # no `insert_text` either (`hasattr` False, and Python suggests
+    # `do_insert_text`). The real method is **`insert(iter, text)`**, whose
+    # iterator comes *first* - `insert_text(text, -1)` was an argument order
+    # invented on the spot and it raised
+    # `AttributeError: 'TextBuffer' object has no attribute 'insert_text'`.
+    #
+    # At the end iter is where a keystroke's text lands on an empty field.
+    buffer = entry.get_buffer()
+    buffer.insert(buffer.get_end_iter(), text)
     return text
 
 

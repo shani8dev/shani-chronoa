@@ -15927,18 +15927,33 @@ handler that sent on every Return would pass "Enter sends" and quietly remove
 multi-line questions. Mutation-checked: ignoring the modifier fails exactly one
 test.
 
-### Still not fixed, and deliberately left visible
+### The abort was this bug, not a second one - corrected
 
-`test_slash_menu_opens` still cannot run here. Its two API bugs were **masking**
-a third problem: with them fixed the file reaches `app.run()` inside pytest and
-**aborts the process** (`Fatal Python error: Aborted`, in `Gio.run`), which takes
-every test queued behind it down. Run alone it fails with `'NoneType' object has
-no attribute '_input_entry'` - the window never activates.
+The first version of this entry claimed the file also needed its harness moved
+into a subprocess, because with the API bugs fixed it **aborted the process** in
+`Gio.run()`. **That was wrong, and the claim was acted on.**
 
-The fix is the one `test_window_input_and_copy` already uses: drive the harness
-in a **subprocess**, which is how 10 tests pass in 1.3s in that file. Not done
-here. An abort that ends the run is worse than a failure, so this is recorded as
-work outstanding rather than left to be discovered during a full suite.
+The abort was the *same* `AttributeError`, raised inside a `GLib.idle_add`
+callback while `app.run()` was executing. GTK4 aborts on an unhandled Python
+exception in a main-loop callback - it does not propagate to pytest. So an
+exception raised during the loop **looks like a crashed interpreter** and reads
+as a harness problem, when it is the ordinary bug underneath.
+
+With the call corrected, the file is **3 passed** and stable over three
+consecutive runs. No subprocess harness, no skip, no change to the test's design.
+
+Half the fix was also wrong the first time: `get_buffer().insert_text(...)` -
+a `Gtk.TextBuffer` has no `insert_text` either (`hasattr` False; Python suggests
+`do_insert_text`). The method is **`insert(iter, text)`**, iterator first. Both
+were wrong in the *same direction* - invented at the keyboard and "corrected"
+into the next wrong API - which is what two rounds of guessing looks like, and is
+why `hasattr` is the check and not the traceback's suggestion.
+
+**The lesson, and it is the whole entry:** three methods did not exist -
+`Gtk.TextView.set_text`, `Gtk.TextView.insert_text`, `Gtk.TextBuffer.insert_text`
+- and in each case the AttributeError was a *real* finding that the surrounding
+harness turned into noise. The fix was never to make the error go away quietly;
+it was to find the line it came from.
 
 ## arXiv is reachable from `web_search`, and the query language is the work (2026-10-12)
 
