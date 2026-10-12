@@ -738,7 +738,10 @@ def _row(title: str, detail: str, tooltip: str, accessible: str) -> Gtk.Widget:
     """One line of the page: a title, a plain detail, and both texts carried on
     the tooltip and the accessible label so either can be read without a
     screen."""
-    row = common.row(title, detail)
+    # **`escape=False`, because this row switches markup off below.** Escaping
+    # text that is shown verbatim prints the entity - measured, a model
+    # named `<b>x</b>` rendered as `&lt;b&gt;x&lt;/b&gt;`.
+    row = common.row(title, detail, escape=False)
     # After the title, not before: `common.row()` sets both, and a title
     # carrying markup warns once on stderr here before rendering as plain text.
     _no_markup(row)

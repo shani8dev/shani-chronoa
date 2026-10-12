@@ -557,7 +557,7 @@ def group(title: str = "", description: str = "") -> Gtk.Widget:
 
 
 def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
-        activatable: bool = False) -> Gtk.Widget:
+        activatable: bool = False, escape: bool = True) -> Gtk.Widget:
     """One row: a title, an optional explanation, an optional control.
 
     **The title is escaped here, and this docstring already claimed it was.**
@@ -573,11 +573,22 @@ def row(title: str, subtitle: str = "", suffix: Optional[Gtk.Widget] = None,
     measured, not assumed: `set_subtitle("a & b")` logs the same parse error. So
     both are escaped here, and the plain-GTK branch below escapes neither,
     because `Gtk.Label` takes no markup at all.
+
+    **`escape=False` for a caller that switches markup off on the row.**
+    `model.py` does exactly that, and escaping for it printed the entity - the
+    same defect as escaping twice, in the other direction. The default stays
+    `True`: escaping is the safe answer for every caller that leaves the row as
+    libadwaita builds it, and the opt-out is named at the one site that needs it.
     """
     if adw_ready():
+        # `escape=False` is for a caller that switches markup off on the row
+        # afterwards. Escaping is correct for markup that will be *parsed*;
+        # escaping text that will be shown verbatim prints the entity to the
+        # person, which is what happened to `model.py` - measured, a model
+        # named `<b>x</b>` rendered as `&lt;b&gt;x&lt;/b&gt;`.
         widget = Adw.ActionRow(
-            title=GLib.markup_escape_text(title) if title else "",
-            subtitle=GLib.markup_escape_text(subtitle) if subtitle else "")
+            title=(GLib.markup_escape_text(title) if escape else title) if title else "",
+            subtitle=(GLib.markup_escape_text(subtitle) if escape else subtitle) if subtitle else "")
         if suffix is not None:
             widget.add_suffix(suffix)
         if activatable:

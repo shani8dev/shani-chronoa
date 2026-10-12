@@ -866,7 +866,9 @@ class _Workbench:
         self.apply_filter(self.search.get_text())
 
     def _add_builtin(self, name: str, description: str) -> Gtk.Widget:
-        row = common.row(_plain(name), _plain(description or "(no description)"))
+        # `common.row()` escapes both fields; `_plain()` escaping again is
+        # what rendered a description's `&` as `&amp;` on screen.
+        row = common.row(name, description or "(no description)")
         row.add_css_class(BUILTIN_ROW)
         row.set_tooltip_text(f"{name}\n{description or '(no description)'}")
         row.update_property([Gtk.AccessibleProperty.LABEL], [f"Built-in skill {name}"])
@@ -881,7 +883,7 @@ class _Workbench:
         button.update_property([Gtk.AccessibleProperty.LABEL],
                                [f"Remove the drop-in skill {drop_in.name}"])
         button.connect("clicked", lambda _b, d=drop_in: self.ask_remove(d))
-        row = common.row(_plain(drop_in.name), _plain(drop_in.line), suffix=button)
+        row = common.row(drop_in.name, drop_in.line, suffix=button)
         row.add_css_class(DROPIN_ROW)
         row.set_tooltip_text(f"{drop_in.path}\n{drop_in.description or '(no description)'}")
         row.update_property([Gtk.AccessibleProperty.LABEL],

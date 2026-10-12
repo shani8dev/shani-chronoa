@@ -605,6 +605,12 @@ def test_the_escaped_title_really_matches_itself(monkeypatch) -> None:
     seen = []
     monkeypatch.setattr(ui_driver, "_xdotool",
                         lambda args, timeout=30: seen.append(list(args)) or _Run(title))
+    # **And `_which`, or the availability gate refuses before the stubbed call
+    # is ever reached.** It raises `GuiUnavailable` on a box with no `xdotool`
+    # on `PATH`, which is what made this test green on a machine that happened
+    # to have the binary and red here for a reason that has nothing to do with
+    # what it asserts.
+    monkeypatch.setattr(ui_driver, "_which", lambda binary, verb: "/stubbed")
     ui_driver.find_window(title, app="slack", timeout=1)
     searches = [a[-1] for a in seen if a and a[0] == "search"]
     assert searches, "the search must have been made at all"

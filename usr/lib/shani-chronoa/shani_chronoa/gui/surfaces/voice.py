@@ -278,7 +278,11 @@ def _row(title: str, detail: str, tooltip: str = "") -> Gtk.Widget:
     label in the libadwaita one. Both were measured, not assumed.
     """
     shown = _escape if common.adw_ready() else (lambda value: str(value))
-    row = common.row(shown(title), shown(detail))
+    # **The only two arguments here that go through `common.row()`,** which
+    # escapes its own title and subtitle - so wrapping them in `shown()`
+    # was escaping twice and a voice named `A & B` rendered as `A &amp; B`.
+    # The other four uses below are plain text and keep `shown()`.
+    row = common.row(title, detail)
     text = tooltip or f"{title}: {detail}"
     row.set_tooltip_text(shown(text))
     row.update_property([Gtk.AccessibleProperty.LABEL], [shown(f"{title}: {detail}")])

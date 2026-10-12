@@ -445,7 +445,9 @@ class _SkillsSurface:
             # No switch for a skill that declares no gate: there is nothing to
             # switch, and offering one would be a permission that does not exist.
             lines.append(ALWAYS_AVAILABLE)
-            widget = common.row(title=_plain(title), subtitle=_plain("\n".join(lines)))
+            # `common.row()` escapes both fields; `_plain()` escaping again
+            # rendered a skill name's `&` as `&amp;` on screen.
+            widget = common.row(title=title, subtitle="\n".join(lines))
         else:
             lines.append(f"{gate_name} - {state_text}")
             widget = common.switch_row(
