@@ -77,7 +77,20 @@ def _run(arguments: dict) -> str:
             else:
                 shutil.copy2(source, destination, follow_symlinks=False)
         else:
-            shutil.move(str(source), str(destination), overwrite=bool(arguments.get("overwrite")))
+            # `shutil.move` takes `(src, dst, copy_function)` - there is no
+            # `overwrite` keyword, so passing one raised TypeError on **every**
+            # move, and the handler below catches OSError, not TypeError, so the
+            # traceback reached the model as the skill's whole answer.
+            #
+            # Replacement is not this function's job: the guard above has already
+            # established that the destination may be replaced, and for a file
+            # `os.rename` replaces it by itself. The one case needing work is a
+            # directory onto an existing directory, which `shutil.move` refuses
+            # with `shutil.Error` - and that *is* an OSError, so the handler
+            # below already reports it as the refusal it is.
+            if destination.is_dir():
+                shutil.rmtree(destination)
+            shutil.move(str(source), str(destination))
     except OSError as exc:
         return files.describe(exc, destination if destination.exists() else source, mode)
 
