@@ -798,7 +798,7 @@ question - **what is Chronoa, in the vocabulary of a body** - and the
 answer is machine-readable, in `organism.py`, because a table in a
 document cannot be kept true and one sitting next to the code can.
 
-27 functions: **17 built, 10 part, 0 absent.**
+31 functions: **17 built, 14 part, 0 absent.**
 
 Eight of them have a light in the window's organ strip; the rest have
 no indicator, and the Inventory panel says so rather than implying they
@@ -829,13 +829,17 @@ there is no left pinky, because nothing in here has one.
 | Core | Cerebellum | checking its own work: post-conditions, and repairing a broken turn. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
 | Core | Amygdala | fast evaluation of danger, before the slow part of the brain is asked. | built | - | `guardrail.py`, `permissions.py`, `approvals.py`, `senses/security.py` |
 | Core | Reticular formation | attention: deciding what is worth interrupting for. | part | - | `triggers/events.py`, `cues.py`, `speech.py` | no interrupt policy; everything notable is announced equally
+| Core | Brainstem | the involuntary: what keeps running when nobody is deciding. | part | - | `model_service.py`, `daemon.py`, `senses/idle.py` | the Heart below says 'a liveness signal exists per subsystem; nothing consumes it yet' - this is what would consume it. The daemon's rules and senses survive every state, and the model's own cycle does not govern them
 | Regulation | Heart | pulse: is it alive, is the model up, is the clock sane. | part | - | `model_service.py`, `local_llm.py`, `senses/timebase.py` | a liveness signal exists per subsystem; nothing consumes it yet
 | Regulation | Thermoregulation | keeping itself at a working temperature, and noticing when it cannot. | part | `nose` | `senses/thermalgrid.py`, `senses/hwmon.py`, `skills/power_profile.py` | it reads its temperature; it does not act on it unasked
 | Regulation | Hypothalamus | setpoints: the conditions it should notice on its own. | part | - | `triggers/rules.py`, `approvals.py` | no built-in presets; a rule has to be armed by the user
+| Regulation | Pituitary gland | the master gland: the setpoints the hypothalamus has none of. | part | - | `triggers/rules.py`, `approvals.py` | nothing supplies a setpoint. The Hypothalamus below records the gap - 'a rule has to be armed by the user' - and this is the organ that would fill it: a default posture per context so a person sets a policy once rather than arming every rule
 | Regulation | Circadian rhythm | rhythm: knowing what time it is and whether that matters now. | part | - | `senses/timebase.py`, `senses/idle.py`, `triggers/` | the clock is read; nothing is scheduled *because* of the hour
+| Regulation | Kidney | filtration: what gets thrown away rather than kept. | part | - | `skills/cleanup_apply.py`, `skills/empty_trash.py`, `skills/power_profile.py`, `cues.py` | cleanup and empty-trash are consented skills with no organ at all - they are the only actuators that discard rather than change, and a body filters continuously rather than when asked
 | Memory and learning | Hippocampus | what it was told, and what it perceived. | built | `memory` | `senses/store.py`, `conversation_store.py`, `local_embed.py` |
 | Memory and learning | Sleep | consolidation: turning a long conversation into something usable. | built | - | `consolidation.py`, `compression.py` |
 | Memory and learning | Synaptic plasticity | learning from how a call went - the outcome, whether it was approved, undone. | built | `brain` | `learning.py`, `tool_tracking.py`, `tool_select.py` |
+| Memory and learning | Thymus | the foundry: producing the cells that do the defending. | part | - | `learning.py`, `tool_tracking.py` | Immune system guards the boundary and that organ is built, but nothing *produces* anything. Learning reorders the tools already allowed by their verdicts, which is immune memory with nowhere to be made; there is no factory, only the record
 | Memory and learning | Endocrine system | slow signals about how things are going: pain and reward. | part | - | `tool_tracking.py`, `cues.py`, `verification.py` | faults and pressures are reported; there is no reward signal at all
 
 ### The gaps, in one place
@@ -854,7 +858,11 @@ works and stops short of something specific.
 - **Heart** - a liveness signal exists per subsystem; nothing consumes it yet.
 - **Thermoregulation** - it reads its temperature; it does not act on it unasked.
 - **Hypothalamus** - no built-in presets; a rule has to be armed by the user.
+- **Pituitary gland** - nothing supplies a setpoint. The Hypothalamus below records the gap - 'a rule has to be armed by the user' - and this is the organ that would fill it: a default posture per context so a person sets a policy once rather than arming every rule.
+- **Brainstem** - the Heart below says 'a liveness signal exists per subsystem; nothing consumes it yet' - this is what would consume it. The daemon's rules and senses survive every state, and the model's own cycle does not govern them.
 - **Circadian rhythm** - the clock is read; nothing is scheduled *because* of the hour.
+- **Thymus** - Immune system guards the boundary and that organ is built, but nothing *produces* anything. Learning reorders the tools already allowed by their verdicts, which is immune memory with nowhere to be made; there is no factory, only the record.
+- **Kidney** - cleanup and empty-trash are consented skills with no organ at all - they are the only actuators that discard rather than change, and a body filters continuously rather than when asked.
 - **Endocrine system** - faults and pressures are reported; there is no reward signal at all.
 
 ### How to keep this true

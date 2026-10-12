@@ -188,6 +188,22 @@ INVENTORY: Tuple[Organ, ...] = (
           "setpoints: the conditions it should notice on its own",
           ("triggers/rules.py", "approvals.py"), PART,
           missing="no built-in presets; a rule has to be armed by the user"),
+    Organ("pituitary", "Regulation", "Pituitary gland",
+          "the master gland: the setpoints the hypothalamus has none of",
+          ("triggers/rules.py", "approvals.py"), PART,
+          missing="nothing supplies a setpoint. The Hypothalamus below records "
+                  "the gap - 'a rule has to be armed by the user' - and this is "
+                  "the organ that would fill it: a default posture per context "
+                  "so a person sets a policy once rather than arming every rule"),
+
+    Organ("brainstem", "Core", "Brainstem",
+          "the involuntary: what keeps running when nobody is deciding",
+          ("model_service.py", "daemon.py", "senses/idle.py"), PART,
+          missing="the Heart below says 'a liveness signal exists per subsystem; "
+                  "nothing consumes it yet' - this is what would consume it. The "
+                  "daemon's rules and senses survive every state, and the "
+                  "model's own cycle does not govern them"),
+
     Organ("circadian", "Regulation", "Circadian rhythm",
           "rhythm: knowing what time it is and whether that matters now",
           ("senses/timebase.py", "senses/idle.py", "triggers/"), PART,
@@ -213,6 +229,22 @@ INVENTORY: Tuple[Organ, ...] = (
           missing="verification verdicts reorder the tools that are already "
                   "allowed; there is no preference learning from what you "
                   "liked, and a score can never grant a tool"),
+    Organ("thymus", "Memory and learning", "Thymus",
+          "the foundry: producing the cells that do the defending",
+          ("learning.py", "tool_tracking.py"), PART,
+          missing="Immune system guards the boundary and that organ is built, "
+                  "but nothing *produces* anything. Learning reorders the tools "
+                  "already allowed by their verdicts, which is immune memory with "
+                  "nowhere to be made; there is no factory, only the record"),
+
+    Organ("kidney", "Regulation", "Kidney",
+          "filtration: what gets thrown away rather than kept",
+          ("skills/cleanup_apply.py", "skills/empty_trash.py",
+           "skills/power_profile.py", "cues.py"), PART,
+          missing="cleanup and empty-trash are consented skills with no organ at "
+                  "all - they are the only actuators that discard rather than "
+                  "change, and a body filters continuously rather than when asked"),
+
     Organ("endocrine", "Memory and learning", "Endocrine system",
           "slow signals about how things are going: pain and reward",
           ("tool_tracking.py", "cues.py", "verification.py"), PART,
