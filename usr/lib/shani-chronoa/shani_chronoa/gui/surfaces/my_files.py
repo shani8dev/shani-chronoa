@@ -59,7 +59,7 @@ TITLE = "My files"
 #: `tests/test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`.
 #: A name the theme lacks renders as an empty box the size of an icon, which
 #: reads as a rendering bug rather than as a missing glyph.
-ICON = "folder-documents-symbolic"
+ICON = "edit-find-replace-symbolic"
 SECTION = "Remembering"
 SUBTITLE = ("Search your own documents and notes, by keyword and - where the "
             "embedding model is installed - by meaning.")
@@ -279,7 +279,7 @@ class _FilesView(Gtk.Box):
             self._present(_consent_refusal(self._app))
             return
         self._present(common.empty_state(
-            "folder-documents-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
+            "edit-find-replace-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
 
     def _show_hits(self, hits: List[dict], how: str, query: str) -> None:
         group = common.group()
@@ -342,7 +342,7 @@ class _FilesView(Gtk.Box):
         state = file_index.status(root=self._directory())
         if not state["indexed"]:
             self._present(common.empty_state(
-                "folder-documents-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
+                "edit-find-replace-symbolic", NOTHING_INDEXED, NOTHING_INDEXED_DESC))
             return
         self._present(common.empty_state(
             "edit-find-symbolic",

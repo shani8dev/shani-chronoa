@@ -54,7 +54,20 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 logger = logging.getLogger(__name__)
 
 TITLE = "What's running"
-ICON = "applications-system"
+#: `applications-system` is not a name Adwaita ships (measured against
+#: `/usr/share/icons/Adwaita`), so on GNOME it drew a blank box; the
+#: `-symbolic` one is the theme's own name for the same thing.
+#: **`applications-system-symbolic` is `desktop`'s** and
+#: `applications-system` is not a name Adwaita ships at all (measured
+#: against `/usr/share/icons/Adwaita`), so on GNOME it drew a blank box.
+#: The sidebar icon is the fastest thing to match when scanning, so it
+#: also has to be nobody else's.
+#: Neither of the two obvious names works: `applications-system` is not in
+#: Adwaita at all (it drew a blank box), and both `-symbolic` spellings belong
+#: to `desktop` and `inventory`. `emblem-system-symbolic` is the theme's own
+#: "this is the system" glyph and nobody else has it - which matters because
+#: a sidebar row's icon is the fastest thing to match when scanning.
+ICON = "emblem-system-symbolic"
 SECTION = "Acting"
 SUBTITLE = ("Everything Chronoa started, and the button that stops each one. "
             "Nothing here runs unless you turned it on.")
@@ -292,4 +305,9 @@ def build(app: Any) -> Gtk.Widget:
     widget = page.page
     if hasattr(widget, "connect"):
         widget.connect("showing", lambda _w: page.rebuild())
+    # **A health word, read off the returned widget** - the sidebar dot looks for
+    # `status` on whatever `build()` handed back, and this panel returns the
+    # `Adw.NavigationPage` its `_Page` class made. `unknown` before the first
+    # rebuild, because nothing has been read yet.
+    widget.status = lambda: common.STATUS_UNKNOWN
     return widget

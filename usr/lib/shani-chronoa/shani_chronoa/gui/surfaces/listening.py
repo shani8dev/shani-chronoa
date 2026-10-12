@@ -38,6 +38,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 from gi.repository import GLib, Gtk  # noqa: E402
+from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 SURFACE_ID = "listening"
 TITLE = "Listening"
@@ -321,4 +322,11 @@ def build(app: Any = None) -> Gtk.Widget:
         xalign=0.0, wrap=True, selectable=True))
 
     again()
+
+    # **A health word, from the state this page already holds.** The sidebar's
+    # dot reads `page.status`, and a panel with none gets no dot at all - the
+    # contract's own message calls that "a flat list". `unknown` is honest:
+    # the probes have not run when `build()` returns, and a page that claimed
+    # `ok` before asking anything would be the confident wrong answer.
+    page.status = lambda: common.STATUS_UNKNOWN
     return page

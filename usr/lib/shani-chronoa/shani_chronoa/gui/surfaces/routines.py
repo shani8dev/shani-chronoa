@@ -244,7 +244,10 @@ def build(app: Any) -> Gtk.Widget:
     page, set_content = common.surface(TITLE, SUBTITLE)
     surface = _RoutinesSurface(app, set_content)
     page.surface = surface
-    page.status = lambda: ""
+    # **A word from the vocabulary, not an empty one.** An unknown word
+    # renders an uncoloured dot, which is the failure
+    # `common.status_row`'s closed vocabulary exists to prevent.
+    page.status = lambda: common.STATUS_UNKNOWN
     # Re-read on every showing: the `routines` skill saves one from a chat turn
     # while this page sits built and cached in the window.
     if hasattr(page, "connect") and common.adw_ready():
