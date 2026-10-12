@@ -671,6 +671,18 @@ real version of it.
    denial, the user undoing it, the user correcting it ("no, the other one").
    It is a record only; nothing changes behaviour yet. It joins the
    conversations database.
+   **Two of the four records exist, in a JSONL log rather than the SQLite table
+   this item predicted (checked 2026-10-12).** The post-condition result is
+   recorded (`verification.py`'s VERIFIED / FAILED / UNVERIFIED, reaching
+   `tool_tracking`), and so is approval versus denial (`verdict` throughout
+   `tool_tracking.py`). **The user undoing it is not written back** -
+   `skills/undo_last_change.py` and the undo ring exist, but nothing writes an
+   undo into the call log, so a reversal a person made is invisible to the record
+   that is supposed to learn from it. And the store is JSONL, not the SQLite
+   table named here; `sqlite` appears zero times in `tool_tracking.py`. The
+   model that reads this log is fitted and refuses to over-claim - see
+   `learning.py`'s own report - so the *learning* half has moved further than the
+   *recording* half, which is the opposite of the order the item assumes.
 3. **Embeddings and RAG in SQLite** (Memory). `llama-server --embedding` with a
    small GGUF embedding model, vectors stored next to FTS5, with hybrid
    bm25-plus-vector search over conversations, memory facts and opted-in
