@@ -17811,3 +17811,40 @@ guessing `local` would override a legitimate cloud chain. The gschema gives
 real application - the branch is reachable only from a config whose compiled
 schemas predate the key. Corrected in `7a59930`; a comment that describes a path
 the code cannot take misleads whoever reads it next.
+
+## The chunk-runner bytecode fix was a no-op, and the trap has one source (2026-10-12)
+
+Correcting a claim made earlier this session, because it was measured badly and
+then asserted confidently.
+
+`tools/run_suite_in_chunks.sh` was changed to set `PYTHONDONTWRITEBYTECODE=1`, and
+the report said *"proved by measurement: run a chunk with the flag in place and
+the `.pyc` count under `usr/` does not move (36 before, 36 after)"*. **That
+measurement could not have failed either way**, which is the negative-control trap
+this file records more than any other. Run without the flag, the same count is
+**0 before, 0 after** - identical.
+
+The decisive experiment, run as a comparison rather than as a single arm:
+
+| run | `.pyc` written under `usr/` |
+|---|---:|
+| `python3 -m pytest tests/<file>.py`, no flag in the environment | **0** |
+| `python3 tools/gen_capabilities.py`, no flag | **312** |
+
+So **the pytest path never wrote bytecode**: `tests/conftest.py:38` sets the
+variable at module scope, and pytest imports every conftest before it imports any
+test module, so the package is always compiled after the flag is set. The whole
+source of this trap is **standalone `tools/*.py` runs**, which import the package
+with no conftest involved at all.
+
+The flag in the chunk runner stays - it is harmless defence against a future where
+conftest's guard is moved or a tool is imported earlier - but it is not the fix,
+and it was recorded as one. **A measurement that would read the same whether the
+change worked or not is not a measurement of the change.**
+
+The six hand-cleaned `__pycache__` directories this session were all standalone
+`tools/` runs, mostly this session's own probes. The habit is the only durable
+answer available: `pytest-env` is not installed, so `pytest.ini` cannot set the
+variable, and a root-level `sitecustomize.py` that `site` would auto-import is
+magic nobody would expect to find in this repo.
+
