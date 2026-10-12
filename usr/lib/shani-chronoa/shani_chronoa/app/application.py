@@ -434,6 +434,11 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         return {row[0] for row in _ModeStrip._EGRESS}
 
     @property
+    def _PRESENCE_KEYS(self):
+        from shani_chronoa.gui.window import _ModeStrip
+        return {row[0] for row in _ModeStrip._PRESENCE}
+
+    @property
     def _AMBIENT_KEYS(self):
         from shani_chronoa.gui.window import _ModeStrip
         return {row[0] for row in _ModeStrip._AMBIENT}
@@ -503,6 +508,59 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         action.set_state(GLib.Variant("s", key))
         self._apply_answer_mode()
         self._refresh_strip()
+
+    def _on_answer_presence(self, action, value) -> None:
+        """Move to the chosen presence state, and say what happened.
+
+        **Applying a state is not writing a setting.** ACTIVE and DROWSY swap
+        which weights the local server holds; SLEEPING stops it. That is a
+        `systemctl` call and a cold start, so **the work runs off the main loop**
+        - the same reason `answer-model` restarts there, and for the same reason:
+        done on the loop it freezes the window for the duration.
+
+        **The choice is recorded only on success.** `presence.apply` reports
+        `(reached, reason)` rather than raising, so a stop that fails leaves the
+        model loaded while the chip would read "Asleep" - the chip reporting a
+        state the machine is not in, which is the failure this strip has now hit
+        three times. So on failure the chip redraws from what is actually true.
+        """
+        key = value.get_string() if value is not None else ""
+        if key not in self._PRESENCE_KEYS:
+            logger.warning("unknown answer-presence choice %r", key)
+            return
+        from shani_chronoa import local_llm, presence
+        from shani_chronoa.gateway import off_the_main_loop
+
+        target = presence.Presence(key)
+        self._presence_pending = target
+
+        def work() -> None:
+            try:
+                reached, reason = presence.apply(
+                    target, is_up=local_llm.is_up,
+                    wake=local_llm.start_service, sleep=local_llm.stop_service)
+            except Exception:                           # noqa: BLE001
+                logger.warning("presence change failed", exc_info=True)
+                GLib.idle_add(self._presence_finished, False, "it could not be changed")
+                return
+            if reached:
+                self._presence = target
+            GLib.idle_add(self._presence_finished, reached, reason)
+
+        off_the_main_loop(work, "answer-presence")
+
+    def _presence_finished(self, reached: bool, reason: str) -> bool:
+        """Back on the loop: show the outcome, and the truth either way."""
+        action = self.lookup_action("answer-presence")
+        if action is not None:
+            action.set_state(GLib.Variant(
+                "s", self._presence.value if reached else ""))
+        if not reached:
+            self.window.set_status(f"Still here: {reason}") \
+                if self.window is not None else None
+        self._presence_pending = None
+        self._refresh_strip()
+        return False
 
     def _on_answer_ambient(self, action, value) -> None:
         """Write "when it may act": only on request, or in the background.
@@ -1117,6 +1175,7 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
                 ("answer-egress", self._on_answer_egress,
                  "local-then-cloud"),
                 ("answer-ambient", self._on_answer_ambient, "on-ask"),
+                ("answer-presence", self._on_answer_presence, ""),
                 ("hands-free", self._on_hands_free, "off"),
                 ("answer-model", self._on_answer_model, "")):
             act = Gio.SimpleAction.new_stateful(

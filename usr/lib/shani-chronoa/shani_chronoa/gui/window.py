@@ -212,6 +212,8 @@ class _ModeStrip(Gtk.Box):
         self.append(self._rules_chip)
         self._ambient_chip = self._ambient_chip()
         self.append(self._ambient_chip)
+        self._presence_chip = self._presence_chip()
+        self.append(self._presence_chip)
         self._hands_chip = self._hands_free_chip()
         self.append(self._hands_chip)
         self._answer_chip = self._egress_chip()
@@ -341,6 +343,29 @@ class _ModeStrip(Gtk.Box):
          "reply", "media-playback-pause-symbolic"),
     )
 
+    #: Whether it is here at all, as one choice.
+    #:
+    #: **This is the largest question the window can answer, and it was only in
+    #: Settings.** Everything else on this strip governs how Chronoa behaves *for
+    #: the person*; this governs whether it is *there*. `presence.Presence` has
+    #: three states, the third of which is a decision rather than an observation:
+    #: `detect()` answers "is the model resident" and so can only ever return
+    #: ACTIVE or DROWSY, while SLEEPING is something a person chose.
+    #:
+    #: The word is the **reconciled** state, for the reason `reconcile()` exists:
+    #: a stale DROWSY on a machine that is up would otherwise show a word that
+    #: disagrees with what is actually loaded, which is the two-widgets failure
+    #: this strip keeps hitting.
+    _PRESENCE = (
+        ("active", "Here",
+         "Awake and answering", "user-busy-symbolic"),
+        ("drowsy", "Drowsy",
+         "Loaded, but idle - it will let go of the model", "user-idle-symbolic"),
+        ("sleeping", "Asleep",
+         "It has let go of the model and will not answer until woken",
+         "user-offline-symbolic"),
+    )
+
     #: Where it may **go**, as one choice: the answer engine and the egress lock
     #: together.
     #:
@@ -400,6 +425,65 @@ class _ModeStrip(Gtk.Box):
             "Whether Chronoa's automatic rules keep running when you are not "
             "talking to it")
         return button
+
+    def _presence_chip(self) -> Gtk.MenuButton:
+        """Whether Chronoa is here at all, in a dropdown of three.
+
+        **A menu rather than the button it replaces.** The Settings row cycles the
+        states with a press, and its label is the *next* action rather than the
+        current state - which is right for a row whose subtitle already says the
+        state, and wrong for a strip, where the word on the chip is the only thing
+        legible in a screenshot or from across the room.
+
+        Applying a state stops or starts a service, so the work happens in
+        `_on_answer_presence` rather than here.
+        """
+        button, label, image = self._menu_chip("user-busy-symbolic")
+        self._presence_label = label
+        self._presence_image = image
+        menu = Gio.Menu()
+        for key, word, _line, _icon in self._PRESENCE:
+            menu.append(word, f"app.answer-presence::{key}")
+        button.set_menu_model(menu)
+        button.set_tooltip_text(
+            "Whether Chronoa is awake, letting go of the model, or asleep")
+        return button
+
+    def _read_presence(self) -> str:
+        """The presence choice, reconciled against what the machine is doing.
+
+        `reconcile()` and not `detect()`: the word a person reads is built from
+        the reconciled value, so reading it must come from the same value - and
+        because `detect()` cannot see SLEEPING at all, reading through it would
+        report a state that is not the one chosen.
+        """
+        from shani_chronoa import local_llm, presence
+
+        chosen = getattr(self._app, "_presence", None)
+        try:
+            if chosen is None:
+                chosen = presence.detect(local_llm.is_up)
+            return presence.reconcile(chosen, local_llm.is_up).value
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the presence state", exc_info=True)
+            return "drowsy"
+
+    def _dream_sentence(self) -> str:
+        """When Chronoa last reflected on its own day, in one sentence.
+
+        **Dreaming is an activity, not a fourth presence state**, so it is a
+        sentence on the chip rather than a value in `_PRESENCE`: a pass over the
+        tool-call log can run at any of the three. What it does *not* do is let
+        the chip claim something untrue - so the one thing it adds is the moment
+        it happened, which is otherwise invisible on every surface but a
+        Settings row.
+        """
+        try:
+            from shani_chronoa import dream
+            return dream.describe_last_dream()
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the last dream", exc_info=True)
+            return "Its last dream could not be read"
 
     def _read_capability(self) -> str:
         """The capability choice, read from the module that owns it."""
@@ -664,6 +748,16 @@ class _ModeStrip(Gtk.Box):
                        self._read_ambient(), self._AMBIENT,
                        "When it may act", quiet=("on-ask",),
                        image=self._ambient_image)
+            # Quiet is "here", not "asleep": an assistant that has gone to sleep
+            # is a departure somebody should see at a glance.
+            presence_state = self._read_presence()
+            self._draw(self._presence_chip, self._presence_label,
+                       presence_state, self._PRESENCE,
+                       "Whether Chronoa is here", quiet=("active",),
+                       image=self._presence_image)
+            self._presence_chip.set_tooltip_text(
+                f"{self._presence_chip.get_tooltip_text()}. "
+                f"{self._dream_sentence()}")
             self._draw(self._hands_chip, self._hands_label,
                        self._read_hands_free(), self._HANDS,
                        "How Chronoa hears you", quiet=("off",),

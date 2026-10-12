@@ -377,3 +377,50 @@ def write_dream(path: Optional[Path] = None, out_dir: Optional[Path] = None,
         logger.warning("dream: the pass ran but its result could not be "
                        "written to %s: %s", destination, exc)
         return None
+
+def last_dream(out_dir: Optional[Path] = None) -> Optional[Path]:
+    """The most recent dream this machine has written, or `None`.
+
+    **Owns the question rather than leaving two places to answer it.** The
+    Learning surface already globbed for `dream-*.txt` inline, and the mode strip
+    needs the same answer for its tooltip - and two globs are two places for them
+    to disagree about which dream is the latest one.
+
+    **`None` is a real answer and means "never".** On a machine where the daemon
+    has never ticked - and the daemon only ticks when `background-mode-enabled`
+    is on, which is off by default - there is no dream file at all. Measured on
+    this machine: zero, against a `tool_calls.log` that exists and has content.
+    So a caller must have something to say for the empty case rather than
+    rendering a blank.
+    """
+    import glob
+
+    directory = Path(out_dir) if out_dir is not None else _log_file(None).parent
+    found = [p for p in glob.glob(str(directory / "dream-*.txt"))]
+    if not found:
+        return None
+    return Path(max(found, key=lambda p: Path(p).stat().st_mtime))
+
+
+def describe_last_dream(out_dir: Optional[Path] = None,
+                        now: Optional[float] = None) -> str:
+    """A sentence for the newest dream, including why there may not be one.
+
+    Split from `last_dream()` because **the sentence is a claim** and belongs
+    where a caller cannot accidentally skip it: the two callers want different
+    wording, and "3h ago" and "it has never dreamed" are not the same message.
+    """
+    import time as _time
+
+    path = last_dream(out_dir)
+    if path is None:
+        return ("It has never dreamed - the background pass runs only while "
+                "automatic rules are on")
+    age = (_time.time() if now is None else now) - path.stat().st_mtime
+    if age < 90:
+        return "It dreamed just now"
+    for limit, div, unit in ((3600, 60, "min"), (86400, 3600, "h"),
+                             (86400 * 30, 86400, "d")):
+        if age < limit:
+            return f"It last dreamed {int(age // div)} {unit} ago"
+    return "It last dreamed over a month ago"
