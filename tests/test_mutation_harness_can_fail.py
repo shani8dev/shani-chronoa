@@ -1639,3 +1639,91 @@ class TestNoMutationSetHasADuplicateKey:
             "the duplicate-key check did not notice a deliberately duplicated "
             "key with identical values, so it is the lint that already exists and "
             "not a check that can see this shape")
+
+
+class TestNoHandKeptTableAnywhereHasADuplicateKey:
+    """Tree-wide, not just the mutation sets.
+
+    **The check above started as one set and the tree-wide sweep found a second
+    live instance.** Sweeping `usr/`, `tools/` and `tests/` for dict literals with
+    a repeated key: **1,112 files, 1 duplicate** — `_IMPL` in
+    `tests/test_skill_gates_are_enforced.py`, 95 entries with 93 unique keys, where
+    `container` and `vm` were each declared twice. The second copy's comment about
+    `*-control-enabled` was sitting on entries the interpreter had already thrown
+    away, and the surviving rows were identical, so nothing failed.
+
+    AGENTS.md records *"pyflakes was the only thing that noticed"* as the reason
+    the duplicate-key defect is caught, in three separate places. It does not
+    notice this shape: **it warns only when a repeated key's two values differ**,
+    so two identical rows are invisible to the declared lint. That gap is the
+    finding, and a lint that someone has stopped checking is worse than one that
+    never worked.
+
+    The sweep is the reason this file does it rather than leaving it to pyflakes.
+    """
+
+    ROOTS = ("usr", "tools", "tests")
+
+    @staticmethod
+    def _duplicates():
+        import pathlib
+        base = pathlib.Path(__file__).resolve().parent.parent
+        roots = [base / name for name in
+                 TestNoHandKeptTableAnywhereHasADuplicateKey.ROOTS
+                 if (base / name).is_dir()]
+        files = [p for root in roots for p in root.rglob("*.py")
+                 if "pkg" not in p.relative_to(base).parts[:1]]
+        for path in sorted(files):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            except (SyntaxError, OSError):
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Dict) or not node.keys:
+                    continue
+                keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+                if len(keys) != len(set(keys)):
+                    dupes = sorted({k for k in keys if keys.count(k) > 1})
+                    yield f"{path.relative_to(base)}:{node.lineno} {dupes}"
+
+    def test_no_duplicate_keys_anywhere_in_the_tree(self):
+        found = list(self._duplicates())
+        assert not found, (
+            f"{len(found)} dict literal(s) name a key twice. The later value wins "
+            f"silently, pyflakes only warns when the two values DIFFER, so an "
+            f"identical repeat is invisible to the declared lint:\\n  "
+            + "\\n  ".join(found))
+
+    def test_the_sweep_actually_reads_the_tree(self):
+        """**The control.** A sweep that finds nothing because it scanned nothing
+        is the same defect as one that cannot fail - and this is exactly what a
+        `pkg` exclusion or an empty root list would produce.
+        """
+        import pathlib
+        base = pathlib.Path(__file__).resolve().parent.parent
+        roots = [base / name for name in self.ROOTS if (base / name).is_dir()]
+        assert len(roots) == 3, (
+            f"expected to sweep usr/, tools/ and tests/, found "
+            f"{[r.name for r in roots]}", )
+        files = [p for root in roots for p in root.rglob("*.py")
+                 if "pkg" not in p.relative_to(base).parts[:1]]
+        assert len(files) > 1000, (
+            f"the sweep read {len(files)} files, which is too few to be the whole "
+            f"tree - so a clean result here would mean nothing")
+        # and it must be able to see a duplicate: the mutation sets' own check is
+        # the same shape on a known-good file, so prove the predicate discrinates.
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = pathlib.Path(tmp) / "probe.py"
+            probe.write_text(
+                'ROW = {"a": 1, "a": 1}\n', encoding="utf-8")
+            tree = ast.parse(probe.read_text(encoding="utf-8"))
+            seen = [n for n in ast.walk(tree)
+                    if isinstance(n, ast.Dict) and n.keys]
+            assert seen and len([k.value for k in seen[0].keys
+                                 if isinstance(k, ast.Constant)]) != len(
+                set(k.value for k in seen[0].keys
+                    if isinstance(k, ast.Constant))), (
+                "the predicate did not flag a deliberately duplicated key with "
+                "identical values, so the sweep could not catch the shape it "
+                "exists for")

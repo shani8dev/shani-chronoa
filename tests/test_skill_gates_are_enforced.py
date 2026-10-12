@@ -87,11 +87,11 @@ _IMPL = {
     # needs to know which module consults which key.
     "ir_remote": "shani_chronoa.skills.ir_remote",
     # Containers and VMs: each declares its own key inside the module, as
-    # `_CONSENT_KEY`, and checks it before any subprocess is built.
-    "container": "shani_chronoa.skills.container",
-    "vm": "shani_chronoa.skills.vm",
-    # Both gate on their own `*-control-enabled` key, deliberately not the
-    # `containers-sense-enabled` read key `list_containers` follows.
+    # `_CONSENT_KEY`, and both gate on their own `*-control-enabled` key -
+    # deliberately not the `containers-sense-enabled` read key
+    # `list_containers` follows. (These two rows were once entered twice, the
+    # second copy's comment about `*-control-enabled` sitting on entries the
+    # interpreter had already discarded; both notes are kept on the surviving row.)
     "container": "shani_chronoa.skills.container",
     "vm": "shani_chronoa.skills.vm",
     "click_pointer": "shani_chronoa.skills.input_control",
