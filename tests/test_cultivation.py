@@ -791,3 +791,92 @@ def test_the_gate_passing_merge_is_refused_by_the_real_gate():
     v = cultivation.ascension_gate(base, merged, held_out=True)
     assert v.unlocked is False, v.why
     assert "no better" in v.why, v.why
+
+
+# ---------------------------------------------------------------------------
+# The gate names how much of what it counted could be scored at all.
+# ---------------------------------------------------------------------------
+
+class TestTheGateNamesWhatItCouldScore:
+    """`right` is "cases got right" **plus** "cases that were never in question".
+
+    Of the 220 expect-carrying cases, **109 declare no expected arguments**, and
+    through the real scorer a call with the right tool and an empty argument
+    dict scores fully correct on every one of them. So the same count can be
+    "103 of 220" or "103 of 111", and a verdict quoting the first as a
+    proportion of the corpus claims a result over rows that held nothing.
+    """
+
+    def _measure(self, right, of, **kw):
+        return cultivation.Measurement(right=right, of=of, seconds=4.0, **kw)
+
+    def test_the_verdict_names_the_population_it_was_graded_on(self):
+        base = self._measure(50, 220, scoreable=111)
+        adapted = self._measure(53, 220, scoreable=111)
+        v = cultivation.ascension_gate(base, adapted, held_out=True)
+        assert v.unlocked is True, v.why
+        assert "111 of 220 could tell right from wrong" in v.why, v.why
+
+    def test_a_population_that_was_not_measured_says_nothing_about_it(self):
+        """"None" means unknown, not zero - and a sentence that invented a
+        number for an unmeasured one would be the confident wrong answer."""
+        base = self._measure(50, 220)
+        adapted = self._measure(53, 220)
+        v = cultivation.ascension_gate(base, adapted, held_out=True)
+        assert v.unlocked is True, v.why
+        assert "could tell right from wrong" not in v.why, v.why
+        # Not `"0 of 220" not in why` - that substring is inside "50 of 220",
+        # which is the ordinary count. The claim is that no population clause
+        # was invented for a caller that did not measure one.
+        assert v.why.count(" of ") == 2, v.why
+
+    def test_two_runs_over_different_populations_are_not_comparable(self):
+        """The refusal is about the *denominator*, not the count.
+
+        A base scored over 111 gradable cases and an adapter over 96 produce two
+        numbers that cannot be subtracted from one another, and the gate says so
+        before it compares anything else.
+        """
+        base = self._measure(50, 220, scoreable=111)
+        adapted = self._measure(53, 220, scoreable=96)
+        v = cultivation.ascension_gate(base, adapted, held_out=True)
+        assert v.unlocked is False, v.why
+        assert "graded over different populations" in v.why, v.why
+        assert "111" in v.why and "96" in v.why, v.why
+
+    def test_a_tie_still_names_the_population_in_its_refusal(self):
+        base = self._measure(50, 220, scoreable=111)
+        tied = self._measure(50, 220, scoreable=111)
+        v = cultivation.ascension_gate(base, tied, held_out=True)
+        assert v.unlocked is False, v.why
+        assert "could tell right from wrong" in v.why, v.why
+
+    def test_the_population_is_measured_from_the_real_scorer(self):
+        """The number comes from `task_eval.score`, not from a count I made up.
+
+        If the corpus changes - a case gains arguments, or more cases arrive -
+        this test moves with it, which is the alternative to a constant that
+        stays right by accident and then lies.
+        """
+        import json
+        import sys
+        import pathlib
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        sys.path.insert(0, str(repo / "usr" / "lib" / "shani-chronoa"))
+        sys.path.insert(0, str(repo / "tools"))
+        import task_eval
+        cases = json.loads(
+            (repo / "tools" / "eval_cases.json").read_text())["cases"]
+        rows = [c for c in cases if c.get("expect")]
+        gradable = sum(1 for c in rows if c["expect"][0].get("args"))
+        assert len(rows) == 220 and gradable == 111, (
+            f"{len(rows)} expect-carrying cases with {gradable} carrying "
+            f"arguments - both the corpus and this test have drifted")
+        vacuous = sum(
+            1 for c in rows if not c["expect"][0].get("args")
+            and task_eval.score(c, [{"name": c["expect"][0]["tool"],
+                                     "args": {}}])[1])
+        assert vacuous == len(rows) - gradable == 109, (
+            f"{vacuous} no-argument cases score as passing on an empty dict, "
+            f"against 109 expected - the headroom claim in the docstring is "
+            f"now stale")

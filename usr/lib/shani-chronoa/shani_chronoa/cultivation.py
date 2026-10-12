@@ -727,17 +727,41 @@ class Measurement(NamedTuple):
     measurements can refuse to be compared when they were run over different
     numbers of cases, which is otherwise a comparison of two different
     experiments.
+
+    **`scoreable` is how many of those cases could tell right from wrong at
+    all**, and it is Optional - `None` means "not measured", never zero.
+
+    The reason is measured, not hypothesised: of the 220 expect-carrying cases
+    in `tools/eval_cases.json`, **109 declare no expected arguments**, and a call
+    with the right tool and an *empty* argument dict scores fully correct on
+    every one of them. So a `right` count is "the cases it got right, plus the
+    cases that were never in question", and a verdict of 103/220 against one of
+    103/111 is the same cases under two denominators. A number reported as a
+    proportion of `of`, with nothing beside it, claims a result over rows that
+    held nothing to get right.
     """
     right: int
     of: int
     seconds: float
     refusals: int = 0
+    scoreable: Optional[int] = None
 
 
 #: How much slower an adapter may be before it is refused. 25% is chosen, not
 #: assumed: at 1.7B on this machine one adapter's measured overhead was 65%, and
 #: a gate set at 100% would have waved that through.
 SLOWDOWN_LIMIT = 0.25
+
+
+def _scoreable_clause(m: "Measurement") -> str:
+    """`, of which N could tell right from wrong` when that was measured.
+
+    Empty when `scoreable` is None, because a caller that did not measure its
+    gradable population gets a sentence that does not pretend to know one.
+    """
+    if m.scoreable is None:
+        return ""
+    return f" ({m.scoreable} of {m.of} could tell right from wrong)"
 
 
 def ascension_gate(base: Measurement, adapted: Measurement, *,
@@ -794,10 +818,20 @@ def ascension_gate(base: Measurement, adapted: Measurement, *,
             f"the adapter makes the model decline more often "
             f"({adapted.refusals} against {base.refusals}); that is worse in "
             "the most expensive way there is"))
+    if adapted.scoreable is not None and base.scoreable != adapted.scoreable:
+        return Verdict(False, (
+            f"not comparable in what they could score: {base.scoreable} cases "
+            f"were gradable for the base against {adapted.scoreable} for the "
+            "adapter, so the two runs were graded over different populations"))
+    # The same sentence in both branches, and the population beside it. A
+    # verdict of "4 of 5" against one of "103 of 220" is not a verdict about
+    # 220 gradable cases, and a reader has no way to know the difference
+    # unless the sentence says so.
     if adapted.right <= base.right:
         return Verdict(False, (
             f"no better: {adapted.right} of {adapted.of} right tool and "
-            f"arguments against {base.right} of {base.of} for the base alone. "
+            f"arguments{_scoreable_clause(adapted)} against {base.right} of "
+            f"{base.of} for the base alone{_scoreable_clause(base)}. "
             "A tie is a refusal, not a win"))
     if base.seconds > 0:
         slower = adapted.seconds / base.seconds - 1.0
@@ -808,8 +842,10 @@ def ascension_gate(base: Measurement, adapted: Measurement, *,
                 f"past the {slowdown_limit * 100:.0f}% limit, for accuracy it "
                 "did not earn"))
     return Verdict(True, (
-        f"earned: {adapted.right} of {adapted.of} against {base.right} of "
-        f"{base.of}, at {adapted.seconds:.2f} s/case against "
+        f"earned: {adapted.right} of {adapted.of} right tool and "
+        f"arguments{_scoreable_clause(adapted)} against {base.right} of "
+        f"{base.of}{_scoreable_clause(base)}, at {adapted.seconds:.2f} s/case "
+        "against "
         f"{base.seconds:.2f}, and reversible by dropping the file"))
 
 
