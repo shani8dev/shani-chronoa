@@ -15044,11 +15044,16 @@ via `_record_row`'s call site (1).
 ### Recorded, not fixed: the sibling that is wired and the one that is not
 
 `TranscriptView` carries **two** near-identical methods.
-`set_regenerate_handler` is wired - `gui/window.py` attaches it at
-`set_regenerate_handler`, and this file already records the false claim that it
-was not. `set_suggestion_handler` is wired to **nothing at all**: no caller in
-`usr/`, none in `tests/`, no string, no launcher. Its only mention anywhere is
-the docstring that explains its sibling's pattern.
+`set_regenerate_handler` is wired, and the chain is three links so a reader can
+check it: `app/conversation.py:180` calls `self.window.set_regenerate_handler(...)`,
+`gui/window.py:2495` forwards it to `self._transcript.set_regenerate_handler(handler)`,
+and that is `widgets.py`'s method. This file already records the false claim that
+it was *not* wired.
+`set_suggestion_handler` is wired to **nothing at all**: no caller in `usr/`,
+none in `tests/`, no string, no launcher. Its only mention anywhere is the
+docstring that explains its sibling's pattern. Measured again after the
+concurrent session edited `widgets.py` for an unrelated reason: still 0 mentions
+outside its own definition, and its sibling still 2.
 
 Not wired here, because what a *suggestion* handler should do is a product
 decision rather than a mechanical connection - and inventing one would be the
