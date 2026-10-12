@@ -637,6 +637,9 @@ def main(argv=None) -> int:
     parser.add_argument("--wait", type=float, default=0.0, metavar="SECONDS",
                         help="wait this long for another run to finish instead of "
                              "refusing (default: refuse immediately)")
+    parser.add_argument("--check-witnesses", action="store_true",
+                        help="check every mutation's named witnesses resolve to "
+                             "a real test id, without running any mutation")
     parser.add_argument("--check-anchors", action="store_true",
                         help="check every mutation's anchor still matches the code, "
                              "without running a single test. This is the cheap "
@@ -675,6 +678,8 @@ def main(argv=None) -> int:
         print(str(busy), file=sys.stderr)
         return 2
     try:
+        if args.check_witnesses:
+            return _check_witnesses(wanted, available)
         if args.check_anchors:
             return _check_anchors(wanted, available)
         # **A killed run's leftovers are put back here, before anything is
@@ -724,6 +729,54 @@ def main(argv=None) -> int:
             (reached, len(wanted)), all_unmeasurable, all_stale_witnesses)
     return 1 if (all_survivors or failures or all_unmeasurable
                  or all_stale_witnesses) else 0
+
+
+def _check_witnesses(wanted, available) -> int:
+    """Every mutation's `expect` list resolves to a real test id.
+
+    **The cheap half of the witness gate.** A witness that cannot fire was a line
+    in the middle of a mutation run that nobody read; the per-set check closes it
+    and this makes it *runnable every time*, beside `--check-anchors`, because
+    collection is not a run. 44 sets collected is a fraction of the anchor check's
+    own file reads.
+
+    **It takes the lock for the reason the anchor check does**: this reads source
+    a mutation run may be rewriting, and a check that reads what a run is mutating
+    cannot tell a mutation from an edit. That was measured here already, on the
+    cheap half, and it is why this is not exempt.
+    """
+    stale = []
+    checked = 0
+    collected = {}
+    for name in wanted:
+        namespace = {}
+        exec(compile(available[name].read_text(encoding="utf-8"),
+                     str(available[name]), "exec"), namespace)
+        test_file = namespace.get("TEST_FILE")
+        if not test_file:
+            continue
+        if test_file not in collected:
+            try:
+                collected[test_file] = _collected_ids(test_file)
+            except Exception as exc:  # noqa: BLE001 - reported, not fatal
+                collected[test_file] = set()
+                print(f"  could not collect {test_file}: {exc}", file=sys.stderr)
+        ids = collected[test_file]
+        for entry in namespace.get("MUTATIONS") or []:
+            for witness in entry.get("expect") or []:
+                checked += 1
+                if not _witness_hit(witness, ids):
+                    stale.append(f"{name}: {witness!r} - named on the mutation "
+                                 f"{entry['label']!r}, and no test in "
+                                 f"{test_file} has that id")
+    if stale:
+        print(f"{len(stale)} witness(es) could never fire. The mutation is still "
+              f"reported when another witness catches it, so this is a hole in "
+              f"the measurement and not a red tally:\n" + "\n".join(stale))
+        return 1
+    print(f"{checked} witness(es) across {len(wanted)} set(s), all resolve to a "
+          f"real test id")
+    return 0
 
 
 def _check_anchors(wanted, available) -> int:

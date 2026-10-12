@@ -70,6 +70,28 @@ def test_the_total_is_what_the_docstring_says():
 '''
 
 
+class _LockFixture:
+    """Holds `build/mutate/run.lock` the way a live mutation run would.
+
+    **The pid must be the first whitespace token**, because `_Lock._stale` does
+    `int(read_text().split()[0])`. JSON `{"pid": 123}` makes that `int()` fail,
+    which `_stale` reads as *the owner is gone* - so the lock is taken over and
+    the run proceeds. Writing JSON here produced a test that passed for exactly
+    the opposite reason it was written for.
+    """
+
+    def __init__(self, tmp_path):
+        self.path = tmp_path / "build" / "mutate" / "run.lock"
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    def acquire(self):
+        return self
+
+    def release(self):
+        self.path.unlink(missing_ok=True)
+
+
 def _named_set(tmp_path, name, mutations):
     """A mutation set written under `name`, over the fixture's own test file.
 
@@ -1472,6 +1494,52 @@ class TestAWitnessThatNamesNothingIsAnErrorNotALogLine:
             "a base-id witness against a parametrized test was flagged, so the "
             "prefix rule this harness documents on purpose is broken:\n"
             + out.stdout)
+
+    def test_the_cheap_half_reports_a_stale_witness_without_running_anything(
+            self, tmp_path):
+        """**`--check-witnesses`, and why it exists.**
+
+        The per-set gate only fires inside a mutation run, which is minutes long
+        and mutates the tree. Collection is neither. Same check, same lock
+        discipline, a fraction of the cost - so a rename that strands a witness is
+        found by the command a person can run every time, not by one that needs
+        half an hour and rewrites source.
+        """
+        self._set(tmp_path, ["test_one", "test_no_such_witness"])
+        out = _run("--check-witnesses", cwd=tmp_path)
+        assert out.returncode != 0, (
+            "the cheap witness check passed on a set naming a witness that does "
+            "not exist:\n" + out.stdout)
+        assert "test_no_such_witness" in out.stdout, out.stdout
+        assert "could never fire" in out.stdout, out.stdout
+
+    def test_the_cheap_half_clears_a_clean_set(self, tmp_path):
+        """**The control.** Without it the cheapest failure is a check that refuses
+        everything."""
+        self._set(tmp_path, ["test_one", "test_inside_a_class"])
+        out = _run("--check-witnesses", cwd=tmp_path)
+        assert out.returncode == 0, out.stdout
+        assert "2 witness(es)" in out.stdout, (
+            "the count is not reported, so a run cannot tell a clean check from "
+            "one that collected nothing:\n" + out.stdout)
+
+    def test_the_cheap_half_refuses_to_run_on_a_mutated_tree(self, tmp_path):
+        """**The reason it takes the lock, which is a measured lesson.** A check
+        that reads what a mutation run is rewriting cannot tell a mutation from an
+        edit - AGENTS.md records that on the anchor check, and the same hole here
+        would make a collection succeed against mutated code."""
+        self._set(tmp_path, ["test_one"])
+        lock = _LockFixture(tmp_path)
+        lock.acquire()
+        try:
+            out = _run("--check-witnesses", cwd=tmp_path)
+            assert out.returncode != 0, (
+                "the cheap witness check ran while another run held the tree, so "
+                "it collected against code that was being rewritten:\n"
+                + out.stdout)
+            assert "holds the tree" in out.stdout + out.stderr, out.stdout
+        finally:
+            lock.release()
 
     def test_a_set_whose_file_has_no_witnesses_is_not_flagged(self, tmp_path):
         out = self._set(tmp_path, [])
