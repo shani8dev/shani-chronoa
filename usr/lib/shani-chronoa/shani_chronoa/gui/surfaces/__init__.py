@@ -204,9 +204,24 @@ SURFACE_IDS = (
 #: opens with an untitled "Conversation" row for the live chat, and a heading by
 #: that name above a "Conversations" panel would give it two things called
 #: Conversation. The saved list leads "Remembering" instead.
-SECTION_ORDER = ("Remembering", "Acting", "Sensing", "Thinking",
-                 "Health and trust", "Everything else")
+SECTION_ORDER = ("Remembering", "Acting", "Phone and remote", "Sensing",
+                 "Thinking", "Health and trust", "Everything else")
 
+
+#: **`"Phone and remote"`, added 2026-10-12.** Measured on the real sidebar,
+#: `"Acting"` held 14 of 33 panels and was not one category: four of them
+#: (`phone_link`, `phone`, `screen_share`, `connections`) are about reaching this
+#: computer from a phone or over the network, which is a question about *reach*,
+#: not about anything Chronoa was asked to do. Putting them under "Acting" meant
+#: the only heading that could describe them also described the four verbs, so a
+#: person looking for the phone panel had to read past seven things that were not
+#: it. One new name, four panels moved, and "Acting" is now nine things that all
+#: answer "what can it do for me".
+#:
+#: `processes` moved the other way, into "Health and trust", beside "Background
+#: mode" and "Diagnostics": "What's running" is what the machine is holding, and
+#: it is the panel somebody opens when the machine feels slow.
+SECTION_PHONE = "Phone and remote"
 
 #: Where a panel that declares no `SECTION` of its own belongs. A table rather
 #: than a guess: the panels that predate sections would otherwise all land in

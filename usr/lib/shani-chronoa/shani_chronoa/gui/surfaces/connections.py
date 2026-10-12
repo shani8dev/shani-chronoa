@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Connections"
 ICON = "network-server-symbolic"
-SECTION = "Acting"
+SECTION = "Phone and remote"
 SUBTITLE = ("Other apps and chat channels that can use Chronoa, and how to "
             "connect them. Read-only: nothing here starts anything.")
 

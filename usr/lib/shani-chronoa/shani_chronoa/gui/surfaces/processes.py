@@ -68,7 +68,7 @@ TITLE = "What's running"
 #: "this is the system" glyph and nobody else has it - which matters because
 #: a sidebar row's icon is the fastest thing to match when scanning.
 ICON = "emblem-system-symbolic"
-SECTION = "Acting"
+SECTION = "Health and trust"
 SUBTITLE = ("Everything Chronoa started, and the button that stops each one. "
             "Nothing here runs unless you turned it on.")
 

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Phone link"
 ICON = "phone-symbolic"
-SECTION = "Acting"
+SECTION = "Phone and remote"
 SUBTITLE = ("Find a phone on this network and put something on it. This "
             "computer speaks the KDE Connect LAN protocol.")
 

@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 TITLE = "Phone"
 ICON = "call-start-symbolic"
-SECTION = "Acting"
+SECTION = "Phone and remote"
 SUBTITLE = ("Calls, messages, contacts and music on your phone, and finding your watch - "
             "through the phone link, or plain Bluetooth when there is none.")
 #: Reading the phone takes seconds; build this panel when it is opened, not at start.

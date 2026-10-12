@@ -33,7 +33,7 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 TITLE = "Screen share"
 ICON = "send-to-symbolic"
-SECTION = "Acting"
+SECTION = "Phone and remote"
 SUBTITLE = ("This computer's screen, on a paired phone over Bluetooth. Ask "
             "first to see whether this machine can - the check reads "
             "GStreamer and the Bluetooth address, and takes a while.")
