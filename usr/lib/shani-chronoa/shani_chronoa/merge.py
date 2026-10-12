@@ -245,6 +245,27 @@ def _combine(base_arr, task_vectors, method, density, lam):
     (`Qwen3-0.6B-Base` 48.770 against `Qwen3-0.6B` 76.469, same corpus, a 57%
     gap), a midpoint of the two models lands between them and beats neither -
     which is the interference this exists for, observed rather than argued.
+
+    **TIES' second step cannot do anything with two parents, and this is
+    measured rather than argued.** The election is majority by *count*, so with
+    exactly two parents the vote is 1-1 at every coordinate where they
+    disagree. Measured on the sibling pair this box has (`Qwen3-0.6B-Base`
+    against `Qwen3-0.6B`): **49.90% of the 594,811,145 coordinates with a
+    non-zero task vector are contested** - the two parents push opposite ways -
+    and every one of them falls through to the magnitude fallback. For a
+    two-parent merge the *disjoint mean* therefore degenerates to "whichever
+    parent moved this coordinate further", which is a defensible rule and is
+    **not** the interference resolution the paper describes.
+
+    That makes the magnitude fallback the method rather than a tie-break, and it
+    changes what a sweep is measuring: at two parents the only thing `ties`
+    adds over `task_arithmetic` is the trim.
+
+    **TIES earns its keep at three parents or more**, which is what the paper's
+    results are about. `blend` takes any number of parents, so this is a
+    property of the input and not a limitation here - but a two-parent "TIES
+    merge" should never be described as interference resolution.
+
     """
     import numpy as np
 
