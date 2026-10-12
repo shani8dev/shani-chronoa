@@ -583,6 +583,9 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: None means the window offers no such control, rather than offering one
         #: that goes nowhere.
         self._on_regenerate = on_regenerate
+        #: Set by `set_turn_footer_handler`; `None` means a turn draws no
+        #: footer, which is the empty state that was always reachable.
+        self._on_turn_footer = None
         #: Opens the Diff panel; given to every tool card that rewrote a file.
         self._on_show_diff = on_show_diff
         self._rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -639,6 +642,22 @@ class TranscriptView(Gtk.ScrolledWindow):
         if self._is_placeholder():
             self.show_placeholder()
 
+    def set_turn_footer_handler(self, handler) -> None:
+        """Attach (or detach) the per-turn cost footer.
+
+        **`turn_stats()` existed and was consumed by nothing.** The assistant
+        times every model call, sums the token usage the backends report, and
+        returns it all from `turn_stats()` - which no caller ever read. Measured:
+        zero references outside its own definition. So the number was computed
+        every turn and shown to nobody, which is the same class as the stop-
+        speaking button that can never appear.
+
+        A handler rather than a stats object: the transcript has no assistant,
+        and `set_regenerate_handler` below is the pattern this class already
+        uses for exactly that.
+        """
+        self._on_turn_footer = handler
+
     def set_regenerate_handler(self, handler) -> None:
         """Attach (or detach) "Ask that again".
 
@@ -685,6 +704,47 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._blocks = None
         self._block_text = ""
 
+    def _footer(self, row, handler=None) -> None:
+        """A dim line under a turn saying what it cost, when there is anything.
+
+        **Time and tokens, never money.** `turn_stats()`' own docstring draws
+        that line - when cloud fallback is on a per-call price depends on the
+        provider and the model, and a wrong figure invented here would be worse
+        than none.
+
+        **Silent when there is nothing to say.** No handler, or no model call
+        yet, leaves no label at all rather than a zero - because "0.0s" on a turn
+        that has not happened is a claim.
+        """
+        if handler is None:
+            return
+        try:
+            stats = handler()
+        except Exception:                               # noqa: BLE001
+            return
+        if not stats or not stats.get("model_calls"):
+            return
+        parts = []
+        calls = int(stats.get("model_calls") or 0)
+        parts.append(f"{calls} model call" + ("s" if calls != 1 else ""))
+        wall = stats.get("wall_seconds")
+        if isinstance(wall, (int, float)) and wall > 0:
+            parts.append(f"{wall:.1f}s")
+        usage = stats.get("usage") or {}
+        total = sum(int(v) for v in usage.values() if isinstance(v, (int, float)))
+        if total:
+            parts.append(f"{total:,} tokens")
+        if stats.get("over_budget"):
+            parts.append("over its time budget")
+        label = Gtk.Label(label=" · ".join(parts))
+        label.add_css_class("dim-label")
+        label.add_css_class("caption")
+        label.set_xalign(0.0)
+        label.set_margin_start(34)      # under the copy button, not the window edge
+        label.update_property([Gtk.AccessibleProperty.LABEL],
+                              [f"this turn used {' and '.join(parts)}"])
+        row.append(label)
+
     def _append_turn(self, role: str, text: str) -> Gtk.Label:
         """Append one turn, styled by role, and return its label."""
         self._note_position()
@@ -715,6 +775,7 @@ class TranscriptView(Gtk.ScrolledWindow):
             # label back with `[None]` segfaults, which is how this was found.
             row._turn_text = text
             self._rows.append(row)
+            self._footer(row, handler=self._on_turn_footer)
             self._turns.append((role, text))
             self._scroll_to_end()
             return stack

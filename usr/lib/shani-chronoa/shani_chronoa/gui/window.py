@@ -1300,6 +1300,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._search_bar.connect_entry(self._search_entry)
         main_box.append(self._search_bar)
 
+        # What each turn cost. `turn_stats()` was already computed on every turn
+        # and read by nothing - so this is a number that existed since the
+        # assistant was written and reached nobody. Time and tokens only; the
+        # pricing is deliberately left to whoever knows it.
+        self._transcript.set_turn_footer_handler(self._turn_stats_for_footer)
         main_box.append(self._transcript)
 
         # Where an `ask_user` question appears. Hidden until a question is
@@ -2536,6 +2541,24 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _on_input_activate(self, entry: Gtk.Entry) -> None:
         self._submit_input()
+
+    def _turn_stats_for_footer(self):
+        """The running turn's cost, or nothing when there is no turn to cost.
+
+        **Read at the moment the turn is appended, and never cached.** The
+        assistant's totals are for the turn in progress, so a footer captured
+        earlier would report the number as it stood when the reply appeared
+        rather than as it ended.
+        """
+        assistant = getattr(getattr(self, "app", None), "assistant", None)
+        stats = getattr(assistant, "turn_stats", None)
+        if stats is None:
+            return None
+        try:
+            return stats()
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not read the turn's cost", exc_info=True)
+            return None
 
     def _on_turn_stop_clicked(self, _button: Gtk.Button) -> None:
         """Stop the turn in progress, and say plainly what that does.
