@@ -32,6 +32,7 @@ import logging
 import os
 import pathlib
 import sqlite3
+import shutil
 import subprocess
 import time
 from typing import List, Optional
@@ -181,10 +182,15 @@ def read_file(path: pathlib.Path) -> "tuple[Optional[str], str]":
 
 
 def _which(binary: str) -> bool:
-    try:
-        return subprocess.run(["which", binary], capture_output=True).returncode == 0
-    except OSError:
-        return False
+    """Whether a helper binary is on `PATH`.
+
+    **`shutil.which`, not `["which", binary]`.** The subprocess form forks a child
+    to answer a lookup question, and it carried **no timeout** - which the repo's
+    own audit measured as zero across the package, so a hang here would have been
+    a first. `shutil.which` answers in-process: no fork, nothing to hang, and no
+    dependency on a `which` binary itself being present.
+    """
+    return shutil.which(binary) is not None
 
 
 def _walk(root: pathlib.Path, problems: List[str]):

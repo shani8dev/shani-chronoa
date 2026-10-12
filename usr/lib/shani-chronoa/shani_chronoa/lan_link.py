@@ -66,6 +66,7 @@ import pathlib
 import re
 import socket
 import ssl
+import shutil
 import subprocess
 import threading
 import time
@@ -270,7 +271,10 @@ def _avahi_publish(tcp_port: int) -> bool:
     reads as the whole thing working.
     """
     tool = "avahi-publish-service"
-    if subprocess.run(["which", tool], capture_output=True).returncode != 0:
+    # `shutil.which`, not `["which", tool]` as a subprocess with no timeout.
+    # The honest failure mode when it is missing is the one this function already
+    # returns; what a subprocess adds is a fork that can hang.
+    if shutil.which(tool) is None:
         return False
     name = device_id()[:12] or "chronoa"
     try:
