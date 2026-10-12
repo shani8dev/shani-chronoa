@@ -353,11 +353,53 @@ class TestTheInventoryIsTrue:
         return Path(body_module.__file__).resolve().parent
 
     def test_every_organ_names_code_that_exists(self):
-        missing = [(organ.key, path)
-                   for organ in organism.INVENTORY
-                   for path in organ.code
-                   if not (self._root() / path).exists()]
+        """Every named path exists - **including a directory claim.**
+
+        A trailing-slash entry like `skills/` used to be skipped entirely, and
+        that is how ten directories sat unowned for months: the check validated
+        `skills/` by asking whether a *file* named `skills/` existed, which it
+        did not, so nothing failed - and the claim itself was never resolved to
+        the members it covers. **A directory claim that names nothing is a claim
+        that checks nothing**, which is worse than no claim, because it reads as
+        coverage in the generated document.
+        """
+        root = self._root()
+        missing, empty_claims = [], []
+        for organ in organism.INVENTORY:
+            for path in organ.code:
+                target = root / path
+                if path.endswith("/"):
+                    # Resolved: a directory claim must actually have members.
+                    members = list(target.rglob("*.py")) if target.is_dir() else []
+                    if not members:
+                        empty_claims.append((organ.key, path))
+                elif not target.exists():
+                    missing.append((organ.key, path))
         assert not missing, f"the inventory names files that are not there: {missing}"
+        assert not empty_claims, (
+            f"directory claims that cover nothing: {empty_claims}. A claim that "
+            f"resolves to no file is a claim that checks nothing.")
+
+    def test_every_shipped_directory_is_named_by_some_organ(self):
+        """The other direction, which nothing checked until now.
+
+        `test_every_organ_names_code_that_exists` goes organ to file and stops.
+        It cannot see a shipped directory that no organ claims - which is how
+        `gui/`, `app/`, `windows/`, `settings_window/` and `office/` were
+        invisible while the anatomy claimed 31 organs and looked complete.
+        """
+        root = self._root()
+        claimed = set()
+        for organ in organism.INVENTORY:
+            claimed.update(path for path in organ.code if path.endswith("/"))
+        unowned = sorted(
+            d.name + "/" for d in root.iterdir()
+            if d.is_dir() and d.name != "__pycache__"
+            and d.name + "/" not in claimed)
+        assert not unowned, (
+            f"these directories ship and no organ names them: {unowned}. Either "
+            f"they belong to an organ or they do not - leaving them unclaimed is "
+            f"how a growing codebase becomes invisible to its own map.")
 
     def test_every_state_is_one_of_the_three_words_the_target_uses(self):
         allowed = {organism.BUILT, organism.PART, organism.ABSENT}

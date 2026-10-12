@@ -810,18 +810,18 @@ there is no left pinky, because nothing in here has one.
 
 | System | Organ | What it is for | State | Light | Code |
 |---|---|---|---|---|---|
-| Boundary | Skin | the outside edge: everything that leaves this machine, and the log of it. | built | `skin` | `egress.py`, `senses/network.py` |
+| Boundary | Skin | the outside edge: everything that leaves this machine, and the log of it. | built | `skin` | `egress.py`, `gui/`, `app/`, `windows/`, `settings_window/`, `senses/network.py` |
 | Boundary | Immune system | what defends against a hostile world - untrusted input, privilege, secrets. | built | - | `guardrail.py`, `redaction.py`, `sandbox/`, `permissions.py`, `senses/security.py` |
 | Boundary | Scar tissue | the wall between a skill and the machine it runs on. | built | - | `sandbox/executor.py`, `sandbox/profiles.py`, `sandbox/landlock.py`, `sandbox/seccomp.py` |
 | Senses | Ears | hearing: the microphone, speech recognition, wake phrase, and what is heard. | built | `ears` | `audio.py`, `stt.py`, `stt_provision.py`, `wakeword.py`, `vad.py`, `senses/hearing.py` |
 | Senses | Eyes | sight: the camera, the screen, OCR, faces, objects, and the vision model. | built | `eyes` | `screengrab.py`, `local_vision.py`, `opencv/`, `photo_library.py`, `senses/vision.py` |
-| Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/power.py`, `senses/thermalgrid.py`, `senses/hwmon.py`, `senses/services.py`, `senses/network.py`, `senses/security.py` |
+| Senses | Nose | smell: the machine's own state - power, heat, disks, services, network. | built | `nose` | `senses/`, `senses/power.py`, `senses/thermalgrid.py`, `senses/hwmon.py`, `senses/services.py`, `senses/network.py`, `senses/security.py` |
 | Senses | Fingertips | reaching outward: looking something up beyond this machine. | part | - | `websearch.py`, `webtext.py`, `senses/web.py` | the only sense that leaves the machine by default - it is gated on 'web-sense-enabled' and the egress layer records it, but no organ owned it until now, and it is the one sense a person would assume is covered by eyes or skin
 | Senses | Touch | contact: idle time, and what is plugged into it. | part | `nose` | `senses/idle.py`, `senses/devices.py`, `senses/usb.py`, `senses/bluetooth.py` | no raw input events, on purpose - it watches devices, not you
 | Senses | Tongue | taste: judging whether an action actually worked. | built | - | `verification.py`, `history_repair.py`, `guardrail.py` |
 | Senses | Vestibular sense | balance: what deserves attention now, out of everything that happened. | part | - | `tool_select.py`, `compression.py`, `triggers/events.py` | no salience or priority queue; selection is by tool relevance only
 | Action | Mouth | speech: saying things, in the voice that was chosen. | built | `mouth` | `tts.py`, `voices.py`, `sherpa.py`, `audio.py` |
-| Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `portal.py`, `desktop_session.py`, `phone.py` |
+| Action | Hands | acting: changing the world - files, windows, services, settings, devices. | built | `hands` | `tools.py`, `skills/`, `office/`, `portal.py`, `desktop_session.py`, `phone.py` |
 | Action | Legs | getting about without being asked: rules that fire on their own. | built | - | `triggers/rules.py`, `triggers/event_rules.py`, `skills/timer.py`, `approvals.py` |
 | Action | Diaphragm | breath: the rhythm of a day - awake, active, idle, asleep. | part | - | `daemon.py`, `senses/idle.py`, `model_service.py`, `presence.py` | the awake/active/asleep cycle now exists for the *model* (presence.py, on the mode strip, and it reaches SLEEPING), but nothing sleeps the rest of it: the daemon keeps its rules and senses running through every state
 | Core | Brain | thinking: the language model and the tool loop it drives. | built | `brain` | `assistant.py`, `local_llm.py`, `ollama_llm.py`, `cloud_llm.py`, `mcp.py` |

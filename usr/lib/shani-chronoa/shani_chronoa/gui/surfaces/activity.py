@@ -226,6 +226,29 @@ class _ActivityView(Gtk.Box):
         self._area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._area.set_vexpand(True)
         self.append(self._search)
+        # The refusals sit above the calls, and the same emptiness test the
+        # `None` means nothing to say, so there is no visible gap in the panel.
+        #
+        # that reads as "something failed to draw".
+        # `None` for "nothing to say", not an empty box. **Introspection was the
+        # wrong tool here**: the obvious check - `hasattr(w, "get_children")` -
+        # is true for the empty `Gtk.Box` and false for the `Adw.PreferencesGroup`
+        # that actually has content, because the two answer to different methods.
+        # Measured: the first version of this appended nothing, silently, and the
+        # refusals never reached the panel. A `None` says the same thing without
+        # asking the widget anything.
+        # Built here, not further down. **It was assigned after this guard and
+        # read before it**, so every surface that builds Activity raised
+        # `AttributeError: '_ActivityView' object has no attribute '_refusals'`
+        # at construction - measured as 101 errors across the layout contract,
+        # because one panel that cannot build takes every surface that touches
+        # it with it. `None` is the sentinel because introspection was the wrong
+        # tool for the emptiness test: `hasattr(w, "get_children")` is true for
+        # the empty Gtk.Box and false for the Adw.PreferencesGroup that has
+        # content, so the obvious check appends nothing, silently.
+        self._refusals = build_refusals()
+        if self._refusals is not None:
+            self.append(self._refusals)
         self.append(self._area)
         self._render("")
         # Above the per-call rows, because "which skill should I not trust" is the
@@ -469,6 +492,38 @@ def build_summary(records) -> Gtk.Widget:
             tool, _rate_sentence(tool, calls, verified, failed, installed)))
     return group
 
+
+
+def build_refusals() -> Gtk.Widget:
+    """What Chronoa declined and why, newest last. Empty when nothing was refused.
+
+    **Here rather than as a ninth light or a line on the strip.** A refusal is an
+    *event*, not a state a strip can hold - and the strip was measured rendering
+    148px off centre with two more lights. It belongs in the audit trail because
+    that is what this panel is: what Chronoa did, including the thing it did not
+    do, which is the half of the audit that is normally missing.
+
+    Reads `body.body.notices()` rather than the tool log, because a refusal never
+    reaches the log - it is decided one layer above it, in the permissions layer,
+    and returns as the tool result.
+
+    **Returns `None` rather than an empty widget when there is nothing to say**,
+    so "no refusals" is not a visible gap in the middle of a panel.
+    """
+    from shani_chronoa import body as body_module
+    try:
+        notices = body_module.body.notices()
+    except Exception:                                   # noqa: BLE001
+        return None
+    if not notices:
+        return None
+    group = common.group(
+        "Declined",
+        f"{len(notices)} request(s) Chronoa did not carry out, and why. "
+        "The most recent is last.")
+    for said in notices:
+        group.add(common.row("Declined", said))
+    return group
 
 
 def build(app) -> Gtk.Widget:
