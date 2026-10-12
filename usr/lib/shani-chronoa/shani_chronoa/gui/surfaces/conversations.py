@@ -71,6 +71,33 @@ UNREADABLE = "Could not read conversations"
 ROWS_MAX_HEIGHT = 520
 
 
+def _count_sentence(rows: "list", listed: "list") -> "tuple[str, str]":
+    """`(title, detail)` for the store summary.
+
+    A module-level function, not two f-strings inline in `build`, because **the
+    test has to be able to reach it.** The first version of
+    `tests/test_the_conversation_count_says_one_thing.py` reimplemented this
+    arithmetic inside the test file, which meant it would still pass after the
+    panel changed - the same tautology found and fixed in
+    `tests/test_listening_gate_offers_a_way.py`.
+
+    **Pluralised the way this same file already did it thirty lines below** -
+    `f"{count} message{'s' if count != 1 else ''}"` - rather than with a `(s)`
+    nobody should see on screen. The measured panel said:
+
+        1 conversation(s) recorded - 0 empty, 1 with messages
+
+    Three numbers where one was wanted. The detail is a *count that only ever
+    restates the count* when every conversation has messages in it, so it is
+    empty then; naming the empty ones is the case that earns it, because that is
+    how a person tells a deleted conversation from one opened and left.
+    """
+    title = f"{len(rows)} conversation{'' if len(rows) == 1 else 's'} recorded"
+    empties = len(listed) - len(rows)
+    detail = f"{empties} of them have no messages" if empties else ""
+    return title, detail
+
+
 def _when(stamp: float, now: "Optional[float]" = None) -> str:
     """`Today 14:02`, `Yesterday 09:10`, `Tuesday 18:30`, `02 Oct`, `02 Oct 2025`."""
     now = time.time() if now is None else now
@@ -218,9 +245,7 @@ class _ConversationsView(Gtk.Box):
             rows = [item for item in listed if item["messages"] or item["active"]]
             self._status_slot.append(self.status_recorder.row(
                 common.STATUS_OK,
-                f"{len(rows)} conversation(s) recorded",
-                f"{len(listed) - len(rows)} empty, {len(rows)} "
-                "with messages"))
+                *_count_sentence(rows, listed)))
 
         # Removed by reference. `Adw.PreferencesGroup` is a `Gtk.ListBox` with
         # libadwaita's own boxes inside it, so walking it for children finds
