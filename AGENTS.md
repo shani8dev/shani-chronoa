@@ -12116,3 +12116,33 @@ throwaway script, and this repository's rule is that a one-off is lost. It needs
 repo already holds the whisper model cache. Not built here — a slot run to verify
 it is a different piece of work from the question, and the answer is already
 negative enough to act on.
+
+## Two models can't answer the size question, and here is what blocks the third (2026-10-12)
+
+The KV floor is measured on SmolLM2-135M and Qwen3-8B, and `q5_0`'s cost rose
+12x between them (0.11% → 1.35%). Two points cannot distinguish a size trend from
+one model being an outlier, and the answer changes what the floor should be: a
+smooth trend means `q5_0` costs more on the 30B MoE tier the ladder actually
+exists for, and an outlier means the 8B is the odd one.
+
+`Qwen3-1.7B-Q4_K_M.gguf` is present in this repo's own
+`shani-install-media/test-env/cache/llm-models/` and would have settled it. It
+cannot be read:
+
+    -rw------- 1 root root  1107409472  Qwen3-1.7B-Q4_K_M.gguf
+
+Root-owned, mode 0600, and this is an unprivileged dev box. All four
+`llama-perplexity` runs failed with `Permission denied` - which is not a
+measurement result and is not one I can work around without a privilege I should
+not take. The same holds for `SmolVLM2-500M`, `mmproj-…` and `nomic-embed-text`.
+
+The remaining readable models are `Qwen3-0.6B-Q8_0` (measuring now) and the two
+already measured. `0.6B` sits between 135M and 8B but far closer to the bottom, so
+it splits the difference only partly - it can show whether the cost is flat across
+small models and jumps at the 8B, or climbs steadily. It cannot bound the 30B
+figure.
+
+**What would actually settle it:** the ladder exists to buy VRAM headroom on the
+one MoE tier, and that tier is 17.3 GB - larger than anything measurable here. A
+slot run with a 30B-class checkpoint is the only way to price `q5_0` where the
+ladder is used, and that is recorded rather than approximated.
