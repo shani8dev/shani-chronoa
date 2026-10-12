@@ -5672,6 +5672,17 @@ anchored at a count now. And `ERROR tests/x.py` is a **file**, not a
 a mutation that broke every test in a file reported
 `failed for another reason: {'ERROR'}` — naming nothing to act on.
 
+**And the run's own witness output, read to the end, closes the question.
+*"NOT caught by X"* is not a defect signal and cannot be read as one.* The
+completed run reported 43 of them, and **every one of those 43 fires on some
+other mutation** — so the line means *"not the witness that caught this one"*,
+which is the runner working. Of 394 witnesses named across the 45 sets, 77 never
+fired in the 44-set run; each is a normal redundancy because a mutation is caught
+by *any* named witness, so a second one staying quiet is what a second one is
+for. **None of the 77 was also a NOT-caught**, which is the arithmetic that
+separates "this witness is spare" from "this witness is dead" — and the only
+number in that paragraph that is a finding is the zero.
+
 **And `--check-witnesses` closed a third.** The runner already printed which
 named witnesses did not fire — 42 across the sets — and nobody read it. Checking
 all 42: **41 exist, and the two that do not are renames the set never
