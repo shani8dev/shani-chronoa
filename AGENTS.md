@@ -5724,6 +5724,24 @@ renames the set never followed, both real and load-bearing, in one mutation's
 expect list that had been catching its target with one of three witnesses.
 **532 witnesses across 45 sets all resolve now, and the full run reports 0 stale.**
 
+**The guard was proved against this session's own work, by someone else.** The
+concurrent session's chunked full-suite sweep had **chunks 3, 4 and 5 refused**
+by `conftest.py`'s `_mutation_in_flight` - *"a mutation run (pid 164432) is
+rewriting the source tree right now"* - because a mutation set was running
+throughout, and ~130 files went unmeasured. That is the guard doing its job on a
+real invocation rather than a synthetic one, from the other side of the lock, and
+it is the same refusal this session's own runs hit several times. **Their finding
+that 6695 passed is a floor and not the suite is the honest reading of a run that
+was partly refused, which is the distinction the whole tally work above exists to
+make visible from the runner's side.**
+
+The gap they name is real and cannot be closed from here: `_mutation_in_flight`
+runs in `pytest_configure`, so a run that begins *while* a suite is running is
+not caught. Closing it from the runner would mean asking whether a pytest is
+running, which is a name-based process query - forbidden in this workspace for
+the reasons the `pkill` trap records, and the wrong instrument to reach for
+because of them.
+
 **What is still not claimed.** That the inventory is green. The one survivor is
 `kv_parity`'s "the caller discards what the check said", whose two real-GGUF
 witnesses both **skip** without `CHRONOA_KV_PARITY_MODEL` — so it is **unmeasured
