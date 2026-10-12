@@ -16380,3 +16380,120 @@ monitor (the same shape as `user_prompts.rules_message()`, already built),
 `distill.py`'s router needs and does not have), `Toward SLM-based agentic
 task-tool intent matching`, and the embedding-model decision framework: named,
 none built, each needing its own measurement first.
+
+## The finding that turns a deferred experiment into a local one: the structure tax is a field-ordering effect (2026-10-12)
+
+Fourth sweep, aimed at the mechanism the third sweep's best finding needed -
+*how* a step's uncertainty would be scored - and at the four questions the
+three-arm experiment depends on. Ten queries, same instrument.
+
+*Structure Tax: How Structured Output affects LLMs Performance*
+([arXiv:2610.12056](https://arxiv.org/abs/2610.12056)) re-examines the premise
+the previous two entries took as settled:
+
+> *"prior work treats the resulting accuracy loss as an inherent 'structure
+> tax'. **We re-examine this claim** [...] **The tax turns out to depend on
+> schema design rather than on structure per se**: reasoning-first field ordering
+> **matches or exceeds** free-form accuracy, while **answer-first ordering
+> causes steep drops, particularly in smaller models**."*
+
+It adds that format sensitivity "scales inversely with a task's own structural
+constraints", that reasoning-order schemas "also improve **calibration**, with
+CKA showing greater separability between correct and incorrect
+representations in middle transformer layers", and reframes the question from
+**"whether to structure"** to **"how to structure"**.
+
+**Why this is the most actionable result of the whole research sequence.** Two
+previous entries concluded that constrained decoding costs accuracy - one from
+the register side (answer diversity collapses), one from the decoder side (intent
+distortion) - and the entry before that recorded the correct three-arm experiment
+as still deferred because no instrument existed. **All three are answered by a
+property of the schemas rather than of the decoder**, and the schemas are
+**hand-written in this repository, 257 of them, in the exact property order their
+author typed**.
+
+So the deferred experiment is not "turn on constrained decoding and see". It is
+narrower and cheaper and needs no new dependency and no weights:
+
+> **Order each tool schema's fields reasoning-first - the order the model would
+> reason in, before the answer - and measure it with `task_eval`, which is
+> already the instrument and already scores right tool and right arguments.**
+
+`AGENTS.md` already records one property-ordering result, found by accident: the
+`past-chat` case failed until `query` got its own parameter description, fixed
+3/3. That is a *field* finding, not a *format* finding, and this paper says the
+category is much larger than one field. **Not built, and the reason is the one
+this file keeps giving: it needs a before/after on the real corpus, and
+`task_eval` takes minutes per configuration.** It is the next experiment, and it
+is now a specific one rather than a direction.
+
+### The calibration number is distribution-specific, and this file says so now
+
+*Mapping from Meaning*
+([arXiv:2510.17028](https://arxiv.org/abs/2510.17028)) observes that "when
+provided with different but semantically equivalent versions of the same prompt,
+models may produce very different distributions of answers", so that "the
+uncertainty reflected in a model's output distribution **for one prompt may not
+reflect the model's uncertainty about the meaning of the prompt**".
+
+This repository reports **ECE 0.430 → 0.107** from temperature scaling on
+**17,891 of its own logged calls**. That is a real, measured improvement - and
+it is fitted on one prompt distribution, which is exactly the condition the paper
+identifies. The paper's remedy is to sample across paraphrases of the same
+question, and this repository already has the shape of that: the refusal-rate
+run split its 60 cases into **24 hand-written and 36 machine-generated**, which is
+a paraphrase axis it built for a different reason. **A calibration figure
+reported without its prompt distribution is a number about a prompt**, and that
+sentence belongs beside the 0.107.
+
+### AgentZip, and the fact that this repository already implemented its scheduling half
+
+*Memory Compression for High-Fanout Agent Sandboxes*
+([arXiv:2609.11294](https://arxiv.org/abs/2609.11294)) names this repository's
+own incident as its motivation - "a single task may spawn many concurrent
+sandbox sessions" whose memory is not independent - and reports 8.7x against
+2.1x for stock Linux.
+
+**Their mechanism is kernel page compression and does not apply** to a userspace
+assistant. Their *scheduling* finding does: expensive compression is aligned
+"with **LLM waiting periods** to avoid interfering with foreground tool
+execution". `speech_gate.py` waits for the model to finish generating and then
+transcribes anyway at the timeout, for exactly that reason, and this file
+records it as "a bounded wait for the model to finish generating". **The half
+that transfers was implemented here first, by hand, for a different subsystem.**
+Recorded because the coincidence is worth a reader's time and the other half is
+worth not being attempted.
+
+### Durable memory has no lineage, and the failure mode is named
+
+*Provenance-Aware Belief Updating*
+([arXiv:2610.13008](https://arxiv.org/abs/2610.13008)) states the hazard
+precisely: **"a single observation can be quoted, summarized, and returned to a
+model as multiple reports, making repetition look like independent
+corroboration."**
+
+`provenance.py` fences *untrusted content* with a per-turn nonce and this file
+records it doing that job well. But the **durable** side - the `memory` sense,
+`remember_fact` and `link_entities`, whose facts are injected into every
+subsequent turn - carries **no lineage at all**, so a fact stored twice, or
+restated by a later turn, is indistinguishable from a second observation. This
+repository already counts repeats elsewhere and deliberately does not treat them
+as corroboration ("Recorded, not filtered: filtering would be the more helpful
+behaviour and the wrong one here"), so the *principle* is already accepted; what
+is missing is that the durable store does not record provenance at all, so the
+principle has nowhere to be applied.
+
+**Not a defect claim and not built.** It is an absent capability with a named
+failure mode and a named source, which is the form this file prefers to a
+speculation.
+
+### Not taken
+
+RL-ARC (calibrating *reasoning* models specifically - relevant because
+Qwen3-1.7B is a thinking model and 57 of 60 replies in the refusal run carried
+no text at all), *Robots That Ask For Help* (uncertainty-aligned escalation,
+the mechanism half of the third sweep's finding), *Can Language Models Learn
+When to Abstain*, SideKernel (microVM sandboxing - bwrap and Landlock are the
+shipped answer and the platform differs), Natural Language Tools (an alternative
+to the JSON schemas this repository's whole whitelist assumes), and Nemotron
+Tool-N1: named, none built, each needing its own measurement first.
