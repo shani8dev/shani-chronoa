@@ -138,6 +138,12 @@ _HARNESS = textwrap.dedent(
         out["answer"] = answers[0] if answers else None
         out["row_hidden_after"] = not window._question_row.get_visible()
         out["pending_cleared_after"] = window._pending_question is None
+        # **The composer must go back to saying what it normally says.** The
+        # question puts its own placeholder up, and without putting the resting
+        # one back the composer asks "Say or type your answer..." to a composer
+        # with no question on it. Mutation-checked: removing the restore leaves
+        # all fifteen of these tests green.
+        out["placeholder_after"] = window._input_placeholder.get_label()
 
         # A prompt still on screen when the user quits. The tool loop is blocked
         # on it and do_shutdown joins that thread.
@@ -342,6 +348,35 @@ class TestTheQuestionCrossesTheThreadBoundary:
         """A control on the harness. Every assertion above is meaningless if the
         application the results came from exited badly."""
         assert started_app["_returncode"] == 0, started_app["_stderr"][-2000:]
+
+
+class TestTheComposerGoesBackToNormal:
+    """A question borrows the composer's placeholder and must give it back."""
+
+    def test_the_composer_stops_asking_for_an_answer_once_the_question_is_gone(
+            self, started_app):
+        assert started_app["placeholder_after"] == "Type a message\u2026", (
+            f"after the question closed the composer still says "
+            f"{started_app['placeholder_after']!r} - a question with nothing to "
+            f"answer")
+
+    def test_the_question_really_did_appear_and_was_answered(self, started_app):
+        """The control: the placeholder is restored because a question came.
+
+        Without this, "the composer says the normal thing" passes trivially on a
+        build where the question never appeared at all - which is exactly the
+        state the shipped code was in, with four tests reporting a missing
+        result and nobody reading that as "the prompt is broken".
+        """
+        assert started_app["prompt_shown"] is True, (
+            "the question never reached the window")
+        assert started_app["button_labels"] == [
+            "Allow this once", "Allow for this session", "No, don't allow"], (
+            f"the options did not render: {started_app['button_labels']}")
+        assert started_app["blocked_before_click"] is True, (
+            "the tool loop was not actually blocked by the question")
+        assert started_app["answer"] == "Allow for this session", (
+            f"the click did not resolve the event: {started_app['answer']!r}")
 
 
 class TestEveryWayOfNotAnsweringIsNotAChoice:

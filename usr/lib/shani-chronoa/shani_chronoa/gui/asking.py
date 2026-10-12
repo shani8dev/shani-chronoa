@@ -17,6 +17,12 @@ from .questions import (  # noqa: F401
 
 
 
+#: The composer's resting placeholder. Held here because `asking.py` puts
+#: another one up while a question is open and has to put this one back - and
+#: because the text now lives in two places that must agree.
+_COMPOSER_PLACEHOLDER = "Type a message\u2026"
+
+
 class AskingMixin:
     """A pending question in the window: shown, answered by click or voice, or abandoned. - a part of ChronoaWindow, which mixes it in."""
 
@@ -56,7 +62,23 @@ class AskingMixin:
         self._question_row.append(hint)
 
         self._question_row.set_visible(True)
-        self._input_entry.set_placeholder_text("Say or type your answer…")
+        # **The composer's own placeholder label, not
+        # `_input_entry.set_placeholder_text`.** `_input_entry` is a
+        # `Gtk.TextView`, which has no `set_placeholder_text` - that is
+        # `Gtk.Entry`'s method - so this raised `AttributeError` every single time
+        # a question was asked. `questions.py` catches it, logs "question could
+        # not be put on screen", and resolves `""`: **the prompt never appeared
+        # and the tool that asked got "no answer"**, silently, in the shipped
+        # app. Measured by running `show_question` directly and reading the
+        # traceback; four tests reported "the real app produced no result" and
+        # were filed as pre-existing.
+        #
+        # The composer already has a placeholder - a `Gtk.Label` inside the
+        # `Gtk.Overlay` around the entry, shown by `_on_input_changed` whenever
+        # the buffer is empty. So this sets that label's text and lets the
+        # existing logic show it; there is no second placeholder to invent.
+        self._input_placeholder.set_label("Say or type your answer…")
+        self._on_input_changed(self._input_entry.get_buffer())
         self._pending_question = resolve
         self._pending_options = list(options)
 
@@ -114,5 +136,10 @@ class AskingMixin:
             resolve(answer)
         self._clear_question_widgets()
         self._question_row.set_visible(False)
+        # **Restore the composer's own prompt.** Without this the composer keeps
+        # saying "Say or type your answer…" after the question is gone, which is
+        # a question with nothing to answer.
+        self._input_placeholder.set_label(_COMPOSER_PLACEHOLDER)
+        self._on_input_changed(self._input_entry.get_buffer())
         self._input_entry.set_placeholder_text("Type a message…")
         self._input_entry.grab_focus()

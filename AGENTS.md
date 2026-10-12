@@ -16168,3 +16168,83 @@ this repository could reproduce on **11 rows**.
 
 **Also not measured:** arXiv's ranking moves day to day, and every "N hits"
 figure above is one day's answer, not a property of the corpus.
+
+## Every question the assistant asked was silently unanswered (2026-10-12)
+
+`gui/asking.py`:
+
+```python
+self._input_entry.set_placeholder_text("Say or type your answer…")
+# AttributeError: 'TextView' object has no attribute 'set_placeholder_text'
+```
+
+`_input_entry` is a `Gtk.TextView`; `set_placeholder_text` is `Gtk.Entry`'s
+method. **So the line raised every single time a question was asked.**
+`questions.py` catches it, logs *"question could not be put on screen"*, and
+resolves `""` - the prompt never appeared and the tool that asked got **no
+answer**, silently, in the shipped app. `ask_user`, and every permission prompt
+that depends on it, were dead.
+
+The harness reported it precisely and nobody read it:
+
+| key | value |
+|---|---|
+| `window_in_stage2` | `True` - the window built |
+| `row_visible` | `True` - the row appeared, **empty** |
+| `button_labels` | `[]` |
+| `blocked_before_click` | `False` - the tool loop was never blocked |
+| `answer` | `''` |
+
+Four tests said *"the real app produced no result"* and were filed as
+pre-existing. The real error was on the child's stderr, one level below what the
+assertion printed.
+
+**Found by running `show_question` directly and reading the traceback.** Neither
+the file, the grep, nor the test output contained the failing line.
+
+### The fix uses the placeholder the composer already has
+
+The composer is a `Gtk.Overlay` around the entry holding a `Gtk.Label`
+placeholder, shown by `_on_input_changed` whenever the buffer is empty. So there
+was never a need for a second placeholder: the question sets that label's text
+and lets the existing logic show it, and puts the resting text back on close.
+
+Verified end to end through the harness, not by reading:
+
+```
+prompt_shown          True
+button_labels         ['Allow this once', 'Allow for this session', "No, don't allow"]
+blocked_before_click  True
+answer                'Allow for this session'
+row_hidden_after      True
+```
+
+**Two mutations, two caught**: reverting to `set_placeholder_text` fails four
+tests; removing the restore leaves the composer saying *"Say or type your
+answer..."* to a composer with no question on it - and **that one was green until
+I looked**, so a test for it was added, along with a control asserting the
+question really did appear, because "the composer says the normal thing" passes
+trivially on a build where no question was ever shown.
+
+`test_question_presenter`: **4 failed / 11 passed -> 17 passed**, and 45s -> 5.3s.
+
+## The other half of that failure: a stale bus name
+
+Four of those tests were failing for a second, independent reason: a harness
+subprocess from an **earlier run of mine was still alive and owned
+`dev.shani.chronoa`**, so a fresh harness's `activate` was forwarded to the stale
+owner and never ran locally. `test_setup_button_is_reachable` documents this
+mechanism in its own docstring - *"measured with three concurrent suites live"* -
+and says nothing else.
+
+Killed by recorded pid, not by name - the user's real `shani-chronoa-overlay`
+(576168) was left alone. Worth stating as a habit: **a GUI test that builds a
+window can be made to fail or pass by unrelated processes**, and the first thing
+to check is `busctl --user list`, not the code.
+
+Two background suite runs of my own were alive simultaneously for most of this
+session. Every "19 failures" I reported before noticing was manufactured that
+way, and re-running them one file at a time is what separated the real ones from
+the noise. **The rule about never running concurrent pytest processes is not
+about D-Bus contention alone** - it is that concurrency manufactures failures
+that look exactly like defects.
