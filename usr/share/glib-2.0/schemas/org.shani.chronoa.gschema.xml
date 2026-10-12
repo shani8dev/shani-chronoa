@@ -47,6 +47,16 @@
       <summary>How a reply is paced</summary>
       <description>A named reply-style preset, one config key, so one user's style setting cannot drift between sessions or require learning prompt syntax. 'ordinary' is the base; 'brief' keeps only the direct answer; 'explanatory' adds one sentence of mechanism around the same facts. The same style line is appended to the system prompt on every turn, so a change applies immediately and is live in settings rather than stored anywhere.</description>
     </key>
+    <key name="answer-mode" type="s">
+      <choices>
+        <choice value="local"/>
+        <choice value="local-cloud"/>
+        <choice value="cloud"/>
+      </choices>
+      <default>'local'</default>
+      <summary>Where answers come from</summary>
+      <description>The stored half of the mode strip's egress dropdown. The strip offers four rows and this holds three values, because 'Nothing leaves' and 'This machine answers' both mean 'answer here': the difference between them is whether a lookup may leave, which is privacy-mode's decision, not this one's. 'local' answers here and reaches nothing; 'local-cloud' answers here and falls back to a provider when it cannot; 'cloud' answers from a provider even when this machine could. Shown as a dropdown in the window's mode strip, not in Settings - a second control would be a second place to set one answer, and privacy mode forces local whatever this is set to. The setup wizard's Mode page writes it directly.</description>
+    </key>
     <key name="tts-rate" type="d">
       <range min="0.5" max="2.0"/>
       <default>1.0</default>
