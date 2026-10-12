@@ -62,6 +62,13 @@ pair is being measured rather than assumed.
 still the cheaper lever, and a merge still rewrites 1.1 GB to add what a 20 MB
 adapter adds alongside.
 
+**Corrected 2026-10-12: 渡劫 is no longer "has no code".** That line was stale
+the moment `adapter.py` landed (`e0c2b7c`). It now carries `is_adapter`,
+`mismatches`, `check` and `server_args`, and the check is the point: a LoRA
+adapter names a base it was trained for and is refused against any other, so the
+fit is verified before llama-server is asked to load it. `TERMS["ascension"]`
+and the `trial` row are written against that reality.
+
 **The five prohibitions. This is the part that matters.**
 
 These are the heart demon, named concretely, because every one of them is a
@@ -102,6 +109,17 @@ distinguished it. The measures that actually track usefulness already exist here
 and are better than perplexity: does the router beat the majority-tool baseline,
 does a tool's claim survive verification, does the dream produce findings a
 person acts on.
+
+**What is currently true, measured rather than asserted.**
+
+**The three axes.** `STAGES` is *where you are*, `RESOURCES` is *what you
+have*, and `TERMS` is the **genre vocabulary those two are written in** - kept
+because a term naming nothing here would be decoration, so each one either
+names the function that decides it or is refused with the reason. The
+progression is the genre's own shape (a ladder with prerequisites, bounded
+resources, and a trial at each advance) used honestly: the trial really refuses,
+and "immortal" really means attributable and reversible, which is the only
+part of the metaphor that survives contact with a machine.
 
 **What is currently true, measured rather than asserted.**
 
@@ -236,6 +254,373 @@ def resource_status() -> Dict[str, str]:
     """
     return {name: entry.get("measured", "not measured")
             for name, entry in RESOURCES.items()}
+
+
+#: The cultivation-novel vocabulary, in the sense the genre uses it.
+#:
+#: **This table exists under the same rule as `RESOURCES`: a term that names
+#: nothing here is a decorative flourish, so every entry names the *function*
+#: that decides it, or is declared `NOT_BUILT` with the reason.** That is the
+#: line between using the genre as a shared metaphor (which it genuinely is -
+#: a progression with prerequisites and resource limits) and pasting on Chinese
+#: for flavour. A refusal here ("no real analogue, and a fake one would be a
+#: lie") is more useful than an invented mapping.
+#:
+#: The terms are **the genre's shared lexicon** - the ones that appear across
+#: essentially every cultivation story, so they are the load-bearing ones -
+#: not a quotation from any single novel, and deliberately **not** names of
+#: specific characters, sects or artefacts. Specific names from specific novels
+#: would be decoration pretending to be structure.
+#:
+#: Each row is `{is, from, measured}` shaped like a resource so one accessor can
+#: serve both tables, and the test imports every `from`. `from` is the module
+#: function name when one exists; otherwise it is the literal `"NOT_BUILT"` and
+#: `not_built` carries the reason.
+TERMS: Dict[str, Dict[str, str]] = {
+    "qi": {  # 灵气 qi - the ambient energy that is gathered, not created
+        "is": "the raw signal available to train from: a machine's own day's "
+              "observations, verdicts and calls",
+        "from": "distill.harvest_rows",
+        "measured": "the same measured figure as the qi resource: what a day "
+                    "of use on this machine actually yields",
+    },
+    "foundation": {  # 筑基 zhǔjī - the base built before anything else
+        "is": "the pinned base checkpoint every later stage is measured "
+              "against, verified before use rather than assumed",
+        "from": "local_llm.verify",
+        "measured": "size + sha256 must match the pin; an unverified base "
+                    "makes every later number meaningless",
+    },
+    "perception": {  # 感知 gǎnzhī - perceiving the world's state
+        "is": "bounded observations of the machine and the day, each carrying "
+              "how sure it is and where it came from",
+        "from": "senses.discover_senses",
+        "measured": "a fixed registry of senses, each consent-gated, because a "
+                    "perception nobody can turn off is surveillance",
+    },
+    "refinement": {  # 淬炼 cuìliàn - refining what was gathered
+        "is": "the distilled router: raw qi gathered and refined into a "
+              "component that narrows and reorders what is already offered",
+        "from": "distill.train_router",
+        "measured": "trained only on human-agreed rows, and it must beat the "
+                    "majority-tool baseline or there is no student",
+    },
+    "attunement": {  # 同化 tonghua - fusing separate things into one
+        "is": "the weight merge: sibling checkpoints interpolated into one, "
+              "which must measure better than every parent to count",
+        "from": "merge.gate",
+        "measured": "three verdicts, and only `better` ships - a tie is not a "
+                    "win, it is a no-better refusal",
+    },
+    "ascension": {  # 渡劫 du jie - surviving the trial to advance
+        "is": "the adapter loaded *alongside* the base, so the trial does not "
+              "rewrite what already works",
+        "from": "adapter.check",
+        "measured": "REFUSED on the honest instrument. `adapter.check` passes - "
+                    "lumen-mouth-lora FITS Qwen3-1.7B-Q4_K_M and is refused "
+                    "against the 0.6B with 168/196 mismatches - and *fitting* is "
+                    "not *earning*. Measured on task_eval, 5 cases, select "
+                    "config: base alone 4/5 at 4.65 s/case, base + adapter 4/5 "
+                    "at 7.65 s/case, zero refusals either way, and both miss "
+                    "the same one. Same accuracy, 65% slower: the adapter adds "
+                    "nothing it has been shown to earn, so Ascension stays "
+                    "locked. It is reversible - dropping the file undoes it - "
+                    "which is exactly why trying it was cheap",
+    },
+    "immortality": {  # 长生 changsheng - lasting by not rotting
+        "is": "a signed, provenance-bearing record: every change attributable "
+              "and reversible, so a degradation can be traced and undone",
+        "from": "learning.verify_model",
+        "measured": "digest verifies and the prior version still exists; "
+                    "immortal here means attributable + reversible, not eternal",
+    },
+    "furnace": {  # 丹炉 danlu - the thing that transforms under heat
+        "is": "the quantiser: same source weights, re-quantised with an "
+              "importance matrix telling it which bits matter",
+        "from": "local_llm.calibrated_quantize",
+        "measured": "the calibrated build beside the naive one, so the "
+                    "difference is an actual measurement and not a claim",
+    },
+    "elixir": {  # 丹药 danyao - a consumed product whose effect is checked
+        "is": "the refined artifact itself - the outcome model - and the "
+              "measured difference it made against the log it came from",
+        "from": "learning.train_and_save",
+        "measured": "cross-fit ECE and NLL on held-out calls; a model that "
+                    "loses to a constant is not an elixir, it is a bottle",
+    },
+    "core": {  # 妖丹 yaodan - the kernel taken from a trained thing
+        "is": "the distilled component carried out of the log it was fitted "
+              "to: a router, a bandit arm, an outcome model",
+        "from": "learning.cross_validate",
+        "measured": "scored by cross-validation, so a core is judged on data "
+                    "it was not forged on",
+    },
+    "stone": {  # 灵石 lingshi - the unit things are priced and weighed in
+        "is": "the budget a thing must fit inside: memory, bandwidth, context",
+        "from": "local_llm.effective_bandwidth",
+        "measured": "measured bandwidth, not a spec sheet, so what the machine "
+                    "can actually do is what the ladder plans against",
+    },
+    "seclusion": {  # 闭关 biguan - the closed-door pass that consolidates
+        "is": "the offline consolidation over the day's activity, away from "
+              "any live request",
+        "from": "consolidation.consolidate",
+        "measured": "run on a schedule or on demand, never on the reply path",
+    },
+    "heart_demon": {  # 心魔 xinmo - the self-corruption a closed loop invites
+        "is": "the failure this whole design refuses: training on your own "
+              "output until the model collapses into a fixed point",
+        "from": "distill.MIN_AGREEMENT",
+        "measured": "the human-agreement floor is what makes self-collapse "
+                    "visible; without an outside label there is nothing to see",
+    },
+    "deviation": {  # 走火入魔 zouhuo rumo - losing the path mid-cultivation
+        "is": "an artifact that measured well on the wrong instrument and is "
+              "worse at the thing it exists for",
+        "from": "merge.perplexity",
+        "judged_by": "tools/task_eval.py",
+        "measured": "perplexity can be improved while tool-selection gets "
+                    "worse - measured here, which is why the gate is a floor",
+    },
+    "kinship": {  # 血脉 xuemai - the lineage an artefact inherits
+        "is": "provenance: which parents, which licences, which digests, and "
+              "the signed record tying them together",
+        "from": "learning.sign_model",
+        "measured": "a model that cannot say what went into it cannot be "
+                    "traced when it degrades nor rolled back",
+    },
+    "reversal": {  # 逆转 nizhuan - undoing an advancement
+        "is": "rollback: the prior version exists and swapping back is a "
+              "move, not a rebuild",
+        "from": "local_llm.use",
+        "measured": "the design choice that put ascension before attunement: "
+                    "a reversible thing is tried before an irreversible one",
+    },
+    "technique": {  # 功法 gongfa - the method, separate from the result
+        "is": "the harness that decides how a turn is offered to the model: "
+              "tool selection, not every schema at once",
+        "from": "tool_select.select_tools",
+        "measured": "selecting the relevant tools is what lets a small model "
+                    "answer at all - the harness, not the weights",
+    },
+    "perception_gate": {  # 明察 mingcha - seeing, but not overstepping
+        "is": "consent: a perception is refused unless its switch is on, and "
+              "withheld again if consent is withdrawn",
+        "from": "permissions.decide",
+        "measured": "a gate that fails closed - a permission nobody can grant "
+                    "is a permission that is always off, which is safe",
+    },
+    "artifact": {  # 器物 qiwu - a thing that carries its own meaning
+        "is": "a model described by what is inside it - identity, licence, "
+              "digest, source - read off the file itself",
+        "from": "model_registry.describe",
+        "measured": "described from the GGUF header, so the description is a "
+                    "fact about the bytes and not a claim about them",
+    },
+    "transmission": {  # 传承 chuancheng - passing it on without losing it
+        "is": "portable knowledge: what a fresh machine cannot otherwise get - "
+              "arms, model, router - exported and re-imported with digests",
+        "from": "learning.export_knowledge",
+        "measured": "exported knowledge verifies on import; a bundle that "
+                    "does not verify is refused rather than adopted",
+    },
+    "counter": {  # 灵契 lingqi - the contract bound to a task
+        "is": "the boundary fence around untrusted content, so a tool result "
+              "or a fetched page cannot speak as the system",
+        "from": "provenance.fence",
+        "measured": "fenced by a per-turn nonce, so content cannot forge its "
+                    "own terminator",
+    },
+    "price": {  # 天机 tianji - what a thing costs to use
+        "is": "the per-call cost of spending a model: tokens against a known "
+              "price, so use is accountable",
+        "from": "usage.price",
+        "measured": "an unknown model prices as unknown, never as zero - a "
+                    "free number is a fabricated one",
+    },
+    "chance": {  # 机缘 jiyuan - an opportunity, taken or missed
+        "is": "the bandit over tools: an arm is pulled on measured worth and "
+              "the estimate is kept honest against what it returned",
+        "from": "learning.evaluate_bandit",
+        "measured": "reported with whether it ranks better than chance; on "
+                    "this machine it does not, and the tool says so",
+    },
+    "trial": {  # 天劫 tianjie - the catastrophe the advance must survive
+        "is": "the gate itself: a held-out measurement that can refuse the "
+              "advancement",
+        "from": "merge.gate",
+        "measured": "a stage that does not measure is not unlocked; the "
+                    "refusal is a first-class outcome, not an oversight",
+    },
+    # --- terms the genre has and this codebase deliberately does not --------
+    #
+    # These are the honest refusals. Each has no real analogue here, and a
+    # fabricated mapping would be a lie wearing a table - so the reason is
+    # recorded instead of a function.
+    "sworn_oath": {
+        "is": "a vow that binds fate - the genre's mystical contracts between "
+              "people, enforced by the story rather than by a mechanism",
+        "from": "NOT_BUILT",
+        "not_built": "no analogue: nothing here binds a person by magic, and "
+                     "the real commitments (consent, permissions) are code, "
+                     "not vows",
+    },
+    "sect": {
+        "is": "a lineage or school that transmits a technique across "
+              "generations, with its own hierarchy and rules",
+        "from": "NOT_BUILT",
+        "not_built": "deliberately not a here-is-how to form a guild model; "
+                     "the whitelist is a fixed set of tools, not a lineage "
+                     "you join",
+    },
+    "technique_tier": {
+        "is": "a graded ladder of named techniques, from entry spell to the "
+              "artefact a master carries",
+        "from": "NOT_BUILT",
+        "not_built": "the real ladder is the measured model ladder (see the "
+                     "stone resource), and it moves on evidence, not on names",
+    },
+}
+
+
+#: The cosmological register, kept **separate from `TERMS` on purpose**.
+#:
+#: `TERMS` is the vocabulary of *progress* - where you are and what you have.
+#: `ELEMENTS` is the vocabulary of *the world the progress happens in*:
+#: emptiness, time, undifferentiated chaos, the elemental cycle, weather, and
+#: the light/dark duality. Mixing them would blur the very distinction the two
+#: tables exist to hold, so they are two tables under one rule.
+#:
+#: **Same discipline as everywhere else: every entry names a function that
+#: imports, or is refused as NOT_BUILT with the reason.** This matters more for
+#: this register than for the progression one, because cosmological terms are
+#: the most tempting to fake - they sound profound and map onto anything if you
+#: squint. 混沌 in particular is the word a writer reaches for when the design
+#: has not been thought through, so it gets the strictest treatment here: it is
+#: refused, with the reason, rather than decorated onto whatever was already
+#: built.
+#:
+#: Genre lexicon again, not any one novel's proper nouns.
+ELEMENTS: Dict[str, Dict[str, str]] = {
+    "void": {  # 虚空 xūkōng - emptiness; the space things move through
+        "is": "instant retrieval across everything already stored: every "
+              "conversation answerable by meaning without walking a history",
+        "from": "conversation_store.search",
+        "measured": "hybrid meaning + FTS5 search over the whole store, so "
+                    "reaching a year-old turn costs a query, not a traversal",
+    },
+    "time": {  # 时光 shíguāng - the record of what was, read back
+        "is": "reading the past: the tool-call log re-read for what it teaches, "
+              "and a goal run's own age used to decide if it is stale",
+        "from": "goals.reconcile_stale_runs",
+        "measured": "a run whose last activity is old is demoted to paused and "
+                    "stamped, rather than shown as 'in progress' forever",
+    },
+    "chaos": {  # 混沌 húndùn - the undifferentiated; what is before form
+        "from": "NOT_BUILT",
+        "is": "the pre-differentiated state, from which order is supposed to "
+              "arise",
+        "not_built": "deliberately refused: 'chaos' is the word a design reaches "
+                     "for when it has not been thought through, and mapping it "
+                     "onto the raw log would dignify undifferentiated input "
+                     "that this repo exists to refine. qi is the real input; "
+                     "chaos is its absence of structure, and structure is the "
+                     "job, not a resource",
+    },
+    "five_elements": {  # 五行 wǔxíng - the elemental cycle
+        "is": "the closed vocabularies of state a thing may be in: installed / "
+              "not installed / running / not running / could-not-ask - each "
+              "real, mutually exclusive, and closed so a row may not invent a "
+              "fourth",
+        "from": "gui.surfaces.desktop.EVIDENCE_WORDS",
+        "measured": "five evidence words and a closed set; collapsing them "
+                    "would let 'could not ask' read as 'not installed', which is "
+                    "the confident wrong answer this repo keeps catching",
+    },
+    "wind": {  # 风 fēng - the ambient, always-moving periphery
+        "is": "the senses: the machine's own background readings, polled on "
+              "their intervals, each consent-gated",
+        "from": "senses.discover_senses",
+        "measured": "a fixed registry of senses, polled on schedule; the "
+                    "ambient input, distinguished from a deliberate request",
+    },
+    "lightning": {  # 雷电 léidiàn - sudden external events striking the system
+        "is": "the trigger event types: screen lock, power state, USB, network, "
+              "schedule - transitions the system did not ask for",
+        "from": "triggers.EVENT_TYPES",
+        "measured": "a closed set of event types that fires on a *transition*; "
+                    "a rule armed on a state that never changes does nothing",
+    },
+    "yin": {  # 阴 yīn - the dark half; what must not act
+        "is": "the read-only half of the tool split: what the assistant may "
+              "observe but not change",
+        "from": "capabilities.READ_ONLY_TOOLS",
+        "measured": "a declared read-only set; explore mode refuses anything "
+                    "outside it, so the dark half is a boundary, not a mood",
+    },
+    "yang": {  # 阳 yáng - the light half; what may act
+        "is": "the mutating half: the tools that change the machine, each "
+              "reaching its own consent gate",
+        "from": "capabilities.MUTATING_TOOLS",
+        "measured": "a declared mutating set; every one of these meets a "
+                    "consent key before it runs, so the light half is gated",
+    },
+}
+
+
+def element_status() -> Dict[str, str]:
+    """`{element: what is actually known about it}` - the cosmological register,
+    same no-empty-answers contract as `term_status` / `resource_status`."""
+    out: Dict[str, str] = {}
+    for name, entry in ELEMENTS.items():
+        if entry.get("from") == "NOT_BUILT":
+            out[name] = "NOT BUILT: " + entry.get("not_built", "no analogue")
+        else:
+            out[name] = entry.get("measured", "not measured")
+    return out
+
+
+def term_status() -> Dict[str, str]:
+    """`{term: what is actually known about it}` - same shape as
+    `resource_status`, over the genre vocabulary.
+
+    Mirrors the resource contract: no empty answers. A term with no analogue
+    says `NOT BUILT` and why; a term with an analogue quotes the measurement.
+    """
+    out: Dict[str, str] = {}
+    for name, entry in TERMS.items():
+        if entry.get("from") == "NOT_BUILT":
+            out[name] = "NOT BUILT: " + entry.get("not_built", "no analogue")
+        else:
+            out[name] = entry.get("measured", "not measured")
+    return out
+
+
+#: The realm ladder, reversed: the later a stage, the fewer paths remain open.
+#: `next_stage` walks it forward; this says what each boundary *costs*.
+#:
+#: Deliberately not a flat "harder -> harder" list. Each entry names the thing
+#: that becomes irreversible, because that is the property the ordering rests
+#: on and the reason ascension sits before attunement.
+BOUNDARIES: Dict[str, str] = {
+    "foundation": "before this: nothing exists to measure. After: every later "
+                  "number is relative to a verified base.",
+    "perception": "after this the system can see; that is also the point at "
+                  "which seeing must become consent-gated, because an "
+                  "observation nobody can switch off is surveillance.",
+    "refinement": "after this the system reorders what is on offer. It gains "
+                  "no new power - a router that could authorise a call would "
+                  "be a compromised host, not a router.",
+    "ascension": "the first reversible advance: a 20 MB adapter loaded "
+                 "alongside the base, dropped without a rewrite. Tried before "
+                 "attunement precisely because it can be undone.",
+    "attunement": "the first irreversible advance: the whole model again, at "
+                  "1.1 GB, behind a metadata round-trip. Earned after "
+                  "ascension has shown a cheap advance can be measured at all.",
+    "immortality": "after this a change is attributable and reversible. That "
+                   "is the whole meaning: not that it lives forever, but that "
+                   "every change can be traced and undone.",
+}
 
 
 class Verdict(NamedTuple):

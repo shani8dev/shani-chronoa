@@ -172,3 +172,312 @@ def test_the_progression_and_the_resources_are_separate_axes():
     assert set(cultivation.STAGES) != set(cultivation.RESOURCES)
     assert "qi" not in cultivation.STAGES
     assert "foundation" not in cultivation.RESOURCES
+
+
+# --- the genre vocabulary -----------------------------------------------------
+#
+# `TERMS` is the xianxia lexicon the two axes are written in. It stands or falls
+# on ONE rule, the same rule `RESOURCES` and `PRODUCES` were rewritten to obey:
+# **a term that names nothing here is a decorative flourish.** So a term either
+# names the function that decides it (verified by import, below) or is refused
+# as NOT_BUILT with a reason. Pasting Chinese onto the design without that
+# discipline is exactly the "machinery whose only purpose is to report success"
+# this repo refuses to build.
+
+def test_every_term_is_either_mapped_to_a_real_function_or_refused_with_a_reason():
+    """The load-bearing property of the whole table, and the negative control
+    that makes the scanner below honest.
+
+    Two populations, kept apart: a **built** term must name a function that
+    really imports and exists; a **refused** term (`from == "NOT_BUILT"`) must
+    carry the reason it has no analogue here. A term in neither state - built
+    but naming nothing, or refused with no reason - is the failure.
+    """
+    import importlib
+    missing, unreasoned, ambiguous = [], [], []
+    for name, entry in cultivation.TERMS.items():
+        target = entry.get("from", "")
+        assert target, "%s: no `from` and no refusal - which is it?" % name
+        if target == "NOT_BUILT":
+            if not entry.get("not_built", "").strip():
+                unreasoned.append(name)
+            continue
+        # built: the target must be module.symbol and must resolve
+        module_name, _, symbol = target.rpartition(".")
+        if not module_name or not symbol:
+            missing.append("%s: `%s` is not module.symbol" % (name, target))
+            continue
+        try:
+            module = importlib.import_module("shani_chronoa." + module_name)
+        except ImportError as problem:
+            missing.append("%s: %s does not import (%s)"
+                           % (name, module_name, problem))
+            continue
+        if not hasattr(module, symbol):
+            missing.append("%s: %s has no %s" % (name, module_name, symbol))
+    assert not missing, "terms claiming a function that is not there: %r" % missing
+    assert not unreasoned, "terms refused without saying why: %r" % unreasoned
+    assert not ambiguous
+
+
+def test_the_function_each_built_term_names_exists_is_a_real_check():
+    """**The control.** Without a term that is genuinely refused, a bug that
+    made every term auto-`NOT_BUILT` would pass the test above - it would find
+    nothing built to check. So the built population must be non-empty, and the
+    refused population must be non-empty too: a table where *everything* maps
+    is the plausible-mapping trap this discipline exists to avoid."""
+    built = [n for n, e in cultivation.TERMS.items() if e.get("from") != "NOT_BUILT"]
+    refused = [n for n, e in cultivation.TERMS.items() if e.get("from") == "NOT_BUILT"]
+    assert built, "no term names a real function - the vocabulary is all prose"
+    assert refused, ("no term is refused with a reason - a vocabulary that maps "
+                     "everything to code is not reading the genre, it is "
+                     "decorating it")
+
+
+def test_a_refused_term_says_not_built_and_why_in_its_status():
+    """`term_status` must make the refusal legible, because a term quietly
+    missing from the table is indistinguishable from a term someone forgot."""
+    status = cultivation.term_status()
+    refused = [n for n, e in cultivation.TERMS.items() if e.get("from") == "NOT_BUILT"]
+    for name in refused:
+        assert name in status, name
+        assert status[name].startswith("NOT BUILT: "), (
+            "%s: a refusal must be visible in the status, not just the table" % name)
+        assert len(status[name]) > len("NOT BUILT: "), "%s: no reason given" % name
+
+
+def test_every_term_says_what_it_is_and_what_it_measured_or_refused():
+    """Every term answers both halves, so `term_status` never hands back an
+    empty string - the same absence-shaped-green rule as the resource axis."""
+    for name, entry in cultivation.TERMS.items():
+        assert entry.get("is", "").strip(), "%s: no description" % name
+        if entry.get("from") == "NOT_BUILT":
+            continue  # a refusal is measured by its reason, not a figure
+        assert entry.get("measured", "").strip(), (
+            "%s: no measured figure. A term with none reads as settled, which "
+            "is the absence-shaped green this suite keeps catching." % name)
+
+
+def test_term_status_has_no_empty_answers():
+    status = cultivation.term_status()
+    assert set(status) == set(cultivation.TERMS)
+    for name, answer in status.items():
+        assert answer.strip(), name
+    # and the built ones never read as the refusal string by accident
+    built = [n for n, e in cultivation.TERMS.items() if e.get("from") != "NOT_BUILT"]
+    for name in built:
+        assert not status[name].startswith("NOT BUILT"), (
+            "%s is built but its status reads as refused" % name)
+
+
+def test_each_of_the_six_stages_appears_in_the_vocabulary():
+    """The genre vocabulary is not decoration hung beside the progression - it
+    is the language the progression is written in, so every stage must have a
+    word for itself. A stage with no term is a stage the metaphor skipped."""
+    missing = [s for s in cultivation.STAGES if s not in cultivation.TERMS]
+    assert not missing, "stages with no term in the vocabulary: %r" % missing
+
+
+def test_the_tribulation_stages_point_at_the_gates_that_can_refuse():
+    """渡劫 (the trial) and 同化 (the fuse) are the two irreversible-ish
+    advances, and both must name the gate that can actually say no. A trial that
+    cannot refuse is the failure this repo records most often."""
+    for term, fn in (("trial", "merge.gate"), ("attunement", "merge.gate")):
+        assert cultivation.TERMS[term]["from"] == fn, term
+        # and the gate has a refusal path, driven for real below
+    from shani_chronoa import merge
+    assert hasattr(merge, "gate")
+
+
+def test_the_ascension_term_points_at_the_adapter_check_not_the_merge():
+    """The one place this table could drift silently: 渡劫 is the *adapter*
+    stage. If someone swaps it to the merge, the table starts describing a
+    different design than the one that ships."""
+    assert cultivation.TERMS["ascension"]["from"] == "adapter.check"
+    from shani_chronoa import adapter
+    assert hasattr(adapter, "check")
+
+
+def test_the_vocabulary_is_distinct_from_the_resource_axis():
+    """They overlap in *concept* on purpose (qi, furnace, elixir are both a
+    resource and a term), so this does NOT assert disjointness - that would be
+    wrong. It asserts the vocabulary carries terms the resource axis does not
+    (`heart_demon`, `trial`, `technique`), so it is a real third axis rather
+    than a relabelled copy of the second."""
+    assert set(cultivation.TERMS) != set(cultivation.RESOURCES)
+    only_terms = set(cultivation.TERMS) - set(cultivation.RESOURCES)
+    assert {"heart_demon", "trial", "technique"} <= only_terms, (
+        "the vocabulary should carry concepts the resource list does not")
+
+
+def test_the_boundaries_cover_every_stage_and_say_what_becomes_irreversible():
+    """`BOUNDARIES` is the argument for the *ordering* - it names, per stage, the
+    thing that stops being undoable. Every stage needs one, or the ladder is a
+    list without a reason."""
+    missing = [s for s in cultivation.STAGES if s not in cultivation.BOUNDARIES]
+    assert not missing, "stages with no boundary: %r" % missing
+    for name, sentence in cultivation.BOUNDARIES.items():
+        assert sentence.strip(), name
+    # the ordering's whole argument: ascension is reversible, attunement is not
+    assert "reversible" in cultivation.BOUNDARIES["ascension"]
+    assert "irreversible" in cultivation.BOUNDARIES["attunement"]
+
+
+# --- the cosmological register (ELEMENTS) --------------------------------------
+#
+# Same rule as TERMS, applied to the *world* vocabulary rather than the
+# progression vocabulary: each element names a real function/symbol, or is
+# refused with a reason. 混沌 (chaos) in particular is refused on purpose - it
+# is the word a design reaches for when it has not been thought through, so the
+# table refuses it rather than decorating the raw log with it.
+
+def test_every_element_is_mapped_to_a_real_symbol_or_refused_with_a_reason():
+    import importlib
+    missing, unreasoned = [], []
+    for name, entry in cultivation.ELEMENTS.items():
+        target = entry.get("from", "")
+        assert target, "%s: no `from` and no refusal - which is it?" % name
+        if target == "NOT_BUILT":
+            if not entry.get("not_built", "").strip():
+                unreasoned.append(name)
+            continue
+        module_name, _, symbol = target.rpartition(".")
+        if not module_name or not symbol:
+            missing.append("%s: `%s` is not module.symbol" % (name, target))
+            continue
+        try:
+            module = importlib.import_module("shani_chronoa." + module_name)
+        except ImportError as problem:
+            missing.append("%s: %s does not import (%s)"
+                           % (name, module_name, problem))
+            continue
+        if not hasattr(module, symbol):
+            missing.append("%s: %s has no %s" % (name, module_name, symbol))
+    assert not missing, "elements claiming a symbol that is not there: %r" % missing
+    assert not unreasoned, "elements refused without saying why: %r" % unreasoned
+
+
+def test_the_element_table_is_populated_on_both_sides():
+    """**The control.** As with TERMS, a table where everything maps (or where
+    everything is refused) is the failure this discipline exists to catch."""
+    built = [n for n, e in cultivation.ELEMENTS.items() if e.get("from") != "NOT_BUILT"]
+    refused = [n for n, e in cultivation.ELEMENTS.items() if e.get("from") == "NOT_BUILT"]
+    assert built and refused, (
+        "the element table must both map real things and refuse fake ones; "
+        "built=%r refused=%r" % (built, refused))
+
+
+def test_chaos_is_refused_because_it_would_decorate_the_raw_log():
+    """混沌 is the load-bearing refusal. It must stay refused, and the reason
+    must name why: it is the word a design reaches for when it has not been
+    thought through."""
+    chaos = cultivation.ELEMENTS["chaos"]
+    assert chaos["from"] == "NOT_BUILT"
+    assert "not been thought through" in chaos["not_built"], chaos["not_built"]
+    assert "NOT BUILT" in cultivation.element_status()["chaos"]
+
+
+def test_every_element_says_what_it_is_and_what_it_measured_or_refused():
+    for name, entry in cultivation.ELEMENTS.items():
+        assert entry.get("is", "").strip(), "%s: no description" % name
+        if entry.get("from") == "NOT_BUILT":
+            continue
+        assert entry.get("measured", "").strip(), (
+            "%s: no measured figure - an element with none reads as settled" % name)
+
+
+def test_element_status_has_no_empty_answers():
+    status = cultivation.element_status()
+    assert set(status) == set(cultivation.ELEMENTS)
+    for name, answer in status.items():
+        assert answer.strip(), name
+
+
+def test_the_five_elements_map_to_a_real_closed_vocabulary_of_five():
+    """五行 is the genre's five mutually-exclusive states that interact; the
+    honest analogue is the *closed evidence vocabulary*, which is literally five
+    real, mutually-exclusive words - and the whole point is that a row may not
+    invent a sixth (so 'could not ask' never reads as 'not installed')."""
+    from shani_chronoa.gui.surfaces import desktop
+    words = desktop.EVIDENCE_WORDS
+    assert cultivation.ELEMENTS["five_elements"]["from"] == (
+        "gui.surfaces.desktop.EVIDENCE_WORDS")
+    assert len(words) == 5, words
+    assert len(set(words)) == 5, "a closed vocabulary of five with a duplicate is four"
+    assert "could not ask" in words, (
+        "the refusal that keeps an unknown from reading as a negative")
+
+
+def test_yin_and_yang_are_the_read_only_and_mutating_halves():
+    """阴阳 is a complementary split where both halves are real and neither is
+    the whole. Here that is the tool split: what may be seen vs what may act,
+    each a declared set, with the mutating half meeting a consent gate."""
+    from shani_chronoa import capabilities
+    yin = cultivation.ELEMENTS["yin"]
+    yang = cultivation.ELEMENTS["yang"]
+    assert yin["from"] == "capabilities.READ_ONLY_TOOLS"
+    assert yang["from"] == "capabilities.MUTATING_TOOLS"
+    assert capabilities.READ_ONLY_TOOLS, "the yin half is not empty"
+    assert capabilities.MUTATING_TOOLS, "the yang half is not empty"
+    assert capabilities.READ_ONLY_TOOLS != capabilities.MUTATING_TOOLS
+
+
+def test_the_cosmological_register_is_separate_from_the_progression_terms():
+    """Two registers, not one merged pile: `TERMS` is progress vocabulary,
+    `ELEMENTS` is the world. They overlap in spirit but must stay distinct
+    tables, or the distinction this module draws is lost."""
+    assert set(cultivation.ELEMENTS) != set(cultivation.TERMS)
+    only_elements = set(cultivation.ELEMENTS) - set(cultivation.TERMS)
+    assert {"void", "chaos", "lightning"} <= only_elements, (
+        "the cosmological register should carry concepts TERMS does not")
+
+
+def test_ascension_is_recorded_as_the_refusal_it_measured_as():
+    """渡劫 is the first real measurement of an adapter on the honest
+    instrument, and it is a **refusal**: base alone 4/5 at 4.65 s/case,
+    base + adapter 4/5 at 7.65 s/case, both missing the same case. Same
+    accuracy, 65% slower.
+
+    This test exists so the refusal cannot be quietly reworded into a success.
+    A `measured` field that stopped saying REFUSED would still contain digits,
+    so the digit check elsewhere does not catch it - only an assertion on the
+    verdict does. Same rule as the poison row: 丹毒 is a failure this repo must
+    keep on the record, not quietly reword once it stops being news.
+    """
+    said = cultivation.TERMS["ascension"]["measured"]
+    assert "REFUSED" in said, (
+        "ascension measured as a refusal; saying so is the point")
+    # both numbers, so a reader can see it was a comparison and not a verdict
+    for figure in ("4/5", "4.65", "7.65"):
+        assert figure in said, "missing %s: %s" % (figure, said)
+
+
+def test_no_term_or_element_reads_as_a_success_the_measurement_did_not_produce():
+    """The general form of that rule: a `measured` field must not claim the
+    thing *worked* unless the measurement showed it.
+
+    The subtlety this version had to learn: a naive substring check for
+    "unlocked" fires on "a stage that does not measure is **not unlocked**" -
+    which is a *refusal*, the exact thing this test exists to protect. So each
+    success word is checked with the preceding few words, and the claim only
+    counts when it is **not** immediately negated. This is the substring trap
+    this repo records repeatedly, hit here in my own test.
+    """
+    negators = frozenset(("not", "never", "no", "cannot"))
+    claims = ("earned", "unlocked", "successfully")
+    for name, entry in (list(cultivation.TERMS.items())
+                        + list(cultivation.ELEMENTS.items())):
+        if entry.get("from") == "NOT_BUILT":
+            continue
+        measured = entry.get("measured", "")
+        low = measured.lower()
+        for word in claims:
+            start = low.find(word)
+            while start != -1:
+                words_before = low[max(0, start - 12):start].split()
+                previous = words_before[-1] if words_before else ""
+                assert previous in negators, (
+                    "%s: %r claims success (%r not negated) in %r - if the "
+                    "measurement refused, the row must say so"
+                    % (name, word, word, measured))
+                start = low.find(word, start + 1)
