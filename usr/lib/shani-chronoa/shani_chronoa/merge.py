@@ -225,6 +225,32 @@ def check_compatible(paths: Sequence[Path]) -> Dict[str, object]:
             "basename": base.get("general.basename")}
 
 
+def _scratch(prefix: str) -> Path:
+    """A temporary directory for a merge's intermediate files.
+
+    **`TMPDIR`, not `$TMPDIR`.** This box's `/tmp` is a 16 GiB tmpfs and a
+    merge's intermediates are 1.1 GB of F16 plus a few hundred MiB of quantised
+    output *per configuration* - a five-point sweep is over 4 GB and ran the disk
+    out mid-run, with every blend afterwards refused by `ENOSPC`-shaped
+    `Errno 122 Disk quota exceeded` rather than by anything about merging. The
+    checkout's own `cache/` is on the real filesystem and gitignored, so a
+    scratch directory there costs nothing and does not evict anything.
+
+    `SHANI_MERGE_SCRATCH` overrides it, and an existing directory is reused
+    rather than refused - a sweep legitimately wants all its files in one place.
+    """
+    root = os.environ.get("SHANI_MERGE_SCRATCH", "").strip()
+    if not root:
+        from pathlib import Path as _P
+        try:
+            root = str(_P(__file__).resolve().parents[4] / "cache" / "merge-scratch")
+        except (IndexError, OSError):
+            root = tempfile.gettempdir()
+    base = Path(root)
+    base.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=str(base)))
+
+
 def _combine(base_arr, task_vectors, method, density, lam):
     """Combine one tensor's task vectors. Pure arithmetic, no files.
 
@@ -392,8 +418,7 @@ def blend(parents: Sequence[Path], weights: Sequence[float],
     ref_float = {name: to_float32(data, qtype)[0]
                  for name, (_shape, data, qtype) in ref_map.items()}
 
-    target = Path(out_path) if out_path else Path(
-        tempfile.mkdtemp(prefix="chronoa-merge-")) / "merged-f16.gguf"
+    target = Path(out_path) if out_path else _scratch("chronoa-merge-") / "merged-f16.gguf"
     target.parent.mkdir(parents=True, exist_ok=True)
 
     # A tensor whose parent stores it in a float type keeps that type; a

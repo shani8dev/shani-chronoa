@@ -161,3 +161,37 @@ def test_the_scratch_directory_does_not_survive_the_call(tmp_path, measured):
     merge.gate(tmp_path / "merged.gguf", [tmp_path / "base-Q8_0.gguf"],
                quant="Q4_K_M")
     assert set(Path(tempfile.gettempdir()).glob("merge-gate-*")) == before
+
+
+def test_scratch_does_not_default_to_tmpfs(tmp_path, monkeypatch):
+    """A merge's intermediates are ~1.4 GB each, and this box's `/tmp` is a
+    16 GiB tmpfs with 4 GB of sweep already on it - which is how a five-point
+    sweep came back with every blend after the first refused by `Errno 122`
+    rather than by anything about merging.
+
+    The scratch belongs beside the checkout, which is on the real filesystem and
+    gitignored, not on the tmpfs the system clears.
+    """
+    from pathlib import Path
+    import tempfile
+    monkeypatch.delenv("SHANI_MERGE_SCRATCH", raising=False)
+    chosen = merge._scratch("test-")
+    assert str(chosen).startswith(str(Path(merge.__file__).resolve().parents[4]
+                                     / "cache")), chosen
+    chosen.rmdir()
+
+
+def test_the_scratch_root_can_be_overridden(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHANI_MERGE_SCRATCH", str(tmp_path))
+    chosen = merge._scratch("override-")
+    assert str(chosen).startswith(str(tmp_path)), chosen
+
+
+def test_the_scratch_directory_is_created_if_it_does_not_exist(tmp_path, monkeypatch):
+    """A path under a directory that is not there yet is the common case - a
+    fresh checkout has no `cache/merge-scratch` - and refusing would make the
+    override useless for the reason it is usually wanted."""
+    deep = tmp_path / "a" / "b" / "c"
+    monkeypatch.setenv("SHANI_MERGE_SCRATCH", str(deep))
+    chosen = merge._scratch("fresh-")
+    assert chosen.is_dir()
