@@ -17234,3 +17234,66 @@ does work. The distinction is the point:
 
 The second still needs to be found by running the thing. That is why
 `MathBlock`'s test was red instead of green: somebody ran it.
+
+## `model_registry` is a committed 259-line fix for a live bug, and nothing calls it (2026-10-12)
+
+The first genuinely dead *module* this session. Found by running the reachability
+differential across the whole shipped tree rather than `gui/`: of **81** names
+`deadcode.py` calls dead, **44** are dead by both instruments, and of those,
+**15** sit in a module that a crude importer check found nothing loading. Checking
+each of the 15 by hand, **14 are imported** and **one is not**:
+
+    model_registry.py   259 lines, committed, 0 imports, 0 attribute calls
+
+`model_registry.py` is fully written and its docstring states the measured bug it
+exists to fix:
+
+> put a GGUF on disk that is not one of the six pinned filenames and `installed()`
+> returned `[]`, `active()` returned `""`, and the mode strip said **"No model"** -
+> while `current.gguf` pointed at a file `llama-server` would have loaded.
+> `installed()` was checking `SPECS`, so a shared model was not *unavailable*; it
+> was *unmentionable*.
+
+**The bug is live, and the differential is measured rather than argued.** With a
+non-pinned `.gguf` in the model directory and `current.gguf` pointing at it:
+
+    local_llm.installed()        -> []          # cannot see the file
+    local_llm.active()           -> ''          # cannot name the model
+    model_registry.active_entry()-> {'filename': 'shared-finetune-Q4_K_M.gguf',
+                                     'reason': 'no `general.architecture` in the
+                                     header, so nothing knows what it implements',
+                                     ...}      # names it, and says why it is not one
+
+`installed()` and `active()` still iterate `SPECS` only - measured, both are
+unchanged from the shape the docstring describes.
+
+**Two places claim it is wired, and both are prose.** `modelfmt.py`'s docstring
+says *"`model_registry` calls this function rather than keeping its own copy"*
+about two of its own helpers - a claim nothing honours. And
+`cultivation.py:211` carries `"from": "model_registry.describe"` in the pipeline
+table, where `from` is a **label**: it is read back only to compare against
+`"NOT_BUILT"`, so the string names a source and never dispatches to one. The other
+five entries in that table (`distill.harvest_rows`, `local_llm.calibrated_quantize`,
+`learning.train_and_save`, `local_llm.effective_bandwidth`,
+`local_llm.compare_calibration`) are all real, wired functions - which is what
+makes the one unbuilt entry easy to miss.
+
+**Not wired here.** `installed()` and `active()` feed the mode strip, the Models
+panel, `modelfmt` and `requirements_met`, so pointing them at a registry changes
+what several surfaces *say* about a machine - which is a product decision about
+what to display, not a mechanical connection. `active_entry()` returns `''`-shaped
+answers plus a `reason` for every file, so the wiring wants a decision about which
+of those a person sees. Recorded with the measurement so it is a five-minute job
+for whoever makes that call.
+
+### And the method, because it is the part that generalises
+
+The differential that found this was: **run both scanners, then triage the
+disagreement by hand.** `deadcode.py`'s AST rule and a string-aware rule disagreed
+on 37 names; reading them separated class names used as type annotations
+(`EMA`, `Ridge`, `AnomalyDetector` - a mention, not a call) from genuine string
+seams (`activity_text`, `webkit_version`). The 44 both call dead were then grouped
+by module, and only the module question - *is this a dead name or a dead module?*
+- turned the number into a finding. 81, 44 and 15 were all noise until the last
+one.
+
