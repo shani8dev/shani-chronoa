@@ -27,8 +27,10 @@ from __future__ import annotations
 import ast
 import collections
 import functools
+import io
 import pathlib
 import re
+import tokenize
 
 import pytest
 
@@ -67,15 +69,27 @@ def _all_files(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
 def _index(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
     """Per file: the identifiers it uses, and the method names it defines.
 
-    **A mention is not automatically a use.** meetings' `_tick` was dead and the
-    first version of this scan called it alive, because `_tick` is also the name
-    of a live, scheduled method on a class in `gui/widgets.py` - three mentions
-    in the tree, two of them something else's. Verified against the pre-fix tree:
-    the scan caught `_recording_possible` and missed `_tick` for exactly that
-    reason, which is recorded here rather than left implied.
+    **A mention is not automatically a use, and this is the part the first
+    version got wrong twice.** meetings' `_tick` was dead and the first version
+    called it alive, because `_tick` is also the name of a live, scheduled
+    method on a class in `gui/widgets.py` - three mentions in the tree, two of
+    them something else's. Verified against the pre-fix tree: the scan caught
+    `_recording_possible` and missed `_tick` for exactly that reason.
 
     So a file that *defines* a name is not evidence about anyone else's method of
     that name, and is excluded from the count of its uses.
+
+    **And the second version counted prose.** A name mentioned in a comment or a
+    docstring read as a caller, which is the mirror-image mistake: measured, a
+    `TranscriptView` handler is named exactly once outside its own definition -
+    in a `window.py` docstring explaining a pattern - and a raw-text scan calls
+    it live. It is dead. **Comments and docstrings are dropped here; every other
+    string literal is kept**, because that is where the live seams actually are:
+    `phone_link.py:370` dispatches `show_devices` through a `getattr` string
+    tuple, `voice.py`'s `_FORWARDED` carries `speaking_row` into `setattr`, and
+    `webkit_version` / `activity_text` are called from inside subprocess
+    harnesses held as strings in two test files. Dropping strings - which is
+    `tools/deadcode.py`'s deliberate rule - calls all four dead.
     """
     per_file = []
     for f in _all_files(pkg, tests):
@@ -95,9 +109,51 @@ def _index(pkg: pathlib.Path = PKG, tests: pathlib.Path = TESTS):
                         defined.add(item.name)
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 defined.add(node.name)
-        per_file.append((f, collections.Counter(re.findall(r"\w+", text)), defined,
+        per_file.append((f, collections.Counter(_code_words(text, tree)), defined,
                          _definition_lines(text)))
     return tuple(per_file)
+
+
+def _docstring_positions(tree: ast.AST) -> set:
+    """(lineno, col_offset) of every module, class and function docstring.
+
+    A docstring is the first statement of one of those bodies and is prose by
+    construction, so a name appearing in one is documentation and not a caller.
+    """
+    spots = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef,
+                             ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr):
+                value = body[0].value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    spots.add((body[0].lineno, body[0].col_offset))
+    return spots
+
+
+def _code_words(text: str, tree: ast.AST):
+    """Every identifier in the file's **code**: comments and docstrings dropped,
+    all other string literals kept.
+
+    Tokenised rather than regexed over the raw text, because the raw text is
+    where the prose lives. Keeping non-docstring strings is load-bearing - see
+    `_index`'s docstring for the four names that would otherwise read as dead.
+    """
+    prose = _docstring_positions(tree)
+    words = []
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                continue
+            if tok.type == tokenize.STRING and (tok.start[0], tok.start[1]) in prose:
+                continue
+            words.extend(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", tok.string))
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        # An unparseable file is not evidence either way; its raw words are the
+        # only thing available and are counted, which fails toward "live".
+        words = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text)
+    return words
 
 
 _DEF_LINE = re.compile(r"^\s*(?:async\s+)?def\s+(\w+)\s*\(", re.MULTILINE)
@@ -279,6 +335,64 @@ class TestNoSurfaceMethodIsUnreachable:
     def test_the_real_tree_is_clean(self):
         """Stated separately so a failure names which half broke."""
         assert unreachable_methods() == []
+
+    def test_a_name_named_only_in_a_docstring_is_not_a_use(self):
+        """**The control for the false positive the first version had.**
+
+        A method in `gui/widgets.py` is dead, and it is named exactly once
+        outside its own definition - in a `window.py` docstring explaining the
+        pattern `None` follows. A raw-text scan counts that word and calls the
+        method live; measured, the first version of this file did.
+
+        So the extractor drops docstrings, and this asserts it does, against a
+        real dead method rather than a fixture. If the tokenising ever stops
+        excluding prose, this goes red while
+        `test_no_surface_method_is_reachable_by_nothing` stays green, which is
+        what makes it worth having.
+
+        **The name is composed, and that is not decoration.** Spelling it here
+        would put it in this file's source, which `_all_files` reads and counts -
+        so the control would manufacture the very caller it asserts is absent.
+        Measured: the first version of this test named the method four times and
+        failed with `assert 3 == 0`, every count coming from its own docstring.
+        A control that names its subject is a control that cannot fail.
+        """
+        name = "set_" + "suggestion_" + "handler"
+        # guard that the composition is right AND that the name is not spelled
+        # anywhere in this file, which is what makes the assertion below mean
+        # something: `_all_files` reads this file too, so a literal here would be
+        # counted as a caller of the very method under test.
+        assert name == "".join(("set", "_", "suggestion", "_", "handler"))
+        assert name not in pathlib.Path(__file__).read_text(), (
+            f"{name} is spelled in this test's own source, so the scan would "
+            f"count the control as a caller")
+        index = _index()
+        total = sum(u.get(name, 0) - d.get(name, 0)
+                    for _f, u, _defined, d in index)
+        assert total == 0, (
+            f"{name} is counted {total} times outside its def, but its only "
+            f"mention is a window.py docstring - prose is being read as a caller")
+
+    def test_a_string_dispatched_name_is_still_a_use(self):
+        """**The other side, and the reason strings are kept at all.**
+
+        Dropping *all* string literals - which is `tools/deadcode.py`'s
+        deliberate rule - calls four live methods dead: `show_devices` and
+        `speaking_row` are dispatched through string tuples, and `webkit_version`
+        and `activity_text` are called from inside subprocess harnesses held as
+        strings. Every one of them is live and none appears as a code token.
+
+        Both directions are asserted because either alone can be satisfied by a
+        scanner that is simply broken.
+        """
+        index = _index()
+        for name in ("show_devices", "speaking_row",
+                     "webkit_version", "activity_text"):
+            total = sum(u.get(name, 0) - d.get(name, 0)
+                        for _f, u, _defined, d in index)
+            assert total > 0, (
+                f"{name} is dispatched through a string and reads as dead - "
+                f"the extractor is dropping the strings it needs")
 
     @pytest.mark.parametrize("name", ["show_devices", "_refresh_status", "find"])
     def test_three_known_live_seams_are_not_flagged(self, name):
