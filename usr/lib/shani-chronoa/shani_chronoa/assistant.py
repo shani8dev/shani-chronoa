@@ -24,7 +24,7 @@ byte-for-byte what it was before the senses layer existed.
 """
 from shani_chronoa.guardrail import as_argument_object
 from shani_chronoa import permissions
-from shani_chronoa import provenance
+from shani_chronoa import provenance, prompt_pieces
 
 import asyncio
 import contextvars
@@ -227,7 +227,15 @@ class Assistant:
     ) -> None:
         self.llm = llm
         self.config = config
-        self._history: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # The prompt through `prompt_pieces`, so a person's override file in
+        # `~/.config/shani-chronoa/prompts/` reaches the conversation. `reload()`
+        # clears first, so an override added while the app is running applies on
+        # the next assistant built, and deleting it reverts to the default in
+        # code. `SYSTEM_PROMPT` stays the constant and stays what the default
+        # composes to - every test that asserts on it keeps its meaning.
+        prompt_pieces.load_overrides()
+        self._history: list[dict] = [
+            {"role": "system", "content": prompt_pieces.compose()}]
         # Public, not underscore-private: a caller (app.py, a test, a future
         # sense producer inside the GUI) needs to be able to add a percept to
         # the store this assistant reads from, and the CLI writes to the same

@@ -2,6 +2,73 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## laya: the system prompt is now tunable, and the safety sentence has no door (2026-10-12)
+
+`harness-study/laya` cloned and studied (a local-first AI notification centre;
+Python engine, 285 files - the same language as Chronoa). Its README states its
+headline feature as:
+
+> Override 20+ pipeline stages individually - change one, keep the rest as
+> default. Tune persona voices, classification rules, or briefing style to your
+> team. **Delete the file to revert - defaults always come back.**
+
+Chronoa's `SYSTEM_PROMPT` was one hard-coded string, so a person who wanted
+"answer in British English" had to edit the source and lose the default, or put
+it in `rules.md` - one file, landing *after* everything, for a job it was not
+shaped for. `prompt_pieces.py` is the lever.
+
+**Four of Laya's decisions are the whole transfer, and each is a way a simpler
+version lies:**
+
+1. **The default lives in code, and nothing here writes the directory** - so
+   "revert" is deleting a file, and an update can never be undone by a user edit.
+2. **An unrecognised file name is a warning that lists the recognised ones.**
+   `tools/mutations`'s first version of this test asserted `"recognised" in
+   caplog.text`, which the word *unrecognised* satisfies - a warning that named
+   the problem and not the answer still passed. It asserts each recognised
+   filename now.
+3. **An empty file is a warning and not an override.** Replacing a prompt with
+   nothing is worse than not replacing it.
+4. **`override_status()` answers "what am I overriding"** - the default alongside
+   the current, because there is nothing to compare against without it.
+
+**And the property that matters more than any of them:** the provenance boundary
+sentence - the one telling the model what the untrusted-content fence means - is
+**not in the registry at all**. There is no key for it, so no file can name it.
+Laya's construction is the same shape, for identifier fields ("absent by
+construction because capabilities don't list them as content"). A security
+statement is not a preference; the way to keep it unoverridable is to leave no
+door, not to check the door harder. The mutation that puts the lookup back is
+**inert**, and that is the proof - a key no file maps to cannot be reached.
+
+**Chronoa's version is stronger than Laya's in one measured way.** Laya's loader
+runs at engine start, so its "delete to revert" needs a restart. `compose()` here
+re-reads the directory, because it is called once per assistant built and not per
+turn - so the scan is free and deletion reverts immediately. A test asserts the
+immediate revert; the mutation that restores Laya's caching fails it.
+
+`tests/test_prompt_pieces.py` (11), `tools/mutations/prompt_pieces.py` (**10
+caught, 0 survivors, 1 equivalent documented**). 91 passed across the prompt,
+reply-style, provenance, user-prompts and matrix-name suites; 30 sets / 265
+anchors all match.
+
+### Not taken, and why
+
+Laya's deeper answer to a defect Chronoa records four times is **not** ported
+here, because it is a refactor and not a fix. `engine/laya/egress/registry.py`
+says:
+
+> adding a platform means writing one file, not editing a dozen tables here.
+
+Chronoa's `capabilities._GROUPS`, `GATED` and `GATE_NAMES` are three hand-kept
+tables, and `test_skill_gates_are_enforced._IMPL` is a fourth; AGENTS.md records
+that a duplicate key silently killed a `browse` label and that a skill landing
+leaves four lists stale. Laya's answer - each skill owns its metadata, and the
+prompt and the tables are **generated** from the registry, so there is no second
+list to drift - is the right one and it is a change across every skill. Recorded
+as the next pass, not half-done in this one.
+
+
 ## The wizard's void got a mark, and the icon was a gear the first time (2026-10-11)
 
 Reported as *"minor UI glitches during model/voice installation"*, then, looking at
