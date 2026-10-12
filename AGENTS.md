@@ -16497,3 +16497,62 @@ When to Abstain*, SideKernel (microVM sandboxing - bwrap and Landlock are the
 shipped answer and the platform differs), Natural Language Tools (an alternative
 to the JSON schemas this repository's whole whitelist assumes), and Nemotron
 Tool-N1: named, none built, each needing its own measurement first.
+
+## A chunked sweep's 27 failing files were 23 contamination and 3 real (2026-10-12)
+
+A ten-chunk sweep came back with **27 failing files**. Re-run serially in their
+own process - this file's own rule, and the only reason to trust a chunked result
+- **23 passed entirely**. The 27 were mostly parallel-shard contention, which is
+the same lesson as the mutation-lock contamination and the
+`gschemas.compiled`-stale probe.
+
+Three were real, and each is a different failure of the same discipline:
+
+**`Gtk.BUTTON_SECONDARY` - the repo's own first-documented bug class, still
+live.** `gui/widgets.py:794` used a GTK 3 constant GTK 4 removed: measured,
+`hasattr(Gtk, "BUTTON_SECONDARY")` is False while `Gdk.BUTTON_SECONDARY` is 3.
+`Gdk` was already imported. The gesture is attached at `:996` with a real
+handler, so every build raised `AttributeError` - a whole feature (right-click to
+edit a row and rerun) dead in the shipped code, caught by two tests in
+`test_regenerate.py`.
+
+**`do_shutdown` read an attribute another lifecycle method creates.** Mine.
+`_pending_idles` is set in `do_startup` and read in `do_shutdown`, and
+`tests/conftest.py`'s `stubbed_app` builds the application with `__new__` and
+hand-assigns only what a test needs - so shutdown reached the read with the
+attribute absent and raised, costing the real teardown that follows. **The
+surrounding code already used `getattr(self, name, None)` for exactly this
+reason, with a comment saying so.** Mine was the line that broke the pattern, and
+I found it only because a sweep ran a file I had never run.
+
+**A self-poisoning test that wrote into the developer's real settings.**
+`test_suggested_action_is_additive.py`'s fixture set `GSETTINGS_BACKEND=keyfile`
+and the schema dir but never isolated `XDG_CONFIG_HOME`, so the subprocess read
+*and wrote* `~/.config/glib-2.0/settings/keyfile`. The harness's own apply step is
+the writer: it turns the suggested senses on, so the first run fills the file, and
+every later run finds `missing` empty, writes nothing, and fails *"the action
+wrote nothing at all"*. Measured both ways on the same tree: isolated, **4
+passed**; as the repo runs it, **1 failed**. Same class as the tests that wrote
+into the real user's `tool_calls.log`, and the `fake_bin` `PATH` lesson.
+
+### Still in the real keyfile, and it needs a person
+
+The test is fixed and no longer writes. **What it already wrote is still there:**
+`hearing-sense-enabled`, `filesystem-sense-enabled` and `web-sense-enabled` are
+all `true` in `~/.config/glib-2.0/settings/keyfile`, against schema defaults of
+false, set by a test rather than by anyone using the machine. **`hearing` is
+consent for the microphone**, so this is not cosmetic and it is not this file's
+call: resetting it mutates real user data outside a disposable harness, which
+Boundaries says to ask about first.
+
+### And the probe that read the wrong machine, twice in one turn
+
+While diagnosing #3 a probe reported all four suggested senses already enabled.
+It had set `XDG_STATE_HOME` but not `XDG_CONFIG_HOME`, so it read the real keyfile
+- and the keyfile *was* polluted, by the bug being diagnosed. A second probe used
+a stale `gschemas.compiled` and got the same answer for a different reason. The
+independent reader (`gsettings get` with a fresh compile, `memory` backend)
+returned `false`, which is what finally separated the two. **A probe that does not
+control its environment is describing the machine it ran on, and when the machine
+is the thing being debugged, it will agree with the bug.**
+
