@@ -10,6 +10,7 @@ environment and the point here is the decision, not which label reads.
 
 from __future__ import annotations
 
+import re
 import struct
 import sys
 from pathlib import Path
@@ -511,10 +512,18 @@ class TestTheFloorReproducesOnASecondModel:
         # `current.gguf`, the default tier, so this is the model the floor protects
         # most directly. Dropping its record leaves three models and a test that
         # still passes, which is why the count is four.
-        assert len(per_model) >= 4, (
-            f"the floor at q8_0 rests on four models, including Qwen3-1.7B "
-            f"(q5_0 +8.54%) and Qwen3-0.6B (+8.53%), which together show the cost "
-            f"is bimodal rather than a size trend; {len(per_model)} models measured")
+        # Five, and the fifth is what rules out the last remaining explanation.
+        # Four models established that the cost is bimodal rather than a size
+        # trend. SmolVLM2-500M-Q8_0 then landed on the *cheap* side (+0.74%),
+        # which settles that nothing else predicts it either: `Q4_K_M` appears on
+        # both sides (135M and 8B cheap, 1.7B expensive) and so does `Q8_0`
+        # (500M cheap, 0.6B expensive). Size, family and weight quantization are
+        # each varied across the split, so the cost is per-model and unpredictable
+        # - which is the whole argument for the floor being per-model.
+        assert len(per_model) >= 5, (
+            f"the floor at q8_0 rests on five models, which between them vary "
+            f"size, family and weight quantization across both sides of the "
+            f"split, so no parameter predicts the cost; {len(per_model)} measured")
         for model, costs in per_model.items():
             # Non-decreasing from `q8_0` on - not monotonic including `f16`.
             # `q8_0` measured -0.04% on the small model, i.e. *better* than
@@ -640,6 +649,101 @@ class TestTheFourthModelSettlesTheShapeOfTheCost:
                    for k in ctxfit.KV_CACHE_MEASUREMENTS), (
             f"the loaded model {name} is not among the measured ones, so the "
             f"floor's worst case does not describe the model in use")
+
+
+class TestNoParameterPredictsTheCost:
+    """The fifth model's finding, and the strongest version of the floor's case.
+
+    Four models established bimodality. SmolVLM2-500M-Q8_0 - **cheap** at +0.74%
+    - then landed on the near-zero side, and that is what rules out every
+    remaining explanation. Grouping the five by their weight quantization:
+
+      Q4_K_M : cheap 135M, 8B   |  expensive 1.7B
+      Q8_0   : cheap 500M       |  expensive 0.6B
+
+    Each quantization appears on **both** sides, so the file's own quantization
+    does not predict the cost. Combined with the size and family splits (a 135M
+    is cheap, a 1.7B is expensive, an 8B is cheap), there is **no property of the
+    checkpoint** this table can read that says which side a model lands on.
+
+    That is the whole argument for the floor being a per-model rule rather than a
+    formula: a step whose cost cannot be predicted from anything you have before
+    measuring is not a step to offer.
+    """
+
+    CHEAP = 2.0      # % worse than f16, at or below which the step is affordable
+    EXPENSIVE = 5.0  # % worse than f16, at or above which it is not
+
+    def _groups(self) -> dict:
+        from shani_chronoa import ctxfit
+        cheap, expensive = {}, {}
+        for key, costs in ctxfit.KV_CACHE_MEASUREMENTS.items():
+            side = "cheap" if costs["q5_0"] <= self.CHEAP else (
+                "expensive" if costs["q5_0"] >= self.EXPENSIVE else "middle")
+            quant = key.rsplit("-", 1)[-1] if "-" in key else "?"
+            if side == "cheap":
+                cheap.setdefault(quant, []).append(key)
+            elif side == "expensive":
+                expensive.setdefault(quant, []).append(key)
+        return {"cheap": cheap, "expensive": expensive,
+                "middle": [k for k, c in ctxfit.KV_CACHE_MEASUREMENTS.items()
+                           if self.CHEAP < c["q5_0"] < self.EXPENSIVE]}
+
+    def test_each_weight_quantization_appears_on_both_sides(self):
+        """Per quantization, not just one. The first version of this asserted that
+        *some* quantization straddled the split, which `Q4_K_M` always does (the
+        1.7B is expensive and Q4_K_M) - so it passed even with a mutation that put
+        every `Q8_0` model on the expensive side. The mutation run found it.
+        """
+        groups = self._groups()
+        from shani_chronoa import ctxfit
+        per_quant: dict[str, list[str]] = {}
+        for key in ctxfit.KV_CACHE_MEASUREMENTS:
+            per_quant.setdefault(key.rsplit("-", 1)[-1], []).append(key)
+        for quant, keys in per_quant.items():
+            if len(keys) < 2:
+                continue          # one model cannot straddle anything
+            assert (quant in groups["cheap"] and quant in groups["expensive"]), (
+                f"weight quantization {quant} appears to predict the cost: cheap "
+                f"{groups['cheap'].get(quant, [])} against expensive "
+                f"{groups['expensive'].get(quant, [])}. If every model of one "
+                f"quantization lands on the same side, the floor could be a "
+                f"formula instead of a per-model measurement")
+
+    def test_size_does_not_order_the_cost(self):
+        """A size trend would make this monotonic; it is not, in either direction.
+
+        The five models sorted by parameter count give costs of
+        cheap, cheap, expensive, expensive, cheap - so neither "bigger is worse"
+        nor "bigger is better" survives. That is what the fourth and fifth
+        measurements settled between them.
+        """
+        from shani_chronoa import ctxfit
+
+        def params(key: str) -> float:
+            m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*([mb])(?:[-_.]|$)", key)
+            if not m:
+                return float("inf")
+            return float(m.group(1)) * (0.001 if m.group(2) == "m" else 1.0)
+
+        rows = sorted(((params(k), c["q5_0"], k)
+                       for k, c in ctxfit.KV_CACHE_MEASUREMENTS.items()))
+        costs = [c for _, c, _ in rows]
+        assert len(rows) >= 4, "need at least four models to see a non-trend"
+        increasing = all(a <= b for a, b in zip(costs, costs[1:]))
+        decreasing = all(a >= b for a, b in zip(costs, costs[1:]))
+        assert not increasing and not decreasing, (
+            f"q5_0's cost appears ordered by size: "
+            + ", ".join(f"{k}={c}%" for _, c, k in rows)
+            + " - a size trend would make the floor a formula")
+
+    def test_the_floor_holds_across_all_five(self):
+        from shani_chronoa import ctxfit
+        worst = max(c[ctxfit.KV_CACHE_FLOOR]
+                    for c in ctxfit.KV_CACHE_MEASUREMENTS.values())
+        assert worst <= 1.0, (
+            f"the floor step {ctxfit.KV_CACHE_FLOOR} costs {worst:.2f}% on some "
+            f"model, so it is not cheap everywhere the ladder is applied")
 
 
 class TestTheFloorsCost:

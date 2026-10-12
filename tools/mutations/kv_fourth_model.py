@@ -49,4 +49,26 @@ MUTATIONS = [
         "label": "the 1.7B's q5_0 cost is made to agree with the 8B",
         "expect": ["test_the_same_weight_quantization_costs_six_times_apart"],
     },
+    {
+        "file": _CTX,
+        "old": '    "smolvlm2-500m-video-instruct-q8_0": {"f16": 0.0, "q8_0": 0.13, "q5_0": 0.74, "q4_0": 2.16},\n',
+        "new": "",
+        # The fifth record removed. With four models the suite is green *and*
+        # weight quantization looks like it might predict the cost - Q4_K_M would
+        # be cheap, cheap, expensive, and Q8_0 just expensive - which is a reading
+        # the fifth model refutes. Only the count catches it.
+        "label": "the fifth model's measurement is deleted",
+        "expect": ["test_the_ordering_holds_on_every_model"],
+    },
+    {
+        "file": _CTX,
+        "old": '"smolvlm2-500m-video-instruct-q8_0": {"f16": 0.0, "q8_0": 0.13, "q5_0": 0.74, "q4_0": 2.16}',
+        "new": '"smolvlm2-500m-video-instruct-q8_0": {"f16": 0.0, "q8_0": 0.13, "q5_0": 8.5, "q4_0": 2.16}',
+        # The 500M moved to the expensive side. Then Q8_0 is expensive in both its
+        # models, so weight quantization appears to predict the cost again - which
+        # is the exact reading the fifth model refutes, and the reason a model
+        # nobody measured is a model whose side of the split is unknown.
+        "label": "the fifth model is moved to the expensive side",
+        "expect": ["test_each_weight_quantization_appears_on_both_sides"],
+    },
 ]

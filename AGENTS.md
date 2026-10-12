@@ -12820,3 +12820,58 @@ nobody re-derives them:**
   **not explained**. It is a coincidence-shaped fact about two models 3x apart in
   size and differently quantized, and reading a mechanism into it would be the
   confident wrong answer.
+
+## The fifth model: no parameter of the checkpoint predicts the cost (2026-10-12)
+
+The two remaining unreadable models split on a measurement rather than on taste.
+`llama-perplexity --help` carries **zero** `embedding`/`pooling` flags (measured,
+re-verified), so `nomic-embed-text` cannot produce a KV-cache figure at all - that
+dead end is recorded in this file already and is now re-measured rather than
+trusted. The vision model's text backbone *is* measurable (`--mmproj` is accepted,
+and the main GGUF even loads with no projector), and the fifth point was worth
+having for a reason that was not obvious before it landed.
+
+Downloaded (437 MB, git-ignored `cache/`), same corpus, same calibrated harness -
+the control reproduced the 135M's table to the digit again first:
+
+| type | 135M | 8B | 0.6B | 1.7B | **500M** |
+|---|---|---|---|---|---|
+| q8_0 | -0.04% | +0.32% | +0.40% | +0.30% | **+0.13%** |
+| q5_0 | +0.11% | +1.35% | +8.53% | +8.54% | **+0.74%** |
+| q4_0 | +6.08% | +5.81% | +457% | +38.90% | **+2.16%** |
+
+**The 500M landed on the *cheap* side, and that is the measurement's whole
+value.** Grouping all five by weight quantization:
+
+    Q4_K_M : cheap 135M, 8B        |  expensive 1.7B
+    Q8_0   : cheap 500M            |  expensive 0.6B
+
+Each quantization appears on **both** sides. So it is not size, not architecture,
+and not the file's own quantization - the three properties a reader could have
+reached for. **No property of the checkpoint that this table can read says which
+side a model will land on.**
+
+That is the strongest form of the floor's case, and it is a stronger claim than
+bimodality: `q5_0`'s cost is not merely non-monotonic in size, it is
+**unpredictable from anything available before measuring**. Which is exactly why
+`KV_CACHE_FLOOR` is a per-model measurement and not a formula, and why a model
+nobody has measured is a model whose side of the split is unknown.
+
+Sorted by size the costs read **0.11, 0.74, 8.53, 8.54, 1.35** - neither
+increasing nor decreasing, pinned as a property rather than as prose.
+
+**The floor holds unchanged across all five.** `q8_0` is the only step cheap on
+every one of them (worst case **+0.40%**), and it is measured on the default tier
+(`current.gguf` -> the 1.7B). `q4_0` costs anywhere from +2.16% to +457%, which is
+the same unpredictability at the next rung down.
+
+**A survivor my own test earned, and the fix.** The first version of
+`test_each_weight_quantization_appears_on_both_sides` asserted that *some*
+quantization straddled the split - which `Q4_K_M` always does, because the 1.7B is
+expensive and Q4_K_M. So it passed even under a mutation that put every `Q8_0`
+model on the expensive side. The mutation run found it; it is per-quantization
+now, and the reason is in the docstring.
+
+`tools/mutations/kv_fourth_model.py`: **5 mutations, 5 caught, 0 survivors, 0
+equivalent.** 86 tests green across the ctxfit, model-requirements and kv-parity
+suites; 43 sets / 359 anchors all match.
