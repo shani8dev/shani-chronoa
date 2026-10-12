@@ -43,6 +43,7 @@ TEST_FILE = "tests/test_asleep_is_reachable.py"
 
 _WIN = "usr/lib/shani-chronoa/shani_chronoa/settings_window/window.py"
 _BRAIN = "usr/lib/shani-chronoa/shani_chronoa/app/brain.py"
+_MODELS = "usr/lib/shani-chronoa/shani_chronoa/gui/surfaces/models.py"
 
 MUTATIONS = [
     {
@@ -151,5 +152,35 @@ MUTATIONS = [
         "expect": ["test_the_guard_is_live_where_it_is_read"],
         "why": "a question starts the server the person asked to leave alone, "
                "which is the whole of what Asleep means",
+    },
+    # -- the Models panel's release, which the reachable choice made a lie ----
+    {
+        "file": _MODELS,
+        "old": "    if chosen is Presence.SLEEPING:\n",
+        "new": "    if False:\n",
+        "label": "the Models panel promises a wake it refuses to perform",
+        "expect": ["test_an_asleep_model_is_not_promised_a_wake"],
+        "why": "Asleep became reachable in the same change, which made the "
+               "panel's one sentence - the next question loads it again - false "
+               "on the one state a person chose deliberately",
+    },
+    {
+        "file": _MODELS,
+        "old": '        set_summary("Nothing to release - it was already stopped. The next "\n'
+               '                    "question loads it again.")\n',
+        "new": '        set_summary("Released the model - its memory is back.")\n',
+        "label": "a release with nothing to release claims a release",
+        "expect": ["test_a_release_with_nothing_to_release_does_not_claim_a_release"],
+        "why": "stop_service() returns '' for an already-inactive unit, so the "
+               "success path cannot tell the two apart on its own",
+    },
+    {
+        "file": _MODELS,
+        "old": '                    + " Press \\"Wake up\\" in Settings > Models > Right now.")\n',
+        "new": '                    + ".")\n',
+        "label": "the asleep refusal names no way out",
+        "expect": ["test_an_asleep_model_is_not_promised_a_wake"],
+        "why": "the panel owns Free-the-model but not Wake-up, which lives in "
+               "Settings - so without the sentence it is a dead end",
     },
 ]

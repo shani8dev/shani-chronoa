@@ -133,12 +133,30 @@ class TestTheModelCanBeStartedFromHere:
         pytest.fail("the 'Right now' row is not in the Settings window")
 
     def test_the_row_has_both_a_run_and_a_free(self, rows):
+        """Both controls, and the release one names the action it will take.
+
+        **This used to assert the literal `"Free the model"`**, which was true
+        only because the label was written once at build time and never read
+        again. With the row refreshed from the real state, the release button
+        carries `Presence.action()` for wherever we are - "Free the model" when
+        the model is loaded, "Go to sleep" once it is released, "Wake up" when
+        asleep - so a machine with no model answering correctly reads "Go to
+        sleep" and the old assertion failed on it. The contract is what is
+        asserted now: the label is *an* action, and it is the right one for the
+        state the row is describing.
+        """
+        from shani_chronoa import local_llm, presence
+
         buttons = [b.get_label() for b in _walk(self._row(rows))
                    if isinstance(b, Gtk.Button)]
         assert "Run the model" in buttons, (
             f"no way to start the model from the one page about models: {buttons}")
-        assert "Free the model" in buttons, (
-            f"the control that releases it went missing: {buttons}")
+        chosen = getattr(rows["__window__"].app, "_presence", None)
+        if chosen is None:
+            chosen = presence.detect(local_llm.is_up)
+        assert chosen.action() in buttons, (
+            f"the control that releases it went missing: {buttons} "
+            f"(expected {chosen.action()!r} for {chosen.name})")
 
     def test_the_run_button_is_not_just_drawn(self, rows):
         """**Presence is not wiring.** A button with no handler is the dead-control

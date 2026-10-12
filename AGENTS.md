@@ -107,6 +107,35 @@ branches like `elif action == "get_title"`, and re-flagged 14. Both are the
 recorded so the next pass does not re-derive them: the leads were cleared by
 reading each handler, not by trusting either scan.
 
+## And the fix it needed: the Models panel's release, made a lie by its own change (2026-10-12)
+
+The entry above is what made `Asleep` reachable. **Reaching it is what turned the
+Models panel's one sentence false.** `_say_release_result` printed
+
+> Released the model - its memory is back, and the next question loads it again.
+
+for every outcome, and once a person can *choose* Asleep, `brain._use_local_server`
+refuses to start a server while the choice holds - so the second half of that
+sentence is false on the one state selected deliberately. The panel offered to
+release a model that was not loaded and promised a wake the next question would
+not perform.
+
+Two more things fell out of opening it, both the same shape:
+
+- **`stop_service()` returns `''` for a unit that was already inactive**, so the
+  success path cannot tell "stopped it" from "there was nothing to stop" - it
+  reported a release either way. `is_up()` is asked first now.
+- **The tooltip made the claim too**, so both were corrected rather than one.
+
+Four sentences for four facts, and the Asleep pair splits again: *stopped and
+stays asleep* when it was running, *already asleep* when it was not. The refusal
+names the way out, because the panel owns Free-the-model but not Wake-up - which
+lives in Settings - and a dead end the person has to find in another window is the
+failure this file records most often.
+
+`tests/test_asleep_is_reachable.py` (+6, 18 in the file) and three more mutations
+in `tools/mutations/asleep_state.py` (12 in the set).
+
 ## "wire all": the generated document nobody regenerated, and the audit that measured nothing (2026-10-12)
 
 Asked to wire every check in this repo that nothing runs. Two `check_*` audit

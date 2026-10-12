@@ -398,3 +398,65 @@ def test_the_guard_is_live_where_it_is_read(monkeypatch):
             f"{choice.name}: _use_local_server returned {used}, expected {expected}")
         assert (started == ["wake"]) is expected, (
             f"{choice.name}: start_service called={started}")
+
+
+# ---------------------------------------------------------------------------
+# the Models panel's release says which of the three it left us in
+# ---------------------------------------------------------------------------
+
+
+def _release(choice, was_resident, why=""):
+    """Drive `_say_release_result` and hand back the one sentence it produced."""
+    from shani_chronoa.gui.surfaces import models
+
+    said = []
+    models._say_release_result(why, choice, was_resident, lambda t: said.append(t))
+    return said[0] if said else ""
+
+
+def test_a_release_that_happened_says_so_and_names_the_wake():
+    said = _release(Presence.ACTIVE, True)
+    assert "Released the model" in said
+    assert "loads it again" in said, said
+
+
+def test_a_release_with_nothing_to_release_does_not_claim_a_release():
+    """`stop_service()` returns `''` for a unit that was already inactive, so the
+    old success path could not tell "stopped it" from "there was nothing to
+    stop" - and reported a release either way."""
+    said = _release(Presence.DROWSY, False)
+    assert "Nothing to release" in said, said
+    assert "Released the model" not in said, said
+
+
+def test_an_asleep_model_is_not_promised_a_wake():
+    """**The defect this closes.** With Asleep now reachable, the panel's one
+    sentence - "the next question loads it again" - became false on the one
+    state a person chose deliberately, because `brain._use_local_server`
+    refuses to start a server while the choice is SLEEPING.
+    """
+    said = _release(Presence.SLEEPING, False)
+    assert "asleep" in said.lower(), said
+    assert "loads it again" not in said, (
+        "the panel promised a wake that `brain` refuses to perform:\n" + said)
+    assert "Wake up" in said, "the refusal named no way out"
+
+
+def test_an_asleep_model_that_was_running_says_it_was_stopped():
+    """Two facts, two sentences: it *was* running and it *stays* stopped."""
+    said = _release(Presence.SLEEPING, True)
+    assert "stopped" in said and "stays asleep" in said, said
+
+
+def test_a_refused_release_is_still_a_refusal():
+    said = _release(Presence.ACTIVE, True, why="systemctl is not available")
+    assert "Could not release" in said, said
+
+
+def test_the_release_tooltip_names_the_asleep_case():
+    """The tooltip made the same claim the sentence did."""
+    from shani_chronoa.gui.surfaces import models
+
+    source = pathlib.Path(models.__file__).read_text(encoding="utf-8")
+    assert "unless the model is asleep" in source, (
+        "the tooltip still promises a wake Asleep refuses")

@@ -489,9 +489,13 @@ def _engine_box(app: Any) -> Gtk.Widget:
     # list a person is looking at when they decide they want the memory back.
     release = Gtk.Button(label="Free the model now", halign=Gtk.Align.START,
                          css_classes=["pill"])
+    # **"It starts again on the next question" is not true of Asleep.** Now that
+    # the choice is reachable, this tooltip promised behaviour `brain` refuses
+    # on the one state the person chose deliberately.
     release.set_tooltip_text(
         "Stop llama-server so its memory is released. It starts again on the "
-        "next question.")
+        "next question - unless the model is asleep, in which case it stays "
+        "stopped until you press Wake up in Settings.")
     release.connect("clicked", lambda _b: threading.Thread(
         target=lambda: _apply_release(app, _set_summary, refresh),
         daemon=True).start())
@@ -534,15 +538,34 @@ def _apply_engine_choice(app: Any, kind: str, set_summary, refresh) -> None:
 
 
 def _apply_release(app: Any, set_summary, refresh) -> None:
+    """Stop the model, and say which of the states that leaves us in.
+
+    **It printed one sentence for all of them.** "Released the model - its
+    memory is back, and the next question loads it again" appeared whether the
+    server had just been stopped, had already been stopped, or was **asleep on
+    purpose** - and in that last case the second half is false, because
+    `brain._use_local_server` refuses to start a server while the choice is
+    SLEEPING. The panel offered to release a model that was not loaded and
+    promised a wake the next question would not perform.
+
+    `stop_service()` returns `''` for a unit that was already inactive, so the
+    success path cannot tell the two apart on its own - `is_up()` is asked first.
+    """
     from gi.repository import GLib
 
     from shani_chronoa import local_llm
+    from shani_chronoa.presence import Presence
 
+    chosen = getattr(app, "_presence", None)
+    if chosen is None:
+        chosen = Presence.ACTIVE
+    was_resident = local_llm.is_up()
     try:
         why = local_llm.stop_service()
     except Exception as exc:  # noqa: BLE001 - reported, never raised
         why = "the release failed: %s" % (exc,)
-    GLib.idle_add(lambda: (_say_release_result(why, set_summary), refresh())[1])
+    GLib.idle_add(lambda: (_say_release_result(why, chosen, was_resident,
+                                               set_summary), refresh())[1])
 
 
 def _say_engine_result(why: str, kind: str, set_summary) -> None:
@@ -554,13 +577,34 @@ def _say_engine_result(why: str, kind: str, set_summary) -> None:
     logger.warning("engine switch to %s refused: %s", kind, why)
 
 
-def _say_release_result(why: str, set_summary) -> None:
-    if not why:
-        set_summary("Released the model - its memory is back, and the next "
+def _say_release_result(why: str, chosen, was_resident: bool, set_summary) -> None:
+    """What actually happened, which is three sentences rather than one.
+
+    A refused release, a release that happened, and a release that had nothing to
+    do - plus Asleep, which is the case the single sentence got wrong.
+    """
+    from shani_chronoa.presence import Presence
+
+    if why:
+        set_summary("Could not release the model: %s" % why)
+        logger.warning("model release refused: %s", why)
+        return
+    if chosen is Presence.SLEEPING:
+        # The choice, not an accident: stopping again is a no-op and the next
+        # question will not undo it. Name the way out, or this is a dead end the
+        # person has to find in another window. Two sentences for two facts -
+        # whether it was running just now, and what happens next.
+        set_summary(("The model is stopped and stays asleep - the next question "
+                     "will not load it." if was_resident else
+                     "The model is already asleep - nothing was running.")
+                    + " Press \"Wake up\" in Settings > Models > Right now.")
+        return
+    if not was_resident:
+        set_summary("Nothing to release - it was already stopped. The next "
                     "question loads it again.")
         return
-    set_summary("Could not release the model: %s" % why)
-    logger.warning("model release refused: %s", why)
+    set_summary("Released the model - its memory is back, and the next "
+                "question loads it again.")
 
 
 def _switch(app: Any, card: Dict[str, Any], box: Gtk.Widget,
