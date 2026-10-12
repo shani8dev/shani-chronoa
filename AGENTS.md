@@ -12761,3 +12761,62 @@ come to mind. The measurement is running now, and the result goes in
 
 The same check would also have found that `SmolVLM2-500M` and `nomic-embed-text`
 are unreadable for real, so those still stand blocked.
+
+## The fourth model settled the shape of the cost, and it is the default tier (2026-10-12)
+
+The 1.7B turned out to be readable all along (see the permission-check entry
+above), so the fourth measurement exists. `Qwen3-1.7B-Q4_K_M.gguf` — and
+`current.gguf` is a symlink to it, so **this is the default tier**, the model a
+default install runs:
+
+| type | SmolLM2-135M | Qwen3-8B | Qwen3-0.6B | **Qwen3-1.7B** |
+|---|---|---|---|---|
+| q8_0 | -0.04% | +0.32% | +0.40% | **+0.30%** |
+| q5_0 | +0.11% | +1.35% | +8.53% | **+8.54%** |
+| q4_0 | +6.08% | +5.81% | +457% | **+38.90%** |
+
+**The 1.7B is the model that says what the cost follows, because it holds the
+weight quantization constant against the 8B.** Both are `Q4_K_M`. Their `q5_0`
+costs are **6.3x apart** (+8.54% against +1.35%). So:
+
+- it is **not size** — the 1.7B is 4.7x smaller than the 8B and costs 6x more;
+- it is **not weight quantization** — identical here, 6x apart;
+- it is **not architecture** — 0.6B, 1.7B and 8B are all Qwen3.
+
+`q5_0`'s cost is **per-model and bimodal**: two models near zero, two near 8.5%.
+That is the sentence the third model could not produce, and it is why the floor is
+a *per-model* rule rather than a formula. A cache type is usable only if it is
+cheap on every model the ladder might be applied to — and a model nobody measured
+is a model whose side of the split is unknown.
+
+**The floor holds, unchanged, and now covers the default configuration.**
+`q8_0` is the only step cheap on all four (worst case +0.40%), and the 1.7B is the
+loaded model — so the floor is now measured on the tier it most directly protects.
+`KV_CACHE_FLOOR` stays `"q8_0"`; `KV_CACHE_MEASUREMENTS` carries four models.
+
+**The control that makes the number trustworthy: the harness reproduces a known
+value.** Before measuring anything new, the same script was re-run against
+SmolLM2-135M, whose figures are already in the table. It returned them **to the
+digit** — 59.1719 / 59.1499 / 59.2380 / 62.7689 — so the corpus, the corpus-copy
+count, the context, the thread count and the stderr parse are all byte-identical
+to the three earlier runs, and the 1.7B row is comparable with them. A new
+measurement taken with an uncalibrated harness is not comparable with anything.
+
+`tools/mutations/kv_fourth_model.py`: 3 mutations, 3 caught, 0 survivors —
+including the fourth record being deleted, which is caught only by a count
+(`len(per_model) >= 4`), because deleting it leaves three models and a green
+suite with the bimodality reading silently reverted to a size trend. Renaming one
+test left two stale anchors in `kv_floor.py`, reported as survivors that "failed
+for another reason" rather than as clean passes — the reason a mutation set whose
+anchor no longer exists is an error to fix, not a survivor to explain.
+
+**Two things measured that are *not* the fourth model's finding, recorded so
+nobody re-derives them:**
+- The load hypothesis for the three full-suite failures is **disproved**: the
+  `TestAgainstRealProcesses` ordering tests pass 19 for 19 under 4x CPU load, so
+  CPU contention is not the cause. What the three failures were is **not known**,
+  and I am not recording a guess.
+- The 1.7B and 0.6B agreeing to two decimal places (+8.53% / +8.54%) is noted and
+  **not explained**. It is a coincidence-shaped fact about two models 3x apart in
+  size and differently quantized, and reading a mechanism into it would be the
+  confident wrong answer.

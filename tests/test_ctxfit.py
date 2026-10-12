@@ -492,7 +492,7 @@ class TestTheFloorReproducesOnASecondModel:
     establish: the ordering, and that `q4_0` is the cliff on both.
     """
 
-    def test_the_ordering_is_the_same_on_both_models(self):
+    def test_the_ordering_holds_on_every_model(self):
         from shani_chronoa import ctxfit
         per_model = ctxfit.KV_CACHE_MEASUREMENTS
         # Three, not two, and the number is the point rather than a round one.
@@ -501,10 +501,20 @@ class TestTheFloorReproducesOnASecondModel:
         # overturned that. Removing it does not error anywhere; the floor simply
         # goes back to being justified by the two that were luck, so this is the
         # assertion that catches a deletion.
-        assert len(per_model) >= 3, (
-            f"the floor at q8_0 rests on three models including Qwen3-0.6B, "
-            f"where q5_0 costs +8.53%; with fewer it reverts to the two-model "
-            f"reading that put it at q5_0")
+        # Four, and the fourth is the one that settled the *shape* of the cost.
+        # With three models q5_0 read as "8.5% on the small one, 1.35% on the big
+        # one" - a size trend. Qwen3-1.7B-Q4_K_M broke that reading: it is the
+        # same weight quantization as the 8B and costs **+8.54%** against the 8B's
+        # **+1.35%**, a 6x difference with the quantization held constant. So the
+        # cost is bimodal and per-model, not a trend - and a model nobody measured
+        # is a model whose side of the split is unknown. The 1.7B is also
+        # `current.gguf`, the default tier, so this is the model the floor protects
+        # most directly. Dropping its record leaves three models and a test that
+        # still passes, which is why the count is four.
+        assert len(per_model) >= 4, (
+            f"the floor at q8_0 rests on four models, including Qwen3-1.7B "
+            f"(q5_0 +8.54%) and Qwen3-0.6B (+8.53%), which together show the cost "
+            f"is bimodal rather than a size trend; {len(per_model)} models measured")
         for model, costs in per_model.items():
             # Non-decreasing from `q8_0` on - not monotonic including `f16`.
             # `q8_0` measured -0.04% on the small model, i.e. *better* than
@@ -558,6 +568,78 @@ class TestTheFloorReproducesOnASecondModel:
             assert costs and max(costs) > worst_q8 * 3, (
                 f"{excluded} is excluded from the ladder but never costs more "
                 f"than q8_0 does, so the exclusion is not earning its keep")
+
+
+class TestTheFourthModelSettlesTheShapeOfTheCost:
+    """The finding the fourth measurement produced, which is stronger than the
+    one the third produced.
+
+    With three models, `q5_0` read as a **size trend**: 0.11% at 135M, 1.35% at
+    8B - and then 8.53% at 0.6B, which already broke monotonicity. Three points
+    cannot say *what* the cost follows.
+
+    Qwen3-1.7B-Q4_K_M settles it by holding the weight quantization constant:
+    it and the 8B are both `Q4_K_M`, and their `q5_0` costs are **6.3x apart**.
+    So the cost is not a function of size (the 1.7B is smaller and far more
+    expensive) and not of weight quantization (identical here, 6x apart). It is
+    **per-model and bimodal** - two models near zero, two near 8.5% - which is
+    what makes the floor a per-model question rather than a formula.
+    """
+
+    def test_the_same_weight_quantization_costs_six_times_apart(self):
+        from shani_chronoa import ctxfit
+        a = ctxfit.KV_CACHE_MEASUREMENTS["qwen3-1.7b-q4_k_m"]["q5_0"]
+        b = ctxfit.KV_CACHE_MEASUREMENTS["qwen3-8b-q4_k_m"]["q5_0"]
+        assert a > b * 3, (
+            f"the 1.7B and the 8B are both Q4_K_M, so weight quantization alone "
+            f"would predict a similar cost; they measure {a}% and {b}%, a "
+            f"{a / b:.1f}x spread, so the cost is per-model rather than derived "
+            f"from the file's quantization")
+        # And the ordering a size trend would predict is inverted: the smaller
+        # model is the expensive one.
+        assert a > b, (
+            "the 1.7B is smaller than the 8B and costs more at q5_0, which is "
+            "the direction a size trend would not predict")
+
+    def test_the_floor_still_holds_with_the_fourth_model(self):
+        """The floor is unchanged, and the fourth model is not an exemption."""
+        from shani_chronoa import ctxfit
+        worst = max(c[ctxfit.KV_CACHE_FLOOR]
+                    for c in ctxfit.KV_CACHE_MEASUREMENTS.values())
+        assert worst <= 1.0, (
+            f"the floor step {ctxfit.KV_CACHE_FLOOR} costs {worst:.2f}% on some "
+            f"model, so it is not cheap everywhere the ladder is applied")
+        assert ctxfit.KV_CACHE_FLOOR == "q8_0"
+
+    def test_the_default_tier_is_one_of_the_expensive_ones(self):
+        """Why this matters beyond the number: the 1.7B is the loaded model.
+
+        `current.gguf` is a symlink to Qwen3-1.7B, so `q5_0` at +8.54% is the
+        cost on the tier a default install runs - the case where an untested
+        floor would have been applied without anyone choosing it.
+        """
+        import os
+        from shani_chronoa import ctxfit
+        from shani_chronoa import local_llm
+        # conftest redirects XDG_DATA_HOME to a scratch home, so the models
+        # installed once into this repo's git-ignored cache are invisible unless
+        # they are linked in - the same trap test_tts_loudness.py records, where
+        # the engines "skipped on a box that has them".
+        data_home = Path(os.environ["XDG_DATA_HOME"])
+        real = Path(__file__).resolve().parent.parent / "cache" / "data-home" / "shani-chronoa" / "llm"
+        link = data_home / "shani-chronoa" / "llm"
+        if real.is_dir() and not link.exists():
+            link.parent.mkdir(parents=True, exist_ok=True)
+            os.symlink(real, link)
+        current = local_llm.model_dir() / "current.gguf"
+        if not current.exists():
+            import pytest
+            pytest.skip("no model installed on this machine")
+        name = current.resolve().name.lower()
+        assert any(k.split("-q")[0] in name or name[:8] in k
+                   for k in ctxfit.KV_CACHE_MEASUREMENTS), (
+            f"the loaded model {name} is not among the measured ones, so the "
+            f"floor's worst case does not describe the model in use")
 
 
 class TestTheFloorsCost:

@@ -133,6 +133,7 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 KV_CACHE_MEASUREMENTS: "dict[str, dict[str, float]]" = {
     "smollm2-135m-q4_k_m": {"f16": 0.0, "q8_0": -0.04, "q5_0": 0.11, "q4_0": 6.08},
     "qwen3-0.6b-q8_0": {"f16": 0.0, "q8_0": 0.40, "q5_0": 8.53, "q4_0": 457.58},
+    "qwen3-1.7b-q4_k_m": {"f16": 0.0, "q8_0": 0.30, "q5_0": 8.54, "q4_0": 38.9},
     "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 5.81},
 }
 

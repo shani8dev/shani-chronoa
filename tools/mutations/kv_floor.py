@@ -62,7 +62,7 @@ SECOND_MODEL_ORDER = {
     # q8_0 made worse than q5_0 - i.e. a *lighter* compression costing more than a
     # heavier one, which the ladder's whole walk assumes cannot happen.
     "label": "a lighter compression is recorded as costing more",
-    "expect": ["test_the_ordering_is_the_same_on_both_models"],
+    "expect": ["test_the_ordering_holds_on_every_model"],
 }
 
 MUTATIONS = MUTATIONS + [SECOND_MODEL, SECOND_MODEL_ORDER]
@@ -78,7 +78,7 @@ THIRD_MODEL = {
     # silently revives a floor the third model overturned.
     "label": "the third model's measurement is deleted",
     "expect": ["test_the_floor_is_the_only_step_cheap_on_every_model",
-               "test_the_ordering_is_the_same_on_both_models"],
+               "test_the_ordering_holds_on_every_model"],
 }
 
 BACK_TO_Q5 = {
