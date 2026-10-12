@@ -141,5 +141,14 @@ class AskingMixin:
         # a question with nothing to answer.
         self._input_placeholder.set_label(_COMPOSER_PLACEHOLDER)
         self._on_input_changed(self._input_entry.get_buffer())
-        self._input_entry.set_placeholder_text("Type a message…")
+        # **The `set_placeholder_text` line that used to be here was the same
+        # bug as the one above, one line down**, and it was still in the tree
+        # after that fix: `_input_entry` is a `Gtk.TextView`, so it raised
+        # `AttributeError` here too - *after* `resolve(answer)` had already run,
+        # which is why every test still passed. The visible damage was that
+        # `grab_focus()` on the next line never ran, so after typing an answer
+        # the caret went nowhere.
+        #
+        # Found by a static sweep for Entry-only methods called on TextViews
+        # across the tree, after finding three of them in one test file.
         self._input_entry.grab_focus()

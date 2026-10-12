@@ -17118,3 +17118,37 @@ often than it means "fix the code"**, and the third time is the one to stop
 re-deriving. What the trap costs is not the clean - it is the confidence that
 something in the repo just broke.
 
+
+## The same bug, three more times - found by sweeping for it rather than waiting (2026-10-12)
+
+After fixing `ask_user`'s placeholder, a static sweep for **methods that exist
+on `Gtk.Entry` but not on `Gtk.TextView`** found two more in shipped code:
+
+| site | what | effect |
+|---|---|---|
+| `asking.py` `_resolve_question` | `set_placeholder_text` **after** `resolve(answer)` | raised, so `grab_focus()` never ran |
+| `questions.py` `_show` | the same call | **`ask_for_text` was dead**, same silent `resolve("")` |
+
+The first is the more instructive one: **every test passed with it in place.**
+`resolve(answer)` runs on an earlier line, so the answer got through, the row
+closed, the assertions were satisfied - and then the function raised and the
+caret went nowhere. A test that only checks the answer cannot see an exception
+after the answer.
+
+`ask_for_text` had **no test at all**, which is how a second dead path survived
+next to a first one. `tests/test_ask_for_text.py` covers it, including a control
+that the caller is genuinely *blocked* - "the placeholder was set" passes
+trivially on a build where the prompt flashed and the tool was answered at once.
+
+**It uses no `app.run()`.** The presenter hands work to `GLib.idle_add` and
+`MainContext.iteration(False)` drains it one source at a time. This is not a
+style preference: `test_slash_menu_opens` measured that an exception raised
+inside a main loop *aborts the process* under pytest rather than propagating.
+
+Both mutations caught: restoring either GTK3-only call fails tests.
+
+**The sweep itself is the reusable part.** Four methods in a row that do not
+exist, three of them invented at the keyboard and "corrected" into the next
+wrong API, is what a *check* is for. `hasattr(Gtk.TextView(), "set_text")` is
+False and costs nothing; the traceback's `Did you mean` suggestion is how
+`do_insert_text` became the next wrong guess.

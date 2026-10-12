@@ -135,8 +135,20 @@ def make_text_presenter(window_getter):
             window._question_widgets.append(label)
             window._question_row.append(label)
             window._question_row.set_visible(True)
-            window._input_entry.set_placeholder_text(
+            # **The composer's placeholder label, not
+            # `_input_entry.set_placeholder_text`.** Exactly the bug fixed in
+            # `asking.py` for the button-question path, repeated here for the
+            # *text* prompt - which meant `ask_for_text` was dead in the same
+            # silent way: the `except` below logged "text prompt could not be
+            # put on screen" and resolved `""`.
+            #
+            # The composer is a `Gtk.Overlay` holding a `Gtk.Label` placeholder
+            # that `_on_input_changed` shows whenever the buffer is empty, so
+            # that label is the placeholder - there is nothing to set on the
+            # entry.
+            window._input_placeholder.set_label(
                 placeholder or "Type your answer…")
+            window._on_input_changed(window._input_entry.get_buffer())
             # `_resolve_question` clears the row and resets the placeholder when
             # the typed answer arrives, so this only has to hand it the answer.
             window._pending_question = resolve
