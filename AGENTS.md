@@ -14691,3 +14691,45 @@ file turns it green with the source byte-identical afterwards (`cmp`). 309
 surface methods across 35 modules, none unreachable, and that count is asserted
 so a scan over a missing path cannot pass forever.
 
+
+## An "unwired" finding that was a 90-second snapshot of somebody wiring it (2026-10-12)
+
+`grep -rn "code_hl" --include=*.py .` returned **nothing**, about a 400-line
+module. Every check the repo prescribes was run and every one agreed: no
+importer, no string-held reference, no `usr/bin/` launcher, no test, no registry
+marker. The write-up was one sentence from being *"built and wired to nothing,
+again."*
+
+It is wired. `gui/blocks.py:54` imports it and `:417`/`:488` call
+`code_hl.highlight(...)`, and `tests/test_code_highlighting.py` exists. The
+mtimes say what happened:
+
+    blocks.py   19:41:38   <- the import landed here
+    test file   19:42:57
+    code_hl.py  19:43:08
+    my grep     before 19:41:38
+
+**I measured a tree that was being edited underneath me, and the conclusion I
+drew was true for ninety seconds.** The other session wrote the module, then
+wrote the wiring, then wrote the test — and I looked in the middle of that.
+
+### The rule, and it is not "re-check before recording"
+
+The checks were all correct and all agreed; re-running the grep thirty seconds
+later would have been enough. The real hazard is what the finding *looks like*:
+**an unwired module is the single most common defect in this repository, so a
+measurement that supports it is believed without a second look.** A plausible
+finding about a well-known problem is the easiest one to ship unchecked, and
+this is the fourth time this session a confident reading was contradicted by
+re-measuring.
+
+Two habits follow, and the second is the one that generalises:
+
+- **Timestamp any claim about the tree.** A finding with no time on it cannot be
+  told from a stale one, and "no reference anywhere" is meaningless without "as
+  of when".
+- **An untracked file being actively written is a tree in motion.** Its wiring
+  is *the thing being written*, so an absence measured against it is measuring
+  the author's progress, not the code. For a file whose mtime is minutes old,
+  "unwired" is a claim about the session, not the repository.
+
