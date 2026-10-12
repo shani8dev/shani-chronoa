@@ -30,6 +30,7 @@ test touches the real package.
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
@@ -564,3 +565,118 @@ class TestNoSetIsLeftBehind:
             "a checked-in mutation set reports a survivor or an error. Fix the "
             "set or the code it aimed at - do not delete the set:\n" + out.stdout)
         assert "0 survivors" in out.stdout, out.stdout
+
+
+class TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne:
+    """A mutation that names no test must say it is an equivalent mutant.
+
+    **Found by running the full inventory** (2026-12), which reported three
+    survivors. One was `kv_parity`'s witnesses skipping for want of an
+    environment variable, and the other two were *documented equivalents* that
+    explained themselves in a **comment** where `tools/mutate.py` has supported an
+    `equivalent` key with a `why` all along - ten sets use it, `history.py`
+    among them.
+
+    So the runner was right about the tally and wrong about what it meant: a
+    SURVIVOR line cannot distinguish a guard nobody wrote a test for from a guard
+    that is provably untestable, and only one of those is a finding.
+
+    The prose was not lost - both reasons are already written out in full, which
+    is what makes this mechanical - it was simply in a place no tool reads.
+    """
+
+    @staticmethod
+    def _mutations():
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        for path in sorted((root / "tools" / "mutations").glob("*.py")):
+            if path.name == "harness.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Dict) and node.keys):
+                    continue
+                entry = {}
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        entry[key.value] = value
+                if "label" in entry and "file" in entry:
+                    yield path.name, entry
+
+    @staticmethod
+    def _witnesses(entry):
+        expect = entry.get("expect")
+        if not isinstance(expect, ast.List):
+            return []
+        return [e.value for e in expect.elts if isinstance(e, ast.Constant)]
+
+    def test_no_mutation_is_neither_witnessed_nor_flagged_equivalent(self):
+        unwitnessed = [
+            f"{name}: {entry['label'].value}"
+            for name, entry in self._mutations()
+            if not self._witnesses(entry) and not entry.get("equivalent")
+        ]
+        assert not unwitnessed, (
+            f"{len(unwitnessed)} mutation(s) name no test and are not flagged "
+            f"equivalent, so the inventory reports them as SURVIVORS - "
+            f"indistinguishable from a guard with no witness at all:\n  "
+            + "\n  ".join(unwitnessed)
+            + "\n\nEither name a test that fails without it, or set "
+            '"equivalent": True with a "why" - the runner has supported that key '
+            "since it learned to tell the two apart, and a reason written in a "
+            "comment is one no tool reads."
+        )
+
+    def test_an_equivalent_mutant_states_its_reason(self):
+        """A flag with no reason is the claim this file exists to distrust.
+
+        `tools/mutate.py` prints `EQUIVALENT [set] label` and then the `why`. An
+        empty one leaves a reader with an assertion and no argument, which is the
+        shape of a promise nobody can check.
+        """
+        bare = [
+            f"{name}: {entry['label'].value}"
+            for name, entry in self._mutations()
+            if entry.get("equivalent")
+            and not (isinstance(entry.get("why"), ast.Constant)
+                     and entry["why"].value.strip())
+        ]
+        assert not bare, (
+            f"{len(bare)} equivalent mutant(s) carry no reason:\n  "
+            + "\n  ".join(bare)
+        )
+
+    def test_the_check_can_be_made_to_fail(self, tmp_path):
+        """The control. Without it this is a gate nobody has ever seen refuse."""
+        import textwrap
+        probe = tmp_path / "mutations"
+        probe.mkdir()
+        (probe / "probe.py").write_text(textwrap.dedent('''
+            MUTATIONS = [
+                {
+                    "file": "x.py",
+                    "label": "a mutation nobody witnessed and nobody explained",
+                    "expect": [],
+                },
+            ]
+        ''').strip(), encoding="utf-8")
+        offending = []
+        for path in sorted(probe.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not (isinstance(node, ast.Dict) and node.keys):
+                    continue
+                entry = {}
+                for key, value in zip(node.keys, node.values):
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        entry[key.value] = value
+                if "label" in entry and "file" in entry:
+                    expect = entry.get("expect")
+                    names = ([e.value for e in expect.elts
+                              if isinstance(e, ast.Constant)]
+                             if isinstance(expect, ast.List) else [])
+                    if not names and not entry.get("equivalent"):
+                        offending.append(entry["label"].value)
+        assert offending, (
+            "an unwitnessed, unflagged mutation was NOT reported, so this gate "
+            "would pass over exactly the defect it exists to catch"
+        )

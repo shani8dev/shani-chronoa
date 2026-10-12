@@ -69,6 +69,17 @@ MUTATIONS = [
         # layout, not the load-bearing one, and no test can fail on removing it
         # without inventing an output shape the tool does not produce. It is
         # kept for that reason and named here rather than left looking tested.
+        # **`equivalent: True` was missing here for the same reason as
+        # `privacy_device.py`**: the reason was written in prose where the runner
+        # wants a key, so the inventory reported a documented equivalent as a
+        # SURVIVOR.
+        "equivalent": True,
+        "why": "pidstat prints its Average block after a blank line and it carries "
+               "no `PID` header, so `_parse_table` already rejects it on its own "
+               "terms. The guard is defence in depth against a different pidstat "
+               "layout, not the load-bearing check, and no test can fail on "
+               "removing it without inventing an output shape the tool does not "
+               "produce",
         "expect": [],
     },
 

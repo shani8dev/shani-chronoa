@@ -95,6 +95,19 @@ MUTATIONS = [
         # that name it (`device=""` and `device="   "`) pin the *behaviour*, and
         # `test_a_whitespace_value_is_the_omission` is the one a future reader
         # should not remove to make this green.
+        #
+        # **`equivalent: True` was missing here and the prose above was doing the
+        # runner's job.** `tools/mutate.py` has supported an `equivalent` key with
+        # a `why` since it learned to tell a kept equivalent from a survivor - ten
+        # sets use it, `history.py` among them - and this one explained itself in a
+        # comment instead. The full inventory therefore reported it as a
+        # SURVIVOR, indistinguishable from a guard with no witness at all, which
+        # is the one reading a mutation set must never invite.
+        "equivalent": True,
+        "why": "`\"\" in \"any camera name\"` is true for every camera, so the "
+               "mutant's `device is None` check hands the matcher an empty string "
+               "and gets every camera back - the same outcome as the omission, "
+               "arrived at by an accident of substring semantics",
         "expect": [],
     },
     {
