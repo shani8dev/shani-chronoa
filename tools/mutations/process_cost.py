@@ -59,7 +59,6 @@ MUTATIONS = [
     },
     {
         "label": "Average rows are parsed as if they were samples",
-        "equivalent": True,
         "file": _SKILL,
         "old": '        if line.startswith("Linux ") or line.startswith("Average:"):',
         "new": '        if line.startswith("Linux "):',

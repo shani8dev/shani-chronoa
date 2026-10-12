@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ast
 import os
+import textwrap
 import subprocess
 import sys
 from pathlib import Path
@@ -1544,3 +1545,97 @@ class TestAWitnessThatNamesNothingIsAnErrorNotALogLine:
     def test_a_set_whose_file_has_no_witnesses_is_not_flagged(self, tmp_path):
         out = self._set(tmp_path, [])
         assert "STALE WITNESS" not in out.stdout, out.stdout
+
+
+class TestNoMutationSetHasADuplicateKey:
+    """No entry in any set may name the same key twice.
+
+    **This is the defect class AGENTS.md records three times already** - the
+    `browse` help label killed by a duplicate in `capabilities._GROUPS`, the three
+    entries in one table, and a duplicate key silently killing a label - and
+    **pyflakes catches two of the three shapes and not this one**, which is how
+    three live duplicates sat in this repository's own mutation sets.
+
+    Measured, on this box's pyflakes:
+
+        GROUPS = {"browse": "one", "browse": "another"}
+            -> dictionary key 'browse' repeated with different values
+        {"equivalent": True, "equivalent": True, ...}
+            -> nothing at all
+
+    pyflakes warns only when the two values **differ**. Two identical
+    `"equivalent": True,` lines are therefore invisible to the declared lint, and
+    a duplicate key with the same value is still a duplicate: the later occurrence
+    wins silently, and the reader cannot tell which one the author meant.
+
+    **And the three were produced by two sessions finding the same thing.** This
+    session's `e21d8a2` flagged `privacy_device` and `process_cost` as documented
+    equivalents with a reason; the concurrent session found the same three
+    mutations independently and added the same flag on top, in `b8818f4`. Neither
+    was wrong, and `history.py` was flagged twice by the same collision. The
+    resulting duplicates were harmless *and* undetectable, which is the exact
+    combination this class of defect needs.
+    """
+
+    @staticmethod
+    def _entries():
+        root = _SET_DIR
+        for path in sorted(root.glob("*.py")):
+            if path.name == "harness.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Dict) and node.keys):
+                    continue
+                keys = [k.value for k in node.keys
+                        if isinstance(k, ast.Constant)]
+                if "label" in keys:
+                    yield path.name, node, keys
+
+    def test_no_duplicate_key_in_any_set(self):
+        """**The check.** AST, so a duplicate is a duplicate whether or not the two
+        values differ - which is the whole reason a lint that compares values
+        cannot do this job."""
+        bad = []
+        for name, node, keys in self._entries():
+            seen, dupes = set(), set()
+            for key in keys:
+                if key in seen:
+                    dupes.add(key)
+                seen.add(key)
+            if dupes:
+                bad.append(f"{name}: {sorted(dupes)} at line {node.lineno}")
+        assert not bad, (
+            f"{len(bad)} mutation entry/entries name a key twice. The later value "
+            f"wins silently and pyflakes cannot see it when both values are the "
+            f"same, so this is one edit away from a flag that stops applying:\\n  "
+            + "\\n  ".join(bad))
+
+    def test_the_check_would_catch_a_deliberate_duplicate(self, tmp_path):
+        """**The control.** An absence presented as a pass is the same defect as an
+        absence presented as a failure, so the check has to be shown to bite on a
+        set that repeats a key - with identical values, the shape pyflakes misses.
+        """
+        probe = tmp_path / "probe.py"
+        probe.write_text(textwrap.dedent('''
+            MUTATIONS = [
+                {
+                    "file": "x.py",
+                    "label": "a mutation that names a key twice",
+                    "equivalent": True,
+                    "equivalent": True,
+                    "expect": [],
+                },
+            ]
+        ''').strip(), encoding="utf-8")
+        keys = None
+        for node in ast.walk(ast.parse(probe.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Dict) and node.keys:
+                keys = [k.value for k in node.keys if isinstance(k, ast.Constant)]
+                if "label" in keys:
+                    break
+        assert keys is not None
+        assert len(keys) != len(set(keys)), (
+            "the duplicate-key check did not notice a deliberately duplicated "
+            "key with identical values, so it is the lint that already exists and "
+            "not a check that can see this shape")

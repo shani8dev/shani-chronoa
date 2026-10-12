@@ -74,7 +74,6 @@ MUTATIONS = [
         # and then skips it. Both lose the same call.
         "label": "a partial first line is not dropped, only its first byte",
         "equivalent": True,
-        "equivalent": True,
         "why": "a record with its first byte removed does not parse, and the "
                "reader already skips unparseable lines - so this reaches the "
                "same set of records by a different route.",
