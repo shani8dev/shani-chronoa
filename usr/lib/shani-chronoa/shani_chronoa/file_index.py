@@ -378,26 +378,29 @@ def index_directory(root, progress=None, embed=True, db=None):
             db.commit()
         db.commit()
 
-        # Rows whose file has gone **[within this root, not within the index].**
+        # Rows whose file has gone **[anywhere in the index, not just this root].**
         #
-        # The first version deleted every row the walk did not see, which is a
-        # second indexing run **erasing the first one's directory**: index
-        # `~/notes`, then index `~/work`, and `notes` is gone from the shelf -
-        # silently, because nothing reports a deletion and the count still looks
-        # like a working index.
+        # The first version removed every row *the walk did not see*, which is a
+        # second indexing run erasing the first one's directory: index
+        # `~/notes`, then index `~/work`, and `notes` is gone - silently.
         #
-        # And `search()` had the same scope question answered the other way
-        # round: it read every row in the table, so with `path=` naming one
-        # directory it answered about *all* of them. Index scope and search scope
-        # disagreed, which is the shape where "N files under X" is a number about
-        # something other than what gets searched.
-        seen_in_root = {path for path in seen
-                        if _under(path, root_resolved)}
-        gone = [r[0] for r in db.execute("SELECT path FROM docs")
-                if r[0] not in seen_in_root and _under(r[0], root_resolved)]
-        for gone_path in gone:
-            db.execute("DELETE FROM docs WHERE path=?", (gone_path,))
-            db.execute("DELETE FROM docs_fts WHERE path=?", (gone_path,))
+        # The second version (mine) confined the deletion to the root and
+        # **forgot nothing at all**, which is worse in the way only real use
+        # shows: a directory the person deletes keeps its rows forever, so
+        # `status()` counts files that no longer exist and a search returns
+        # paths that resolve to nothing. Measured after fixing the first defect
+        # that way - the suite had passed until it was run a second time, which
+        # is what a machine does over days.
+        #
+        # The rule that satisfies both: delete a row when its file is genuinely
+        # absent, and for no other reason. That is independent of which root was
+        # indexed, so indexing `~/work` prunes `~/notes` the day it is deleted
+        # and leaves it alone while it still exists.
+        for row in db.execute("SELECT path FROM docs").fetchall():
+            if _still_there(row[0]):
+                continue
+            db.execute("DELETE FROM docs WHERE path=?", (row[0],))
+            db.execute("DELETE FROM docs_fts WHERE path=?", (row[0],))
             updated += 1
         db.commit()
 
@@ -507,6 +510,21 @@ def search(root, query: str, limit: int = 10, embed=True, db=None):
     finally:
         if owns:
             db.close()
+
+
+def _still_there(path: str) -> bool:
+    """Whether the file a row names is still on disk.
+
+    A row whose file is gone is a lie the index tells on every search: it counts
+    in `status()` and it comes back from `_fts_pattern` with an excerpt, for a
+    path that resolves to nothing. The correct reason to drop a row is this, and
+    no other reason - which is what lets a second indexing run prune a deleted
+    directory while leaving one that still exists entirely alone.
+    """
+    try:
+        return pathlib.Path(path).is_file()
+    except OSError:
+        return False
 
 
 def _under(path: str, root: pathlib.Path) -> bool:

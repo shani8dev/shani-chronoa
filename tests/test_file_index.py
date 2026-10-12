@@ -1,5 +1,13 @@
 """The file knowledge base, against real files and a real sqlite index.
 
+**Every test in this file gets its own index.** `_connect()` resolves
+`index_path()` per call, and `index_directory`, `search` and `status` all call it
+with no path - so without the autouse fixture below a test that indexes three
+files leaves them for the next, which then counts them. It never showed until
+two more classes landed here: a fresh run of the whole file went **14 red** while
+every test passed on its own, and `status()` returned eight files from a
+*previous run's* temporary directory for a test that had just indexed two.
+
 The design question this file pins: **how does the answer degrade when there is
 no embedding model?** `local_embed` needs a 146 MB download and a llama.cpp
 server; a fresh Arch box has neither, and this dev machine has no CUDA at all. So
@@ -22,6 +30,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]
                        / "usr" / "lib" / "shani-chronoa"))
 
 from shani_chronoa import file_index as F  # noqa: E402
+
+@pytest.fixture(autouse=True)
+def _own_index(tmp_path, monkeypatch):
+    """Every test gets its own index. See the note at the top of this file."""
+    monkeypatch.setattr(F, "index_path", lambda: tmp_path / "one-index.db")
+
 
 TEXT = {
     "network.txt": "The wifi box in the study drops the link every evening around six.\n",
@@ -743,3 +757,55 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
     def test_status_with_no_root_still_reports_everything(self, tmp_path):
         notes, work, db = self._two(tmp_path)
         assert F.status(db=db)["indexed"] == 2
+
+    def test_a_deleted_directory_is_forgotten_and_a_live_one_is_not(self, tmp_path):
+        """**The defect my own scope fix introduced, and only a second run showed.**
+
+        Confining the deletion to the root being indexed stopped a second run
+        erasing the first one's directory - and forgot nothing at all. A directory
+        the person deletes kept its rows forever, so `status()` counted files that
+        no longer exist and a search returned paths resolving to nothing.
+
+        The suite passed until it was run **twice**, which is what a machine does
+        over days: 14 tests went red in the second pass, all of them reading a
+        row count polluted by earlier runs' temp directories.
+
+        The rule that satisfies both: a row is dropped when its file is genuinely
+        absent, and for no other reason.
+        """
+        notes, work = tmp_path / "notes", tmp_path / "work"
+        notes.mkdir()
+        work.mkdir()
+        (notes / "a.txt").write_text("the wifi box")
+        (work / "c.txt").write_text("the deploy")
+        db = F._connect()
+
+        F.index_directory(notes, embed=False, db=db)
+        assert F.status(db=db)["indexed"] == 1, F.status(db=db)
+
+        # **Indexing a second directory leaves the first one entirely alone.**
+        F.index_directory(work, embed=False, db=db)
+        assert F.status(db=db)["indexed"] == 2, F.status(db=db)
+
+        # **And deleting the first prunes it, at the next index of anything.**
+        (notes / "a.txt").unlink()
+        F.index_directory(work, embed=False, db=db)
+        state = F.status(db=db)
+        assert state["indexed"] == 1, state
+        assert state["root"] == str(work), state
+
+        hits, _how = F.search(str(tmp_path), "wifi box", embed=False, db=db)
+        assert hits == [], f"a deleted file was found: {[h['path'] for h in hits]}"
+
+    def test_an_empty_row_set_is_not_a_reason_to_delete_anything(self, tmp_path):
+        """The other direction: a walk that finds nothing is not permission to
+        empty the index."""
+        live = tmp_path / "live"
+        live.mkdir()
+        (live / "keep.txt").write_text("still here")
+        db = F._connect()
+        F.index_directory(live, embed=False, db=db)
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        F.index_directory(empty, embed=False, db=db)
+        assert F.status(db=db)["indexed"] == 1, F.status(db=db)
