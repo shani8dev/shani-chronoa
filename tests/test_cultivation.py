@@ -5,8 +5,6 @@ and nothing imported it. A module that nothing can reach is green on everything,
 so these tests exist to make it reachable *and* to pin the one property the
 whole design turns on.
 """
-import pytest
-
 from shani_chronoa import cultivation
 
 
