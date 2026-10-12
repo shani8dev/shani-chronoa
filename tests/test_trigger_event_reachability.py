@@ -246,6 +246,48 @@ def _clear_calls():
     _CALLS.clear()
 
 
+@pytest.fixture(autouse=True)
+def _own_runtime_dir(tmp_path, monkeypatch):
+    """**A real lock, held by a real assistant, stopped every test in this file.**
+
+    `runner_lock.lock_path()` resolves `$XDG_RUNTIME_DIR/shani-chronoa/triggers.lock`
+    and `holds()` *takes* it when it is free, returning False only when another
+    process already holds it. So `TestTheRealLoopEvaluatesIt` cannot pass on any
+    machine where Chronoa is actually running - which is every machine with a
+    user - and it failed with `expected exactly one dispatch, got []`.
+
+    Measured, not reasoned: with the flock held in another process this tree
+    gives **6 failed, 131 passed**; with it free, **137 passed**. So the suite
+    was green only because nothing happened to hold the lock at that moment,
+    which is a fixture describing the machine it ran on - the `fake_bin` `PATH`
+    lesson, on a variable that is an OS lock rather than a directory.
+
+    A per-test directory gives this file a lock nobody else holds. **It does not
+    hand the lock to everything**, which is the over-fix that had to be avoided:
+    `test_background_mode.py`'s `test_the_scheduler_leaves_the_rules_alone_without_
+    the_lock` monkeypatches `runner_lock.holds` directly and never touches the
+    filesystem, so it still forces the answer both ways and a fixture that
+    granted the lock could not have silenced it. Verified by mutation: removing
+    the gate from `scheduler._poll_event_rules` turns that control red.
+
+    **Why this is per-file and not in `conftest.py`'s `_hermetic_env`.** The
+    general fix was written there first and measured as **54 failed, 148 passed**
+    across the panel suites: the module-scoped `broadway` fixture reads
+    `XDG_RUNTIME_DIR` once at module setup and spawns `gtk4-broadwayd` with its
+    socket there, while this function-scoped fixture moved the variable before
+    the subprocess ran - so the socket and the client were in different
+    directories and `Adw.init()` failed with `invalid (NULL) pointer instance`.
+    A module-scoped fixture and a function-scoped autouse fixture cannot share
+    one variable. Making the general fix correct means giving the broadway
+    fixtures a scope contract they do not have, which touches files another
+    session is editing; this file has no display fixture and is the whole of the
+    affected population.
+    """
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700, exist_ok=True)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+
+
 def _engine() -> EventEngine:
     return EventEngine(store=EventRuleStore(), dispatch=_recorder)
 
