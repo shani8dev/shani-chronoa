@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]
 gi = pytest.importorskip("gi")
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw  # noqa: E402
+from gi.repository import Adw, GLib  # noqa: E402
 
 Adw.init()
 
@@ -131,3 +131,76 @@ class TestTheMixinReachesTheApplication:
         assert "_shutting_down" in source, (
             "the guard is not in `_open_setup`, so the idle that calls it has "
             "no way to know the application is going away")
+
+
+class TestShutdownCancelsWhatActivationQueued:
+    """**The guard at the callee was not enough, and this is the half that was
+    missing.** With only `_open_setup` refusing, `chunk_ad` segfaulted a second
+    time from the second idle at line 662 - same traceback, different lambda.
+    A guard on one path is one check on one path; a cancelled source is cancelled
+    on every path, including the ones nobody has thought of yet.
+    """
+
+    def test_the_recorder_remembers_every_source(self):
+        """**The lambdas return False, and that is load-bearing.** Queuing a
+        source that stays pending leaves it on the default main context, which
+        the next test that iterates blocks on forever - measured, by this file
+        hanging after six tests. An idle in production is the same: one that
+        never answers is a loop that never idles."""
+        app = _app_stub(_pending_idles=set())
+        try:
+            app._queue_idle(lambda: False)
+            app._queue_idle(lambda: False)
+            assert app._pending_idles, (
+                "the sources were queued and not remembered, so shutdown could "
+                "not cancel them")
+            assert len(app._pending_idles) == 2, app._pending_idles
+        finally:
+            for source in app._pending_idles:
+                GLib.source_remove(source)
+
+    def test_a_cancelled_source_never_runs(self):
+        """The property itself, in a real main loop: cancellation is GLib's, not a
+        flag a callback might ignore."""
+        from gi.repository import GLib
+
+        fired = []
+        source = GLib.idle_add(lambda: fired.append(True) or False)
+        GLib.source_remove(source)
+        context = GLib.MainContext.default()
+        for _ in range(10):
+            while context.pending():
+                context.iteration(False)
+        assert fired == [], "source_remove did not stop the callback - the fix rests on nothing"
+
+    def test_do_shutdown_removes_them_before_it_releases_anything(self):
+        import inspect
+        source = inspect.getsource(app_mod.ChronoaApplication.do_shutdown)
+        cancel_at = source.index("GLib.source_remove")
+        first_release = source.index("self._stop_global_shortcut")
+        assert cancel_at < first_release, (
+            "the pending idles are cancelled after teardown began, so a callback "
+            "firing between two releases still runs against a dying application")
+
+    def test_every_idle_that_reaches_open_setup_is_recorded(self):
+        """**The property, scoped to what it is about.** Every *queued* callback
+        that can call `_open_setup` goes through `_queue_idle`, so shutdown can
+        cancel it. Not every `idle_add` in the module - the start-hidden `act`
+        lambda is a different thing, and over-scoping this assertion would have
+        failed on code that is correct, which is the control-that-cannot-fail trap
+        wearing the opposite costume.
+
+        The filter is on a queued lambda, not on the word `idle_add`: the lines
+        read `_queue_idle(lambda: (self._open_setup() ...))` and contain no such
+        word, which is how the first version of this test found nothing and
+        reported a property with no subject."""
+        import inspect
+        source = inspect.getsource(app_mod.ChronoaApplication)
+        queued = [line.strip() for line in source.splitlines()
+                  if "lambda" in line and "_open_setup" in line
+                  and "connect" not in line]
+        assert queued, "no queued callback reaches _open_setup - the property has no subject"
+        for line in queued:
+            assert "_queue_idle(" in line, (
+                f"a queued callback reaches _open_setup without being recorded, "
+                f"so shutdown cannot cancel it: {line[:90]}")
