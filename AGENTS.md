@@ -17061,3 +17061,60 @@ the part this file exists to hold.
 The file's own advice is right and this is the second time: **append and commit
 in one command.** An entry whose measurements live in a test can be rebuilt from
 the test; an entry whose only copy is a paragraph in a working tree cannot.
+
+## `gui/` is now covered end to end for reachability, and the differential is clean (2026-10-12)
+
+The scan from this session covers class methods and module-level helpers in
+`gui/surfaces/`. This turn asked the same question of `gui/` **outside**
+`surfaces/` - the files the concurrent session edits most - by running both
+instruments over it and comparing:
+
+| | result |
+|---|---|
+| names my rule calls dead but `deadcode.py` calls live | **none** |
+| names `deadcode.py` calls dead but my rule calls live | **`webkit_version`** |
+| names both call dead | **none** |
+
+`webkit_version` is the one string seam in that population: it is called only from
+inside a subprocess harness held as a string in
+`tests/test_browser_window_probe.py`, exactly the shape `deadcode.py`'s docstring
+says it cannot see. So `gui/` outside `surfaces/` is **clean** - no dead helper,
+and the only disagreement is the documented false positive.
+
+**Deliberately not extended into a test.** The population is clean today, but it
+is the most actively edited code in the tree, and a guard there would fire on a
+helper that is about to be wired - the `code_hl` near-miss, where a module read as
+unwired for the ninety seconds it took the other session to import it. A guard
+that cries wolf in the directory somebody is working in is worse than no guard.
+The differential is recorded here so the next pass checks it rather than rebuilds
+it.
+
+### And the shutdown fix survives, with a witness that bites
+
+`_pending_idles` is still in `HEAD` (6 occurrences), and the `getattr` guard added
+this turn is with it. The `Gdk.BUTTON_SECONDARY` fix has a direct witness - the
+concurrent session wrote one independently, and it asserts the *mechanism* rather
+than the count: `gestures[0].get_button() == Gdk.BUTTON_SECONDARY`. Verified it
+can fail: reverting the constant to `Gtk.BUTTON_SECONDARY` turns **2** of that
+file's tests red and restoring turns them green.
+
+**One mutation survived, and it should have.** Replacing `Gdk.BUTTON_SECONDARY`
+with a bare `3` leaves every test green - because `Gdk.BUTTON_SECONDARY` *is* 3.
+That is an equivalent mutant by construction, not a coverage gap, and it is
+recorded rather than counted as a survivor: the value is what the gesture listens
+on, and both spellings carry the same value.
+
+### Stray bytecode, again, and whose it was
+
+`test_packaging` went **2 failed** on 301 `.pyc` files under `usr/` that appeared
+after an earlier clean this same turn. **None were mine** - every probe and test
+run this session sets `PYTHONDONTWRITEBYTECODE=1`, and none of the files were
+newer than fifteen minutes, so they were not written by the run in flight either.
+Removed after confirming nothing in those directories is tracked; **28 passed**
+afterwards.
+
+The pattern is worth naming: **a red packaging test means "clean `/tmp`" more
+often than it means "fix the code"**, and the third time is the one to stop
+re-deriving. What the trap costs is not the clean - it is the confidence that
+something in the repo just broke.
+
