@@ -35,8 +35,16 @@ TITLE = "Compare"
 #: `document-compare-symbolic` and `edit-compare-symbolic` are both absent from
 #: Adwaita - checked with `rglob` over the theme directory, because an icon name
 #: the theme lacks renders as an empty box that reads as a bug rather than as a
-#: missing glyph. `view-continuous-symbolic` is the theme's own "side by side".
-ICON = "view-continuous-symbolic"
+#: missing glyph.
+#: **`view-dual`, not `view-continuous`, because `activity` already had it.**
+#: The first version of this line used `view-continuous-symbolic` and its own
+#: comment called it "the theme's own 'side by side'" - which it is, and which
+#: is why `activity` was already using it for exactly that idea.
+#: `test_no_two_panels_share_an_icon` caught the clash, and it is the right
+#: test: a sidebar row's icon is the fastest thing to match when scanning, so
+#: two of the same make two different questions look like one. `view-dual` is
+#: also "two panes side by side" and is used by nothing else in the tree.
+ICON = "view-dual-symbolic"
 SECTION = "Remembering"
 
 SUBTITLE = ("What changed between two conversations, by the questions you asked. "
