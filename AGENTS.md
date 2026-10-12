@@ -546,19 +546,37 @@ consolidation exists for, and only a source-level check catches it, which is why
 that check is a test and not a comment.
 
 **Two real defects were found and deliberately not fixed, because they live in the
-other session's uncommitted files.** The mode strip's three `_MODES` menu lines are
-42, 87 and 70 characters, and the layout contract fails any label over 30 that can
+other session's uncommitted files.** ~~Both have since been resolved: the mode
+strip's~~ **The mode strip's** three `_MODES` menu lines are
+42, 85 and 66 characters, and the layout contract fails any label over 30 that can
 neither wrap nor ellipsise - menu items do neither. `_STYLES` directly above
-documents the rule and obeys it; `_MODES` does not. The root cause is **one string
-doing two jobs**: the third field is both the menu text and the tooltip sentence
-(`f"Where answers come from: {word}. {sentence}"`), and only one of the two can be
-long. Separately, the cloud-keys wizard page asks for **640px of a 560px window** -
-the same defect this file records as fixed once at 590px.
+documents the rule and obeys it; `_MODES` does not.
+~~The root cause is **one string doing two jobs**: the third field is both the menu
+text and the tooltip sentence (`f"Where answers come from: {word}. {sentence}"`), and
+only one of the two can be long.~~
+**That root cause was wrong, and so was the diagnosis it implies - one string was
+never doing two jobs, because there were always two strings.** The tables are
+`(key, word, line, icon)` and had carried a short word since they were written
+down; every consumer bound it as `_word` and threw it away, putting the long
+sentence in the menu instead. Re-measured 2026-10-12 after `b81f323` landed, on
+which this had become a live failure in **twelve** menu labels rather than three,
+and across **all five** dropdowns rather than one table - see
+"A menu item is a name, not a sentence" below. The fix is not splitting one string
+in two; it is using the column that was already there. Separately, the cloud-keys
+wizard page asks for **640px of a 560px window** - the same defect this file records
+as fixed once at 590px, and still unfixed.
 
 Committing my version of `gui/window.py` or `setup_wizard.py` while they hold
 uncommitted work in both would drop it, which is the destructive path operation this
 workspace forbids in a different disguise. The findings are recorded with the root
-cause and the shape of the fix instead. `window.py` was mid-edit during the triage
+cause and the shape of the fix instead.
+
+**How this resolved.** `gui/window.py` was committed by the other session (`b81f323`,
+the model selector) and became clean, so the mode-strip defect was fixed here rather
+than left recorded - see "A menu item is a name, not a sentence" below, which also
+retracts this entry's root-cause diagnosis as wrong. `setup_wizard.py` is **still
+uncommitted theirs**, so the cloud-keys page remains the one open item, for the same
+reason and no other. `window.py` was mid-edit during the triage
 (`_answer_mode_chip` being renamed while `_read_answer_mode` still referenced it,
 which is why 15 tests failed at one instant and passed minutes earlier) - direct
 evidence that the caution was the right call.
@@ -13987,6 +14005,120 @@ verdict this file records repeatedly: the failure text names the product, not th
 machine. The chunked sweep found it only because a chunk happened to run while a
 real Chronoa process held the lock, and it is the reason a red test must be
 re-run serially and in its own environment before it is believed.
+
+## A menu item is a name, not a sentence (2026-10-12)
+
+This supersedes the root cause recorded above, and the superseding measurement had
+to be pushed all the way back to the entry itself - the note 300 lines earlier had
+been written from reading the code and was wrong in the way that matters, because
+it predicted a fix (split one string in two) that would have been the wrong fix.
+
+**What it actually was.** `gui/window.py` builds five dropdowns on the mode strip,
+from five `(key, word, line, icon)` tables. All five loops were:
+
+    for key, _word, line, _icon in self._RULES:
+        menu.append(line, f"app.answer-rules::{key}")
+
+The short word was bound to a name beginning with an underscore, which is this
+file's own convention for *deliberately unused* - and it was deliberately unused
+at five sites. **The fix was one word per site**: `menu.append(word, ...)`.
+
+**Measured on the built window, not predicted.** `b81f323` (the concurrent
+session's model selector) turned this from a latent problem into a live one, and
+`test_the_main_window_wraps_or_ellipsises_its_long_text` went red with **twelve**
+offenders - not the three the old entry predicted, and not `_MODES`, but all five
+dropdowns including the model rows built from disk.
+
+**The provenance, measured by swapping the two files rather than argued.** At
+`b81f323^` `window.py` held **one** dropdown table, `_STYLES`, and parsed with `ast`
+its three lines are **0/3 over the ceiling** - so it always obeyed the rule, which is
+what the entry above meant by "`_STYLES` directly above documents the rule and obeys
+it". `test_the_main_window_wraps_or_ellipsises_its_long_text` passed at that commit
+and fails now. **The defect was introduced by `b81f323`**, in the three tables that
+commit added:
+
+    _RULES   4 rows, 4/4 over 30   51 51 39 59
+    _HANDS   4 rows, 4/4 over 30   41 56 67 74
+    _MODES   3 rows, 3/3 over 30   42 85 66
+
+Every line in all three is over the ceiling; not one word is. The longest word is
+"This computer, then cloud" at 26 characters.
+
+**Two numbers recorded earlier in this file were wrong, and are corrected here
+rather than quietly replaced.** The `_MODES` lines are **42, 85 and 66**, not the
+42/87/70 written above - that was the *uncommitted* working-tree version, and the
+committed one differs. And a figure of "105 characters" for `_STYLES` appeared
+during this investigation and is **wrong**: it came from a regex that matched
+greedily across rows and concatenated three separate strings into one, which is
+the failure mode of measuring source with a pattern instead of parsing it. `ast`
+gives 0/3. **Both mistakes were made by measuring badly and then writing the number
+down as though it were a measurement** - the exact shape this file exists to
+correct, committed here so the next reader does not repeat it.
+
+**Reachability, settled by probe rather than left open.** A `Gtk.PopoverMenu` builds
+its item labels **eagerly**, at `set_menu_model` time: measured, 4 labels reachable
+from a chip that was never presented or mapped. So menu labels have always been
+visible to `_walk`, and the reason the test passed before is simply that no table
+was over the ceiling. No traversal mystery, no laziness in GTK.
+
+**The information was already somewhere, which is why nothing was lost.** `_draw`
+sets each chip's tooltip to `f"{what}: {word}. {line}"`, so the sentence for the
+current selection was on the chip the whole time; the menu was the only place the
+long line appeared, and the only place it could not fit.
+
+**GTK was probed, not assumed.** The question worth asking was whether a menu item
+can carry a short label *and* a description, which would have kept the design
+intent as well as obeying the ceiling. Measured: `Gtk.PopoverMenu` renders `label`
+and nothing beside it. `Gio.MenuItem.set_attribute("description", ...)` exists in
+the C API but does not reach the popover, and on this machine (GLib 2.88, GTK
+4.22) its introspection binding is broken besides - it wants one positional
+argument for a three-argument C function. **No per-item tooltip on a `Gio.Menu`.**
+So terse labels in the menu is the only shape that both fits and says what it
+means.
+
+**The docstring that justified the old design was corrected in place.**
+`_model_rows` said "the line is `TIERS`' own description, so the menu says what the
+tier is for rather than only its size" - a deliberate design decision, stated
+plainly, that this fix reverses. Leaving it would have been the stale-claim shape
+this file records over and over: a corrected behaviour with the reasoning for the
+old one still standing underneath it.
+
+**Five tests in `tests/test_menu_labels_are_words.py`, in their own file** rather
+than in `tests/test_mode_strip.py`, which the other session holds uncommitted.
+Two assert the cause (`labels == [r[1] for r in rows]`, and every label under the
+30-character ceiling - on the *built menus*, not on the table, because
+`f"{word}: {note}"` keeps every column short and makes the menu long again). The
+other three are controls, and the important one is
+`test_the_lines_the_fix_dropped_are_really_longer`: **without it, `labels == words`
+is a claim that passes just as happily if word and line hold the same string**, in
+which case dropping the line would have lost nothing and fixed nothing.
+
+**Verified by running it both ways.** Swapping the pre-fix `window.py` back in turns
+exactly the two cause tests red (`5 passed` -> `2 failed, 3 passed`) and the three
+data controls green in both states, which is what a control should do. Restored
+byte-identical afterwards.
+
+**A sixth test, because four of those five were weaker than they looked on this
+machine.** `local_llm.installed()` is **empty here** - measured, 0 of 6 tiers - so
+the model menu has exactly one row, the hardcoded empty-disk fallback, and all six
+declared tiers are absent from every menu assertion in the file. The one dropdown
+built from *data* rather than a constant was therefore the one checked least, and a
+tier with a long key would put a long label back on every machine that installs it
+while the suite stayed green. All six real words are 2-4 characters, so this is not
+a latent defect - it is a witness that could not bite.
+
+`test_every_declared_tier_word_fits_the_ceiling` puts every declared tier on disk
+for the duration and asks the **real** `_model_rows` what it would build, rather
+than re-deriving the word rule out of the source with a regex and `eval` - a copy
+tests the copy, and goes stale silently the first time that line is reformatted.
+Its control is `len(rows) == len(specs)`: making the `installed()` patch inert turns
+it red with `expected all 6 declared tiers, got 1 rows`, which is the difference
+between a test that checked six things and one that checked a fallback row.
+
+**And the pattern was swept rather than assumed to be local.** Every menu-label site
+in the shipped code is nine lines: the five above, and four in `app/tray.py`
+(`_menu`). The tray's labels are 12, 17, 8 and 4 characters, so the mode strip was
+the only place carrying this and nothing else was fixed by luck.
 
 ## A model selector on the mode strip, and the two ways I broke it (2026-10-12)
 

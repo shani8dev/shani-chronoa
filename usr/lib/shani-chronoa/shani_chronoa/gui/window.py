@@ -271,8 +271,8 @@ class _ModeStrip(Gtk.Box):
         self._style_label = label
         self._style_image = image
         menu = Gio.Menu()
-        for key, _word, line, _icon in self._STYLES:
-            menu.append(line, f"app.reply-style::{key}")
+        for key, word, _line, _icon in self._STYLES:
+            menu.append(word, f"app.reply-style::{key}")
         button.set_menu_model(menu)
         return button
 
@@ -344,8 +344,8 @@ class _ModeStrip(Gtk.Box):
         self._rules_label = label
         self._rules_image = image
         menu = Gio.Menu()
-        for key, _word, line, _icon in self._RULES:
-            menu.append(line, f"app.answer-rules::{key}")
+        for key, word, _line, _icon in self._RULES:
+            menu.append(word, f"app.answer-rules::{key}")
         button.set_menu_model(menu)
         button.set_tooltip_text(
             "What Chronoa is allowed to do, and whether anything may leave this "
@@ -385,8 +385,8 @@ class _ModeStrip(Gtk.Box):
         self._hands_label = label
         self._hands_image = image
         menu = Gio.Menu()
-        for key, _word, line, _icon in self._HANDS:
-            menu.append(line, f"app.hands-free::{key}")
+        for key, word, _line, _icon in self._HANDS:
+            menu.append(word, f"app.hands-free::{key}")
         button.set_menu_model(menu)
         button.set_tooltip_text("How Chronoa hears you")
         return button
@@ -451,7 +451,15 @@ class _ModeStrip(Gtk.Box):
         The word is the tier's size, under the 30-character ceiling
         `tests/test_ui_layout_contract.py` enforces on every chip label - a menu
         item can neither wrap nor ellipsise. The line is `TIERS`' own description,
-        so the menu says what the tier is for rather than only its size.
+        and it goes in the **chip's tooltip, not the menu**: this comment used to
+        say the menu should say what the tier is for rather than only its size,
+        and every one of the five dropdowns was built to do exactly that - with
+        twelve sentences over the ceiling, measured on the built window. GTK has
+        no per-item tooltip on a `Gio.Menu` (`GtkPopoverMenu` renders `label` and
+        nothing beside it), so a sentence in that column is a sentence the
+        dropdown cannot fit. `_draw` already composes `f"{what}: {word}. {line}"`
+        onto the chip, so the explanation for the selection is a hover away and
+        nothing is lost; `tests/test_menu_labels_are_words.py` holds the line.
         """
         rows = []
         for key, spec in getattr(local_llm, "SPECS", {}).items():
@@ -517,8 +525,8 @@ class _ModeStrip(Gtk.Box):
         self._mode_label = label
         self._mode_image = image
         menu = Gio.Menu()
-        for key, _word, line, _icon in self._MODES:
-            menu.append(line, f"app.answer-mode::{key}")
+        for key, word, _line, _icon in self._MODES:
+            menu.append(word, f"app.answer-mode::{key}")
         button.set_menu_model(menu)
         return button
 
@@ -616,8 +624,8 @@ class _ModeStrip(Gtk.Box):
             # measured, `get_menu_model()` returned None and the dropdown had
             # nothing to open.
             menu = Gio.Menu()
-            for key, _word, line, _icon in rows:
-                menu.append(line, f"app.answer-model::{key}")
+            for key, word, _line, _icon in rows:
+                menu.append(word, f"app.answer-model::{key}")
             self._model_chip.set_menu_model(menu)
             # Only a tier that is actually installed can be the quiet one - on a
             # machine whose default is not downloaded, every installed tier is a
