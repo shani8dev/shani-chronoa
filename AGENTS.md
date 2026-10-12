@@ -4995,6 +4995,27 @@ unmutated code before it was written down:
   measured green** (`5 mutations, 4 caught` becoming `18 mutations, 0 caught`).
   Re-running something you already know the answer to is the cheapest detector of
   a harness that has stopped looking.
+- **The cheap half needs the same discipline, and had two silent holes of its
+  own.** `--check-anchors` prints *"43 set(s), 359 anchors, all still match the
+  code"*, and it is the half that can run every time, so it is the line most
+  likely to be quoted. A set with `MUTATIONS = []` — or no key at all —
+  contributed **zero anchors and still appeared in the set count**, so the line
+  read as an inventory of 43 things (the *full* run says "N has no mutations";
+  the cheap half said nothing). And `zip(old, new)` **truncates to the shorter
+  list**: a pair-anchor with two `old` and one `new` checks one anchor and applies
+  one edit, with no error anywhere, because `_apply` truncates the same way. Both
+  are now reported by name and fail the check. Both were **latent** — 43 sets, 359
+  mutations, no empty set, no mismatch — which is why this is a gate and not a fix.
+- **A pair-anchor makes `checked` and `declared` differ on correct code**, so
+  never assert they are equal. They count anchors and mutations, and the pair
+  shape — two loops that are not adjacent and must change together — exists on
+  purpose. Measured on this tree: **359 mutations, 361 anchors**, the difference
+  being `edit_file.py`'s "a single line is treated as a quote" and
+  `file_locks.py`'s "the device is read as decimal instead of hex". I wrote the
+  gate first, then a comment claiming the numbers happened to be equal "because
+  no set uses one" — **a reading error, and it would have made an actively wrong
+  gate look vacuous.** Both numbers are printed so a reader can cross-check them;
+  neither is asserted against the other.
 - **Assert that a mutation changes behaviour, not merely that its anchor matched
   once.** The arithmetic control above was `all_unmeasurable.extend(...[:1])`
   against a fixture set holding exactly **one** unmeasurable mutation - so the
