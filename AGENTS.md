@@ -11954,3 +11954,40 @@ row that did nothing wrong is not a miss.
 
 Raw output: `test-env/eval-out/` convention — the JSON carries `reply` and `text`
 per case, which is what made the split possible after the fact.
+
+## The KV floor reproduced on a second, 50x larger model — and one claim got weaker (2026-10-12)
+
+Last round set `KV_CACHE_FLOOR = "q5_0"` from **one small model** (SmolLM2-135M,
+98 MiB) and said the number's limit was that it was one model. `Qwen3-8B-Q4_K_M`
+sits in this repo's own `cache/data-home`, is 50x the size, and is the model the
+`-t` thread measurement in this file already used. Same corpus, same method:
+
+| type | SmolLM2-135M | Qwen3-8B |
+|---|---|---|
+| q8_0 | -0.04% | **+0.32%** |
+| q5_0 | +0.11% | **+1.35%** |
+| q4_0 | +6.08% | **+5.81%** |
+
+**The ordering is the same on both and `q4_0` costs ~6% on both.** The floor did
+not move - a demonstrable cliff reproduced across a 50x size range is what it was
+set from, and now it is that rather than one box's accident.
+
+**But one claim got weaker, and it is recorded as weaker.** The first measurement
+concluded *"`q8_0` and `q5_0` are free"*. On the 8B, `q5_0` measures **+1.35%** -
+not free. Only `q8_0` holds up on both (-0.04% and +0.32%). The floor stayed at
+`q5_0` anyway, for a reason worth stating: 1.35% is a measurable cost, not a cliff,
+and `q5_0` is sometimes the only step that makes a model fit at all - excluding it
+could mean a model that would run does not. What changed is the wording, from
+"free" to "a known cost, below the cliff".
+
+`KV_CACHE_MEASUREMENTS` holds both models' figures, and a new test class pins the
+two properties their union establishes: the ordering is non-decreasing in
+compression from `q8_0` down, and `q4_0` is the cliff on both. One correction to
+that test on the way: I first asserted strict monotonicity including `f16`, which
+is wrong - `q8_0` measured **-0.04%** on the small model, i.e. *better* than f16,
+which is the noise a compression cannot buy. The claim is non-decreasing from
+`q8_0`, and that is what it asserts now.
+
+`tools/mutations/kv_floor.py`: 5 mutations, 5 caught, 0 survivors, including a
+new pair that pins the second model's figure - dropping its `q4_0` below the
+cliff, and making a *lighter* compression cost more than a heavier one.

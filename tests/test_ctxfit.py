@@ -466,3 +466,64 @@ class TestTheCacheFloor:
             int(6 * 2 ** 30), 2048, total_bytes=int(6 * 2 ** 30),
             per_token_at_f16=per_token)
         assert chosen == ctxfit.KV_CACHE_FLOOR, chosen
+
+
+class TestTheFloorReproducesOnASecondModel:
+    """The `q5_0` floor was first measured on one small model, and the note said
+    so: *"a floor taken further than it deserves is worse than no floor."*
+
+    It has now been measured on a second, 50x larger one, with the same corpus
+    and method. Perplexity as a percentage of each model's own f16 figure:
+
+        type   SmolLM2-135M    Qwen3-8B-Q4_K_M
+        q8_0      -0.04%          +0.32%
+        q5_0      +0.11%          +1.35%
+        q4_0      +6.08%          +5.81%
+
+    **The ordering is the same on both, and `q4_0` costs ~6% on both.** That
+    reproduction is what makes the floor a measurement rather than one box's
+    accident.
+
+    These tests pin the *shape* of the two measurements rather than re-running
+    them - `llama-perplexity` takes minutes per pass on the 8B, and a test that
+    forks a 4.7 GB model is not a unit test. The numbers live in
+    `KV_CACHE_MEASUREMENTS`; this class asserts the two properties they jointly
+    establish: the ordering, and that `q4_0` is the cliff on both.
+    """
+
+    def test_the_ordering_is_the_same_on_both_models(self):
+        from shani_chronoa import ctxfit
+        per_model = ctxfit.KV_CACHE_MEASUREMENTS
+        assert len(per_model) >= 2, (
+            "the floor was justified on one model; it now needs two")
+        for model, costs in per_model.items():
+            # Non-decreasing from `q8_0` on - not monotonic including `f16`.
+            # `q8_0` measured -0.04% on the small model, i.e. *better* than
+            # f16, which is the noise a compression cannot buy; asserting
+            # monotonicity across that step would fail on correct data.
+            steps = [costs[t] for t in ("q8_0", "q5_0", "q4_0")]
+            assert steps == sorted(steps), (
+                f"{model}: the costs are not monotonic in compression "
+                f"{costs} - the ladder assumes worse compression costs more")
+
+    def test_q4_0_is_the_cliff_on_both_models(self):
+        """The one property the floor actually rests on. If a future measurement
+        shows `q4_0` cheap on some model, the floor's basis is gone and this test
+        should be what makes somebody revisit it."""
+        from shani_chronoa import ctxfit
+        for model, costs in ctxfit.KV_CACHE_MEASUREMENTS.items():
+            cliff = costs["q4_0"]
+            assert cliff >= 3.0, (
+                f"{model}: q4_0 measured {cliff:.2f}% worse, which is not a cliff "
+                f"anymore - the floor at q5_0 is no longer justified by it")
+            cheaper = costs["q5_0"]
+            assert cheaper < cliff / 2, (
+                f"{model}: q5_0 at {cheaper:.2f}% is not clearly cheaper than "
+                f"q4_0 at {cliff:.2f}%, so the floor is not separating anything")
+
+    def test_the_floor_is_still_the_step_below_the_cliff(self):
+        from shani_chronoa import ctxfit
+        cliff = max(c["q4_0"] for c in ctxfit.KV_CACHE_MEASUREMENTS.values())
+        assert ctxfit.KV_CACHE_FLOOR == "q5_0", (
+            "the floor sits just above the cliff; q4_0 measured "
+            f"{cliff:.2f}% worse on both models")

@@ -54,3 +54,28 @@ MUTATIONS = [
         "expect": ["test_the_ladder_stops_at_the_floor"],
     },
 ]
+
+# --- the second model's measurement, and the class that pins both ------------
+
+SECOND_MODEL = {
+    "file": _CTX,
+    "old": '    "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 5.81},\n',
+    "new": '    "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 0.9},\n',
+    # The 8B's q4_0 figure dropped below the cliff the class asserts. That is the
+    # one number the whole floor rests on, so a measurement that contradicts it
+    # has to be caught rather than quietly weakening the cliff.
+    "label": "the 8B stops showing q4_0 as the cliff",
+    "expect": ["test_q4_0_is_the_cliff_on_both_models"],
+}
+
+SECOND_MODEL_ORDER = {
+    "file": _CTX,
+    "old": '    "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 5.81},\n',
+    "new": '    "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 3.20, "q5_0": 1.35, "q4_0": 5.81},\n',
+    # q8_0 made worse than q5_0 - i.e. a *lighter* compression costing more than a
+    # heavier one, which the ladder's whole walk assumes cannot happen.
+    "label": "a lighter compression is recorded as costing more",
+    "expect": ["test_the_ordering_is_the_same_on_both_models"],
+}
+
+MUTATIONS = MUTATIONS + [SECOND_MODEL, SECOND_MODEL_ORDER]

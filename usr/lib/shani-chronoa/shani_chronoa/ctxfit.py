@@ -101,22 +101,40 @@ KV_CACHE_BYTES_PER_ELEM: "dict[str, float]" = {
 #: The most compression the KV cache may take. `q4_0` is deliberately absent.
 #:
 #: Measured 2026-10-12 with this repo's own `llama-perplexity` path and its own
-#: fixed corpus, on SmolLM2-135M-Q4_K_M, both `-ctk` and `-ctv` set, two identical
-#: runs per type (the numbers repeat exactly, so the tool is deterministic here):
+#: fixed corpus, both `-ctk` and `-ctv` set, on **two** models - SmolLM2-135M
+#: (98 MiB, two identical runs each) and Qwen3-8B (4.7 GB, one run each).
+#: Perplexity, as a percentage of the same model's f16 figure:
 #:
-#:     f16   59.1719      q8_0   59.1499  (-0.022)
-#:     q5_0  59.2380      q4_0   62.7689  (+3.597, +6.1%)
+#:     type   SmolLM2-135M    Qwen3-8B-Q4_K_M
+#:     q8_0      -0.04%          +0.32%
+#:     q5_0      +0.11%          +1.35%
+#:     q4_0      +6.08%          +5.81%
 #:
-#: So `q8_0` and `q5_0` are **free** - inside the run-to-run noise of a corpus this
-#: size - and `q4_0` costs 6.1%. That is the bottom of the ladder, and it is a
-#: measurement rather than someone's write-up.
+#: **The ordering is the same on both, and `q4_0` costs ~6% on both.** That is
+#: what the floor is set from: a demonstrable cliff, reproduced on a model 50x
+#: the size of the first one. `q4_0` is excluded and nothing below `q5_0` is
+#: reachable.
 #:
-#: Honest limits on the number, because a floor taken further than it deserves is
-#: worse than no floor: **one small model**, one corpus, and perplexity - which is
-#: not the same thing as what a listener notices. A larger model may hold up
-#: differently under a 4-bit cache. What the measurement does settle is the
-#: direction and the order of magnitude, and `q5_0` is the step *below* which this
-#: box can demonstrate a real cost.
+#: **What changed when the second model was added:** `q5_0` is *not* free. On
+#: SmolLM2 it measured +0.11% (inside the noise); on Qwen3-8B it measures
+#: +1.35%, which is not. The first measurement said "q8_0 and q5_0 are free" and
+#: that was a small-model artifact. The floor did not move - 1.35% is a measurable
+#: cost, not the cliff, and `q5_0` is sometimes the only step that makes a model
+#: fit at all - but the claim about it is now honest rather than flattering.
+#:
+#: Honest limits that remain: perplexity is not what a listener notices, one
+#: corpus, and one run per type on the larger model. What is settled is the
+#: direction, the order of magnitude, and the *ordering* - the cliff is at `q4_0`
+#: and it reproduced.
+#: The measurements the floor rests on, as perplexity *percentages* of the same
+#: model's f16 figure. Two models, same corpus and method (2026-10-12): one run
+#: per type on Qwen3-8B, two identical runs on SmolLM2. The union of what both
+#: establish is the floor; either alone would be a single box's accident.
+KV_CACHE_MEASUREMENTS: "dict[str, dict[str, float]]" = {
+    "smollm2-135m-q4_k_m": {"f16": 0.0, "q8_0": -0.04, "q5_0": 0.11, "q4_0": 6.08},
+    "qwen3-8b-q4_k_m": {"f16": 0.0, "q8_0": 0.32, "q5_0": 1.35, "q4_0": 5.81},
+}
+
 KV_CACHE_FLOOR: str = "q5_0"
 
 #: Best first, and stopping at `KV_CACHE_FLOOR`. See that constant for the
