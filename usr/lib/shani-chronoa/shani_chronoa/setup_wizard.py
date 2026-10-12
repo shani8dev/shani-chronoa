@@ -1430,11 +1430,49 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     def save() -> None:
         for provider_id, value in entered.items():
             config.set_api_key(config.API_KEY_SETTINGS[provider_id], value)
+        typed = sum(1 for v in entered.values() if v)
         key_status.set_label(
-            f"Saved {sum(1 for v in entered.values() if v)} key(s). Chronoa will "
+            f"Saved {typed} key(s). Chronoa will "
             f"try {', '.join(p for p, v in entered.items() if v) or 'the free gateways'} "
             "when it needs to think.")
         _consent_given(config, True)          # asking a cloud model is consent
+        # **And now it says whether any of them work.**
+        # This page used to end at the sentence above: the key was saved and that
+        # was the whole of the feedback. An expired, revoked or wrong-product key
+        # is indistinguishable from a working one until a turn *fails* - and by
+        # then the question has been asked, miles from this page. Measured on the
+        # real page during this change: pressing "Save these keys" with a key
+        # typed said "Saved 1 key(s)..." and nothing about whether it works.
+        #
+        # Off the main loop: nine providers at up to 20 s each would otherwise
+        # freeze the window for minutes.
+        if not typed:
+            key_status.set_label(key_status.get_label()
+                                 + " No key was entered, so there is nothing to test.")
+            return
+        key_status.set_label(key_status.get_label() + " Testing the keys...")
+
+        def work() -> None:
+            from shani_chronoa import cloud_llm
+
+            try:
+                found = cloud_llm.probe_keys()
+                said = cloud_llm.keys_sentence(found)
+            except Exception as exc:  # noqa: BLE001 - a failed probe is a report
+                said = "Could not test them: %s" % (exc,)
+
+            def done() -> None:
+                from gi.repository import GLib
+
+                GLib.idle_add(lambda: (key_status.set_label(said), None)[1])
+
+            import threading
+
+            threading.Thread(target=done, daemon=True).start()
+
+        import threading
+
+        threading.Thread(target=work, daemon=True).start()
 
     save_keys.connect("clicked", lambda *_: save())
     page_footer(box).append(save_keys)
@@ -1476,8 +1514,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             "Ollama is running on this computer, so Chronoa uses it - "
             "nothing to download."))
     elif b["up"]:
+        # Only `active` is interpolated, in the concatenation below, so an
+        # f-string here has no placeholder of its own - which pyflakes names.
+        # Pre-existing at HEAD; cleared here because this file is being touched.
         box.append(wrapping(
-            f"llama-server is answering on this computer"
+            "llama-server is answering on this computer"
             + (f" with {b['active']}" if b.get("active") else "")
             + ", so nothing needs downloading."))
     elif b.get("installed"):
