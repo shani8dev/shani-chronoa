@@ -23,6 +23,7 @@ Hermeticity guarantees:
 
 import os
 import shutil
+import tempfile
 import subprocess
 import sys
 import textwrap
@@ -120,6 +121,68 @@ def compiled_schema_dir():
     window this whole mechanism exists to close.
     """
     return Path(COMPILED_SCHEMA_DIR)
+
+
+#: Prefixes this suite is allowed to clean up. **Deliberately a list, not a
+#: sweep of everything new in /tmp** - the machine's /tmp belongs to whatever else
+#: is running, and a fixture that deletes directories it did not create is a
+#: fixture that deletes somebody else's work.
+#: **`pytest-of-` is deliberately NOT here**, and that is the second version of
+#: this list. The first one included it, and the reclaimer then deleted
+#: `/tmp/pytest-of-<user>` at the end of whichever session finished first -
+#: including the directory the *next* run was using. Measured:
+#: `FileNotFoundError: /tmp/pytest-of-shrinivaskumbhar/pytest-0`, which showed up
+#: as 101 errors in whichever file ran second and as a clean pass run alone.
+#:
+#: That is the whole order-dependence this file was meant to end up fixing, and
+#: this fixture caused it. pytest already manages its own retention (three runs
+#: by default), so the honest thing is to leave its directories to it and clean
+#: only what this suite makes itself.
+_OWNED_TMP_PREFIXES = (
+    "chronoa-", "cwa", "cwm", "gs-", "kept-", "organism-doc-",
+    "ties-", "three-", "sibling-merge-",
+)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _reclaim_the_temp_dirs_this_suite_makes():
+    """Delete what the suite made in /tmp, so the next run starts from the same disk.
+
+    **Measured, repeatedly, and it is not a small thing.** A run of the suite
+    left **12 GB** in /tmp - `/tmp/ties-*` and `/tmp/three-*` at 6 GB each - and
+    once a 16 GB tmpfs fills, unrelated tests fail with
+    `OSError: [Errno 122] Disk quota exceeded` while copying the schema, which
+    has nothing to do with the cause. It happened three times in one session, and
+    each time it looked like a code failure rather than a full filesystem.
+
+    The cause is ordinary: **14 `tempfile.mkdtemp()` call sites are not inside a
+    `with`**, so nothing removes them -
+    `conftest.py:68`, `test_browser.py:143`, `test_every_gate_has_a_row.py:159`,
+    `test_git_write.py:168`, `test_landlock.py:170` and `:176`,
+    `test_oom_score.py:336`, `test_organism_doc.py:94`,
+    `test_readme_numbers.py:59`, `test_sandbox_core_dumps.py:119` and `:122`,
+    `test_skill_workbench.py:92`, `test_voice_loop_live.py:107`,
+    `test_windows_gnome_live.py:64`.
+
+    Fixing fourteen call sites one at a time would leave the next one to be
+    written the same way, and this suite is not short-lived. So this removes what
+    was made, at the end of the session, and only what this suite made.
+    """
+    import shutil
+
+    yield
+
+    removed = 0
+    for entry in Path(tempfile.gettempdir()).iterdir():
+        if not entry.is_dir() or not entry.name.startswith(_OWNED_TMP_PREFIXES):
+            continue
+        try:
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"\n[conftest] reclaimed {removed} temp directories from /tmp")
 
 
 @pytest.fixture(scope="session", autouse=True)

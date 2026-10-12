@@ -952,9 +952,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _on_suggestion_clicked(self, _button: Gtk.Button, suggestion: str) -> None:
         """Put a suggestion in the input, ready to send or edit."""
-        self._input_entry.set_text(suggestion)
+        self._set_input_text(suggestion)
         self._input_entry.grab_focus()
-        self._input_entry.set_position(-1)
 
     def open_help(self) -> HelpWindow | None:
         """Open the capability list, or raise the one already open.
@@ -1307,6 +1306,19 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._transcript.set_turn_footer_handler(self._turn_stats_for_footer)
         main_box.append(self._transcript)
 
+        # **Escape stops the turn.** The stop-*speaking* button beside the
+        # composer has claimed "(Esc)" in its tooltip since before it was wired
+        # to anything, so the shortcut was advertised and did not exist - and the
+        # button it was on could never appear either. Now there is a key that
+        # does what that tooltip says, on a control that does.
+        #
+        # Scoped to a turn in progress: with nothing running, Escape is left
+        # alone, because a global Escape that stops nothing is the same kind of
+        # claim as everything else this file keeps catching.
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self._on_window_key_pressed)
+        self.add_controller(keys)
+
         # Where an `ask_user` question appears. Hidden until a question is
         # actually pending, so it costs nothing the rest of the time.
         self._question_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -1317,24 +1329,46 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._question_widgets: list = []
 
         input_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        # Still a `Gtk.Entry`, not `Adw.Entry`: measured, `Adw.Entry` does not
-        # exist on libadwaita 1.5 (it arrived in 1.6), so the multi-line composer
-        # Alpaca has is a `Gtk.TextView` and is a separate piece of work. Kept as
-        # an entry so nothing that drives it - Enter, the Send button, `--ask=`,
-        # a suggestion chip - changes behaviour while the panels are landing.
-        self._input_entry = Gtk.Entry()
-        self._input_entry.set_placeholder_text("Type a message…")
+        # The composer's own box, so the placeholder can sit *in* the field
+        # rather than beside it - a label to the left of the text view reads as
+        # a caption, not as the prompt GTK's entry used to draw.
+        composer = Gtk.Overlay()
+        composer.set_hexpand(True)
+        # **A `Gtk.TextView`, which is the piece this comment used to call "a
+        # separate piece of work".** Measured, because the first version of this
+        # comment was simply wrong: a `Gtk.Entry` *can* hold a newline -
+        # `Gtk.Entry().set_text("one\ntwo")` gives back `"one\ntwo"`. What it
+        # cannot do is **show** it: one line, no wrapping, no vertical growth, so
+        # a three-line request is three lines of text in a field one line tall and
+        # the person cannot see or edit what they wrote. That is the limitation,
+        # and it is about reading rather than storing.
+        #
+        # `Adw.Entry` is still not an option: measured, it does not exist on
+        # libadwaita 1.5 (it arrived in 1.6).
+        self._input_entry = Gtk.TextView()
+        self._input_entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self._input_entry.set_accepts_tab(False)
+        # A `Gtk.TextView` has no placeholder, so the hint is a label sitting in
+        # the same place GTK would have drawn one and hidden as soon as there is
+        # a character. Losing the built-in placeholder outright would have been
+        # the kind of quiet regression this file keeps catching.
+        self._input_placeholder = Gtk.Label(label="Type a message…")
+        self._input_placeholder.add_css_class("dim-label")
+        self._input_placeholder.set_xalign(0.0)
+        self._input_placeholder.set_valign(Gtk.Align.START)
+        self._input_placeholder.set_margin_start(10)
+        self._input_placeholder.set_margin_top(6)
         # A placeholder is not an accessible name: a screen reader announced
         # this field as just "text" (shani-testbed a11y-lint, chronoa-voice)
         self._input_entry.update_property([Gtk.AccessibleProperty.LABEL], ["Message to Chronoa"])
         self._input_entry.add_css_class("cajita-input")
         self._input_entry.set_hexpand(True)
-        self._input_entry.connect("activate", self._on_input_activate)
+        self._input_entry.connect("key-pressed", self._on_input_key_pressed)
+        self._input_entry.get_buffer().connect("changed", self._on_input_changed)
         # The command menu: cline has a `SlashCommandMenu`, kimi-cli a
         # decorator registry, and here a list of names that each run something
         # real. `_sync_command_menu` decides when it is up - only for a leading
         # slash with no space yet.
-        self._input_entry.connect("changed", lambda _e: self._sync_command_menu())
         self._command_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._command_menu = Gtk.Popover()
         self._command_menu.set_child(self._command_list)
@@ -2466,7 +2500,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         name: the menu is a discovery aid, and leaving it up while somebody
         types an ordinary sentence would be a popover arguing with them.
         """
-        text = self._input_entry.get_text()
+        text = self._input_text()
         showing = text.startswith("/") and " " not in text
         if showing:
             prefix = text[1:].lower()
@@ -2559,8 +2593,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _complete_command(self, name: str) -> None:
         """Put `/name ` in the field and hand focus back to typing."""
-        self._input_entry.set_text(f"/{name} ")
-        self._input_entry.set_position(-1)
+        self._set_input_text(f"/{name} ")
         self._input_entry.grab_focus()
         if self._command_menu is not None:
             self._command_menu.popdown()
@@ -2662,6 +2695,55 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             logger.warning("could not read the turn's cost", exc_info=True)
             return None
 
+    def _input_text(self) -> str:
+        """Everything typed, newlines and all."""
+        buf = self._input_entry.get_buffer()
+        return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+
+    def _set_input_text(self, text: str) -> None:
+        """Replace the contents and leave the caret at the end.
+
+        `Gtk.TextView` has no `set_position(-1)`, and every call site that set
+        text also wanted the caret after it - a suggestion chip or a slash command
+        that fills the field should be followed by typing, not by nothing.
+        """
+        buf = self._input_entry.get_buffer()
+        buf.set_text(text or "")
+        buf.place_cursor(buf.get_end_iter())
+
+    def _on_input_changed(self, _buffer) -> None:
+        self._input_placeholder.set_visible(not self._input_text())
+        self._sync_command_menu()
+
+    def _on_input_key_pressed(self, _view, keyval, _keycode, state) -> bool:
+        """Enter sends; Shift+Enter is a newline.
+
+        The convention every chat UI has, and the one a person who cannot reach
+        the Send button needs: without Shift there is no way to type two lines,
+        and without Enter there is no way to send from the keyboard.
+        """
+        if keyval != Gdk.KEY_Return and keyval != Gdk.KEY_KP_Enter:
+            return False
+        shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
+        if shift:
+            return False            # let it through: a newline
+        self._on_input_activate(self._input_entry)
+        return True
+
+    def _on_window_key_pressed(self, _controller, keyval, _keycode, _state) -> bool:
+        """Escape stops a running turn, and does nothing when none is running.
+
+        Returns True only when it acted, so Escape keeps its other jobs - closing
+        a popover, dismissing a question - everywhere else.
+        """
+        if keyval != Gdk.KEY_Escape:
+            return False
+        stop = getattr(self, "_turn_stop_button", None)
+        if stop is None or not stop.get_visible():
+            return False
+        self._on_turn_stop_clicked(stop)
+        return True
+
     def _on_turn_stop_clicked(self, _button: Gtk.Button) -> None:
         """Stop the turn in progress, and say plainly what that does.
 
@@ -2691,11 +2773,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         drift from the key binding - the bug class where a control is wired to
         a slightly different action than the shortcut beside it.
         """
-        raw = self._input_entry.get_text()
+        raw = self._input_text()
         text = raw.strip()
         if not text:
             return
-        self._input_entry.set_text("")
+        self._set_input_text("")
         if self._run_command(text):
             return
         if self._pending_question is not None:
@@ -2718,11 +2800,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def submit_text(self, text: str) -> None:
         """Send `text` as if typed - for `--ask=`, through the same path as Enter."""
-        self._input_entry.set_text(text)
+        self._set_input_text(text)
         self._submit_input()
 
     def get_input_text(self) -> str:
-        return self._input_entry.get_text()
+        return self._input_text()
 
     def set_input_text(self, text: str) -> None:
         """Put text in the composer without sending it.
@@ -2732,11 +2814,11 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         neither: it could only reach `_input_entry` directly, which is how the
         `?` argument of `/help` ended up nowhere.
         """
-        self._input_entry.set_text(text or "")
+        self._set_input_text(text or "")
         self._input_entry.grab_focus()
 
     def clear_input(self) -> None:
-        self._input_entry.set_text("")
+        self._set_input_text("")
 
     __gsignals__ = {
         "user-input": (GObject.SignalFlags.RUN_FIRST, str, (str,)),
