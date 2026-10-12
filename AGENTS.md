@@ -2,6 +2,55 @@
 
 This file applies to any AI coding assistant working in this repository
 (Claude Code, opencode, Kilo Code, Cursor, Aider, or similar). Read this
+## laya's evidence states: `honest()` collapsed "unanswerable" into "no" (2026-10-12)
+
+`harness-study/laya-decision`'s `laya/evidence.py` states the doctrine in its
+opening lines:
+
+> Every state it assigns is either derived directly from an upstream artifact or
+> marked UNKNOWN. **It never manufactures a healthy-looking state from absent
+> input.**
+
+and it keeps `INSUFFICIENT` apart from `MISSING` for the reason this needed:
+*there and too thin to support a claim* is not *not there*.
+
+Chronoa's `learning.Report.honest()` collapsed the same distinction into a bare
+`False`. Measured: a model whose minority verdict has **3 examples** (under
+`_MIN_CLASS`'s 20) and a model that **genuinely failed** to learn that verdict
+returned the **same answer** - and the two have opposite remedies, one being *use
+the assistant more* and the other *stop quoting the model*. This file already
+records the principle from the other side: *"a truthful refusal demoted as a
+failure"* is a defect, and `train_and_save()` declining with *"the training split
+contains no example of verified"* is the correct output for that data. A refusal
+that reads as a result is the same defect the other way up.
+
+`Report.honest_reason()` returns `("reason", "sentence")` - `""` when honest,
+`insufficient` when the question cannot be answered from this log, and
+`not-detected` when it was answered and the answer was no. **`honest()` is
+unchanged** and every callsite reads it; the reason is additive, and a test
+asserts the two never disagree.
+
+**Measuring found a dead branch in my own first version.** `best_detection()` only
+returns verdicts for which `detected()` is true, and any of those makes `honest()`
+true - so a `near-miss` branch placed after the early return could never run. A
+four-case probe never reached it. It is recorded as unreachable rather than left
+looking reachable.
+
+`tests/test_honest_reason.py` (7), `tools/mutations/honest_reason.py` (**8 caught,
+0 survivors**).
+
+**Three of the eight were defects in my set, and one of them is the recurring
+shape.** The class-count guard `len(counts) <= 2` was untested because my fixture
+built exactly two verdicts, so it was always true - a wide report with one thin
+verdict among three is the witness that was missing. One mutant altered no
+behaviour because `return ("", "text")` is a **tuple**, which is truthy, so the
+bool-disagreement test could not see it. And one mutated a `# pragma: no cover`
+comment, which is not a mutant at all - deleted rather than kept.
+
+53 passed across the honest-reason, learning-calibration, outcome-model,
+measure-not-asserted and surface-learning suites.
+
+
 ## laya's hooks: `EventSink` refuses a field that is not a callable (2026-10-12)
 
 `harness-study/laya-decision`'s `laya/hooks.py` opens with the rule:

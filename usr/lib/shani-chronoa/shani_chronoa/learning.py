@@ -3981,6 +3981,59 @@ class Report(NamedTuple):
                    key=lambda n: min(self.detection(n), self.precision_lift(n)))
         return best, min(self.detection(best), self.precision_lift(best))
 
+    def honest_reason(self) -> str:
+        """Why this report is **not** worth quoting, or "" when it is.
+
+        **A reason rather than the bool alone, which is the transfer.**
+        `harness-study/laya-decision`'s `laya/evidence.py` states the doctrine:
+
+        > Every state it assigns is either derived directly from an upstream
+        > artifact or marked UNKNOWN. **It never manufactures a healthy-looking
+        > state from absent input.**
+
+        and it keeps `INSUFFICIENT` apart from `MISSING` for exactly the reason
+        this needs: *there and too thin to support a claim* is not *not there*.
+
+        Chronoa's own `Report.honest()` collapses the two into `False`. Measured,
+        a model whose minority verdict has 3 examples (under `_MIN_CLASS`'s 20)
+        and a model that has genuinely failed to learn the same verdict return
+        **the same answer** - and the two have opposite remedies: use the
+        assistant more, or stop quoting the model. This file already records the
+        principle from the other side (*"a truthful refusal demoted as a
+        failure"* is a defect; `train_and_save()` declining because
+        *"the training split contains no example of verified"* is the correct
+        output). A refusal that reads as a result is the same defect.
+
+        The three reasons are not equal, and the order matters: `insufficient`
+        is checked first because it is the one that makes every other answer
+        meaningless rather than negative.
+        """
+        if self.honest():
+            return ""
+        counts = {name: stats.get("support", 0)
+                  for name, stats in self.per_class.items()}
+        thin = [name for name, count in counts.items()
+                if 0 < count < _MIN_CLASS]
+        if thin and len(counts) <= 2:
+            return ("insufficient", "no verdict has "
+                    f"{_MIN_CLASS} examples ("
+                    + ", ".join(f"{name} {count}" for name, count in sorted(counts.items()))
+                    + "), so whether this model detects anything cannot be "
+                      "answered from this log rather than answered no")
+        majority = _majority(self.per_class)
+        if self.best_detection()[0]:
+            # **Unreachable, and removed when measuring it.** `best_detection`
+            # only returns verdicts for which `detected()` is true, and any of
+            # those makes `honest()` true - so a non-empty `best` after the
+            # early return above cannot happen. The first version of this method
+            # carried a `near-miss` branch here, and the four-case probe above
+            # never reached it.
+            return ("detected", "")      # pragma: no cover - see the note above
+        return ("not-detected",
+                f"no verdict outside {majority} is found at "
+                f"{_MIN_DETECTION_GAIN:.1f}x on both recall and precision, and "
+                f"top-1 does not clear the majority baseline")
+
     def honest(self) -> bool:
         """Whether this report is worth quoting.
 
