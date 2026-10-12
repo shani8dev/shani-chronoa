@@ -203,13 +203,48 @@ class TestTheReportCarriesIt:
         out = task_eval.markdown(_results([
             _row(id="a", reply=task_eval.REPLY_REFUSAL),
             _row(id="b", reply=task_eval.REPLY_ANSWER)]))
-        assert "| select | 1 | 0 | 0 | 1 |" in out, out
+        assert "| select | 2 | 1 | 0 | 0 | 1 |" in out, out
+
+    def test_a_case_that_worked_is_not_a_miss_even_when_it_said_nothing(self):
+        """**The distinction, measured rather than designed.**
+
+        The `time` case scores `tool: True, args: True` with `reply: "empty"` -
+        the model called `get_datetime` correctly and produced no text at all,
+        because a thinking model spends the budget on `reasoning_content`. A
+        table over *every* row therefore reports the model as silent on a case it
+        answered correctly, and dilutes the misses that are actually diagnostic.
+        So the miss table counts misses, and emptiness is reported separately.
+        """
+        out = task_eval.markdown(_results([
+            _row(id="done", tool=True, args=True, seen="get_datetime({})",
+                 reply=task_eval.REPLY_EMPTY),
+            _row(id="missed", reply=task_eval.REPLY_REFUSAL)]))
+
+        assert "| select | 1 | 1 | 0 | 0 | 0 |" in out, out
+        assert "refused outright - missed" in out, out
+        # ...and the successful silence is still visible, because it is a
+        # different fact about the model rather than about the run's accuracy.
+        assert "carried no text" in out, out
+        assert "done" in out, out
+
+    def test_a_clean_run_reports_no_miss_table_at_all(self):
+        """Every case right is the case where "0 refusals" is true rather than
+        merely unmeasured, so the section should be absent rather than zero."""
+        out = task_eval.markdown(_results([
+            _row(id="a", tool=True, args=True, reply=task_eval.REPLY_ANSWER)]))
+        assert "What the model said on the cases it missed" not in out, out
 
     def test_a_run_with_nothing_to_say_adds_no_section(self):
         """An empty section reads as "nothing was refused" when it means "nothing
-        was recorded" - the same substitution the classifier refuses."""
+        was recorded" - the same substitution the classifier refuses.
+
+        A row with no `reply` is one this build did not record: the field is only
+        there because `run_case` was taught to write it, so its absence is a
+        different thing from its value.
+        """
         out = task_eval.markdown(_results([_row(id="a", seen="no tool")]))
         assert "What the model said" not in out, out
+        assert "carried no text" not in out, out
 
 
 def test_run_case_keeps_what_the_model_said():
@@ -312,3 +347,184 @@ def test_every_narration_marker_is_exercised_by_something():
         assert task_eval.classify_reply(marker) == task_eval.REPLY_NARRATION, (
             f"the marker {marker!r} matches nothing on its own, so deleting it "
             "cannot fail")
+
+
+class TestTheReportStatesItsPopulation:
+    """A score is about the corpus it ran on, and this one is not all transcripts.
+
+    **Measured 2026-10-12: 149 of the 226 cases are machine-generated**, and each
+    says so in its own `note` — *"the wording is a starting point, not a
+    transcript"*. So a refusal rate over this corpus is mostly measured on
+    phrasings no person typed, which is precisely the population the question was
+    asked of. `coverage.skills_asserted` cannot see this: it counts *which skills*
+    have a case, and both populations name the same skills.
+    """
+
+    def _out(self, rows):
+        return task_eval.markdown(_results(rows))
+
+    def test_a_run_over_generated_cases_says_so(self):
+        out = self._out([_row(id="generated-set_volume"), _row(id="time")])
+        assert "1 of 2 cases are machine-generated" in out, out
+        assert "no person typed" in out, out
+
+    def test_an_all_hand_written_run_does_not_claim_a_population_it_has_not_got(self):
+        out = self._out([_row(id="time"), _row(id="weather")])
+        assert "machine-generated" not in out, (
+            f"a run with no generated case must not carry the caveat: {out}")
+
+    def test_the_generated_prefix_is_read_from_the_generator_not_hand_kept(self):
+        """`gen_eval_cases.py` names the cases it wrote; a second list of which
+        cases are real would rot exactly like `coverage.skills_total` did."""
+        import re
+        gen = re.search(r'"id": f"generated-\{_slug\(name\)\}"', (ROOT / "tools" / "gen_eval_cases.py").read_text())
+        assert gen, "gen_eval_cases.py no longer writes this id prefix"
+        assert task_eval._GENERATED_PREFIX == "generated-"
+
+
+def test_a_classification_shows_the_words_it_judged():
+    """**The number is a claim about text, so the text has to be there.**
+
+    heretic's own `print_responses` exists for this reason, and without it a
+    reader cannot tell whether a case really was a refusal without re-running the
+    model - which is the same measurement twice, on a machine where a run is
+    fifteen minutes.
+    """
+    out = task_eval.markdown(_results([
+        _row(id="weather", reply=task_eval.REPLY_REFUSAL,
+             text="I don't have access to real-time data, so I can't tell you.")]))
+    assert "refused outright - weather" in out, out
+    assert "I don't have access to real-time data" in out, out
+
+
+def test_a_row_with_no_text_says_so_rather_than_printing_nothing():
+    out = task_eval.markdown(_results([
+        _row(id="quiet", reply=task_eval.REPLY_EMPTY, text="")]))
+    assert "`quiet`: (no text)" in out, (
+        f"a bare bullet reads as a truncation bug: {out}")
+
+
+def test_two_configs_do_not_leak_into_each_other():
+    """`run()` returns a result per config - seven of them by default - and the
+    population note and the miss table are both built per config.
+
+    A single-config test cannot see a leak, and a leaked note is worse than a
+    missing one: it would attribute one config's machine-generated share to
+    another, which is the same "the figure is about a corpus it did not run on"
+    mistake this section exists to prevent.
+    """
+    out = task_eval.markdown({
+        "select": {"right_tool": 1, "right_call": 1, "cases": 2, "mean_seconds": "1",
+                   "not_measured": 0,
+                   "rows": [_row(id="generated-x", reply=task_eval.REPLY_REFUSAL,
+                                 text="I can't"),
+                            _row(id="real-y", tool=True, args=True,
+                                 reply=task_eval.REPLY_ANSWER)]},
+        "bare": {"right_tool": 0, "right_call": 0, "cases": 1, "mean_seconds": "1",
+                 "not_measured": 0,
+                 "rows": [_row(id="real-z", reply=task_eval.REPLY_REFUSAL,
+                               text="I cannot")]}})
+
+    assert "select: 1 of 2 cases are machine-generated" in out, out
+    assert "bare: 1 of 1 cases are machine-generated" not in out, (
+        f"the `select` row leaked onto `bare`: {out}")
+    # ...and the miss lists are per-config too.
+    assert out.count("refused outright") == 2, out
+    assert "- `real-z`: I cannot" in out, out
+    assert "- `x`: I can't" not in out, ("a row id was truncated by a prefix match", out)
+
+
+class TestARunSaysWhatItMeasured:
+    """`harness-study/laya-decision`'s `laya/evals.py` states the rule:
+
+    > `compare` reads `overall` and nothing else, so a run that says nothing about
+    > *what it measured* makes a gate that can only compare arithmetic. ...
+    > `EvalReport.comparable_to` refuses a comparison between two runs that are
+    > not the same measurement.
+
+    Chronoa already paid for not having it: AGENTS.md records `test_task_eval`
+    **failing on a stale skill count** - a comparison against a *different* set of
+    cases reading as a regression. `results[config]` carried `cases`, `right_tool`
+    and `mean_seconds`, and nothing saying which cases those were.
+
+    The identity is deliberately free of anything time-bearing, so a report stays
+    byte-reproducible for a fixed runner: reordering the file is not a different
+    measurement, and neither is editing a comment inside a case. What must change
+    it is the set of things asked, or what was asked.
+    """
+
+    def _one(self, cid, request="set the volume"):
+        return {"id": cid, "request": request}
+
+    def test_two_runs_over_the_same_cases_are_comparable(self):
+        cases = [self._one("a"), self._one("b")]
+        left = {"identity": task_eval.run_identity(cases)}
+        right = {"identity": task_eval.run_identity(list(cases))}
+        same, why = task_eval.comparable(left, right)
+        assert same is True, why
+
+    def test_a_different_number_of_cases_is_refused(self):
+        """**The case this repo has already been bitten by.**
+
+        AGENTS.md records `test_task_eval` failing on a stale skill count - a
+        comparison against a *different* set of cases reading as a regression.
+        """
+        left = {"identity": task_eval.run_identity(
+            [self._one("a"), self._one("b")])}
+        right = {"identity": task_eval.run_identity([self._one("a")])}
+        same, why = task_eval.comparable(left, right)
+        assert same is False, "a smaller set was compared as the same measurement"
+        assert "different cases" in why, why
+    def test_the_same_number_but_not_the_same_cases_is_refused(self):
+        """A count cannot catch this one, which is exactly why the digest is here."""
+        left = {"identity": task_eval.run_identity(
+            [self._one("a"), self._one("b")])}
+        right = {"identity": task_eval.run_identity(
+            [self._one("a"), self._one("c")])}
+        same, why = task_eval.comparable(left, right)
+        assert same is False, "one swapped case was compared as the same set"
+        assert "not the same cases" in why, why
+
+    def test_a_missing_identity_is_refused_rather_than_assumed(self):
+        """A report written before this change has no identity, and the honest
+        answer is "cannot tell" rather than "the same thing"."""
+        same, why = task_eval.comparable({}, {})
+        assert same is False
+        assert "no measurement identity" in why, why
+
+    def test_reordering_the_file_is_not_a_different_measurement(self):
+        cases = [self._one("a"), self._one("b"), self._one("c")]
+        shuffled = [self._one("c"), self._one("a"), self._one("b")]
+        same, why = task_eval.comparable(
+            {"identity": task_eval.run_identity(cases)},
+            {"identity": task_eval.run_identity(shuffled)})
+        assert same is True, f"reordering a file read as a new measurement: {why}"
+
+    def test_changing_what_is_asked_changes_the_identity(self):
+        left = {"identity": task_eval.run_identity(
+            [self._one("a", "set the volume")])}
+        right = {"identity": task_eval.run_identity(
+            [self._one("a", "set the brightness")])}
+        same, why = task_eval.comparable(left, right)
+        assert same is False, "a reworded request read as the same measurement"
+
+    def test_a_derived_case_is_counted_apart(self):
+        """`_GENERATED_PREFIX` exists so the markdown can say how much of a score
+        came from cases derived from schemas rather than from a person's own
+        phrasing - so the identity has to keep them distinguishable."""
+        cases = [self._one("a"),
+                 self._one(task_eval._GENERATED_PREFIX + "x"),
+                 self._one("b")]
+        _n, _sha, generated = task_eval.run_identity(cases)
+        assert generated == 1, _n
+
+    def test_the_real_dataset_has_a_stable_identity(self):
+        """The file on disk, run twice, must give the same value - a digest that
+        moves for a fixed input is worse than no digest."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        path = _Path(__file__).resolve().parent.parent / "tools" / "eval_cases.json"
+        cases = _json.loads(path.read_text(encoding="utf-8"))["cases"]
+        assert task_eval.run_identity(cases) == task_eval.run_identity(list(cases))
+        assert len(cases) > 100, "the eval corpus is smaller than AGENTS.md says"
