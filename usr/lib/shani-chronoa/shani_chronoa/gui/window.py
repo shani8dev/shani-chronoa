@@ -1381,6 +1381,24 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         input_row.append(self._attach_button)
         input_row.append(self._input_entry)
         input_row.append(self._stop_button)
+        # **Stopping the turn, which the button above does not do.** That one is
+        # `app.stop-speaking` - it stops the *voice* after the answer is made,
+        # and it is created hidden and never shown by anything, so "Stop
+        # speaking (Esc)" is a tooltip on a button that can never appear. A turn
+        # that is thinking, streaming or mid-skill had no control at all:
+        # `Decision.CANCEL` existed and worked, but only from inside the approval
+        # prompt, so a turn could be stopped at exactly one moment - the one where
+        # it asked permission. This is that decision reachable from outside it.
+        self._turn_stop_button = Gtk.Button()
+        self._turn_stop_button.set_icon_name("process-stop-symbolic")
+        self._turn_stop_button.add_css_class("flat")
+        self._turn_stop_button.set_valign(Gtk.Align.CENTER)
+        self._turn_stop_button.set_tooltip_text(
+            "Stop this turn. It ends before the next action, so whatever is "
+            "already running finishes first.")
+        self._turn_stop_button.connect("clicked", self._on_turn_stop_clicked)
+        self._turn_stop_button.set_visible(False)
+        input_row.append(self._turn_stop_button)
         input_row.append(self._send_button)
         main_box.append(self._attach_bar)
         # The organ strip sits directly above the composer, always present, so
@@ -1588,6 +1606,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         """Set the assistant state. The single entry point for it."""
         self._state = state
         self._sync_from_state()
+        # A turn-stop is only meaningful while a turn exists, and `set_state` is
+        # the one place that knows. Driven here rather than in `_setup_ui` so it
+        # cannot end up built-but-never-shown, which is what happened to the
+        # stop-*speaking* button above.
+        stop = getattr(self, "_turn_stop_button", None)
+        if stop is not None:
+            stop.set_visible(state != AssistantState.IDLE)
         # The rail answers "what is it doing" from the state line, so it is
         # refreshed here as well as on its tick: a state change is the moment
         # the rail's answer must not lag behind the orb.
@@ -2511,6 +2536,25 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _on_input_activate(self, entry: Gtk.Entry) -> None:
         self._submit_input()
+
+    def _on_turn_stop_clicked(self, _button: Gtk.Button) -> None:
+        """Stop the turn in progress, and say plainly what that does.
+
+        **It stops before the next action, not the one in flight.** Cancelling a
+        `chat_message` mid-stream would leave half an answer in the transcript,
+        so the control is worded to promise only what the mechanism delivers. A
+        stop that claims a hard kill it cannot perform is the same defect as a
+        chip that reports a state the app has overridden.
+        """
+        from shani_chronoa import permissions
+        try:
+            stopped = permissions.cancel_turn()
+        except Exception:                               # noqa: BLE001
+            logger.warning("could not stop the turn", exc_info=True)
+            self.set_status("This turn could not be stopped")
+            return
+        self.set_status("Stopping after this step" if stopped
+                        else "Nothing was running")
 
     def _on_send_clicked(self, _button: Gtk.Button) -> None:
         self._submit_input()

@@ -808,6 +808,32 @@ def decide(action: str, resource: "str | None", consent_key: str,
     return None
 
 
+def cancel_turn() -> bool:
+    """Stop the turn in progress, from outside the approval prompt.
+
+    **This is the same `Decision.CANCEL` the dialog files**, not a second
+    mechanism with its own flag for a caller to forget to check. That is the
+    shape of the bug this module already records once: an option whose label
+    promises something nothing acts on.
+
+    Written session-scoped under the `*` pattern, because the tool loop that has
+    to notice has the turn but not the `(action, resource)` key a decision would
+    otherwise be filed under - which is exactly why `turn_cancelled()` exists at
+    all.
+
+    **It stops the next tool call, not the one in flight.** The model call itself
+    is a `chat_message` await and cancelling it mid-stream would leave a partial
+    answer in the transcript. So this is honestly scoped in the docstring rather
+    than presented as a hard kill, because a control that claims more than it
+    does is the defect this whole module exists to prevent.
+
+    Returns what it filed, so a caller can say whether there was anything to
+    stop.
+    """
+    add_rule("*", "*", Decision.CANCEL, session_only=True)
+    return turn_cancelled()
+
+
 def cancel_requested(action: str, resource: str) -> bool:
     """Whether the user asked to stop the turn rather than just refuse this call."""
     return evaluate(action, resource) == Decision.CANCEL
