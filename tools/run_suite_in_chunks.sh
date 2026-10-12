@@ -48,8 +48,22 @@ for manifest in /tmp/opencode/chunk_*; do
     state="$STATE/$name"
     mkdir -p "$state"
     files=$(tr '\n' ' ' < "$manifest")
+    # **`PYTHONDONTWRITEBYTECODE=1`, because its absence is a red test four runs
+    # later.** A chunk that imports the package writes `.pyc` into
+    # `usr/lib/shani-chronoa/**/__pycache__`, and `test_packaging.py`'s two
+    # bytecode guards then fail - on a tree where nothing is actually wrong.
+    # `tests/conftest.py:38` sets the same variable at *import* time, which covers
+    # everything imported after conftest but is too late for the interpreter's own
+    # compilation of what pytest has already collected. Setting it in the
+    # environment here closes the whole path rather than relying on ordering.
+    # What it does not cover is a standalone `tools/*.py` run, which never imports
+    # conftest at all - that one is a habit, and AGENTS.md records it.
+    #
+    # This was added once already and then **lost to a working-tree restore from
+    # HEAD** - the edit was uncommitted when the tree was destroyed, so the very
+    # trap it closes reopened. Landing it as a commit is what makes it durable.
     setsid env XDG_STATE_HOME="$state" XDG_CONFIG_HOME="$state/config" \
-        XDG_DATA_HOME="$state/data" \
+        XDG_DATA_HOME="$state/data" PYTHONDONTWRITEBYTECODE=1 \
         python3 -m pytest $files -q --tb=no -rf > "$log" 2>&1 < /dev/null &
     echo "launched $name ($(wc -w < "$manifest") files) -> $log"
 done
