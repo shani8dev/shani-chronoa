@@ -21317,3 +21317,63 @@ show this fix**, because the harness builds the one machine the fix is about
 wrong. The row is verified by driving the real reader against a stand-in engine,
 and a `main:cloud` render target - an app with a `CloudLLMChain` - is the honest
 way to see it, and is recorded rather than built here.
+
+## The renderer now blanks the main window and still reports PASS (2026-10-13)
+
+Found while trying to build the `main:cloud` target the cloud-engine fix needed.
+Recorded first because it is **live and it will mislead the next person**, who
+will be looking at white rectangles and reading them as renders.
+
+    render_ui.py at HEAD (byte-identical, `git diff` empty), 1280x800:
+      1 rendered, 0 not.
+      opaque 0.2%      <- 183,117 bytes earlier today, 100% opaque
+
+**The same command on the same commit gave 100% opaque earlier in this
+session**, so the difference is exhaustion, not code: this pass ran about eight
+renders and the broadway pool is 31 numbers. It is the `acquire_display` cascade
+this file already records - one slow start poisoning the numbers after it - and
+the reason the retry loop exists.
+
+**And nothing reports it.** The PASS column is written by `[[ -s "$out" ]]`: a
+file appeared. **A blank PNG is 20,000-odd bytes, so every check the sweep runs
+passes**, which is the fourth instance of a capture that photographs less than
+its target being called a render. The alpha coverage number is right there in
+the image and nothing reads it.
+
+**What this cost, and why it is worth writing down.** I spent the remaining
+budget convinced my own change had broken the main window - a new engine on the
+render's application stand-in - and only checked it because `main` went blank
+too. Reverting the one file I had touched, from HEAD, and re-rendering was the
+whole diagnosis: **the renderer was already broken before I started.** The
+lesson is the same one this file keeps meeting from new directions, and the
+costliest version yet: *the failure was in the instrument, and the instinct was
+to doubt the code*. `test_mutation_harness_can_fail.py` exists for this, and the
+render harness has no equivalent - which is the actual gap.
+
+**So the rule this leaves, in the form it needs:** **a render target is not
+proved by a file appearing.** Alpha coverage and a distinct sha across targets
+are the checks that distinguish a picture from a page, and the batch driver does
+neither. Adding them is a small change to `render_once` and would have caught
+this, the 129,834-byte `cloud-keys` false pass and the 96.2%-transparent main
+window with one line each.
+
+### And `main:cloud` is recorded, not built
+
+The target is the right idea and it does not work yet. Setting the stand-in
+application's `llm` to an unbuilt `CloudLLMChain` (`__new__`, so `isinstance`
+passes without reading every configured key) makes the window capture **0.3%
+opaque**. Two forms were tried - its own `elif`, then a flag on the main path -
+and both blank, so the cause is the engine object rather than the target's
+shape.
+
+**The suspected mechanism, not established:** the window pre-builds every surface
+in an idle callback, so a surface raising on an unbuilt chain **aborts the main
+loop rather than naming itself**, and no display was free long enough to read
+the traceback. `gui/surfaces/model.py:452` reads `getattr(llm, "model", "")`
+which an unbuilt chain survives, so the surface that raises is not that one.
+
+**Not shipped**, because a target whose output is a blank page is the defect
+this entry is about. What was kept is nothing in `render_ui.py` - it is back at
+HEAD - and the window-side fix, which degrades correctly when the application
+cannot say which engine is answering, and which is pinned directly against the
+reader rather than through a caller that swallows exceptions.
