@@ -38,10 +38,10 @@ MUTATIONS = [
                'shrinking slice of history. Nothing reports that records stopped '
                'arriving; the report just gets quieter. This is the mutation the '
                'whole retention change could introduce, and it is the one the '
-               'readers were wired for.',
-        'expect': ['test_rotation_keeps_every_record',
-                   'test_records_come_back_in_time_order',
-                   'test_log_files_is_oldest_first_with_the_active_log_last'],
+               'readers were wired for. Two names were removed and neither is missing. `test_records_come_back_in_time_order` builds a log that is never rotated, so the active log holds everything and it passes either way - a real property about order, just not one this mutation can disturb. `test_log_files_is_oldest_first_with_the_active_log_last` tests `tool_tracking.log_files`, and this mutation is in `learning.py`: a witness naming a different function\'s test is the mis-naming this runner reports, not coverage.',
+        'expect': [               'test_rotation_keeps_every_record',
+               'test_a_named_path_returns_the_archived_records_too',
+               'test_a_generation_is_never_half_dropped'],
         'file': _LEARN,
         'old': '    sources = tool_tracking.log_files(Path(path) if path is not None\n'
                '                                      else Path(_log_path()))',
@@ -53,10 +53,9 @@ MUTATIONS = [
                'tool selection, so the learned weights would be computed from '
                'the newest chunk alone - and the module\'s own docstring says a '
                'fresh tracker answering "no durable history" is how that class of '
-               'silent starvation happens.',
-        'expect': ['test_the_tail_reader_sees_across_the_boundary',
-                   'test_the_tail_reader_sees_across_the_boundary',
-                   'test_a_missing_log_is_none_not_an_empty_list'],
+               'silent starvation happens. The name was also listed twice, so one witness was standing in for two and the count was padding. `test_a_missing_log_is_none_not_an_empty_list` cannot bite because the mutation preserves its case exactly - `[path] if path.exists() else []` is empty for a missing log, so the answer stays `None` and the test is green with the defect in place.',
+        'expect': [               'test_the_tail_reader_sees_across_the_boundary',
+               'test_the_tail_reader_stays_within_its_limit_across_many_chunks'],
         'file': _LEARN,
         'old': '    sources = list(reversed(tool_tracking.log_files(path)))',
         'new': '    sources = [path] if path.exists() else []',
@@ -69,10 +68,8 @@ MUTATIONS = [
                'next write checks, and over a boundary the newest record can be '
                'left in an archive while the active log is reset. Rotating '
                'first is what makes "the active log is always the newest chunk" '
-               'an invariant rather than a hope.',
-        'expect': ['test_a_write_past_the_cap_rotates_first',
-                   'test_rotation_does_not_split_a_record',
-                   'test_records_come_back_in_time_order'],
+               'an invariant rather than a hope. One witness, because only one applies. `test_rotation_does_not_split_a_record` asks whether a record can be cut in half by a rotation; moving the rename to the wrong side of the append cuts nothing in half - a different property. `test_records_come_back_in_time_order` is the never-rotated fixture named above.',
+        'expect': [               'test_a_write_past_the_cap_rotates_first'],
         'file': _TT,
         'old': '        try:\n'
                '            if self.log_file.stat().st_size + len(line) > ACTIVE_MAX_BYTES:\n'
@@ -171,10 +168,8 @@ MUTATIONS = [
         'label': 'the size check that triggers rotation is removed',
         'why': 'the feature becomes a function nothing calls, and every test '
                'that calls `rotate()` directly stays green - the `refused_tools` '
-               'and `Registry.register` shape.',
-        'expect': ['test_a_write_past_the_cap_rotates_first',
-                   'test_a_write_below_the_cap_does_not_rotate',
-                   'test_the_cap_holds_far_more_than_a_month_of_use'],
+               'and `Registry.register` shape. One witness again, and the two removed are the mirror image of each other. `test_a_write_below_the_cap_does_not_rotate` asserts that a small write does **not** rotate - and with the size check deleted nothing ever rotates, the same observed outcome, so it is green with the defect in place. A guard that can only fail in one direction needs the other direction\'s mutation to be seen at all. `test_the_cap_holds_far_more_than_a_month_of_use` measures how generous `ACTIVE_MAX_BYTES` is, and removing the comparison against it does not change the constant.',
+        'expect': [               'test_a_write_past_the_cap_rotates_first'],
         'file': _TT,
         'old': '            if self.log_file.stat().st_size + len(line) > ACTIVE_MAX_BYTES:\n'
                '                rotate(self.log_file)',
@@ -198,10 +193,10 @@ MUTATIONS = [
         'why': '`.2` and `.1` with no `.3` is the ordinary state after a quiet '
                'period - a rotation with nothing to rotate leaves the numbering '
                'sparse - and a reader that assumed contiguity would stop at the '
-               'hole and report a history that is merely shorter.',
-        'expect': ['test_a_gap_in_the_numbering_is_not_a_gap_in_the_records',
-                   'test_the_number_of_chunks_is_bounded',
-                   'test_a_gap_in_the_numbering_is_not_a_gap_in_the_records'],
+               'hole and report a history that is merely shorter. `test_records_come_back_in_time_order` is the never-rotated fixture again. `test_the_number_of_chunks_is_bounded` counts what is on disk against `ARCHIVE_KEEP`, and this mutation changes only what the reader *lists* - the directory is pruned identically either way, which is exactly why that test was rewritten to count the directory rather than the accessor\'s return value.',
+        'expect': [               'test_a_gap_in_the_numbering_is_not_a_gap_in_the_records',
+               'test_a_generation_is_never_half_dropped',
+               'test_log_files_is_oldest_first_with_the_active_log_last'],
         'file': _TT,
         'old': '    for n in range(ARCHIVE_KEEP, 0, -1):\n'
                '        candidate = d / ("%s.%d" % (active.name, n))\n'
