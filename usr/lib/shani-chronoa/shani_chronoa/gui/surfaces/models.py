@@ -797,6 +797,85 @@ def _pick(app: Any, card: Dict[str, Any]) -> None:
         config.set("piper-voice", key.split(":", 1)[-1])
 
 
+def recorder_row_status(*a, **k):
+    from shani_chronoa.gui.surfaces import common as _c
+    return _c.status_row(*a, **k)
+
+
+def _other_files_in_the_model_folder() -> List[Gtk.Widget]:
+    """What is in the model folder that the tally above does not count.
+
+    **`modelfmt.catalog()` existed and had no caller in the tree.** Its docstring
+    is *"Every model-shaped file under `roots`, with format, role and
+    loadability"* - and it is the only thing here that can answer for a file the
+    catalogue has never heard of.
+
+    The row above counts **cards**, so it counts the shipped tiers. Measured on
+    this machine the folder holds ten GGUF files and that row says *"3 installed,
+    27 available"*. The other seven were:
+
+    | file | what it really is |
+    |---|---|
+    | `lumen-cortex-lora.gguf` | a LoRA **adapter** - the header says `general.type: adapter` |
+    | `lumen-executor-lora.gguf` | the same |
+    | `lumen-mouth-lora.gguf` | the same |
+    | `tool-q4_k_m.gguf` | a usable model from elsewhere; nothing here has checked it |
+    | `toolcall-q5_k_m.gguf` | the same |
+    | `Qwen3-0.6B-Base.Q8_0.gguf` | the same |
+    | `Qwen3-0.6B-heretic.Q8_0.gguf` | the same |
+    | `SmolVLM2-500M-Video-Instruct-Q8_0.gguf` | the same, and the projector `mmproj-` file is not beside it, so `llama-server` would need `--mmproj` for the video side |
+
+    **Two halves, and they need opposite words.** Five load and are unoffered;
+    three would break `llama-server` if selected, because a LoRA is not a model.
+    One sentence covering all eight would be wrong for all of them.
+
+    The first draft of this docstring listed four of the five and said "four",
+    because it was written from the table above rather than from the row the panel
+    renders. The row says five. The row is right.
+
+    Built with `common.status_row` and **not** a `StatusRecorder`: these rows
+    carry their own dots, and folding "there are some other files" into the
+    panel's recorded status word would turn a healthy panel red over a folder
+    someone deliberately filled.
+
+    Returns an empty list when there is nothing else - a row saying "nothing to
+    report" is one more thing to read.
+    """
+    from shani_chronoa import local_llm, modelfmt
+
+    try:
+        found = modelfmt.catalog([local_llm.model_dir()])
+    except Exception:  # noqa: BLE001 - a report must not fail the panel
+        return []
+
+    offered = {spec.filename for spec in getattr(local_llm, "SPECS", {}).values()}
+    #: `model=False` marks a declared non-model that `catalog` parks in `usable`
+    #: anyway, because it is present and has to be named. Not "unoffered".
+    usable = [r for r in found["usable"]
+              if r["filename"] not in offered and r.get("model") is not False]
+    unusable = list(found["present"]) + list(found["unreadable"])
+
+    rows: List[Gtk.Widget] = []
+    if usable:
+        names = ", ".join(r["filename"] for r in usable[:4])
+        if len(usable) > 4:
+            names += f", and {len(usable) - 4} more"
+        rows.append(common.status_row(
+            common.STATUS_OK,
+            f"{len(usable)} other model file(s) in this folder",
+            f"{names} load, but they are not among the models this panel offers "
+            f"and nothing here has checked them - they did not come from this "
+            f"build. Point `current.gguf` at one to run it."))
+    if unusable:
+        why = unusable[0].get("reason") or unusable[0].get("note") or ""
+        rows.append(recorder_row_status(
+            common.STATUS_ATTENTION,
+            f"{len(unusable)} file(s) in this folder cannot be run as a model",
+            f"{unusable[0]['filename']}: {why}"
+            + (f" (and {len(unusable) - 1} more)" if len(unusable) > 1 else "")))
+    return rows
+
+
 def build(app: Any) -> Gtk.Widget:
     """The model manager for `app` - anything with a `config` will do."""
     page, set_content = common.surface(TITLE, SUBTITLE)
@@ -888,6 +967,11 @@ def build(app: Any) -> Gtk.Widget:
             common.STATUS_UNKNOWN,
             "No models",
             "the registry returned nothing"))
+
+    # **After** the tally, not instead of it: that row is about the catalogue and
+    # is correct. This is about the folder, and one does not answer for the other.
+    for row in _other_files_in_the_model_folder():
+        root.append(row)
 
     # --- the two lists, as a view stack with a switcher under them ---------
     stack = Adw.ViewStack(vexpand=True)
