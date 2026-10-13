@@ -99,6 +99,20 @@ def _open_settings(app, target: str) -> None:
     common.open_page(app, target)
 
 
+#: Titles are clamped to **one line**, which is the only lever `Adw.ActionRow`
+#: offers. `set_title_widget` does not exist on it - measured, `AttributeError:
+#: 'ActionRow' object has no attribute 'set_title_widget'`, and the first version
+#: of this fix used it and broke every window that built a sidebar. `set_title`
+#: keeps the title as a *string*, so `get_title()` still answers the panel name;
+#: a title widget would have made it answer "".
+#: **Used, not decorative.** The first version wrote this constant and then
+#: called `set_title_lines(1)` with a literal in both places, so it said
+#: nothing at all - and the mutation run said so: flipping it to 0 changed no
+#: test, because nothing read it. A named constant that nothing reads is a
+#: comment with extra syntax.
+SIDEBAR_TITLE_LINES = 1
+
+
 class SidebarPage(Adw.NavigationPage):
     """The panel list: search, the sections, and the way back to the chat.
 
@@ -204,6 +218,7 @@ class SidebarPage(Adw.NavigationPage):
         # and the docstring were right about the intent and wrong about the
         # tree; this is the line that carries the intent.
         chat_row = Adw.ActionRow(title=CHAT_TITLE)
+        chat_row.set_title_lines(SIDEBAR_TITLE_LINES)
         chat_row.add_css_class("sidebar-row")
         chat_icon = Gtk.Image.new_from_icon_name(CHAT_ICON)
         chat_icon.set_pixel_size(SIDEBAR_ICON_PX)
@@ -228,6 +243,7 @@ class SidebarPage(Adw.NavigationPage):
             groups[section] = group
             for name, title, icon in entries:
                 row = Adw.ActionRow(title=title)
+                row.set_title_lines(SIDEBAR_TITLE_LINES)
                 # `sidebar-row` so the `selected` rule above is scoped to this
                 # list. `selected` is a libadwaita class name that a
                 # `PreferencesRow` may also carry, and a rule with no subject
