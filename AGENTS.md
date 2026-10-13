@@ -20695,3 +20695,55 @@ result as one that works.** What finally worked was the rule "the longest run
 whose colour differs from the background" - and what found `memory` was not the
 detector at all but **cropping the region and looking**, after the detector had
 already pointed at it once.
+
+## The organ gap test protects a value that still produces the symptom it names (2026-10-13)
+
+The last item from the render pass, and the honest answer is about the **witness**,
+not the spacing.
+
+Renders at **760** and **1024** - both widths the harness could only reach once
+`CHRONOA_FORCE_SIZE` existed - both show the eight organ labels reading as one
+string:
+
+    listening looking speaking network sensing remembering acting thinking
+
+That is **exactly the symptom** `set_column_spacing(6)` was introduced to cure.
+`organs.py` records the whole story: zeroing the `flowboxchild` padding recovered
+~230px of width "and left nothing between the lights, so the eight labels
+rendered as ... one run-on string, not eight named lights". Six pixels is the fix
+for that.
+
+**And 6px does not fix it.** A six-pixel gap between two lowercase words reads as
+a space, not a boundary. Two renders at two widths say so.
+
+**The test does not catch this, and cannot:**
+
+    assert strip.get_column_spacing() >= 4
+
+A floor of 4 is satisfied by the shipped 6, so the witness passes **with the
+symmetric symptom fully present**. It was written to protect the property its
+docstring names - "the strip's width test passes on a row nobody can read" - and
+the value it chose does not deliver it. That is the same shape as the seven
+vacuous witnesses elsewhere this session, arrived at from the other direction:
+a test that is *not* vacuous, passes truthfully, and still does not protect the
+thing.
+
+**Not changed**, and the reason is the measurement I could not finish. The
+spacing also governs whether the strip wraps to two rows, which is a documented
+prior bug: homogeneous cells wrapped "even at 1280px (measured) because six wide
+cells plus two is a line break, not because the words needed it". Widening the
+gap costs `7 x delta` pixels across the strip, and I could not measure the
+strip's natural width per spacing in the time left - the broadway daemon died
+mid-measurement and GTK4 widgets cannot be measured without a display.
+
+So the change needs, in this order:
+
+1. the strip's natural width at spacings 6 / 12 / 18, measured;
+2. the column width available to it at 760 and at 1024, from a render;
+3. the smallest spacing at which the labels read as eight things;
+4. the test's floor raised to **that** number, so the witness protects the
+   property it names.
+
+Changing the constant first and rendering afterwards would be the same mistake as
+the one this session already made once - forcing a render size and checking byte
+counts, which produced a picture of a white rectangle and passed every check.
