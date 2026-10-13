@@ -299,6 +299,41 @@ def report(results: dict, arms: "list[str]", n: int, dropped: int = 0) -> None:
         paired_table(results, arms)
 
 
+def report_only(path: str) -> int:
+    """Print the report for a run that already happened. No server, no model.
+
+    **Why this is not a convenience.** The arms are run sequentially into
+    per-arm JSON precisely so a timeout in the last one does not lose the first
+    two - and a per-arm file is worth nothing if the only way to read it is to
+    run five hours of inference again. The process that is running right now
+    loaded this module *before* the paired comparison existed, so its own
+    console output is the old report; this is how the new one is obtained from
+    the same measurements.
+
+    The population size is re-derived from the rows rather than remembered,
+    because a header that says 220 because something once said 220 is a stale
+    label on a measurement.
+    """
+    try:
+        merged = json.loads(pathlib.Path(path).read_text())
+    except (OSError, ValueError) as exc:
+        print("could not read %s: %s" % (path, exc))
+        return 2
+    arms = [a for a in ARMS if merged.get(a, {}).get("rows")]
+    if not arms:
+        print("%s holds no arm of this run" % path)
+        print("arms this tool knows: %s" % ", ".join(ARMS))
+        return 2
+    ids = set()
+    for arm in arms:
+        ids |= {r.get("id") for r in merged[arm]["rows"] if r.get("id")}
+    dropped = sum(1 for arm in arms for r in merged[arm]["rows"]
+                  if r.get("unavailable"))
+    print("re-reporting %s" % path)
+    report(merged, arms, len(ids), dropped)
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--dry-run", action="store_true")
@@ -313,7 +348,16 @@ def main(argv=None) -> int:
     ap.add_argument("--ctx", type=int, default=2048)
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--json", default="")
+    ap.add_argument("--report", default="",
+                    help="load a finished run's merged JSON and print the "
+                         "report from it. Starts no server and asks no model "
+                         "anything: the run is five hours of inference and the "
+                         "analysis is seconds, so improving the report must "
+                         "not cost a re-run.")
     args = ap.parse_args(argv)
+
+    if args.report:
+        return report_only(args.report)
 
     # **Say the population out loud before starting a server.** The first version
     # of this tool counted the *strings* it had been handed, so it printed "5

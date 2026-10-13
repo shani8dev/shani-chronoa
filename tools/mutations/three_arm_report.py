@@ -65,4 +65,57 @@ MUTATIONS = [
         'old': 'CASES = "time,weather,volume,set_timer,reminder"',
         'new': 'CASES = "time,weather"',
     },
+    {
+        'label': 'the re-report flag starts a server and asks the model again',
+        'why': '**the whole point of the flag is that it does not.** A per-arm '
+               'JSON file is worth nothing if reading it costs five hours of '
+               'inference, and the run in flight right now loaded this module '
+               'before the paired comparison existed - so its console output is '
+               'the old report and the new one has to come from somewhere.',
+        'expect': ['test_it_starts_no_server',
+                   'test_a_finished_run_is_reported',
+                   'test_it_does_not_need_the_cases_file_to_exist'],
+        'file': _SRC,
+        'old': '    if args.report:\n        return report_only(args.report)',
+        'new': '    if False:\n        return report_only(args.report)',
+    },
+    {
+        'label': 'a re-report of a file that was never written succeeds',
+        'why': 'the header would print over nothing, and the reader has no way '
+               'to tell an empty report from a finished one.',
+        'expect': ['test_a_missing_file_is_refused_by_name'],
+        'file': _SRC,
+        'old': '        print("could not read %s: %s" % (path, exc))\n        return 2',
+        'new': '        print("could not read %s: %s" % (path, exc))\n        return 0',
+    },
+    {
+        'label': 'a file holding no arm of this run is reported as one',
+        'why': 'it prints a header naming arms it never found, which is the '
+               '`skills_total` failure: a figure that cannot distinguish "did '
+               'not happen" from "was zero".',
+        'expect': ['test_a_file_holding_no_arm_of_this_run_says_which_arms_it_knew'],
+        'file': _SRC,
+        'old': '        print("arms this tool knows: %s" % ", ".join(ARMS))\n        return 2',
+        'new': '        print("arms this tool knows: %s" % ", ".join(ARMS))\n        return 0',
+    },
+    {
+        'label': 'the re-reported population is the number of arms, not of cases',
+        'why': 'the header would claim a population nobody ran, and the whole '
+               'point of re-deriving it is that a remembered 220 is a stale '
+               'label on a measurement.',
+        'expect': ['test_the_population_is_derived_from_the_rows_not_remembered'],
+        'file': _SRC,
+        'old': '    report(merged, arms, len(ids), dropped)',
+        'new': '    report(merged, arms, len(arms), dropped)',
+    },
+    {
+        'label': 'a re-report of two arms calls itself a three-arm result',
+        'why': 'the run that died in arm two is the case this file exists for, '
+               'and a report that does not say so is the failure to keep the '
+               'arms that did finish while appearing to have lost them.',
+        'expect': ['test_a_two_arm_run_is_still_called_a_two_arm_run'],
+        'file': _SRC,
+        'old': '    arms = [a for a in ARMS if merged.get(a, {}).get("rows")]',
+        'new': '    arms = list(ARMS)',
+    },
 ]

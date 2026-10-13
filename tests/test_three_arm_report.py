@@ -20,10 +20,30 @@ row the *service* failed is not a row the model got wrong.
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("three_arm", ROOT / "tools" / "three_arm.py")
 three_arm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(three_arm)
+
+
+@pytest.fixture(autouse=True)
+def _no_server_ever_starts(monkeypatch):
+    """**A test file that can accidentally start the five-hour run is a hazard
+    for whoever adds the next test to it.**
+
+    Found by mutation: the mutation that makes `--report` start a server instead
+    of reading a file was *caught* - by a 300-second timeout, because the
+    mutated path went on to launch a real `llama-server` and run the whole eval.
+    A witness that can only fire by hanging is a witness nobody can act on, and
+    a file where that is one keystroke away is worse.
+
+    So every path that would start a server returns immediately instead. The
+    `test_it_starts_no_server` witness is unaffected: it patches `Popen` and
+    asserts on whether it was called, which is decided long before this.
+    """
+    monkeypatch.setattr(three_arm, "_wait", lambda *a, **k: False)
 
 
 def row(tool=False, args=False, seen="no tool", unavailable=False):
@@ -103,3 +123,92 @@ class TestTheArmsAndThePopulationAreDeclared:
             "every id in the default case list now exists, so the "
             "strings-vs-cases defect cannot show - keep this honest")
         assert chosen, "the default case list matches nothing"
+
+class TestAFinishedRunCanBeReReportedWithoutReRunningIt:
+    """**A per-arm JSON file is worth nothing if reading it costs the run.**
+
+    The arms are run sequentially into per-arm files precisely so a timeout in
+    the last one does not lose the first two - and the process that is running
+    right now loaded this module *before* the paired comparison existed, so its
+    own console output is the old report. Improving the analysis must not cost
+    five hours of inference to apply.
+
+    So `--report PATH` loads a finished run and prints from it: no server, no
+    model, no question asked of anything. The refusal cases matter as much as
+    the happy one, because a re-report tool that cannot say "I could not read
+    that" would print a header over nothing.
+    """
+
+    def _run_file(self, tmp_path, arms=("+greedy", "+greedy+constrained",
+                                        "+greedy+request"), n=20):
+        import json as _json
+        merged = {}
+        for i, arm in enumerate(arms):
+            merged[arm] = {"rows": [
+                {"id": "c%d" % k, "tool": k < 10 + i, "args": k < 10 + i,
+                 "seen": "" if k < 10 + i else "no tool", "unavailable": False,
+                 "seconds": 1.0, "schemas": 8, "reply": "x"}
+                for k in range(n)]}
+        path = tmp_path / "run.json"
+        path.write_text(_json.dumps(merged))
+        return path
+
+    def test_a_finished_run_is_reported(self, tmp_path, capsys):
+        path = self._run_file(tmp_path)
+        assert three_arm.main(["--report", str(path)]) == 0
+        out = capsys.readouterr().out
+        assert "+greedy+constrained" in out and "+greedy+request" in out, out
+        assert "re-reporting" in out, out
+
+    def test_the_population_is_derived_from_the_rows_not_remembered(self, tmp_path,
+                                                                   capsys):
+        """A header that says 220 because something once said 220 is a stale
+        label on a measurement."""
+        path = self._run_file(tmp_path, n=37)
+        three_arm.main(["--report", str(path)])
+        out = capsys.readouterr().out
+        assert "37 cases" in out, out
+        assert "220" not in out, out
+
+    def test_it_starts_no_server(self, tmp_path, monkeypatch, capsys):
+        """The property the whole flag exists for: asking the model again is the
+        thing it must not do."""
+        started = []
+
+        class _Proc:
+            def terminate(self): pass
+            def wait(self, timeout=None): return 0
+            def kill(self): pass
+
+        monkeypatch.setattr(three_arm.subprocess, "Popen",
+                            lambda *a, **k: started.append(a) or _Proc())
+        three_arm.main(["--report", str(self._run_file(tmp_path))])
+        assert not started, "a server was started to re-read a finished run"
+
+    def test_a_missing_file_is_refused_by_name(self, tmp_path, capsys):
+        path = tmp_path / "never-written.json"
+        assert three_arm.main(["--report", str(path)]) == 2
+        assert str(path) in capsys.readouterr().out
+
+    def test_a_file_holding_no_arm_of_this_run_says_which_arms_it_knew(self,
+                                                                      tmp_path,
+                                                                      capsys):
+        path = tmp_path / "other.json"
+        path.write_text('{"something-else": {"rows": []}}')
+        assert three_arm.main(["--report", str(path)]) == 2
+        out = capsys.readouterr().out
+        assert "+greedy+constrained" in out, (
+            "the refusal must name the arms it was looking for, or the reader "
+            "has to guess what shape the file should have:\n" + out)
+
+    def test_a_two_arm_run_is_still_called_a_two_arm_run(self, tmp_path, capsys):
+        path = self._run_file(tmp_path, arms=("+greedy", "+greedy+constrained"))
+        assert three_arm.main(["--report", str(path)]) == 0
+        assert "only 2 of 3 arms ran" in capsys.readouterr().out
+
+    def test_it_does_not_need_the_cases_file_to_exist(self, tmp_path, monkeypatch,
+                                                      capsys):
+        """`--cases` resolution reads eval_cases.json; a re-report must not, or
+        it inherits a dependency on a file the run did not produce."""
+        monkeypatch.setattr(three_arm, "REPO", tmp_path / "nowhere")
+        assert three_arm.main(["--report", str(self._run_file(tmp_path))]) == 0
