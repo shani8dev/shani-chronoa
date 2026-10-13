@@ -26,9 +26,24 @@ refusal of everything that is not an identity, our own broadcast being filtered
 out of discovery, and the stability of the device id.
 
 **Not verified**: any plugin packet after pairing. The capability *list* the
-phone advertises is real and is returned by `identity_exchange`, but what a
-given plugin actually answers to has not been exercised. `pairing_status()`
-says that rather than implying the rest works.
+phone advertises is real, and it arrives with the discovery datagram - the
+official field order puts `incomingCapabilities`/`outgoingCapabilities` in the
+plaintext identity, and `parse_identity` returns them, so
+`tests/test_lan_link.py` reads `kdeconnect.battery` out of one. But what a given
+plugin actually answers to has not been exercised. `pairing_status()` says that
+rather than implying the rest works.
+
+**One handshake in this module, not two.** An earlier version also carried a
+119-line `identity_exchange()` that hand-drove the same TCP + TLS + identity
+exchange over a `MemoryBIO`. It had no caller and no test, and `Link` does the
+job better: it keeps the peer's whole identity body in `_peer_reply_body`, and
+it has the `expect_peer` pinning defence that the standalone copy had no way to
+express. It was removed rather than given a caller, because the one thing that
+made it look like a missing capability - "it returns the capability list" - is
+already answered by discovery, with no handshake at all. Two copies of a
+hand-written TLS handshake whose roles were, in this module's own words, "got
+wrong first", is one too many; `tests/test_one_tls_handshake_in_lan_link.py`
+holds that line.
 
 **The two non-obvious parts, both of which were got wrong first.**
 
@@ -335,126 +350,6 @@ def _hostname() -> str:
         return socket.gethostname()
     except OSError:
         return "this computer"
-
-
-def identity_exchange(host: str, tcp_port: int = UDP_PORT, timeout: float = 20.0):
-    """The full KDE Connect handshake with a peer: `(its identity, why-not)`.
-
-    **What this is.** The real thing, in order:
-
-    1. TCP to the peer's control port.
-    2. Our **plaintext** `kdeconnect.identity` - the short discovery form, with
-       `deviceId`, `protocolVersion`, `deviceType`, `tcpPort`.
-    3. The peer answers a TLS handshake **as the client** (measured: it sends
-       nothing until it has our identity, then a ClientHello - so reading first
-       and wrapping later needs a memory BIO rather than `wrap_socket`, which
-       would consume the ClientHello itself).
-    4. Inside TLS, both sides send the **full** identity - `deviceName`,
-       `deviceType`, and the capability lists a phone advertises.
-
-    The identity is a stable per-run thing, so our certificate is generated once
-    and cached under the state home. It matters: a phone pairs to a
-    **fingerprint**, and a new certificate each call would look to the phone like
-    a different computer every time.
-
-    **The roles are not symmetric, and getting them backwards is the bug this
-    function is written around.** The TCP *receiver* is the TLS *client*
-    (`kdeconnect-nx`: "Receiver connects as TLS client; we are TLS server"), so
-    `server_side=True`. The first version of this used
-    `server_side=False` and the phone reset the connection outright.
-
-    Returns `(None, why-not)` with a reason when anything is missing, never a
-    partially-handshaked object.
-    """
-    import ssl
-
-    ours = identity_packet(name=_hostname(), device_type="desktop",
-                           tcp_port=tcp_port)
-    try:
-        raw = socket.create_connection((host, tcp_port), timeout=timeout)
-    except OSError as exc:
-        return None, f"could not connect to {host}:{tcp_port} ({exc})"
-
-    cert, key = _our_certificate()
-    if cert is None:
-        raw.close()
-        return None, "could not make a TLS identity for this computer"
-
-    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    try:
-        context.load_cert_chain(str(cert), str(key))
-    except (ssl.SSLError, OSError) as exc:
-        raw.close()
-        return None, f"the certificate would not load ({exc})"
-    context.verify_mode = ssl.CERT_NONE        # trust-on-first-use, as the spec allows
-
-    incoming = ssl.MemoryBIO()
-    outgoing = ssl.MemoryBIO()
-    tls = context.wrap_bio(incoming, outgoing, server_side=True)
-    deadline = time.monotonic() + timeout
-    try:
-        # 1. the plaintext short identity, which is what makes the peer speak
-        raw.sendall((json.dumps(ours, separators=(", ", ": ")) + "\n").encode())
-
-        # 2. drive the handshake by hand, because the ClientHello has to be read
-        #    off the socket and the ServerHello written to it ourselves.
-        while True:
-            if time.monotonic() > deadline:
-                return None, "the handshake did not finish in time"
-            try:
-                tls.do_handshake()
-                break
-            except ssl.SSLWantReadError:
-                if outgoing.pending:
-                    raw.sendall(outgoing.read())
-                raw.settimeout(max(0.1, deadline - time.monotonic()))
-                chunk = raw.recv(65536)
-                if not chunk:
-                    return None, "the peer closed the connection during the handshake"
-                incoming.write(chunk)
-            except (ssl.SSLError, OSError) as exc:
-                return None, f"the TLS handshake failed ({exc})"
-
-        if outgoing.pending:
-            raw.sendall(outgoing.read())
-
-        # 3. the full identity, inside TLS, in both directions
-        # `wrap_bio` gives an SSLObject, which has write() and not sendall().
-        tls.write((json.dumps(identity_packet(name=_hostname(),
-                                             device_type="desktop",
-                                             tcp_port=tcp_port),
-                              separators=(", ", ": ")) + "\n").encode())
-        theirs = b""
-        while b"\n" not in theirs:
-            if time.monotonic() > deadline:
-                return None, "the peer answered our identity with nothing"
-            if outgoing.pending:
-                raw.sendall(outgoing.read())
-            raw.settimeout(max(0.1, deadline - time.monotonic()))
-            try:
-                chunk = raw.recv(65536)
-            except socket.timeout:
-                return None, "the peer stopped answering after we were connected"
-            if not chunk:
-                break
-            incoming.write(chunk)
-            try:
-                theirs += tls.read()
-            except ssl.SSLWantReadError:
-                continue
-        if not theirs:
-            return None, "the peer sent no identity after the handshake"
-        packet = json.loads(theirs.decode("utf-8", "replace").split("\n")[0])
-        body = packet.get("body")
-        if not isinstance(body, dict) or not body.get("deviceName"):
-            return None, "the peer's identity was not a full one"
-        entry = dict(body)
-        entry["address"] = host
-        return entry, ""
-    except Exception as exc:  # noqa: BLE001 - every failure mode is a sentence
-        return None, f"{type(exc).__name__}: {exc}"
-    finally:
-        raw.close()
 
 
 def _our_certificate(directory=None):
@@ -873,7 +768,7 @@ def send_file(host: str, path, tcp_port: int = UDP_PORT,
         listener.close()
         return False, f"could not open a port to send from ({exc})"
 
-    # **The port the caller names, exactly as `identity_exchange` does.** The
+    # **The port the caller names, not a fixed one.** The
     # first version dialled UDP_PORT here while `send_file` was the only caller
     # that knew better, so a peer on any other control port - including a test's
     # fake one - came back as `ConnectionRefusedError` rather than as "the wrong
