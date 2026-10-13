@@ -475,3 +475,93 @@ class TestTheSkillWiring:
                             lambda page: page)
         out = self._handler()({"query": "q", "url": "https://example.org/", "source": "web"})
         assert out == "https://example.org/"
+
+class TestTheAbstractIsNotTruncated:
+    """A capped abstract is a search that cannot say what it found.
+
+    Measured: a sweep aimed at *why three fine-tunes break tool calling* returned
+    twelve results whose `description` was capped at 420 characters, and the one
+    paper naming the answer - **arXiv:2604.06066, "The Alignment Tax of
+    Constrained Decoding"** - was unreadable through the tool that had found it.
+    The field existed in arXiv's feed and was cut before it reached the caller.
+
+    So the facts stay capped for the list, and the paper's own words travel
+    beside them untruncated. Tests run against the **real captures** this file
+    already holds, so no network is involved and a real feed's shape decides.
+    """
+
+    def _capture(self):
+        # The same real capture every other test in this file uses. The first
+        # version looked in `tools/` and skipped - a test that skips is a test
+        # that reports green while proving nothing, which is this repository's
+        # most-recorded failure and was caught here by reading the skip count.
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parents[1]
+        path = root / "tests" / "fixtures" / "search" / "arxiv.atom"
+        if not path.exists():
+            import pytest
+            pytest.skip("no arxiv capture in tests/fixtures/search/")
+        return path.read_bytes()
+
+    def test_the_abstract_travels_whole(self):
+        from shani_chronoa import websearch as W
+        found, why = W._parse_arxiv(self._capture())
+        assert found, why
+        for result in found:
+            if not result.abstract:
+                continue
+            # The description is what the list shows and is capped; the abstract
+            # is the paper. The first can be strictly shorter, and the second
+            # must not be a cut of the first.
+            assert "..." not in result.abstract[-3:] or \
+                result.abstract.endswith("...") is False, (
+                f"{result.url}: the abstract itself ends in an ellipsis")
+        whole = [r for r in found if r.abstract]
+        assert whole, "no entry carried an abstract at all"
+        assert max(len(r.abstract) for r in whole) > 420, (
+            "the longest abstract is inside the description's own cap, so the "
+            "field is not carrying anything the cap did not already have")
+
+    def test_the_capped_description_is_not_the_abstract(self):
+        """Both fields exist, and they are not the same string.
+
+        A single field serving both jobs is why the truncation was invisible: the
+        module's docstring called the tail the abstract and nobody could read
+        past it. Two fields make the distinction checkable.
+        """
+        from shani_chronoa import websearch as W
+        found, why = W._parse_arxiv(self._capture())
+        with_abstract = [r for r in found if r.abstract]
+        assert with_abstract, why
+        # The cap is `_ARXIV_DESC_CHARS` plus the three characters of ellipsis,
+        # so the bound is the constant + 3 and not the bare constant - the first
+        # version asserted 420 and a real entry measured 422.
+        from shani_chronoa import websearch as W
+        for result in with_abstract:
+            assert len(result.description) <= W._ARXIV_DESC_CHARS + 3, (
+                f"{result.url}: the description is {len(result.description)} "
+                f"chars, past the {W._ARXIV_DESC_CHARS} cap it documents")
+            assert result.abstract not in result.description, (
+                f"{result.url}: the abstract is entirely inside the capped "
+                f"description, so this capture cannot show the difference")
+
+    def test_format_results_shows_the_abstract(self):
+        """A field that is carried and never shown is the dead-code class one
+        level below a module - the abstract must reach the printed answer."""
+        from shani_chronoa import websearch as W
+        result = W.Result("A paper", "https://arxiv.org/abs/1", "short facts",
+                          "arXiv", "the whole abstract, long enough to matter " * 6)
+        text = W.format_results("q", [result])
+        assert result.abstract in text, (
+            "the untruncated abstract is not in the formatted output")
+        assert "abstract:" in text
+
+    def test_a_source_with_no_abstract_still_formats(self):
+        """The field defaults, so a provider that gives none is not broken by
+        one that does."""
+        from shani_chronoa import websearch as W
+        result = W.Result("A page", "https://example.org", "its words", "Web")
+        assert result.abstract == ""
+        text = W.format_results("q", [result])
+        assert "abstract:" not in text
+        assert "its words" in text

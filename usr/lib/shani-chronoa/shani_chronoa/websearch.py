@@ -203,6 +203,20 @@ class Result(NamedTuple):
     url: str
     description: str
     source: str
+    #: The source's own summary, **untruncated**, when the provider gives one.
+    #:
+    #: `description` is what a *list* shows and is capped, because a list of
+    #: twelve entries is unreadable if every one carries 1,200 words. But a
+    #: capped abstract means no caller can ever answer *what does this paper
+    #: actually say* - which is the question the search was asked. Measured: a
+    #: sweep aimed at "why do three fine-tunes break tool calling" returned
+    #: twelve results truncated at 420 characters, and the one paper that named
+    #: the answer was unreadable through the tool that found it.
+    #:
+    #: So the cap and the content are two fields rather than one, and the
+    #: caller reads `abstract` when it wants the paper rather than the list.
+    #: Defaulted so the other parsers in this module construct unchanged.
+    abstract: str = ""
 
 
 def gate(what):
@@ -881,7 +895,7 @@ def _parse_arxiv(raw):
             description = ("%s — %s" % (description, abstract)).lstrip(" —")
         if len(description) > _ARXIV_DESC_CHARS:
             description = description[:_ARXIV_DESC_CHARS].rstrip() + "..."
-        out.append(Result(title, url, description, "arXiv"))
+        out.append(Result(title, url, description, "arXiv", abstract))
     return out, ""
 
 
@@ -1153,6 +1167,15 @@ def format_results(query, results, notes=None):
         lines.append("    %s" % result.url)
         if result.description:
             lines.append("    %s" % result.description)
+        # **The provider's own words, in full, when the capped description was
+        # not enough.** A truncated abstract is the shape that made this tool
+        # unable to answer what a paper says: the description field carries 420
+        # characters of the abstract's tail, and everything past it - the
+        # method, the numbers, the caveats - was unreachable. This block is why
+        # the field exists; without it the abstract is carried and never shown,
+        # which is this repository's dead-code class one level below a module.
+        if result.abstract and result.abstract not in result.description:
+            lines.append("    abstract: %s" % result.abstract)
         lines.append("")
     lines.append("These are the engine's rankings and summaries, not Chronoa's "
                  "own claims - open a page with web_search before treating its "

@@ -190,4 +190,33 @@ MUTATIONS = [
         "label": "the model is never offered arxiv as a source",
         "expect": ["test_the_schema_offers_source_with_arxiv_in_it"],
     },
+    {
+        'label': 'the abstract is truncated with the description',
+        'why': 'the defect the field was added for: capped at 420 characters the '
+               'paper is unreadable, and the one paper naming a research answer '
+               'was cut by the tool that had found it.',
+        'expect': ['test_the_abstract_travels_whole'],
+        'file': _WS,
+        'old': '            description = ("%s — %s" % (description, abstract)).lstrip(" —")',
+        'new': '            description = ("%s — %s" % (description, abstract)).lstrip(" —")\n'
+               '            abstract = abstract[:_ARXIV_DESC_CHARS]',
+    },
+    {
+        'label': 'the abstract field is never filled',
+        'why': 'carried and dropped, which is the dead-code class one level below '
+               'a module.',
+        'expect': ['test_the_abstract_travels_whole'],
+        'file': _WS,
+        'old': 'out.append(Result(title, url, description, "arXiv", abstract))',
+        'new': 'out.append(Result(title, url, description, "arXiv", ""))',
+    },
+    {
+        'label': 'format_results stops showing the abstract',
+        'why': 'a field nobody prints is a field that did nothing. The whole '
+               'point is that the paper reaches the answer the model reads.',
+        'expect': ['test_format_results_shows_the_abstract'],
+        'file': _WS,
+        'old': '        if result.abstract and result.abstract not in result.description:',
+        'new': '        if False:',
+    },
 ]
