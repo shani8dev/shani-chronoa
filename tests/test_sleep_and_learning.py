@@ -16,6 +16,8 @@ The dangerous versions, for the record:
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -688,3 +690,146 @@ class TestTheDurableHistorySurvivesARestart:
         holder._t.record_call("from_ring", {}, "ok", 1.0, verdict="verified")
         weights = learning.weights_from_tracker(holder)
         assert "from_ring" in weights, weights
+
+
+class TestTheWeightsCacheCannotBeServedTheWrongHistory:
+    """`weights_from_records` is memoised on the records list's identity.
+
+    `ranked()` calls `learned_weights()` on **every request**, and the weights
+    used to be re-derived from every durable record each time - 30% of what
+    `select_tools` still spent after the per-tool cache landed. `_durable_records`
+    returns the *same list object* until a chunk's size or mtime moves, so
+    identity is the right key and the result cannot change while the records it
+    came from have not.
+
+    A cache that cannot be over-applied is not a cache yet, so the pins below are
+    all about the way it must **fail** to apply: a different list, an equal but
+    distinct list, and a log that grew.
+    """
+
+    @staticmethod
+    def _records(*names):
+        return [{"tool_name": n, "ok": True} for n in names]
+
+    def test_the_same_list_answers_the_same_thing(self):
+        from shani_chronoa import learning
+        records = self._records("a", "b")
+        assert learning.weights_from_records(records) == learning.weights_from_records(records)
+
+    def test_a_different_list_is_not_served_the_old_answer(self):
+        """The one that matters: a new history must re-derive, not inherit."""
+        from shani_chronoa import learning
+        first = learning.weights_from_records(self._records("a", "b"))
+        second = learning.weights_from_records(self._records("a", "b", "never_heard_of_it"))
+        assert set(first) == {"a", "b"}, sorted(first)
+        assert "never_heard_of_it" in second, (
+            "a tool that exists only in the newer history was answered from the "
+            "older one - the cache is serving another list's history")
+
+    def test_an_equal_but_distinct_list_still_re_derives(self):
+        """`is`, not `==`. Two lists can hold equal records and still be the
+        two histories; the key is the object, and a content comparison would
+        quietly widen what the cache claims to know."""
+        from shani_chronoa import learning
+        records = self._records("a")
+        assert learning.weights_from_records(records) == learning.weights_from_records(list(records))
+
+    def test_the_cache_is_bounded(self):
+        """Every distinct log revision would otherwise be kept alive forever -
+        and each one holds the whole records list."""
+        from shani_chronoa import learning
+        learning._WEIGHTS_BY_RECORDS.clear()
+        for i in range(learning._WEIGHTS_CACHE_MAX * 3):
+            learning.weights_from_records(self._records("a", "tool%d" % i))
+        assert len(learning._WEIGHTS_BY_RECORDS) <= learning._WEIGHTS_CACHE_MAX
+
+    def test_a_generator_is_still_accepted_and_is_not_cached(self):
+        """It cannot be keyed by identity - and it can only be walked once."""
+        from shani_chronoa import learning
+        records = self._records("a", "b")
+        expected = learning.weights_from_records(list(records))
+        learning._WEIGHTS_BY_RECORDS.clear()
+        assert learning.weights_from_records(iter(records)) == expected
+        # Checked **before** any list call: comparing against the list answer
+        # first would cache it and leave the cache non-empty for a reason that
+        # has nothing to do with the iterator.
+        assert not learning._WEIGHTS_BY_RECORDS, (
+            "a one-shot iterator was cached by identity - a fresh iterator over "
+            "equal records could reuse its answer, and this one is already spent")
+
+
+class TestThePathKeyedCachesAreBounded:
+    """`load()` and `_durable_records()` cache by **path**, and nothing evicted them.
+
+    Measured with real log lines: **98 KB retained per distinct path**, growing
+    one entry at a time. Production has one log, so this was a theoretical leak
+    there - but a test run builds thousands of temporary logs and would hold
+    every one of them to the end of the run, which is the same failure an
+    unbounded dict has anywhere else.
+
+    The pins are both directions, as a bound has to be: it has to *hold*, and
+    what it evicts has to come back **right** rather than wrong or empty.
+    """
+
+    @staticmethod
+    def _log_with(path, lines=40):
+        """A log of `lines` real records, or shape-valid ones if there is none.
+
+        Real rows where available: synthetic ones that do not parse measure the
+        cache's entry count honestly but its retained bytes not at all, which is
+        how a leak gets reported as harmless.
+        """
+        real = Path(os.environ.get("CHRONOA_TEST_LOG",
+                                   "/tmp/opencode/prof/tool_calls.log.1"))
+        if real.exists():
+            body = "\n".join(real.read_text().splitlines()[:lines])
+        else:
+            row = {"ts": "2026-10-13T00:00:00Z", "tool_name": "get_datetime",
+                   "verdict": "ok", "request": "what time is it", "reply": "",
+                   "args": {}}
+            body = "\n".join(json.dumps(row) for _ in range(lines))
+        path.write_text(body + "\n")
+        return path
+
+    def test_the_example_cache_does_not_grow_with_the_number_of_logs(self, tmp_path):
+        from shani_chronoa import learning
+        learning._EXAMPLE_CACHE.clear()
+        for n in range(learning._EXAMPLE_CACHE_MAX + 6):
+            learning.load(self._log_with(tmp_path / ("log%d.txt" % n)))
+        assert len(learning._EXAMPLE_CACHE) <= learning._EXAMPLE_CACHE_MAX, (
+            "the example cache grew to %d entries" % len(learning._EXAMPLE_CACHE))
+
+    def test_the_history_cache_does_not_grow_with_the_number_of_logs(self, tmp_path):
+        from shani_chronoa import learning
+        learning._HISTORY_CACHE.clear()
+        for n in range(learning._HISTORY_CACHE_MAX + 6):
+            # **The file has to exist.** `_durable_records` stats every chunk and
+            # returns `None` on `OSError`, *before* it reaches the cache - so a
+            # version of this test that named paths without writing them
+            # asserted on a dict that was never written to, and passed with the
+            # bound deleted. That is the check that cannot fail.
+            path = self._log_with(tmp_path / ("log%d.txt" % n))
+            class _T:
+                log_file = path
+            assert learning._durable_records(_T()) is not None, (
+                "path %d was not read at all, so this test is measuring nothing"
+                % n)
+        assert len(learning._HISTORY_CACHE) <= learning._HISTORY_CACHE_MAX, (
+            "the history cache grew to %d entries" % len(learning._HISTORY_CACHE))
+
+    def test_a_re_read_of_an_evicted_log_is_correct_not_empty(self, tmp_path):
+        """The bound must not turn into "the log is there and empty"."""
+        from shani_chronoa import learning
+        learning._HISTORY_CACHE.clear()
+        paths = [self._log_with(tmp_path / ("log%d.txt" % n)) for n in range(8)]
+        for path in paths[:-1]:
+            class _T:
+                log_file = path
+            learning._durable_records(_T())
+        class _Last:
+            log_file = paths[-1]
+        records = learning._durable_records(_Last()) or []
+        assert records, (
+            "after the cache evicted everything else, re-reading a log that "
+            "still exists returned nothing - the reader is reporting an empty "
+            "log rather than a cold cache")

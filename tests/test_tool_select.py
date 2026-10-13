@@ -280,3 +280,221 @@ def test_a_bare_number_word_is_a_length_instruction_not_a_sum():
     """
     assert not ARITHMETIC.search("explain it in two sentences")
     assert ARITHMETIC.search("what is two plus two")
+
+
+def _eval_says():
+    """Every request in the eval corpus. Real ones - a 40-byte fixture is why a
+    shape bug hid in this module for a session."""
+    import pathlib
+    cases = json.loads((pathlib.Path(__file__).resolve().parents[1] /
+                        "tools" / "eval_cases.json").read_text())["cases"]
+    return [case["say"] for case in cases]
+
+
+class TestTheCapArithmeticIsMeasuringRatherThanReasoning:
+    """The cap sums per-tool sizes instead of re-serialising the selection.
+
+    `_fits` is `len(json.dumps(request_tools))`, and the arithmetic that replaced
+    it has to produce **the same number**. The cap and the window test cannot
+    disagree about what "fits" means, or the guarantee quietly becomes whatever
+    the faster path happens to think.
+
+    Three separate things can go wrong, and they need three separate pins:
+
+    * a wrong **size** - not measuring the whole schema. `test_every_size_is_the_
+      whole_schema`.
+    * a wrong **formula** - brackets, separators. `test_the_sum_equals_what_
+      serializing_would_say`.
+    * a cap that does not actually cap. `test_every_real_request_fits_the_window`.
+
+    None of these is hypothetical. The first was real: summing
+    `len(json.dumps(fn))` rather than the schema is short by **34 chars per tool -
+    95.4% of the true size** - and a selection of eight hands back ~68 tokens of
+    a 2048 window it has already spent.
+
+    The second is why these call `_selection_chars` instead of writing the
+    arithmetic out again here. A test that re-derives what it is testing checks
+    its own copy: with the formula written out in the test, dropping the brackets
+    from the code left it **green**. That is the shape of a check that cannot
+    fail, and it is the reason the code is a named function at all.
+    """
+
+    def test_every_size_is_the_whole_schema(self):
+        """The size the cap sums is the size `_fits` measured."""
+        from shani_chronoa import tool_select
+        corpus = tool_select._corpus(list(TOOLS))
+        wrong = ["%s: summed %d, real %d" % (t["function"]["name"],
+                                              corpus.chars_by_name[t["function"]["name"]],
+                                              len(json.dumps(t)))
+                 for t in TOOLS
+                 if corpus.chars_by_name[t["function"]["name"]] != len(json.dumps(t))]
+        assert not wrong, (
+            "the cap sums the wrong size for %d of %d tools, so the window "
+            "guarantee is measured in something other than what is sent:\n  %s"
+            % (len(wrong), len(TOOLS), "\n  ".join(wrong[:5])))
+
+    def test_the_sum_equals_what_serializing_would_say(self):
+        """`_selection_chars` is `len(json.dumps(...))`, on all 225 selections."""
+        from shani_chronoa import tool_select
+        corpus = tool_select._corpus(list(TOOLS))
+        says = _eval_says()
+        assert len(says) >= 200, "the corpus shrank: %d requests" % len(says)
+        wrong, worst, first = 0, 0, ""
+        for say in says:
+            kept = select_tools(say, TOOLS)
+            names = [t["function"]["name"] for t in kept]
+            total = tool_select._selection_chars(names, corpus.chars_by_name)
+            real = len(json.dumps(kept))
+            if total != real:
+                wrong += 1
+                worst = max(worst, abs(total - real))
+                first = first or ("%r: %d tools, summed %d, json.dumps says %d"
+                                  % (say, len(kept), total, real))
+        assert wrong == 0, (
+            "%d of %d real selections disagree with len(json.dumps(...)), worst "
+            "off by %d chars. %s" % (wrong, len(says), worst, first))
+
+    def test_the_fast_path_agrees_with_the_function_it_replaced(self):
+        """`_selection_chars` answers exactly as `_fits` does, at every budget.
+
+        `_fits` is no longer on the hot path - that is the whole point - so
+        without this it would be dead code, and dead code that documents the
+        definition stops being checked the moment it stops being read. Here it is
+        the **oracle**: the original, obviously-correct predicate, and the fast
+        one has to agree with it.
+
+        Swept over many budgets rather than the one the cap happens to use. Both
+        sides do the same integer division, so a disagreement would not show up
+        at every threshold - an off-by-`2*k` error is invisible at the single
+        budget where the selection fits and visible at the one below it.
+        """
+        from shani_chronoa import tool_select
+        corpus = tool_select._corpus(list(TOOLS))
+        mismatches = []
+        for say in _eval_says():
+            kept = select_tools(say, TOOLS)
+            names = [t["function"]["name"] for t in kept]
+            chars = tool_select._selection_chars(names, corpus.chars_by_name)
+            for budget in (0, 1, 50, 200, 400, 600, 800, 1000, 1536, 2048, 4096):
+                fast = chars // 4 <= budget
+                slow = tool_select._fits(kept, budget)
+                if fast != slow:
+                    mismatches.append("%r at budget %d: fast %s, _fits %s"
+                                      % (say, budget, fast, slow))
+        assert not mismatches, ("the fast path and the function it replaced "
+                                "disagree at %d point(s):\n  %s"
+                                % (len(mismatches), "\n  ".join(mismatches[:5])))
+
+    def test_every_real_request_fits_the_window_or_has_nothing_left_to_drop(self):
+        """The guarantee, over the whole corpus rather than five handpicked asks.
+
+        `test_a_selection_fits_the_smallest_window` covers five requests someone
+        thought of. The arithmetic that replaced measuring the selection runs on
+        all 225, so all 225 are what has to hold.
+
+        **The budget is not a hard ceiling, and this test says so.** `browse` is
+        ~850 tokens and is protected - a request that cannot be answered without
+        a browser is sent with one. `browse` plus `CORE` alone is past a 1536
+        budget, so "Click." finishes at 1936 tokens. Measured on HEAD, unchanged
+        by this work. So the invariant is *fits, or nothing droppable was left* -
+        which still fails the moment the cap stops dropping, and fails if a new
+        request overflows for any other reason.
+
+        Asserting a flat "always fits" would have been red on this machine
+        before a line changed, and would have been the kind of test that gets
+        deleted instead of the bug that made it red.
+        """
+        from shani_chronoa import tool_select
+        budget = 2048 * 0.75
+        overflowed, unjustified = [], []
+        for say in _eval_says():
+            sent = select_tools(say, TOOLS)
+            if _tokens(sent) < budget:
+                continue
+            names = {t["function"]["name"] for t in sent}
+            overflowed.append("%r: %d tokens, budget %d, %d tools"
+                              % (say, _tokens(sent), int(budget), len(sent)))
+            # Everything left must be protected. If anything droppable remains,
+            # the cap stopped dropping - which is the regression worth catching.
+            protected = tool_select.protected_for(say, names, None)
+            spare = sorted(names - protected)
+            if spare:
+                unjustified.append("%r still holds droppable %s" % (say, spare))
+        assert not unjustified, (
+            "%d request(s) went over budget with tools the cap was allowed to "
+            "drop:\n  %s" % (len(unjustified), "\n  ".join(unjustified[:5])))
+        # Named rather than merely tolerated: a new entry here is a behaviour
+        # change and should be argued for, not discovered by a later reader.
+        assert len(overflowed) == 1 and "Click." in overflowed[0], (
+            "the set of requests that finish over budget changed - it was "
+            "exactly 1 ('Click.', 1936 tokens, all five protected). Now %d:\n  %s"
+            % (len(overflowed), "\n  ".join(overflowed[:5])))
+
+
+class TestTheCorpusIsBuiltOnceAndOnlyForThisToolSet:
+    """`_corpus` memoises the last tool list it was given, by identity.
+
+    `select_tools` builds one `tools` list and hands the same object to
+    `ranked()` and `_cap_to_window()`, which each asked for a corpus - 512
+    `_tool_facts` lookups per request to build the same one twice.
+
+    The memo is one entry deep and holds the list it was built from, which is
+    what makes an identity key safe: a freed list's id could otherwise be handed
+    to a different list. These are the two ways that goes wrong.
+    """
+
+    def test_another_tool_set_does_not_get_this_one_s_statistics(self):
+        from shani_chronoa import tool_select
+        # Distinct words on purpose: a shared one ("alpha only" / "beta only")
+        # belongs in **both** corpora, and asserting it away would be the test
+        # being wrong about what a document frequency is.
+        small = [{"function": {"name": "alpha", "description": "alpha waters"}}]
+        wide = [{"function": {"name": "beta", "description": "beta tides"}},
+                {"function": {"name": "gamma", "description": "gamma rays"}}]
+        one, two = tool_select._corpus(small), tool_select._corpus(wide)
+        assert one.n == 1 and two.n == 2
+        assert "alpha" in one.df, sorted(one.df)
+        assert "alpha" not in two.df, (
+            "the second tool set was handed the first one's words: %s" % sorted(two.df))
+        # Expected stems come from `_words` rather than being spelled out: the
+        # stemmer turns "rays" into "ray" and "tides" into "tid", and hardcoding
+        # those would make this test fail for the right reason at the wrong time.
+        expected = set(tool_select._words("beta tides gamma rays"))
+        assert set(two.df) == expected, (sorted(two.df), sorted(expected))
+
+    def test_the_facts_cache_is_bounded(self):
+        """Keyed on content, so contents that keep changing would keep entries.
+
+        A schema edited, installed, or generated by the Workbench is a key this
+        has never seen. Unbounded, every one of them is kept - ~7 KB of stemmed
+        words each - for the life of the process. The live registry is 256, so
+        this bound is never reached by normal use.
+        """
+        from shani_chronoa import tool_select
+        tool_select._TOOL_FACTS.clear()
+        for i in range(tool_select._TOOL_FACTS_MAX + 50):
+            tool_select._tool_facts(
+                {"function": {"name": "tool%d" % i,
+                              "description": "description number %d" % i}})
+        assert len(tool_select._TOOL_FACTS) <= tool_select._TOOL_FACTS_MAX, (
+            "the facts cache grew to %d entries" % len(tool_select._TOOL_FACTS))
+        # ...and still correct afterwards: an evicted tool re-derives, it does not
+        # come back wrong.
+        again = tool_select._tool_facts(
+            {"function": {"name": "tool0", "description": "description number 0"}})
+        assert "number" in again.body
+
+    def test_an_edited_schema_gets_its_own_facts(self):
+        """Keyed on content, so an in-place edit lands on a different key.
+
+        Keying on `id()` would have been faster and wrong: a schema edited in
+        place keeps its identity, and the cache would go on describing the old
+        one.
+        """
+        from shani_chronoa import tool_select
+        tool = {"function": {"name": "alpha", "description": "the original words"}}
+        before = tool_select._tool_facts(tool)
+        tool["function"]["description"] = "completely different words"
+        after = tool_select._tool_facts(tool)
+        assert "original" in before.body and "original" not in after.body
+        assert before is not after

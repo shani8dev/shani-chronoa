@@ -1508,8 +1508,28 @@ def weight(score: float) -> float:
                                math.exp(_SLOPE * (bounded - NEUTRAL))))
 
 
+#: Weights derived from a records list, keyed on that list's **identity** and
+#: holding it - so a freed list's id cannot be handed to another one while an
+#: entry claims it. `_durable_records` already returns the *same list object*
+#: until a chunk's size or mtime changes, so identity is exactly the right key:
+#: a new list means the log moved.
+#:
+#: This was recomputing `reliability` over every durable record on **every
+#: request** - `ranked()` calls `learned_weights()` per turn, and the result was
+#: 30% of the time `select_tools` still spent. The answer cannot change while the
+#: records it is derived from have not.
+_WEIGHTS_BY_RECORDS: Dict[int, tuple] = {}
+_WEIGHTS_CACHE_MAX = 4
+
+
 def weights_from_records(records: Iterable) -> Dict[str, float]:
     """Per-tool multipliers, from a flat list of call records."""
+    if isinstance(records, list):
+        cached = _WEIGHTS_BY_RECORDS.get(id(records))
+        # `is`, not `==`: two different lists can hold equal records, and the
+        # point of the key is that this object is the one already worked out.
+        if cached is not None and cached[0] is records:
+            return cached[1]
     grouped: Dict[str, list] = {}
     for record in records:
         name = (record.get("tool_name") if isinstance(record, dict)
@@ -1517,7 +1537,12 @@ def weights_from_records(records: Iterable) -> Dict[str, float]:
         if not name:
             continue
         grouped.setdefault(str(name), []).append(record)
-    return {name: weight(reliability(items)) for name, items in grouped.items()}
+    weights = {name: weight(reliability(items)) for name, items in grouped.items()}
+    if isinstance(records, list):
+        if len(_WEIGHTS_BY_RECORDS) >= _WEIGHTS_CACHE_MAX:
+            _WEIGHTS_BY_RECORDS.pop(next(iter(_WEIGHTS_BY_RECORDS)))
+        _WEIGHTS_BY_RECORDS[id(records)] = (records, weights)
+    return weights
 
 
 def weights_from_tracker(tracker: Optional[object] = None) -> Dict[str, float]:
@@ -1581,6 +1606,11 @@ _HISTORY_TAIL_BYTES = 4 * 1024 * 1024
 #: `path -> ((size, mtime), records)`, keyed the way `_EXAMPLE_CACHE` is keyed.
 #: The hot path is one `stat`; a re-parse happens only when the log moved.
 _HISTORY_CACHE: Dict[str, Tuple[Tuple[int, float], List[dict]]] = {}
+#: Same bound and the same reasoning as `_EXAMPLE_CACHE`: keyed by path, never
+#: evicted, **98 KB retained per distinct path** measured. This one is on the
+#: **per-request** advisory read, so its whole job is to not do work twice for a
+#: log that is not moving - which is one entry, not an unbounded number of them.
+_HISTORY_CACHE_MAX = 4
 
 
 def _read_tail(path, limit: int, byte_budget: int) -> List[dict]:
@@ -1660,6 +1690,8 @@ def _durable_records(tracker) -> Optional[List[dict]]:
     for source in sources:
         records = _read_tail(source, per_file,
                              max(_HISTORY_TAIL_BYTES // len(sources), 4096)) + records
+    if len(_HISTORY_CACHE) >= _HISTORY_CACHE_MAX:
+        _HISTORY_CACHE.pop(next(iter(_HISTORY_CACHE)))
     _HISTORY_CACHE[key] = (tuple(revisions), records[:HISTORY_LIMIT])
     return records[:HISTORY_LIMIT]
 
@@ -3576,6 +3608,17 @@ def _entries_of(source: Path) -> List[dict]:
 #: change nothing at all, silently, and look like it had worked. Measured as a
 #: design failure here before it was ever a runtime one.
 _EXAMPLE_CACHE: Dict[Tuple[str, "str"], Tuple[Tuple[int, float], List["Example"]]] = {}
+#: **Bounded, because the key is a path.** Measured with real log lines: **98 KB
+#: retained per distinct path**, and nothing ever evicted it. Production has one
+#: log, so this was a theoretical leak there - but a test run builds thousands of
+#: temporary logs and holds every one of them to the end of the run, which is the
+#: same shape of problem as an unbounded dict anywhere else.
+#:
+#: Four is generous: one live log, and `only_tools` filters multiply the key by
+#: one each, so a person comparing a couple of filtered runs still hits. Eviction
+#: is oldest-first and the cost of a miss is re-parsing that file, which is what
+#: the caller was going to pay anyway on a changed revision.
+_EXAMPLE_CACHE_MAX = 4
 
 #: How many examples to keep resident. 200k is roughly 40 MB of sparse tuples,
 #: which is a working set rather than an archive.
@@ -3682,6 +3725,8 @@ def load(path: Optional[Path] = None, limit: int = 200_000,
     # everything; this keeps what a recent-experience model can actually use.
     if len(examples) > WINDOW:
         examples = examples[-WINDOW:]
+    if len(_EXAMPLE_CACHE) >= _EXAMPLE_CACHE_MAX:
+        _EXAMPLE_CACHE.pop(next(iter(_EXAMPLE_CACHE)))
     _EXAMPLE_CACHE[cache_key] = (tuple(revisions), examples)
     return examples
 

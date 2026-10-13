@@ -52,6 +52,28 @@ def _fits(request_tools: List[dict], budget_tokens: int) -> bool:
     return len(json.dumps(request_tools)) // _CAP_CHARS_PER_TOKEN <= budget_tokens
 
 
+def _selection_chars(kept_names: List[str], chars_by_name: Dict[str, int]) -> int:
+    """**Exactly** `len(json.dumps([the schemas for kept_names]))`, in O(k).
+
+    `_fits` measures the selection by serialising it, and the cap called it once
+    per candidate to drop - 25 `json.dumps` of a ~17 KB selection per request, to
+    produce a number that only changes when a tool leaves. Every schema's own
+    serialised size is known from `_corpus`, so the total is arithmetic:
+
+    * `2` for the `[` and `]`,
+    * `2` per separator - `json.dumps` writes `", "` between items, not `","`,
+    * plus each schema's own length, wrapper included.
+
+    A separate function rather than an expression inline in `_cap_to_window`
+    because **a test that re-derives this arithmetic proves nothing**: it checks
+    its own copy against `json.dumps` and passes whatever the code does. Measured
+    that way, breaking the brackets here - dropping the leading `2` - left the
+    test green. The test calls *this*, so it cannot.
+    """
+    sizes = [chars_by_name[name] for name in kept_names]
+    return 2 + sum(sizes) + 2 * max(len(sizes) - 1, 0)
+
+
 def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
                    budget_tokens: int, protected: Set[str]) -> Set[str]:
     """Drop the lowest-scoring tools until the selection fits the window.
@@ -83,7 +105,22 @@ def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
     person anything, and the resulting rejection says nothing about why. An
     over-budget core fails visibly; a starved one fails invisibly.
     """
-    if _fits([t for t in tools if _name(t) in keep], budget_tokens):
+    # **The cap re-serialised the whole selection on every drop.** `_fits` is
+    # `len(json.dumps(request_tools))`, and the loop called it once per candidate
+    # with a freshly rebuilt list - 25 `json.dumps` of a ~17 KB selection per
+    # request, measured, for a number that only changes when a tool leaves.
+    # Each schema's own serialised size is now known from `_corpus`, and the
+    # arithmetic now lives in `_selection_chars`, which is where the test pins
+    # it - see that docstring for why a test cannot re-derive it.
+    corpus = _corpus(tools)
+    chars = corpus.chars_by_name
+    names = corpus.names
+
+    def fits_now() -> bool:
+        kept = [n for n in names if n in keep]
+        return _selection_chars(kept, chars) // _CAP_CHARS_PER_TOKEN <= budget_tokens
+
+    if fits_now():
         return keep
     scored_names = {name for _s, name, _h in scored}
     droppable = [name for _s, name, _h in sorted(scored, key=lambda x: x[0])
@@ -92,7 +129,7 @@ def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
     # there is no evidence for it, so it is dropped after the scored ones.
     unscored = sorted(n for n in keep if n not in scored_names and n not in protected)
     for name in droppable + unscored:
-        if _fits([t for t in tools if _name(t) in keep], budget_tokens):
+        if fits_now():
             break
         keep.discard(name)
     return keep
@@ -320,14 +357,94 @@ def _query_words(text: str) -> List[str]:
     return _words(text + " " + extra)
 
 
-def _tool_text(tool: dict) -> "tuple[List[str], List[str]]":
-    fn = tool.get("function", {})
-    name = _words(fn.get("name", ""))
-    body = fn.get("description", "")
-    for prop in (fn.get("parameters", {}).get("properties", {}) or {}).values():
+#: Per-tool derived data, keyed on **the tool's own content**.
+#:
+#: Everything in here - the stemmed name, the stemmed body, the option words, the
+#: serialised size - is a pure function of one schema, and none of it depends on
+#: the request. It was being recomputed on every turn: measured with
+#: `cProfile` over this module's own 220-case corpus, `_tool_text` alone was
+#: **57,344 calls and 7.8 s of 11.6 s**, because it tokenises all 256
+#: descriptions - roughly 68,000 tokens of text - once per request. Selecting
+#: tools for 220 requests cost **12.6 ms each** and almost all of it was
+#: re-reading data that had not changed.
+#:
+#: Keyed on content rather than on `id()` **on purpose**: a schema edited in place
+#: keeps its identity, so an identity-keyed cache would serve a stale description
+#: for it. The key is the description text plus the enum values, which is what
+#: every field below is derived from - so an edit lands on a different key.
+#:
+#: **The space this costs, measured rather than waved at:** 256 entries, **1.86 MB**
+#: of Python heap live (1.88 MB peak during the build), held for the life of the
+#: process; the per-tool-set statistics add 0.03 MB more. That replaces 220
+#: requests' worth of the same allocation churn per turn - so the peak is about
+#: the same and the *churn* is what disappears. (7 MB was the guess written here
+#: first, then 1.8; 1.86 is what `tracemalloc` says.)
+_TOOL_FACTS: Dict[tuple, "_ToolFacts"] = {}
+#: **Bounded, because the key is content-derived and contents are not fixed.**
+#: A schema edited or installed at runtime, or one generated by the Workbench,
+#: lands on a key this has never seen - and an unbounded dict would keep every
+#: one of them, ~7 KB of stemmed words each, for the life of the process. The
+#: live registry is 256 schemas, so a bound of four times that is never reached
+#: by normal use; it exists so a long session against a changing registry costs
+#: a bounded amount of memory rather than an unbounded amount. Eviction is
+#: oldest-first, and re-tokenising one tool is a few hundred microseconds.
+_TOOL_FACTS_MAX = 1024
+
+
+class _ToolFacts:
+    """One tool's request-independent facts. Immutable by convention."""
+
+    __slots__ = ("name", "body", "options", "words")
+
+    def __init__(self, name, body, options):
+        #: Stemmed name words, as a `list` - `ranked()` reports the order's first
+        #: hit count from it, and it is two words wide, so a set would buy nothing.
+        self.name = name
+        #: **A frozenset, not a list.** `ranked()` tests `w in body` once per
+        #: request word per tool; against a ~200-word list that is a linear scan,
+        #: and this module's inner loop is the one place that has to be O(1).
+        self.body = body
+        self.options = options
+        #: `name | body`, cached because `ranked()`'s document-frequency pass
+        #: needs exactly this union for every tool on every request.
+        self.words = frozenset(name) | body
+
+
+def _tool_facts(tool: dict) -> "_ToolFacts":
+    """One tool's request-independent facts, cached on the tool's own content."""
+    fn = tool.get("function", {}) or {}
+    name = fn.get("name", "") or ""
+    props = ((fn.get("parameters") or {}).get("properties") or {})
+    parts = [fn.get("description", "") or ""]
+    enums = []
+    for prop in props.values():
         if isinstance(prop, dict):
-            body += " " + str(prop.get("description", ""))
-    return name, _words(body)
+            parts.append(str(prop.get("description", "")))
+            for value in (prop.get("enum") or []):
+                enums.append(str(value))
+    body = " ".join(parts)
+    key = (name, body, tuple(enums))
+    facts = _TOOL_FACTS.get(key)
+    if facts is None:
+        option_words: Set[str] = set()
+        for value in enums:
+            option_words.update(_words(value))
+        facts = _ToolFacts(_words(name), frozenset(_words(body)),
+                           frozenset(option_words))
+        if len(_TOOL_FACTS) >= _TOOL_FACTS_MAX:
+            _TOOL_FACTS.pop(next(iter(_TOOL_FACTS)))
+        _TOOL_FACTS[key] = facts
+    return facts
+
+
+def _tool_text(tool: dict) -> "tuple[List[str], List[str]]":
+    """`(name words, body words)` - kept for the tests that read it.
+
+    The body is a **frozenset** now rather than a list. Membership is what every
+    caller does with it, and `ranked()` does it once per request word per tool.
+    """
+    facts = _tool_facts(tool)
+    return facts.name, sorted(facts.body)
 
 
 def _tool_options(tool: dict) -> "set":
@@ -336,12 +453,11 @@ def _tool_options(tool: dict) -> "set":
     The most precise words a request can contain - "make subtitles", "blur the
     faces" - are often a tool's literal option values, and they were not read at
     all: the small model picked `read_video` and `edit_image` instead (2026-10-08).
+
+    Cached with the rest of the tool's facts, because it walks the same enum
+    values the description pass already collected.
     """
-    words = set()
-    for prop in (tool.get("function", {}).get("parameters", {}).get("properties", {}) or {}).values():
-        for value in (prop.get("enum") or []) if isinstance(prop, dict) else []:
-            words.update(_words(str(value)))
-    return words
+    return _tool_facts(tool).options
 
 
 def _name(tool: dict) -> str:
@@ -435,6 +551,79 @@ def distilled(request: str, tools: Iterable[dict], limit: int = 2,
             if name in available and best - score <= margin]
 
 
+class _Corpus:
+    """Everything about a *tool set* that does not depend on the request.
+
+    Measured, not assumed: `df` is **2,133** distinct words and `option_df` is
+    **378**, together **0.07 MB** of heap, built in 0.9 ms. They were being
+    rebuilt on every request - 8,599 dictionary operations each time - to produce
+    numbers that only change when a schema does.
+    """
+
+    __slots__ = ("facts", "names", "df", "option_df", "n", "chars_by_name")
+
+    def __init__(self, tools, facts):
+        self.facts = facts
+        self.names = [tool.get("function", {}).get("name", "") for tool in tools]
+        self.n = len(tools)
+        self.df = {}
+        for facts_one in facts:
+            for word in facts_one.words:
+                self.df[word] = self.df.get(word, 0) + 1
+        self.option_df = {}
+        for facts_one in facts:
+            for word in facts_one.options:
+                self.option_df[word] = self.option_df.get(word, 0) + 1
+        # **The whole schema, wrapper included - not the inner `function` dict.**
+        # Measuring `fn` was short by 34 chars per tool, 95.4% of the true size,
+        # and a selection of eight handed back ~68 tokens of window it had already
+        # spent: `test_a_selection_fits_the_smallest_window` caught it. The
+        # wrapper is part of the tool set, not of one tool's content, which is
+        # why this is here and not in `_ToolFacts`.
+        self.chars_by_name = {name: len(json.dumps(tool))
+                              for name, tool in zip(self.names, tools)}
+
+
+#: Keyed on the **identity of the per-tool facts**, and holding them. That is what
+#: makes an identity key safe here: a bundle keeps every facts object it was built
+#: from alive, so a freed object's id cannot be handed to a different one while a
+#: bundle that claims it is still in the cache. Without that reference this would
+#: be the classic id-reuse bug, and it would return another tool set's statistics
+#: for no visible reason.
+#:
+#: Bounded because the key is content-derived: a test that rebuilds schemas makes
+#: a new key, and an unbounded dict would keep every one of them.
+_CORPUS_CACHE: Dict[tuple, "_Corpus"] = {}
+_CORPUS_CACHE_MAX = 8
+
+
+#: The last corpus built, **holding the list it was built from**. A one-entry
+#: memo on list identity, and holding the list is what makes that safe: a freed
+#: list's id could otherwise be handed to a different list, and this would serve
+#: another tool set's statistics. `select_tools` builds one `tools` list and
+#: hands the same object to `ranked()` and `_cap_to_window()`, which each asked
+#: for a corpus - 512 `_tool_facts` lookups per request to build the same one
+#: twice, 42% of what was left after the per-tool cache landed.
+_CORPUS_LAST: "Optional[tuple]" = None
+
+
+def _corpus(tools: List[dict]) -> "_Corpus":
+    global _CORPUS_LAST
+    last = _CORPUS_LAST
+    if last is not None and last[0] is tools:
+        return last[1]
+    facts = [_tool_facts(tool) for tool in tools]
+    key = tuple(id(one) for one in facts)
+    corpus = _CORPUS_CACHE.get(key)
+    if corpus is None:
+        corpus = _Corpus(tools, facts)
+        if len(_CORPUS_CACHE) >= _CORPUS_CACHE_MAX:
+            _CORPUS_CACHE.pop(next(iter(_CORPUS_CACHE)))
+        _CORPUS_CACHE[key] = corpus
+    _CORPUS_LAST = (tools, corpus)
+    return corpus
+
+
 def ranked(request: str, tools: Iterable[dict],
            learned: Optional[Dict[str, float]] = None) -> "List[tuple]":
     """(score, tool name, how many request words are in the tool's own name), best first; only tools that matched."""
@@ -446,26 +635,23 @@ def ranked(request: str, tools: Iterable[dict],
     # expansion ("travel" -> "web search") hit `search`, an option of three
     # unrelated tools, and inflated a travel question by 550 tokens.
     said = set(_words(request or ""))
-    texts = [_tool_text(t) for t in tools]
-    options = [_tool_options(t) for t in tools]
-    # Only distinctive option words count: "subtitles" is one tool's option,
-    # "from" or "press" are many tools' - those pulled 874-token `browse` into
-    # "press the enter key" and photos/install_app into a travel question.
-    option_df: Dict[str, int] = {}
-    for opts in options:
-        for w in opts:
-            option_df[w] = option_df.get(w, 0) + 1
-    # rarer words say more: idf over the tools' own text
-    df: Dict[str, int] = {}
-    for name, body in texts:
-        for w in set(name) | set(body):
-            df[w] = df.get(w, 0) + 1
-    n = len(tools)
+    # Everything below depends on the tool set and not on the request, so it is
+    # built once per set and kept: measured at 8,599 dictionary operations and a
+    # full pass over every description, on every request, to produce constants.
+    corpus = _corpus(tools)
+    df, option_df, n = corpus.df, corpus.option_df, corpus.n
+    # **The idf depends on the request word, not on the tool.** It was computed
+    # inside the per-tool loop, so each of ~10 words had its `math.log` and its
+    # dictionary lookup done **256 times** - about 2,560 of each per request, to
+    # produce ten numbers. The same mistake as the per-tool cache one level up,
+    # in miniature: constant-per-word work inside the loop that consumes it.
+    idfs = {w: math.log(1 + n / (1 + df.get(w, 0))) for w in query}
     scored = []
-    for tool, (name, body), opts in zip(tools, texts, options):
+    for facts, tool_name in zip(corpus.facts, corpus.names):
         score, name_hits = 0.0, 0
+        name, body, opts = facts.name, facts.body, facts.options
         for w in query:
-            idf = math.log(1 + n / (1 + df.get(w, 0)))
+            idf = idfs[w]
             if w in name:
                 score += 3 * idf
                 name_hits += 1
@@ -474,7 +660,7 @@ def ranked(request: str, tools: Iterable[dict],
             elif w in body:
                 score += idf
         if score > 0:
-            scored.append((score, _name(tool), name_hits))
+            scored.append((score, tool_name, name_hits))
     if learned is None:
         learned = learned_weights()
     if learned:
@@ -486,6 +672,44 @@ def ranked(request: str, tools: Iterable[dict],
                 reorder([(s, n, h) for s, n, h in scored], learned)]
     scored.sort(key=lambda x: -x[0])
     return scored
+
+
+def protected_for(request: str, keep: Set[str],
+                  in_use: Optional[Iterable[str]] = None) -> Set[str]:
+    """The tools the cap must not drop, however far over budget they leave it.
+
+    **The budget is not a hard ceiling, and this is why.** A request that cannot
+    be answered without `browse` - ~850 tokens on its own - is still sent with
+    `browse`, because dropping it would answer a different question than the one
+    asked. `browse` plus `CORE` alone exceeds a 1536-token budget, so on "Click."
+    the selection finishes at 1936 tokens and stays there. That is measured
+    behaviour on HEAD, not a regression: the cap drops everything *droppable* and
+    stops at the protected set.
+
+    Which makes the honest invariant the one worth testing - *either* the
+    selection fits, *or* the protected tools alone already exceed the budget.
+    A test that asserted "always fits" would have been red on this machine before
+    a single line changed, and a test that re-derived `protected` here would be
+    testing its own copy. So it is a named function that both call.
+    """
+    protected = set(CORE) | set(in_use or ())
+    # A request to drive a control cannot be answered without the tool that
+    # drives one, so the cap must not take it either - the same zero-sum the
+    # lines below describe for `browse`. Measured: with the cue firing,
+    # `_cap_to_window` still dropped both `ui_elements` and `container` on
+    # "click Fishbowl in the container", because their schemas rank below
+    # `ask_user`/`get_datetime` in `scored`.
+    if wants_to_drive_an_app(request):
+        protected |= {n for n in ("ui_elements",) if n in keep}
+    if "browse" in keep and not _FILE_OR_APP.search(request or ""):
+        # The site rule fired and the request is not about a file: what the
+        # person asked for cannot be done without a browser, so the cap must not
+        # take it. Measured on "Open blaze demo dot com and find the cheapest
+        # flight": `keep` held 11 tools, `_cap_to_window` returned 7 and
+        # `browse` was among the four dropped - the rule that asked for it,
+        # silently undone by the budget.
+        protected.add("browse")
+    return protected
 
 
 def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT,
@@ -559,23 +783,7 @@ def select_tools(request: str, tools: Iterable[dict], limit: int = DEFAULT_LIMIT
         about_files = bool(_FILE_OR_APP.search(request or ""))
         if not about_files:
             keep -= _DISPLACED_BY_A_SITE - set(in_use or ())
-    protected = set(CORE) | set(in_use or ())
-    # A request to drive a control cannot be answered without the tool that
-    # drives one, so the cap must not take it either - the same zero-sum the
-    # lines below describe for `browse`. Measured: with the cue firing,
-    # `_cap_to_window` still dropped both `ui_elements` and `container` on
-    # "click Fishbowl in the container", because their schemas rank below
-    # `ask_user`/`get_datetime` in `scored`.
-    if wants_to_drive_an_app(request):
-        protected |= {n for n in ("ui_elements",) if n in keep}
-    if "browse" in keep and not _FILE_OR_APP.search(request or ""):
-        # The site rule fired and the request is not about a file: what the
-        # person asked for cannot be done without a browser, so the cap must not
-        # take it. Measured on "Open blaze demo dot com and find the cheapest
-        # flight": `keep` held 11 tools, `_cap_to_window` returned 7 and
-        # `browse` was among the four dropped - the rule that asked for it,
-        # silently undone by the budget.
-        protected.add("browse")
+    protected = protected_for(request, keep, in_use)
     keep = _cap_to_window(keep, tools, scored,
                           int(WINDOW_TOKENS * SELECTION_SHARE), protected)
     return [t for t in tools if _name(t) in keep]
