@@ -37,7 +37,6 @@ from dataclasses import dataclass
 __all__ = [
     "Capability",
     "GATED",
-    "capability_for",
     "find_capabilities",
     "gated_by",
     "startup_suggestions",
@@ -1183,15 +1182,6 @@ def task_needs(task: "EverydayTask", config) -> list:
 def help_prompt() -> str:
     """The prompt that opens the capability list rather than answering in text."""
     return _HELP_SUGGESTION
-
-
-def capability_for(capabilities: list[Capability], tool: str) -> Capability | None:
-    for capability in capabilities:
-        if capability.tool == tool:
-            return capability
-    return None
-
-
 #: Consent keys whose capability cannot be undone. This is the set that earns a
 #: client-side "this will change something permanently" warning, so it is written
 #: out explicitly rather than inferred from a name pattern - an inferred rule that

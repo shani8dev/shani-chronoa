@@ -50,7 +50,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -80,61 +80,6 @@ def _scalar(value):
         if len(value) == 1:
             return value[0]
     return value
-
-
-def _as_declared(value, declared):
-    """The value in the shape its *declared* type expects.
-
-    GGUF strings come back from the reader as `memmap([113, 119, ...])` - the
-    bytes of the word, not the word. Handing that to a STRING writer does not
-    pack, and the pack is deferred, so the failure appears as a mystery later.
-    """
-    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
-    # unguarded form loads the module and raises at call time on a real install.
-    try:
-        from gguf import GGUFValueType
-    except ImportError:
-        raise MergeRefusal(
-            "the `gguf` package is not installed, so a declared value cannot be "
-            "shaped here; it is not a dependency of this package. **I could not "
-            "tell**, which is not the same as the value being wrong.")
-    if declared == GGUFValueType.STRING and hasattr(value, "tolist"):
-        raw = value.tolist()
-        if isinstance(raw, list) and raw and all(
-                isinstance(b, int) and 0 <= b < 256 for b in raw):
-            return bytes(raw).decode("utf-8", "replace")
-    if hasattr(value, "tolist"):
-        return value.tolist()
-    return value
-
-
-def _probe_writer(arch: str):
-    """A throwaway writer used to check that one key can be packed.
-
-    gguf-py defers packing to write time, so a key that cannot be expressed
-    surfaces only when the whole header is written. Validating each key as it is
-    added turns "one unnamed key, after the whole blend" into "this key, now".
-    """
-    import tempfile
-    # **Guarded: `gguf` is undeclared and unpackaged in this ecosystem**, so the
-    # unguarded form raises at call time on a real install.
-    try:
-        from gguf import GGUFWriter
-    except ImportError:
-        raise MergeRefusal(
-            "the `gguf` package is not installed, so a probe writer cannot be "
-            "built here; it is not a dependency of this package. **I could not "
-            "tell**, which is not the same as a key being bad.")
-    # **A real file, not `None`.** The first version of this probe passed
-    # `None`, and `write_kv_data_to_file()` then failed for every key - so the
-    # check rejected 28 perfectly good keys including `general.architecture`, and
-    # the merged file came out unloadable. A validation that cannot pass is worse
-    # than no validation, because its output looks like a finding.
-    handle = tempfile.NamedTemporaryFile(suffix=".gguf", delete=False)
-    handle.close()
-    return GGUFWriter(handle.name, arch)
-
-
 def metadata(path: Path) -> Dict[str, object]:
     """Every header key as a plain Python value."""
     reader = _reader(path)

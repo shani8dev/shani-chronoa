@@ -2516,26 +2516,6 @@ def sign_model(payload: dict, key: Optional[bytes] = None) -> dict:
     payload["signature_scheme"] = "hmac-sha256"
     payload["signed_by"] = "local"
     return payload
-
-
-def retire_model(payload: dict, path: Optional[Path] = None) -> Optional[Path]:
-    """Kept for callers that used to ask. **It now does nothing, on purpose.**
-
-    Retiring meant moving the file aside on the assumption it would not be
-    wanted again, and that assumption is wrong whenever a change is reverted -
-    which is most of the time, eventually. The space check on load already
-    refuses a stale model without anyone having to move it, so the move bought
-    organisation at the cost of the only genuinely fragile operation in this
-    layer: a rename that can fail part-way.
-
-    A model from another space keeps its own space-stamped name and stays
-    readable. If that space ever becomes current again, it is already in place.
-    """
-    if path is not None and path.exists():
-        return path
-    return None
-
-
 def adopt_retired(space: Optional[str] = None) -> Optional[Path]:
     """Bring back a retired model when the space it was trained in returns.
 
