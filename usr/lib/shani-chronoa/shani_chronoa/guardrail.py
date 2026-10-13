@@ -249,15 +249,43 @@ def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
                 message=f"{name} was called with a boolean for '{key}', which wants a number.",
             )
         expected = _type_of(declared)
-        if expected is None or isinstance(value, expected):
-            continue
-        return GuardrailResult(
-            GuardrailResult.INVALID,
-            message=(
-                f"{name} was called with {_describe(key)} of the wrong type "
-                f"({type(value).__name__}); it wants {wanted}."
-            ),
-        )
+        if expected is not None and not isinstance(value, expected):
+            return GuardrailResult(
+                GuardrailResult.INVALID,
+                message=(
+                    f"{name} was called with {_describe(key)} of the wrong type "
+                    f"({type(value).__name__}); it wants {wanted}."
+                ),
+            )
+        # **An enum is the only schema constraint this module was not checking.**
+        # Measured over the registry: 682 property nodes across 256 tools, of
+        # which 90 declare an enum in 73 tools and **zero** declare a numeric or
+        # string bound - so this was the whole remaining gap.
+        #
+        # And it was a gap in *placement*, not in the check. `airplane_mode`
+        # already refuses an out-of-enum action itself:
+        #
+        #     action = (arguments.get("action") or "status").strip().lower()
+        #     if action not in ("status", "on", "off"): ...
+        #
+        # which is the right rule - in the child, after dispatch, after the
+        # sandbox and after the audit origin, so the refusal reads as a tool that
+        # ran. The same rule one layer earlier is what this is for.
+        #
+        # **Matched with the tolerance the skills use**, because a gate stricter
+        # than the skills refuses calls that work today: `airplane_mode` strips
+        # and lowercases, so `action="LIST"` is a legal call and is still one.
+        legal = declared.get("enum") if isinstance(declared, dict) else None
+        if legal and isinstance(value, str):
+            said = value.strip().lower()
+            if not any(said == str(item).strip().lower() for item in legal):
+                return GuardrailResult(
+                    GuardrailResult.INVALID,
+                    message=(
+                        f"{name} was called with {_describe(key)} of {value!r}; "
+                        f"it accepts: {', '.join(str(item) for item in legal)}."
+                    ),
+                )
 
     # Retry: a well-formed call that the model should retry with a template.
     # This is the "call it again with valid JSON" shape - the arguments

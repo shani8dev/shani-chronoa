@@ -22830,3 +22830,58 @@ caught by". 357 passed / 1 failed across every test file touching learning, drea
 distill or the activity panel; the failure is pre-existing (`1db21c4`, "explain
 gravity still offers tools") and proved by swapping my two source files for HEAD's
 **in a snapshot** and getting the identical failure.
+
+## The enum was the only schema constraint nothing was checking, and the skills already checked it in the wrong place (2026-10-13)
+
+Asked whether the consent gate should be keyed on arguments as well as on the
+tool name. It already is - **`guardrail` runs on every dispatch**, ahead of the
+sandbox, checking required arguments, per-property types and
+`additionalProperties: False`. So the question was not "should there be one".
+
+**Measured what it did not check.** Across the whole registry - 682 property
+nodes, 256 tools:
+
+| constraint declared in a schema | count |
+|---|---:|
+| `enum` | **90**, in **73** tools |
+| a numeric bound | **0** |
+| a string bound | **0** |
+
+So `enum` was the *entire* remaining gap. And it is a gap in **placement**, not
+in the check: `airplane_mode` already refuses one itself -
+
+    action = (arguments.get("action") or "status").strip().lower()
+    if action not in ("status", "on", "off"): ...
+
+- which is the right rule, **in the child**, after dispatch, after the sandbox and
+after the audit origin. So the refusal existed, and read as a tool that *ran*.
+The same rule one layer earlier is what `guardrail` is for.
+
+**And the over-fix was real, not hypothetical.** Two of the 73 accept values
+*outside* their declared enum through an alias table:
+
+| tool | declares | actually accepts |
+|---|---:|---:|
+| `alarm` | 6 | **14** (`remove`, `cancel`, `edit`, `update`, `move`, `add`, `create`, `when`) |
+| `calendar_edit` | 3 | **10** (`add`, `new`, `schedule`, `delete`, `remove`, `reschedule`, `change`) |
+
+A gate written against the declaration alone would have refused **"remove my
+alarm"** - the most natural phrasing of `delete`. So the remedy is not an
+exception list in `guardrail`; it is to **declare what the skill accepts**, which
+makes *"the value must be in the declared enum"* true of every tool rather than
+71 of them. Offering `remove` to the model is also better selection than making
+it choose between `delete` and `remove`, and `test_every_alias_a_skill_accepts_is_
+declared_in_its_enum` is what makes the claim checkable - **it failed with all
+15 keys named** before the schemas were widened.
+
+**Matched with the tolerance the skills use**, because a gate stricter than the
+skills refuses calls that work today: `airplane_mode` strips and lowercases, so
+`action="LIST"` is legal and stays legal. Both directions are pinned - a gate
+that refuses `"LIST"` and a gate that computes the check and ignores it are two
+separate survivors waiting to happen, and the set carries both.
+
+23 tests in `tests/test_guardrail.py`. **290 passed** across the dispatch,
+permissions, capability and gate suites, and **150 across the workbench and
+guardrail files together** after a tmp leak below was cleared. `tools/mutations/
+guardrail_enum.py`: 8 mutations, including the shipped gap restored verbatim and
+both over-fixes.

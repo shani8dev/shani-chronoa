@@ -555,11 +555,19 @@ SCHEMA = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["set", "list", "next", "change", "snooze", "delete"],
+                    # The eight aliases below `_ALIASES` are declared here too,
+                    # not only accepted: `guardrail` refuses a value outside the
+                    # declared enum, so a schema narrower than the skill would
+                    # refuse "remove my alarm" - the most natural phrasing of
+                    # `delete`. Canonical verbs first.
+                    "enum": ["set", "list", "next", "change", "snooze", "delete",
+                             "remove", "cancel", "edit", "update", "move",
+                             "add", "create", "when"],
                     "description": (
                         "set a new alarm (needs time), list all, next (when the "
                         "next alarm rings), change one (new_time/new_label/"
-                        "repeat), snooze the alarm that just rang, delete one."
+                        "repeat), snooze the alarm that just rang, delete one "
+                        "(also remove, cancel)."
                     ),
                     "default": "set",
                 },

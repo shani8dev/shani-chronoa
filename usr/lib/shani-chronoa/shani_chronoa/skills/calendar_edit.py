@@ -70,7 +70,14 @@ SCHEMA = {
             "Requires the 'calendar-write-enabled' consent key (move/cancel also "
             "'calendar-read-enabled'). No invitations are sent."),
         "parameters": {"type": "object", "properties": {
-            "action": {"type": "string", "enum": list(_ACTIONS)},
+            # **The aliases are declared, not just accepted.** `_ALIASES` is what
+            # the skill has always taken, and `guardrail` now refuses a value
+            # outside the declared enum - so a schema narrower than the skill
+            # would turn "schedule a meeting" into a refusal of the most natural
+            # phrasing of `create`. Canonical verbs first, because that is the
+            # order the model reads them in.
+            "action": {"type": "string",
+                       "enum": list(_ACTIONS) + list(_ALIASES)},
             "title": {"type": "string", "description": (
                 "create: the event's title, e.g. 'Meeting with John'. move/cancel: words from "
                 "the title to find it by (optional when the time is enough).")},

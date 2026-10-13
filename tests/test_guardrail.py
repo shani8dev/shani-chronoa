@@ -182,3 +182,128 @@ class TestARetryTellsTheModelHowToAskAgain:
         assert "Not run" in r.text or "Refused" in r.text, r.text
         assert "Retry speak" not in r.text, (
             "an invalid call was answered with a retry it did not earn")
+
+
+class TestAValueOutsideTheDeclaredEnumIsRefusedBeforeDispatch:
+    """**The enum is the only schema constraint nothing was checking.**
+
+    Measured over the whole registry: 682 property nodes across 256 tools, of
+    which **90 declare an `enum`** in **73 tools**, and **zero** declare a
+    numeric or string bound. So `enum` is the entire gap - there is nothing else
+    in these schemas left to validate.
+
+    And it is a gap in *placement*, not in the check. `airplane_mode` already
+    does this itself:
+
+        action = (arguments.get("action") or "status").strip().lower()
+        if action not in ("status", "on", "off"):
+            return f"action must be status, on or off, not {action!r}."
+
+    which is the right rule - but it runs **in the child**, after dispatch, after
+    the sandbox and after the audit origin is set. So the refusal is a child
+    result: the tool reads as *ran*, on a surface that marks the live ring. Doing
+    it in `guardrail` instead is the same rule one layer earlier.
+    """
+
+    SCHEMA = {"type": "object",
+              "properties": {"action": {"type": "string",
+                                        "enum": ["list", "get", "set"]}},
+              "required": ["action"]}
+
+    def test_a_plausible_value_the_schema_forbids_is_refused(self):
+        """"destroy" is the shape of a small model's mistake: a real word, in the
+        right position, not in the list. Nothing else in the dispatch path can
+        see it - the consent layer answers authority, not shape."""
+        result = guardrail.check("files", {"action": "destroy"}, self.SCHEMA)
+        assert not result.should_run, (
+            "an out-of-enum action reached the sandbox; the refusal %r would "
+            "come from the child, one layer too late" % result.message)
+
+    def test_the_refusal_names_the_parameter_and_every_legal_value(self):
+        """The model is asked again, and a message that names neither the field
+        nor the alternatives is a message it cannot use - which is the whole
+        reason this module exists rather than a traceback."""
+        result = guardrail.check("files", {"action": "destroy"}, self.SCHEMA)
+        assert "action" in result.message
+        for legal in ("list", "get", "set"):
+            assert legal in result.message, (legal, result.message)
+
+    def test_the_spellings_the_skills_accept_are_still_accepted(self):
+        """**The over-fix guard.** Every skill that reads an enum lowercases it,
+        and `airplane_mode` also strips it. A gate stricter than the skills would
+        refuse calls that work today, and `action="LIST"` becoming a refusal is a
+        regression, not a guard."""
+        for spelling in ("list", "LIST", "List", " list ", "\tlIST\n"):
+            result = guardrail.check("files", {"action": spelling}, self.SCHEMA)
+            assert result.should_run, (repr(spelling), result.message)
+
+    def test_a_string_with_no_declared_enum_is_left_free(self):
+        """No enum means no constraint. Inventing one is the over-fix in the
+        other direction, and it is the failure this module's own docstring warns
+        about - *"guessing at a schema we do not understand would reject good
+        calls"*."""
+        free = {"type": "object",
+                "properties": {"path": {"type": "string"}}, "required": []}
+        assert guardrail.check("files", {"path": "/tmp/anything at all"},
+                               free).should_run
+
+    def test_no_schema_means_no_enum_either(self):
+        assert guardrail.check("x", {"action": "destroy"}, {}).should_run
+
+
+class TestEveryEnumToolDeclaresWhatItsSkillAccepts:
+    """**Why the gate above is safe, over the whole population.**
+
+    Two of the 73 accept values **outside** their declared enum, through an alias
+    table - `alarm` accepts 14 while declaring 6, `calendar_edit` accepts 10
+    while declaring 3. So an enum gate written against the declaration alone
+    would refuse `alarm action=remove` and `calendar_edit action=schedule`, which
+    are the most natural phrasings of the verbs those tables already contain.
+
+    The remedy is not an exception list in `guardrail` - it is to declare what the
+    skill accepts, so the rule *"the value must be in the declared enum"* is
+    true of every tool instead of true of 71. Offering `remove` to the model is
+    also better selection than making it guess between `delete` and `remove`.
+
+    This test is what makes that claim checkable rather than asserted, and it
+    **fails today**: the 15 alias keys are accepted by their skills and declared
+    by neither schema.
+    """
+
+    def _enum_tools(self):
+        from shani_chronoa import skills
+        schemas, _ = skills.discover_skills()
+        for schema in schemas:
+            fn = schema.get("function") or {}
+            props = ((fn.get("parameters") or {}).get("properties") or {})
+            enums = {k: list(v["enum"]) for k, v in props.items()
+                     if isinstance(v, dict) and v.get("enum")}
+            if enums:
+                yield fn["name"], enums
+
+    def test_the_population_is_what_the_gate_was_measured_against(self):
+        """The number the reason above quotes, so a schema change that shrinks
+        it cannot leave the reason quietly wrong."""
+        tools = dict(self._enum_tools())
+        assert len(tools) == 73, len(tools)
+        assert sum(len(v) for v in tools.values()) == 90, (
+            sum(len(v) for v in tools.values()))
+
+    def test_every_alias_a_skill_accepts_is_declared_in_its_enum(self):
+        import importlib
+        undeclared = []
+        for name, enums in self._enum_tools():
+            try:
+                module = importlib.import_module("shani_chronoa.skills." + name)
+            except ImportError:
+                continue
+            aliases = getattr(module, "_ALIASES", None)
+            if not isinstance(aliases, dict):
+                continue
+            declared = {v for values in enums.values() for v in values}
+            for key in aliases:
+                if key not in declared:
+                    undeclared.append("%s: %r" % (name, key))
+        assert not undeclared, (
+            "these are accepted by their skills and declared by no schema, so an "
+            "enum gate would refuse them: %s" % undeclared)
