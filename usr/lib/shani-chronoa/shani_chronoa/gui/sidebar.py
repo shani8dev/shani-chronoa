@@ -113,6 +113,39 @@ def _open_settings(app, target: str) -> None:
 SIDEBAR_TITLE_LINES = 1
 
 
+def _words_in(name: str) -> str:
+    """Every word of a panel's own description, lowercased, for searching.
+
+    **The description, not a hand-written tag.** A separate list of keywords
+    would be a second thing to keep true - and this one already exists, written
+    next to the code it describes by whoever wrote that code. `listening.py`
+    says it transcribes what an application is playing; `driving.py` says it
+    asks whether a mouse and a keyboard can reach a window on this desktop.
+    **Both of those sentences are the words a newcomer would type**, and neither
+    word appears in the panel's title.
+
+    Read through the module rather than imported, because `build` is a closure
+    over the module and `inspect.getfile` is the only honest way back to it -
+    and anything that raises here returns nothing, because a search index that
+    fails must not take the sidebar down with it.
+    """
+    import inspect
+
+    try:
+        # **Looked up by name, not threaded in.** The row-building loop carries
+        # `(name, title, icon)` and has no builder in scope - the first version
+        # of this took one and raised `NameError` on the first row, which took
+        # the whole sidebar down rather than losing a search index.
+        entry = _surfaces().get(name)
+        if entry is None:
+            return ""
+        module = inspect.getmodule(entry[2])
+        doc = (module.__doc__ or "") if module is not None else ""
+    except Exception:                 # noqa: BLE001
+        return ""
+    return doc.lower()
+
+
 class SidebarPage(Adw.NavigationPage):
     """The panel list: search, the sections, and the way back to the chat.
 
@@ -195,6 +228,8 @@ class SidebarPage(Adw.NavigationPage):
                 on_surface(key)
 
         self._surface_rows = {}
+        #: panel id -> every word in that panel's own description.
+        self._surface_words: "dict[str, str]" = {}
         self._dots = {}
         #: panel id -> the settings gear on its row. Absent for the panels
         #: Settings does not govern - see `surfaces.SETTINGS_TARGETS`.
@@ -348,6 +383,7 @@ class SidebarPage(Adw.NavigationPage):
                 row.connect("activated", lambda _r, key=name: activate(_r, key))
                 group.add(row)
                 self._surface_rows[name] = (row, title.lower(), icon, section)
+                self._surface_words[name] = _words_in(name)
             self._rows_by_title[section] = entries
 
         self._chat_row = chat_row
@@ -359,8 +395,19 @@ class SidebarPage(Adw.NavigationPage):
         def _filter(text: str) -> None:
             needle = (text or "").strip().lower()
             for key, (row, title, icon, section) in self._surface_rows.items():
-                row.set_visible(not needle or needle in title or needle in icon
-                                or needle in key or needle in section.lower())
+                row.set_visible(
+                    not needle or needle in title or needle in icon
+                    or needle in key or needle in section.lower()
+                    # **What the panel is for, not what it is called.** The
+                    # filter above matches names, so "meeting" finds Meetings
+                    # and "what time is my appointment" finds nothing at all -
+                    # while `listening.py` says in its own first line that it
+                    # asks whether Chronoa can "transcribe what an application
+                    # is playing", and nobody would ever guess that word from
+                    # the word *Listening*. A newcomer searching a box they have
+                    # just installed types the thing they want, not the name the
+                    # app happened to give it.
+                    or needle in self._surface_words.get(key, ""))
             # A section heading with nothing under it is a heading that lies
             # about what is on the screen, so it goes with its rows.
             for section, entries in self._rows_by_title.items():
