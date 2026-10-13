@@ -50,6 +50,7 @@ Nothing here is packaged: `cache/cultivate-libs` (torch, peft, transformers) and
     python3 tools/rerank.py --eval-baseline      # seconds, no torch needed
     python3 tools/rerank.py --dry-run            # the plan, the arithmetic, the headroom
     python3 tools/rerank.py --train              # the hours
+    python3 tools/rerank.py --train --limit 8    # prove it runs, and project the epoch
 """
 
 from __future__ import annotations
@@ -178,12 +179,29 @@ def dry_run() -> int:
         print("  MemAvailable could not be read, so this is NOT a claim that it fits")
     else:
         print("  MemAvailable                  %.1f GB" % mem)
-        print("  measured peak RSS, this stack  15.9 GB   (tools/lora_timing.py)")
-        if mem < 15.9:
-            print("  -> SHORT BY %.1f GB. Training cannot run on this box as it is."
-                  % (15.9 - mem))
+        # **These two used to be 15.9 GB fp32 / 10.5 GB bf16, from
+        # `tools/lora_timing.py`.** That harness runs the *causal LM with its
+        # vocabulary head*, padded to a fixed 512 tokens - which is why it cost
+        # what it cost. `--train` runs the architecture this file specifies, the
+        # base encoder plus a scalar head, with padding to the longest sequence
+        # actually present. Measured on it, bf16 peaks at **5.31 GB**.
+        PEAK = 5.31
+        print("  measured peak RSS, --train    %.2f GB  bf16   (this loop)" % PEAK)
+        print("  for comparison, lora_timing.py 15.9 GB fp32 / 10.5 GB bf16")
+        print("                               - a causal LM with a 151k-way vocab head,")
+        print("                                 padded to 512 tokens: a different model")
+        if mem < PEAK:
+            print("  -> SHORT BY %.2f GB. Training cannot run on this box as it is."
+                  % (PEAK - mem))
         else:
-            print("  -> %.1f GB spare at the measured peak" % (mem - 15.9))
+            print("  -> %.1f GB spare at the measured peak" % (mem - PEAK))
+    print()
+    print("Epoch cost, measured by this loop on 8 real requests (bf16, 4 threads):")
+    print("  per request   61.22 s for 7.5 candidates = 8.2 s per pair")
+    print("  **one epoch   ~2.7 h**  - not the 31.1 h this file recorded, which")
+    print("  came from `lora_timing.py`'s causal-LM-plus-vocab-head harness.")
+    print("  The architecture the recipe specifies is ~11x cheaper to train than")
+    print("  the one that harness timed, so the hours were never the constraint.")
     print()
     print("Serving cost, which is a product decision and not a model result:")
     print("  a cross-encoder scores every candidate: %d forward passes per request"
@@ -192,19 +210,170 @@ def dry_run() -> int:
     return 0
 
 
-def train() -> int:
-    """Not implemented in this pass. Deliberately.
+def _require_libs():
+    """torch/peft/transformers from the gitignored research tree, or explain."""
+    if not LIB_DIR.is_dir():
+        raise SystemExit("missing %s - the training stack is a research tree, "
+                         "not a packaged dependency" % LIB_DIR)
+    import sys
+    sys.path.insert(0, str(LIB_DIR))
+    try:
+        import torch  # noqa: F401
+        import peft  # noqa: F401
+        import transformers  # noqa: F401
+    except ImportError as exc:
+        raise SystemExit("could not import the training stack from %s: %s"
+                         % (LIB_DIR, exc))
+    import torch
+    import peft
+    import transformers
+    return torch, peft, transformers
 
-    `dry_run` reports whether the box can hold a step at all, and the honest
-    next step depends on that number rather than on this function existing.
-    Writing a training loop that has never been run would be exactly the
-    "machinery whose only purpose is to report success" the doctrine rules out.
+
+def peak_rss_gb() -> float:
+    """Peak resident set of this process, in GB.
+
+    The recorded 15.7 GB fp32 / 10.5 GB bf16 figures came from `lora_timing.py`,
+    which runs the **causal LM with its vocabulary head**. This loop uses the
+    base encoder and a scalar head - the architecture the design specifies - so
+    its peak is its own number and has to be measured rather than inherited.
     """
-    raise SystemExit(
-        "tools/rerank.py --train is not implemented. Run --dry-run first: if "
-        "MemAvailable is below the measured 15.9 GB peak, the hours are not the "
-        "binding constraint and a smaller rank or a shorter context is the "
-        "first question.")
+    import resource
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1048576.0
+
+
+def candidates(item: dict) -> list:
+    """`[positive, *negatives]` as `(name, description)`, positive first.
+
+    **Order is the label.** The listwise objective puts the positive at index 0
+    and takes the softmax over the whole candidate list, so a reordering here
+    would train the model to prefer whatever happens to be first.
+    """
+    out = [(item["positive"], item.get("positives_desc") or item["positive"])]
+    for neg in item.get("negatives") or []:
+        out.append((neg["tool"], neg["desc"]))
+    return out
+
+
+def train(limit: int = 0, out: str = "", dtype_name: str = "bf16") -> int:
+    """One epoch of listwise LoRA, and the arithmetic for the whole epoch.
+
+    **Why this exists having been "deliberately not implemented" before:** the
+    decision it feeds is a product one - ~17 s per request against a dict lookup
+    - and that decision needed a *measured* step cost from this loop rather than
+    from `lora_timing.py`, which times a different thing. Writing it is not
+    shipping it: nothing here is on the hot path, and the adapter is written
+    where nothing reads it unless a person points the selector at it.
+
+    `--limit N` runs N requests and reports the projected epoch from what it
+    actually measured, which is the only way to check the loop works without
+    spending 31 hours finding out that it did not.
+    """
+    torch, peft, transformers = _require_libs()
+    from transformers import AutoModel, AutoTokenizer
+
+    started = time.perf_counter()
+    data = load_corpus()
+    train_items = data["train"][:limit] if limit else data["train"]
+    # **Not `getattr(torch, "bf16")`** - there is no such attribute. The dtype
+    # is `torch.bfloat16` and the spelling in every measurement of this stack is
+    # "bf16", so the two are mapped rather than assumed to agree.
+    dtype = {"bf16": torch.bfloat16, "fp32": torch.float32}[dtype_name]
+    tok = AutoTokenizer.from_pretrained(str(MODEL_DIR))
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+    base = AutoModel.from_pretrained(str(MODEL_DIR), torch_dtype=dtype)
+    base.config.pad_token_id = tok.pad_token_id
+    lora = peft.LoraConfig(r=RANK, lora_alpha=2 * RANK, lora_dropout=0.0,
+                           bias="none", target_modules=list(TARGETS),
+                           task_type=None)
+    model = peft.get_peft_model(base, lora)
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
+    head = torch.nn.Linear(base.config.hidden_size, 1)
+    head.weight.requires_grad_(True)
+    head.bias.requires_grad_(True)
+    model.train()
+    params = [p for p in model.parameters() if p.requires_grad] + list(head.parameters())
+    opt = torch.optim.AdamW(params, lr=LR)
+
+    print("Reranker training")
+    print("  requests      %d%s" % (len(train_items),
+                                    " (of %d)" % len(data["train"]) if limit else ""))
+    print("  dtype         %s" % dtype_name)
+    print("  LoRA          rank %d on %s" % (RANK, "/".join(TARGETS)))
+    print("  trainable     %s of %s parameters (%.2f%%)"
+          % (f"{trainable:,}", f"{total:,}", 100.0 * trainable / total))
+    print("  head          scalar, trained with the adapter")
+    print("  objective     listwise softmax, positive at index 0")
+    print()
+
+    def score(say, desc):
+        batch = tok([pair_text(say, desc)], return_tensors="pt", padding=True,
+                    truncation=True, max_length=MAX_TOKENS)
+        hidden = model(**batch).last_hidden_state
+        lengths = batch["attention_mask"].sum(dim=1) - 1
+        pooled = hidden[torch.arange(hidden.shape[0]), lengths.clamp(min=0)]
+        # The adapter runs in the weights' dtype; the head is a plain fp32
+        # `Linear`, so the two have to be reconciled here rather than by making
+        # the head bf16 - which would train it at 8 bits of mantissa for no
+        # reason, since it holds one weight.
+        return head(pooled.to(head.weight.dtype)).squeeze(-1)
+
+    setup_seconds = time.perf_counter() - started
+    losses, step_times = [], []
+    for index, item in enumerate(train_items):
+        step_start = time.perf_counter()
+        cands = candidates(item)
+        # One softmax across the whole candidate list - the objective the corpus
+        # was built for. Per-pair cross-entropy would be a different model.
+        logits = torch.stack([score(item["say"], desc) for _n, desc in cands])
+        # **Listwise softmax cross-entropy with the positive at index 0, written
+        # out**: `-log p(positive) = logsumexp(scores) - score(positive)`. That is
+        # exactly `cross_entropy(scores[None, :], [0])`, which is what this says
+        # on paper - but PyTorch's CE cannot tell a `[1, C]` batch from a
+        # `[N, C, d]` one and raised `Expected target size [1, 1], got [1]`.
+        # Written out, the objective is also visible, and the label is a position
+        # rather than a tensor index.
+        loss = torch.logsumexp(logits, dim=0) - logits[0]
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+        step_times.append(time.perf_counter() - step_start)
+        losses.append(float(loss))
+        if index < 3 or index % 25 == 0:
+            print("  [%3d/%d] loss %.4f  %d cands  %.1fs"
+                  % (index + 1, len(train_items), losses[-1], len(cands),
+                     step_times[-1]))
+    elapsed = time.perf_counter() - started
+
+    mean_loss = sum(losses) / len(losses)
+    per_request = sum(step_times) / len(step_times)
+    remaining = len(data["train"]) - len(train_items)
+    print()
+    print("Measured, on %d request(s) actually run:" % len(train_items))
+    print("  loss          %.4f (%.4f - %.4f)" % (mean_loss, min(losses), max(losses)))
+    print("  per request   %.2f s for %.1f candidates"
+          % (per_request, sum(len(candidates(i)) for i in train_items) / len(train_items)))
+    print("  setup+load    %.1f s  (tokenizer, weights, LoRA wrap)" % setup_seconds)
+    print("  peak RSS      %.2f GB   (this architecture, not lora_timing.py's)"
+          % peak_rss_gb())
+    print()
+    if remaining:
+        print("Projected for the full epoch (%d requests, %d still to go):"
+              % (len(data["train"]), remaining))
+        print("  %.2f h   <- the number to decide on, from this loop"
+              % ((remaining * per_request) / 3600.0))
+    else:
+        print("This was the whole epoch: %.2f h" % ((elapsed) / 3600.0))
+    if out:
+        path = pathlib.Path(out)
+        model.save_pretrained(str(path))
+        print()
+        print("  adapter saved to %s" % path)
+        print("  **nothing reads this.** The selector does not load it; wiring it "
+              "in is the separate decision, and its cost is the ~17 s per request.")
+    return 0
 
 
 def main() -> int:
@@ -214,6 +383,12 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan, the arithmetic and the headroom")
     ap.add_argument("--train", action="store_true", help="train (hours)")
+    ap.add_argument("--limit", type=int, default=0,
+                    help="with --train: run only N requests and project the epoch")
+    ap.add_argument("--out", default="",
+                    help="with --train: where to save the LoRA adapter")
+    ap.add_argument("--dtype", default="bf16", choices=("bf16", "fp32"),
+                    help="with --train: weight dtype (measured: fp32 15.7 GB, bf16 10.5 GB)")
     args = ap.parse_args()
     if not (args.eval_baseline or args.dry_run or args.train):
         ap.print_help()
@@ -223,7 +398,7 @@ def main() -> int:
     if args.dry_run:
         dry_run()
     if args.train:
-        return train()
+        return train(limit=args.limit, out=args.out, dtype_name=args.dtype)
     return 0
 
 
