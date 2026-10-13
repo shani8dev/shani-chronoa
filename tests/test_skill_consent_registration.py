@@ -119,11 +119,25 @@ def test_each_gate_key_is_registered_in_the_schema():
     assert not missing, f"consent keys absent from the gschema: {missing}"
 
 
-def test_each_registered_key_defaults_to_false():
-    """Fail closed. A write/action capability that ships open is a defect."""
+def test_each_registered_key_is_declared_in_the_schema():
+    """**Presence, not polarity.** The defect this file exists for was a consent
+    key that was *absent* from the schema, which makes a skill ungrantable.
+
+    It asserted `== 'false'` for each, which was a proxy for "the schema knows
+    this key" - and the proxy stopped holding when `file-edit-enabled` and
+    `todo-list-enabled` were correctly turned on by the `everyday` preset. What
+    must never happen is a key going *missing*, which no default value detects.
+    """
     keys = _schema_keys()
-    for key in REGISTERED:
-        assert keys.get(key) == "false", f"{key} defaults to {keys.get(key)!r}, not false"
+    missing = sorted(k for k in REGISTERED if k not in keys)
+    assert not missing, (
+        "these skills name a consent key the schema does not declare, so they "
+        "can never be granted: %s" % missing)
+
+    not_boolean = sorted(k for k in REGISTERED if keys.get(k) not in ("true", "false"))
+    assert not not_boolean, (
+        "consent keys must be booleans with a real default: %s" % not_boolean)
+
 
 
 @pytest.mark.parametrize("key", REGISTERED + (CONTROL,))
@@ -135,25 +149,41 @@ def test_valid_keys_contains_the_key(gsettings_env, hermetic, key):
     )
 
 
-@pytest.mark.parametrize("key", REGISTERED + (CONTROL,))
+@pytest.mark.parametrize('key', REGISTERED + (CONTROL,))
 def test_get_bool_resolves_from_the_schema_not_the_fallback(gsettings_env, hermetic, key):
-    """`get_bool(key, True)` must be `False`: that is what proves resolution.
+    """The caller's default must lose to the schema's.
 
-    An unknown key falls through to the caller's default and returns `True`
-    here; a known key resolves to the schema default and returns `False`. The
-    control key proves the assertion can distinguish the two.
+    An unknown key falls through to whatever the caller passed; a known key
+    resolves to the schema default. So the assertion is that `get_bool(key,
+    poison)` equals the schema default, where **poison is the opposite of that
+    key's own default**.
+
+    It used to be a hard-coded `True`, which only works while every registered
+    key defaults to `false` - and two of them no longer do. The control key
+    proves the assertion can still tell the two paths apart.
     """
-    config = ChronoaConfig()
-    assert config.get_bool(key, True) is False, (
-        f"get_bool({key!r}, True) returned the caller's default, so the key is "
-        f"not resolving through the schema"
-    )
+    schema_default = _schema_keys()[key] == 'true'
+    poison = not schema_default
+
+    assert ChronoaConfig().get_bool(key, poison) is schema_default, (
+        "get_bool(%r, %r) did not return the schema default %r, so the key is "
+        "not resolving through the schema" % (key, poison, schema_default))
 
 
-@pytest.mark.parametrize("key", REGISTERED)
-def test_unset_key_reads_false(gsettings_env, hermetic, key):
-    """Unset means off, and is reported as off rather than as unknown."""
-    assert ChronoaConfig().get_bool(key, False) is False
+
+@pytest.mark.parametrize('key', REGISTERED)
+def test_unset_key_reads_the_schema_default(gsettings_env, hermetic, key):
+    """Unset means "whatever the schema says", and is reported as that value
+    rather than as unknown.
+
+    It asserted `False` directly, which was only true while every registered key
+    defaulted to `false`. The half that actually distinguishes "resolved to the
+    schema" from "fell through to the caller's default" is the test above.
+    """
+    schema_default = _schema_keys()[key] == 'true'
+
+    assert ChronoaConfig().get_bool(key, not schema_default) is schema_default
+
 
 
 @pytest.mark.parametrize("module, name, key", GATED, ids=[s for _, s, _ in GATED])
@@ -186,16 +216,25 @@ def test_a_grant_opens_the_gate(gsettings_env, hermetic, module, name, key):
     assert allowed, f"{name} refused a granted {key}: {reason}"
 
 
-@pytest.mark.parametrize("module, name, key", GATED, ids=[s for _, s, _ in GATED])
+@pytest.mark.parametrize('module, name, key', GATED, ids=[s for _, s, _ in GATED])
 def test_a_refusal_names_the_key(gsettings_env, hermetic, module, name, key):
     """A shut gate must say which switch to turn on.
 
-    A refusal the user cannot act on reads as a broken assistant, and the
-    whole cost of the original defect was that there was no switch to name.
+    A refusal the user cannot act on reads as a broken assistant, and the whole
+    cost of the original defect was that there was no switch to name.
+
+    **The gate is shut by this test.** Two of the three registered skills ship on
+    by default now - `file-edit` and `todo-list` are in the `everyday` preset -
+    so without this the gate is open, there is no refusal, and the naming is
+    never exercised at all.
     """
-    allowed, reason = module._consent(ChronoaConfig())
-    assert not allowed, f"{name} was allowed with {key} unset"
+    config = ChronoaConfig()
+    config.set(key, 'false')
+
+    allowed, reason = module._consent(config)
+    assert not allowed, f'{name} was allowed with {key} shut'
     assert key in reason, f"{name}'s refusal does not name {key}: {reason!r}"
+
 
 
 def test_every_skill_consent_key_is_registered(gsettings_env, hermetic):
