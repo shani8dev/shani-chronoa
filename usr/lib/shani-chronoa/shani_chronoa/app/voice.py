@@ -238,6 +238,16 @@ class VoiceMixin:
         if future is not None and not future.done():
             future.cancel()
             logger.info("Turn cancelled by the user")
+            # **Cancelled turns never call back.** `AsyncBridge` drops a
+            # `CancelledError` without invoking its callback, so
+            # `_on_response_ready` - the only place that clears the in-flight
+            # flag - never runs for a stopped turn. Nothing else: every message
+            # typed afterwards would be queued behind a turn that no longer
+            # exists, and the queue would never drain.
+            #
+            # The queue itself is **kept**, not dropped: those messages are in
+            # the transcript already, and they resume in order on the next one.
+            self._turn_in_flight = False
             if self.window:
                 self.window.set_orb_state("idle")
                 self.window.set_state(AssistantState.IDLE)

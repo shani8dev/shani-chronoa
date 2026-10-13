@@ -224,6 +224,56 @@ class ConversationMixin:
         self._voice_turn = False
         self._submit(question)
 
+    @property
+    def _turn_in_flight(self) -> bool:
+        """Whether a turn is running right now.
+
+        A property over one attribute rather than the attribute itself, because
+        this is a `Mixin` mixed into `Application` and nothing initialises it -
+        the existing `_turn_*` state is the same, assigned on first use. Reading
+        it before any turn has run must not raise, or the first message a person
+        ever typed would fail on a boolean that was never set.
+        """
+        return getattr(self, "_turn_running", False)
+
+    @_turn_in_flight.setter
+    def _turn_in_flight(self, running: bool) -> None:
+        self._turn_running = running
+
+    @property
+    def _turn_queue(self) -> list:
+        """Messages typed while a turn was running, oldest first.
+
+        A property for the same reason as `_turn_in_flight`: a `Mixin` has no
+        `__init__` to hang the list on, and a queue that only exists after the
+        first collision is a queue that cannot report "nothing is waiting".
+        """
+        queue = getattr(self, "_turn_pending", None)
+        if queue is None:
+            queue = []
+            self._turn_pending = queue
+        return queue
+
+    def _turn_finished(self) -> None:
+        """A turn is over - whether it answered or failed. Start the next.
+
+        **Called from both exits of `_on_response_ready`.** The failure path
+        returns early, so a turn that raised would otherwise strand every
+        message queued behind it - and that is exactly the moment a person is
+        watching hardest and would take a dead queue for the app hanging.
+
+        **Cancelling does not come through here at all:** `AsyncBridge` drops a
+        `CancelledError` without invoking the callback, so Stop cannot drain the
+        queue by cancelling. It clears `_turn_in_flight` instead, and the next
+        message typed starts immediately - behind anything still queued, since
+        `_submit` only runs now when the queue is empty of running work.
+        """
+        self._turn_in_flight = False
+        if self._turn_queue:
+            text, channel = self._turn_queue.pop(0)
+            logger.info(f"Starting the next of {len(self._turn_queue) + 1} queued")
+            self._start_turn(text, channel)
+
     def _submit(self, text: str, channel: str = "") -> None:
         """Send text through the assistant's tool-calling pipeline.
 
@@ -231,8 +281,56 @@ class ConversationMixin:
         default; an inbound gateway message passes its registered name, which
         is then recorded on that turn's captured facts so a private fact a
         channel heard never leaks into another channel's recall.
+
+        **A message sent while a turn is running is queued, not run beside it.**
+        There is no lock anywhere on this path - not here, not in
+        `assistant.handle`, and the composer is never disabled - so a second
+        send used to start a second `handle()` against the same assistant while
+        the first was still going. Measured: peak **2 concurrent `handle()`
+        calls** on one `Assistant`, both turns mutating the same `_history`.
+
+        Worse than the history, because it is the part a person sees. Every one
+        of `_turn_marks`, `_turn_speech`, `_turn_buffer`, `_turn_streamed` and
+        `_turn_future` is **reassigned** by the second turn, so the running
+        turn's streamed text was written into the *second* turn's speech queue
+        and its reply landed inside the second turn's bubble - two answers
+        interleaved into one. Stop reads `_turn_future`, so it stopped whichever
+        turn was submitted **last**, which is the one that had not started. And
+        the first turn's elapsed clock restarted, so the wait grew by nothing and
+        the reading under it went backwards.
+
+        Queuing is the fix because **the message is already in the transcript** -
+        `window._submit_input` adds the turn before it emits `user-input` - so
+        refusing it would leave a question on screen that Chronoa never answers,
+        which is worse than either alternative. Running it beside the first is
+        what caused this. The queue is FIFO and drains from `_on_response_ready`
+        on **both** exits, so a follow-up typed mid-answer is answered next, in
+        the order it was asked.
         """
         logger.info(f"User input: {text}")
+
+        if self._turn_in_flight or self._turn_queue:
+            self._turn_queue.append((text, channel))
+            if self._turn_in_flight:
+                if self.window:
+                    waiting = len(self._turn_queue)
+                    self.window.set_status(
+                        f"Answering that first - {waiting} message"
+                        f"{'s' if waiting != 1 else ''} waiting")
+                logger.info(f"Queued behind the running turn: {text!r}")
+                return
+            # **A turn was stopped with messages still waiting.** Nothing is
+            # running, so this message cannot jump the queue - it goes to the
+            # back and the *oldest* waiting one starts, which is the order the
+            # transcript already shows. Without this, stopping twice and then
+            # typing answers the new message first and answers the two older
+            # ones never.
+            self._turn_finished()
+            return
+        self._start_turn(text, channel)
+
+    def _start_turn(self, text: str, channel: str = "") -> None:
+        """Begin one turn, unconditionally. `_submit` decides *whether* now."""
 
         if not self.assistant or not self.llm or not self.llm.is_available():
             # The local model may have come up since startup (it loads after
@@ -248,6 +346,7 @@ class ConversationMixin:
             self.window.set_orb_state("processing")
             self.window.set_status("Processing...")
 
+        self._turn_in_flight = True
         self._turn_marks = {"start": time.monotonic()}
         self._turn_speech = self._new_speech_queue()
         self._turn_buffer = speech.SentenceBuffer()
@@ -461,6 +560,7 @@ class ConversationMixin:
                     "error")
                 self.window.set_orb_state("error")
                 self.window.set_status("Ready")
+            self._turn_finished()
             return GLib.SOURCE_REMOVE
 
         response = str(result)
@@ -495,4 +595,5 @@ class ConversationMixin:
                 queue.speak(speech.split_sentences(response))
             queue.close()
 
+        self._turn_finished()
         return GLib.SOURCE_REMOVE

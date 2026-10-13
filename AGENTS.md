@@ -19857,3 +19857,96 @@ defect restored verbatim:
    machine either. I wrote *"a test that does not set up the machine it
    measures is measuring the fixture"* into the helper's docstring and broke it
    one line later.
+## Two messages typed in one turn became two turns, and Stop stopped the wrong one (2026-10-13)
+
+The third thing the UI review found, and the one a person hits by accident
+rather than by understanding the app.
+
+`_submit` had no in-flight guard, and **there is no lock anywhere on that
+path** - not in `_submit`, not in `assistant.handle`, and the composer is never
+disabled. So a message typed while a turn was running started a **second
+`handle()` against the same assistant**. Measured with a stand-in `Assistant`:
+
+    handle('first message') started
+    handle('second message, typed while the first was running') started
+    peak concurrent handle() calls: 2
+    the assistant's history now holds: ['first', 'second']
+
+Both turns mutate the same `_history`. But **the history is not the part anyone
+sees**, and that is what made this worth fixing rather than noting. `_submit`
+reassigns every one of:
+
+| state | what the second turn did to the first |
+|---|---|
+| `_turn_speech`, `_turn_buffer`, `_turn_streamed` | the running turn's **spoken output went into the second turn's queue** |
+| the assistant's turn | the first turn's reply landed **inside the second turn's bubble** |
+| `_turn_future` | **Stop stopped whichever turn was submitted last** - the one that had not started |
+| `_turn_marks` | the first turn's elapsed clock **restarted**: the wait grew by nothing while the reading went backwards |
+
+Two answers interleaved into one, and a Stop button that pointed the wrong way.
+
+### Queued, not refused - and not run beside it
+
+`window._submit_input` adds the user turn to the transcript **before** it emits
+`user-input`. So refusing a second message would leave a question on screen that
+Chronoa never answers, which is worse than either alternative. The queue is
+FIFO and drains from `_on_response_ready`, on **both** exits.
+
+**The failure exit is the one that would have been missed.** `_on_response_ready`
+returns as soon as it has drawn the failure, so draining only at the bottom
+strands every queued message - at the exact moment somebody is watching
+hardest, where a dead queue reads as the app hanging.
+
+### Cancelled turns never call back, so Stop needs its own line
+
+`AsyncBridge._on_done` **drops a `CancelledError` without invoking the
+callback**. So for a stopped turn, the one place that clears the in-flight flag
+- `_on_response_ready` - never runs. With no other clear, every message typed
+after a Stop is queued behind a turn that no longer exists, **and the queue never
+drains again for the life of the process**. `voice.py` now clears it directly.
+
+The queue itself is **kept** across a Stop, in order: stopping twice and then
+typing answers the two older messages first, because `_submit` only starts now
+when nothing is waiting. A test that made a second voice object reported this
+very failure as though the fix were absent - see below.
+
+### `_turn_in_flight` and `_turn_queue` are properties
+
+This is a `Mixin` mixed into `Application` and **nothing runs an initialiser** -
+the existing `_turn_*` state is the same, assigned on first use. A plain
+attribute would raise `AttributeError` on the very first message typed in a
+fresh process. Both read through `getattr` with a default.
+
+**7 mutations, 7 caught**, the first being the shipped bug restored verbatim:
+
+| mutation | |
+|---|---|
+| the in-flight guard removed (**the shipped bug**) | **4 failed** |
+| the queue never drains | 4 failed |
+| the queue drained newest-first | 3 failed |
+| the **failure** exit stops draining | 1 failed |
+| the **success** exit stops draining | 3 failed |
+| the turn never marked in flight | 4 failed |
+| Stop does not release the flag | 2 failed |
+
+### Two harness faults of mine, and both looked exactly like the bug
+
+1. **Two mixins, two objects.** The Stop test built a *separate* voice object
+   and called the handler there, so the flag was cleared on an object the
+   conversation never read - and the test failed with **"a stopped turn still
+   claims to be running"**, which is the precise failure the fix exists to
+   prevent. **Two mixins that are one object in production are two objects in a
+   test** unless the test says otherwise. Driving
+   `VoiceMixin._stop_speaking(mixin, ...)` unbound, against the conversation's
+   own object, is what makes the test mean what it says.
+2. **A flag switched off after the fact is a race with a thread.** The
+   "only this turn fails" test set `assistant.fail = False` right after the
+   second `_submit`, so the *failing* turn usually won the race and answered
+   normally - and the first run reported the failing text **in** `order`.
+   Keyed on the message text instead: `fail_on == text`.
+
+The lesson is the one this repository keeps re-learning in a new costume: **a
+harness that does not reproduce production's object graph will report a fixed
+bug as unfixed, and the first reaction is to doubt the fix.** Both of these
+were harness faults and neither would have been found without running the test
+against the unfixed code and reading what it claimed.
