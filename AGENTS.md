@@ -20115,3 +20115,97 @@ Verified: all six labels now agree with their own `size_bytes` to one decimal
 place (0 disagreements across the six), the page re-renders **87,175 -> 87,370
 bytes**, and 134 passed / 1 skipped across the model-picker, model-requirements,
 menu-label, ctxfit and thread suites.
+## Six refusals that consumed what you asked, and one test that could not fail (2026-10-13)
+
+The review turned into a batch, because six separate findings turned out to be
+**one defect in six costumes**: the app accepted something from a person and
+then threw it away, on a path where the person had no way to notice.
+
+| what was destroyed | where | how a person hit it |
+|---|---|---|
+| the retry on a failed turn | `gui/widgets.py` | asking again, with no way to ask again |
+| messages still queued | `app/voice.py` | Stop, with questions left unanswered on screen |
+| the question | `app/brain.py` | asking while the model sleeps |
+| the question | `app/brain.py` | **the first message typed on any fresh install** |
+| the attachment chips | `gui/attaching.py` | attaching files, then being refused for want of a model |
+| findability of a notice | `gui/widgets.py` | searching for the compaction that lost an answer |
+
+**Two of the six are regressions this session introduced** while fixing other
+things, and that is the part worth remembering:
+
+- Marking a failure as a notice row stopped it reading as something Chronoa
+  said - and **quietly removed the "Ask that again" button**, because capability
+  here comes from **which builder ran**, not from what the row is about. The turn
+  that most needs redoing became the one turn that cannot be redone.
+- The same change stopped the error being the turn's text, and `find()` reads
+  `_turns`, so an error that used to be findable stopped being findable.
+
+### `brain.py` is the sharpest, because its own neighbouring branch gets it right
+
+`_explain_no_model` has three branches and they treat your question three
+different ways:
+
+| branch | what happens to your text |
+|---|---|
+| model installed, not running | starts the service, then **re-submits the same `text`** |
+| model asleep | tells you to ask again - text dropped |
+| **no model at all** (every fresh install) | opens setup - text dropped |
+
+`window._submit_input` clears the composer, the draft *and* the attachment chips
+before it emits, so once a refusal returns, the question is gone from the only
+place it was written. The transcript keeps the question and never the answer.
+
+So the branch that handles "your model is merely stopped" is careful enough to
+re-send your text, while the branch every new install takes throws it away -
+before a 1 GB download the person may walk away from.
+
+**Restored to the composer, not re-sent.** A download takes minutes; answering a
+question typed that long ago unprompted is its own surprise. `set_input_text`
+already existed as the deliberate "show this in the box" half of "send this".
+
+### The promise I nearly shipped was half true
+
+The first version of the message said **"your question is back in the box"** -
+but `take_attachments()` clears the chips on the way out, so three attached
+files were silently gone while the sentence claimed a handover. Restoring two
+of three pieces of state is the failure mode, not a partial success, so
+`restore_last_sent` is one door for composer, draft and chips together.
+
+### The search index is a **dict**, and I corrected my own reason for it
+
+I first said `_turns` is "mutated in three places". Measured: **two** - the
+`del` in `truncate_from_turn` and the `= []` in `clear`. Three of the four sites
+are appends or reads. I had asserted a count I had not checked, in the direction
+that made me look more careful than I was.
+
+### Three of my own witnesses could not fail, and the mutation run said so
+
+**12 mutations, 12 caught** - but only after three attempts at the last one, and
+the first version of the batch reported **14 caught** when two of them had never
+executed at all:
+
+1. **The mutation harness read `sys.argv[3]` for a path it was never given.**
+   All twelve printed `20 passed` - a table of false cleans that looked perfect.
+2. **The snapshot backup used `basename`.** There are **three** `voice.py` files
+   (`app/`, `gui/surfaces/`, `settings_window/`) and `restore` overwrote
+   `app/voice.py` with another module's body, so everything after the first
+   mutation failed to import - including "unmutated".
+3. **The rewind witness passed with the deletion removed, twice.** `find()`
+   iterates `_turns`, so once the rewind empties the transcript there is nothing
+   to match against and `find(...) == []` is true regardless of the notes. The
+   sequence that bites is a **partial** rewind and then rebuilding turns into
+   the space it leaves; a full rewind goes through `clear()`, which resets the
+   notes anyway and masks the missing deletion.
+
+### And the fake window's own comment predicted this
+
+`tests/test_assistd_sayri_harvest.py` carries the line *"this comment is here so
+the next method added is noticed"*, above a three-method `SimpleNamespace`. It
+failed with `AttributeError` exactly as written. Its `restore_last_sent` is now
+recorded and asserted, so the next method breaks the test here rather than
+reading as a product defect three files away.
+
+**Suite at the point of change: 10,825 passed, 37 failed, 70 errors across 8
+chunks.** None of the failures are from this work - the 69-error chunk is live
+audio in parallel shards, `model_registry.verify_digest` is the other session's,
+and the models-card failure is this box having no local model.

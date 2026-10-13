@@ -160,8 +160,10 @@ def test_stop_cancels_a_turn_still_thinking():
 def test_no_model_installed_opens_setup(monkeypatch):
     from shani_chronoa.app import ChronoaApplication
     monkeypatch.setattr(local_llm, "installed", lambda: [])
-    said, opened = [], []
-    window = SimpleNamespace(set_orb_state=lambda s: None, set_response=said.append, set_status=lambda s: None)
+    said, opened, restored = [], [], []
+    window = SimpleNamespace(set_orb_state=lambda s: None, set_response=said.append,
+                             set_status=lambda s: None,
+                             restore_last_sent=restored.append)
     # The fake app implements the interface `_explain_no_model` actually uses.
     # It grew a distilled-router step, and calling the real method on a stand-in
     # that lacks the method raised `AttributeError` - which read as a product
@@ -171,6 +173,37 @@ def test_no_model_installed_opens_setup(monkeypatch):
                           _router_fallback=lambda text: False)
     ChronoaApplication._explain_no_model(app, "hello")
     assert opened and "no language model yet" in said[0]
+    # **The next method added, and the notice acted on.** `_explain_no_model`
+    # now hands the question back on the way to setup, because `_submit_input`
+    # cleared the composer, the draft and the chips before the refusal could be
+    # known - so without `restore_last_sent` here this test raises
+    # `AttributeError` and reads as a product defect rather than a stale fake.
+    # Measured: that is exactly how it failed the first time.
+    assert restored == ["hello"], (
+        f"the question was not handed back on the way to setup: {restored}")
+
+
+def test_a_sleeping_model_hands_the_question_back(monkeypatch):
+    """The other refusal branch, and the control for the one above.
+
+    Same argument, different branch: a model that is asleep refuses without
+    running anything, so the question has to survive that too.
+    """
+    from shani_chronoa.app import ChronoaApplication
+    from shani_chronoa.presence import Presence
+    monkeypatch.setattr(local_llm, "installed", lambda: ["some-model"])
+    monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
+    said, restored = [], []
+    window = SimpleNamespace(set_orb_state=lambda s: None, set_response=said.append,
+                             set_status=lambda s: None,
+                             restore_last_sent=restored.append)
+    app = SimpleNamespace(window=window, _open_setup=lambda: None,
+                          _router_fallback=lambda text: False,
+                          _presence=Presence.SLEEPING)
+    ChronoaApplication._explain_no_model(app, "and tomorrow?")
+    assert any("asleep" in r for r in said), said
+    assert restored == ["and tomorrow?"], (
+        f"the question was not handed back: {restored}")
 
 
 def test_a_distilled_router_carries_the_turn_before_setup_does(monkeypatch):

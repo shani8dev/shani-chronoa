@@ -29,10 +29,32 @@ class AttachingMixin:
     def take_attachments(self):
         """(names, block) for the message being sent, and clear the chips."""
         from shani_chronoa import attachments
+        # **Kept, so a refusal can hand the chips back.** `window._submit_input`
+        # takes the attachments before it emits, and the refusal paths in
+        # `brain._explain_no_model` run *after* that - so by the time a turn is
+        # declined for want of a model, the chips are already gone and the files
+        # with them. Restoring only the sentence would return half a message.
+        self._sent_attachments = list(self._attachments)
         names, block = attachments.take(self._attachments)
         self._attachments = []
         self._refresh_attach_bar()
         return names, block
+
+    def restore_last_sent(self, text: str) -> None:
+        """Put back what was typed and attached, for a turn that never ran.
+
+        **The one door for "a refusal ate my message".** It exists because the
+        composer, the draft and the attachment chips are three separate pieces of
+        state that `_submit_input` clears in one place, and a refusal that
+        restored only some of them would be worse than one that restored none:
+        the person sees their question sitting in the box and reasonably
+        concludes the files came back too.
+        """
+        saved = list(getattr(self, "_sent_attachments", ()) or ())
+        if saved:
+            self._attachments = saved
+            self._refresh_attach_bar()
+        self.set_input_text(text)
 
     def _refresh_attach_bar(self) -> None:
         child = self._attach_bar.get_first_child()

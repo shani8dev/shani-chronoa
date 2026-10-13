@@ -251,7 +251,20 @@ class VoiceMixin:
             if self.window:
                 self.window.set_orb_state("idle")
                 self.window.set_state(AssistantState.IDLE)
-                self.window.set_status("Stopped")
+                # **"Stopped", and how much is still waiting.** The queue is kept
+                # across a Stop on purpose, so the status has to say so: a
+                # person whose three messages are sitting unanswered on screen
+                # reads "Stopped" as *that* - the turn is halted and nothing is
+                # pending - and has no way to learn otherwise, because a
+                # question with no reply is indistinguishable from a failed one
+                # and from one still being worked on. Silence here is the same
+                # claim-without-a-mechanism this file is full of, in the one
+                # place the person just took an action and is waiting to see its
+                # result.
+                waiting = len(getattr(self, "_turn_pending", ()) or ())
+                self.window.set_status(
+                    f"Stopped - {waiting} message{'s' if waiting != 1 else ''} "
+                    f"still waiting" if waiting else "Stopped")
             return
         if self.window and self.window.get_state() is AssistantState.SPEAKING:
             self.window.set_state(AssistantState.IDLE)

@@ -712,6 +712,14 @@ class TranscriptView(Gtk.ScrolledWindow):
         #: labels whose contents include a code block's language tag and a table
         #: cell - which would find "bash" in a reply that never mentions it.
         self._turns: "list[tuple[str, str]]" = []
+        #: Per turn index, the sentences of any notice rows inside it. **A dict,
+        #: not a second list.** `_turns` is mutated in exactly two places - the
+        #: `del` in `truncate_from_turn` and the `= []` in `clear` - and a
+        #: parallel list has to be updated at both or search starts reporting
+        #: matches against turns that no longer exist. Keyed by index, a missed
+        #: entry costs a missed match and nothing else: there is no second
+        #: length that can drift.
+        self._turn_notes: "dict[int, list[str]]" = {}
         #: For each turn, the child that was already in `_rows` when it began -
         #: the last row *before* it - or None when the turn started an empty
         #: transcript. An anchor widget rather than an index, because `_rows` is
@@ -836,6 +844,8 @@ class TranscriptView(Gtk.ScrolledWindow):
             child = following
         del self._turns[index:]
         del self._turn_start[index:]
+        for key in [k for k in self._turn_notes if k >= index]:
+            del self._turn_notes[key]
         self._current_assistant = None
         self._blocks = None
         self._block_text = ""
@@ -1052,6 +1062,7 @@ class TranscriptView(Gtk.ScrolledWindow):
     def clear(self) -> None:
         self._turns = []
         self._turn_start = []
+        self._turn_notes = {}
         child = self._rows.get_first_child()
         while child is not None:
             following = child.get_next_sibling()
@@ -1346,8 +1357,21 @@ class TranscriptView(Gtk.ScrolledWindow):
         if not (needle or "").strip():
             return []
         lowered = needle.strip().lower()
-        return [index for index, (_role, text) in enumerate(self._turns)
-                if lowered in text.lower()]
+        notes = getattr(self, "_turn_notes", None) or {}
+        found = []
+        for index, (_role, text) in enumerate(self._turns):
+            # **The turn's own sentences count as findable.** A notice is drawn
+            # inside a turn but was never in `_turns`, so "find" could not reach
+            # it: a person looking for the compaction that lost them an answer,
+            # or the failure that ate a question, had no way to search for it.
+            # The failure case was briefly worse than that - an error used to be
+            # the turn's text and so *was* findable, and marking it as a notice
+            # row quietly took that away.
+            extra = notes.get(index)
+            haystack = text if not extra else text + "\n" + "\n".join(extra)
+            if lowered in haystack.lower():
+                found.append(index)
+        return found
 
     def highlight(self, needle: str) -> int:
         """Mark every matching turn, and return how many there were.
@@ -1569,7 +1593,42 @@ class TranscriptView(Gtk.ScrolledWindow):
             label.add_css_class("dim-label")
         label.set_xalign(0.0)
         label.set_wrap(True)
+        label.set_hexpand(True)
         row.append(label)
+        # **A failure carries its own "Ask that again".**
+        #
+        # This button used to exist on a failed turn by accident. The failure was
+        # drawn as an assistant answer, and every assistant answer goes through
+        # `_with_copy_button`, which puts an "Ask that again" beside it - so the
+        # retry was there, on a bubble reading `Error: <repr>`, and nobody
+        # designed it. Marking the failure as a notice row (to stop it reading as
+        # something Chronoa said) took the row off that path and **silently
+        # removed the retry**: a failed turn became `icon + label` and nothing
+        # else. The turn that most needs redoing became the one turn that cannot
+        # be redone.
+        #
+        # So capability here comes from **which builder ran**, not from what the
+        # row is about, and those are not the same question. The retry goes back
+        # **on the failure itself** rather than by restoring the fake answer.
+        #
+        # **Only for `error`, and that is the design.** A compaction or cloud
+        # note is housekeeping about a turn that *did* answer - there is nothing
+        # to retry, so a button there would be an offer the app cannot honour.
+        if kind == "error" and self._on_regenerate is not None:
+            again = Gtk.Button()
+            again.set_icon_name("edit-undo-symbolic")
+            again.add_css_class("flat")
+            again.add_css_class("circular")
+            again.set_tooltip_text("Ask that again")
+            again.update_property([Gtk.AccessibleProperty.LABEL],
+                                  ["Ask that again"])
+            again.connect("clicked", self._on_regenerate_clicked)
+            row.append(again)
+        # **Recorded for search, against the turn it is inside.** Computed after
+        # the `_append_turn` above may have created one, so `len - 1` is the
+        # turn this row actually belongs to and not the one before it.
+        if self._turns:
+            self._turn_notes.setdefault(len(self._turns) - 1, []).append(sentence)
         self._blocks.insert_child_after(row, self._blocks.get_first_child())
         self._scroll_to_end()
 

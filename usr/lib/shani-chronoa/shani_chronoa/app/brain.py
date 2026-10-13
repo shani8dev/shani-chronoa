@@ -407,8 +407,10 @@ class BrainMixin:
                 self.window.set_response(
                     "The model is asleep, so nothing was started. Press "
                     "\"Wake up\" in Settings > Models > Right now to load it, "
-                    "or ask again and nothing will happen until you do.")
+                    "then send your question again.")
                 self.window.set_status("The model is asleep")
+                # **What you typed is not consumed by a refusal.**
+                self.window.restore_last_sent(text)
                 return
             self.window.set_response("Starting the local model - this takes a few seconds the first time. "
                                      "Your question will be answered when it is ready.")
@@ -427,6 +429,31 @@ class BrainMixin:
             threading.Thread(target=start_and_retry, daemon=True).start()
             return
         self.window.set_response("Chronoa has no language model yet. Setup downloads one (about 1 GB) "
-                                 "and runs it on this computer.")
+                                 "and runs it on this computer. Your question is back in the box - "
+                                 "send it again once the model is ready.")
         self.window.set_status("No model - opening setup")
+        # **The first message anyone ever types was being eaten here.**
+        #
+        # The branch above, for a model that is installed but not running, is
+        # careful: it starts the service and **re-submits the same `text`**
+        # afterwards. This branch, the one every fresh install takes, dropped it
+        # on the floor - and `window._submit_input` had already cleared the
+        # composer and the draft before emitting, so the question was gone from
+        # the one place it was written. The transcript kept the question and
+        # never the answer, so after a 1 GB download the person who typed the
+        # very first thing they ever asked has to reconstruct it from memory.
+        #
+        # **Back in the composer, not re-sent automatically.** A model download
+        # takes minutes; answering a question typed that long ago without being
+        # asked again is its own surprise. `set_input_text` is the existing
+        # "show this in the box" half of "send this", kept separate from
+        # `submit_text` precisely so a caller can want the first without the
+        # second - and the text is where it was typed, so Enter is all it takes.
+        #
+        # `restore_last_sent` rather than `set_input_text`, because the chips go
+        # too: `take_attachments` clears them on the way out, so restoring the
+        # sentence alone would put back half the message and leave three files
+        # silently gone - and a promise the screen does not back is the defect
+        # this whole review is about, not a fix for it.
+        self.window.restore_last_sent(text)
         self._open_setup()
