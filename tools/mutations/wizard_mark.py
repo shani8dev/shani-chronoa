@@ -59,6 +59,13 @@ MUTATIONS = [
         "label": "**the all-sixteen-pages bug, restored**: an unallocated "
                  "scroller reports room for the mark",
         "equivalent": True,
+        "why": "measured, not reasoned: over 10,000 (upper, page_size) pairs the "
+               "guard changes the answer zero times. VOID_NEEDED_PX is MARK_PX + "
+               "24 = 136, and an unallocated scroller reports page_size = 0, so "
+               "0 - 0 >= 136 is already False - the later threshold subsumed the "
+               "guard that was written for exactly this bug. It is "
+               "defence-in-depth rather than load-bearing, and deleting it is "
+               "not a regression.",
         # **EQUIVALENT, and measured rather than reasoned.** Over **10,000**
         # `(upper, page_size)` pairs the guard changes the answer **zero** times:
         # `VOID_NEEDED_PX` is `MARK_PX + 24 = 136`, and an unallocated scroller

@@ -629,6 +629,22 @@ class TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne:
             if path.name == "harness.py":
                 continue
             tree = ast.parse(path.read_text(encoding="utf-8"))
+            # module-level `NAME = "literal"`, so an alias used as a witness
+            # resolves rather than reading as a witness nobody named.
+            # **Distinct loop names, not one.** The first version wrote
+            # `for n in tree.body ... for n in n.targets`, which rebinds the same
+            # name inside its own comprehension and then reads `.value` off a
+            # `Name` - the shadowing this file records repeatedly, caught here by
+            # pyflakes-free execution rather than by reading.
+            names = {}
+            for stmt in tree.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                if not isinstance(stmt.value, ast.Constant):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        names[target.id] = stmt.value
             for node in ast.walk(tree):
                 if not (isinstance(node, ast.Dict) and node.keys):
                     continue
@@ -637,20 +653,40 @@ class TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne:
                     if isinstance(key, ast.Constant) and isinstance(key.value, str):
                         entry[key.value] = value
                 if "label" in entry and "file" in entry:
-                    yield path.name, entry
+                    yield path.name, entry, names
 
     @staticmethod
-    def _witnesses(entry):
+    def _witnesses(entry, names):
+        """Every test a mutation names, with module-level aliases resolved.
+
+        **A `Name` is a witness too.** `tools/mutations/diagnostics.py` defines
+        `_GREEN = "test_a_server_setup_never_configured_is_not_a_fault"` once and
+        uses it in several entries, which is the right way to avoid typing a long
+        name five times - and the first version of this check skipped every
+        `ast.Name` element, so those entries read as *"names no test at all"*.
+        Three were reported as unwitnessed on a set that named a witness each
+        time, and the remedy would have been to inline five copies of the string
+        or to flag a live guard as equivalent. **A checker that cannot see a
+        correct spelling is the `skills_total` mistake in a validator.**
+        """
         expect = entry.get("expect")
         if not isinstance(expect, ast.List):
             return []
-        return [e.value for e in expect.elts if isinstance(e, ast.Constant)]
+        out = []
+        for element in expect.elts:
+            if isinstance(element, ast.Constant):
+                out.append(element.value)
+            elif isinstance(element, ast.Name):
+                bound = names.get(element.id)
+                if isinstance(bound, ast.Constant):
+                    out.append(bound.value)
+        return out
 
     def test_no_mutation_is_neither_witnessed_nor_flagged_equivalent(self):
         unwitnessed = [
             f"{name}: {entry['label'].value}"
-            for name, entry in self._mutations()
-            if not self._witnesses(entry) and not entry.get("equivalent")
+            for name, entry, names in self._mutations()
+            if not self._witnesses(entry, names) and not entry.get("equivalent")
         ]
         assert not unwitnessed, (
             f"{len(unwitnessed)} mutation(s) name no test and are not flagged "
@@ -672,7 +708,7 @@ class TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne:
         """
         bare = [
             f"{name}: {entry['label'].value}"
-            for name, entry in self._mutations()
+            for name, entry, names in self._mutations()
             if entry.get("equivalent")
             and not (isinstance(entry.get("why"), ast.Constant)
                      and entry["why"].value.strip())

@@ -28,7 +28,7 @@ _GREEN = "test_a_server_setup_never_configured_is_not_a_fault"
 MUTATIONS = [
     {
         "file": _DIAG,
-        "old": "        if not binary:\n            # **Never configured is not a fault**",
+        "old": "        if not binary:\n            # **Never configured is not a fault** - which this docstring says two\n",
         "new": "        if False:\n",
         # **The shipped defect, restored verbatim**: with no binary branch every
         # unconfigured extra falls through to "nothing is answering", which is
@@ -38,7 +38,7 @@ MUTATIONS = [
     },
     {
         "file": _DIAG,
-        "old": "        if not binary:\n            # **Never configured is not a fault**",
+        "old": "        if not binary:\n            # **Never configured is not a fault** - which this docstring says two\n",
         "new": "        if True:\n",
         # **The over-fix.** Every non-answering server reads green, so a server
         # somebody configured and that has gone down is reported as fine. The

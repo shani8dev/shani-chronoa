@@ -21780,3 +21780,132 @@ Not read: methods, tables, ablations, the actual per-task numbers behind the
 percentages, or the limitations sections. Every percentage above is quoted from
 an abstract and none is verified against a table. Nothing here should be read as
 a reproduction; it is a survey of claims, and the claims are attributed.
+
+## The mutation set the other session ported had three witnesses the harness could not see (2026-10-13)
+
+While fixing the anchor bug below I found `tools/mutate.py diagnostics` reporting
+**7 mutations, 5 caught, 0 survivors, 2 unmeasurable** - and the two unmeasurable
+were **the shipped defect and the over-fix**, the two most important claims in the
+set. `MutationDidNotParse: 1 warning, 1 error`, which is the runner *correctly*
+refusing to guess.
+
+**The cause was an anchor that ended mid-line.** The set's two key mutations
+replaced
+
+        if not binary:
+            # **Never configured is not a fault**
+
+with `if False:`. The anchor stopped at `not a fault**` with **no trailing
+newline**, so `str.replace` produced
+
+        if False:** - which this docstring says two
+
+and the corpus never collected. **The runner caught it and reported it as
+unmeasurable rather than as caught** - which is the whole point of that code path,
+and the reason a `survivor` here would have been a *false clean* of exactly the
+kind this entry is about.
+
+Extending both anchors to the end of the comment's first line takes the set from
+`5 caught, 2 unmeasurable` to **7 caught, 0 survivors, 0 unmeasurable**.
+
+### Then the harness told me the same thing about three of those mutations
+
+`tests/test_mutation_harness_can_fail.py` went red - not on the mutations, on the
+*checker*:
+
+> 3 mutation(s) name no test and are not flagged equivalent, so the inventory
+> reports them as SURVIVORS - indistinguishable from a guard with no witness at
+> all
+
+The three all name `_GREEN` - a module-level
+`_GREEN = "test_a_server_setup_never_configured_is_not_a_fault"`. The validator
+counts witnesses by reading `expect` elements and keeping `ast.Constant`, so an
+`ast.Name` reads as **no witness at all**. The three entries name a witness each
+time.
+
+**A checker that cannot see a correct spelling is the `skills_total` mistake
+inside a validator.** The two wrong ways out would both have been plausible:
+inline five copies of the long test name, or flag a live guard `equivalent`. The
+right one is to resolve the alias - which is one dict of module-level
+`NAME = "literal"` bindings, built before the walk.
+
+### And a second validator, and the shadowing bug I wrote fixing the first
+
+`TestEveryMutationEitherHasAWitnessOrSaysWhyItCannotHaveOne` also flagged
+`wizard_mark.py`: an `"equivalent": True` with the full reason written in a
+**comment** above it and no `why` key. That is verbatim the failure the test's own
+docstring records - *"a documented equivalent ... explained themselves in prose
+where no tool reads it"* - already fixed for `history.py`, and here again in the
+concurrent session's file. The prose is preserved and the `why` now carries it.
+
+**My fix for the first bug had my own second bug in it.** The name map was
+written as a comprehension:
+
+    names = {n.id: n.value for n in tree.body
+             if isinstance(n, ast.Assign)
+             and isinstance(n.value, ast.Constant)
+             for n in n.targets if isinstance(n, ast.Name)}
+
+`for n in ... for n in ...` **rebinds the same name inside its own
+comprehension**, so the value half reads `.value` off an `ast.Name` and raises
+`AttributeError`. Distict loop names, stated in a comment rather than left for
+the next reader. **pyflakes is clean on a shadowed comprehension** - it is a
+runtime fault, and only running the test found it.
+
+### A third gate refused to run, and the lock it named was stale
+
+`tests/test_mutation_harness_can_fail.py` then exited with *"a mutation run (pid
+413487) is rewriting the source tree right now"* - and `CHRONOA_MUTATION_RUN` was
+**unset**, `build/mutate/run.lock` did not exist, and pid 413487 was gone. So the
+refusal was **a stale lock file whose owner had already exited**, and the suite
+would have sat refused for a holder that no longer existed. It is recorded rather
+than fixed: the guard is doing its job (refuse rather than read mutated code),
+and a lock whose owner dies without releasing it is the same class the runner
+already handles by *taking it over and saying so* - here it just said nothing.
+**53 passed** once the lock was gone.
+
+### And a mutation set that belonged in the repo, not in `/tmp`
+
+The checkpoint-row fix had a working mutation set in `/tmp/opencode/mut_ckpt.py`
+and none in `tools/mutations/`. This file's own rule is that a harness in `/tmp`
+is lost when the session ends, and **eight were lost this way on 2026-10-11**. It
+is `tools/mutations/checkpoints.py` now, and running it found what the /tmp
+version had not:
+
+| mutation | verdict |
+|---|---|
+| a never-created store is a fault | caught |
+| an empty store is a fault | caught |
+| **a conversation with no checkpoint is fine too** | caught |
+| an unreadable store reads as a clean zero | caught |
+| the probe creates the store it asks about | caught |
+| only the first conversation counted | caught |
+| the count is conversations, not files | caught |
+| the store's own reader re-inlined | **equivalent** |
+
+**8 mutations, 7 caught, 0 survivors, 1 equivalent, 0 unmeasurable.** The
+equivalent is documented rather than dropped: `list_checkpoints` *is* that glob
+plus the same `int()` parse, so swapping it changes nothing observable - which is
+the honest statement, and a reason to keep the store's reader rather than a claim
+that a witness exists.
+
+**Two of my own `expect` lists were wrong and the run said so.** One named
+`test_a_saved_checkpoint_is_reported_with_its_conversation` against the counting
+mutation - a fixture with one conversation and one checkpoint, where
+`total += 1` and `total += len(nums)` are the same number. It was reported
+**"NOT caught by"**, which is the over-claiming this file records for
+`asleep_state`: a witness that passes either way is worse than a missing one,
+because it reads as coverage.
+
+### The anchors, and the one that rotted while I fixed another
+
+Three anchors in `checkpoints.py` were wrong on the first run and the runner
+reported each by name - `occurs 0 times ... not once`. Two were **indentation**
+(`if not root.exists():` is at 4 spaces here, and `return STATUS_WORKING` at 8,
+not 12 - I transcribed them from the function's deeper nesting), and the fix path
+for both was the same: read the block from the file rather than from the design.
+**`--check-anchors` is the half that costs nothing and it caught all three before
+a test ran.**
+
+Final state: **58 sets, 473 anchors of 471 declared mutations, all match the
+code**; **651 witnesses across 58 sets, all resolve to a real test id**.
