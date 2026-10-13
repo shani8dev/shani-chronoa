@@ -1,6 +1,7 @@
 """The application object: startup, the window, actions, command-line arguments; the rest of its behaviour is mixed in from voice, brain, conversation and desktop_integration."""
 
 import logging
+from pathlib import Path
 import sys
 import os
 from typing import Optional, Union
@@ -1032,6 +1033,13 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             self.window.focus_input()
             if self.assistant:  # reopening the app shows the conversation it was in
                 self.window.show_conversation(self.assistant.visible_turns())
+                # **Before the first keystroke, and before `restore_draft`**
+                # below reads it, or every draft would be restored as the
+                # global one and the newest conversation's would be missed.
+                if hasattr(self.window, "set_conversation"):
+                    self.window.set_conversation(
+                        Path(self.assistant.session_path).stem
+                        if self.assistant.session_path else "")
             self.attach_regenerate()
             # **The rail now reads fired rules.** `event_results()` had no
             # caller anywhere in `usr/`, so an event rule could run a skill or

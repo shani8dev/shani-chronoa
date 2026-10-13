@@ -127,9 +127,19 @@ _WINDOW_SEQ = 0
 
 
 def _point_store_at(tmp_path):
-    """Point the draft store at this test's own directory."""
+    """Point the draft store at this test's own directory.
+
+    **Takes an optional key now.** `draft_path(key)` selects one file per
+    conversation, and the window passes `self._draft_key` - so the zero-argument
+    lambda this used to be raised `TypeError: takes 0 positional arguments but 1
+    was given` on the first call, in two tests. **The key is ignored on
+    purpose:** every test here exercises a window that was never told which
+    conversation it is in, which is exactly the `""` case, and the point of the
+    stub is to catch writes to the test's own directory rather than to exercise
+    the naming.
+    """
     target = tmp_path / "composer.draft"
-    composer_draft.draft_path = lambda: target
+    composer_draft.draft_path = lambda key=None: target
     return target
 
 

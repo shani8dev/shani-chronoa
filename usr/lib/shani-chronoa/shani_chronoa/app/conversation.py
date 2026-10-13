@@ -57,7 +57,19 @@ class ConversationMixin:
             # nothing on screen said so. `clear_input()` existed for this and had
             # no caller. A test may stub the window without this method; guard
             # honestly so the real implementation is exercised when present.
-            if hasattr(self.window, 'clear_input'):
+            #
+            # **Moved, not destroyed.** The window now holds a draft per
+            # conversation, so this switches to the new conversation's (empty)
+            # draft instead of wiping the composer - the misfire above is gone
+            # because the text belongs to the conversation it was written for,
+            # and going back finds it where it was left. `clear_input()` is kept
+            # as the fallback for a window that does not know about
+            # conversations at all, which is every stand-in in the tests.
+            if hasattr(self.window, "set_conversation"):
+                self.window.set_conversation(
+                    Path(conversation_store.active_path(
+                        conversation_store.session_dir())).stem)
+            elif hasattr(self.window, "clear_input"):
                 self.window.clear_input()
             self.window.set_status("New conversation")
 
@@ -85,6 +97,15 @@ class ConversationMixin:
         self.assistant.switch_session(want)
         if self.window:
             self.window.show_conversation(self.assistant.visible_turns())
+            # **And tell the window which conversation that is**, so the
+            # composer goes with it. `show_conversation` only carries the turns;
+            # the composer is one widget and a draft belongs to a conversation,
+            # so without this a half-typed question followed the person across
+            # and Enter put it into the conversation they had just opened.
+            # `session_path.stem` is the same reference `_open_conversation`
+            # takes, so the two cannot disagree about which is which.
+            if hasattr(self.window, "set_conversation"):
+                self.window.set_conversation(Path(want).stem if want else "")
             # A transcript that ends mid-turn is repaired for the model on every
             # request (`build_messages` -> `history_repair.clean_history`), so
             # without saying so here the person sees their own unanswered

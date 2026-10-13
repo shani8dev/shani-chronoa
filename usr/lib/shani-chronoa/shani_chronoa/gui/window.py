@@ -1640,6 +1640,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._draft_source = False
         #: The draft is restored once per window, not on every focus.
         self._draft_restored = False
+        #: Which conversation the composer currently belongs to, or "" before
+        #: the application has said. Empty means the single global draft, so
+        #: nothing changes for a window that is never told.
+        self._draft_key = ""
         self._build_palette()
         self._rail_toggle = Gtk.ToggleButton()
         self._rail_toggle.set_icon_name("sidebar-show-right-symbolic")
@@ -3835,30 +3839,90 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa import composer_draft
 
         self._draft_timeout = None
-        composer_draft.save(self._input_text())
+        composer_draft.save(self._input_text(),
+                            composer_draft.draft_path(self._draft_key),
+                            files=[str(p) for p in getattr(self, "_attachments", ())])
         return GLib.SOURCE_REMOVE
 
     def restore_draft(self) -> None:
-        """Put the saved text back, without that act saving it again."""
+        """Put this conversation's saved text and files back, without saving."""
+        from pathlib import Path
+
         from shani_chronoa import composer_draft
 
-        text = composer_draft.load()
+        text, files = composer_draft.load_entry(
+            composer_draft.draft_path(self._draft_key))
         if not text:
             return
         self._draft_source = True
         try:
             self._set_input_text(text)
+            # **The chips with the sentence, in the same guarded block.** A
+            # draft that restored only its words would leave the person reading
+            # "check these three files" above an empty chip bar - which is the
+            # partial restore `composer_draft`'s own docstring calls worse than
+            # none.
+            self._attachments = [Path(f) for f in files]
+            self._refresh_attach_bar()
         finally:
             self._draft_source = False
 
+    def set_conversation(self, key: str) -> None:
+        """Move the composer to `key`'s draft, saving this one's on the way out.
+
+        **Why this exists.** The composer is one widget and the draft was one
+        file, so a half-typed question travelled with you: open another
+        conversation and the box still held what you were writing to the
+        previous one, and Enter put it into the new one - silently, because the
+        transcript then showed your question in a conversation it had nothing to
+        do with. `Ctrl+N` was already fixed for this (`_reset_conversation`
+        clears the composer); switching was not, and it is the common case.
+
+        **Save before swap, and cancel the pending write first.** A live
+        `_draft_timeout` left armed across the swap would fire *after* the key
+        changed and write the outgoing conversation's words into the incoming
+        one's file - the same misfire one level down, and silent.
+
+        **Not cleared, switched.** Going to a new conversation keeps what you
+        had typed against the old one rather than destroying it, so going back
+        finds it where you left it.
+        """
+        if self._draft_timeout is not None:
+            GLib.source_remove(self._draft_timeout)
+            self._draft_timeout = None
+        # Empty on the very first call, when there is nothing to save yet and
+        # `draft_path("")` is the legacy global file.
+        self._flush_draft()
+        self._draft_key = key or ""
+        # **Emptied first, and this line is the fix.** `restore_draft` returns
+        # early when there is no draft to restore, so without this a
+        # conversation with nothing typed opened showing the *previous*
+        # conversation's draft - which is the whole misfire this method exists
+        # to remove, reintroduced one line after being fixed. The first version
+        # of this method did exactly that, and the test written for it caught it
+        # on the first run: switching to a conversation with no draft left the
+        # other one's words sitting in the box.
+        self._draft_source = True
+        try:
+            self._set_input_text("")
+            self._attachments = []
+            self._refresh_attach_bar()
+        finally:
+            self._draft_source = False
+        self.restore_draft()
+
     def clear_draft(self) -> None:
-        """The text is on its way; it is no longer a draft."""
+        """The text is on its way; it is no longer a draft.
+
+        **This conversation's draft, not a global one** - clearing on send must
+        not wipe the draft belonging to a conversation the person is not in.
+        """
         from shani_chronoa import composer_draft
 
         if self._draft_timeout is not None:
             GLib.source_remove(self._draft_timeout)
             self._draft_timeout = None
-        composer_draft.clear()
+        composer_draft.clear(composer_draft.draft_path(self._draft_key))
 
     def _on_input_key_pressed(self, _view, keyval, _keycode, state) -> bool:
         """Enter sends; Shift+Enter is a newline.
