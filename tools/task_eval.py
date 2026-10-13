@@ -12,6 +12,8 @@ same cases (tools/eval_cases.json) run through:
   +greedy         select+recover at temperature 0 (llama-server's default is 0.8)
   +greedy+retry   ... and a narrower forced retry when a clear command was answered in words
   +greedy+constrained  the tool's name then its arguments, each under a JSON schema (grammar)
+  +greedy+request      the same request and the same two steps, schema in prose and NO grammar
+                       (the control: a grammar win that this arm matches is the request, not the grammar)
   cloud           a bigger cloud model with every schema and no harness (--cloud)
   cloud+select    the same cloud model with Chronoa's tool selection, to see what the harness gives it
 
@@ -48,7 +50,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "usr" / "lib" / "shani-chronoa"))
 
-CONFIGS = ("bare", "select", "select+recover", "+compact", "+greedy", "+greedy+retry", "+greedy+constrained")
+CONFIGS = ("bare", "select", "select+recover", "+compact", "+greedy", "+greedy+retry",
+           "+greedy+constrained", "+greedy+request")
 LOCAL_CONFIGS = set(CONFIGS)
 
 
@@ -280,6 +283,9 @@ def build_llm(config: str, cloud: str):
     local_llm.TEMPERATURE = 0.0 if config.startswith("+greedy") else None
     local_llm.FORCE_RETRY = config == "+greedy+retry"
     local_llm.CONSTRAINED = config == "+greedy+constrained"
+    #: The control arm. Set **after** CONSTRAINED so neither can leak into the
+    #: other; `+greedy+constrained` must stay a pure grammar run.
+    local_llm.REQUEST_ONLY = config == "+greedy+request"
     llm = local_llm.LocalLLM()
     if config in ("bare", "select"):
         llm.postprocess = lambda message, tools: message  # no recovery of calls written as text

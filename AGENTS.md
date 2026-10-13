@@ -21547,3 +21547,100 @@ the truth had nowhere to be read.
 
 **Not done here**, and the reason is that a renderer fix needs a warm display to
 prove it, and this pass has not had one since the pool went cold.
+
+
+## The grammar is real and it is enforced - and it buys form, not decisions (2026-10-13)
+
+The three-arm decoder run `AGENTS.md` prescribed for two entries and never ran.
+Arms 1 and 2 already existed (`+greedy`, `+greedy+constrained`); **the control
+arm did not**, and building it is most of what this entry is about. Before any
+score, the lever itself was verified, because a grammar that was silently off
+would have produced a tie that read as "the grammar bought nothing".
+
+### The proof, and what it shows
+
+`llama-server` given `response_format` whose schema allows exactly one value,
+and a user asking for something else:
+
+| | what came back |
+|---|---|
+| grammar **off** | prose: *"I don't have access to real-time weather data..."* |
+| grammar **on** | `{"tool": "get_datetime"}` - the **only legal value**, for a question about weather |
+
+**So enforcement is not a claim, it is measured**, and it produced the finding
+this run was worth doing for. The grammar forced the model to name a tool it had
+**already decided against**. It constrained *form* completely and *choice* not at
+all.
+
+That is the mechanism behind the caution two entries up, and it is sharper than
+"constrained decoding may distort intent" (arXiv:2604.06066, 2510.17376). Those
+papers say constraining the decoder can cost you something. This says **exactly
+what the constraint buys and cannot buy**: it makes every answer well-formed and
+leaves every answer possibly wrong. A grammar turns "no tool called" into "a tool
+called"; it does not turn the wrong tool into the right one.
+
+Which is why `task_eval` scores **the tool and the arguments** and never schema
+validity. Schema validity is the thing the grammar guarantees, so measuring it
+would measure the thing under test.
+
+### Why the control arm had to be built rather than reasoned about
+
+`+greedy+constrained` and `+greedy` differ in **three** ways at once - two-step
+prompt, schema, and enforcement - so their difference measures none of them
+alone. The control arm removes two of the three:
+
+| arm | prompt | payload | runnable |
+|---|---|---|---|
+| `+greedy` | llama-server's own tool calling | native | already existed |
+| `+greedy+constrained` | two steps, schema in prose | `response_format` -> grammar | already existed |
+| `+greedy+request` | **the same two steps, the same schema in prose** | **no `response_format`** | **new here** |
+
+**The single variable is the grammar.** Without enforcement the prompt is the only
+channel, so the schema is written into it as prose (`_shape_request`) and the
+model reads the same shape either way. That equality used to be a promise in a
+docstring, which is not checkable; `_arm_prompt` was lifted out of `_constrained
+for exactly that reason, and
+`test_the_control_arm_is_the_grammar_arm_plus_a_suffix` now asserts the control
+prompt **starts with** the grammar prompt and differs only by that suffix.
+
+### Two wrong calls of my own, both caught only by reading output
+
+The first version of `TestTheTwoArmsAreNotBothOn` called `make_llm`, which does
+not exist, inside a bare `except: pass` - so all three tests read the **defaults**,
+and `test_plain_greedy_has_neither` **passed vacuously**. The second called
+`build_llm` with one argument when it takes two; a guard that only reclassified
+`AttributeError` let the `TypeError` through and the defaults were read again.
+The lesson is the specific one: **the only test in the class that could have
+caught it asserts an absence, and absence is exactly what a broken harness
+produces.** A test that passes when the thing it names is missing is not a test.
+Both are now `module.build_llm(config, "")` with no exception handling at all.
+
+### A third, and it was mine in the tool rather than the test
+
+`tools/three_arm.py` counted its population by splitting `--cases` and counting
+the **strings**, so a run reported `5 cases` when the file holds 225 and only
+**three** of those ids exist (`volume` is not a case). Every denominator it had
+ever printed was wrong, and `3/5` was really `3/3`. The tool now loads
+`eval_cases.json`, prints `N case(s) of 225 in the file` **before starting a
+server**, and pins the resolved ids into argv so what was asked for is what runs.
+
+**Stated plainly: a summary line that reads the same for 3 cases and 220 is a
+reporting defect, not a formatting choice**, and this one survived a complete
+dry run because the dry run also printed the wrong number.
+
+### State of the run
+
+3 cases: `+greedy` **3/3**, `+greedy+constrained` **3/3**, `+greedy+request`
+**2/3** - which is 3 cases and settles nothing, and is reported here only so the
+denominator correction is not mistaken for the final number. **The 220-case run
+is in flight.** The arm-to-arm numbers go in when it lands; the enforcement proof
+above does not depend on it.
+
+17 tests, 10 mutations - 10 caught, 0 survivors, 0 equivalent, 0 stale witnesses.
+The two mutations worth naming are **"the control arm enforces anyway"** and
+**"the dispatch ignores which arm it is on"**, because between them they cover
+the two ways the run could have reported a grammar comparison while measuring
+nothing: the flag right and the wire wrong, and the wire wrong with no test on
+it. The dispatch is driven end to end against a real `_Local` instance with
+`chat_message` patched, so the grammar that would have leaked shows up as a
+failed test rather than as a slightly lower score.

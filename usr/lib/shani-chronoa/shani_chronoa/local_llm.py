@@ -1841,6 +1841,24 @@ FORCE_RETRY = False
 #: tools/task_eval.py.
 CONSTRAINED = False
 
+#: The control for `CONSTRAINED`, and the only reason the grammar result means
+#: anything. Decided by tools/task_eval.py.
+#:
+#: arXiv:2607.18476 asked 44 models the same prompts once plainly and once with
+#: "reply with JSON only" - no schema, no enforcement - and found the collapse
+#: in **the decoder's response to the register**, with `response_format`
+#: compressing no further than the request alone (-0.03 bits). So a grammar
+#: that beats the unconstrained model proves nothing until the *same request*
+#: has been measured without it.
+#:
+#: **The single variable is the grammar, so the prompt is identical in both
+#: arms.** The schema is put in the prompt as prose here and attached as
+#: `response_format` under `CONSTRAINED`; the model therefore reads the same
+#: shape either way and differs only in whether a machine can contradict it.
+#: Everything downstream - the two steps, the parse, `recover_tool_calls`,
+#: scoring - is shared, so a difference can only be the constraint.
+REQUEST_ONLY = False
+
 NO_TOOL_NAME = "answer_without_a_tool"
 NO_TOOL = {"type": "function", "function": {
     "name": NO_TOOL_NAME,
@@ -1872,6 +1890,54 @@ def argument_schema(tool: dict) -> dict:
 
 def _json_format(schema: dict) -> dict:
     return {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}}
+
+
+def _arm_prompt(base: str, schema: dict, enforce: bool) -> str:
+    """One arm's prompt. **The control arm is this function's whole contract.**
+
+    `enforce=False` appends the schema in prose to *the same string* the
+    grammar arm sends, so the two arms differ by a suffix and a payload flag -
+    and nothing else. Lifted out of `_constrained` for exactly that reason: as a
+    docstring it was a promise, and a promise is not checkable. As a function it
+    is `test_the_control_arm_is_the_grammar_arm_plus_a_suffix`.
+    """
+    return base if enforce else base + _shape_request(schema)
+
+
+def _decision_prompt(head: str, tools: "list[dict]", schema: dict, enforce: bool) -> str:
+    """Step one: which tool, if any."""
+    return head + _arm_prompt(
+        ("\n\nDecide what to do with the user's last message. If one of these tools does it, choose that "
+         "tool. If it is a question you can answer yourself, or chat, choose none.\nTools:\n"
+         + tool_menu(tools)), schema, enforce)
+
+
+def _argument_prompt(head: str, tool: dict, schema: dict, enforce: bool) -> str:
+    """Step two: that tool's arguments."""
+    return head + _arm_prompt(
+        (f"\n\nCall {tool['function']['name']}: {tool['function'].get('description', '')}\nGive its arguments "
+         "for the user's last message."), schema, enforce)
+
+
+def _shape_request(schema: dict) -> str:
+    """A schema as prose, so the request-only arm shows the model the same shape.
+
+    Without enforcement the prompt is the **only** channel, so writing the shape
+    down is not a decoration - it is what "the request alone does the work"
+    means operationally. Kept short on purpose: a dumped JSON Schema is a wall,
+    and the point of the arm is to test the *register*, not to out-prompt the
+    grammar with a worse copy of itself.
+    """
+    props = schema.get("properties") or {}
+    required = set(schema.get("required") or ())
+    fields = []
+    for key, spec in props.items():
+        kind = spec.get("type", "string")
+        allowed = spec.get("enum")
+        fields.append("%s (%s)" % (key, " or ".join(map(str, allowed)) if allowed
+                                   else kind + ("" if key in required else ", optional")))
+    return ("\n\nReply with JSON only, no other text: {%s}"
+            % ", ".join(fields))
 
 
 def _never_forced(name: str) -> bool:
@@ -1970,9 +2036,20 @@ class LocalLLM:
                 extra.update(more)
                 return extra
 
-            async def _json(self, messages, schema, temperature=None):
+            async def _json(self, messages, schema, temperature=None, enforce=True):
+                """One JSON answer, optionally under the schema as a grammar.
+
+                **`enforce=False` sends the identical request with no
+                `response_format`.** llama-server builds the grammar from the
+                schema, so this single switch is the whole difference between
+                the two arms - nothing else in the request changes, which is the
+                only reason a difference in the score can be read as the
+                grammar's rather than the wording's.
+                """
                 more = {"temperature": temperature} if temperature is not None else {}
-                self.extra_payload = self._payload_extra(response_format=_json_format(schema), **more)
+                if enforce:
+                    more["response_format"] = _json_format(schema)
+                self.extra_payload = self._payload_extra(**more)
                 try:
                     reply = await super().chat_message(messages, tools=None)
                 finally:
@@ -1991,21 +2068,26 @@ class LocalLLM:
                     f"User: {asked[:600]}\nAssistant: {answered[:600]}")}], schema, temperature=0.2)
                 return str(got.get("title") or "").strip()[:48] if isinstance(got, dict) else ""
 
-            async def _constrained(self, messages, tools):
-                """The tool's name, then its arguments, each generated under a schema."""
+            async def _constrained(self, messages, tools, enforce=True):
+                """The tool's name, then its arguments, each generated under a schema.
+
+                **`enforce=False` is the control arm.** The prompt is the same
+                one the grammar arm sends - instruction, tool menu, and now the
+                schema in prose - so anything that comes back differently is the
+                grammar's doing and not the wording's.
+                """
                 conversation = [m for m in messages if m.get("role") != "system"]
                 head = next((str(m.get("content") or "") for m in messages if m.get("role") == "system"), "")
-                pick = await self._json([{"role": "system", "content": head + (
-                    "\n\nDecide what to do with the user's last message. If one of these tools does it, choose that "
-                    "tool. If it is a question you can answer yourself, or chat, choose none.\nTools:\n"
-                    + tool_menu(tools))}] + conversation, pick_schema(tools))
+                schema = pick_schema(tools)
+                pick = await self._json([{"role": "system", "content": _decision_prompt(
+                    head, tools, schema, enforce)}] + conversation, schema, enforce=enforce)
                 name = pick.get("tool")
                 chosen = next((t for t in tools if t["function"]["name"] == name), None)
                 if chosen is None:
                     return None  # "none", or nothing usable: answer in words
-                args = await self._json([{"role": "system", "content": head + (
-                    f"\n\nCall {name}: {chosen['function'].get('description', '')}\nGive its arguments for the "
-                    "user's last message.")}] + conversation, argument_schema(chosen))
+                schema = argument_schema(chosen)
+                args = await self._json([{"role": "system", "content": _argument_prompt(
+                    head, chosen, schema, enforce)}] + conversation, schema, enforce=enforce)
                 return {"role": "assistant", "content": "", "tool_calls": [
                     {"id": "call_0", "type": "function",
                      "function": {"name": name, "arguments": json.dumps(args if isinstance(args, dict) else {})}}]}
@@ -2028,8 +2110,8 @@ class LocalLLM:
                         {"id": "call_0", "type": "function", "function": {
                             "name": named["function"]["name"],
                             "arguments": json.dumps(args if isinstance(args, dict) else {})}}]}
-                if CONSTRAINED and tools and messages and messages[-1].get("role") == "user":
-                    called = await self._constrained(messages, tools)
+                if (CONSTRAINED or REQUEST_ONLY) and tools and messages and messages[-1].get("role") == "user":
+                    called = await self._constrained(messages, tools, enforce=CONSTRAINED)
                     if called is not None:
                         return called
                     return await super().chat_message(messages, tools=None, stream=stream)
