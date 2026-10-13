@@ -1635,23 +1635,33 @@ def _durable_records(tracker) -> Optional[List[dict]]:
         path = tracker.log_file
     except Exception:
         return None
-    key = str(path)
-    try:
-        stat = path.stat()
-    except OSError:
+    from shani_chronoa import tool_tracking
+    # **Newest first, across every kept chunk.** `log_files()` is oldest-first,
+    # so this is reversed: the tail reader wants the most recent calls, and the
+    # active log is the newest of all. The cache key carries every chunk's
+    # revision, because a rotation moves records between files and a key naming
+    # only the active log would serve a stale answer after one.
+    sources = list(reversed(tool_tracking.log_files(path)))
+    if not sources:
         return None
+    revisions = []
+    for source in sources:
+        try:
+            st = source.stat()
+        except OSError:
+            return None
+        revisions.append((str(source), st.st_size, st.st_mtime))
+    key = str(path)
     cached = _HISTORY_CACHE.get(key)
-    if cached is not None and cached[0] == (stat.st_size, stat.st_mtime):
+    if cached is not None and cached[0] == tuple(revisions):
         return cached[1]
-    records = _read_tail(path, HISTORY_LIMIT, _HISTORY_TAIL_BYTES)
-    try:
-        # Re-stat after the read: the log is append-only and another process may
-        # have written between the two, so cache the revision actually read.
-        stat = path.stat()
-        _HISTORY_CACHE[key] = ((stat.st_size, stat.st_mtime), records)
-    except OSError:
-        pass
-    return records
+    per_file = max(1, HISTORY_LIMIT // len(sources))
+    records: List[dict] = []
+    for source in sources:
+        records = _read_tail(source, per_file,
+                             max(_HISTORY_TAIL_BYTES // len(sources), 4096)) + records
+    _HISTORY_CACHE[key] = (tuple(revisions), records[:HISTORY_LIMIT])
+    return records[:HISTORY_LIMIT]
 
 
 def reorder(ranked: Sequence[Tuple], learned: Optional[Dict[str, float]] = None,
@@ -3472,8 +3482,34 @@ class Example(NamedTuple):
 
 
 def _entries(path: Optional[Path] = None) -> List[dict]:
-    """The recorded calls, in file order, skipping unusable lines."""
-    source = path or _log_path()
+    """The recorded calls, in time order, skipping unusable lines.
+
+    **Through `tool_tracking.log_files()`, not the active log alone.** Rotation
+    moves the oldest records into `tool_calls.log.N`, and every reader here - the
+    outcome model, the calibrations, the bandit, the lessons - trains on what
+    this returns. A reader that kept opening `tool_calls.log` would go on
+    working perfectly while seeing a shrinking slice of history, which is the
+    absence-shaped wrong answer this repository keeps meeting: nothing would
+    report that records had stopped arriving, only that fewer were there.
+
+    An explicit `path` is still honoured - three callers pass one - and means
+    exactly that file, because a caller naming a file is naming a file.
+    """
+    from shani_chronoa import tool_tracking
+    if path is not None:
+        sources = [path]
+    else:
+        sources = tool_tracking.log_files(Path(_log_path()))
+        if not sources:
+            return []
+    out: List[dict] = []
+    for source in sources:
+        out.extend(_entries_of(source))
+    return out
+
+
+def _entries_of(source: Path) -> List[dict]:
+    """One log file's records, skipping unusable lines."""
     try:
         text = source.read_text(encoding="utf-8", errors="replace")
     except OSError:

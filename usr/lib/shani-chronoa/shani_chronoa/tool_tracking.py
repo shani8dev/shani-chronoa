@@ -28,6 +28,121 @@ def log_dir() -> Path:
     return files.data_home() / "shani-chronoa" / "logs"
 
 
+#: The active log is rotated once it would grow past this. **Generous on
+#: purpose.** Measured on this machine: 990 bytes per record and 764 records a
+#: day mean, so 16 MiB holds about 16,900 calls - some three weeks of ordinary
+#: use. The hot reader (`learning._durable_records`) tails this file, so the
+#: cap is also what keeps that read bounded.
+ACTIVE_MAX_BYTES = 16 * 1024 * 1024
+
+#: How many rotated chunks to keep. Eight of them plus the active file is about
+#: 144 MiB and 145,000 calls - roughly six months - against a log that was
+#: measured growing at 276 MB a year with nothing pruning it and a `log_files`
+#: skill whose own description reads "still growing, and unrotated".
+ARCHIVE_KEEP = 8
+
+#: The rotated chunks, oldest first: `.8` is the oldest kept, `.1` the newest,
+#: and the active log is newer than all of them. **Derived from the active log's
+#: own path**, so a caller that points the log somewhere else gets its archives
+#: beside it under its own name - `rotate()` and `log_files()` used to disagree
+#: about the filename, and a test with a log called `calls.jsonl` is what said so.
+def archive_path(active: Path, n: int) -> Path:
+    active = Path(active)
+    return active.parent / ("%s.%d" % (active.name, n))
+
+
+def log_files(active: Optional[Path] = None) -> list:
+    """Every kept log, **oldest first**, so a plain concatenation is in time
+    order. Empty when nothing has been written yet.
+
+    **Takes the active log's path, not a directory and not a filename.** My
+    first version took a directory and globbed `tool_calls.log*` inside it,
+    which silently ignored any caller that had pointed the log somewhere else -
+    and `learning._log_path()` is redirected by tests that name a *different
+    file*, so that caller's log was read as empty and a real test failed with
+    "no lessons yet". The path is what the caller knows; the archives are
+    derived from it, so no name is assumed anywhere.
+
+    **Readers must go through this rather than naming the file.** Rotation moves
+    the oldest records out of the active log and into `<name>.N`, and a reader
+    that still opened the active file alone would silently lose history - the
+    outcome model, the calibrations and the bandit all train on this, and none
+    of them would report that it had stopped seeing records. That is the
+    absence-shaped wrong answer this repository keeps meeting, and a rotation
+    that made it invisible would be worse than no rotation.
+    """
+    active = Path(active) if active is not None else log_dir() / "tool_calls.log"
+    d = active.parent
+    out = []
+    for n in range(ARCHIVE_KEEP, 0, -1):
+        candidate = d / ("%s.%d" % (active.name, n))
+        if candidate.exists():
+            out.append(candidate)
+    if active.exists():
+        out.append(active)
+    return out
+
+
+def rotate(active: Optional[Path] = None) -> list:
+    """Shift the active log into an archive and drop what falls off the end.
+
+    **Returns the chunks it moved, oldest first**, so a caller can report what
+    happened without re-reading the directory - and so a rotation that moved
+    nothing says so rather than looking like one that did.
+
+    Held under an exclusive `flock` for the whole shift: two processes each
+    deciding to rotate at once would otherwise both rename and lose a chunk.
+    The lock is `O_CREAT` and lives beside the log; the kernel releases it when
+    the holder exits, so a dead holder cannot wedge the log.
+    """
+    active = Path(active) if active is not None else log_dir() / "tool_calls.log"
+    if not active.exists():
+        return []
+    if active.is_dir():
+        # **A directory here means the caller handed over a log *directory*.**
+        # The rename would then move the whole directory to `<dir>.1` -
+        # silently, with no error raised and no record kept. I made exactly
+        # that mistake while writing these tests, and the shipped tree has one
+        # call site that gets it right, which is not the same as the next caller
+        # being unable to get it wrong.
+        logger.warning("refusing to rotate %s: that is a directory, not a log",
+                       active)
+        return []
+    moved = []
+    try:
+        fd = os.open(archive_path(active, 0).with_name(active.name + ".rotate.lock"),
+                     os.O_WRONLY | os.O_CREAT, 0o600)
+    except OSError as exc:
+        logger.warning("could not lock for rotation: %s", exc)
+        return []
+    try:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        # Oldest chunk falls off the end; everything else shifts up one.
+        try:
+            os.unlink(archive_path(active, ARCHIVE_KEEP))
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("could not drop the oldest archive: %s", exc)
+        for n in range(ARCHIVE_KEEP - 1, 0, -1):
+            src = archive_path(active, n)
+            if src.exists():
+                os.replace(src, archive_path(active, n + 1))
+        os.replace(active, archive_path(active, 1))
+        files.restrict_file(archive_path(active, 1))
+        for n in range(ARCHIVE_KEEP, 0, -1):
+            moved.append(archive_path(active, n))
+        moved.reverse()
+    except OSError as exc:
+        logger.warning("could not rotate the call log: %s", exc)
+        return []
+    finally:
+        os.close(fd)
+    logger.info("Rotated the call log; keeping %d chunk(s)", ARCHIVE_KEEP)
+    return moved
+
+
 def __getattr__(name: str) -> Path:
     # `tool_tracking.LOG_DIR` / `.LOG_FILE` keep working for readers, resolved now.
     if name == "LOG_DIR":
@@ -226,7 +341,19 @@ class ToolTracker:
         is what tightens a file that already existed at a looser mode.
         """
         self._ensure_log_dir()
+        line = json.dumps(record.to_log_dict(), default=repr) + "\n"
+        # **Rotate before appending, never after.** A writer that appended and
+        # then rotated would lose the record it had just written; rotating first
+        # means the new record always lands in the newest chunk. And a writer
+        # that already holds the old inode when another process renames it
+        # appends into the renamed file - which is the archive, not a hole -
+        # because the open was O_APPEND against a file, not a name.
+        try:
+            if self.log_file.stat().st_size + len(line) > ACTIVE_MAX_BYTES:
+                rotate(self.log_file)
+        except OSError:
+            pass
         fd = os.open(self.log_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         with os.fdopen(fd, "a") as f:
-            f.write(json.dumps(record.to_log_dict(), default=repr) + "\n")
+            f.write(line)
         files.restrict_file(self.log_file)
