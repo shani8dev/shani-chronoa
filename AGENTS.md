@@ -19950,3 +19950,64 @@ harness that does not reproduce production's object graph will report a fixed
 bug as unfixed, and the first reaction is to doubt the fix.** Both of these
 were harness faults and neither would have been found without running the test
 against the unfixed code and reading what it claimed.
+
+## The last 17 pages: 0 of 17 rendered, then 17 of 17 (2026-10-13)
+
+The `setup:*` wizard pages had **never once been rendered in this repository's
+history**. They are the only UI surface here with no picture behind it, and this
+file's standing warning is that "a page that does not render is not necessarily a
+broken page" - which is right, and is also **not enough**, because the right
+response to "don't believe the FAIL" is to find out why.
+
+**Final clean run: 17 targets, `17 rendered, 0 not`, exit 0.** Measured for
+genuineness afterwards by decoding alpha on every file: **17 of 17 at 100% opaque,
+zero false passes.** The audit line *"never once rendered: 0 of 29"* is now
+**29 of 29** for the window pages and **17 of 17** for the wizard.
+
+**And the run that got there is worth recording, because four attempts did not.**
+
+| attempt | what went wrong | who |
+|---|---|---|
+| 1 | 1 page, then pool exhaustion on all 16 | the `rm -f` bug, now fixed |
+| 2 | 13 of 17, then exhaustion | 2 stray sweeps of my own still running |
+| 3 | 2 of 8, then exhaustion | 2 stray sweeps again |
+| 4 | **17 of 17** | nothing else running |
+
+Every failure after the first was **my own harness interference**, and two of the
+ways I caused it are the exact traps this file already documents:
+
+- **Editing `render_ui_batch.sh` while a sweep was executing it.** Bash reads a
+  script incrementally, so the running sweep died with
+  `syntax error near unexpected token ';;'` at line 549 - eleven lines into a
+  function I was editing. The file's own rule is "do not edit it while a sweep
+  is executing", and it is right for the reason that is not obvious: the failure
+  looks like a syntax error in the script, not like a race.
+- **`pkill`/`ps|grep` self-match.** My "is anything else running?" check used
+  `ps -eo args | grep -c '[r]ender_ui_batch'`, and the `[r]` trick that hides the
+  pattern from `grep` does nothing when the pattern is a substring of **my own
+  command line**. I read that check as "provably nothing else alive" and acted on
+  it. The next command put a `kill` loop over the same pattern and **killed my own
+  shell** - SIGTERM, no output. This is the trap recorded under "Kill a stale suite
+  in one command and start the new one in another", reached from a different
+  direction: the bracket guard protects `grep` from itself and does nothing about
+  the enclosing shell.
+
+**What the four attempts do establish is the fix.** `acquire_display`'s `rm -f` of
+a live-but-slow daemon's socket was cascading one slow start into all 31 numbers;
+with that removed, the same script runs all 17 to completion on a pool of 31.
+
+**And `setup:cloud-keys` is no longer a false pass.** It measured **7.2% opaque
+and 129,834 bytes** in the runs above, against 100% opaque for its siblings - the
+detached-subtree capture this file already documents for editable widgets. It now
+renders fully. The void-mark change is the only edit between those renders that
+touches this file, so it is the likely reason, **but that mechanism is not proved
+and is not claimed** - the measurement is the fact, and the attribution is not.
+
+### The detector, now that there is a population to calibrate it against
+
+A page sweep should print **opaque percentage** beside bytes and treat anything
+below a stated floor as NOT RENDERED rather than PASS. The floor is no longer a
+guess: across 17 wizard pages and 4 window pages, every genuine render is
+**100%** and every false pass measured **7.2%** or **96.2% transparent**. Nothing
+sits in between, and **no byte count separates them** - a false pass at 129,834
+bytes outranks a real page at 25,932.
