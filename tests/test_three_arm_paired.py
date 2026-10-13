@@ -311,7 +311,8 @@ class TestTheReportPairsAllThreeOutcomes:
                          "+greedy+constrained": {"rows": b}},
                         ["+greedy", "+greedy+constrained"])
         out = capsys.readouterr().out
-        assert out.count("exact p = ") == 3, out
+        # this report has two arms, so one pair per outcome
+        assert out.count("exact p = ") == len(ta.OUTCOMES), out
 
 
 class TestTheReportCallsIt:
@@ -353,6 +354,40 @@ class TestTheReportCallsIt:
         assert "p = 1.000" in choice, choice
         form = out.split("paired acted (form)")[1].split("paired right tool")[0]
         assert "+22.7 pts" in form, form
+
+    def test_the_experiment_pair_is_printed(self, capsys):
+        """**The pair the whole run exists for.**
+
+        Arms 2 and 3 differ only in whether the grammar is enforced. The first
+        version anchored every comparison on `arms[0]`, so it printed the two
+        controls and never the experiment - while the note underneath it
+        explained what the experiment was. Found by reading the output of a
+        synthetic run, not by reasoning about the loop.
+        """
+        ta.report(self._arms(), ["+greedy", "+greedy+constrained",
+                                 "+greedy+request"], 220)
+        out = capsys.readouterr().out
+        for section in ("paired acted (form)", "paired right tool",
+                        "paired tool+args"):
+            body = out.split(section)[1].split("paired ")[0]
+            assert "+greedy+constrained    -> +greedy+request" in body, (
+                "the grammar-vs-request pair is missing from %r:\n%s"
+                % (section, body))
+
+    def test_three_arms_print_three_pairs_per_outcome(self, capsys):
+        ta.report(self._arms(), ["+greedy", "+greedy+constrained",
+                                 "+greedy+request"], 220)
+        out = capsys.readouterr().out
+        assert out.count("-> +greedy+constrained") == len(ta.OUTCOMES), out
+        assert out.count("-> +greedy+request") == len(ta.OUTCOMES) * 2, out
+
+    def test_two_arms_still_print_one_pair(self, capsys):
+        """The mirror, so 'every pair' cannot be satisfied by printing the
+        experiment twice instead."""
+        arms = self._arms()
+        ta.report(arms, ["+greedy", "+greedy+constrained"], 220)
+        out = capsys.readouterr().out
+        assert out.count("-> +greedy+constrained") == len(ta.OUTCOMES), out
 
     def test_a_partial_run_says_so_rather_than_pretending_to_be_three(self, capsys):
         arms = self._arms()

@@ -203,7 +203,7 @@ def paired(rows_a: "list[dict]", rows_b: "list[dict]", outcome: str) -> dict:
 
 
 def paired_table(results: dict, arms: "list[str]") -> None:
-    """Print the paired comparison for every arm pair and every outcome.
+    """Print the paired comparison for **every** arm pair and every outcome.
 
     **Why this exists at all.** The marginal table answers "what fraction was
     right", which on 220 cases carries roughly +/- 6 points of noise whether or
@@ -212,13 +212,30 @@ def paired_table(results: dict, arms: "list[str]") -> None:
     cases, and the evidence for it is the handful that changed hands. Reporting
     only the marginals would let a real 3-point effect read as a tie and a tie
     read as a result, which are opposite decisions.
+
+    **Every pair, not every pair against the first arm.** The first version
+    anchored on `arms[0]` and compared the other two to it - and the note it
+    prints underneath says *"Arms 2 and 3 differ only in whether the grammar is
+    enforced, so the second pair is the experiment"*, while never printing that
+    pair. **The report described a comparison it did not make**, and the one
+    comparison the whole run exists for was the missing one. Found by reading
+    the output of a synthetic run rather than by reasoning about the loop: three
+    arms give three pairs, and `arms[1:]` against `arms[0]` gives two.
+
+    With three arms the pairs are base->2 and base->3, which are the *controls*
+    (prompt alone, and prompt+grammar against the baseline), and 2->3, which is
+    the experiment. All three are printed, in that order, so the experiment is
+    not the one a reader has to notice.
     """
-    base = arms[0]
+    pairs = [(arms[0], arm) for arm in arms[1:]]
+    for i in range(1, len(arms)):
+        for j in range(i + 1, len(arms)):
+            pairs.append((arms[i], arms[j]))
     for outcome, label in OUTCOMES:
         print("")
         print("  paired %s  (case by case, not two independent proportions)"
               % label)
-        for arm in arms[1:]:
+        for base, arm in pairs:
             rows_a = results.get(base, {}).get("rows", [])
             rows_b = results.get(arm, {}).get("rows", [])
             if not rows_a or not rows_b:

@@ -168,6 +168,25 @@ MUTATIONS = [
         'new': '                note = ""',
     },
     {
+        'label': 'only the first arm is compared to the others',
+        'why': '**The report described a comparison it did not make.** Three '
+               'arms have three pairs and `arms[1:]` against `arms[0]` gives '
+               'two, so the grammar-vs-request pair - the one the entire run '
+               'exists for, and the one the closing note explains - was never '
+               'printed. The two that remained are the controls, so the report '
+               'looked complete while omitting the experiment. Found by reading '
+               'the output of a synthetic run rather than by reasoning about '
+               'the loop.',
+        'expect': ['test_the_experiment_pair_is_printed',
+                   'test_three_arms_print_three_pairs_per_outcome'],
+        'file': _SRC,
+        'old': '    pairs = [(arms[0], arm) for arm in arms[1:]]\n'
+               '    for i in range(1, len(arms)):\n'
+               '        for j in range(i + 1, len(arms)):\n'
+               '            pairs.append((arms[i], arms[j]))',
+        'new': '    pairs = [(arms[0], arm) for arm in arms[1:]]',
+    },
+    {
         'label': 'the report stops printing the paired comparison at all',
         'why': '**the failure mode of not calling it is a report that looks '
                'complete**, because the marginal table above is still there and '
