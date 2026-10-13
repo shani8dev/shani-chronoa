@@ -22885,3 +22885,85 @@ permissions, capability and gate suites, and **150 across the workbench and
 guardrail files together** after a tmp leak below was cleared. `tools/mutations/
 guardrail_enum.py`: 8 mutations, including the shipped gap restored verbatim and
 both over-fixes.
+
+## The grammar is real, it is enforced, and it costs 37 points of tool choice (2026-10-13)
+
+The three-arm experiment this file prescribed for three entries ran: **225 cases,
+Qwen3-1.7B-Q4_K_M, temperature 0, one server**, ~75 minutes an arm. Arms 2 and 3
+are the same two steps with the same schema in prose; **the grammar is the only
+difference**, and enforcement is the only thing arm 3 drops.
+
+| arm | acted (form) | right tool | tool+args |
+|---|---:|---:|---:|
+| `+greedy` | 210/225 | 191/225 | 186/225 |
+| `+greedy+constrained` | **225/225** | 194/225 | 185/225 |
+| `+greedy+request` | **121/225** | 111/225 | 101/225 |
+
+**Arms 2 vs 3 - the experiment.** Paired, case by case, with an exact test:
+
+| | delta | 95% CI | flipped right | flipped wrong | p |
+|---|---:|---|---:|---:|---:|
+| acted (form) | **-46.2** | -52.9 .. -39.6 | **0** | **104** | 0.000 |
+| right tool | **-36.9** | -44.0 .. -30.2 | 4 | 87 | 0.000 |
+| tool+args | **-37.3** | -44.4 .. -30.7 | 6 | 90 | 0.000 |
+
+**And arms 1 vs 2, which is the other half of the question:**
+
+| | delta | 95% CI | flipped right | flipped wrong | p |
+|---|---:|---|---:|---:|---:|
+| acted (form) | **+6.7** | +3.6 .. +10.2 | 15 | **0** | 0.000 |
+| right tool | +1.3 | -3.6 .. +5.8 | 16 | 13 | **0.711** |
+| tool+args | -0.4 | -5.3 .. +4.4 | 17 | 18 | **1.000** |
+
+### What it settles, in three sentences
+
+1. **A grammar buys form, and form is not what `task_eval` scores.** Arm 2 over
+   arm 1 is +6.7 points of form with **15 cases gained and 0 lost**, and *nothing*
+   measurable on choice (p=0.711) or on tool+arguments (p=1.000).
+2. **Enforcement does not merely fail to improve choice - it costs it.** 104 cases
+   lost and **not one** gained. That is the "superficial syntactic alignment,
+   no semantic gain" of arXiv:2604.06066, reproduced here at **1.7B** with paired
+   statistics, from a prediction this repo's own single-case grammar probe made
+   before the run.
+3. **The format request alone is the most harmful of the three arms**, and the
+   grammar's only measured benefit is *rescuing form from the damage it did*: 225
+   acted with enforcement against 121 without.
+
+### The mechanism, observed rather than inferred
+
+Without enforcement the model **answers in prose instead of calling a tool**.
+`time`, `date`, `volume-get`, `mute` and `brightness` all came back classified
+`reply='answer'` with no call at all. Of the 87 cases arm 2 called a tool and arm 3
+did not, **85 are "no tool"**. That is arXiv:2607.18476's "a sharpener, not a
+re-indexer" in a tool chooser: the model falls back to the *chat* register, and the
+chat register's answer to "what time is it" is a sentence, not a call.
+
+And a second pattern, named rather than counted - with the schema in prose and no
+enforcement the model sometimes answers with **the schema echoed back as the
+value**: `firmware_updates({"firmware_updates": {...}})`, `thread_activity(
+{"thread_activity": {...}})`, `data_usage`, `cleanup_report`, `routing_table`,
+`usb_devices`. Form satisfied; the argument is a copy of the thing it describes.
+
+### The prediction, and being wrong about it in the direction I did not expect
+
+This file predicted `constrained -> request`: **form -20.5, choice +2.3**.
+Measured: **form -46.2, choice -36.9**. Wrong on the magnitude of form and **wrong
+in sign on choice** - I expected flat-or-slightly-up and got 37 points down. The
+single-case probe had already shown a model naming the one tool it was allowed to
+name for a question about weather, and I read that as a caution rather than as
+the size of the effect.
+
+### What this settles for the work
+
+**Do not ship constrained decoding.** Not because it does not work - it works
+perfectly, it produced **225/225 well-formed calls** - but because the thing it
+fixes is the thing nobody was asking about. The two levers the literature
+supports are untouched: **schema wording** (arXiv:2604.14862 - changing only key
+tokens moves accuracy, with no training run and no decoder constraint) and
+**selection**, where `select` already has a measured **95.5% offered-set recall
+ceiling** and 35% of what it sends shares no word with the request.
+
+Stated limits, so the number is not read as more than it is: one 1.7B model,
+greedy, one server, 225 cases, and a corpus that is half hand-written. The paired
+design and the 0-gained / 104-lost asymmetry are what carry this, not the
+percentages.
