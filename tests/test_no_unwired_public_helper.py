@@ -230,6 +230,49 @@ PRIVATE_ALLOWED = {
 }
 
 
+#: Unreferenced **public classes**, with the same two properties as `ALLOWED`.
+#:
+#: Probed after the callables and the constants: **0 unreferenced enum members** of
+#: 33, and 22 unreferenced classes of 380 - **19 of them in `learning.py`**, the
+#: concurrent session's area. So three were real candidates and one of those
+#: (`speech_gate.Busy`) turned out to document a raise nothing performed.
+CLASS_ALLOWED = {
+    "IndexError_": "file_index.py: 'A file we will not index, with the reason.' The "
+        "behaviour exists and is better than an exception would be - the walk "
+        "records `problems` (with the OSError text) and `declined` (named "
+        "directories), so a skipped file is reported rather than raised about.",
+    "Task": "goals.py: 'CAMEL's Task shape, reduced to what a local model will "
+        "actually use.' `Step` is the shape the goal engine uses; this is the "
+        "vestige of the upstream framework it was written against.",
+}
+
+
+#: `learning.py`'s unreferenced classes. Listed by name, and the test asserts the
+#: file still yields some, so a rename cannot make the exclusion silently empty.
+#: Same category as `verify_digest`: the concurrent session's active area.
+_LEARNING_NAMES = {
+    "AssociationRules",
+    "BetaBernoulli",
+    "ChangePoint",
+    "EWMA",
+    "Experience",
+    "Frequency",
+    "Gaussian",
+    "Hierarchical",
+    "MonteCarlo",
+    "MovingAverage",
+    "NaiveBayes",
+    "OnlineKMeans",
+    "OnlineLogistic",
+    "PassiveAgregressive",
+    "PolynomialRegression",
+    "Preferences",
+    "RollingWindow",
+    "Tabular",
+    "classification",
+}
+
+
 def _sources():
     """Every file that could hold a reference.
 
@@ -358,8 +401,32 @@ def _defined_private(used):
     return orphans
 
 
+def _defined_classes(used):
+    """`{name: "file:line"}` for public classes nothing refers to."""
+    orphans = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if node.name.startswith("_") or used.get(node.name):
+                continue
+            orphans.setdefault(node.name, []).append(
+                f"{path.relative_to(ROOT)}:{node.lineno}")
+    return orphans
+
+
 def _orphans():
     return _defined_public(_referenced_names())
+
+
+def _class_orphans():
+    return _defined_classes(_referenced_names())
 
 
 def _private_orphans():
@@ -552,3 +619,43 @@ def test_the_private_allowlist_is_not_stale():
 
     assert not gone, (
         f"PRIVATE_ALLOWED names that are referenced again: {gone}. Remove them.")
+
+def test_no_public_class_is_referenced_by_nothing():
+    """**The class the speech-gate fix came from.** 22 unreferenced of 380, 19 of
+    them in `learning.py` - so the list is small, and one of the three real
+    candidates (`speech_gate.Busy`) was a docstring promising a raise that nothing
+    performed."""
+    orphans = _class_orphans()
+    unexpected = sorted(set(orphans) - set(CLASS_ALLOWED) - _LEARNING_NAMES)
+
+    assert not unexpected, (
+        f"{len(unexpected)} public class(es) nothing references:\n"
+        + "\n".join(f"  {name}  ({', '.join(orphans[name])})"
+                    for name in unexpected))
+
+
+def test_every_class_allowlist_entry_carries_a_reason():
+    without = sorted(name for name, why in CLASS_ALLOWED.items() if not why.strip())
+
+    assert not without, f"CLASS_ALLOWED entries with no reason: {without}"
+
+
+def test_the_class_allowlist_is_not_stale():
+    orphans = _class_orphans()
+    gone = sorted(set(CLASS_ALLOWED) - set(orphans))
+
+    assert not gone, f"CLASS_ALLOWED names referenced again: {gone}. Remove them."
+
+
+def test_the_class_audit_can_still_see_learning_py():
+    """`learning.py` is excluded by name, so the exclusion is asserted rather than
+    assumed - a rename would otherwise quietly stop excluding it, or start
+    excluding something else."""
+    orphans = _class_orphans()
+    in_learning = {n for n, where in orphans.items()
+                   if any("learning.py" in w for w in where)}
+
+    assert in_learning, (
+        "no unreferenced class in learning.py at all - either the concurrent "
+        "session wired them, or this audit has stopped reading that file")
+
