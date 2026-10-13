@@ -21644,3 +21644,48 @@ nothing: the flag right and the wire wrong, and the wire wrong with no test on
 it. The dispatch is driven end to end against a real `_Local` instance with
 `chat_message` patched, so the grammar that would have leaked shows up as a
 failed test rather than as a slightly lower score.
+
+### Correction: the renderer IS realised, and the abort is not the cause of the blank
+
+The entry above says the capture "dies in `gsk_renderer_dispose` with a
+`GskCairoRenderer` that was **never realised**". **That is backwards, and the
+assertion text says so:**
+
+    gsk_renderer_dispose: assertion failed: (!priv->is_realized)
+
+A failed assertion means the condition was **false** - so `priv->is_realized`
+is **true**. The renderer *was* realised, which is also what the code says:
+`_capture` calls `Gsk.CairoRenderer.new()` and then `renderer.realize(None)` one
+line later, and this repository's own "Rendering the UI to a PNG" section
+prescribes exactly that pair. I read the assertion's *content* as its
+*conclusion*.
+
+**And the ordering rules the abort out as the cause anyway.** The log is three
+lines in this order:
+
+    WROTE
+    **
+    Gsk:ERROR:... gsk_renderer_dispose ... Bail out!
+
+`WROTE` is printed immediately after `texture.save_to_png(path)` returns, and the
+file is on disk and non-empty. **So the capture completed and the process died
+afterwards, at interpreter teardown** - and the PNG is blank for some other
+reason entirely. A crash after a successful write cannot be why the write is
+empty.
+
+**So the state is: the blank is confirmed, the cause is not.** Reproduced twice
+from a cold pool, identical log, identical 0.2%. What is *not* established is
+what the texture contains and why.
+
+**The next measurement, and it is a one-line probe rather than another render:**
+what `_deepest_node()` returns, and what its allocation is, on a cold display.
+The `node is None` and `texture is None` branches both print and both *did not*
+fire - so a node and a texture existed and the texture was blank, which points
+at the node rather than the rasteriser. `_capture` prints neither the node's
+type nor its allocation, and **a probe that reports only success cannot
+distinguish "painted" from "emptied"** - the same class as the blank-image probe
+this file records needing a positive control.
+
+**Recorded rather than fixed**, because a fix to the capture path cannot be
+verified on this box while every display is cold, and an unverified fix to the
+one thing every render depends on is worse than the gap.
