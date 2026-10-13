@@ -369,7 +369,15 @@ class OrganPanel(Adw.NavigationPage):
 #: that changes colour with the desktop theme is an indicator whose meaning
 #: changes with the desktop theme.
 ORGAN_IDLE_CSS = """
-.organ-strip { padding: 2px 4px; }
+/* Horizontal padding stays at 0 deliberately.  `OrganStrip.do_measure`
+   reports the sum of the cells' own naturals plus the column spacing, and GTK
+   adds a widget's CSS padding on top of whatever `do_measure` asks for.  So
+   `padding: ... 4px` made the strip 8px wider than it had asked for, and
+   `halign=CENTER` centred the *box* while the lights sat 8px off centre
+   inside it - the exact symptom `do_measure` exists to remove (measured:
+   needed 466, allocated 474, cells 8px off).  The vertical 2px is kept
+   because it is the row's own breathing room and is not part of that sum. */
+.organ-strip { padding: 2px 0; }
 .organ { padding: 2px 6px; border-radius: 8px; }
 .organ-icon { opacity: 0.45; }
 .organ-label { font-size: 10px; opacity: 0.55; }

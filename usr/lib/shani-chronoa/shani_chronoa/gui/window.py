@@ -1522,11 +1522,36 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         different one. The idle/active rules are fixed for that reason and live
         in `organs.ORGAN_IDLE_CSS` rather than in this window's stylesheet.
         """
-        provider = Gtk.CssProvider()
-        provider.load_from_data(ORGAN_IDLE_CSS.encode())
-        provider.load_from_data(MODE_STRIP_CSS.encode())
-        Gtk.StyleContext.add_provider_for_display(
-            Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        # **One provider per sheet, because `load_from_data` REPLACES.**
+        #
+        # This was one provider and two loads, which reads as "add both" and is
+        # not: the second call discards the first. Measured on the real window
+        # by the one rule in `ORGAN_IDLE_CSS` that cannot already be satisfied
+        # by chance - `.organ { padding: 2px 6px }` predicts a cell exactly 12px
+        # wider than its label:
+        #
+        #     one provider, two loads   (this used to be)   cell - label = 0
+        #     one provider per sheet                        cell - label = 12
+        #     ORGAN_IDLE_CSS alone                          cell - label = 12
+        #
+        # So the organ sheet was loaded and thrown away, and what the window was
+        # actually running was the mode strip's sheet alone. **What that cost
+        # is the whole point of the organ strip**: `.organ-active` carries the
+        # red pill and `opacity: 1.0`, `.organ-idle` the 0.05 background, and
+        # with neither in effect an active organ rendered identically to an idle
+        # one. `refresh()` still toggled the classes correctly; there was simply
+        # no rule left that read them.
+        #
+        # **Not caught by the existing test, and it could not have been:**
+        # `tests/test_mode_strip.py:741` loads `MODE_STRIP_CSS` into a provider
+        # of its own, so it validates the constant and never reproduces the path
+        # that drops the other one.
+        for sheet in (ORGAN_IDLE_CSS, MODE_STRIP_CSS):
+            provider = Gtk.CssProvider()
+            provider.load_from_data(sheet.encode())
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(),
+                provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def _setup_window(self) -> None:
         self.set_title("Shani Chronoa")

@@ -24364,3 +24364,112 @@ spacing, the floor, or the dead rules. **The dead rules are recorded rather than
 fixed** because whether `ORGAN_IDLE_CSS` loads at all is not established, and
 "delete the sheet" on an unanswered question is how `style.py`'s own comment about
 two stylesheets for one strip goes from stale to wrong.
+## The organ sheet was loaded and thrown away, and the fix shipped a second defect beside it (2026-10-14)
+
+`window.py:_apply_organ_css` built **one** provider and loaded both sheets into
+it. `Gtk.CssProvider.load_from_data` **replaces**, so the second call discarded
+the first. Measured on a real mapped window, by allocation only:
+
+| | organ cell − its label |
+|---|---:|
+| one provider, two loads (shipped) | **0** |
+| one provider per sheet | **12** |
+
+12 is exactly what `.organ { padding: 2px 6px }` predicts, which makes it a
+discriminator rather than a correlation.
+
+**What it cost is the strip's entire job.** `.organ-active` carries the red pill
+and `opacity: 1.0`, `.organ-idle` the 0.05 background. With neither in effect an
+**active organ rendered identically to an idle one** - `refresh()` still toggled
+the classes correctly, and there was simply no rule left that read them.
+
+**Why nothing caught it, and it could not have.** `tests/test_mode_strip.py:741`
+loads `MODE_STRIP_CSS` into a provider *of its own*, so it validates the constant
+and never reproduces the path that drops the other one. Everything else asserted
+centredness, separation or selectability - all of which held.
+
+### The regression this fix introduced, and its root cause
+
+Restoring the sheet made `.organ-strip { padding: 2px 4px }` live for the first
+time. `OrganStrip.do_measure` reports the sum of the cells' naturals plus the
+column spacing and **does not count the strip's own CSS padding**, and GTK adds
+padding on top of whatever `do_measure` asks for:
+
+```
+needed (sum + spacing)  466      strip allocated  474      = 466 + 2x4
+```
+
+so `halign=CENTER` centred the *box* while the lights sat 8px off centre inside
+it - the exact symptom `do_measure` exists to remove, and three of
+`test_organ_strip_is_centred.py`'s assertions went red including the recorded
+0.5px-off baseline.
+
+Fixed by `padding: 2px 0`, which makes `do_measure` correct **with no change to
+`do_measure`**. The alternative - teaching `do_measure` about the padding - needs
+the 4px in Python *and* in the CSS, because GTK4 exposes no padding getter, and
+that is the `wpctl`-three-copies shape.
+
+After, at 380/460/560/760/1024: **allocated == natural == 466 at every width**,
+`cell − label` still **12**, row counts unchanged (2 rows at 380 and 460, 1 at
+560+).
+
+**This answers what the entry above left open.** It ended "whether
+`ORGAN_IDLE_CSS` loads at all is not established". It loads. It was being
+discarded.
+
+### The witness, and why two tests rather than one
+
+| mutation | organ test | mode test |
+|---|---|---|
+| one provider, two loads (**the shipped defect**) | **fails** | passes |
+| one provider, loads **reversed** | passes | **fails** |
+
+They are each other's negative control **in both directions**, which is what makes
+neither vacuous: both assert a specific non-zero number derived from a *different*
+sheet, so an instrument that measured nothing, or read the wrong widget, fails
+both rather than letting one cover for the other.
+
+### Mutations: 3 caught, 1 uncovered - and the uncovered one is measured, not hand-waved
+
+Removing the strip's vertical padding entirely leaves all three centring tests
+green, because the arithmetic is horizontal:
+
+| padding | strip allocated |
+|---|---:|
+| `2px 0` | 466x**38** |
+| `0` | 466x**34** |
+
+So it is **not** an equivalent mutant - 4px of row height is a real observable
+change - and the chrome law does not witness it either:
+`test_the_window_minimum_is_not_below_the_layouts_floor.py` runs in **0.44s** and
+parses `set_size_request` rather than measuring chrome, so the strip's actual
+height is not an input to it. **Uncovered.** Not pinned here, because the height
+is font-dependent and an assertion on it is a number that moves with the theme.
+
+### Two display instruments disagreed with the bytes, and the bytes won
+
+The new test opened with a bracket transposed - `...len(".socket"])` - which both
+`read` and pyflakes' rendered source line displayed as if balanced, and which the
+`edit` tool could not match at all. `repr()` and a hex dump agreed with each
+other and against both:
+
+```
+22 2e 73 6f 63 6b 65 74 22 5d 29   =  " . s o c k e t " ] )
+```
+
+so the `)` belonged to `len(` and the subscript was closed in the wrong order.
+**Two of three instruments agreed with each other and were both wrong** - the
+`price`/`collapse` shape reached through syntax instead of vocabulary, and the
+reason the patch was applied by line number with an asserted anchor rather than
+by any of the three that disagreed.
+
+### Runs
+
+**46 passed** across the mode-strip, now-rail, centring, window-minimum and new
+suites. The one failure is `test_at_1280_both_columns_are_back`, the deliberate
+`pytest.fail` recorded above for a rail that needs more than the 1024x768
+broadway caps. The mutation harness ran on a snapshot at `/tmp/opencode/snap-organ`
+- absolute paths, every anchor asserted to occur exactly once, restore verified
+byte-identical, verdicts read from the summary line - because a mutation run that
+rewrites product source in this tree has shipped the other session's defect three
+times.
