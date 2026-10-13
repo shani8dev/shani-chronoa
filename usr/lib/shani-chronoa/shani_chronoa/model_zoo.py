@@ -112,6 +112,12 @@ CANDIDATES: Tuple[Candidate, ...] = (
               lambda: _sklearn_model("HistGradientBoosting"),
               "strongest tabular model here, and the most able to overfit"),
 )
+#: The model Chronoa runs with no optional dependency, taken from the table rather
+#: than spelled out here. `recommend()` needs to know whether the model it is about
+#: to name is the one already in service, and a second copy of this string is
+#: exactly how the two would come to disagree after a rename.
+_BUILTIN = CANDIDATES[0].name
+
 
 
 class Result(NamedTuple):
@@ -245,6 +251,26 @@ def recommend(results: List[Result]) -> str:
 
     Prefers the cheapest model that clears the bar. A 184 MB dependency has to
     earn its place by being *better*, not by being newer.
+
+    **It says what follows from the recommendation, because on today's data the
+    distinction decides the whole sentence.** `CANDIDATES[0]` is
+    `builtin-logistic`, so among the models that clear the bar the built-in always
+    sorts first - and the built-in is what Chronoa runs. The recommendation is
+    therefore *already in effect* on the current labels, and the honest sentence
+    says so rather than reading as a switch somebody could make.
+
+    That matters because the branch where it is **not** already in effect says
+    "Use RandomForest" and nothing more. Measured with the built-in failing the bar
+    and a forest clearing it, the sentence was:
+
+        Use RandomForest: .... It is the cheapest model that clears the bar
+        (93.0% against a 85.0% baseline, minority recall 41.0%).
+
+    which names none of *still running the built-in model*, *no control that
+    switches it*, or *the built-in failed and that is why*. The panel hosting this
+    says "nothing here changes a setting", so the reader is left holding an
+    instruction with no reachable outcome - and the app quietly keeps the model
+    that **failed** the bar. So the consequence is stated, in both directions.
     """
     useful = [r for r in results
               if r.available and r.beats_baseline and r.minority_recall > 0]
@@ -257,10 +283,24 @@ def recommend(results: List[Result]) -> str:
                 "and re-run this comparison.")
     order = {c.name: i for i, c in enumerate(CANDIDATES)}
     best = sorted(useful, key=lambda r: (order.get(r.name, 99), -r.accuracy))[0]
+    measured = (f"{best.accuracy * 100:.1f}% against a "
+                f"{best.baseline * 100:.1f}% baseline, minority recall "
+                f"{best.minority_recall * 100:.1f}%")
+    if best.name == _BUILTIN:
+        # The recommendation and the running model are the same object, so the
+        # sentence is a confirmation and says as much. Nothing to switch to, and
+        # saying "Use" would imply there was.
+        return (f"Keep {best.name}: {best.note}. It is the cheapest model that "
+                f"clears the bar ({measured}), **and it is the model Chronoa is "
+                f"already running** - so this is a confirmation that the cheap "
+                f"option is still the right one, not a change to make.")
     return (f"Use {best.name}: {best.note}. It is the cheapest model that "
-            f"clears the bar ({best.accuracy * 100:.1f}% against a "
-            f"{best.baseline * 100:.1f}% baseline, minority recall "
-            f"{best.minority_recall * 100:.1f}%).")
+            f"clears the bar ({measured}). But **Chronoa is still running "
+            f"{_BUILTIN}**, and nothing in the interface switches it - this line "
+            f"is a measurement to revisit, not an action. {best.name} clearing "
+            f"the bar while the built-in does not is the signal that the labels "
+            f"have become informative; read it against the post-condition count "
+            f"above before treating it as a reason to change anything.")
 
 
 def best_available() -> Optional[object]:
@@ -268,6 +308,23 @@ def best_available() -> Optional[object]:
 
     Falls back to the standard-library model whenever the zoo is absent or
     useless, so a caller never has to know which dependencies exist.
+
+    **Deliberately not called, and recorded here so the next sweep stops here.**
+    Two reasons, both checked rather than assumed:
+
+    - **It re-runs `compare()` on every call**, which trains *every* candidate on
+      a time-ordered split. This is a report-shaped function, not a
+      prediction-shaped one, and putting it on the prediction path would retrain
+      a forest per prediction.
+    - **The prediction path is `learning.py`**, which is the other session's
+      active area. Even if the cost were acceptable, this is not where a change
+      belongs.
+
+    What a caller actually needed - "is the model the report recommends the one
+    already in service?" - is answered by `recommend()` without training anything,
+    because `CANDIDATES[0]` **is** the built-in and sorts first among the models
+    that clear the bar. That is why the orphan is closed in the report rather than
+    in the predictor.
     """
     try:
         results = compare()
