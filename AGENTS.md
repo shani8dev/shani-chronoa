@@ -23673,3 +23673,37 @@ asserts it packed content. Run against mutations, on a snapshot:
 **3 mutations, 3 caught, 0 survivors.** The second row is the reason the scan
 exists: a start-up crash in a cold path is invisible to a test that only starts
 the parts of the product this display reaches.
+
+### Every palette route into a mode dropdown segfaulted (2026-10-13)
+
+`_open_chip_dropdown` re-parents a chip's popover onto the chip, or onto the
+palette when the chip is not in the window's ancestry. It did it with a lone
+`set_parent(anchor)`.
+
+Measured on a snapshot of the tree with exactly that line deleted, three runs,
+identical every time:
+
+    Fatal Python error: Segmentation fault
+      window.py:3861 in _open_chip_dropdown
+      libgtk-4.so.1  gtk_widget_show
+      libgtk-4.so.1  gtk_widget_realize
+      libgtk-4.so.1  +0x2248e5          <- the fault
+
+**Line 3861 is `popover.popup()`, not the `set_parent` above it**, and that is
+the whole shape of this. Both halves of the obvious guess are wrong:
+
+- `set_parent()` on an already-parented widget **returns normally**. Measured
+  on the same runs: **0** `Gtk-CRITICAL`, **0** warnings, **nothing on stderr**.
+  It does not raise and it does not complain.
+- It also does not move the widget. The popover keeps the parent it had -
+  outside every toplevel, which is the bug it was written to fix.
+- So the *next* call is the one that dies: `popup()` shows a widget with no
+  place in the tree, GTK tries to realize it, realize dereferences NULL.
+
+A fix written as a lone `set_parent` therefore looks applied, passes review,
+and turns a cosmetic defect into a window that vanishes with no error anywhere.
+`unparent()` first is what makes `set_parent` mean what it says.
+
+`tests/test_palette_mode_entries_open.py` catches it, and honestly: not with an
+assertion but with `rc=139` and no summary line. **1 mutation, 1 caught, 0
+survivors** - by the strongest signal a mutation can produce.

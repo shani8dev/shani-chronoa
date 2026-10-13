@@ -3840,6 +3840,35 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         undone the moment the chip is back in the tree, so a chip that is ever
         re-appended to the strip gets its own anchor again rather than a
         popover stranded over the palette.
+
+        **The move is `unparent()` then `set_parent()`, and without the first
+        the process dies.** Measured, three runs, identical every time, with
+        the `unparent()` line deleted and nothing else changed:
+
+            Fatal Python error: Segmentation fault
+              window.py, line 3861 in _open_chip_dropdown
+              libgtk-4.so.1, gtk_widget_show
+              libgtk-4.so.1, gtk_widget_realize
+              libgtk-4.so.1, +0x2248e5          <- the fault
+
+        Line 3861 is `popover.popup()`, not the `set_parent` above it. So the
+        shape of this is worth stating exactly, because the guess is wrong in
+        both halves:
+
+        - `set_parent()` on a widget that already has a parent **returns
+          normally**. Measured: **zero** `Gtk-CRITICAL`, **zero** warnings,
+          nothing on stderr at all. It does not raise and it does not complain.
+        - it also does not move the widget. The popover keeps the parent it
+          had, which is the thing outside every toplevel.
+        - so the *next* call is the one that fails. `popup()` shows a widget
+          that has no place in the tree, GTK tries to realize it, and
+          realize dereferences NULL.
+
+        Which means the missing line did not produce a stranded popover. It
+        produced a **segfault on every palette route into a mode dropdown** -
+        and it produced it silently, with nothing on stderr to explain a
+        window that disappeared. `unparent()` first is what makes
+        `set_parent` mean what it says.
         """
         popover = chip.get_popover() if hasattr(chip, "get_popover") else None
         if popover is None:
@@ -3848,6 +3877,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         if anchor is None:
             return False
         if popover.get_parent() is not anchor:
+            popover.unparent()
             popover.set_parent(anchor)
         popover.popup()
         return True
