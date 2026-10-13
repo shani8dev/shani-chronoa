@@ -728,18 +728,6 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._on_show_diff = on_show_diff
         self._rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
 
-    def is_empty(self) -> bool:
-        """Whether the transcript holds no turns yet.
-
-        **A public question, because `TranscriptView` is a `Gtk.ScrolledWindow`
-        and not iterable.** The empty state asks this, and the first version
-        asked it with `len(self._transcript)` inside a `try` - which raises
-        `TypeError`, which the `except` turned into "empty", which meant the
-        starter row could never be hidden. **A check that cannot run and is
-        caught becomes a check that always passes**, and it passed in the
-        direction that made the new feature look working.
-        """
-        return len(self._rows.get_children()) == 0
         self._rows.set_margin_top(10)
         self._rows.set_margin_bottom(10)
         self._rows.set_margin_start(10)
@@ -804,6 +792,19 @@ class TranscriptView(Gtk.ScrolledWindow):
         self._block_text = ""
         self._connect_theme_changes()
         self.show_placeholder()
+
+    def is_empty(self) -> bool:
+        """Whether the transcript holds no turns yet.
+
+        **A public question, because `TranscriptView` is a `Gtk.ScrolledWindow`
+        and not iterable.** The empty state asks this, and the first version
+        asked it with `len(self._transcript)` inside a `try` - which raises
+        `TypeError`, which the `except` turned into "empty", which meant the
+        starter row could never be hidden. **A check that cannot run and is
+        caught becomes a check that always passes**, and it passed in the
+        direction that made the new feature look working.
+        """
+        return len(self._rows.get_children()) == 0
 
     def _connect_theme_changes(self) -> None:
         """Re-colour the code blocks when the desktop switches light/dark.
