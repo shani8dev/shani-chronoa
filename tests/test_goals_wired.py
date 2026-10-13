@@ -49,6 +49,11 @@ def _wait(surface, timeout=30):
 
 
 def test_saving_needs_the_consent_key():
+    """**The key is shut by this test.** `goals-enabled` is in the `everyday`
+    preset and ships on, so the refusal below was never reached."""
+    from shani_chronoa.config import ChronoaConfig
+
+    ChronoaConfig().set("goals-enabled", "false")
     assert "turned off" in _tool({"action": "add", "goal": "x", "steps": _PLAN})
 
 

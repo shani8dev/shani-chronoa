@@ -59,6 +59,11 @@ def fake_adb(tmp_path, monkeypatch):
 
 
 def test_android_is_gated():
+    """**The key is shut by this test.** `phone-control-enabled` is in the
+    `everyday` preset and ships on, so the refusal below was never reached."""
+    from shani_chronoa.config import ChronoaConfig
+
+    ChronoaConfig().set("phone-control-enabled", "false")
     assert ad._run({"action": "devices"}).startswith("Refusing")
 
 

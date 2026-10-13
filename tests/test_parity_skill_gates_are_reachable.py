@@ -140,6 +140,9 @@ def test_calendar_edit_refuses_until_the_write_key_is_granted(tmp_path) -> None:
     try:
         args = {"action": "create", "title": "Meeting", "start": "tomorrow 3pm"}
 
+        # **Shut by this test.** `calendar-write-enabled` is in the `everyday`
+        # preset and ships on, so the refusal below was never reached.
+        _config().set("calendar-write-enabled", "false")
         refused = tools.execute_tool_outcome("calendar_edit", args).text
         assert "Refusing" in refused, (
             "with the default (off) the skill must refuse, or this test is "

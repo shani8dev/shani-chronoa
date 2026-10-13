@@ -60,6 +60,10 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
     monkey.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     (tmp_path / "config").mkdir()
     try:
+        # **Shut by this test.** `container-control-enabled` is in the
+        # `everyday` preset and ships on, so the refusal below was never
+        # reached - it was asserting against a run that happened instead.
+        ChronoaConfig().set("container-control-enabled", "false")
         refused = tools.execute_tool_outcome("container", {"action": "list"}).text
         assert "Refusing" in refused, f"the gate is open by default: {refused!r}"
         assert "container-control-enabled" in refused, (

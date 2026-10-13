@@ -94,6 +94,10 @@ class TestInputControlConsent:
     separate from the vision sense's key."""
 
     def test_refused_when_consent_off(self, chronoa_config):
+        # **The key is shut by this test.** `input-control-enabled` ships on,
+        # so the refusal below was never reached and the assertion was about a
+        # run that happened instead.
+        chronoa_config.set("input-control-enabled", "false")
         # Given: consent is off (the key is undeclared in the gschema, so
         # get_bool returns its fail-closed default of False)
         from shani_chronoa.skills.input_control import _run_move_pointer
@@ -107,6 +111,10 @@ class TestInputControlConsent:
         assert "separate consent gate from the vision sense" in result
 
     def test_no_command_constructed_when_consent_off(self, chronoa_config, monkeypatch):
+        # **The key is shut by this test.** `input-control-enabled` ships on,
+        # so the refusal below was never reached and the assertion was about a
+        # run that happened instead.
+        chronoa_config.set("input-control-enabled", "false")
         # Given: consent is off and we spy on both command construction and
         # subprocess execution
         from shani_chronoa.skills.input_control import _run_move_pointer, _run_click_pointer, _run_type_text
@@ -124,6 +132,10 @@ class TestInputControlConsent:
         assert run_calls == []
 
     def test_consent_key_is_separate_from_vision(self, chronoa_config):
+        # **The key is shut by this test.** `input-control-enabled` ships on,
+        # so the refusal below was never reached and the assertion was about a
+        # run that happened instead.
+        chronoa_config.set("input-control-enabled", "false")
         # Given: the vision sense consent key exists and is distinct
         from shani_chronoa.config import ChronoaConfig
 
