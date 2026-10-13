@@ -88,7 +88,11 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Voice"
+#: **"Speaking voice", not "Voice".** *"What Chronoa is speaking with, and what
+#: else is installed"* - this is the speech-synthesis side. Paired with App
+#: audio and the microphone, "Voice" claimed all three at once and named none,
+#: which is how two panels in one section stayed indistinguishable.
+TITLE = "Speaking voice"
 ICON = "audio-volume-high-symbolic"
 SECTION = "Sensing"
 SUBTITLE = ("Read from this computer: the engine that would speak the next reply, "

@@ -50,7 +50,12 @@ SURFACE_ID = "listening"
 #: is the fallback for panels that predate sections and this one never did.
 SECTION = "Sensing"
 
-TITLE = "Listening"
+#: **"App audio", not "Listening".** This panel asks *"can Chronoa transcribe
+#: what an application is playing?"* - it is system audio capture, not the
+#: microphone. "Listening" in an app whose centrepiece is a microphone orb means
+#: the microphone, so this sat beside **Voice** under a name that pointed at
+#: neither of the two things it is.
+TITLE = "App audio"
 #: Required by `surfaces.all_surfaces()` (TITLE, ICON, build) - a surface
 #: without one raises AttributeError inside that loop, which takes the
 #: whole registry down rather than just this page. Found by walking the

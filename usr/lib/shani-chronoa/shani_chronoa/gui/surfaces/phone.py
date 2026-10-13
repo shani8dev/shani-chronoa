@@ -38,7 +38,13 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-TITLE = "Phone"
+#: **"Watch", not "Phone".** The panel is *"what a smartwatch does with the
+#: phone, from this computer"* - there is no dialling in it at all. A newcomer
+#: reading a sidebar for the first time sees "Phone", wants to place a call,
+#: opens it, and finds wristwatch integration. **A title that promises a thing
+#: the panel does not do is worse than an unclear one**, because the unclear one
+#: gets clicked and this one gets trusted.
+TITLE = "Watch"
 ICON = "call-start-symbolic"
 SECTION = "Phone and remote"
 SUBTITLE = ("Calls, messages, contacts and music on your phone, and finding your watch - "

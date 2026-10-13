@@ -32,7 +32,13 @@ from gi.repository import Gtk  # type: ignore
 from ... import organism
 from . import common
 
-TITLE = "Inventory"
+#: **"What Chronoa can do", not "Inventory".** The panel's own first line says
+#: *"what Chronoa is, function by function"* - which is the answer to the
+#: question a newcomer arrives with, and **this panel is that answer.** So it was
+#: filed under the one word nobody outside a warehouse would use to describe it,
+#: in a sidebar of thirty-four, and the discovery surface stayed undiscovered.
+#: The row on the empty state asks "what can I ask?"; this is where it leads.
+TITLE = "What Chronoa can do"
 ICON = "applications-utilities-symbolic"
 SECTION = "Health and trust"
 
