@@ -130,9 +130,14 @@ def one_event(granted, monkeypatch):
 def test_the_write_switch_is_off_by_default_and_nothing_is_written():
     """The original defect, in its original shape.
 
-    `_config` answers `False` for both keys, which is what a default install
-    looks like.
+    **The key is shut by this test.** `calendar-write-enabled` is in the
+    `everyday` preset and ships on, so the refusal below was never reached -
+    the run went on to the real calendar service and failed there instead,
+    which says nothing at all about the gate.
     """
+    from shani_chronoa.config import ChronoaConfig
+
+    ChronoaConfig().set("calendar-write-enabled", "false")
     result = ce._run({"action": "create", "title": "Meeting", "start": "tomorrow 3pm"})
     assert "Refusing" in result, result
     assert ce._WRITE_KEY in result, (
