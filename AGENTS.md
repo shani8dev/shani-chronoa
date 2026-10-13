@@ -20063,3 +20063,55 @@ detectable by "a file appeared", which is the whole of the sweep's PASS test.
 asserted) precisely because `/tmp` is not something a `finally` in the repository
 can restore. Applying an edit to a file another process holds open is not a
 commit race; it is writing into something that is about to be overwritten.
+
+## Every model tier stated its size twice, in two unit systems, disagreeing (2026-10-13)
+
+The model-picker wizard page - rendered for the first time ever, like the rest of
+the wizard - showed every row's size **twice**:
+
+| row | title | subtitle |
+|---|---|---|
+| Very large | **4.7 GB** | **5.0 GB download** |
+| Huge | **8.4 GB** | **9.0 GB download** |
+| Mixture of experts | **17.3 GB** | **18.6 GB download** |
+
+Two numbers for one quantity, side by side on the same row, both plausible, and
+the row below them says "Nothing is downloaded yet". **Measured against the
+source** rather than argued from the picture - `local_llm.py`'s `TIERS` carries
+both a `size_bytes` and a hand-written label containing its own size:
+
+| tier | `size_bytes` | decimal GB | GiB | label said |
+|---|---:|---:|---:|---|
+| Very large | 5,027,783,488 | **5.0** | 4.68 | 4.7 GB |
+| Huge | 9,001,752,960 | **9.0** | 8.38 | 8.4 GB |
+| Mixture of experts | 18,556,685,824 | **18.6** | 17.28 | 17.3 GB |
+
+**The labels were GiB written with a "GB" suffix.** The comment two lines above
+the last tier says *"17.3 GiB on disk"* - correct in its own unit - and the label
+below it dropped the `i`. The wizard's subtitle computes from
+`size_bytes / 1e9`, so every row reported the same file twice and the two figures
+differed by exactly the 1.0737 factor between the units.
+
+The first three tiers agreed only because 0.6 GB and 0.6 GiB round alike at one
+decimal place, which is why this survived: **the coincidence is the only reason
+three rows looked right.**
+
+**Three numbers corrected, and the derivation is the proper fix.** The labels are
+prose - *"quick on any computer, for simple requests"* is hand-written by nature
+- but the size inside them is a fact `size_bytes` already states exactly, and
+nothing derives one from the other. Making the parenthetical a formatted field
+rather than a literal is the right shape and was **not** done here, because
+`TIERS` is read positionally in more than one place and that is a wider change
+than a defect fix should be here. **So this entry records the remaining work
+rather than pretending the duplication is gone.**
+
+**Note that this figure is quoted in this file in several places** - "17.3 GB",
+"17.3 GiB", "18.6 GB" appear across the `local_llm` and model-tier entries - and
+every one of them inherits whichever unit the writer typed. **A number copied into
+prose is a number nobody re-measures**, which is the same lesson as the
+`skills_total` figure this file had to correct once already.
+
+Verified: all six labels now agree with their own `size_bytes` to one decimal
+place (0 disagreements across the six), the page re-renders **87,175 -> 87,370
+bytes**, and 134 passed / 1 skipped across the model-picker, model-requirements,
+menu-label, ctxfit and thread suites.

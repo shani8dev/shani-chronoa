@@ -66,12 +66,12 @@ TIERS = (
                "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785",
                "the quality step; reliable tool calls, still CPU-viable",
                _QWEN.format(repo="Qwen3-8B-GGUF", rev="7c41481f57cb95916b40956ab2f0b139b296d974")),
-     "Very large (4.7 GB) - the first size where replies are markedly better", 999),
+     "Very large (5.0 GB) - the first size where replies are markedly better", 999),
     (ModelSpec("qwen3-14b", "Qwen3-14B-Q4_K_M.gguf", 9_001_752_960,
                "500a8806e85ee9c83f3ae08420295592451379b4f8cf2d0f41c15dffeb6b81f0",
                "near-desktop-class reasoning; slow on a CPU",
                _QWEN.format(repo="Qwen3-14B-GGUF", rev="530227a7d994db8eca5ab5ced2fb692b614357fd")),
-     "Huge (8.4 GB) - for machines with room; slow without a graphics card", 999),
+     "Huge (9.0 GB) - for machines with room; slow without a graphics card", 999),
     # A 30B mixture-of-experts: 17.3 GiB on disk, ~3.3B of 30.5B parameters
     # active per token, so it READS a fraction of what it stores. That is what
     # makes it fast enough on modest hardware - see REQUIRES' `active_bytes`.
@@ -82,7 +82,7 @@ TIERS = (
                "0d003f6662faee786ed5da3e31b29c978de5ae5d275c8794c606a7f3c01aa8f5",
                "a 30B that reads like a 3B; the size that works on small machines",
                _QWEN.format(repo="Qwen3-30B-A3B-GGUF", rev="e4d4bafdfb96a411a163846265362aceb0b9c63a")),
-     "Mixture of experts (17.3 GB) - reads a fraction of what it stores", 999),
+     "Mixture of experts (18.6 GB) - reads a fraction of what it stores", 999),
 )
 SPECS = {spec.key: spec for spec, _label, _ram in TIERS}
 
