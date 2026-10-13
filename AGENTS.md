@@ -20604,3 +20604,94 @@ target is misnamed, and **no render target exists for a permission prompt at
 all** (`--list states` shows only `strip-*`, `composer-*` and `organ-*`). So the
 one moment where the app asks a person to trust it with an action has never had a
 picture, which is a gap in the harness rather than in the product.
+
+## Two panels drew a 55px slice of an icon instead of the sentence under it (2026-10-13)
+
+Found by rendering `panel:triggers` and reading it. Between the consent banner
+and the "Arm a rule" form there was a lone grey crescent:
+
+> a clipped arc, flat bottom edge, nothing else on the page
+
+No "**No trigger rules armed**" - on a panel whose entire content is that
+sentence. **Reproducible, not a sweep artefact**: two independent renders put
+**1859 pixels** of the icon's own grey `(156,156,156)` at *identical*
+coordinates.
+
+### The cause is a measurement, and it is one number
+
+`Adw.StatusPage` declares a **minimum height of 301px** and a minimum width of
+152px, *whatever height it is offered*:
+
+| offered | its minimum |
+|---:|---:|
+| 900 | **301** |
+| 200 | **301** |
+| 50 | **301** |
+| 20 | **301** |
+
+The icon is drawn **centred** in the 301px it insists on, so a container that
+can give it a fraction shows **a band across the middle** of the icon - which is
+why it reads as a stray shape rather than as a truncated one.
+
+**`goals` is the control and it renders perfectly**: full icon, title,
+description, button - because it gives its `StatusPage` the whole page. A
+page-level widget mounted **inline**, in a scrolled content box beside other
+content, is the wrong widget for the space it is given.
+
+| panel | what was on screen instead of the sentence |
+|---|---|
+| `triggers` | the crescent, and **no title and no description** |
+| `memory` | a clipped prohibition icon, and no title - the title also ran off as *"...not available to t"* |
+
+`common.empty_state()` takes **`inline=True`**, which builds the squeezable box
+the module already had for the no-Adw case rather than a `StatusPage`. Both
+measured panels pass it. **`goals` does not, and renders byte-identically**
+(sha `fd89a459256e`, unchanged) - the control that says the fix is a placement
+switch and not "stop using StatusPage".
+
+### Two pre-existing gaps the fix exposed, both caught by the layout contract
+
+1. **The box's heading was never wrapped** - only its description was. Invisible
+   while the branch was reached only when Adw was unavailable, because
+   `Adw.StatusPage` wraps its own title. `test_long_labels_wrap_or_ellipsise
+   [memory]` went red the moment a panel used it.
+2. **`memory` had no `Gtk.ScrolledWindow` of its own** - it was passing
+   `test_every_surface_can_scroll` only because the `Adw.StatusPage` it no
+   longer uses **contains one internally**.
+
+Both are the same shape as each other and of the export defect: **a guard that
+was passing because of a widget it no longer used.**
+
+### 3 mutations, 3 caught, and the control is a test not a comment
+
+`inline` ignored (the shipped behaviour) -> **2 failed**; the heading unwrapped
+-> **1**; the scroller removed -> **3**. Every one restores the file
+byte-identical.
+
+The control is `TestThePageEmptyStateIsUnchanged`: it asserts the page variant
+is **still** an `Adw.StatusPage` and still carries its child. **A guard that only
+checked the inline variant would be satisfied by a helper that stopped building
+a StatusPage at all** - which would silently change the 34 other call sites.
+
+**And `test_the_measured_floor_is_still_the_floor` re-derives the 301** rather
+than trusting the constant, so a libadwaita upgrade is visible instead of
+silently invalidating the bound the other tests are written against.
+
+### Five detectors that measured nothing, which is the other half of this
+
+Finding the second panel meant recognising the signature across 33 renders, and
+**five detectors in a row reported a clean tree while looking straight at it**:
+
+| attempt | why it reported 0 |
+|---|---|
+| "most common colour in the row" | the **background** always wins, and my `>120` filter then excluded it - so on exactly the icon's rows the background was the answer |
+| exact colour equality across rows | the icon is **antialiased**; its colour moves 1-2 per row, so every run broke |
+| bucket the colour, then compare | fixed that, and still missed it: **193px was a bounding box, not a per-row run** |
+| 90px per-row threshold | the crescent's rows are ~34px; `memory`'s are ~157px, so the threshold found one and not the other |
+| 40px threshold, restructured | a closure bug in my own `close()` helper |
+
+**A scan that cannot find the thing you are looking at reports the same clean
+result as one that works.** What finally worked was the rule "the longest run
+whose colour differs from the background" - and what found `memory` was not the
+detector at all but **cropping the region and looking**, after the detector had
+already pointed at it once.

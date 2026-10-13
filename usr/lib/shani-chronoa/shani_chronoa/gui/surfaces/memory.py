@@ -531,7 +531,10 @@ class _MemorySurface(Adw.NavigationPage):
 
     def _status(self, icon: str, title: str, detail: str) -> Gtk.Widget:
         """One of the honest non-list states, marked so a test can find it."""
-        widget = common.empty_state(icon, title, detail)
+        # `inline=True` for the reason in `common.empty_state`: this is placed
+        # in the content box, not on a page, and an `Adw.StatusPage` there is
+        # clipped to a slice of its icon with neither title nor description.
+        widget = common.empty_state(icon, title, detail, inline=True)
         widget.add_css_class(EMPTY_CSS)
         widget.set_vexpand(True)
         return widget

@@ -354,11 +354,16 @@ class _TriggersSurface:
         # Present from the start and hidden by `_refresh()`, not added when the
         # list is empty: a status page that appears by being added cannot be
         # taken away again, and this one has to be able to say both.
+        # `inline=True`: this sits in the content box between the consent
+        # banner and the "Arm a rule" form, not on a page of its own, and an
+        # `Adw.StatusPage` there is clipped to a slice of its icon. See
+        # `common.empty_state`.
         self.empty_state: Gtk.Widget = common.empty_state(
             ICON,
             "No trigger rules armed",
             "Nothing here can act on its own. Ask Chronoa to arm one, or run "
             "shani-chronoa-sense trigger list to see this from the command line.",
+            inline=True,
         )
         # **"Ask Chronoa to arm one" now has a way to be asked.** That sentence
         # was a dead end: the arming itself is a skill call, not a page, and the

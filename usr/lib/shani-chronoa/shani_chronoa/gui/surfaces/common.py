@@ -627,14 +627,42 @@ def switch_row(title: str, subtitle: str = "", active: bool = False,
 
 
 def empty_state(icon: str, title: str, description: str = "",
-                child: Optional[Gtk.Widget] = None) -> Gtk.Widget:
+                child: Optional[Gtk.Widget] = None,
+                *, inline: bool = False) -> Gtk.Widget:
     """"There is nothing here", said as a page rather than an empty rectangle.
 
     An empty list with no explanation reads as a bug - this repo has shipped
     surfaces that were exactly that - so the empty case always says what is
     absent and, where it is knowable, why.
+
+    **`inline=True` builds the squeezable box instead of an `Adw.StatusPage`,
+    and the caller has to say which it is.** Measured 2026-10-13:
+
+        Adw.StatusPage declares a MINIMUM height of 301px
+        (and a minimum width of 152px), whatever height it is offered
+
+    As a whole page that is right, and `goals` - which owns its page - renders
+    the StatusPage exactly as intended: full icon, title, description, button.
+    **Mounted inline** - inside a scrolled content box, between a banner and
+    the rest of the panel - it is given far less than 301px and GTK clips it.
+    Two panels did exactly that and both rendered **a 55px horizontal slice
+    through the middle of the icon, with neither the title nor the
+    description**:
+
+    | panel | what was on screen instead of the sentence |
+    |---|---|
+    | `triggers` | a grey crescent, and **no "No trigger rules armed"** - on a panel whose entire content was that sentence |
+    | `memory` | a clipped prohibition icon, and no title or description |
+
+    The icon is drawn *centred* in the 301px it insists on, so the slice
+    through the middle is a band across the icon rather than its top or
+    bottom - which is why it reads as a stray shape rather than as a
+    truncated one.
+
+    The box below has no such floor: it sizes to its children, so the same
+    icon, title and description survive in a band a tenth of that height.
     """
-    if adw_ready():
+    if adw_ready() and not inline:
         page = Adw.StatusPage(icon_name=icon, title=title, description=description)
         if child is not None:
             page.set_child(child)
@@ -649,6 +677,12 @@ def empty_state(icon: str, title: str, description: str = "",
     box.append(image)
     heading = Gtk.Label(label=title)
     heading.add_css_class("title-4")
+    # **The heading is wrapped for the same reason the description is.** It was
+    # not, and that was invisible while this branch was only reached when Adw was
+    # unavailable - `Adw.StatusPage` wraps its own title, so a caller moving to
+    # the box got a title that ran off the edge instead. `test_long_labels_wrap_
+    # or_ellipsise[memory]` caught it the moment a panel did.
+    wrap_label(heading)
     box.append(heading)
     if description:
         note = Gtk.Label(label=description)
@@ -658,7 +692,12 @@ def empty_state(icon: str, title: str, description: str = "",
         box.append(note)
     if child is not None:
         box.append(child)
-    return box
+    # **Its own scroller, for the same reason.** `test_every_surface_can_scroll`
+    # requires every surface to have one, and `memory` was passing only because
+    # the `Adw.StatusPage` it no longer uses *contains* one internally. An
+    # inline empty state is now a real thing in two panels, so it carries its
+    # own rather than depending on a widget class for it.
+    return scrolled(box)
 
 
 def open_setup(app: Any, widget: "Gtk.Widget | None" = None) -> None:
