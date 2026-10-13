@@ -215,8 +215,17 @@ class _ModeStrip(Gtk.Box):
         self.append(self._rules_chip)
         self._auto_chip = self._auto_chip()
         self.append(self._auto_chip)
+        # **Built, not appended - it moved to the composer.** Measured: this
+        # strip is 480px of a 496px column, so it was already full, and the
+        # chip the newcomer most needs (which model answers) had been pushed off
+        # it entirely. `answer_button` carries plan mode, the model and the
+        # reply style together, beside Send, where the width is.
+        #
+        # Still constructed and still drawn by `refresh()`: `test_mode_strip`
+        # asserts the *css class* on this chip, and a test reaching past the
+        # row to ask about a widget is still a test worth keeping.
         self._plan_chip = self._plan_chip()
-        self.append(self._plan_chip)
+        self._answer_button = self._answer_button()
         self._presence_chip = self._presence_chip()
         self.append(self._presence_chip)
         self._answer_chip = self._egress_chip()
@@ -563,6 +572,75 @@ class _ModeStrip(Gtk.Box):
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
             ["Whether Chronoa plans before acting"])
+        return button
+
+    def _answer_button(self) -> Gtk.MenuButton:
+        """Which model answers, how it works it out, how it replies. One control.
+
+        **Three settings, three sections, one button.** ChatGPT merged its model
+        picker and its Thinking slider into one menu, and Claude titles its
+        equivalent page "Change the model, effort, and thinking settings" - so
+        the three rows below are one question ("how should this be answered?")
+        and three chips asking it separately was the shape both moved away from.
+        This file has already paid for the split once: two chips answered
+        overlapping questions and could be set to disagree.
+
+        **The word is the model**, because that is the fact with no other home.
+        At 460px the strip has no room for it and the model was reachable only
+        through the palette, so a person could not see what was answering them.
+        Plan mode and reply style keep their state in the tooltip and in
+        `mode-chip-on`, which is the same highlight every other departure uses.
+
+        **Sections, not one long list.** `Gio.Menu.append_section` puts each
+        heading on screen, so the menu answers "which of these three am I
+        looking at?" without the reader counting rows.
+
+        **The menus are built from the tables this module already keeps** -
+        `_model_rows()`, `_PLAN`, `_STYLES` - and the action names are the ones
+        the four chips already fired, so moving a setting here cannot change
+        what pressing it does.
+        """
+        button, label, image = self._menu_chip("object-select-symbolic")
+        self._answer_label = label
+        self._answer_image = image
+
+        menu = Gio.Menu()
+
+        models = Gio.Menu()
+        for key, word, _line, _icon in self._model_rows():
+            models.append(word, f"app.answer-model::{key}")
+        menu.append_section("Which model", models)
+
+        how = Gio.Menu()
+        for _key, word, _line, _icon in self._PLAN:
+            # Both rows activate the same toggle action, exactly as the plan
+            # chip's own dropdown does - it carries no value, so the chip
+            # redraws from `planmode.is_enabled()` instead.
+            how.append(word, "app.toggle-plan-mode")
+        menu.append_section("How it works it out", how)
+
+        style = Gio.Menu()
+        # **`key`, not a name from another loop.** The first version wrote
+        # `for _key, word, ...` and then interpolated a bare `key` in the f-string
+        # - so all three rows inherited whatever `key` the *model* loop above
+        # left behind, and every one read `reply-style:qwen3-8b`. Measured on the
+        # built window, not reasoned about: pressing "Brief" would have asked for
+        # a reply style called `qwen3-8b`, which is not a style.
+        #
+        # Nothing caught it, which is the part worth keeping: the section
+        # rendered, three rows appeared, the words were right, and
+        # `test_mode_strip` stayed green throughout - because no test presses a
+        # menu row. A control that looks right and acts on nothing else is the
+        # dead-control class this file keeps meeting.
+        for key, word, _line, _icon in self._STYLES:
+            style.append(word, f"app.reply-style::{key}")
+        menu.append_section("How it replies", style)
+
+        button.set_menu_model(menu)
+        button.set_tooltip_text("Which model answers, and how it replies")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL],
+            ["Which model answers, how it works it out, how it replies"])
         return button
 
     def _capability_chip(self) -> Gtk.MenuButton:
@@ -981,6 +1059,20 @@ class _ModeStrip(Gtk.Box):
                        self._read_plan(), self._PLAN,
                        "Whether it plans first", quiet=("working",),
                        image=self._plan_image)
+            # **Drawn here, not on the strip.** `_draw` sets the word, the
+            # icon, the highlight and the tooltip; the menu was built once in
+            # `_answer_button` and `_draw` never touches it. The tooltip is
+            # then completed with the two settings the word does not carry, so
+            # hovering answers all three questions the menu holds.
+            model_rows = self._model_rows()
+            self._draw(self._answer_button, self._answer_label,
+                       self._read_model(), model_rows,
+                       "Which model answers", image=self._answer_image)
+            if model_rows:
+                self._answer_button.set_tooltip_text(
+                    f"Which model answers: {self._answer_label.get_text()}. "
+                    f"{self._answer_tooltip('Whether it plans first', self._read_plan(), self._PLAN)}. "
+                    f"{self._answer_tooltip('Reply style', self._read_reply_style(), self._STYLES)}.")
             self._draw(self._ambient_chip, self._ambient_label,
                        self._read_ambient(), self._AMBIENT,
                        "When it may act", quiet=("on-ask",),
@@ -1108,6 +1200,16 @@ class _ModeStrip(Gtk.Box):
             f"{self._answer_chip.get_tooltip_text() or 'Where it may go'}. "
             f"{message}")
         logger.warning("mode strip: %s", message)
+
+    def _answer_tooltip(self, what: str, current: str, table) -> str:
+        """`"Whether it plans first: Plan"` - from the table, not by hand.
+
+        A fourth hand-written copy of these words is how a control ends up
+        saying something the menu beside it does not offer, which is the same
+        defect `test_menu_labels_are_words.py` exists to catch on the menus.
+        """
+        row = next((r for r in table if r[0] == current), None)
+        return f"{what}: {row[1]}" if row else what
 
     def _draw(self, chip, label, current, table, what, quiet=(),
               image=None) -> None:
@@ -2059,6 +2161,37 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # widgets that can disagree.
         self._mode_strip = _ModeStrip(self._app, self._config)
         main_box.append(self._mode_strip)
+
+        # **The answer controls ride with Send rather than sitting above it.**
+        # Measured at the size this window opens at: the composer row is 496px
+        # and holds two 34px buttons around 412px of typing room, so this is the
+        # one place on screen with width to spend - and the strip above it has
+        # none left (480px of 496px across five chips).
+        #
+        # `insert_child_before`, not `append`, so the control lands *before*
+        # Send rather than after it. It is already constructed by the strip's
+        # `__init__`; this only re-parents it, so nothing about how it works or
+        # what it writes changes.
+        answer = self._mode_strip._answer_button
+        # **A `Gtk.Box` has `append`, `prepend`, `insert_child_after` and
+        # `remove` - and nothing else.** `insert_child_before` is a
+        # `Gtk.ListBox` method and `reorder_child` belongs to `Gtk.Grid` and
+        # `Gtk.FlowBox`; both raise `AttributeError` on window build, which is
+        # how two earlier versions of this line took the whole window down.
+        # Checked with `hasattr` rather than remembered.
+        #
+        # So: find whatever currently sits immediately before Send, and insert
+        # after it. That is the same statement as "beside Send", expressed in
+        # the one method a box actually has.
+        previous = None
+        child = input_row.get_first_child()
+        while child is not None and child is not self._send_button:
+            previous = child
+            child = child.get_next_sibling()
+        if previous is None:
+            input_row.prepend(answer)
+        else:
+            input_row.insert_child_after(answer, previous)
 
         # The task card, above the composer: OpenHands and cline both keep the
         # plan in the conversation rather than behind a panel, because a plan

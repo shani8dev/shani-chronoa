@@ -22470,3 +22470,84 @@ The evidence above is **the seven real PNGs scored by the driver's own extracted
 functions**, plus 15 tests and 5 mutations. An end-to-end pass needs a renderer
 that runs, and saying otherwise is the confident wrong answer this file has
 recorded against its own harness four times.
+
+## One answer control beside Send, because the strip measured full (2026-10-13)
+
+Measured on a real window at the size it opens at, **before** any change:
+
+```
+window 460x640, chat column 496x566
+mode strip   496x40   5 chips totalling 480px   -> 97% of the column
+  General(91)  Ask first(93)  Working(94)  Here(75)  Nothing leaves(127)
+composer row 496x34
+   attach 34  |  composer 412  |  send 34    -> exactly full, two controls
+```
+
+**That is why the model switch had no home.** `_model_chip` and `_style_chip`
+were constructed and **never appended** - the row had no room, so "which model
+answers" was reachable only through the palette, which is this file's own
+"a control whose only path is a keyboard shortcut nobody has been told about is a
+control that is not there". The composer row was the opposite: two 34px buttons
+around 412px of typing room.
+
+**The shape is both other products' own, read from their documentation.**
+ChatGPT: *"In the model menu, GPT-6 replaces Latest... Use the **Thinking**
+slider to choose your effort"* - model and effort are **one** control. Claude
+titles its equivalent page *"Change the model, effort, and thinking settings"* -
+one surface, three settings. Qwen3 makes it a model choice outright:
+Instruct and Thinking are separate checkpoints and the switch is
+`enable_thinking`. And ChatGPT puts reply style in **profile -> Personalization**,
+*not* the composer - so "reply style in the send button" is the direction both
+move away from, and here it became a standing default inside one menu.
+
+So: **one `Gio.MenuButton` beside Send**, three sections - *Which model* /
+*How it works it out* / *How it replies* - each built from a table the module
+already keeps (`_model_rows()`, `_PLAN`, `_STYLES`), so no question is answered
+twice. Plan mode left the strip (5 chips -> 4). Egress and capability stayed,
+permanently worded: they are standing posture, and egress is the chip this file
+records as having once *lied* - reading "Cloud" while a provider answered.
+
+After, measured: strip **386px of chips**, the chat column **fits** (496 -> 455;
+it had been overflowing a 460px window, which is what the
+`AdwNavigationSplitView ... requested 524 px, 460 px available` warning was), and
+the control is a **constant 73px** - typing 290 at 460, 377 at 760, 575 at 1024.
+
+### The bug measurement caught and no test would have
+
+```python
+for _key, word, _line, _icon in self._STYLES:
+    style.append(word, f"app.reply-style::{key}")     # bare `key`!
+```
+
+`key` was still bound from the **model loop above**, so all three reply-style
+rows read `reply-style:qwen3-8b` - a style that does not exist, on every row.
+**Nothing caught it.** `test_mode_strip` stayed green throughout: the section
+rendered, three rows appeared, the words were right, and no test presses a menu
+row. Found by reading the built menu's **targets** rather than its appearance,
+which is the only instrument that sees it. Restoring the defect fails
+`test_each_row_carries_its_own_target` (1 failed, 10 passed), file restored
+byte-identical.
+
+### Four guessed APIs in one afternoon, all of them wrong
+
+`Gtk.Box.insert_child_before` (a **`Gtk.ListBox`** method), `Gtk.Box.reorder_child`
+(**`Gtk.Grid`/`Gtk.FlowBox`**), `Gio.Menu.get_section`, and
+`Gio.Menu.get_item_attribute` (it is **`get_item_attribute_value`**). The first
+two took the whole window down on build; the last two killed the probe, since an
+exception inside a `GLib` timeout **aborts the process silently** rather than
+printing. Checked with `hasattr` before the fourth, which is the rule this file
+keeps re-learning: *a class does not have every method its neighbours have.*
+
+### A correction, because the wrong claim was mine
+
+I reported the strip as **five unlabelled icons**. It is not - the chips carry
+words. That reading was taken before the relayout and was stale; forcing
+`set_compact` both ways returns identical measurements, 480px and 5/5 labels
+visible. There is no icon-only defect and none was fixed.
+
+**Not claimed:** how this looks. `CHRONOA_FORCE_SIZE=1` still blanks the main
+window above 460px, so a render would be a frame around nothing. Everything here
+is allocation at 460/760/1024, which is measurable; the picture is not yet.
+
+266 passed across 11 files (the 8 strip/composer suites, the layout contract,
+the member sweep and the model picker), no regressions.
