@@ -21689,3 +21689,94 @@ this file records needing a positive control.
 **Recorded rather than fixed**, because a fix to the capture path cannot be
 verified on this box while every display is cold, and an unverified fix to the
 one thing every render depends on is worse than the gap.
+
+
+## Four abstracts read whole, and they say the thing the probe measured (2026-10-13)
+
+The `Result.abstract` field added earlier today is now carrying its weight. The
+papers this file had recorded **by title only** - because the old tool truncated
+the abstract to a tail - have been read. The result is not a list of cautions
+any more; it is one finding from four directions, and **it is the finding the
+grammar probe measured on this box**.
+
+### The alignment-tax paper (arXiv:2604.06066) describes the probe's result
+
+*From Hallucination to Structure Snowballing*, Qwen3-8B, Outlines-based
+constrained decoding over structured reflection. In its own words: imposing
+structural constraints **"does not improve self-correction performance"**; it
+instead triggers a failure mode they name **structure snowballing**, where **"the
+cognitive load required to satisfy strict formatting rules pushes the model into
+formatting traps"**. And the sentence that matches this repository's probe
+exactly: the agent **"achieves near-perfect superficial syntactic alignment yet
+fails to detect or resolve deeper semantic errors."**
+
+The probe measured: schema allowing exactly one value, question about the
+weather, model answers `get_datetime` - the one value it was allowed, having
+already decided the question was not about the time. **Near-perfect superficial
+syntactic alignment, no semantic gain.** That paper reached it on
+self-correction at 8B; this reached it on tool choice at **1.7B**. Same finding,
+independent route. It is no longer a caution imported from elsewhere - it is a
+prediction this box confirmed.
+
+### The control arm was predicted to be where the effect lives
+
+*Structured Output Collapses Answer Diversity Across 44 Language Models*
+(arXiv:2607.18476), read whole this time. The 31 prompts, 44 models, and the
+numbers: modal answer **41% -> 64%**, distinct answers **52 -> 36**, mean
+answer-choice surprisal **1.80 -> 1.58 bits**, all from **"Reply with JSON
+only"** - *no schema, no enforcement, just the request*.
+
+The clause that decided the design of `+greedy+request`: **"Enforcing the schema
+at the decoder (response_format) compresses no further than the request (-0.03
+bits)."** The collapse lives in the model's response to the **register**, not in
+the decoder. So if there is any effect to find at all, the control arm is where
+it is, and a grammar-only measurement would have read as a decoder result what
+the paper says is a register result.
+
+**And the direction of that effect is against a tool chooser specifically.**
+They call it **"a sharpener, not a re-indexer"** - the plain-chat answer survives
+in 28 of 31 categories - and JSON **"shifts 53% of a model's stable chat defaults,
+mostly back to the crowd"**. For a tool chooser the mode is **the most common
+tool**, not the right one. That is precisely the failure `tool_select`'s plain
+word overlap already produces, arriving from the other direction: a collapsed
+distribution falls back on the mode.
+
+Also worth keeping: the compression is **format-specific** - JSON -0.22 bits
+(p=.0002), XML -0.19 (p=.002), **absent for YAML and CSV**, and **reversed** for
+an arbitrary bracket wrapper (+0.13, p=.009) - which is why they weigh it toward
+tool-use post-training.
+
+### AdapTrack's numbers, now read rather than cited
+
+arXiv:2510.17376 in full: constrained decoding **"distorts the model's output
+intent, forcing it to produce code that may satisfy the constraint but does not
+match the development intent and is therefore incorrect."** Improvement from
+*not* distorting, over constrained decoding: **360.87%** on a synthetic API
+completion dataset, **38.93%** on a real-world one they collected, **7.84%**
+HumanEval, **6.42%** MBPP. The earlier entry quoted these from a summary; they
+are now read from the abstract.
+
+### The actionable finding, and it is not the grammar
+
+**Schema-Key Wording as an Instruction Channel** (arXiv:2604.14862) - read whole:
+schema-key tokens **enter the autoregressive context** and act as an instruction
+channel; on GSM8K and Math500 across **seven** models, **changing only schema-key
+wording substantially affects accuracy, with both positive and negative effects**,
+and prompt-level and schema-level instructions interact **non-additively**.
+
+That is a cheap, untested lever this repository is sitting on. Chronoa's tool
+argument keys are English words chosen once (`place`, `when`, `text`, `action`,
+`seconds`) and **never A/B'd**. Given tool choice is the binding constraint and
+the grammar demonstrably cannot touch it, the schema's *wording* is the one
+channel in the literature that moves accuracy **without** a training run and
+**without** constraining the decoder. It is also the cheapest thing in this entry
+to test: same instrument, same cases, rename keys, measure.
+
+### What is read and what is not
+
+**Read: the four abstracts, in full, through the shipped tool.** These are
+abstracts - an author's own summary of their own experiments - not the papers.
+Not read: methods, tables, ablations, the actual per-task numbers behind the
+percentages, or the limitations sections. Every percentage above is quoted from
+an abstract and none is verified against a table. Nothing here should be read as
+a reproduction; it is a survey of claims, and the claims are attributed.
