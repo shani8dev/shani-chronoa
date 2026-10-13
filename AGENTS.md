@@ -1371,6 +1371,7 @@ points at exists on one disk until that disk is reused.
 | `HARVEST-EDGE0-DEEP.md` | edge0, deep pass | a hygiene suite that imports nothing; presets as measurements |
 | `HARVEST-PERSONAPLEX.md` | PersonaPlex | the audio-codecode quantizer; the loudness target, measured then built |
 | `HARVEST-DTA.md` | digital-travel-agent | the rules-file refusal; the approval-time replay guard |
+| `HARVEST-LINUX-HELLO.md` | linux-hello | one transfer, and it is a *seam* not a guard: a pure `plausible()` beside detection, so the face decision is testable without OpenCV. The anti-spoofing set, the IR liveness constants, raw V4L2, the warm daemon and the PAM profile are all refused with reasons. Recorded as a defect in the upstream: **face templates written world-readable (dir 0755, file 0644)** |
 | `HARVEST-BWRAP.md` | bubblewrap | the three sandbox protections that belong to the machine |
 | `HARVEST-MAZE.md` | Maze-AI | nothing; a short negative result |
 
@@ -23041,3 +23042,204 @@ serving cost on a 4-core CPU box. Three of those four say go.
 harness that would decide it exists and the numbers it needed are printed by
 `--dry-run`; a training loop that has never been run is the machinery-whose-only-
 purpose-is-to-report-success this file rules out.
+
+---
+
+## 2026-10-13 - Tool selection was paying 12 ms per request to re-read 256 descriptions
+
+Asked to "fix all, make it fast, time and space". The honest first move is that
+"all" is not a population I can guess at, so the instrument came first:
+
+**`tools/profile_hot_paths.py`** - every path a turn touches, **one subprocess
+each**, reporting wall time and peak RSS. Subprocess-per-item is the whole
+design: `ru_maxrss` is a high-water mark, so timing ten things in one process
+attributes the largest allocation to whichever ran last. Sorted by **cold**, not
+warm, because a warm number is a cache reading itself back and ranking a table
+by it puts the cheapest path first for the wrong reason.
+
+The table immediately showed two of its own entries lying:
+
+| it reported | the truth |
+|---|---|
+| `learning_load` 0.0001 s | `_EXAMPLE_CACHE` serving a repeat. Cold read: **0.25 s** |
+| `guardrail_check` 0.566 s cold | that is **module import**, not the path. Warm: 0.0039 s |
+| 4 probes `ERROR` | I had guessed four signatures. See below. |
+
+### The one that was actually hot
+
+**`select_tools`: 12.4 ms per request.** On the path of every single request, and
+`cProfile` put 8.1 s of its 11.6 s in one chain:
+
+```
+_tool_text -> _words -> _stem     8.129 s cumulative
+_tool_text called 57,344 times    = 256 per request, re-tokenising every
+                                    description on every turn
+_stem called 2,907,161 times      = once per word, per tool, per request
+```
+
+Every one of those numbers is a **constant per tool** being recomputed per
+request. Four separate fixes, all the same mistake:
+
+1. **`_tool_text`/`_tool_options` cached per tool** - keyed on the tool's own
+   *content* (`name`, description text, enum values), not on `id()`: a schema
+   edited in place keeps its identity, and an identity-keyed cache would go on
+   describing the old one. 12.56 -> **5.66 ms**.
+2. **`body` is a `frozenset`, not a list.** `ranked()` tests `w in body` once per
+   request word per tool; against a ~200-word list that is a linear scan, in the
+   one loop that has to be O(1).
+3. **`df`/`option_df`/`texts`/`options` cached per tool *set*** - 2,133 and 378
+   entries, **0.07 MB**, built in 0.9 ms, and they were being rebuilt on every
+   request to produce numbers that only change when a schema does.
+4. **`_cap_to_window` stops re-serialising the selection.** `_fits` is
+   `len(json.dumps(request_tools))` and the drop loop called it once per
+   candidate: **25 `json.dumps` of a ~17 KB selection per request**, to add up
+   integers that were already known.
+
+Plus two more found by re-profiling what was left: `select_tools` built the
+corpus **twice** per request (512 `_tool_facts` lookups for one corpus, 42% of
+the remainder), and `learned_weights()` re-derived `reliability` over every
+durable record **on every request** (30% of the remainder) even though
+`_durable_records` returns the *same list object* until a chunk moves.
+
+**12.4 -> 1.80 ms per request. 6.9x. Behaviourally identical: 0 of 225 real
+selections differ from HEAD**, verified by loading HEAD's module beside the new
+one with `learned` pinned on both sides.
+
+The space is a **1.86 MB** cache held for the life of the process, replacing 220
+requests' worth of the same allocation churn per turn. (7 MB was my first guess,
+written into the docstring before measuring; 1.86 is what `tracemalloc` says.)
+
+### Two ways this tried to pass as done
+
+**I measured `fn` where `_fits` measures the schema.** `{"type": "function",
+"function": {...}}` - the wrapper is **34 chars per tool, 95.4% of the true
+size** (180,280 of 188,984), and a selection of eight handed back ~68 tokens of a
+2048 window it had already spent. Caught by `test_a_selection_fits_the_smallest_window`.
+
+**The test I wrote for it could not have caught it.** Asserting that the new
+arithmetic equals `len(json.dumps(kept))` compares the arithmetic against *the
+same set the arithmetic produced* - it agrees with itself about a set it
+mis-measures. So there are two pins, not one: one for the **formula** (brackets,
+separators) and one for the **size** (`chars_by_name[name] == len(json.dumps(tool))`).
+
+And the first version of the formula pin **re-derived the arithmetic inside the
+test**, which proves nothing about the code. Measured: dropping the brackets
+from `_selection_chars` left it **green**. So the arithmetic is now a named
+function the cap calls and the test calls, and the reason is in its docstring.
+
+### 19 mutations: 10 caught, 3 verified equivalents, 6 that change nothing observable
+
+**Three of my mutation runs were false cleans and every one of them looked
+exactly like a pass.** Worth listing, because the failure is always silent:
+
+* an anchor that was in `tool_select.py` while I passed `learning.py` - "all
+  passed", meant nothing, re-run by hand: **caught**;
+* an anchor that matched **twice** - the assert fired, the mutation never
+  applied, and the run reported the baseline's 53 passed. Re-run with a unique
+  anchor: **caught** (5 failed);
+* four mutations after a snapshot where I forgot `tests/conftest.py`, so
+  `shani_chronoa` was not importable and **pytest errored at collection** - four
+  rows of empty output that a careless read would have called four survivors. The
+  baseline in that same batch printed nothing, which is the tell.
+
+The equivalents were **verified by construction, not asserted**: `body` as a
+list gives an identical digest across all 225 selections (2.34 vs 2.14 ms), and
+`==` instead of `is` on the two caches is equivalent because equal-but-distinct
+inputs produce equal answers. Six change nothing observable - three disable a
+cache outright (speed only, and pinning them means a timing assertion), and one
+narrows the new oracle's budget sweep from eleven budgets to one, which weakens
+the test without touching the code.
+
+### `_fits` is no longer called, so it is the oracle instead of dead code
+
+Replacing the serialising call left `_fits` defined and unreferenced - and a
+definition that documents what "fits" means stops being checked the moment it
+stops being read. So it is now the **oracle**: `test_the_fast_path_agrees_with_
+the_function_it_replaced` sweeps `_selection_chars` against it at eleven budgets
+over all 225 real selections, because both sides do the same integer division and
+an off-by-`2*k` is invisible at the one budget where the selection happens to
+fit. A guard pointing at nothing is not a guard; pointing it back at the function
+it replaced is what makes it one.
+
+### The last one was invisible until the two variants were interleaved
+
+`idf` depends on the request word and the corpus, not on the tool - and it was
+being computed **inside** the per-tool loop, so each of ~10 words had its
+`math.log` and its dictionary lookup done **256 times**: ~2,560 of each per
+request, to produce ten numbers. Hoisting it is provably identical output and
+strictly fewer operations.
+
+Measured once against the recorded 1.68 ms: **1.66 - within noise.** So the
+arithmetic said ~0.13 ms should be there and the number said it was not, and
+neither of those is a measurement. Interleaving both variants, three rounds
+alternating:
+
+| | median | best |
+|---|---:|---:|
+| inline | 1.693 / 1.720 / 1.696 | 1.61 / 1.66 / 1.67 |
+| **hoisted** | **1.624 / 1.618 / 1.579** | **1.58 / 1.56 / 1.54** |
+
+**~4.7%, real and consistent, winning every round** - and a single before/after
+against a remembered number had reported it as nothing. On a 1.6 ms measurement,
+run-to-run drift is larger than the effect; only alternating the two builds
+separates them. Worth saying plainly because the first measurement was
+**correctly executed and useless**, which is a different failure from a wrong one.
+
+### Then the space half, which found a leak of my own making
+
+Having bounded the corpus cache I checked whether I had bounded the one above
+it. **I had not.** `_TOOL_FACTS` was keyed on schema *content*, so every schema
+ever edited, installed, or generated by the Workbench was a key it had never seen
+- and an unbounded dict keeping all of them, ~7 KB of stemmed words each, for the
+life of the process. Bounded at 1024: the live registry is 256, so normal use
+never reaches it.
+
+Two more were pre-existing and the same shape. `learning._EXAMPLE_CACHE` and
+`learning._HISTORY_CACHE` are both keyed by **path** and neither was ever
+evicted. Measured with real log lines: **98 KB retained per distinct path**,
+one entry at a time. Production has one log so this costs nothing there, but a
+test run builds thousands of temporary logs and would hold every one of them to
+the end. All three bounded now, and `_HISTORY_CACHE` matters more than its size
+suggests: it is the **per-request** advisory read, so its entire job is not
+redoing work for a log that is not moving - which is one entry, not an unbounded
+number of them.
+
+### The fourth false clean, and it was mine again
+
+Bounding `_HISTORY_CACHE` wrote a test that **named log paths without ever
+writing the files**. `_durable_records` stats every chunk and returns `None` on
+`OSError` *before* it reaches the cache, so the dict stayed empty and the
+assertion passed with the bound deleted - three mutations survived it. A probe
+that did write the files grew to 10 and failed, which is what found it.
+
+That is the same failure as the three above and the same lesson: **a check on a
+cache that was never written to is not a check.** The test now writes the file
+and asserts the read came back non-`None`, so "nothing happened" cannot pass as
+"nothing grew".
+
+After the fix all three bounds are caught, and the mutations that survive are
+`clear()` in place of `pop(next(iter(...)))` - evicting everything instead of one
+entry. That is thrashing, not behaviour, so it is recorded as an equivalent
+rather than pinned; pinning it would mean asserting on cache *hit rate*, which is
+a timing measurement wearing a correctness costume.
+
+### Two things measured and deliberately not changed
+
+**The selection budget is not a hard ceiling, and my test had claimed it was.**
+"Click." finishes at **1,936 tokens against a 1,536 budget**: `browse` is ~850 on
+its own and is protected, because a request that cannot be answered without a
+browser is sent with one. Confirmed on **HEAD, unchanged by this work**. The
+honest invariant is *fits, or nothing droppable was left*, and
+`protected_for()` is now a named function so the test asks the code rather than
+re-deriving it. Asserting a flat "always fits" would have been red on this
+machine before a line changed.
+
+**`learning._entries()` is 117 MB for a panel refresh, and capping it would
+reintroduce the rotation bug.** Its whole documented purpose is that a reader
+seeing a shrinking slice of history is the failure - one rotation once made it
+return 1 record of 19,111 and say nothing. Six callers train on the whole
+history. Reported, not fixed.
+
+Sparse against dense, measured with `getsizeof` and extrapolated, because the
+factor is the entire argument for the sparse form: **18,796 records would be
+9.86 GB dense against 5.41 MB sparse, 1,821x less.**
