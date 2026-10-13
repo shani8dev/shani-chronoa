@@ -255,3 +255,103 @@ def test_the_open_folder_button_launches_the_file_manager(monkeypatch, tmp_path)
                     if isinstance(c, type) and hasattr(c, "_on_path_clicked"))
     view_cls._on_path_clicked(None, None, target)
     assert launched == [target.parent.as_uri()]
+
+# --- the category filter -----------------------------------------------------
+# Everything above this line asks whether a surface *builds*. This asks whether it
+# *responds*, and the gap between those two questions is where this was hiding:
+# the Artifacts panel built perfectly, four category buttons rendered, and every
+# one of them was connected to `pass`.
+
+def _one_artifact_per_category(artifact_store, categories=("document", "export",
+                                                           "model", "voice")):
+    import datetime
+    from pathlib import Path
+    return [
+        artifact_store.Artifact(
+            name=c, path=Path("/tmp") / c, category=c, size=1,
+            modified=datetime.datetime(2026, 1, 1), checksum=None,
+            description="d")
+        for c in categories]
+
+
+def _view_with_artifacts(monkeypatch, artifact_store):
+    """The view built through its real constructor.
+
+    **`_ArtifactStoreView(app=None)`, not `__new__`.** An earlier version of this
+    probe bypassed `__init__` - which is exactly where the fix lives, the filter
+    being wired to the view's handler - and so reported the buttons still inert
+    after the change. The wiring is the thing under test, so it has to run.
+    """
+    fake = _one_artifact_per_category(artifact_store)
+    monkeypatch.setattr(artifact_store, "_discover_artifacts", lambda home: list(fake))
+    return artifact_store._ArtifactStoreView(app=None), fake
+
+
+def test_a_category_button_actually_filters(monkeypatch):
+    """**All four buttons were connected to `pass`.**
+
+    `_CategoryFilter` builds the buttons and connects them to its own handler,
+    whose whole body was `pass  # Rendering is handled by the view`. The handler
+    that *does* filter lives on `_ArtifactStoreView` and was connected to nothing.
+
+    Measured before the fix, driving the real widgets: clicking a category left
+    `_selected_category` at `"all"` and the visible set at all four artifacts.
+
+    Nothing about this is visible to a build-a-widget test, which is why the
+    panel could look finished and filter nothing.
+    """
+    from shani_chronoa.gui.surfaces import artifact_store
+    view, fake = _view_with_artifacts(monkeypatch, artifact_store)
+
+    assert len(view._filtered) == len(fake)
+
+    view._category_filter._buttons["document"].set_active(True)
+
+    assert view._selected_category == "document", (
+        "ticking a category did not reach the view: selected=%r"
+        % view._selected_category)
+    assert [a.category for a in view._filtered] == ["document"], (
+        "the category filter is not filtering: %r"
+        % [a.category for a in view._filtered])
+
+
+def test_unticking_the_last_category_shows_everything_again(monkeypatch):
+    """**The second defect, in the handler that was never connected.**
+
+    It assigned `_selected_category` only inside `if btn.get_active()`, so with no
+    button active the previous category survived. Ticking **Document** and then
+    unticking it left the panel filtered to Document, and there was no way back to
+    all four without reloading.
+
+    Measured before the fix: tick Document -> "document"; untick -> still
+    "document".
+    """
+    from shani_chronoa.gui.surfaces import artifact_store
+    view, fake = _view_with_artifacts(monkeypatch, artifact_store)
+    button = view._category_filter._buttons["document"]
+
+    button.set_active(True)
+    assert view._selected_category == "document"
+    button.set_active(False)
+
+    assert view._selected_category == artifact_store.ArtifactCategory.ALL.value, (
+        "unticking the only active category left the panel filtered to %r"
+        % view._selected_category)
+    assert len(view._filtered) == len(fake), (
+        "unticking did not bring the hidden artifacts back: %d of %d"
+        % (len(view._filtered), len(fake)))
+
+
+def test_the_filter_stays_wired_after_a_rebuild(monkeypatch):
+    """The control: the handler is connected *once*, in the constructor, so this
+    is a second view rather than the same one twice - otherwise the first two
+    tests would pass on a filter that only worked while a flag was still set."""
+    from shani_chronoa.gui.surfaces import artifact_store
+    first, _ = _view_with_artifacts(monkeypatch, artifact_store)
+    second, fake = _view_with_artifacts(monkeypatch, artifact_store)
+
+    assert second._category_filter is not first._category_filter
+    second._category_filter._buttons["voice"].set_active(True)
+
+    assert second._selected_category == "voice", second._selected_category
+    assert [a.category for a in second._filtered] == ["voice"]

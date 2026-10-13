@@ -272,8 +272,23 @@ class _CategoryFilter(Gtk.Box):
             self._buttons[cat] = btn
             self.append(btn)
 
+    #: **Set by the view, which owns what is shown.** This handler used to be
+    #: `pass`, so every button was connected to a no-op: ticking a category
+    #: changed the button and nothing else. Measured - `_selected_category` is
+    #: written in one place only, inside the view's own copy of this handler,
+    #: and that copy was connected to nothing, so it stayed `"all"` for the
+    #: life of the window and the filter never filtered.
+    on_toggle = None
+
     def _on_category_toggled(self, button: Gtk.ToggleButton) -> None:
-        pass  # Rendering is handled by the view
+        """Hand the click up.
+
+        The filter owns the buttons and knows which one is active; the view
+        owns `_selected_category` and `_apply_filters`. This is the whole of
+        the connection between them.
+        """
+        if self.on_toggle is not None:
+            self.on_toggle(button)
 
 
 class _ArtifactRow(Gtk.Box):
@@ -417,6 +432,10 @@ class _ArtifactStoreView(Gtk.Box):
         filter_section.append(filter_label)
         
         self._category_filter = _CategoryFilter()
+        # **Without this the four category buttons are inert.** The filter
+        # builds them and connects them to its own handler, which did nothing;
+        # the handler that filters lives here and was connected to nothing.
+        self._category_filter.on_toggle = self._on_category_toggled
         filter_section.append(self._category_filter)
         
         self.append(filter_section)
@@ -509,11 +528,20 @@ class _ArtifactStoreView(Gtk.Box):
             self._show_error(f"Failed to load artifacts: {exc}")
 
     def _on_category_toggled(self, button: Gtk.ToggleButton) -> None:
-        # Update selected category
+        """Recompute which category is showing from the buttons, every time.
+
+        **Unticking the last one goes back to `ALL`.** This assigned only
+        inside `if btn.get_active()`, so with no button active the previous
+        category simply survived - and the list could never return to showing
+        everything. Measured before this change: tick **Document**, untick it,
+        and `_selected_category` stayed `"document"`.
+        """
+        selected = ArtifactCategory.ALL.value
         for cat, btn in self._category_filter._buttons.items():
             if btn.get_active():
-                self._selected_category = cat
+                selected = cat
                 break
+        self._selected_category = selected
         self._apply_filters()
 
     def _on_search_text_changed(self, entry: Gtk.Entry) -> None:
