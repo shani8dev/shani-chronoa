@@ -23472,3 +23472,30 @@ listening"* and I was one command from duplicating it. And I reported "10
 panels are ungrouped", which was my own tool being wrong: `DEFAULT_SECTION`
 assigns them deliberately. **Reading a design is not the same as reading the
 current design.**
+
+## Two claims of mine about the sidebar taxonomy were both wrong (2026-10-13)
+
+I told the user *"Senses is not under Sensing"* - that a newcomer looking for
+the `senses` panel under the `Sensing` heading would not find it there. **It is
+under it.** `DEFAULT_SECTION` maps `"senses": "Sensing"`, and measured through
+`sections()` itself:
+
+    senses -> Sensing
+    every panel lands in a section: True
+    Remembering 6 · Acting 9 · Sensing 6 · Health and trust 6 ·
+    Phone and remote 4 · Thinking 3
+
+**This is the second time the same mistake, and the cause is worth writing
+down.** Both times a quick script of mine read `SECTION` out of each surface
+module and reported the panels that lacked one - and both times it reported ten
+of them as ungrouped, which `DEFAULT_SECTION` exists precisely to prevent. The
+table's own docstring says it is *"a deliberate table rather than a guess"*, and
+I read the modules without reading the function that consumes them.
+
+**A panel with no `SECTION` of its own is not a panel with no section.** The
+declaration is an override, not a requirement, and a script that treats an
+override as the whole of a rule will invent a defect in the same place twice.
+
+So: no placement defect, nothing to fix, and the four title renames in the
+previous commit were checked against `available_surfaces()` - the real
+consumer - rather than against a grep. **Ask the function, not the source.**
