@@ -23499,3 +23499,38 @@ override as the whole of a rule will invent a defect in the same place twice.
 So: no placement defect, nothing to fix, and the four title renames in the
 previous commit were checked against `available_surfaces()` - the real
 consumer - rather than against a grep. **Ask the function, not the source.**
+
+## Measured at last: the sidebar rasterises and the conversation pane does not (2026-10-13)
+
+After `733109f` repaired `TranscriptView.__init__`, `main` rendered for the
+first time all session and the picture could be looked at. **It looked wrong**,
+and the wrongness measured:
+
+    SIDEBAR   alpha 255 across all 16,000 samples; (73,73,73), (57,57,57)
+    CONTENT   alpha 0 across 38,329 of 47,000 samples - **82% unpainted**
+              alpha 20 for 2,805; alpha 255 for 1,933
+
+**So the conversation pane is not washed out. It is absent.** What reads as faint
+grey text on near-white is the eighteen percent that was drawn, at low alpha,
+over transparency - and the gate scored the capture 53% because the modal
+colour in the image is transparent black, so every opaque sidebar pixel counted
+as content. **The gate answered a question nobody asked**: "is there a picture"
+rather than "is the whole window in it".
+
+Why the split: `Adw.NavigationSplitView` paints its own sidebar, and
+`self.set_content(self._split)` means `window.get_content()` **is the split
+view** - so snapshotting it gets the chrome and the sidebar and nothing of the
+`Adw.NavigationView` inside it, whose page the toplevel paints separately.
+The content-first candidate is therefore **neutral**, not the fix; I cannot
+attribute `main` rendering to it, and the window rendering at all is `733109f`.
+
+**What the fix needs**: the capture has to reach the widget inside the split
+view's content, which is the case the `_deepest_node` walk exists for - except
+the walk returns the *first* child that answers, and the sidebar answers first.
+So the walk needs the ranking that returned `best=-1` on the one run where it
+was tried, and that run cannot now be repeated to tell whether the ranking was
+wrong or the box was.
+
+**Recorded rather than guessed at a third time.** Two attempts at this have
+already been reverted, and this entry is the measurement that says what any
+next attempt has to beat.

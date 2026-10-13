@@ -238,6 +238,28 @@ def _deepest_node(widget, width, height, depth=0):
     answers whenever it answers at all, and the walk exists only for the windows
     where it does not.
     """
+    # **Try the window's *content* before the window.** `Adw.ApplicationWindow`
+    # overrides `snapshot()` to draw the window's own chrome - the rounded
+    # background - and stops there; the content is drawn by the toplevel, not by
+    # the window's snapshot vfunc. So `_snapshot(window)` answers, every time,
+    # with the chrome and none of the 948 widgets under it. **The node is real
+    # and the node is not a picture**, which is the same sentence as the mode
+    # strip's and the gate's, arrived at three times now.
+    #
+    # **Only where the widget has content.** `get_content()` is a `Gtk.Window`
+    # method; a panel is not a window and has none, so this cannot replace the
+    # walk below - it can only stop the window answering with its own frame.
+    if depth == 0:
+        try:
+            inner = widget.get_content()
+        except Exception:                 # noqa: BLE001
+            inner = None
+        if inner is not None:
+            content_node = _snapshot(inner, width, height)
+            print(f"CONTENT NODE {'yes' if content_node is not None else 'no'}",
+                  flush=True)
+            if content_node is not None:
+                return content_node
     node = _snapshot(widget, width, height)
     if node is not None:
         return node
