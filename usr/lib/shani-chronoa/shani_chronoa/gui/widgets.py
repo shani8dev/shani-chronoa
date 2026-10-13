@@ -803,8 +803,25 @@ class TranscriptView(Gtk.ScrolledWindow):
         starter row could never be hidden. **A check that cannot run and is
         caught becomes a check that always passes**, and it passed in the
         direction that made the new feature look working.
+
+        **The second version was worse and was also a check that cannot run.**
+        `self._rows` is a `Gtk.Box`, and both spellings this reached for are
+        GTK3: `len(box)` raises `TypeError` and `box.get_children()` raises
+        `AttributeError`. Measured on this box:
+
+            len(Gtk.Box())          -> TypeError: object of type 'Box' has no len()
+            Gtk.Box().get_children() -> AttributeError: 'Box' object has no
+                                        attribute 'get_children'
+
+        So this raised on **every** call, and every caller caught it.
+
+        **The answer is the turn list, not the widget.** `_rows` holds the
+        empty-state furniture as well as turns - `show_placeholder()` puts the
+        prompt, the shortcut hints and the `SuggestionBar` in it - so even a
+        correct GTK4 spelling would answer "not empty" on a fresh window. The
+        question is about turns, and `_turns` is the list of them.
         """
-        return len(self._rows.get_children()) == 0
+        return not getattr(self, "_turns", None)
 
     def _connect_theme_changes(self) -> None:
         """Re-colour the code blocks when the desktop switches light/dark.

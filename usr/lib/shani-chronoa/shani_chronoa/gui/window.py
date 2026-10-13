@@ -1247,12 +1247,6 @@ class _ModeStrip(Gtk.Box):
         chip.update_property(
             [Gtk.AccessibleProperty.LABEL], [f"{what}, currently {word}"])
 
-#: How many starter chips the empty state shows. **Five, not thirty-four**:
-#: the row's job is to show that asking is something you do here, and a wall of
-#: chips on the main screen would be the wall it was added to dissolve.
-_STARTER_CHIPS = 5
-
-
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
                     Adw.ApplicationWindow):
 
@@ -1881,30 +1875,42 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._detail_label.set_visible(False)
         main_box.append(self._detail_label)
 
-        # **The empty state's answer to "what can I ask?"**
+        # **The empty state's answer to "what can I ask?" is inside the
+        # transcript**, not here, and this is where that decision is recorded
+        # because the row that used to live here was the wrong half of it.
         #
-        # Thirty-four panels across seven groups is a wall, and the composer's
-        # placeholder said only "Type a message…". So the person a newcomer most
-        # is - one who has just finished setup and wants to know what the thing
-        # can do - had to guess a question and then read a list to find out
-        # whether they had guessed right. That is the wrong order: the list is
-        # the answer and it was behind the guessing.
+        # There were two of them. This one showed five chips built from
+        # `available_surfaces()` - the panel titles. `TranscriptView`'s own
+        # `SuggestionBar` shows six, built from `capabilities.startup_suggestions`
+        # and gated on the live skill registry, so a skill that is not loaded is
+        # never offered. Measured, side by side, on a real window:
         #
-        # **Built from the registry, so it cannot go stale.** A hand-written
-        # list of examples would be wrong the day a panel was added - and the
-        # wrongness is invisible, because an example that no longer works still
-        # reads as a sentence. `available_surfaces()` is the same source the
-        # sidebar reads, so this row and the sidebar cannot disagree about what
-        # exists. It is the panel titles, which are the one description of a
-        # panel that is already kept true next to it.
+        # | | this row | the SuggestionBar |
+        # |---|---|---|
+        # | chips | 5 | 6 |
+        # | words | `Conversations, Compare, My files, Meetings, Phone link` | `Battery left?, What time?, Set a timer, Which model?, Search the web, Screenshot` |
+        # | gated on | which panels exist | which **skills** are installed |
+        # | shown | **never** - see below | yes |
+        # | fit measured | no | 149px of a 162px viewport |
         #
-        # **Clicking asks, it does not navigate.** Filling the composer and
-        # sending is the demonstration; opening a panel teaches that panels are
-        # a separate shape of thing, and a newcomer who has only ever opened
-        # panels never learns that they can just ask. So the chip puts the
-        # question in the box and puts the caret in it.
-        self._starter_row = self._build_starter_row()
-        main_box.append(self._starter_row)
+        # **The panel titles teach the wrong thing.** "What can I ask?" is
+        # answered by questions, and a list of page names answers "what can I
+        # look at". For an app whose pitch is 256 named skills, the chips that
+        # name panels point a newcomer at the panels.
+        #
+        # **And this row could not have shown anyway**, which is why the two
+        # coexisted rather than competing. Its gate was `TranscriptView.is_empty()`,
+        # and that called `self._rows.get_children()` on a `Gtk.Box` - a GTK3
+        # spelling that raises `AttributeError` on every call. The caller caught
+        # it and failed closed, so the row was permanently hidden while its own
+        # test file was green, because that file asserted on the *other* row.
+        #
+        # Fixing the emptiness check without removing this would have put two
+        # rows of questions on screen. So both happened together, and
+        # `tests/test_the_empty_state_is_one_answer.py` holds the result.
+        #
+        # `is_empty()` is still a public question and still answers it -
+        # a new empty state has somewhere to ask. It has no caller here.
 
         self._transcript = TranscriptView(
             config=self._config,
@@ -2222,7 +2228,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # widgets that can disagree.
         self._mode_strip = _ModeStrip(self._app, self._config)
         main_box.append(self._mode_strip)
-        self._refresh_starter_row()
 
         # **The answer controls ride with Send rather than sitting above it.**
         # Measured at the size this window opens at: the composer row is 496px
@@ -3177,80 +3182,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             return GLib.SOURCE_REMOVE
 
         GLib.idle_add(one, priority=GLib.PRIORITY_DEFAULT_IDLE)
-
-    def _build_starter_row(self) -> Gtk.Box:
-        """Chips that ask one question each, drawn from the surface registry.
-
-        **Nothing here is hand-written.** Every word comes from the `TITLE` the
-        panel already declares, so a panel that is renamed is renamed here in
-        the same commit and one that is added appears without anybody deciding
-        to add it.
-        """
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.set_halign(Gtk.Align.CENTER)
-        row.set_valign(Gtk.Align.CENTER)
-        row.set_visible(False)
-        try:
-            from shani_chronoa.gui.surfaces import available_surfaces
-
-            names = list(available_surfaces())
-        except Exception:                 # noqa: BLE001
-            logger.info("starter row: no surface registry to read", exc_info=True)
-            return row
-
-        # **A handful, not all thirty-four.** The point is to show that asking is
-        # a thing you can do here, not to replace the sidebar on the main
-        # screen - thirty-four chips is the wall this row exists to dissolve.
-        for name in names[:_STARTER_CHIPS]:
-            surface = available_surfaces()[name]
-            title = surface[0] if isinstance(surface, (tuple, list)) else str(surface)
-            chip = Gtk.Button(label=title)
-            chip.add_css_class("flat")
-            chip.add_css_class("dim-label")
-            chip.set_tooltip_text(f"Ask about {title}")
-            chip.update_property(
-                [Gtk.AccessibleProperty.LABEL], [f"Ask about {title}"])
-            chip.connect("clicked", self._on_starter_chip_clicked, name, title)
-            row.append(chip)
-        return row
-
-    def _on_starter_chip_clicked(self, _button, name: str, title: str) -> None:
-        """Put the question in the box, with the caret in it.
-
-        **It does not send, and it does not open the panel.** Sending would take
-        a turn on somebody's behalf from a click they meant as reading; opening
-        the panel would answer a different question than the one the chip
-        names. Filling the composer and focusing it keeps the next move theirs,
-        which is the whole point of the row.
-        """
-        try:
-            self._set_input_text(f"What can you tell me about {title.lower()}?")
-        except Exception:                 # noqa: BLE001
-            logger.debug("starter chip: composer unavailable", exc_info=True)
-        entry = getattr(self, "_input_entry", None)
-        if entry is not None:
-            entry.grab_focus()
-
-    def _refresh_starter_row(self) -> None:
-        """The row belongs to an empty conversation and nothing else.
-
-        **It is checked rather than remembered.** A boolean flipped at submit
-        time disagrees with the transcript the moment a turn is cleared, a
-        conversation is switched, or an undo removes the only message - and the
-        failure is a row of chips sitting under a full transcript, or a
-        newcomer left with no examples in a conversation that is empty.
-        """
-        row = getattr(self, "_starter_row", None)
-        if row is None:
-            return
-        try:
-            empty = self._transcript.is_empty()
-        except Exception:                 # noqa: BLE001
-            # **Fail closed - hidden, not shown.** If the question cannot be
-            # asked, the safe wrong answer is the one that adds nothing to a
-            # transcript that already has turns in it.
-            empty = False
-        row.set_visible(empty)
 
     def _show_surface(self, name: str) -> None:
         """Push a panel onto the content view.
@@ -4579,7 +4510,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _submit_input(self) -> None:
         """Send whatever is typed, from Enter or the button.
-        self._refresh_starter_row()
 
         Both call this rather than duplicating it, so the send button cannot
         drift from the key binding - the bug class where a control is wired to

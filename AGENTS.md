@@ -23707,3 +23707,76 @@ and turns a cosmetic defect into a window that vanishes with no error anywhere.
 `tests/test_palette_mode_entries_open.py` catches it, and honestly: not with an
 assertion but with `rc=139` and no summary line. **1 mutation, 1 caught, 0
 survivors** - by the strongest signal a mutation can produce.
+
+### The empty state had two answers to "what can I ask?", and one could not run (2026-10-13)
+
+`85c11ab` added `_starter_row` - five chips built from `available_surfaces()` -
+to the chat column above the transcript. `TranscriptView` already had a
+`SuggestionBar` of six chips in its empty state. So the question the newer row
+was written to answer had **two** answers on screen.
+
+**And the newer one had never been visible.** Its gate was
+`TranscriptView.is_empty()`, which asked `len(self._rows.get_children()) == 0`
+on a `Gtk.Box`. Measured on this box:
+
+    len(Gtk.Box())            -> TypeError: object of type 'Box' has no len()
+    Gtk.Box().get_children()  -> AttributeError: 'Box' object has no attribute
+                                 'get_children'
+
+**Both are GTK3**, so `is_empty()` raised on *every* call, and
+`_refresh_starter_row`'s fail-closed `except` turned that into "not empty". The
+row was permanently hidden from the day it shipped.
+
+**Its own test file was green throughout**, because it asserted on the *other*
+row - `test_the_empty_state_answers_what_can_i_ask.py`'s headline test walks
+the transcript for `.suggestion-chip` buttons. The watcher was pointed at the
+mechanism that works.
+
+`is_empty()` now answers its own docstring, which is about **turns**:
+
+    return not getattr(self, "_turns", None)
+
+A GTK4 spelling would still be wrong, and this is why: `show_placeholder()`
+puts the prompt, the shortcut hints and the `SuggestionBar` into `_rows` at
+construction, so `get_first_child() is None` reports a fresh window as **not**
+empty. A mutation of exactly that over-fix is in the set below and is caught.
+
+### The panel titles were the wrong half, measured rather than argued
+
+| | the starter row | the SuggestionBar |
+|---|---|---|
+| chips | 5 | 6 |
+| words | `Conversations, Compare, My files, Meetings, Phone link` | `Battery left?, What time?, Set a timer, Which model?, Search the web, Screenshot` |
+| gated on | which **panels** exist | which **skills** are installed |
+| shown | **never** | yes |
+| fit measured | no | 149px of a 162px viewport |
+
+"What can I ask?" is answered by questions; a list of page names answers "what
+can I look at". For an app whose pitch is 256 named skills, chips that name
+panels point a newcomer at the panels.
+
+**So it is a removal, and both halves had to land together.** Fixing the
+emptiness check alone would have put two rows of questions on screen the first
+time somebody pressed Enter on a new conversation. `is_empty()` stays public
+and still answers - a new empty state has somewhere to ask - and has no product
+caller, which is recorded rather than left to look like drift.
+
+### 5 mutations, 5 caught, 0 survivors
+
+| mutation | caught by |
+|---|---|
+| the shipped `len(self._rows.get_children())` | **2** |
+| `len(self._rows)` - the other GTK3 spelling | **2** |
+| `get_first_child() is None` - **the over-fix** | **2** |
+| a second `SuggestionBar` on the window | 1 |
+| **the starter row restored, with panel titles** | **3** |
+
+That last row is why the test counts rows instead of naming one: a second empty
+state fails the count, a first-but-wrong one fails the words, and a resurrected
+retired method fails the source check. **5 of 6 tests are about the result
+rather than the method**, which is the whole change - the defect was a design
+collision, and a test naming either half of it passes while the other is wrong.
+
+`tests/test_the_empty_state_answers_what_can_i_ask.py` retired with its feature
+rather than left as 16 orphans. 43 passed across it, the window-build gate, the
+palette and the mode strip.
