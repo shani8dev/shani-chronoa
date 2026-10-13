@@ -256,6 +256,96 @@ def _deepest_node(widget, width, height, depth=0):
     return best if best is not None else node
 
 
+def _count_descendants(widget, depth=0, cap=4000):
+    """How many widgets are under `widget`, and how many of them are mapped.
+
+    **Counting, not measuring.** A capture that succeeds and photographs nothing
+    is the failure this file exists to prevent, and `to_node()` returning a node
+    is indistinguishable from that - a node is not a picture. So this reports the
+    two numbers that separate them: a tree the app has not populated yet has
+    almost no descendants, and a tree whose leaves were never mapped has almost
+    no mapped descendants.
+
+    `cap` because this walks a live tree from inside the capture path: a walk
+    with no ceiling is a way to turn a diagnostic into the hang it was added to
+    diagnose.
+    """
+    total = mapped = seen = 0
+    stack = list(_children_of(widget))
+    while stack and seen < cap:
+        child = stack.pop()
+        seen += 1
+        total += 1
+        if child.get_mapped():
+            mapped += 1
+        stack.extend(_children_of(child))
+    return total, mapped, seen >= cap
+
+
+def _children_of(widget):
+    out = []
+    child = widget.get_first_child()
+    while child is not None:
+        out.append(child)
+        child = child.get_next_sibling()
+    return out
+
+
+def _print_capture_state(widget, width, height):
+    """Report what is about to be photographed, before it is photographed.
+
+    **A capture that reports only success cannot tell "painted" from
+    "emptied."** Every branch in `_capture` announces that it produced a node
+    and every one of them is compatible with a blank PNG, which is why
+    `main` writing a 20,000-byte file and rendering 0.2% opaque were both
+    reported as a render until the alpha gate existed. This is the probe that
+    gap called for, and it prints rather than decides: the alpha gate is what
+    decides.
+
+    Every field here is a plain reading, so it cannot itself be the thing that
+    changes what the capture does.
+    """
+    total, mapped, capped = _count_descendants(widget)
+    elapsed = (GLib.get_monotonic_time() - _T0) / 1000.0 if _T0 else -1.0
+    # **What the display is, not only what was asked for.** Asking for
+    # 1280x800 and receiving a 1024x768 allocation has two candidate causes -
+    # the window constraining itself, or the screen being 1024x768 and the
+    # allocation clamped to it - and they predict different pictures, so the
+    # screen is read rather than guessed. Asking for 800x600 and receiving
+    # 800x600 does **not** settle it: a 1024x768 screen honours that too.
+    screen = "none"
+    display = widget.get_display() if hasattr(widget, "get_display") else None
+    # `get_monitors()`, not `get_n_monitors()` - the first version of this
+    # probe raised `AttributeError: 'GdkBroadwayDisplay' object has no
+    # attribute 'get_n_monitors'`, which killed the capture and the target
+    # with it. **A probe that can raise is a probe that can destroy what it
+    # measures**, and this one sits inside `_render` rather than beside it.
+    monitors = display.get_monitors() if display is not None else []
+    if monitors:
+        g = monitors[0].get_geometry()
+        screen = f"{g.width}x{g.height}"
+    print(
+        "CAPTURE {target} {ms:.0f}ms t+{elapsed:.0f}ms {cls} "
+        "mapped={mapped} realized={realized} alloc={aw}x{ah} "
+        "asked={aw2}x{ah2} screen={screen} "
+        "descendants={total} mapped_descendants={nmap}{capped}".format(
+            target=WHICH,
+            ms=elapsed,
+            elapsed=elapsed,
+            cls=type(widget).__name__,
+            mapped=widget.get_mapped(),
+            realized=widget.get_realized(),
+            aw=widget.get_width(), ah=widget.get_height(),
+            aw2=width, ah2=height,
+            screen=screen,
+            total=total,
+            nmap=mapped,
+            capped=" CAPPED" if capped else "",
+        ),
+        flush=True,
+    )
+
+
 def _render(widget, width, height, path, own_size=False):
     """Capture `widget`. `own_size` uses the widget's own measurement.
 
@@ -275,6 +365,7 @@ def _render(widget, width, height, path, own_size=False):
         allocated_h = widget.get_height()
         if allocated_w > 1 and allocated_h > 1:
             width, height = min(width, allocated_w), min(height, allocated_h)
+    _print_capture_state(widget, width, height)
     node = _deepest_node(widget, width, height)
     if node is None:
         print("NO NODE", flush=True)
@@ -656,7 +747,16 @@ def _all_states():
 
 
 
+#: Monotonic time at which the target's window was first handed to the main
+#: loop, so `_print_capture_state` can report **how late the capture actually
+#: fired** against the settle it was armed with. Set in `on_activate` because
+#: that is the single point every plain target passes through.
+_T0 = None
+
+
 def on_activate(app):
+    global _T0
+    _T0 = GLib.get_monotonic_time()
     # **`global` is load-bearing, not tidiness.** The sizing block below narrows
     # `WIDTH`/`HEIGHT` for a window that chose its own size, and Python makes a
     # name local for the *whole* function the moment it is assigned anywhere in

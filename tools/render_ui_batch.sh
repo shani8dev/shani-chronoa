@@ -54,7 +54,7 @@ set -uo pipefail
 # question has an answer on the first line that asks it.
 VERBOSE="${VERBOSE:-}"
 
-#: **Below this much opaque paint, a capture is reported as NOT RENDERED**
+#: **Below this much painted area, a capture is reported as NOT RENDERED**
 #: rather than as a pass. See `render_once` for the four recorded instances and
 #: why a byte count cannot tell a picture from a page.
 MIN_OPAQUE_PCT="${MIN_OPAQUE_PCT:-50}"
@@ -342,6 +342,38 @@ render_once() {
         :
     fi
     [[ -s $out ]] || return 1
+
+    # **A render at the wrong size is not a render of what was asked for.**
+    #
+    # **Before the alpha gate, not after.** The first version sat below it, which
+    # meant it could never fire on a blank capture - and a blank capture is
+    # exactly when the size matters most, because a window that came up at
+    # 1024x768 when 1280x800 was asked for is the difference between a
+    # picture of the wide layout and a picture of the narrow one. Both
+    # signals have to reach the reader together.
+    #
+    # The broadway screen on this box is a hard 1024x768 - `broadwayd` takes no
+    # size option - so a sweep that asks for 1280x800 gets a picture of 1024x768
+    # and nothing anywhere says so. That went unnoticed through a whole review
+    # because the PNG was valid, opaque, and the right file name, which is the
+    # same trio the alpha gate above had to be built for. **It also sent the
+    # `state:` branch's size handling into AGENTS.md as a bug in that branch:**
+    # `state:` honours `CHRONOA_FORCE_SIZE` perfectly well and the screen
+    # overrules it, which is why "asked 1280x800, got 1024x768" looked like a
+    # branch that ignored its own override.
+    #
+    # **Warned, not failed.** Refusing would make the harness useless on a box
+    # whose screen cannot be enlarged, and a check that can never pass stops
+    # being read - the `-rs` shape this file already records. The ask is still
+    # honoured wherever the display allows it; where it is not, the difference
+    # is now stated rather than inferred from the file.
+    local got_w got_h
+    got_w="$(_png_width "$out")"; got_h="$(_png_height "$out")"
+    if [[ -n $got_w && -n $got_h ]] && [[ "$got_w" != "$WIDTH" || "$got_h" != "$HEIGHT" ]]; then
+        printf 'note: %s captured at %sx%s, not %sx%s (display is smaller)\n' \
+            "$(basename "$out")" "$got_w" "$got_h" "$WIDTH" "$HEIGHT" >&2
+    fi
+
     local opaque
     opaque="$(_opaque_percent "$out")"
     # **A probe that could not measure is not a pass.** If Pillow is missing or
@@ -349,8 +381,34 @@ render_once() {
     # the opposite of the bug this replaces, where anything unreadable counted as
     # a render.
     [[ -n $opaque ]] || return 1
-    (( opaque >= MIN_OPAQUE_PCT ))
+    (( opaque >= MIN_OPAQUE_PCT )) || return 1
+
+    return 0
 }
+
+_png_size() {
+    python3 - "$1" "$2" <<'PYSIZE' 2>/dev/null
+import sys
+try:
+    from PIL import Image
+except Exception:
+    sys.exit(0)
+try:
+    im = Image.open(sys.argv[1])
+except Exception:
+    sys.exit(0)
+# `im.size[int(...)]`, not `getattr(im.size, ...)`. `im.size` is a **tuple**,
+# and `getattr(("1024","768"), "0", "")` is empty - so the first version
+# measured nothing on every file, the `[[ -n $got_w ]]` guard was always
+# false, and the note never printed. **A check that cannot measure passed
+# silently**, which is the whole failure this gate was written to stop, and it
+# did it in the same commit.
+print(im.size[int(sys.argv[2])])
+PYSIZE
+}
+
+_png_width() { _png_size "$1" 0; }
+_png_height() { _png_size "$1" 1; }
 
 _opaque_percent() {
     # How much of this PNG is actually painted, as an integer percentage.
@@ -377,7 +435,15 @@ total = opaque = 0
 for y in range(0, h, step):
     for x in range(0, w, step):
         total += 1
-        if px[x, y][3] == 255:
+        # **`alpha > 0`, not `alpha == 255`.** The first version required fully
+        # opaque pixels, which is stricter than "painted" by a factor of a
+        # hundred: measured on the real `main` capture, the alpha histogram is
+        # 25 (80% of the image), 140 and 151 - **not one pixel in the window is
+        # at 255**. So the gate reported 0% on a picture that is painted edge to
+        # edge, and every genuine render of this app would have been refused.
+        # Anything with paint in it is painted; the question was never whether
+        # GTK composited it to full opacity.
+        if px[x, y][3] > 0:
             opaque += 1
 print(int(100 * opaque / total))
 PYOPACITY

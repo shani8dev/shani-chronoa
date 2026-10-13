@@ -22046,3 +22046,80 @@ not ask for*, exactly like the test that wrote the real keyfile and the probes
 that left `.pyc` under `usr/`. Every one of those was found by listing what
 changed and asking, not by reading code - and this one survived three questions
 because **there was nothing to read**: the writer was never committed.
+
+## The "blank" main window is not blank, and the gate I added would have rejected every good render (2026-10-13)
+
+Three entries above chase the blank `main` capture through pool exhaustion, a
+mutation run, and an unrealised `GskCairoRenderer`. **All three were wrong, and
+the answer was in the file all along - nobody opened it.** The alpha histogram
+of `main`, measured:
+
+    alpha 25  -> 51,958 samples (80% of the image)
+    alpha 140 ->  8,011
+    alpha 151 ->  1,677
+    alpha   0 ->    540
+
+**Not one pixel in the window is at 255.** So the sweep was photographing a
+painted picture and the gate from `e918a9c` was calling it 0% opaque, because it
+counted `alpha == 255` - which is stricter than "painted" by a factor of a
+hundred, and which **would have refused every genuine render of this app**.
+It was a false negative shipped as a fix, and it is corrected: the measure is
+now `alpha > 0`. The 7 tests still reject the blank and accept the painted one,
+which is the only reason to believe the correction rather than trust it.
+
+### What the picture actually is
+
+Rendered and **looked at**, not measured: a rounded orange frame, pale inside,
+nothing in it. Chronoa's accent (237,128,89) at 8,000 samples. So `main` is not
+a photograph of nothing - it is a photograph of **one rounded rectangle**.
+
+### The probe that says so is now shipped in `render_ui.py`
+
+`_print_capture_state` runs before every capture and prints the screen geometry,
+the window's allocation, mapped/realized, descendant counts, and how late the
+capture actually fired. Measured, four runs:
+
+    CAPTURE main 5137ms mapped=True realized=True alloc=1024x768
+           asked=1280x800 screen=1024x768 descendants=948 mapped_descendants=528
+
+**Three facts fall out, and each kills a theory:**
+
+- **`descendants=948 mapped_descendants=528`.** The tree is populated and mapped.
+  *Captured too early* is refuted - there was something to photograph.
+- **`screen=1024x768`, and `broadwayd` has no size option.** The window came up
+  1024x768 when 1280x800 was asked for. **This retires a claim two entries
+  above**: that the `state:` branch "ignores `CHRONOA_FORCE_SIZE`". It honours it;
+  the screen overrules it. `state:` was never the problem.
+- **The PNG is 1280x800 anyway**, because `main` does not pass `own_size` - so the
+  capture photographs a 1024x768 window into a 1280x800 frame. `render_once` now
+  prints a note when the two differ, above the alpha gate rather than below it,
+  because a blank capture is exactly when the size matters most.
+
+**Also measured, and not what the comment says:** the capture fires at
+**5137-5439ms**, not the 3500ms it is armed with. The twenty-panel idle chain at
+`PRIORITY_DEFAULT_IDLE` - one panel per turn, each running real probes - delays
+it by ~1.7s. The `settle = 3500` comment's "measures at about two seconds" was
+true on 2026-10-08 and is now wrong; the number belongs to the machine it was
+measured on, not to the constant.
+
+### Two of my own probes were broken, in the same commit that exists to stop it
+
+- `getattr(im.size, "0", "")` - `im.size` is a **tuple**. So the size check
+  measured nothing on every file, `[[ -n $got_w ]]` was always false, and it
+  never printed. **A check that cannot measure passed silently**, which is the
+  exact failure the alpha gate exists to prevent, committed in the same change.
+- `display.get_n_monitors()` does not exist on `GdkBroadwayDisplay`; it raised
+  `AttributeError` inside `_render` and killed the capture it was measuring. **A
+  probe that can raise is a probe that can destroy what it is measuring**, so it
+  is now a plain read in a `try`-free path that cannot take the render down.
+
+Both were found by reading the output, not by reasoning about it. **And one of my
+own commands truncated the evidence that would have shown the first** - `ls -la |
+head -4` cut off the very file I was about to conclude did not exist.
+
+### Not established
+
+**Why the node contains one rounded rectangle and not 948 widgets.** The tree is
+mapped and populated, so the children exist and the snapshot does not carry them.
+That is the open question, and it is now a question rather than four wrong
+answers.
