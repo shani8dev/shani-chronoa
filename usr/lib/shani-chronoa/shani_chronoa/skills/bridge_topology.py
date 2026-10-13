@@ -114,13 +114,6 @@ def _stale_members(name: str, members: List[str]) -> List[str]:
     shape; so it is separated out and named.
     """
     return [m for m in members if not (_NET / m).exists()]
-
-
-def _forward_delay(name: str) -> Optional[int]:
-    value = _read_int(_NET / name / "bridge" / "forward_delay")
-    return None if value is None else value // 1000
-
-
 def _run(arguments: dict) -> str:
     wanted = arguments.get("bridge")
     if wanted is not None and not isinstance(wanted, str):

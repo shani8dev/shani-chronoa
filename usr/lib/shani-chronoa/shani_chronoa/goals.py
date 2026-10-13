@@ -14,10 +14,14 @@ async loop, a trigger, or a test all drive it the same way (sayri's
 headless-core discipline, `core.py:34-89`, applied to goals rather than the
 voice loop).
 
-Why the CAMEL `Task` fields are here too: a goal that decomposes is a `Task`
-with a parent, subtasks and dependency edges, and the same persistence
-carries it. `Task.state` rides the same phase enum as the run, so a
-subtask that parks does not need a second vocabulary.
+Decomposition rides the run's own vocabulary rather than a second one. A
+goal that decomposes is a run of `PlannedStep`s, `depends_on` is the
+dependency edge between them, and the phase lives on the run - so a step
+that parks does not need a phase of its own. That is CAMEL's `Task` shape
+reduced to the two fields a local model will actually use; the parent and
+subtask links it also carries were never built, because the steps are
+already ordered by the graph and naming them twice is a second way for
+two things to disagree.
 """
 
 from __future__ import annotations
@@ -156,21 +160,6 @@ class PlannedStep(NamedTuple):
     tool_arguments: dict
     variable_name: str
     depends_on: tuple = ()
-
-
-class Task(NamedTuple):
-    """CAMEL's `Task` shape, reduced to what a local model will actually use."""
-
-    id: str
-    content: str
-    state: Phase = Phase.PENDING
-    parent: Optional[str] = None
-    subtasks: tuple = ()
-    result: Optional[str] = None
-    failure_count: int = 0
-    dependencies: tuple = ()
-
-
 class GoalRun(NamedTuple):
     """The persisted state of one run. Plain data: json round-trips it."""
 

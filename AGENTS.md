@@ -24473,3 +24473,107 @@ broadway caps. The mutation harness ran on a snapshot at `/tmp/opencode/snap-org
 byte-identical, verdicts read from the summary line - because a mutation run that
 rewrites product source in this tree has shipped the other session's defect three
 times.
+
+## The window minimum is now measured off the product, and the padding mutation it missed is caught (2026-10-14)
+
+`40e6859` closed with *"the chrome law does not witness it either: the window-
+minimum test runs in 0.44s and parses `set_size_request` rather than measuring
+chrome, so the strip's actual height is not an input to it. **Uncovered.**"* That
+gap is the whole of this entry, and it is closed by `TestTheChromeIsMeasured-
+AndNotRemembered` - four tests that build real mapped windows and read
+`get_allocation()` off them.
+
+### The measurement, direct and per-process
+
+One process per window, `BROADWAY_DISPLAY=:150`, real allocations:
+
+| | measured |
+|---|---|
+| declared minimum | 380x571 |
+| window allocation | **380x571** - exactly what is declared |
+| transcript | **366x120** |
+| chrome | **451** |
+| chrome width | **14** |
+| asked for 380x**481** | allocation still 380x**571**, transcript still 120 |
+
+So **`571 - 451 = 120` with zero slack**, and the window genuinely cannot be
+shorter than its minimum - asking for 481 gets 571. That is the design: one
+pixel of chrome growth turns the promise into 119, which is the drift this file
+records for the previous 570 (which was `448 + 120` and left **119** once the
+strip's padding started applying).
+
+**And the previous entry's numbers were wrong, in the direction that hid it.**
+`CHROME_NARROW` is **451** (recorded 448), `CHROME_WIDE` is **415** (recorded
+411), the layout difference is **36** (recorded 37) and the width breakpoint is
+**495** (recorded 760) - where the strip's own natural width of 466 stops
+fitting. The recorded 448 came from before `ORGAN_IDLE_CSS` stopped being
+discarded, and the test computed the promise with the same typed constant it was
+checking, so a 3px drift read as a pass. Both chromes are read off real windows
+now, at 700 and 768, and `451 == 451` is asserted rather than typed.
+
+### The instrument was wrong twice, and both times silently
+
+**`BROADWAY_DISPLAY` is the daemon's number, not the socket's.** This file
+records *"`gtk4-broadwayd :N` listens on `broadway(N+1).socket`, so
+`BROADWAY_DISPLAY` is the socket number, not the one passed to the daemon"* -
+**backwards.** Measured by strace: `BROADWAY_DISPLAY=:151` attempted
+`/run/user/1001/broadway152.socket`, which does not exist. GDK adds 1 itself.
+`:150` gives a real `GdkBroadwayDisplay`. The recorded belief sends every run at
+a socket number one past a live daemon.
+
+**`XDG_RUNTIME_DIR` is load-bearing for a client.** This file's run env says
+*"do NOT set `XDG_RUNTIME_DIR`"*. Measured: unset it, or point it at a fresh
+temp dir, and `Gdk.Display.get_default()` is **None** while
+`Gtk.init_check()` still answers **True** - the trap this file already records
+for `test_sense_idle`'s guard. GDK resolves the daemon's socket through GLib's
+runtime dir, so it must be the real `/run/user/<uid>`. The instruction as
+written produces a display-less run that reports the module-scoped fixture as 4
+**errors** in 0.3s - which reads as a failing fixture rather than a missing
+display, and cost the first mutation run every verdict it printed.
+
+### Four mutations, four caught, and the uncovered one is the third
+
+Run on a snapshot at `/tmp/opencode/snap-min` (absolute paths, anchor asserted
+`count == 1`, restore verified byte-identical, verdicts from the tally line):
+
+| mutation | witnesses that failed |
+|---|---|
+| the shipped **480** restored | the arithmetic minimum **and** the measured one |
+| a tighter **570** | the same two - so there is no slack to hide in |
+| the strip's **`padding: 0`** | **both** chrome tests (`assert 447 == 451`, `assert 411 == 415`) |
+| the strip's **`padding: 4px 0`** | both chrome tests **and** the measured minimum (455 -> 116) |
+
+The third is the one `40e6859` recorded as uncovered, and it is caught because
+removing the vertical padding shrinks **both** chromes by exactly 4px - 451/415
+to 447/411, measured. **4 caught, 0 survivors, 0 unmeasurable.**
+
+### Two of my own harness bugs, and one of them ran the control for the experiment
+
+**The summary regex grabbed `=== warnings summary ===`.** The first parser took
+the *first* `=+ ... =+` line, which is the warnings header, so all four
+mutations printed `UNMEASURABLE` over runs that had really measured. Then the
+"fix" required a leading `=`, and `-q` prints its tally plain - so it found
+nothing at all. **A run that could not be read is not a run that measured
+nothing**, and here the reader could not read a run that had.
+
+**An `&&` chain short-circuited and I ran the control believing it was the
+experiment.** `cp <relative path> && python3 - <<EOF` - the `cp` failed on the
+wrong cwd, so the mutation never applied and pytest ran the unmutated snapshot.
+I read `14 passed` as *"the padding mutation is not caught"*, which is the exact
+opposite of the truth, and it took a probe printing `447 vs 451` to overturn it.
+A harness now preflights the four files byte-identical against the real tree
+before any mutation runs, because **a snapshot that has drifted makes every
+verdict a statement about the copy** - the same class as the `code_hl` snapshot
+of somebody mid-write.
+
+### Not claimed
+
+**The 403px width overflow at 380 is observed, not attributed.** Building the
+minimum window prints `AdwNavigationSplitView ... requested 403 px, 380 px
+available`. The width is 380 before and after this change, so it is structurally
+pre-existing - but it was not measured at HEAD, and one display's worth of
+looking is not an attribution.
+
+52 passed and 1 expected failure across the five affected suites; the one is
+`test_at_1280_both_columns_are_back`, the deliberate `pytest.fail` for a rail
+that needs more than the 1024x768 broadway caps.

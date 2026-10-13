@@ -1558,20 +1558,28 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self.set_default_size(460, 640)
         # **The minimum is as tall as the conversation it promises, not as short
         # as the chrome allows.** Measured on the real window, the transcript is
-        # an exact linear function of the window's height with a floor where the
-        # chrome's own minimums bind: `max(58, height - 448)` below 760 wide, and
-        # `max(69, height - 411)` above it. So the 480 this used to declare left
-        # `max(58, 32)` = **58px** - about two lines - in the smallest window the
-        # app would occupy. 448 + 120 is 568, and 120 is the smallest transcript
-        # worth calling a conversation (roughly six lines; below that the
-        # transcript is a peephole rather than a place a reply is read).
+        # an exact linear function of the window's height: `height - 451` while
+        # the organ strip needs two rows, and `height - 415` once it does not.
+        # The 480 this used to declare left `max(58, 32)` = **58px** - about two
+        # lines - in the smallest window the app would occupy.
+        #
+        # **The two numbers are measured and re-measurable.** `451 + 120 = 571`,
+        # and 120 is the smallest transcript worth calling a conversation
+        # (roughly six lines; below that the transcript is a peephole rather than
+        # a place a reply is read). The previous 570 was `448 + 120` with two
+        # pixels of slack, and the strip's vertical padding - which the sheet
+        # carrying it had never applied, because that sheet was being loaded and
+        # discarded - grew the chrome by 3px, which left **119** rather than the
+        # promised 120. Nothing complained: the test that checks the promise
+        # computed it with the same typed constant it was checking.
+        # `tests/test_the_window_minimum_is_not_below_the_layouts_floor.py` now
+        # measures both chromes off real mapped windows.
         #
         # **This treats the symptom and the root cause is recorded in AGENTS.md:**
-        # 448px of fixed chrome in a 480px window is the real number, and an orb
-        # at 88px is a third of the declared minimum. A minimum that is honest
-        # beats a minimum that promises a window with nothing in it; the chrome
-        # is the next thing to shrink.
-        self.set_size_request(380, 570)
+        # 451px of fixed chrome is the real number, and an orb at 88px is a fifth
+        # of it. A minimum that is honest beats a minimum that promises a window
+        # with nothing in it; the chrome is the next thing to shrink.
+        self.set_size_request(380, 571)
         self.set_decorated(True)
         self._apply_css()
         self._apply_motion_preference()

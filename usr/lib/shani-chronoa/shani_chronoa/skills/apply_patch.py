@@ -39,6 +39,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import List
 
 from shani_chronoa import files
 from shani_chronoa.skills import Skill
@@ -88,14 +89,30 @@ def _verdict(out: str, err: str, rc: int) -> "tuple[str, str]":
     return "nothing", "patch said nothing this reads as a change"
 
 
-def _sidecars(target: Path) -> "list[Path]":
+def _sidecars(root: Path, reported: str = "") -> "list[Path]":
     """The files `patch` leaves: `.rej` for what it could not apply, `.orig`
-    for the backup. Reported, never removed."""
-    found = []
+    for the backup. Reported, never removed.
+
+    Swept recursively under `root`, because the patch names its own files and
+    any of them can be under there. `reported` is `patch`'s own output, added
+    because `patch --directory` can still print a path outside the directory -
+    and a reject nobody is told about is the one that gets found by hand later.
+
+    **Both suffixes, which is the point of having this function.** An earlier
+    version swept `.rej` inline and left `_sidecars` unwired, so the `.orig`
+    backup `patch` writes beside every file it changes was never reported -
+    while this module's own docstring promised it. One definition, both files.
+    """
+    found: List[Path] = []
     for suffix in (".rej", ".orig"):
-        candidate = Path(str(target) + suffix)
-        if candidate.exists():
-            found.append(candidate)
+        for path in sorted(root.glob("**/*" + suffix)):
+            if path not in found:
+                found.append(path)
+    for token in reported.split():
+        if token.endswith((".rej", ".orig")):
+            candidate = Path(token) if token.startswith("/") else root / token
+            if candidate not in found:
+                found.append(candidate)
     return found
 
 
@@ -172,23 +189,22 @@ def _run_skill(arguments: dict) -> str:
         lines.append("Applied." if action == "apply"
                      else "It would apply. Ask me to `apply` it to do so.")
 
-    sidecars = []
-    for token in (out + err).split():
-        if token.endswith(".rej"):
-            candidate = Path(token) if token.startswith("/") else \
-                target_dir / token
-            sidecars.append(candidate)
-    for path in (target_dir).glob("**/*.rej"):
-        if path not in sidecars:
-            sidecars.append(path)
-    if sidecars:
+    sidecars = _sidecars(target_dir, out + err)
+    rejects = [p for p in sidecars if p.suffix == ".rej"]
+    backups = [p for p in sidecars if p.suffix == ".orig"]
+    if rejects or backups:
         lines.append("")
-        lines.append(f"`patch` left {len(sidecars)} `.rej` file(s) holding "
-                     "what it could not apply:")
-        for path in sidecars[:10]:
-            lines.append(f"  {path}")
-        if len(sidecars) > 10:
-            lines.append(f"  ... {len(sidecars) - 10} more")
+        for group, noun, tail in (
+                (rejects, "`.rej` file(s)", "holding what it could not apply"),
+                (backups, "`.orig` backup(s)",
+                 "of the files it changed, holding what was there before")):
+            if not group:
+                continue
+            lines.append(f"`patch` left {len(group)} {noun} {tail}:")
+            for path in group[:10]:
+                lines.append(f"  {path}")
+            if len(group) > 10:
+                lines.append(f"  ... {len(group) - 10} more")
 
     lines.append("")
     lines.append("**What this does not claim**: that the result is what the "

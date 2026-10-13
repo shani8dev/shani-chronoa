@@ -143,11 +143,6 @@ class SettingsWindow(SensesPage, PrivacyPage, VoicePage, ActivityPage, Gtk.Windo
     def show_page(self, page_id: str) -> bool:
         """The registry calls every window the same thing; this is that name."""
         return self.show_section(page_id)
-
-    def section_ids(self) -> list:
-        """Every section id, in the order they appear."""
-        return [g._section_id for g, _ in self._searchable]
-
     def family_ids(self) -> list:
         """Every section *family* id, in the order the families first appear.
 

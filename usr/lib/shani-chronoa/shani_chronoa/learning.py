@@ -1280,27 +1280,14 @@ class decision:
             return max(self.value, key=self.value.get) if self.value else None
 
     @staticmethod
-    def utility(outcomes: Sequence[Tuple[float, float]]) -> float:
-        """Expected utility from (probability, value) pairs.
-
-        Value is signed, so a negative outcome costs utility rather than merely
-        scoring zero - which matters when the alternative is doing nothing.
-        """
-        return sum(p * v for p, v in outcomes)
-
-    @staticmethod
-    def utility_auction(probabilities: Sequence[float],
-                        values: Sequence[float]) -> float:
-        """Utility under an auction rule: every bidder pays its own bid.
-
-        Included because it is the rule that actually stops two agents competing
-        for the same slot, which plain expected utility does not.
-        """
-        total = 0.0
-        for value, probability in zip(values, probabilities):
-            total += value - value * probability
-        return total
-
+    # `utility` and `utility_auction` were removed: unwired members of the
+    # decision class, which is live through `confidence` alone. Nothing in this
+    # tree computes an expected utility or runs an auction rule, so a second
+    # definition of each sitting beside the live method was the dead-code class
+    # this repository records most often. The reason each carried is kept here
+    # rather than in the code that no longer has it: utility is signed so a
+    # negative outcome *costs* rather than scoring zero, and the auction rule is
+    # the one that stops two agents competing for the same slot.
     @staticmethod
     def confidence(probabilities: Dict[str, float]) -> float:
         """How much of the mass sits on one answer, in [1/k, 1].
@@ -5417,11 +5404,9 @@ class AnomalyDetector:
                       for other in self.rows)
         return sum(best[:self.k]) / max(len(best[:self.k]), 1)
 
-    def is_anomalous(self, example) -> bool:
-        if self.threshold is None:
-            return False
-        return self.score(example) > self.threshold
-
+    # `is_anomalous` was removed: it asked "is this row anomalous" with the same
+    # two-step test `flag()` performs over every row, so the class held two
+    # answers to one question and only `flag` had a caller.
     def flag(self) -> List[int]:
         """Which training rows the cutoff considers anomalous."""
         if self.threshold is None:
@@ -5480,16 +5465,10 @@ class Bandit:
             self._arms[arm] = Arm(current.pulls + 1, current.wins + reward, moment)
         return reward
 
-    def observe(self, arm: str, reward: float, now: Optional[float] = None) -> None:
-        """Record a reward directly, for an outcome scored elsewhere."""
-        import time
-        moment = time.time() if now is None else now
-        current = self._arms.get(arm)
-        if current is None:
-            self._arms[arm] = Arm(1, reward, moment)
-        else:
-            self._arms[arm] = Arm(current.pulls + 1, current.wins + reward, moment)
-
+    # `observe` was removed: a second write path beside `update`, identical in
+    # its bookkeeping and differing only in taking a raw reward rather than a
+    # verdict word. `update` is the one a caller uses; nothing scores an outcome
+    # into a reward itself, so the second door led nowhere.
     def arms(self, now: Optional[float] = None) -> Dict[str, Arm]:
         """Live arms, with stale ones dropped."""
         import time

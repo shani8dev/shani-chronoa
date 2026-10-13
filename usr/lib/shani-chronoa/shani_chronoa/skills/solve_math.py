@@ -1161,11 +1161,24 @@ def _bc_text(body: str) -> str:
 
 
 def _numeric(result: str, arguments: dict) -> str:
-    digits = _digits(arguments)
-    try:
-        return f"{result[:digits]}"
-    except Exception:  # noqa: BLE001
-        return result
+    """A numeric result cut to the requested number of digits.
+
+    `bc` answers with its own scale, which is more places than anybody asked
+    for, and the precision the caller named is a preference rather than a
+    licence for trailing noise. One definition, because two places rounded.
+
+    **The `except Exception` this replaced was dead in every case, not merely
+    unreachable.** `digits = _digits(arguments)` sat *outside* the `try`, so the
+    handler wrapped only `f"{result[:digits]}"` - a slice of a `str` formatted
+    into a `str`, neither of which can raise. It could not have caught the one
+    failure `_digits` can raise, which is a non-integer `digits`: measured
+    through `compute`, `digits="three"` produced the *same* sentence before and
+    after this change, and `_run`'s own `except ValueError` is what produced it.
+    So the handler guarded nothing and could still have swallowed anything -
+    a second vocabulary for "something went wrong", which is how one of them
+    becomes a confident wrong answer.
+    """
+    return result[:_digits(arguments)]
 
 
 # ---------------------------------------------------------------- operations
@@ -1566,9 +1579,8 @@ def compute(arguments: dict) -> str:
     if op == "sum":
         return _sum(expr, variable, arguments)
     if op == "evaluate":
-        digits = _digits(arguments)
         return f"{_say(expr)} = {_numeric_expr(raw, variable, '0')} " \
-               f"= {_bc(_numeric_expr(raw, variable, '0'), arguments)[:digits]}"
+               f"= {_numeric(_bc(_numeric_expr(raw, variable, '0'), arguments), arguments)}"
     return "Unsupported."
 
 

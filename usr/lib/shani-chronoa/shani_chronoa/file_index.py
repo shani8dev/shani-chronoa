@@ -114,12 +114,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     path UNINDEXED, text, tokenize='unicode61'
 );
 """
-
-
-class IndexError_(RuntimeError):
-    """A file we will not index, with the reason."""
-
-
 def _connect(path=None):
     path = pathlib.Path(path) if path else index_path()
     path.parent.mkdir(parents=True, exist_ok=True)

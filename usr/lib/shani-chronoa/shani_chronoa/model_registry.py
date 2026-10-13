@@ -243,33 +243,3 @@ def active_entry(model_dir: Optional[Path] = None,
     if tier:
         entry["sha256"] = specs[tier].sha256
     return entry
-
-
-def register(entry: Dict[str, object]) -> Dict[str, object]:
-    """Compute a digest for an imported file so it can be verified like a tier.
-
-    **Returns the verdict; writes nothing.** A registry file is new on-disk state
-    that something else would then trust, and the honest first version is the one
-    that reports what it found. `verify_digest` is the check a caller performs on
-    every later run, and it is the same one shipped tiers already get.
-    """
-    path = Path(entry["path"])
-    return {
-        "filename": path.name,
-        "sha256": _digest(path),
-        "size_bytes": path.stat().st_size,
-        "architecture": entry.get("architecture", ""),
-        "license": entry.get("license", ""),
-        "source_url": entry.get("source_url", ""),
-        "uuid": entry.get("uuid", ""),
-        "vouched": False,
-    }
-
-
-def verify_digest(path: Path, expected: str) -> bool:
-    """Whether `path` still hashes to `expected` - the question `verify()` asks of
-    a shipped tier, asked of an imported one."""
-    try:
-        return _digest(Path(path)) == expected
-    except OSError:
-        return False

@@ -83,7 +83,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "lan_phone",
@@ -186,12 +186,12 @@
           "desc": "ui_elements: Use another app's controls by what they are, through the accessibility tree. apps: which apps are reachable. inspect: list a window's buttons, fields, menus and labels with ids (app = its name; query narrows by text). press: activate an element by id (a button, checkbox, link, menu item). set_text: put text in a field by id. read: an element's text or value. menu: open a menu path like 'File > Export'. drive: one turn of driving - give an action and a control number and the reply is the app's new state in the same short numbered form, which is what a small model can act on. act: click, type or key an app by name or position, with a visible cursor. state: the numbered controls an app is showing. Works on a container's app and on this desktop's own apps alike. Requires 'input-control-enabled'; drive start also runs a container, so it needs 'container-control-enabled' as well. (arguments: action, app, id, text, query, path, do, how, number, image, keys, x, y)"
         },
         {
-          "tool": "browse",
-          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         },
         {
-          "tool": "news",
-          "desc": "news: News headlines only (title, source, age), from Google News (or BBC) RSS feeds - not facts or what a page says, which is web_search. With no topic: the top stories. A topic can be a section - world, business, tech, science, health, sports, entertainment - or anything to search for, e.g. 'ISRO'. Requires the web sense to be enabled and privacy mode to be off. (arguments: topic, source, limit)"
+          "tool": "browse",
+          "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
         }
       ],
       "offered": [
@@ -201,8 +201,8 @@
         "open_settings",
         "open_files",
         "ui_elements",
-        "browse",
-        "news"
+        "calendar_edit",
+        "browse"
       ],
       "recall_hit": true
     },
@@ -611,7 +611,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "lan_phone",
@@ -692,7 +692,7 @@
         },
         {
           "tool": "capture_video",
-          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds)"
+          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
         },
         {
           "tool": "manage_mount",
@@ -712,7 +712,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         }
       ],
       "offered": [
@@ -941,7 +941,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "accessibility",
@@ -1086,7 +1086,7 @@
       "negatives": [
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "office_document",
@@ -1352,7 +1352,7 @@
       "positive_args": {
         "action": "*"
       },
-      "positives_desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)",
+      "positives_desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)",
       "negatives": [
         {
           "tool": "usb_devices",
@@ -1407,7 +1407,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "bluetooth_gatt",
@@ -1527,7 +1527,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         }
       ],
       "offered": [
@@ -1614,16 +1614,16 @@
           "desc": "watch: Your MoYoung/Da Fit smartwatch: 'summary' (steps, distance, calories for 3 days, last night's sleep stages, today's stress, workouts), 'measure' a heart rate, blood oxygen or blood pressure on the wrist (takes up to a minute), read 'settings', 'set' one (step_goal, time_format 12h/24h, units metric/imperial, raise_to_wake, sedentary_reminder, other_app_notifications, power_saving, heart_rate_auto_interval, do_not_disturb '22:00-07:00'), 'sync_time', 'notify' (show a message on the watch), or set the 'profile' (height, weight, age, gender - weight is never measured by the watch). Requires the 'bluetooth-gatt-enabled' consent key. (arguments: action, device, what, setting, value, sender, text, kind, height_cm, weight_kg, age, gender)"
         },
         {
+          "tool": "capture_video",
+          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
+        },
+        {
           "tool": "edit_image",
           "desc": "edit_image: Edit a picture (for faces or backgrounds use photo_video) and save the result as a new file next to it: resize (width and/or height, or percent), compress (quality, or to under a size in KB), crop, upscale (2-4x), rotate, flip, grayscale, a look (sepia, vignette, sketch, paint, enhance), strip metadata (location/camera), or convert format. Several edits can be combined in one call. For effects that depend on what is in the picture (blur faces, blur the background) use photo_video. (arguments: path, width, height, percent, upscale, quality, max_kb, crop, rotate, flip, grayscale, look, strip_metadata, format)"
         },
         {
           "tool": "set_wallpaper",
           "desc": "set_wallpaper: Report or change the GNOME desktop wallpaper, setting the light and dark variants together. Refuses a path that does not exist, rather than leaving a blank desktop with no error. KDE is not supported and will say so. Requires the 'appearance-control-enabled' consent key; reporting needs no such permission. (arguments: action, image)"
-        },
-        {
-          "tool": "audio_output",
-          "desc": "audio_output: List the speakers/headphones (outputs) and microphones (inputs) and which one is the default, or switch the default output or input - 'play through my headphones', 'use the USB microphone', 'send sound to the HDMI monitor'. Pick a device by its number or part of its name. (arguments: action, device, kind)"
         }
       ],
       "offered": [
@@ -1632,9 +1632,9 @@
         "browse",
         "system_history",
         "watch",
+        "capture_video",
         "edit_image",
-        "set_wallpaper",
-        "audio_output"
+        "set_wallpaper"
       ],
       "recall_hit": true
     },
@@ -2460,6 +2460,10 @@
           "desc": "create_document: Create a document from a title and body: a markdown file, a plain text file, or an HTML page. Writes a new file; never overwrites. (arguments: title, body, format, path)"
         },
         {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+        },
+        {
           "tool": "file_locks",
           "desc": "file_locks: Show who holds a file lock, and on what - the answer to \"why won't this file save\" and \"why did my write fail with EAGAIN\". A WRITE lock blocks another writer; a READ lock is shared and usually harmless. Use for 'who has this file locked', 'what is holding a lock', 'why can't I write this file', 'is this file locked'. Give a path to check one file; omit it for every lock on the machine. Reads the kernel's own lock table (/proc/locks), so it needs no binary and no privilege. Read-only; nothing is polled, changed or broken. (arguments: path)"
         },
@@ -2470,10 +2474,6 @@
         {
           "tool": "dns_lookup",
           "desc": "dns_lookup: Look a hostname or address up in DNS and report what came back: the addresses, or the mail servers, name servers, TXT records, certificate records or other records a name publishes, and whether the answer is DNSSEC-signed and valid. Distinguishes 'this name does not exist' from 'the resolver did not answer', because those have different fixes. Obeys privacy mode, since the query goes to a resolver outside this machine. Read-only. (arguments: name, type)"
-        },
-        {
-          "tool": "phone",
-          "desc": "phone: The user's paired phone via GSConnect/KDE Connect: status (reachable, battery), ring it to find it, ping it, share a file or link to it; read text messages ('messages': latest, from a contact, or unread only); send a text message ('send': to a contact name or number, or omit contact to reply to the latest conversation) with exactly the text given - draft it first; or 'call' a contact or number (opens the phone's dialer). The user confirms every message and call before it goes. Requires the 'phone-control-enabled' consent key; reading needs 'phone-messages-read-enabled', sending and calling 'phone-messages-send-enabled'. (arguments: action, device, target, contact, text, unread_only, limit)"
         }
       ],
       "offered": [
@@ -2481,10 +2481,10 @@
         "notes",
         "convert_document",
         "create_document",
+        "alarm",
         "file_locks",
         "meeting",
-        "dns_lookup",
-        "phone"
+        "dns_lookup"
       ],
       "recall_hit": true
     },
@@ -2807,12 +2807,12 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
-          "tool": "container",
-          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         },
         {
-          "tool": "focus_window",
-          "desc": "focus_window: Bring a window to the front and give it keyboard focus, by window id from list_windows or by matching part of its title. Works on X11 and Plasma; on GNOME it needs Chronoa's window control extension and says so. (arguments: window_id, title_contains)"
+          "tool": "container",
+          "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
         }
       ],
       "offered": [
@@ -2822,8 +2822,8 @@
         "accessibility",
         "list_shortcuts",
         "alarm",
-        "container",
-        "focus_window"
+        "calendar_edit",
+        "container"
       ],
       "recall_hit": true
     },
@@ -3283,7 +3283,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "scan_document",
@@ -3333,7 +3333,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "create_video",
@@ -3954,7 +3954,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "photo_metadata",
@@ -3966,7 +3966,7 @@
         },
         {
           "tool": "capture_video",
-          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds)"
+          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
         },
         {
           "tool": "edit_video",
@@ -4063,16 +4063,16 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
+        },
+        {
           "tool": "encode_text",
           "desc": "encode_text: Encode or decode text: base64, url (percent-encoding), hex, binary, rot13, morse. (arguments: text, scheme, direction)"
         },
         {
           "tool": "type_text",
           "desc": "type_text: Type text at the currently focused window. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: text)"
-        },
-        {
-          "tool": "read_text_file",
-          "desc": "read_text_file: Read a text file and return its contents, optionally a range of lines. Use this to see what a file actually says. (arguments: path, start_line, max_lines)"
         }
       ],
       "offered": [
@@ -4081,9 +4081,9 @@
         "undo_last_change",
         "phone",
         "alarm",
+        "calendar_edit",
         "encode_text",
-        "type_text",
-        "read_text_file"
+        "type_text"
       ],
       "recall_hit": true
     },
@@ -5167,8 +5167,8 @@
           "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
         },
         {
-          "tool": "boot_report",
-          "desc": "boot_report: How the last boot went: total boot time split into firmware, loader, kernel and userspace, the services that took longest to start, when the machine booted and whether it shut down cleanly before, and which EFI entry the firmware will boot by default. Use for 'why does it boot slowly', 'did it crash last time'. Boot history uses the 'boots-sense-enabled' switch. Read-only. (arguments: top)"
+          "tool": "calendar_edit",
+          "desc": "calendar_edit: Change the user's calendar: 'create' adds an event to the default calendar (title, start, optional duration or end, location); 'move' reschedules an event found by its current time and/or title to new_start; 'cancel' deletes one. Times in words: 'tomorrow 3pm', 'friday 5 pm', '2026-10-09 14:00'. Move and cancel ask the person to confirm. Ambiguous matches are refused with the candidates. Requires the 'calendar-write-enabled' consent key (move/cancel also 'calendar-read-enabled'). No invitations are sent. (arguments: action, title, start, duration, end, new_start, location, notes)"
         }
       ],
       "offered": [
@@ -5179,7 +5179,7 @@
         "cleanup_report",
         "set_locale",
         "alarm",
-        "boot_report"
+        "calendar_edit"
       ],
       "recall_hit": true
     },
@@ -5520,7 +5520,7 @@
       "say": "Take a photo or selfie with the webcam.",
       "positive": "take_photo",
       "positive_args": {},
-      "positives_desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)",
+      "positives_desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)",
       "negatives": [
         {
           "tool": "set_wallpaper",
@@ -5981,7 +5981,7 @@
       "negatives": [
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "browse",
@@ -6031,16 +6031,16 @@
           "desc": "open_files: Find which programs have a file, directory or network socket open. Use for 'what is using this file', 'why can't I delete this', 'what has my disk open', 'which process is holding that socket'. Names the holding program with its full command line, and flags deleted files whose space cannot be reclaimed. Reads only this user's processes unless run as root. Read-only: it lists open handles and never closes one. (arguments: path, pid, limit)"
         },
         {
-          "tool": "identify_file",
-          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
-        },
-        {
           "tool": "open_application",
           "desc": "open_application: Open or launch an installed application by name or by kind, e.g. 'firefox', 'files', 'settings', 'music player', 'text editor'. Not for websites: use browse to open a site and work on it. (arguments: name)"
         },
         {
           "tool": "open_settings",
           "desc": "open_settings: Open the system Settings app at a specific page, e.g. 'wifi', 'bluetooth', 'display', 'sound', 'power', 'privacy', 'keyboard', 'mouse', 'touchpad', 'printers', 'users', 'about', 'date_time', 'region', 'notifications', 'background', 'accessibility'. GNOME and KDE Plasma. Use open_application for Settings without a page. (arguments: page)"
+        },
+        {
+          "tool": "identify_file",
+          "desc": "identify_file: Identify a file by reading its first bytes rather than trusting its name. Use for 'why won't this open', 'what is this file', 'is this really a PNG', 'this file has no extension'. Reports the detected format and whether the filename agrees with it, which is the usual cause of a file refusing to open in the program its name implies. Says plainly when a signature is unrecognised. Read-only. (arguments: path)"
         },
         {
           "tool": "android_device",
@@ -6058,9 +6058,9 @@
       "offered": [
         "open_file",
         "open_files",
-        "identify_file",
         "open_application",
         "open_settings",
+        "identify_file",
         "android_device",
         "conversations",
         "browse"
@@ -6222,7 +6222,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "lan_phone",
@@ -6764,7 +6764,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "speed_test",
@@ -6953,6 +6953,10 @@
           "desc": "move_pointer: Move the pointer to absolute screen coordinates. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: x, y)"
         },
         {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+        },
+        {
           "tool": "arrange_window",
           "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
         },
@@ -6971,21 +6975,17 @@
         {
           "tool": "browse",
           "desc": "browse: Open a website and do things on it for the person: find information, fill in forms, click through. Drive a web browser: navigate, read the page's text (get_text), click, type, select options, scroll, move through history, take screenshots and wait for conditions. While Chronoa's window is open this is the in-app browser the user can watch: there it opens only http(s) pages the egress policy allows, and key, hover, drag, upload_file, tabs and evaluate are not available. Otherwise it is a headless Chromium with all actions. Requires the web sense to be enabled and privacy mode to be off. (arguments: action, url, selector, text, key, value, label, files, x, y, to_x, to_y, to_selector, delta_x, delta_y, steps, repeat, tab_id, path, wait_for, timeout, settle)"
-        },
-        {
-          "tool": "find_recently_modified",
-          "desc": "find_recently_modified: List files under a directory whose recorded modification time is within the last N days, newest first. Use this to answer 'what did I change today'. This is a timestamp, so a tool that preserves or sets times (tar, rsync, cp -p) can move an entry without the content changing. (arguments: path, within_days, pattern, limit)"
         }
       ],
       "offered": [
         "move_or_copy_file",
         "move_pointer",
+        "alarm",
         "arrange_window",
         "calendar_edit",
         "conversations",
         "bluetooth_call",
-        "browse",
-        "find_recently_modified"
+        "browse"
       ],
       "recall_hit": true
     },
@@ -7010,6 +7010,10 @@
           "desc": "manage_triggers: Arm, list, or remove automatic rules that run a Chronoa action when a perception matches - for example, notify when the battery sense reports low. A rule names one already-whitelisted skill; it cannot run an arbitrary command or an LLM-authored prompt. Listing needs no permission; arming or disarming requires the 'trigger-control-enabled' consent key. (arguments: action, name, sense, match_mode, substring, keywords, actuator, arguments, cooldown_seconds, event_type, source, params, ask_first, retry_policy, debounce_seconds)"
         },
         {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+        },
+        {
           "tool": "move_pointer",
           "desc": "move_pointer: Move the pointer to absolute screen coordinates. Requires the 'input-control-enabled' consent key (separate from the vision sense) to be enabled. (arguments: x, y)"
         },
@@ -7020,10 +7024,6 @@
         {
           "tool": "date_math",
           "desc": "date_math: Date arithmetic: days until a date ('how many days until 25 December'), the date N days/weeks/months from a date ('what date is 45 days from now'), days between two dates, or the weekday of a date. (arguments: operation, date, other_date, amount, unit)"
-        },
-        {
-          "tool": "set_timer",
-          "desc": "set_timer: Set a countdown timer that sends a desktop notification when it finishes; list pending timers, say how much time is left, add or take off time, pause, resume, reset to the original length, and cancel. With one timer pending, 'my timer' needs no id. The countdown is owned by systemd, so it fires even if the assistant is closed. It is refused rather than silently accepted when systemd is unavailable, because a timer recorded as pending that will never fire is the same lie as a camera reported as disabled when it is not. (arguments: action, seconds, label, id)"
         }
       ],
       "offered": [
@@ -7031,10 +7031,10 @@
         "calendar_events",
         "calendar_month",
         "manage_triggers",
+        "alarm",
         "move_pointer",
         "move_or_copy_file",
-        "date_math",
-        "set_timer"
+        "date_math"
       ],
       "recall_hit": true
     },
@@ -7655,7 +7655,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "type_text",
@@ -7716,16 +7716,16 @@
           "desc": "edit_audio: Edit a sound file and save the result as a new file next to it (never overwriting the original): trim between times, raise or lower the volume, normalize loudness, change speed, or convert to an audio format. End times accept seconds or 'MM:SS'/'HH:MM:SS'. (arguments: path, start, end, volume, normalize, speed, to)"
         },
         {
-          "tool": "search_documents",
-          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
-        },
-        {
           "tool": "edit_video",
           "desc": "edit_video: Edit a video and save the result as a new file next to it (never overwriting the original): trim between times, resize to a width, rotate, mute or keep only the audio, or change the speed. End times accept seconds ('95'), or 'MM:SS' / 'HH:MM:SS'. (arguments: path, start, end, width, rotate, mute, audio_only, speed, output)"
         },
         {
           "tool": "read_video",
           "desc": "read_video: Read a video's basics out loud (for subtitles or what was said use recording): how long it is, its resolution, its video codec, whether it has audio, and its bitrate. Add keyframes=true to also save the moments the image changes. The original is never modified. (arguments: path, keyframes)"
+        },
+        {
+          "tool": "search_documents",
+          "desc": "search_documents: Search inside the user's files by their contents, using the desktop's own search index (LocalSearch on GNOME, Baloo on Plasma). Requires the 'document-search-enabled' consent key. (arguments: query, kind, limit)"
         }
       ],
       "offered": [
@@ -7734,9 +7734,9 @@
         "media_control",
         "create_video",
         "edit_audio",
-        "search_documents",
         "edit_video",
-        "read_video"
+        "read_video",
+        "search_documents"
       ],
       "recall_hit": true
     }
@@ -8125,10 +8125,6 @@
           "desc": "create_video: Create a video: a slideshow from a list of pictures (each shown for a few seconds), or a simple clip of a colour for a duration. Writes a new .mp4 next to the inputs; never overwrites. (arguments: images, seconds, color, duration, width)"
         },
         {
-          "tool": "office_document",
-          "desc": "office_document: Word (.docx), Excel (.xlsx) and PowerPoint (.pptx) files; also reads .odt/.ods/.odp. read: text with headings, tables, one section per sheet or slide (sheet, cell_range like A1:D20, formulas=true to see formulas). create: a new file from content - for .docx Markdown-style text (# headings, - bullets, 1. lists, | tables |, **bold**); for .xlsx rows (list of lists), or sheets {name: rows}, or CSV/Markdown-table text in content, '=...' cells are formulas; for .pptx slides [{title, bullets[], subtitle}]. set_cells: values {'B12': 42, 'C1': 'Total'} in a sheet. replace_text / append: change a .docx. pdf_images: save a PDF's embedded pictures to a folder. Changing an existing file needs 'file-edit-enabled' and can be undone with undo_last_change. (arguments: action, path, content, rows, sheets, slides, values, sheet, cell_range, formulas, find, replace, title, overwrite, output_dir)"
-        },
-        {
           "tool": "create_document",
           "desc": "create_document: Create a document from a title and body: a markdown file, a plain text file, or an HTML page. Writes a new file; never overwrites. (arguments: title, body, format, path)"
         },
@@ -8139,6 +8135,10 @@
         {
           "tool": "directory_tree",
           "desc": "directory_tree: Show the shape of a directory as a nested tree, with each entry's type. Use this to understand how a project or folder is laid out before opening files in it. Reports what it skipped and when it stopped early. (arguments: path, max_depth, include_hidden)"
+        },
+        {
+          "tool": "empty_directories",
+          "desc": "empty_directories: Find directories under a path that hold nothing at all. Use for 'clean up empty folders', 'what are these leftover directories', 'tidy this up'. Empty means rmdir would succeed - a directory holding only sub-directories is not empty - and one that cannot be read is not empty either. Reports what it found and removes nothing. Read-only. (arguments: path, limit)"
         }
       ],
       "offered": [
@@ -8146,10 +8146,10 @@
         "list_directory",
         "create_archive",
         "create_video",
-        "office_document",
         "create_document",
         "lab_network_create",
-        "directory_tree"
+        "directory_tree",
+        "empty_directories"
       ],
       "recall_hit": true
     },
@@ -8157,7 +8157,7 @@
       "say": "Record a short video from the camera.",
       "positive": "capture_video",
       "positive_args": {},
-      "positives_desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds)",
+      "positives_desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)",
       "negatives": [
         {
           "tool": "convert_media",
@@ -8215,10 +8215,6 @@
           "desc": "conversations: The user's saved Chronoa conversations. list: recent ones; search: find what was said in earlier conversations (query); open: continue one (which = title or id); new: start a fresh one; rename (which, title); copy: duplicate one to try another way, optionally keeping only its first keep_turns user messages; export: save one as Markdown (path); delete: remove one permanently (needs 'file-delete-enabled'). (arguments: action, which, query, title, path, keep_turns)"
         },
         {
-          "tool": "routines",
-          "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
-        },
-        {
           "tool": "empty_trash",
           "desc": "empty_trash: Permanently delete everything in the desktop trash, after listing what is in there first. There is no way to undo this, so it requires the 'trash-empty-enabled' consent key. Use 'list' to see the contents without emptying anything. (arguments: action)"
         },
@@ -8231,6 +8227,10 @@
           "desc": "press_key: Press a key or key combination in the focused window, e.g. 'Return', 'Escape', 'Tab' or 'ctrl+shift+t'. This sends a key, not text - use type_text to type a string. Requires the 'input-control-enabled' consent key. X11 only. (arguments: key, repeat)"
         },
         {
+          "tool": "routines",
+          "desc": "routines: Save a routine: a short phrase (e.g. 'good morning', 'leaving work') that later runs a whole request, e.g. 'tell me the weather, my calendar today and the top news'. Also list or delete routines. Saving runs nothing; saying the phrase later runs the request. (arguments: action, name, request, phrases)"
+        },
+        {
           "tool": "stale_files",
           "desc": "stale_files: Find files that are both large and untouched for a long time - the deletion candidates a disk-usage answer only gestures at. Use for 'what can I delete', 'what is safe to clean up', 'what in here is old and big'. Reports candidates only: it claims nothing is safe to delete, removes nothing, and says that an untouched timestamp is not proof a file is unused. Read-only. (arguments: path, older_than_days, limit)"
         }
@@ -8239,10 +8239,10 @@
         "delete_file",
         "alarm",
         "conversations",
-        "routines",
         "empty_trash",
         "open_files",
         "press_key",
+        "routines",
         "stale_files"
       ],
       "recall_hit": true
@@ -8460,7 +8460,7 @@
         },
         {
           "tool": "fm_radio",
-          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, deemphasis_us)"
+          "desc": "fm_radio: FM and AM broadcast radio. Five actions: 'hardware' for whether this computer can receive anything at all (a laptop usually cannot, and that is a true answer rather than a failure - it needs an RTL2832U USB dongle), 'bands' for the coverage, 'tune' to a frequency, 'decode' to demodulate a recorded IQ capture, and 'scan' to look for carriers in one. A frequency is given in MHz, e.g. 98.6. rtl_fm is narrowband and retunes per channel, so it cannot scan - scanning needs a wideband recording. No station names are guessed: a carrier gives a frequency, and naming it would need a table for your region. Requires the 'fm-radio-enabled' consent key. (arguments: action, frequency, seconds, file, centre_mhz, out, deemphasis_us)"
         },
         {
           "tool": "read_document",
@@ -8835,7 +8835,7 @@
         },
         {
           "tool": "take_photo",
-          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device)"
+          "desc": "take_photo: Take a photo or selfie with the webcam and save it to the Pictures folder, optionally after a countdown in seconds (0-30). Requires the vision/camera consent. Not for screenshots (use screenshot) or video (use capture_video). (arguments: countdown, path, device, infrared)"
         },
         {
           "tool": "create_video",
@@ -9120,6 +9120,10 @@
           "desc": "vm: Run a virtual machine with QEMU and drive it like a browser: launch it with a visible window on the desktop and a QMP control socket beside it, photograph its screen, send key combinations, type text into it, move and click its pointer (percentages of its screen), check its power state, and stop it. Requires the 'vm-control-enabled' consent key, off by default. Listing the VMs already running is `list_vms` (virsh) or this skill's list action; this one starts and drives them. (arguments: action, name, memory_mb, iso, disk, display, firmware, tpm, keys, text, x, y, button)"
         },
         {
+          "tool": "alarm",
+          "desc": "alarm: Alarm clock: set an alarm at a time of day (once, or repeating daily/weekdays/weekends/chosen days), list alarms, say when the next one is, change one's time or label, snooze the one that just rang, or delete one. Examples: 'set an alarm for 7am', 'alarm for 6:30 on weekdays', 'when is my next alarm?', 'change my 7am alarm to 7:30', 'snooze', 'delete the 7am alarm'. Times may be words ('7am', '7:30 pm', 'tomorrow 6:45'). It rings with a notification and the alarm sound even if the assistant is closed; it is held by systemd --user, so a reboot drops it until alarms are next listed, which re-arms it. (arguments: action, time, label, repeat, id, new_time, new_label, minutes)"
+        },
+        {
           "tool": "arrange_window",
           "desc": "arrange_window: Minimize, maximize, unmaximize, make fullscreen, leave fullscreen, move, resize, or send a window to another workspace, by window id from list_windows or by part of its title. move takes x and y, resize takes width and height (pixels), set_workspace takes a 0-based workspace. Nothing is closed; close_window does that. (arguments: action, window_id, title_contains, x, y, width, height, workspace)"
         },
@@ -9130,10 +9134,6 @@
         {
           "tool": "container",
           "desc": "container: Run containers on this machine with podman (run an image, run a command inside a running container, stop it, read its logs, list what is running, list local images, pull one) and start/stop nspawn machines with machinectl. A container started with display=x11 draws on this desktop, and the ui_elements tool is what drives it by name with a visible cursor; this tool starts it, and stops it. Needs 'container-control-enabled', off by default. (arguments: action, image, name, command, detach, display, share_bus, publish, all, tail)"
-        },
-        {
-          "tool": "desktop_setting",
-          "desc": "desktop_setting: Read or change one desktop setting from a fixed list: animations (window and menu animations); cursor_size (mouse pointer size in pixels (24 is normal; 32, 48, 64 are larger)); single_click (open files and folders with a single click); clock_24h (show the top-bar clock in 24-hour format); clock_seconds (show seconds in the top-bar clock); battery_percentage (show the battery percentage in the top bar); hot_corner (open the overview when the pointer hits the top-left corner); natural_scroll (touchpad natural (reverse) scrolling); tap_to_click (tap the touchpad to click). Changing requires the 'appearance-control-enabled' consent key. (arguments: setting, value)"
         }
       ],
       "offered": [
@@ -9141,10 +9141,10 @@
         "click_pointer",
         "move_or_copy_file",
         "vm",
+        "alarm",
         "arrange_window",
         "calendar_edit",
-        "container",
-        "desktop_setting"
+        "container"
       ],
       "recall_hit": true
     },
@@ -9844,7 +9844,7 @@
         },
         {
           "tool": "capture_video",
-          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds)"
+          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
         },
         {
           "tool": "cloud_files",
@@ -10108,7 +10108,7 @@
         },
         {
           "tool": "capture_video",
-          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds)"
+          "desc": "capture_video: Record a short video from the camera (webcam), e.g. '/dev/video0', for a few seconds. Requires the vision/camera consent. Writes a new .mp4; no camera means a clear refusal. (arguments: device, seconds, infrared)"
         },
         {
           "tool": "create_video",

@@ -142,7 +142,16 @@ def _run_skill(arguments):
                 "`rclone config` - it is not the same as a configured remote "
                 "that happens to be empty.")
 
-    wanted = str(arguments.get("remote") or "").strip().rstrip(":")
+    # The remote may arrive as `remote:path/to/dir` - the colon is the separator
+    # and everything after it is the path. Splitting it with `_remote` rather
+    # than stripping the colon is what makes the difference: before, the whole
+    # string was tested against the configured names, so `docs:work/reports`
+    # was answered *"There is no remote called 'docs:work/reports'"* when `docs`
+    # was right there - and a typo'd `nosuch:here` named the path as part of the
+    # remote, so nobody could tell what to fix. A lone `remote:` is valid and
+    # splits to `("remote", "")`.
+    token = str(arguments.get("remote") or "").strip()
+    wanted, inline_path = _remote(token) if token else ("", "")
     if wanted:
         if wanted not in remotes:
             return ("There is no remote called %r. The configured ones are %s."
@@ -164,7 +173,9 @@ def _run_skill(arguments):
         lines.append("Ask about one by name to see what is in it.")
         return "\n".join(lines)
 
-    path = str(arguments.get("path") or "").strip().strip("/")
+    # A path given inline (`remote:dir`) is the same request as `path=dir`, and
+    # `path` wins when both are supplied - it is the one the schema describes.
+    path = str(arguments.get("path") or "").strip().strip("/") or inline_path
     target = chosen + ":" + path if path else chosen + ":"
 
     entries, why = _top_level(target)

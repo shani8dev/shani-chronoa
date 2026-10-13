@@ -196,13 +196,6 @@ def compose(overrides: Optional[Dict[str, str]] = None) -> str:
     return " ".join(pieces) + " " + provenance.describe_boundary()
 
 
-def style_clause(key: str, overrides: Optional[Dict[str, str]] = None) -> str:
-    """One reply-style clause, overridable under the same rules."""
-    if overrides is None:
-        return get_prompt(key, STYLE_PIECES[key]["default"])
-    return overrides.get(key, STYLE_PIECES[key]["default"])
-
-
 def override_status() -> List[Dict[str, Any]]:
     """Every piece, whether a file replaces it, and what replaced it.
 

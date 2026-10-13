@@ -445,21 +445,6 @@ def _tool_text(tool: dict) -> "tuple[List[str], List[str]]":
     """
     facts = _tool_facts(tool)
     return facts.name, sorted(facts.body)
-
-
-def _tool_options(tool: dict) -> "set":
-    """The words of a tool's enum values: `subtitles`, `blur_faces` -> blur, faces.
-
-    The most precise words a request can contain - "make subtitles", "blur the
-    faces" - are often a tool's literal option values, and they were not read at
-    all: the small model picked `read_video` and `edit_image` instead (2026-10-08).
-
-    Cached with the rest of the tool's facts, because it walks the same enum
-    values the description pass already collected.
-    """
-    return _tool_facts(tool).options
-
-
 def _name(tool: dict) -> str:
     return tool.get("function", {}).get("name", "")
 

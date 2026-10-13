@@ -359,14 +359,6 @@ def lowpass(x, rate, cutoff, order=4):
     if cutoff >= rate / 2.0 * 0.98:
         return list(x)
     return sosfiltfilt(butter_sos(order, cutoff, rate, "low"), x)
-
-
-def highpass(x, rate, cutoff, order=4):
-    if cutoff <= 0:
-        return list(x)
-    return sosfiltfilt(butter_sos(order, cutoff, rate, "high"), x)
-
-
 def bandpass(x, rate, low, high, order=4):
     if low <= 0 or high >= rate / 2.0 * 0.98:
         return list(x)
@@ -543,10 +535,6 @@ def _convolve(x: "list[float]", taps: "list[float]") -> "list[float]":
                 total += x[j] * tap
         out.append(total)
     return out
-
-
-def _is_integer_rational(up: int, down: int) -> bool:
-    return down % up == 0
 # --- spectrum -----------------------------------------------------------------
 
 

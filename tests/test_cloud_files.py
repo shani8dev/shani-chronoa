@@ -226,6 +226,57 @@ def test_a_missing_rclone_names_its_package(tmp_path, monkeypatch):
     assert "the package that provides it" not in out
 
 
+# --- `remote:path` is one argument, and the colon is the separator -------------
+# The module's own `_remote` was written for exactly this and had no caller.
+# Without it the whole string was tested against the configured names, so a
+# perfectly ordinary `remote:docs` was answered **"There is no remote called
+# 'remote:docs'"** - naming a remote that was configured, and sending the person
+# looking for a typo that was not there.
+
+def test_the_remote_and_path_may_arrive_as_one_argument(tmp_path, monkeypatch):
+    """`docs:work/reports` is the remote *and* the path, and the colon is the
+    separator - everything after the first one is the path."""
+    _fake_rclone(tmp_path, monkeypatch, remotes="docs:\ndrive:\n")
+    out = CF._run_skill({"remote": "docs:work/reports"})
+    assert "**docs:work/reports**" in out
+    assert "no remote called" not in out
+
+
+def test_a_lone_colon_is_the_remote_and_no_path(tmp_path, monkeypatch):
+    """`docs:` is valid - a remote with nothing named under it. This is the one
+    form the old `.rstrip(":")` happened to get right, and it has to keep working
+    through the same splitter rather than by the accidental route."""
+    _fake_rclone(tmp_path, monkeypatch, remotes="docs:\n")
+    out = CF._run_skill({"remote": "docs:"})
+    assert "**docs:**" in out
+    assert "no remote called" not in out
+
+
+def test_the_refusal_names_the_remote_and_not_the_path(tmp_path, monkeypatch):
+    """A typo in `nosuch:here` used to be answered *"There is no remote called
+    'nosuch:here'"* - quoting the path as part of the name, so the sentence
+    named something that is not a remote and the person had no way to tell what
+    to fix. It names `nosuch` now."""
+    _fake_rclone(tmp_path, monkeypatch, remotes="docs:\ndrive:\n")
+    out = CF._run_skill({"remote": "nosuch:here"})
+    assert "no remote called 'nosuch'" in out
+    assert "'nosuch:here'" not in out
+
+
+def test_a_named_path_still_wins_over_the_inline_one(tmp_path, monkeypatch):
+    """Both spellings of "where to look" are accepted; `path` is the one the
+    schema describes, so it wins rather than the two silently disagreeing."""
+    log = _fake_rclone(tmp_path, monkeypatch, remotes="docs:\n")
+    monkeypatch.setattr(CF, "_top_level", lambda target: ([], ""))
+    CF._run_skill({"remote": "docs:inline", "path": "named"})
+    # **`size`, not `lsf`** - `_top_level` is stubbed out above, so the listing
+    # never runs and the path the skill chose is visible in what *is* sent. The
+    # first version of this asserted on `lsf` and failed on correct code.
+    argv = _argv(log)
+    assert any("docs:named" in line for line in argv), argv
+    assert not any("docs:inline" in line for line in argv), argv
+
+
 # --- the one equivalent mutant, recorded rather than hidden --------------------
 # **Emptying `_FORBIDDEN` leaves the suite green, and correctly so.** The module
 # never invokes a transfer verb, so a guard against one fires neither way - the

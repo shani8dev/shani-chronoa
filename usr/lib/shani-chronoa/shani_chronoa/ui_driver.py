@@ -2248,24 +2248,6 @@ def portal_available() -> bool:
         return _portal.PortalClient().version(_portal.RD_IFACE) > 0
     except Exception:  # noqa: BLE001 - no portal is a route that does not exist
         return False
-
-
-def _type_keys(text: str):
-    """Type `text` by the best route available, without checking it arrived.
-
-    Kept for callers that only need "the keys were sent"; `type_text` does not
-    use it, because it must *verify* and therefore needs the routes individually.
-    """
-    routes = _typing_routes("")
-    if routes:
-        try:
-            return routes[0][1](text)
-        except Exception:  # noqa: BLE001 - fall through to the next route
-            pass
-    return _xdotool(["type", "--clearmodifiers", "--delay", "45", "--", text],
-                    timeout=120)
-
-
 def type_text(app: str, title: str, text: str,
               window_id: "str | None" = None) -> str:
     """Type into a container's GUI app, with the cursor shown where it lands."""

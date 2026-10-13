@@ -964,12 +964,6 @@ def _find(rows: list, wanted: str) -> "tuple[int, str] | str":
     offered = ", ".join(list(dict.fromkeys(known))[:8]) or "none"
     return (f"this device has no characteristic I know how to read as {uuid_name(wanted)}"
             f" - it offers: {offered}")
-
-
-def _characteristics(rows: list) -> list:
-    return [uuid_name(u) for _, u, kind in rows if "characteristic" in kind.lower()]
-
-
 def _resolve(dev: str, devices: list) -> "tuple[tuple | None, str]":
     """A name fragment to exactly one paired device, refusing an ambiguous one."""
     hits = [(mac, name) for mac, name in devices if dev in name.lower()]

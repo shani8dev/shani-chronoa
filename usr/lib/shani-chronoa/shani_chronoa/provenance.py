@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import re
 import secrets
-from typing import Iterable, List, NamedTuple, Optional
+from typing import NamedTuple
 
 #: The label the model reads. Deliberately says *data* rather than *ignore
 #: this*: "ignore" is an instruction, and an instruction inside content is the
@@ -142,20 +142,6 @@ def fence(content: str, source: str) -> Fenced:
         f"[{close_marker}]\n"
     )
     return Fenced(text, source, True)
-
-
-def fence_all(items: Iterable) -> List[Fenced]:
-    """Fence an iterable of `(content, source)` pairs or `Fenced`s."""
-    out: List[Fenced] = []
-    for item in items:
-        if isinstance(item, Fenced):
-            out.append(item)
-            continue
-        content, source = item
-        out.append(fence(content, source))
-    return out
-
-
 def strip_fences(text: str) -> str:
     """Remove our markers from text that is being persisted rather than sent.
 

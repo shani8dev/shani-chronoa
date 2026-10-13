@@ -102,70 +102,47 @@ def _tokens_of(source):
 #: Decorators whose function body is not the interesting part.
 _SKIP_DECORATORS = ("property", "cached_property", "abstractmethod", "override")
 
+#: Names a **framework resolves by name**, so no code in this tree can refer to
+#: them and no scanner can see that they are called.
+#:
+#: `http.server.BaseHTTPRequestHandler.handle_one_request` builds
+#: `mname = "do_" + self.command` and then does `getattr(self, mname)` - so a
+#: `do_GET` is called by the *request method string*, and `log_message` is called
+#: by `log_request`. Verified against the stdlib source, not inferred.
+#:
+#: These were three entries in `ALLOWED`, each carrying that explanation in prose.
+#: A prose reason is the right shape for "nobody calls this and here is why"; it is
+#: the wrong shape for "this is called and the calling is invisible". The second
+#: kind belongs in a declared exemption like `_SKIP_DECORATORS`, where it cannot
+#: quietly absorb a genuine orphan: `test_the_framework_dispatch_exemption_names_
+#: only_real_handlers` requires every name here to exist on a class that inherits
+#: `BaseHTTPRequestHandler`.
+_FRAMEWORK_DISPATCH = ("do_GET", "do_POST", "log_message")
+
 #: Unreferenced public callables, each with why it is allowed to stay.
 #:
 #: **Every entry carries a reason, and a reason of "" is a failure.** An allowlist
 #: of bare names is how an audit becomes a rubber stamp: the names stop being
 #: examined, and the next genuine orphan joins them by being copied.
 #:
-#: `learning.py` belongs to another session working in parallel. Its cluster is
-#: listed here so the guard is green today and so the list is *visible* rather than
-#: being an unexplained block of failures.
-ALLOWED = {
-    # --- dispatched by a framework, never by name -----------------------
-    "do_GET": "http.server.BaseHTTPRequestHandler calls it for every GET; no code "
-              "in this tree can, by construction.",
-    "do_POST": "the same - BaseHTTPRequestHandler's POST hook.",
-    "log_message": "the same - BaseHTTPRequestHandler's logging hook.",
-
-    # --- another session's area: learning.py ---------------------------
-    "bayesian": "learning.py - the concurrent session's active area.",
-    "contextual": "learning.py - the concurrent session's active area.",
-    "credible_interval": "learning.py - the concurrent session's active area.",
-    "decaying_epsilon_greedy": "learning.py - the concurrent session's active area.",
-    "episode": "learning.py - the concurrent session's active area.",
-    "iqr_outliers": "learning.py - the concurrent session's active area.",
-    "is_anomalous": "learning.py - the concurrent session's active area.",
-    "is_informative": "learning.py - the concurrent session's active area.",
-    "kl_ucb": "learning.py - the concurrent session's active area.",
-    "observe": "learning.py - the concurrent session's active area.",
-    "ranking": "learning.py - the concurrent session's active area.",
-    "retire_model": "learning.py - the concurrent session's active area.",
-    "seasonality": "learning.py - the concurrent session's active area.",
-    "trend": "learning.py - the concurrent session's active area.",
-    "ucb1": "learning.py - the concurrent session's active area.",
-    "ucb_tuned": "learning.py - the concurrent session's active area.",
-    "utility": "learning.py - the concurrent session's active area.",
-    "utility_auction": "learning.py - the concurrent session's active area.",
-    "z_scores": "learning.py - the concurrent session's active area.",
-
-    # --- examined and deliberately left unwired -------------------------
-    "default_teacher": "distill.py: 'Kept as the historical entry point'. The "
-                       "live entry is `distil()`, which `tools/distill_run.py` "
-                       "calls - the measurement runner, deliberately off-session "
-                       "rather than a GUI action.",
-    "dependents_of": "goals.py: superseded by `downstream_of`.",
-    "fence_all": "provenance.py: the only bulk-ish site, assistant.py:483, "
-                 "fences per message conditionally (role check, already-fenced "
-                 "check) and rebuilds the dict; `(content, source) -> Fenced` "
-                 "cannot express that.",
-    "highpass": "fmdsp.py: a filter primitive beside `bandpass`, which is used. "
-                "Library surface with no caller yet.",
-    "list_voices": "tts.py: the Voice panel's `_voice_catalogue` does this.",
-    "load_dict": "event_rules.py: `BackoffPolicy` is a stateless calculator - "
-                 "`EventRule._policy()` rebuilds it from the rule's own counters "
-                 "on every call. Loading into it would write to a throwaway.",
-    "resample_to": "fmdsp.py: `resample()` already reduces the fraction by gcd "
-                   "itself (fmdsp.py:32), so this wrapper adds nothing.",
-    "section_ids": "settings_window/window.py: all 20 SETTINGS_TARGETS name "
-                   "*families*, which `family_ids()` already serves; nothing "
-                   "addresses a group by id.",
-    "style_clause": "prompt_pieces.py: style assembly goes through "
-                    "`get_prompt`/`ALL_PIECES`.",
-    "verify_digest": "model_registry.py: the concurrent session's in-flight "
-                     "work. AGENTS.md calls it 'the only enforcement-shaped "
-                     "orphan left'.",
-}
+#: **Empty, and empty on purpose.** It held 26 names once; 18 were deleted, 2 were
+#: wired, and the last 6 (`fence_all`, `highpass`, `list_voices`, `load_dict`,
+#: `section_ids`, `verify_digest`) went with the rest of that batch.
+#: `test_the_allowlist_is_not_stale` is what forced it: a name that has become
+#: reachable has to leave, so an allowlist permitted to survive its own entries is
+#: not tracking anything.
+#:
+#: The reasons that were here each failed in one of two ways, and both are worth
+#: recording because both look sound when written: the thing was reachable by a
+#: route nobody had grepped (`load_dict` - a bare `load(` inside the defining
+#: module, which a `module.func(` search drops), or it was a duplicate the guard
+#: could count because the name sat in a *string* (`show_devices` in a `getattr`
+#: tuple, `context_report` in `getattr(assistant, "context_report", None)`).
+#:
+#: `learning.py` is the remainder, and it is deliberately **not** folded in here:
+#: its toolbox exclusion is derived from that file's own classes, and the controls
+#: below assert it still yields something, so it cannot silently empty itself.
+ALLOWED: dict = {}
 
 
 #: This file. Excluded from the *reference* pass, for a reason found by running it:
@@ -180,97 +157,123 @@ _SELF = "test_no_unwired_public_helper.py"
 #: bar is different: a private name is allowed to be spare far more often, and
 #: merging the two lists would make the public one look arbitrary.
 #:
+#: **Empty, and empty for the same reason as `ALLOWED`.** Eleven names were here;
+#: 8 were deleted and 3 were wired (`_remote`, `_lsusb`, `_numeric`), and wiring
+#: them closed three real defects rather than tidying a list.
+#:
 #: Probed by asking what the guard deliberately skips: **0 unreferenced module
 #: constants** of 3557, and 14 unreferenced private functions of 3652.
-PRIVATE_ALLOWED = {
+PRIVATE_ALLOWED: dict = {}
 
-    "_as_declared": "merge.py: remains of `gguf-py`'s typed writer, which this "
-        "module deliberately stopped using - its own docstring records that the "
-        "typed path 'lost 15 of 31 keys on a real Qwen3 file'. The metadata "
-        "section is now copied verbatim via `kv_section_bytes`.",
-    "_probe_writer": "merge.py: the same removed typed-writer path. A throwaway "
-        "GGUFWriter to validate key packing, for a writer nothing calls.",
-
-    "_is_integer_rational": "fmdsp.py: `resample()` chooses its decimation path "
-        "on `up == 1`, not on `down % up == 0` - and it is right to. A 1/2 ratio "
-        "is a rational number but is not pure decimation, so using this would be "
-        "a bug.",
-
-    "_tool_options": "tool_select.py: a one-line accessor for "
-        "`_tool_facts(tool).options`. `ranked()` scores against `facts.options` "
-        "directly (with the `option_df <= 3` rarity guard), so nothing needs the "
-        "accessor. Checked, not assumed: the enum words are read.",
-    "_read_plan_mode": "gui/window.py: one line wrapping `planmode.is_enabled()`, "
-        "which the module already calls directly at three other sites - so the "
-        "reason the docstring gives, 'not through ChronoaConfig', is being "
-        "honoured without the wrapper.",
-
-    "_forward_delay": "skills/bridge_topology.py: reads a bridge's STP forward "
-        "delay. Nothing in that module reads it, and `_read_int` exists there "
-        "only to serve it. STP timers are not meaningful for the single bridge a "
-        "lab network has, so surfacing one would be noise.",
-
-    "_remote": "skills/cloud_files.py: parses `remote:path/to/dir`. No call site "
-        "uses that spelling.",
-    "_udisks": "skills/manage_mount.py: runs `udisksctl status`; the module "
-        "invokes udisksctl itself at its own three sites.",
-    "_lsusb": "senses/devices.py: runs `lsusb`; the module shells out to lsusb at "
-        "its own sites.",
-    "_characteristics": "skills/bluetooth_gatt.py: filters GATT rows to "
-        "characteristics; the module builds its own row lists.",
-    "_numeric": "skills/solve_math.py: result formatting against `_digits()`.",
-    "_type_keys": "ui_driver.py: types text on the best route without checking "
-        "it arrived. Its own docstring says `type_text` does not use it 'because "
-        "it must *verify*', and no caller that only wants 'the keys were sent' "
-        "exists - so this is a spare entry point, not a missing capability.",
-    "_sidecars": "skills/apply_patch.py: reports `.rej` and `.orig`. The report "
-        "is written inline at the call site and is **narrower** - it lists `.rej` "
-        "only, deliberately: a `.orig` is the pre-patch backup, which is good "
-        "news rather than something to worry about.",
-}
 
 
 #: Unreferenced **public classes**, with the same two properties as `ALLOWED`.
+#:
+#: **Empty.** The two names that were here (`IndexError_`, `Task`) were deleted;
+#: `Task` was a vestige of the upstream framework `goals.py` was written against,
+#: and its two jobs were already done by `PlannedStep` and `Phase`.
 #:
 #: Probed after the callables and the constants: **0 unreferenced enum members** of
 #: 33, and 22 unreferenced classes of 380 - **19 of them in `learning.py`**, the
 #: concurrent session's area. So three were real candidates and one of those
 #: (`speech_gate.Busy`) turned out to document a raise nothing performed.
-CLASS_ALLOWED = {
-    "IndexError_": "file_index.py: 'A file we will not index, with the reason.' The "
-        "behaviour exists and is better than an exception would be - the walk "
-        "records `problems` (with the OSError text) and `declined` (named "
-        "directories), so a skipped file is reported rather than raised about.",
-    "Task": "goals.py: 'CAMEL's Task shape, reduced to what a local model will "
-        "actually use.' `Step` is the shape the goal engine uses; this is the "
-        "vestige of the upstream framework it was written against.",
-}
+CLASS_ALLOWED: dict = {}
 
 
-#: `learning.py`'s unreferenced classes. Listed by name, and the test asserts the
-#: file still yields some, so a rename cannot make the exclusion silently empty.
-#: Same category as `verify_digest`: the concurrent session's active area.
-_LEARNING_NAMES = {
-    "AssociationRules",
-    "BetaBernoulli",
-    "ChangePoint",
-    "EWMA",
-    "Experience",
-    "Frequency",
-    "Gaussian",
-    "Hierarchical",
-    "MonteCarlo",
-    "MovingAverage",
-    "NaiveBayes",
-    "OnlineKMeans",
-    "OnlineLogistic",
-    "PassiveAgregressive",
-    "PolynomialRegression",
-    "Preferences",
-    "RollingWindow",
-    "Tabular",
-    "classification",
-}
+
+#: `learning.py`'s own classes - the documented statistics toolbox.
+#:
+#: **This is not an allowlist and does not claim to be.** The three allowlists above
+#: (`ALLOWED`, `PRIVATE_ALLOWED`, `CLASS_ALLOWED`) are now empty; every entry in them
+#: was wired or deleted. What remains is a *documented deliberate* population:
+#: `AGENTS.md` records it as a toolbox kept on purpose - *"keep learning even when
+#: the result is not yet actionable"* - and `learning.py`'s own `__all__` exports the
+#: top of it as library surface.
+#:
+#: It replaced a 29-name hand-kept list that was *correct* - every orphan was in it,
+#: and all 29 names were real classes - but which nothing could check. Seven of its
+#: entries subtracted names the class scan never reports anyway, so a name added or
+#: mis-spelled there would have been invisible in both directions.
+#:
+#: So it is derived now: the classes of one module, read out of the source. The
+#: controls that keep it honest are `test_the_toolbox_exclusion_cannot_reach_
+#: another_file` (it must never name a class declared outside `learning.py`, which
+#: is what an allowlist does the moment somebody adds a name to it) and
+#: `test_the_toolbox_exclusion_never_covers_a_live_class` (every name it subtracts
+#: from the orphans must actually be an orphan, so it cannot absorb live code).
+_TOOLBOX_MODULE = "learning.py"
+
+
+def _toolbox_class_names():
+    """Class names declared in the toolbox module, read out of the source.
+
+    **Read from the file, never typed.** A name that stops existing disappears on
+    the next run rather than sitting in a list nothing re-derives.
+    """
+    roots, nested = _toolbox_roots(), set()
+    for path in sorted(PKG.rglob(_TOOLBOX_MODULE)):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            up = parents.get(node)
+            while up is not None:
+                if isinstance(up, ast.ClassDef):
+                    if up.name in roots:
+                        nested.add(node.name)
+                        break
+                up = parents.get(up)
+    # **A class a seam reaches is not in the toolbox, nested or not.**
+    # `estimators.py` re-exports `EMA`, `KMeans` and `KNN` from here (the
+    # split-modules commit), so three classes inside the sections are live - and an
+    # exclusion that covers them has promised not to report a class that something
+    # outside this file reaches. That is the over-claiming the emptied allowlists
+    # were made of, arrived at by a different route: it costs nothing today,
+    # because none of the three is an orphan, so dropping them changed no audit
+    # result at all. The measurement is in the failure this makes catchable, not in
+    # a number that moved.
+    return {n for n in roots | nested if not _seam_reaches(n)}
+
+
+def _toolbox_roots():
+    """The toolbox's module-level sections: lowercase classes no seam reaches.
+
+    **Not every class in the module.** `learning.py` also holds live machinery -
+    `OutcomeModel`, `Report`, `decision` - and an exclusion covering the whole
+    file would absorb those too, silently, the day any of them came unwired. The
+    sections are the lowercase module-level classes, and which of those count is
+    decided by `_seam_reaches`, the non-blind reader: a token scan sees `stats` as
+    a local variable in three other modules and would call every section wired.
+
+    **`_toolbox_module_classes` was deleted on 2026-10-13 and did not need to be.**
+    It computed the same eleven names by a second route - "module-level classes
+    that appear in `_toolbox_class_names()`" - which is the same set as this
+    function, because a nested class is never module-level. Two derivations of one
+    number is the drift this file records for `capabilities._GROUPS` and for the
+    `skills_total` figure: one is checked and the other rots. This is the
+    primitive the whole derivation builds on, so it is the one that stays.
+    """
+    names = set()
+    for path in sorted(PKG.rglob(_TOOLBOX_MODULE)):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name[:1].islower():
+                names.add(node.name)
+    return {n for n in names if not _seam_reaches(n)}
 
 
 #: Unreferenced **`@property` / `@cached_property` members**.
@@ -282,6 +285,18 @@ _LEARNING_NAMES = {
 #:
 #: No separate allowlist: all 117 are read. The dict exists so a future entry has
 #: to carry a reason, and so the empty result is an assertion rather than a shrug.
+#: The six toolbox classes the class audit **cannot** see, and why.
+#:
+#: Their names are ordinary English words, so the reference pass finds them as
+#: local variables in other modules - `memory`, `online`, `stats`, `regression`,
+#: `clustering` and `rl` - and reports no unreferenced class for any of them.
+#: A named list rather than six inline strings, so the audit control and the
+#: blind-spot control cannot disagree about which classes are invisible.
+_BLIND_TOOLBOX = {
+    "memory", "online", "stats", "regression", "clustering", "rl",
+}
+
+
 PROPERTY_ALLOWED: dict = {}
 
 
@@ -316,6 +331,107 @@ def _docstring_lines(tree):
     return spans
 
 
+def _all_lines(tree):
+    """Line numbers belonging to an `__all__` assignment, and its elements.
+
+    Both halves: the `__all__ = [...]` statement and the string elements inside
+    it. Skipping only the elements would leave the assignment itself, but the
+    names there are the strings, so the elements are what matter - both are
+    returned so neither can leak through.
+    """
+    lines = set()
+    for node in ast.walk(tree):
+        targets = getattr(node, "targets", None)
+        if not isinstance(node, ast.Assign) or not targets:
+            continue
+        if not any(isinstance(t, ast.Name) and t.id == "__all__" for t in targets):
+            continue
+        lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
+
+
+def _toolbox_methods_per_class():
+    """`{toolbox class: excluded public callables}` from the source.
+
+    Not from the audit: a count the audit derives about the audit is the
+    over-the-shoulder agreement this file records for a hand-kept number.
+    """
+    import ast as _ast
+
+    per = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts or path.name != "learning.py":
+            continue
+        try:
+            tree = _ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        parents = {}
+        for node in _ast.walk(tree):
+            for child in _ast.iter_child_nodes(node):
+                parents[child] = node
+        for node in _ast.walk(tree):
+            if not isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef)):
+                continue
+            up = parents.get(node)
+            while up is not None:
+                if isinstance(up, _ast.ClassDef):
+                    per.setdefault(up.name, []).append(node.name)
+                    break
+                up = parents.get(up)
+    return {name: calls for name, calls in per.items()
+            if name in _toolbox_class_names()}
+
+
+def _toolbox_locations():
+    """`"file:line"` for every public callable defined inside the toolbox.
+
+    **Derived from the AST at test time, and deliberately not a name list.** The
+    three allowlists this file used to carry all became rubber stamps - a name
+    that only grows, absorbing whatever is near it - and emptying them was the
+    point. A toolbox exclusion that works has to be the same idea expressed the
+    other way round: *only ever* `learning.py`, only ever the classes the guard
+    already documents, and computed from the source each run so a rename shows up
+    as a change rather than as a stale entry.
+
+    A nested class counts, because the majority of the toolbox is nested: measured
+    2026-10-13 at **11 module-level sections and 25 classes inside them**, 36 in
+    total. That number is hand-written here and will drift - what does not drift is
+    the rule, so the count is only ever a description of the derivation above.
+    """
+    out = set()
+    # **One module, and only that one.** A name-keyed exclusion matched `Report`
+    # in `context_meter.py` and `Example` beside it, because those files declare
+    # classes with the same names - so a toolbox entry would have silently
+    # absorbed orphans in another module. The derivation walks the toolbox module
+    # and nothing else, so a location it returns is in that file by construction.
+    for path in sorted(PKG.rglob(_TOOLBOX_MODULE)):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        parents = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name.startswith("_"):
+                continue
+            chain = []
+            up = parents.get(node)
+            while up is not None:
+                if isinstance(up, ast.ClassDef):
+                    chain.append(up.name)
+                up = parents.get(up)
+            if any(name in _toolbox_class_names() for name in chain):
+                out.add("%s:%d" % (path.relative_to(ROOT), node.lineno))
+    return out
+
+
 def _referenced_names():
     """`{name: {files}}` for every name the tree refers to."""
     used = {}
@@ -329,7 +445,18 @@ def _referenced_names():
                 used.setdefault(name, set()).add(str(path))
             continue
 
-        skip = _docstring_lines(tree)
+        # **`__all__` is an export list, not a use.** A name that appears only
+        # there has been *offered* to importers and *taken up* by nobody, which
+        # is the same condition this whole file exists to report - counting it as
+        # a reference makes the audit blind to it.
+        #
+        # Measured: 12 names across the package had `__all__` as their only
+        # reference anywhere in the tree - `learning.bandits`, `learning.anomaly`,
+        # `learning.timeseries`, `learning.bayes`, `learning.train_and_report`,
+        # `learning.vectorise`, `learning.score_predictions`, `bandit.save_bandit`,
+        # `capabilities.capability_for`, `code_hl.supports`, and two from
+        # `sandbox/__init__.py`. Seven of them are whole learning capabilities.
+        skip = _docstring_lines(tree) | _all_lines(tree)
         names = set()
         for node in ast.walk(tree):
             if getattr(node, "lineno", None) in skip:
@@ -368,6 +495,8 @@ def _defined_public(used):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if node.name.startswith("_"):
+                continue
+            if node.name in _FRAMEWORK_DISPATCH:
                 continue
             if any((getattr(d, "id", None)
                     or getattr(getattr(d, "func", None), "id", None))
@@ -479,6 +608,118 @@ def _class_orphans():
     return _defined_classes(_referenced_names())
 
 
+_SEAM_NAMES = None
+
+
+def _seam_reaches(name):
+    """True when a real call seam reaches `name` in the toolbox module.
+
+    **The instrument the blind cannot use.** A bare-token scan sees `stats` as a
+    local variable in three other modules; this asks the two ways the tree can
+    actually reach a name it did not define in that file - an attribute on the
+    module, or an import from it. Six classes are invisible to the token scan, so
+    saying they are unwired needs a second reader that is not blind the same way.
+
+    The names are collected **once** and cached: `_toolbox_roots` asks this about
+    every section, and a per-name re-walk of the tree turned a 167s guard run into
+    a 563s one. The cache is filled on first use and cleared when a plant rebinds
+    the package, so a scratch tree can ask about itself.
+    """
+    global _SEAM_NAMES
+    if _SEAM_NAMES is None:
+        _SEAM_NAMES = set()
+        for path in _sources():
+            if path.name == _SELF:
+                continue
+            try:
+                tree = ast.parse(path.read_text(errors="replace"))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Attribute) \
+                        and isinstance(node.value, ast.Name) \
+                        and node.value.id == "learning":
+                    _SEAM_NAMES.add(node.attr)
+                if isinstance(node, ast.ImportFrom) \
+                        and node.module == "shani_chronoa.learning":
+                    for alias in node.names:
+                        _SEAM_NAMES.add(alias.name)
+    return name in _SEAM_NAMES
+
+
+def _forget_seam_cache():
+    """Drop the cached seam set, so a rebound package is re-read."""
+    global _SEAM_NAMES
+    _SEAM_NAMES = None
+
+
+def _planted_class_orphan_is_found():
+    """True when `_class_orphans` reports a class planted in a scratch package.
+
+    The public counterpart of `_planted_private_orphan_is_found`: one public class,
+    referenced nowhere, must be reported. Both are needed because a scan that has
+    stopped reading the tree returns the same empty dict it would return for a
+    clean tree, so only a plant tells the two apart.
+    """
+    import pathlib as _pathlib
+    import tempfile as _tempfile
+
+    global PKG, ROOT
+    real_pkg, real_root = PKG, ROOT
+    try:
+        with _tempfile.TemporaryDirectory(prefix="plant-class-") as tmp:
+            base = _pathlib.Path(tmp)
+            (base / "pkg").mkdir()
+            (base / "pkg" / "_planted.py").write_text(
+                "class NothingNamesThis:\n"
+                "    pass\n\n\n"
+                "class ThisOneIsUsed:\n"
+                "    pass\n\n\n"
+                "PUBLIC = ThisOneIsUsed\n"
+            )
+            PKG = base / "pkg"
+            ROOT = base
+            found = _class_orphans()
+            return "NothingNamesThis" in found
+    finally:
+        PKG, ROOT = real_pkg, real_root
+
+
+def _planted_private_orphan_is_found():
+    """True when `_defined_private` reports a helper planted in a scratch package.
+
+    Writes a module holding one private function that nothing refers to, points
+    `PKG` at it, and asks the real scanner. `PKG` and `ROOT` are restored in a
+    `finally` because the failure this guards against is a scan that returns an
+    empty dict - and a scan pointed at the wrong tree returns exactly that.
+    """
+    import pathlib as _pathlib
+    import tempfile as _tempfile
+
+    global PKG, ROOT
+    real_pkg, real_root = PKG, ROOT
+    try:
+        with _tempfile.TemporaryDirectory(prefix="plant-private-") as tmp:
+            base = _pathlib.Path(tmp)
+            (base / "pkg").mkdir()
+            (base / "pkg" / "_planted.py").write_text(
+                "def _nothing_calls_this_anywhere():\n"
+                "    return 0\n\n\n"
+                "def _this_one_is_used():\n"
+                "    return 1\n\n\n"
+                "PUBLIC = _this_one_is_used()\n"
+            )
+            # point the scanner at the scratch package, and the reference pass at
+            # the same tree only - so the planted name is genuinely unreferenced
+            PKG = base / "pkg"
+            ROOT = base
+            referenced = _referenced_names()
+            found = _defined_private(referenced)
+            return "_nothing_calls_this_anywhere" in found
+    finally:
+        PKG, ROOT = real_pkg, real_root
+
+
 def _private_orphans():
     return _defined_private(_referenced_names())
 
@@ -487,13 +728,23 @@ def _private_orphans():
 
 def test_no_public_helper_is_called_by_nothing():
     orphans = _orphans()
-    unexpected = sorted(set(orphans) - set(ALLOWED))
+    # **The toolbox is excluded by definition site, never by name.** A name would
+    # be the allowlist this file just emptied, one file down: it would absorb a
+    # method of `decision` or `Bandit` on the strength of a name someone typed.
+    # `_toolbox_locations()` can only ever point at `learning.py`, and
+    # `test_the_toolbox_exclusion_cannot_reach_another_file` asserts exactly that.
+    toolbox = _toolbox_locations()
+    unexpected = {name: [loc for loc in locs if loc not in toolbox]
+                  for name, locs in orphans.items()}
+    unexpected = {n: l for n, l in unexpected.items() if l}
 
     assert not unexpected, (
         f"{len(unexpected)} public callable(s) that nothing in the tree "
         f"references:\n"
-        + "\n".join(f"  {name}  ({', '.join(orphans[name])})" for name in unexpected)
-        + "\n\nEither wire it, delete it, or add it to ALLOWED with a reason.")
+        + "\n".join(f"  {name}  ({', '.join(locs)})"
+                    for name, locs in sorted(unexpected.items()))
+        + "\n\nEither wire it, or delete it. (There is no allowlist to add it to "
+          "any more - that is the point of this file now.)")
 
 
 def test_every_allowed_name_carries_a_reason():
@@ -644,23 +895,65 @@ def test_both_audits_actually_find_their_allowlisted_orphans():
     So both scans are required to find the orphans they are known to contain. If
     the reference pass loses a directory, the definition walk stops matching, or
     the dunder filter changes shape, this fails instead of passing quietly.
+
+    **And when the allowlists emptied, the first half of this control became
+    trivially true** - `set(ALLOWED) - set(public)` is `set()` over an empty
+    `ALLOWED`, so the blindness this test exists to catch would have arrived in
+    the exact edit that removed it. The declared known-orphan population is now
+    the derived toolbox, so that is what the scan is required to find.
     """
-    public, private = _orphans(), _private_orphans()
+    public = _orphans()
 
-    missing_public = sorted(set(ALLOWED) - set(public))
-    assert not missing_public, (
-        f"the public scan no longer finds {missing_public}, so it has gone blind - "
-        f"the 'no unwired helper' test would now pass on an empty result")
+    # **Not the six the scan provably cannot see.** `_BLIND_TOOLBOX` names them,
+    # and `test_the_class_audit_cannot_see_the_english_word_classes` asserts both
+    # halves of that fact. Demanding the scan find them here would assert the blind
+    # spot away - which is the same error this control exists to catch, aimed at a
+    # control instead of at the code.
+    # **The class half is proved by planting one too.** It used to demand that the
+    # scan find every toolbox class minus the six it cannot see - which meant
+    # maintaining a second hand-kept set describing a blind spot, to prove a
+    # control that a planted class proves outright. A class dropped into a
+    # scratch package and referenced nowhere must come back; a blind scan answers
+    # the same empty dict for the tree and for the plant.
+    assert _planted_class_orphan_is_found(), (
+        "the class scan did not find a public class planted in a scratch package "
+        "and referenced nowhere, so an empty result proves nothing")
 
-    missing_private = sorted(set(PRIVATE_ALLOWED) - set(private))
-    assert not missing_private, (
-        f"the private scan no longer finds {missing_private}, so it has gone "
-        f"blind for the same reason")
+    # And both are non-trivial. **The floor is a claim about a file, not a number.
+    # It used to be a bare `20`, calibrated while the three allowlists still held
+    # their 26 names, and it failed by one the day the last allowlist entry was
+    # wired. What it was actually guarding against is "found nothing at all", and
+    # what this tree really contains is a documented toolbox: **one orphaned
+    # method per module-level toolbox class**. Derived from that population rather
+    # than fitted to the audit's own output, and it fails if the reference pass
+    # loses `learning.py`.
+    # **The floor counts only what the scan can see.** It is `_toolbox_roots()` -
+    # 11 module-level sections - and 6 of those are the English-word blind spot
+    # `_BLIND_TOOLBOX` names, which the scan never reports at all. Asking one
+    # orphan of each demanded 11 of a population that could only ever produce 4,
+    # so the floor was the *visible* classes; the number used here is the honest
+    # form of "this file is still being read".
+    toolbox = _toolbox_roots()
+    found = {n for n, where in public.items() if any("learning.py" in w for w in where)}
 
-    # And both are non-trivial: an audit that found nothing at all has stopped
-    # reading the tree, which is indistinguishable from a clean tree.
-    assert len(public) >= 20, f"the public scan found only {len(public)}"
-    assert len(private) >= 10, f"the private scan found only {len(private)}"
+    # `found` is already a subset of `public` - every name in it came from the
+    # orphans dict filtered to that file, so the intersection would be `found`.
+    assert len(found) >= len(toolbox), (
+        f"the public scan found {len(found)} orphan(s) in learning.py "
+        f"against {len(toolbox)} module-level toolbox classes - it has stopped "
+        f"reading that file")
+    # **And the private half is proved by planting one.** It used to carry a bare
+    # `len(private) >= 10`, which was true only while 11 entries sat in
+    # `PRIVATE_ALLOWED`. They were wired this batch - `_numeric`, `_lsusb`,
+    # `_remote`, `_sidecars` and the rest - so the private scan now finds nothing,
+    # and a count floor cannot tell that from a scan that stopped reading the tree.
+    #
+    # So the floor is a plant: a private helper dropped into a scratch package and
+    # referenced nowhere must come back. A blind scan reports the same empty dict
+    # for the tree and for the plant, which is what makes this the half that bites.
+    assert _planted_private_orphan_is_found(), (
+        "the private scan did not find a private helper planted in a scratch "
+        "package and referenced nowhere, so an empty result proves nothing")
 
 
 def test_the_private_allowlist_is_not_stale():
@@ -676,7 +969,8 @@ def test_no_public_class_is_referenced_by_nothing():
     candidates (`speech_gate.Busy`) was a docstring promising a raise that nothing
     performed."""
     orphans = _class_orphans()
-    unexpected = sorted(set(orphans) - set(CLASS_ALLOWED) - _LEARNING_NAMES)
+    unexpected = sorted(set(orphans) - set(CLASS_ALLOWED)
+                        - _toolbox_class_names())
 
     assert not unexpected, (
         f"{len(unexpected)} public class(es) nothing references:\n"
@@ -695,6 +989,139 @@ def test_the_class_allowlist_is_not_stale():
     gone = sorted(set(CLASS_ALLOWED) - set(orphans))
 
     assert not gone, f"CLASS_ALLOWED names referenced again: {gone}. Remove them."
+
+
+def test_the_toolbox_exclusion_cannot_reach_another_file():
+    """**The control that keeps the toolbox exclusion from being an allowlist.**
+
+    A name list would have been the simplest way to finish this task and would
+    have re-created exactly what the three emptied allowlists used to be: a list
+    that only grows, absorbing whatever is near it. The exclusion is derived from
+    the source instead, and the two properties that make that difference real are
+    asserted here rather than promised:
+
+    1. **It can only ever point at `learning.py`.** A definition site anywhere
+       else is never subtracted, so an orphan in any other file still fails. A
+       wide glob or a relaxed class test would let this exclusion spread, and this
+       is the assertion that names it.
+    2. **It is not empty.** An empty derivation would make the public audit pass
+       while orphans sit in `learning.py`, which is the same blindness as a scan
+       that finds nothing - so the count is asserted, not assumed.
+    """
+    locations = _toolbox_locations()
+
+    assert locations, (
+        "the toolbox exclusion derived nothing at all - the public audit would "
+        "now pass while orphans sit in learning.py")
+
+    # **And the constant it shares has to name classes that exist.** An entry in a
+    # hand-kept set that no longer parses is the stale-entry failure: the set would
+    # keep asserting a blind spot about a class that was wired or deleted.
+    import ast as _ast
+    declared = set()
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts or path.name != "learning.py":
+            continue
+        try:
+            for node in _ast.walk(_ast.parse(path.read_text(errors="replace"))):
+                if isinstance(node, _ast.ClassDef):
+                    declared.add(node.name)
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+    missing = sorted(_BLIND_TOOLBOX - declared)
+    assert not missing, (
+        f"_BLIND_TOOLBOX names class(es) learning.py does not declare: {missing} - "
+        f"a stale entry in a blind-spot list is a blind spot that cannot close")
+
+    other = {loc for loc in locations if "learning.py" not in loc}
+    assert not other, (
+        f"the toolbox exclusion reached outside learning.py: {sorted(other)} - "
+        f"it has become an allowlist and will silently absorb orphans elsewhere")
+
+
+def test_the_toolbox_exclusion_covers_the_documented_classes():
+    """The population it names is the one the derived toolbox documents, so the two
+    cannot drift apart: the class exclusion and the callable exclusion are two
+    views of one deliberately-kept toolbox."""
+    per_class = _toolbox_methods_per_class()
+
+    assert per_class, "no declared toolbox class contributed an excluded callable"
+    empty = sorted(name for name, n in per_class.items() if n == 0)
+    assert not empty, (
+        f"declared toolbox classes contributing no excluded callable: {empty} - "
+        f"the class exclusion and the callable derivation have drifted apart")
+
+
+def test_the_toolbox_exclusion_covers_no_seam_reachable_root():
+    """`decision` is the class the roots filter exists to keep out.
+
+    `_toolbox_roots()` takes every lowercase module-level class in `learning.py`
+    and drops the ones `_seam_reaches` finds a caller for. With the filter
+    removed, `decision` joins the toolbox - and with it its own `RewardModel` and
+    `ActionSelector`. All three are live and none is an orphan today, so the
+    audit's result is identical either way: that is why the mutation removing the
+    filter survived, and why this assertion exists.
+
+    **A control that only bites in the future is a control that cannot fail now.**
+    This one bites now, because it asserts the roots set against a derivation
+    that does not use the filter - the lowercase class list - subtracted by
+    exactly the seams. A filter that is deleted, or that starts keeping a class
+    something reaches, changes the answer here.
+    """
+    roots = _toolbox_roots()
+    all_names = set()
+    for path in sorted(PKG.rglob(_TOOLBOX_MODULE)):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        all_names |= {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
+    assert roots, "no toolbox root derived at all"
+
+    lower = {n for n in all_names if n[:1].islower()}
+    reached = {n for n in lower if _seam_reaches(n)}
+    assert lower - roots == reached, (
+        "the roots filter does not keep exactly the lowercase class with no seam: "
+        f"expected the filter to drop {sorted(reached)}, it dropped "
+        f"{sorted(lower - roots)}")
+    assert roots, "decision is a root - it is live, a seam reaches it"
+    return roots
+
+
+def test_the_class_audit_cannot_see_the_english_word_classes():
+    """Six of the eleven toolbox classes are invisible to the class audit, and not
+    for a reason anybody would guess.
+
+    **`memory`, `online`, `stats`, `regression`, `clustering` and `rl` are ordinary
+    English words.** The reference pass counts a name as used when it appears
+    anywhere in the tree - including as a local variable in another module - so
+    those six are never reported as unreferenced however little refers to them.
+    That is the `price`/`collapse` trap inside the *scanner* rather than inside the
+    code, and it means a clean class audit is not a covered toolbox.
+
+    The assertion is two-sided, and the second half uses an *independent*
+    instrument. "The audit must not see them" alone is satisfiable by a scanner
+    that has stopped looking altogether; what makes it real is that these six are
+    unwired by a route the blind scanner does not use - **no real seam** reaches
+    them. `learning.stats`, `from shani_chronoa.learning import stats`: if any
+    exists, the class is live and the blind spot was a caller nobody counted.
+    """
+    orphans = _class_orphans()
+
+    hidden = _BLIND_TOOLBOX
+
+    for name in sorted(hidden):
+        assert name not in orphans, (
+            f"{name} is now reported by the class audit - either it was wired or "
+            f"the English-word blind spot closed; this control has to be re-read")
+        assert not _seam_reaches(name), (
+            f"a real seam reaches {name}, so the class is live and the blind "
+            f"spot was a caller nobody counted - this control has to be re-read")
+    assert hidden <= _toolbox_class_names(), (
+        f"toolbox classes the audit cannot see are missing from the derived "
+        f"toolbox: {sorted(hidden - _toolbox_class_names())}")
 
 
 def test_the_class_audit_can_still_see_learning_py():
@@ -829,3 +1256,67 @@ def test_every_property_allowlist_entry_carries_a_reason():
 
     assert not without, f"PROPERTY_ALLOWED entries with no reason: {without}"
 
+def test_the_framework_dispatch_exemption_names_only_real_handlers():
+    """**The exemption cannot absorb a genuine orphan.**
+
+    `_FRAMEWORK_DISPATCH` says "the framework calls these by name", which is a
+    claim that can rot: a name could be added that no `BaseHTTPRequestHandler`
+    subclass implements, and then the exemption would silence a real orphan.
+
+    So every name in it must exist on a class that inherits
+    `BaseHTTPRequestHandler` - the class whose `handle_one_request` does the
+    `getattr(self, "do_" + command)` that makes the exemption true at all.
+    """
+    handlers = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            bases = {b.id if isinstance(b, ast.Name)
+                     else getattr(b, "attr", "") for b in cls.bases}
+            if not any("HTTPRequestHandler" in b for b in bases):
+                continue
+            for member in cls.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    handlers.setdefault(member.name, []).append(
+                        "%s:%d" % (path.relative_to(ROOT), member.lineno))
+
+    assert handlers, (
+        "no class inheriting BaseHTTPRequestHandler was found, so the exemption "
+        "cannot be checked - and it may no longer be true")
+    for name in _FRAMEWORK_DISPATCH:
+        assert name in handlers, (
+            "%s is exempted as framework-dispatched but no "
+            "BaseHTTPRequestHandler subclass defines it, so the exemption is "
+            "hiding a genuine orphan" % name)
+
+
+def test_the_exempted_handlers_are_really_resolved_by_the_framework():
+    """The exemption rests on one stdlib line, so that line is asserted.
+
+    `BaseHTTPRequestHandler.handle_one_request` builds `mname = "do_" +
+    self.command` and then `getattr(self, mname)`. If a Python version ever stops
+    doing that - or a subclass is expected to define `handle_one_request` itself -
+    every name in `_FRAMEWORK_DISPATCH` becomes an orphan and the guard would go
+    quietly blind instead of going red.
+    """
+    import http.server
+    import inspect
+
+    source = inspect.getsource(http.server.BaseHTTPRequestHandler)
+
+    assert "'do_' + self.command" in source or '"do_" + self.command' in source, (
+        'BaseHTTPRequestHandler no longer resolves a handler as "do_" + command, '
+        "so do_GET/do_POST are not framework-dispatched and the exemption is no "
+        "longer true")
+    assert "getattr(self, mname)" in source, (
+        "the resolved handler is no longer fetched by name")
+    assert "self.log_message(" in source, (
+        "BaseHTTPRequestHandler no longer calls log_message, so the exemption "
+        "for it is no longer true")

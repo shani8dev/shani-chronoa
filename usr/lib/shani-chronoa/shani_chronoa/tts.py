@@ -850,20 +850,6 @@ class PiperTTS:
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
-
-    def list_voices(self) -> list[dict]:
-        """List available Piper voices."""
-        voices_dir = "/usr/share/piper/voices"
-        if not os.path.exists(voices_dir):
-            return []
-
-        voices = []
-        for f in os.listdir(voices_dir):
-            if f.endswith(".onnx"):
-                voice_name = f.replace(".onnx", "")
-                voices.append({"name": voice_name, "file": f})
-        return voices
-
     def is_available(self) -> bool:
         """Some speech engine is installed (see engine())."""
         return self.engine() is not None

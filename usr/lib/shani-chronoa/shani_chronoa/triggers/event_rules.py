@@ -126,26 +126,6 @@ class BackoffPolicy:
             self.consecutive >= self.max_consecutive_failures
             or self.restart_allowance_left() <= 0
         )
-
-    def to_dict(self) -> dict:
-        return {
-            "consecutive": self.consecutive,
-            "restarts": list(self.restarts),
-        }
-
-    def load_dict(self, raw: Any) -> None:
-        if not isinstance(raw, dict):
-            return
-        try:
-            self.consecutive = int(raw.get("consecutive", 0))
-            self.restarts = [float(t) for t in raw.get("restarts", [])]
-        except (TypeError, ValueError):
-            # A corrupt counter is a counter of zero, not a crash: refusing to
-            # load the rule would let a truncated write disable a safety gate.
-            self.consecutive = 0
-            self.restarts = []
-
-
 # --- event rules -----------------------------------------------------------
 
 class EventRule:

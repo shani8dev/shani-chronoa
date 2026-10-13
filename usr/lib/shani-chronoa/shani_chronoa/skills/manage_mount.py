@@ -73,19 +73,6 @@ def _consent(config: ChronoaConfig) -> "tuple[bool, str]":
             f"device that was not there a moment ago."
         )
     return True, ""
-
-
-def _udisks() -> str:
-    if shutil.which("udisksctl") is None:
-        return ""
-    try:
-        proc = subprocess.run(["udisksctl", "status"], capture_output=True,
-                              text=True, timeout=_TIMEOUT, check=False)
-    except (subprocess.TimeoutExpired, OSError):
-        return ""
-    return proc.stdout or ""
-
-
 def _run(arguments: dict) -> str:
     action = (arguments.get("action") or "list").strip().lower()
     if action not in ("mount", "unmount", "list"):
