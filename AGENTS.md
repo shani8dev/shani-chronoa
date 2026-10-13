@@ -24180,3 +24180,95 @@ conversation suites plus the layout contract: **246 passed, 1 failed** - and tha
 one, `test_no_surface_overflows_a_narrow_window[phone]`, **reproduces identically
 with `conversations.py` at HEAD** (`phone needs 823px` both ways, one-file swap in
 a snapshot), so it is pre-existing.
+
+## The main window has no capture path at all, so "capture on after-paint" cannot be the fix (2026-10-13)
+
+My own open item has said for most of a session that the main window's capture
+is a **race**: same commit, same target, same size, **53% / 32% / 13%** content,
+and a fix that must be `Gdk.FrameClock.after-paint`, fired once. Two attempts
+were written and reverted. This entry retires that item, because the premise is
+wrong and re-measuring it is how the third attempt would have been spent.
+
+**The structural finding, which load cannot affect.** Seven runs of `main` at
+1024x700 - four with `CHRONOA_FORCE_SIZE=1`, three without - and **every one
+printed**:
+
+    CONTENT NODE no
+
+`_deepest_node` tries `get_content()` first precisely so the window cannot
+answer with its own rounded background. Measured on a real mapped
+`ChronoaWindow`:
+
+| widget | `_snapshot` |
+|---|---|
+| `ChronoaWindow` | **NO NODE** |
+| `window.get_content()` -> `Adw.NavigationSplitView` | **NO NODE** |
+
+**So neither the content candidate nor the window answers.** The walk *is*
+reached - the `return` that skips it is guarded on `node is not None`, and the
+node is `None` - and the walk finds exactly two node-bearing widgets in a tree
+of **1481 descendants / 525 mapped**:
+
+| depth | widget | node |
+|---|---|---|
+| 5 | `Bin` | `TransformNode` |
+| 6 | `Adw.NavigationPage` | `TransformNode` |
+
+Both are **libadwaita composites**, and GTK's snapshot contract says a
+composite's own `do_snapshot` paints its background and nothing else - its
+children are painted by the *parent's* pass, through
+`gtk_widget_snapshot_child`. **A node from `Gtk.WidgetPaintable` over a
+composite is therefore structurally near-empty**, and it is still a *node*, which
+is exactly why "did you get a node" cannot tell it from a picture.
+
+**Which retires the race with the reason attached.** `after-paint` guarantees a
+paint *happened*; it cannot supply a node for a widget whose snapshot path yields
+none. There is nothing for a later frame to carry. **Every "blank" in this
+file's history that was attributed to a settle time - the 96.2%-transparent
+`page:main:conversation`, the `13%` and `32%` runs - is this**, and so are the
+ones blamed on pool exhaustion, a concurrent mutation run and an unrealised
+`GskCairoRenderer`. Four causes, one fault, and the instrument was the thing
+under suspicion every time.
+
+**And the 53/32/13 spread could not be re-measured at all today**, which is why
+this is recorded as a structural result rather than as a new spread. `/proc/loadavg`
+was **6.98 with five concurrent `pytest` processes** alive, and the capture fired
+at **22-25 s** against the **5.1-5.4 s** recorded when the spread was first seen.
+**A timing measurement taken on a box that oversubscribed is a number about the
+oversubscription** - the same lesson as the 21.03/23.63 ms under load that still
+gave the 6.9x ratio, and the fifth time concurrency has been the answer here
+(`GSETTINGS_BACKEND`, `fake_bin`'s `PATH`, `XDG_RUNTIME_DIR`, the D-Bus name,
+and now the render pool). **The race is unproven, not refuted**; what is proven
+is that the fix it called for cannot work.
+
+### The probe, and the three ways it was wrong before it measured anything
+
+Written to answer "is there a node-bearing widget below the window?", which is
+the question the fix depends on - **if the answer were no, the fix would be
+cosmetic and there would be nothing to do.**
+
+1. **`import render_ui` cannot work, and fails silently.** The module ends with
+   `app.connect("activate", on_activate); app.run([])`, and the `--list` branch
+   calls `sys.exit(0)` first - so importing it printed 40 state names and ended
+   the probe before one line of it ran. It is executed with the application tail
+   removed and the `SystemExit` caught instead, so the functions under test are
+   the real ones byte for byte.
+2. **`__file__` is load-bearing and its absence is a `NameError`** at
+   `render_ui.py:69`, which builds `sys.path` from it - a path problem wearing a
+   name error.
+3. **`Gdk.Rectangle` is not `Graphene.Rect`**, and the driver copies the right
+   one rather than constructing one from memory.
+
+And the scorer was checked against its own failure mode before any number from
+it was believed: two blank controls (a white page and a transparent one) score
+**0% / 0%** and a genuine render scores **7% / 11%**, using
+`render_ui_batch.sh`'s **own** `_content_percent` and `_interior_ink` lifted
+verbatim - because a blank PNG matches no colour at all, so a negative cannot
+distinguish "this is empty" from "nothing was measured", which is the recorded
+blank-image-probe defect. It then still crashed on a *missing* file rather than
+reporting "could not measure", which is the same shape one level down.
+
+**Not claimed:** that no capture of this window is possible. What is established
+is that `Gtk.WidgetPaintable` + `_deepest_node` cannot do it, because the only
+nodes on offer belong to composites that paint no children. The route that does
+work is **not** a longer wait, and nothing here names it.
