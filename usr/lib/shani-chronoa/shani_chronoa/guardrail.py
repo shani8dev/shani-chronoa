@@ -186,14 +186,23 @@ def as_argument_object(raw) -> "tuple[Optional[dict], str]":
 def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
     """Verdict on whether this call is well-formed enough to run.
 
-    Returns a `GuardrailResult` with one of five verdicts:
-    - `valid`: the call is well-formed; run it.
-    - `invalid`: the call is malformed; do not run, report the reason.
-    - `retry`: the call is well-formed but should be retried with a template
-      (e.g. a JSON-arg parse error: "call it again with valid JSON").
-    - `reask`: the model should be asked again; the reason is a question for
-      the model, not a human.
-    - `stop`: the call must never run; a hard stop with a reason.
+    Returns a `GuardrailResult`. **Three of the five declared verdicts are
+    reachable today; two are not yet produced:**
+
+    | verdict | produced by `check()`? | what it means |
+    |---|---|---|
+    | `valid` | yes | the call is well-formed; run it |
+    | `invalid` | yes | the call is malformed; do not run, report the reason |
+    | `retry` | yes, once | well-formed, but should be retried with `template` (a string argument that starts `ERROR:`) |
+    | `reask` | **no** | the model should be asked again; the reason is a question for the model, not a human |
+    | `stop` | **no** | the call must never run; a hard stop with a reason |
+
+    **This list used to claim all five were reachable**, which sent the wrong way
+    twice: `should_reask` and `should_stop` were read as two verdicts the dispatch
+    layer acted on, when no code path constructs either verdict and nothing reads
+    those two properties. `should_retry` is reachable but redundant - the RETRY
+    payload is its `template`, and `tools.py` uses `reason.template or
+    reason.message` directly and deliberately, with the reason written down there.
 
     A returned `GuardrailResult` is the decision the dispatch layer acts on -
     naming the argument, what was wrong, and what was expected. A traceback
