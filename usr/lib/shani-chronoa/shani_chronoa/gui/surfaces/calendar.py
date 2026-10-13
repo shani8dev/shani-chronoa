@@ -462,6 +462,14 @@ class _CalendarSurface:
             child = following
         self._content.append(self._status_slot)
         common.clear(self._status_slot)
+        # **Before every early return below**, because the question this answers
+        # matters most in the states that return early: with no permission, no
+        # backend, nothing readable, or *no events at all* - and "no events" is
+        # exactly when a person would ask Chronoa to add one. Placed inside
+        # `_show_events` it only appeared when there was something to list.
+        where = self._where_row()
+        if where is not None:
+            self._status_slot.append(where)
         self._rows = []
         self._groups = []
         self._events = []
@@ -521,6 +529,55 @@ class _CalendarSurface:
             f"{len(self._events)} event(s) in range",
             detail))
         self._show_events(self._events, now)
+
+    def _where_row(self) -> Optional[Gtk.Widget]:
+        """Which calendar an event asked for in chat would actually land in.
+
+        **`eds_calendar.default_calendar_name()` had no caller in the tree.**
+        This panel listed events without ever saying where they live, and
+        `create_event()` writes to the *default* calendar rather than to any
+        particular one - so a person could ask for an event and have it appear in
+        a calendar they did not choose.
+
+        The three answers are all worth having, and two of them are the ones that
+        save time:
+
+        - **the name**, so "which calendar" is answerable without leaving Chronoa
+        - **there is no default calendar**, which is what
+          `CalendarUnavailable("there is no default calendar to add to")` raises -
+          the panel should say that here rather than let the person find out by
+          asking for an event
+        - **it could not be asked**, said as itself rather than as an empty
+          calendar, because "no calendar" and "could not read the calendar" are
+          two different problems with two different fixes
+
+        Writability is deliberately **not** claimed here: `create_event()` checks
+        `client.is_readonly()` on a live connection, and this row is a single
+        synchronous read of a display name. Saying "writable" here without having
+        asked would be a claim this row cannot support.
+        """
+        try:
+            from shani_chronoa import eds_calendar
+
+            name = eds_calendar.default_calendar_name()
+        except Exception as exc:  # noqa: BLE001 - said plainly, never raised
+            text = str(exc)
+            if "no default calendar" in text.lower():
+                return self.status_recorder.row(
+                    common.STATUS_ATTENTION,
+                    "There is no default calendar to add events to",
+                    "asking Chronoa to add an event would fail. Pick a default "
+                    "in your calendar application, or add the event there.")
+            return self.status_recorder.row(
+                common.STATUS_UNKNOWN,
+                "Which calendar events would go to could not be read",
+                f"{text}. The events below are read from wherever they are; this "
+                "row only answers where a *new* one would go.")
+        return self.status_recorder.row(
+            common.STATUS_OK,
+            f"New events go to {name!r}",
+            "the default calendar, which is not necessarily the one the events "
+            "below came from")
 
     def _show_events(self, events: List[Any], now: float) -> None:
         body = _margined(common.page_body())
