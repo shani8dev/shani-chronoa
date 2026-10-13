@@ -22123,3 +22123,59 @@ head -4` cut off the very file I was about to conclude did not exist.
 mapped and populated, so the children exist and the snapshot does not carry them.
 That is the open question, and it is now a question rather than four wrong
 answers.
+
+## Alpha was the wrong question twice; the UI still cannot be photographed (2026-10-13)
+
+Opening the files settled it. `state:composer-empty` is a **pure white
+rectangle** - 26,589 bytes and nothing on it - and the `alpha > 0` gate shipped
+one commit earlier scored it 100% and reported it rendered.
+
+**Three measures, and only the third was right:**
+
+| measure | `main` | white page | verdict |
+|---|---|---|---|
+| `alpha == 255` | 0% - **refused a real render** | 100% | false negative |
+| `alpha > 0` | ~99% | 100% - **passed a blank page** | false positive |
+| contrast against background | 4% | 4% | correct |
+
+Alpha says a pixel *exists*. It says nothing about whether anything was drawn
+**into** it. `_content_percent` now takes the most common colour in the sample as
+the background by definition and asks how much of the image is something else.
+A transparent page and a white page both score 0; the orange-framed `main`
+scores 4; a real window scores well above the floor.
+
+**Measured on the real targets with the driver's own function:**
+
+    main.png                        4% content
+    state:composer-empty.png        4% content
+    floor                           5%
+
+**So the gate is right and the pictures are empty**, and this is now an honest
+"not rendered" rather than a confident PASS. `tests/test_a_render_target_is_not_a_file_appearing.py`
+(8) asserts all three of those rows, including the white page that `alpha > 0`
+passed - and the floor's own upper bound, because a floor only the best pictures
+clear turns every hard target into a failure and a check that fails on
+everything stops being read.
+
+### What this means for a UI review
+
+**The main window cannot be photographed yet, and it is a capture fault rather
+than a UI fault.** The probe says the tree is populated and mapped -
+`descendants=948 mapped_descendants=528` - so 528 mapped widgets exist and the
+snapshot carries none of them, only the window's rounded background. A newcomer
+looking at `main` sees an empty orange frame.
+
+**Every UX finding recorded so far about the main window is unverified**, because
+every one of them came from reading code or from the one earlier capture, and the
+current capture shows no content to confirm any of it. They stay marked as
+unverified rather than being dressed up as observations.
+
+### The retry logic also lost a good first attempt
+
+Both files were written on the **first** attempt (15:26, 23,374 and 19,330
+bytes) and the verdict came from the **second** (15:28), which wrote nothing and
+reported "no file written". So the sweep discards a successful render in favour
+of a later empty one - **the same class as the original `[[ -s $out ]]` bug, one
+level up**: the decision is made from the last attempt rather than from whether
+a picture was ever obtained. Unfixed here; it is the next thing to change, and
+the change is to score the best attempt rather than the final one.

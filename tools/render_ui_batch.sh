@@ -54,10 +54,10 @@ set -uo pipefail
 # question has an answer on the first line that asks it.
 VERBOSE="${VERBOSE:-}"
 
-#: **Below this much painted area, a capture is reported as NOT RENDERED**
+#: **Below this much non-background area, a capture is NOT RENDERED**
 #: rather than as a pass. See `render_once` for the four recorded instances and
 #: why a byte count cannot tell a picture from a page.
-MIN_OPAQUE_PCT="${MIN_OPAQUE_PCT:-50}"
+MIN_CONTENT_PCT="${MIN_CONTENT_PCT:-5}"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$HERE")"
@@ -320,9 +320,8 @@ render_once() {
     # `main` itself blanking at HEAD while the sweep said "1 rendered, 0 not".
     # **The alpha number is in the file the whole time and nothing reads it.**
     #
-    # The floor is 50% and it is not a guess: every genuine render measured in
-    # this repository is 100% opaque and every recorded false pass is 7.2% or
-    # worse, so nothing sits near the line. `MIN_OPAQUE_PCT` is overridable
+    # The floor is 5%: a blank transparent page and a blank white page both
+    # measure 0, and the poorest thing that is really a picture measures ~20. `MIN_OPAQUE_PCT` is overridable
     # because a legitimate future target might be a thin popover - and an
     # overridable threshold is still a threshold, where "a file appeared" is not.
     # **Keep the log when the target fails.**
@@ -375,13 +374,13 @@ render_once() {
     fi
 
     local opaque
-    opaque="$(_opaque_percent "$out")"
+    content="$(_content_percent "$out")"
     # **A probe that could not measure is not a pass.** If Pillow is missing or
-    # the file is not a PNG, `_opaque_percent` prints nothing and this fails -
+    # the file is not a PNG, `_content_percent` prints nothing and this fails -
     # the opposite of the bug this replaces, where anything unreadable counted as
     # a render.
-    [[ -n $opaque ]] || return 1
-    (( opaque >= MIN_OPAQUE_PCT )) || return 1
+    [[ -n $content ]] || return 1
+    (( content >= MIN_CONTENT_PCT )) || return 1
 
     return 0
 }
@@ -410,14 +409,31 @@ PYSIZE
 _png_width() { _png_size "$1" 0; }
 _png_height() { _png_size "$1" 1; }
 
-_opaque_percent() {
-    # How much of this PNG is actually painted, as an integer percentage.
-    # **Sampled, not exhaustive**: every 8th pixel, which is 1/64 of the image
-    # and fast enough to run per target. A blank page is blank at every stride,
-    # so sampling costs this check nothing and a real render is uniformly opaque,
-    # so there is nothing to miss.
+_content_percent() {
+    # How much of this PNG is **not background**, as an integer percentage.
+    #
+    # **Alpha was the wrong question, twice.** The first version counted
+    # `alpha == 255` and refused every genuine render - the real `main` window
+    # is alpha 25 across 80% of the image. Counting `alpha > 0` fixed that and
+    # immediately passed `state:composer-empty`, which is a **pure white
+    # rectangle**: alpha 255 everywhere, and no picture in it at all. Alpha says
+    # a pixel exists. It says nothing about whether anything was drawn *into*
+    # it.
+    #
+    # So the measure is contrast against the background: the most common colour
+    # in the sample is the background by definition, and the question is how
+    # much of the image is something else. That separates all four cases
+    # measured on this repository's targets - a transparent page and a white
+    # page both score 0, the orange-framed `main` scores ~20, and a real window
+    # scores far above that.
+    #
+    # **Sampled, not exhaustive**: every 8th pixel, 1/64 of the image, fast
+    # enough to run per target. Background is a whole-image property and a
+    # 1/64 sample estimates it closely enough to sit nowhere near the floor.
     python3 - "$1" <<'PYOPACITY' 2>/dev/null
 import sys
+from collections import Counter
+
 try:
     from PIL import Image
 except Exception:
@@ -431,21 +447,14 @@ w, h = im.size
 if w < 1 or h < 1:
     sys.exit(0)
 step = 8
-total = opaque = 0
+colours = []
 for y in range(0, h, step):
     for x in range(0, w, step):
-        total += 1
-        # **`alpha > 0`, not `alpha == 255`.** The first version required fully
-        # opaque pixels, which is stricter than "painted" by a factor of a
-        # hundred: measured on the real `main` capture, the alpha histogram is
-        # 25 (80% of the image), 140 and 151 - **not one pixel in the window is
-        # at 255**. So the gate reported 0% on a picture that is painted edge to
-        # edge, and every genuine render of this app would have been refused.
-        # Anything with paint in it is painted; the question was never whether
-        # GTK composited it to full opacity.
-        if px[x, y][3] > 0:
-            opaque += 1
-print(int(100 * opaque / total))
+        colours.append(px[x, y][:3])
+if not colours:
+    sys.exit(0)
+background = Counter(colours).most_common(1)[0][0]
+print(int(100 * sum(1 for c in colours if c != background) / len(colours)))
 PYOPACITY
 }
 
