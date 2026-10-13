@@ -21377,3 +21377,71 @@ this entry is about. What was kept is nothing in `render_ui.py` - it is back at
 HEAD - and the window-side fix, which degrades correctly when the application
 cannot say which engine is answering, and which is pinned directly against the
 reader rather than through a caller that swallows exceptions.
+
+## The gate the render harness never had: a file appearing is not a render (2026-10-13)
+
+The entry above records the live fault. **This is the fix**, and it is the
+smallest change in this file that removes a whole class.
+
+`tools/render_ui_batch.sh` decided PASS with:
+
+    [[ -s $out ]]
+
+**A blank PNG is 20,000-odd bytes.** So every check passed on a capture of
+nothing, four times over: the 96.2%-transparent main window, the 129,834-byte
+`cloud-keys` false pass (which *outranked* a genuine 25,932-byte page on size),
+`composer-empty` at 0.3%, and `main` itself blanking at HEAD while the sweep
+printed "1 rendered, 0 not".
+
+`render_once` now measures how much of the PNG is actually painted and fails
+below `MIN_OPAQUE_PCT` (50, overridable). **The floor is not a guess**: every
+genuine render recorded in this repository is 100% opaque and every recorded
+false pass is 7.2% or worse, so nothing sits near the line.
+
+**Measured end to end, on the fault itself** - the identical command on the
+identical commit:
+
+    before:  1 rendered, 0 not.      (opaque 0.2%)
+    after:   0 rendered, 1 not.
+
+**Two rules inside the gate, both from this file's own experience:**
+
+- **A probe that could not measure is not a pass.** Missing Pillow, a truncated
+  file, a path that is not a PNG: `_opaque_percent` prints nothing and the gate
+  **fails**. The old gate passed all of those, which is the defect.
+- **The threshold is read out of the script, not copied.** The test extracts
+  `_opaque_percent` and `MIN_OPAQUE_PCT` from the driver rather than restating
+  them, because a second copy of a number is `skills_total`, `42/87/70` and
+  "105 characters" - three recorded incidents of a value that drifted from the
+  code it describes.
+
+### And extracting it was wrong twice before it worked
+
+Both failures presented as *the gate being broken*, which is the trap this
+test exists in front of:
+
+1. `chunk.index("PYOPACITY")` finds the heredoc's **opener** `<<'PYOPACITY'`,
+   not its terminator, so the extracted body was empty and all three
+   measurements came back `None`.
+2. Slicing from `_opaque_percent() {` means the chunk **already opens** the
+   function - wrapping it again produced
+   `_opaque_percent() {_opaque_percent() {` - and stopping before the terminator
+   left the heredoc unclosed.
+
+So all three measurement tests failed for reasons in the *test*, and a reader
+would reasonably have concluded the gate was wrong. **A check that measures
+nothing and a check that is broken produce the same result**, which is why the
+positive control exists: `test_a_real_capture_is_above_the_floor` fails too if
+the extraction returns nothing for everything, so the negative cannot pass alone.
+
+`tests/test_a_render_target_is_not_a_file_appearing.py` (7), including the
+wiring assertions - because **a correct function nothing calls is a dead
+control**, the shape this file records for `Registry.register`,
+`Gateway.may_execute` and `refused_tools`.
+
+**Not claimed:** an end-to-end *positive*. Every render attempted afterwards
+came back blank too, so the pool was still exhausted and the gate was never
+shown accepting a real capture through the driver itself - only through the
+same measurement code, against a known 99%-opaque PNG. The three population
+tests cover the comparison; the driver-level positive needs a pool that has
+recovered.
