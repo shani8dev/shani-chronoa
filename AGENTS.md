@@ -20470,3 +20470,72 @@ reading the status call - only by counting the organs and reading the PKGBUILD.
 vocabulary, the same `StatusRecorder`, one directory away, doing it correctly -
 which is the strongest available evidence that "nothing to export yet" belongs at
 `STATUS_OK` and was an oversight rather than a deliberate reading.
+## The main UI had never been rendered above 460px, and the harness said nothing (2026-10-13)
+
+The rendering pass that had been blocked all session finally ran, and the first
+thing it produced was a measurement about the **harness**, not the product.
+
+### `CHRONOA_FORCE_SIZE=1` and how to use it
+
+Rendering works from a clean tree with:
+
+    env -u DISPLAY -u WAYLAND_DISPLAY bash tools/render_ui_batch.sh <out> 1024 700 main
+
+**`DISPLAY` must be unset.** The batch driver says so in its own comment and it
+is exactly why every direct invocation failed with `GDK_IS_DISPLAY (display)
+failed` and `Gtk couldn't be initialized`: this machine has a live X session
+(`DISPLAY=:0`, `WAYLAND_DISPLAY=wayland-0`) and **a live X display wins over
+`GDK_BACKEND=broadway`**, so the renderer silently rendered onto nothing. That
+was the whole of the "broadway doesn't work here" mystery.
+
+`broadwayd :N` listens on socket **N+1**, so `BROADWAY_DISPLAY` is the *socket*
+number, not the one passed to the daemon. There is no `--size` option.
+
+### Every picture of the main window was 460x640, whatever was asked for
+
+`render_ui.py` honours a window's own default size, and says why: *"a window that
+sized itself keeps its own size"* - so Quick Ask's `set_default_size(460, -1)`
+popup is not stretched into a full screen with 730px of nothing under it. That
+reasoning is sound.
+
+**But `ChronoaWindow` declares `set_default_size(460, 640)`** in `_setup_window`
+- correctly, the app really does open at 460x640 - so the same rule clamped
+*every* capture of the main window, and **there was no way to ask for anything
+else**. Measured, with the size traced from inside `_render`:
+
+    argv=['render_ui.py', 'main', '/tmp/chronoa-t/main.png', '1024', '700']
+    WIDTH=460 HEIGHT=640   alloc=460x640   default=(width=460, height=640)
+
+`main` at 1280x860 and at 1000x700 produced **byte-identical 460x640 PNGs**.
+
+That is not cosmetic. At 460 the sidebar, the rail and the two-column transcript
+are all collapsed by the app's own breakpoints, so **every layout that only
+exists when the window is wide had no picture at all** - the sidebar open, the
+rail with its eight sections, the header's full title instead of "Shani...".
+The whole point of looking is to see those, and the default made them
+unreachable while still reporting `PASS` and a plausible byte count.
+
+**`CHRONOA_FORCE_SIZE=1` overrides it.** Default behaviour is unchanged, so the
+Quick Ask reasoning still stands; what was missing was a way to ask for the other
+one. With it, `main` renders at **1024x700, 86,956 bytes** - nearly double, and a
+different window.
+
+### What the wide render actually shows
+
+- **The sidebar, the rail, and the full header title "Shani Chronoa"** all exist
+  and look right. Nothing broken was found in them.
+- **The permission chips are two different chips, not one regressed one.**
+  `"No questions"` is the *posture* (`window.py:344`) and `"Nothing leaves"` is
+  the *privacy* one (`window.py:498`); the strip shows the posture currently set,
+  which is `"Ask first"`. I had written down that the render showed a regression
+  and it was wrong - worth recording, because it is the second time this session
+  that reading carefully beat looking carefully.
+- **The organ strip's labels still read as one run-on string** at 1024:
+  *"listening looking speaking network sensing remembering acting thinking"*.
+  That is the **same symptom** `organs.py`'s 6px `set_column_spacing` was
+  introduced to cure, and
+  `test_now_rail.py::test_the_organ_lights_are_separated_by_a_gap` pins the
+  number. A 6px gap between two lowercase words reads as a space, not a
+  boundary. **Not changed here**: it is a value a test pins, a CSS half was
+  previously moved around to avoid, and one render is not a basis for tuning it.
+  It needs an A/B at two or three widths and the test updated deliberately.

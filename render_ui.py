@@ -158,6 +158,27 @@ def _in_a_window(widget):
     lookalike.
     """
     if isinstance(widget, Gtk.Window):
+        # **The requested size, which used never to be applied here at all.**
+        #
+        # This branch returned the window untouched, and the sizing below only
+        # ever ran for a *bare widget* put in a new wrapper. A `ChronoaWindow`
+        # target is already a window, so it went straight to capture at whatever
+        # size the display gave it - and `_render`'s `own_size` then capped the
+        # picture at that same allocation.
+        #
+        # Measured: `main` rendered at 1280x860 and at 1000x700 produced
+        # **byte-identical** 460x640 PNGs. So every picture this harness has
+        # ever taken of a real window was at phone width, no matter what was
+        # asked for, and no claim about the wide layout could have come from
+        # one. The bug is invisible in the output: the renders succeeded, and
+        # the bytes were a plausible size.
+        #
+        # **The wrapper branch below keeps its own sizing**, which is a
+        # different job - photographing a bare `Gtk.FlowBox` without the
+        # wrapper stretching it into full-height columns. That one is deliberate
+        # and documented where it lives.
+        if WIDTH and HEIGHT and os.environ.get("CHRONOA_FORCE_SIZE"):
+            widget.set_default_size(WIDTH, HEIGHT)
         return widget
     window = Gtk.Window()
     # No titlebar: it is harness chrome, it eats a third of a short window's
@@ -885,9 +906,27 @@ def on_activate(app):
     #
     # `get_default_size()` returns `(-1, -1)` before anything has set one, so a
     # fresh window falls through to the capture size.
+    # **`CHRONOA_FORCE_SIZE` overrides the rule below**, and it exists because
+    # applying that rule to *every* window means the main window can never be
+    # photographed above its own default.
+    #
+    # `ChronoaWindow` declares `set_default_size(460, 640)` in `_setup_window` -
+    # correctly, because the app really does open at 460x640. So the rule below
+    # clamped every capture of the main window to 460x640 and there was no way
+    # to ask for more. Measured: `main` at 1280x860 and at 1000x700 produced
+    # **byte-identical** 460x640 PNGs.
+    #
+    # That is not a cosmetic gap. At 460 the sidebar, the rail and the
+    # two-column transcript are all collapsed by the app's own breakpoints, so
+    # **every layout that only exists when the window is wide had no picture at
+    # all** - and the whole point of looking is to see those. The Quick Ask
+    # reasoning below is sound and still applies by default; what was missing is
+    # a way to ask for the other behaviour when the target is a real window.
     if hasattr(window, "set_default_size"):
         chosen_w, chosen_h = window.get_default_size()
-        if chosen_w <= 0 and chosen_h <= 0:
+        if os.environ.get("CHRONOA_FORCE_SIZE"):
+            window.set_default_size(WIDTH, HEIGHT)
+        elif chosen_w <= 0 and chosen_h <= 0:
             window.set_default_size(WIDTH, HEIGHT)
         else:
             if chosen_w > 0:
