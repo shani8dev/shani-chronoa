@@ -348,6 +348,7 @@ class _ConversationsView(Gtk.Box):
         actions.set_margin_end(6)
         actions.append(open_btn)
         actions.append(branch)
+        actions.append(self._checkpoint_button(item))
         actions.append(rename)
         actions.append(delete)
         # `PreferencesRow` holding the line directly: an `ActionRow` suffix
@@ -383,6 +384,89 @@ class _ConversationsView(Gtk.Box):
             GLib.idle_add(lambda: (self._refresh(), False)[1])
 
         button.connect("clicked", branch)
+        return button
+
+    def _checkpoint_button(self, item: dict) -> Gtk.MenuButton:
+        """Set a point to come back to, and return to one.
+
+        **`conversation_store.checkpoint()`, `revert()` and `list_checkpoints()`
+        all exist, and nothing in the whole codebase called any of them.** Not
+        the GUI, not a skill, not `app/brain.py` - verified by grepping the
+        package and `tests/` for `checkpoint(` and `revert(`. The capability
+        explains itself:
+
+            A checkpoint is a copy of the conversation at a point the user
+            wants to come back to - "before I edited that file" - rather than
+            a reset.
+
+        So a person could neither save that point nor return to it, from
+        anywhere. Wired here the way `_branch_button` wires `fork()`, which was
+        in the same position before it: reachable only by asking a model in chat.
+
+        The distinction kept is the module's own: a checkpoint is **not** a
+        reset. `revert()` rewrites the current transcript and leaves the
+        checkpoint in place, so the same point can be returned to again - which
+        is why the menu offers every numbered checkpoint rather than one "undo",
+        and why the tooltip says so.
+        """
+        button = Gtk.MenuButton(icon_name="document-save-symbolic",
+                                valign=Gtk.Align.CENTER)
+        button.add_css_class("flat")
+        _access(button, f"Checkpoints for {item['title']}")
+        button.set_tooltip_text("Set a point to come back to, or return to one")
+
+        pop = Gtk.Popover()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for side in ("top", "bottom", "start", "end"):
+            getattr(box, f"set_margin_{side}")(6)
+
+        save = Gtk.Button(label="Set a checkpoint here")
+        save.add_css_class("flat")
+
+        def set_it(_b: Gtk.Button) -> None:
+            try:
+                conversation_store.checkpoint(conversation_store.session_dir(),
+                                              item["id"])
+            except Exception as exc:  # noqa: BLE001 - a failed save must not take the panel
+                logger.warning("could not checkpoint %s: %s", item["id"], exc)
+                return
+            GLib.idle_add(lambda: (self._refresh(), False)[1])
+
+        save.connect("clicked", set_it)
+        box.append(save)
+
+        try:
+            have = conversation_store.list_checkpoints(
+                conversation_store.session_dir(), item["id"])
+        except Exception:  # noqa: BLE001 - an unreadable list is not a dead button
+            have = []
+        for n in have:
+            back = Gtk.Button(label=f"Return to checkpoint #{n}")
+            back.add_css_class("flat")
+            back.set_tooltip_text(
+                "Return the transcript to that point. The checkpoint stays, so "
+                "you can return to it again - this is not a reset.")
+
+            def back_to(_b: Gtk.Button, n: int = n) -> None:
+                try:
+                    conversation_store.revert(conversation_store.session_dir(),
+                                              item["id"], n)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("could not revert %s to %s: %s",
+                                   item["id"], n, exc)
+                    return
+                GLib.idle_add(lambda: (self._refresh(), False)[1])
+
+            back.connect("clicked", back_to)
+            box.append(back)
+
+        if not have:
+            note = Gtk.Label(label="No checkpoints saved yet.", xalign=0.0)
+            note.add_css_class("dim-label")
+            box.append(note)
+
+        pop.set_child(box)
+        button.set_popover(pop)
         return button
 
     def _rename_button(self, item: dict) -> Gtk.MenuButton:
