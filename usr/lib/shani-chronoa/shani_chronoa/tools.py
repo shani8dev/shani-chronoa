@@ -1605,6 +1605,28 @@ def _notice_refusal(tool: str, resource: str, why) -> None:
         pass
 
 
+#: The `DispatchResult` of the call this thread last dispatched through
+#: `execute_tool`, kept so a caller can have the verdict *and* the prose from
+#: one call. A **thread-local, not a global**: a turn dispatches on an executor
+#: thread while the panels dispatch on the GTK thread, and a shared slot would
+#: hand one of them the other's verdict - which is a wrong answer about a
+#: destructive tool, so it fails closed by being per-thread rather than by luck.
+_LAST_DISPATCH = threading.local()
+
+
+def take_last_dispatch():
+    """The `DispatchResult` of the last dispatch on **this** thread, then forget it.
+
+    **`None` means "no dispatch of ours just happened"**, which is the answer a
+    caller must be able to distinguish from any verdict. Taking-and-clearing in
+    one call is what makes that true: a caller that forgets to ask, or asks
+    twice, gets `None` rather than a stale value it could act on.
+    """
+    got = getattr(_LAST_DISPATCH, "value", None)
+    _LAST_DISPATCH.value = None
+    return got
+
+
 def execute_tool(name: str, arguments: dict, by_reference: bool = False,
                  origin: str = ORIGIN_USER) -> str:
     """Execute a named tool, returning the short result string a model reads.
@@ -1613,9 +1635,23 @@ def execute_tool(name: str, arguments: dict, by_reference: bool = False,
     shape for a caller deciding whether the tool ran, which is why `_dispatch`
     exists and why `execute_tool_outcome` uses it instead of re-reading the
     string this returns.
+
+    **The dispatch is also left where `take_last_dispatch` can find it**, so a
+    caller that needs the verdict does not have to call a *different* function
+    and run the tool twice. That alternative was tried and is why this exists
+    instead: `assistant.py` asked `execute_tool_outcome` and every dispatch ran
+    twice, and then it asked that and stopped calling this - and **59 test
+    files patch `execute_tool`** to intercept a turn's tool calls, so moving the
+    seam made them run real skills and write real files instead of their
+    fixtures. `execute_tool` stays the seam; the verdict comes beside the prose.
+
+    The slot is cleared on entry as well as on exit, so a dispatch that raises
+    cannot leave this thread holding a verdict from before it.
     """
-    return _dispatch(name, arguments, by_reference=by_reference,
-                     origin=origin).text
+    _LAST_DISPATCH.value = None
+    result = _dispatch(name, arguments, by_reference=by_reference, origin=origin)
+    _LAST_DISPATCH.value = result
+    return result.text
 
 
 def execute_tool_outcome(
@@ -1634,6 +1670,7 @@ def execute_tool_outcome(
     is then indistinguishable from one that never could.
     """
     result = _dispatch(name, arguments, by_reference=by_reference, origin=origin)
+    _LAST_DISPATCH.value = result
     return ToolOutcome(text=result.text, verdict=result.verdict,
                        artifacts=result.artifacts,
                        evidence=result.evidence, ran=result.ran)

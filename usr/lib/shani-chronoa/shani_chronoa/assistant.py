@@ -42,6 +42,7 @@ from shani_chronoa import (compression, context_meter, history_repair,
                            conversation_store, user_prompts)
 from shani_chronoa.senses.context import ContextBuilder
 from shani_chronoa.tools import TOOLS, execute_tool
+from shani_chronoa import verification
 from shani_chronoa.tool_select import select_tools
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, keeps the runtime import out
@@ -1195,7 +1196,12 @@ class Assistant:
                 # made once, from the outcome the dispatcher already produced,
                 # and `_tool_verdict_of` documents what it can and cannot know.
                 ctx = contextvars.copy_context()
-                result = await asyncio.get_running_loop().run_in_executor(
+                # **Two values, because one call has to carry both.** `result` is
+                # the prose the model reads; `outcome` is what the dispatcher
+                # already decided about it. The second is `None` only when
+                # `execute_tool` was patched and no dispatcher ran - see
+                # `_run_tool`.
+                result, outcome = await asyncio.get_running_loop().run_in_executor(
                     None, ctx.run, functools.partial(_run_tool, name, arguments, origin))
                 # A result that begins with these is a call the dispatcher
                 # refused before execution (ill-formed arguments, a schema
@@ -1221,7 +1227,7 @@ class Assistant:
                     # exactly the confident wrong answer this repo keeps paying
                     # for, and the executor already encodes the verdict in the
                     # text it returns.
-                    ok = _tool_ok(result, name)
+                    ok = _tool_ok(result, name, outcome)
                     try:
                         # **The clipped text, not the raw one.** This callback
                         # fires *before* the clip is applied to what goes into the
@@ -1239,10 +1245,22 @@ class Assistant:
                     except Exception as e:
                         logger.error(f"on_tool_result callback failed: {e}")
                 if sink is not None:
-                    head = str(result).lstrip().lower()
+                    # **The same two answers, not a second guess.** This was an
+                    # independent copy of "did it work" with a *different*
+                    # marker list (`("error", "refused")` against
+                    # `_tool_ok`'s four), so the two sites disagreed about the
+                    # same string - measured: a `Not run. ...` refusal was
+                    # `ok=False` for the card and `ok=True` for the rail. Two
+                    # answers to one question, twenty lines apart.
+                    #
+                    # And `artifacts` was read with `getattr(result, "artifacts")`
+                    # off a **`str`**, which is `()` every time - so the files a
+                    # skill declared never reached the transcript through this
+                    # path even once. It now reads the dispatch that carries
+                    # them.
                     sink.fire("on_tool_finish", name, arguments, str(result),
-                              not head.startswith(("error", "refused")),
-                              tuple(getattr(result, "artifacts", ()) or ()))
+                              _tool_ok(result, name, outcome),
+                              tuple(getattr(outcome, "artifacts", ()) or ()))
                 # tool_call_id correlates this result back to the specific
                 # tool_calls entry that requested it - required by the
                 # actual OpenAI spec (tolerated without it by the free
@@ -1388,8 +1406,45 @@ def _clip_tool_result(result, limit: int = MAX_TOOL_RESULT_CHARS):
 
 
 def _run_tool(name, arguments, origin):
-    """`execute_tool`, looked up at call time so a test's monkeypatch still applies."""
-    return execute_tool(name, arguments, origin=origin)
+    """`execute_tool`, looked up at call time so a test's monkeypatch still applies.
+
+    **Returns `(text, outcome)`, and the second element is the whole point.**
+
+    The tool loop needs three facts about each call - the prose the model
+    reads, whether it can be shown to a person as having happened, and which
+    files it made - and until now only one of them came back. The other two were
+    recovered from the prose, or not recovered at all:
+
+    - "did it work" was `not text.startswith(...)`, which measured **three real
+      dispatches wrongly** (see `_tool_ok`).
+    - "which files did it make" was `getattr(result, "artifacts", ())` on a
+      **`str`**, so it was `()` every time. The artifact block existed, every
+      skill declared correctly, `execute_tool_outcome` carried the field, and
+      **no file a skill ever made appeared in the transcript** - because the one
+      value that reaches the loop is a string. Every test in
+      `test_a_made_file_is_shown.py` was green, each of them asserting either
+      the *type* has the field or that the *card* renders it; none drove the
+      seam between.
+
+    **The alternative was tried and is worse.** Calling
+    `execute_tool_outcome` instead runs every dispatch **twice** - a write
+    performed twice because the caller wanted to know whether it worked. And
+    keeping one call while moving the seam to `execute_tool_outcome` bypassed
+    the **59 test files that patch `execute_tool`**: they ran the real skill
+    instead of their fixture, and a turn that used to write a stub wrote a real
+    file.
+
+    So the seam stays exactly where the tests are, and `execute_tool` leaves
+    the dispatch where `tools.take_last_dispatch()` can find it. **A patched
+    `execute_tool` sets nothing, so the take answers `None`** and every caller
+    below falls back to what it did before - which is the correct answer for a
+    call whose dispatcher was never reached.
+    """
+    from shani_chronoa import tools as _tools
+
+    _tools.take_last_dispatch()          # a previous call's must not be this one's
+    result = execute_tool(name, arguments, origin=origin)
+    return result, _tools.take_last_dispatch()
 
 
 #: How the dispatcher marks a call it refused before executing it ran. Read
@@ -1398,23 +1453,40 @@ def _run_tool(name, arguments, origin):
 _REFUSAL_MARKERS = ("ERROR:", "Not run. ", "Refused:", "ERROR(exit=")
 
 
-def _tool_ok(result, name: str = "") -> bool:
+def _tool_ok(result, name: str = "", outcome=None) -> bool:
     """Whether this call can be shown to a person as having happened.
 
-    **Deliberately still a prefix check, and the comment says so.** The honest
-    fix is to read `DispatchResult.verdict`, which the dispatch computes and
-    throws away one line earlier - `execute_tool_outcome` exists for exactly
-    this and `brain.py` and `gateway.py` use it. It could not be used here:
-    `execute_tool` is the seam **58 test files patch** to intercept a turn's
-    tool calls, and moving the seam to `execute_tool_outcome` bypassed every
-    one of them - a turn that used to write a stub wrote a real file instead,
-    and nothing failed loudly enough to notice.
+    **The verdict, when there is one.** `_dispatch` computes it and
+    `execute_tool` now leaves it where `tools.take_last_dispatch()` finds it, so
+    the loop reads three of the four `DispatchResult` states rather than
+    guessing at them from prose. Measured on real dispatches, before this
+    change, on the same strings:
 
-    So the guess stays, and this function is where it lives and why, rather than
-    being an unexplained expression mid-loop. The markers are the dispatcher's
-    own; a refusal worded some other way is still reported as ok, which is the
-    bug this documents rather than fixes.
+    | dispatch | verdict | said by the guess |
+    |---|---|---|
+    | `create_document` | `UNVERIFIED`, ran | ok - correct |
+    | `delete_file` refused, post-condition says the effect is absent | **`FAILED`** | **ok - wrong** |
+    | unknown tool | **`ran=False`** | **ok - wrong** |
+    | missing a required argument | **`ran=False`** | **ok - wrong** |
+
+    So a call that never ran, and a call whose own post-condition confirmed
+    that its effect is not there, were both drawn as done. The post-condition
+    is the one that matters most: it is the skill itself saying *this did not
+    work*, and the card said otherwise.
+
+    **`ran` is half the answer and the verdict is the other half.**
+    `DispatchResult`'s docstring is the authority: `ran=False` is "never
+    executed", whatever the verdict says - an unknown tool and a missing
+    argument both report `UNVERIFIED`, because nothing was there to verify.
+
+    **The fallback is still a prefix check, and still wrong**, but it is now
+    only reached when `execute_tool` was **patched** - 59 test files do that -
+    so it describes a call whose dispatcher nobody reached. A real call always
+    has the verdict.
     """
+    if outcome is not None:
+        return bool(outcome.ran) and outcome.verdict not in (
+            verification.Verdict.FAILED, verification.Verdict.IMPOSSIBLE)
     head = str(result).lstrip()
     return not head.startswith(_REFUSAL_MARKERS)
 

@@ -23841,3 +23841,107 @@ collision, and a test naming either half of it passes while the other is wrong.
 `tests/test_the_empty_state_answers_what_can_i_ask.py` retired with its feature
 rather than left as 16 orphans. 43 passed across it, the window-build gate, the
 palette and the mode strip.
+
+## The card's "did it work" is now the dispatcher's verdict (2026-10-13)
+
+The entry above ("The deep scan, and the fix it refused") recorded that
+`verification.Verdict` never reaches the screen and that the assistant decides
+the card's `ok` by string prefix - and that the fix was a **migration, not an
+edit**. It is not. **The verdict was reachable from one call all along**, and
+taking it costs nothing.
+
+### Measured, on real dispatches through `tools.execute_tool_outcome`
+
+| dispatch | verdict | `ran` | what `_tool_ok` said |
+|---|---|---|---|
+| `create_document`, a real write | `UNVERIFIED` | True | ok - correct |
+| `delete_file`, post-condition says the effect is absent | **`FAILED`** | True | **ok - WRONG** |
+| a tool that does not exist | `UNVERIFIED` | **False** | **ok - WRONG** |
+| a call missing a required argument | `UNVERIFIED` | **False** | **ok - WRONG** |
+
+Three of four were wrong. The `FAILED` row is the one that matters: **`FAILED`
+is the skill's own statement that its effect is not there**, and the card was
+drawn saying it happened. `DispatchResult`'s docstring names the failure this is
+- *"a refusal starts to look indistinguishable from a success that nobody
+checked"* - and `execute_tool_outcome` exists to carry the verdict.
+
+**`ran` is half the answer and the verdict is the other half.** An unknown tool
+and a missing argument both report `UNVERIFIED`, because there was nothing to
+verify - so reading the verdict alone gets exactly these wrong. That is the
+docstring's four-row table, read as a table.
+
+### Both obvious fixes are worse, which is why the seam does not move
+
+- `execute_tool_outcome` **alongside** `execute_tool` runs every dispatch
+  **twice** - a write performed twice because the caller wanted to know whether
+  it worked.
+- replacing one with the other moves the seam, and **59 test files patch
+  `execute_tool`** to intercept a turn's tool calls. They ran the real skill
+  instead of their fixture, and a turn that used to write a stub wrote a real
+  file.
+
+So `execute_tool` stays the seam and **leaves** the dispatch where
+`tools.take_last_dispatch()` finds it - a **thread-local**, because a turn
+dispatches on an executor thread while the panels dispatch on the GTK one, and a
+shared slot would hand one of them the other's verdict about a destructive tool.
+Taking-and-clearing in one call is what makes `None` mean *"no dispatch of ours
+just happened"*, which a caller must be able to tell from any verdict.
+
+**A patched `execute_tool` sets nothing, so the take answers `None`** and every
+caller falls back to what it did before - which is the correct answer for a call
+whose dispatcher nobody reached, and is why 59 test files keep passing.
+
+### A second, independent guess, twenty lines away, that could disagree
+
+The sink carried **its own** marker list (`("error", "refused")`) against
+`_tool_ok`'s four. Measured: a `Not run. ...` refusal is `ok=False` for the card
+and **`ok=True` for the rail** - the same call, two answers. One call now.
+
+### The artifacts were dead end to end, and the suite was green throughout
+
+`getattr(result, "artifacts", ())` was read off a **`str`**, so it was `()` every
+time. **No file a skill ever made appeared in the transcript** - while every
+test in `test_a_made_file_is_shown.py` passed, each asserting either that the
+*type* carries the field or that the *card* renders it. None drove the value
+through the seam. The new test drives a whole turn and reads what the sink was
+handed.
+
+### 11 mutations, 11 caught, 0 survivors, 0 unmeasurable
+
+Including the shipped defect restored (`_tool_ok` ignoring the verdict), `ran`
+dropped from the answer, `FAILED` and `IMPOSSIBLE` each reported as done, the
+sink's two separate guesses, the slot not cleared on entry, `take` not clearing,
+the slot made a global, and the fallback dropped. Run on a snapshot at
+`/tmp/opencode/snap-vd`, both files byte-identical afterwards.
+
+### Three of my own instruments were wrong first, and each is the shape this file records
+
+1. **A collection error counted as "caught".** The first harness grepped for
+   `failed|error`, so four mutations that produced `1 error in 0.25s` -
+   **nothing ran** - were reported as caught: a table of false cleans that looks
+   exactly like a pass. `1 error in 0.25s` with no test counts is
+   **UNMEASURABLE**, which is what `MutationDidNotParse` exists to say in
+   `tools/mutate.py`, and I had it in `/tmp` rather than in the file I was
+   reading it from.
+2. **A vacuous witness for the entry-clear.** `test_a_dispatch_that_raises_leaves_
+   no_verdict_from_before_it` took the previous dispatch *before* the raising
+   call, so the slot was already empty and the assertion passed with the guard
+   deleted. **Mutation 8 survived and the fixture was the reason.** It now
+   deliberately leaves a dispatch in the slot.
+3. **The `IMPOSSIBLE` fixture decided the answer itself.** Built with
+   `ran=False`, so `bool(outcome.ran)` was False and the verdict was irrelevant -
+   **mutation 4 survived**. `DispatchResult`'s table does not list `IMPOSSIBLE`
+   at all, so the reachable case is `ran=True`, which `_replay_put` reasons
+   about deliberately (*"an impossible request"* is among what it declines to
+   cache). Corrected, and the reason is in the test.
+
+### Not claimed
+
+- **`IMPOSSIBLE` is unreachable end to end.** None of the 256 skills returns the
+  sentinel, so that one assertion is built rather than driven, and says so.
+- **Nothing here changes what the model reads.** The prose is byte-identical;
+  only the two derived answers move.
+- **`test_tool_activity_panel.py` is 28 red and is not mine** - identical with
+  HEAD's `assistant.py` and `tools.py` swapped in (`28 failed, 17 passed` both
+  ways). Likewise `guardrail_enum.py`'s missing `"why"` key, which is committed
+  and unmodified.
