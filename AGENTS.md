@@ -1371,6 +1371,20 @@ points at exists on one disk until that disk is reused.
 | `HARVEST-EDGE0-DEEP.md` | edge0, deep pass | a hygiene suite that imports nothing; presets as measurements |
 | `HARVEST-PERSONAPLEX.md` | PersonaPlex | the audio-codecode quantizer; the loudness target, measured then built |
 | `HARVEST-DTA.md` | digital-travel-agent | the rules-file refusal; the approval-time replay guard |
+**Recorded against myself, in the same pass: `git commit --only <file>` is not
+safe in this workspace, and the rule above did not say so.** The workspace's
+`AGENTS.md` documents `git commit` with no paths sweeping another session's staged
+work, and prescribes `--only`. It scopes **paths, not lines**. `git add AGENTS.md
+&& git commit --only AGENTS.md` was run while a concurrent session had ~200 lines
+of an uncommitted section in the same file, and **their work landed inside my
+commit** (`c3ba7b5`, whose message is about the harvest). Nothing was lost and no
+file was clobbered; the cost is that their work is now attributed to me and their
+next commit will not contain it, because the file is clean. The fix is the one the
+workspace already gives for the narrow case: **back up, write the note, and commit
+only what you can show is yours** - here, by checking `git show --stat` named the
+line count *before* pushing the commit. Rewriting the history is a person's
+decision, not a mechanical one, and it is recorded rather than fixed.
+
 | `HARVEST-LINUX-HELLO.md` | linux-hello | one transfer, and it is a *seam* not a guard: a pure `plausible()` beside detection, so the face decision is testable without OpenCV. The anti-spoofing set, the IR liveness constants, raw V4L2, the warm daemon and the PAM profile are all refused with reasons. Recorded as a defect in the upstream: **face templates written world-readable (dir 0755, file 0644)** |
 | `HARVEST-BWRAP.md` | bubblewrap | the three sandbox protections that belong to the machine |
 | `HARVEST-MAZE.md` | Maze-AI | nothing; a short negative result |
