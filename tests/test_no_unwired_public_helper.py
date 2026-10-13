@@ -653,6 +653,58 @@ def _forget_seam_cache():
     _SEAM_NAMES = None
 
 
+def _planted_toolbox_location_stays_in_its_module():
+    """False when the toolbox exclusion reports a callable outside its own module.
+
+    **This is the control for `other` in
+    `test_the_toolbox_exclusion_cannot_reach_another_file`, which measured as
+    unable to fail.** A scratch tree is built holding two modules: the toolbox
+    module, with a root class `stats` carrying one public method and one
+    module-level function beside it, and a *second* module declaring its own
+    `class stats` with a public method.
+
+    A derivation confined to the toolbox module reports exactly one location - the
+    method inside `stats` - and nothing else: the second module is invisible, and
+    so is the module-level function, which has no enclosing class to hang the
+    exclusion on. Widened to `*.py`, it reports both modules.
+
+    Both halves matter. Reporting nothing at all satisfies "not outside the
+    module" trivially, which is why the count of one is part of the answer rather
+    than only the absence of the second module.
+    """
+    import pathlib as _pathlib
+    import tempfile as _tempfile
+
+    global PKG, ROOT
+    real_pkg, real_root = PKG, ROOT
+    try:
+        with _tempfile.TemporaryDirectory(prefix="plant-toolbox-") as tmp:
+            base = _pathlib.Path(tmp)
+            pkg = base / "pkg"
+            pkg.mkdir()
+            (pkg / "learning.py").write_text(
+                "class stats:\n"
+                "    def mean():\n"
+                "        return 0\n"
+                "def not_inside_a_class():\n"
+                "    return 0\n"
+            )
+            (pkg / "other.py").write_text(
+                "class stats:\n"
+                "    def mean():\n"
+                "        return 0\n"
+            )
+            PKG, ROOT = pkg, base
+            _forget_seam_cache()
+            locations = _toolbox_locations()
+            in_module = [l for l in locations if "learning.py" in l]
+            outside = [l for l in locations if "learning.py" not in l]
+            return len(locations) == 1 and bool(in_module) and not outside
+    finally:
+        PKG, ROOT = real_pkg, real_root
+        _forget_seam_cache()
+
+
 def _planted_class_orphan_is_found():
     """True when `_class_orphans` reports a class planted in a scratch package.
 
@@ -1038,6 +1090,19 @@ def test_the_toolbox_exclusion_cannot_reach_another_file():
         f"the toolbox exclusion reached outside learning.py: {sorted(other)} - "
         f"it has become an allowlist and will silently absorb orphans elsewhere")
 
+    # **And the assertion above is backed by a plant, because measured it cannot
+    # fail on this tree.** Every file outside `learning.py` that nests a class
+    # inside a toolbox-named class is under `cache/` - `tqdm`'s `EMA`, `torch`'s
+    # `SGD`, `sympy`'s `Gaussian` - and `_SKIP` drops all of it. So `other` is
+    # empty by construction: when the derivation was widened to every `.py` in the
+    # package it walked the whole tree, took **453 s against 170**, and still
+    # reported only `learning.py` locations. Slower and just as green is the shape
+    # of a control that has stopped being able to fail.
+    assert _planted_toolbox_location_stays_in_its_module(), (
+        "a public callable declared in a module that is not the toolbox module was "
+        "reported by the toolbox exclusion - the derivation is no longer confined "
+        "to learning.py, so an orphan anywhere else can be absorbed by it")
+
 
 def test_the_toolbox_exclusion_covers_the_documented_classes():
     """The population it names is the one the derived toolbox documents, so the two
@@ -1059,14 +1124,21 @@ def test_the_toolbox_exclusion_covers_no_seam_reachable_root():
     and drops the ones `_seam_reaches` finds a caller for. With the filter
     removed, `decision` joins the toolbox - and with it its own `RewardModel` and
     `ActionSelector`. All three are live and none is an orphan today, so the
-    audit's result is identical either way: that is why the mutation removing the
-    filter survived, and why this assertion exists.
+    audit's result is identical either way. That is why the mutation removing the
+    filter **survived** when it was run, and it is recorded rather than shrugged
+    at.
 
     **A control that only bites in the future is a control that cannot fail now.**
-    This one bites now, because it asserts the roots set against a derivation
-    that does not use the filter - the lowercase class list - subtracted by
-    exactly the seams. A filter that is deleted, or that starts keeping a class
-    something reaches, changes the answer here.
+    So this one bites now: it asserts the roots against a derivation that does not
+    use the filter - every lowercase module-level class, minus exactly the ones a
+    seam reaches - and then asserts the whole box holds no seam-reachable class
+    either. A filter that is deleted, or a box that starts keeping a class
+    something outside this file reaches, changes the answer here.
+
+    The second half is the one that keeps the exclusion honest as it is used:
+    `estimators.py` re-exports `EMA`, `KMeans` and `KNN` out of the toolbox (the
+    split-modules commit), so three classes inside the sections are live - and a
+    box holding them has promised not to report a class with a caller.
     """
     roots = _toolbox_roots()
     all_names = set()
@@ -1084,10 +1156,20 @@ def test_the_toolbox_exclusion_covers_no_seam_reachable_root():
     reached = {n for n in lower if _seam_reaches(n)}
     assert lower - roots == reached, (
         "the roots filter does not keep exactly the lowercase class with no seam: "
-        f"expected the filter to drop {sorted(reached)}, it dropped "
+        f"expected it to drop {sorted(reached)}, it dropped "
         f"{sorted(lower - roots)}")
-    assert roots, "decision is a root - it is live, a seam reaches it"
-    return roots
+
+    # `decision` is the live one: it has a caller and is not a toolbox section.
+    assert "decision" not in roots, (
+        "decision is a toolbox root - it is live, a seam reaches it")
+
+    # And the box as a whole holds nothing a seam reaches, nested or not.
+    box = _toolbox_class_names()
+    live = sorted(n for n in box if _seam_reaches(n))
+    assert not live, (
+        f"the toolbox exclusion covers class(es) a real seam reaches: {live} - "
+        f"so live code is inside the box, which is the over-claiming the emptied "
+        f"allowlists were made of arrived at by another route")
 
 
 def test_the_class_audit_cannot_see_the_english_word_classes():
