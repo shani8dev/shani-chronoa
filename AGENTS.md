@@ -20539,3 +20539,27 @@ different window.
   boundary. **Not changed here**: it is a value a test pins, a CSS half was
   previously moved around to avoid, and one render is not a basis for tuning it.
   It needs an A/B at two or three widths and the test updated deliberately.
+
+### The override blanked the help window, and looking is how I found out
+
+`CHRONOA_FORCE_SIZE` as first written forced **every** window. Applied to `help`
+- a modal dialog - it rendered **a blank white page**:
+
+| | size | bytes |
+|---|---|---|
+| without the override | 638x620 | **110,103** |
+| with the override | 1024x700 | **25,346** |
+
+Both reported `PASS`. That is precisely *"a broken picture from a successful
+render, which is the worst of both"* - the failure this module's docstring says
+it exists to prevent - and **I introduced it ten minutes earlier**.
+
+The fix is not a special case but the rule the block was already expressing:
+**a modal dialog's size is its design**, the same reason Quick Ask is a 460x170
+popup. So modals are excluded, and `help` renders at its own 638x620 with its
+content intact.
+
+**The lesson is about method, not about GTK.** Every check I had run on that
+change was a byte count and an exit status, and all of them were satisfied by a
+picture of a white rectangle. Nothing short of looking at the image would have
+caught it, and the render batch reported `PASS` for both.

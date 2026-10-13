@@ -177,7 +177,8 @@ def _in_a_window(widget):
         # different job - photographing a bare `Gtk.FlowBox` without the
         # wrapper stretching it into full-height columns. That one is deliberate
         # and documented where it lives.
-        if WIDTH and HEIGHT and os.environ.get("CHRONOA_FORCE_SIZE"):
+        if (WIDTH and HEIGHT and os.environ.get("CHRONOA_FORCE_SIZE")
+                and not widget.get_modal()):
             widget.set_default_size(WIDTH, HEIGHT)
         return widget
     window = Gtk.Window()
@@ -922,9 +923,19 @@ def on_activate(app):
     # all** - and the whole point of looking is to see those. The Quick Ask
     # reasoning below is sound and still applies by default; what was missing is
     # a way to ask for the other behaviour when the target is a real window.
+    #
+    # **Modals are excluded, and that is not a special case.** The rule this
+    # block expresses is *"a window that sized itself keeps its own size"*, and a
+    # modal dialog's size **is** its design - Quick Ask is a 460x170 popup over
+    # somebody's work. Forcing `help` to 1024x700 measured as a **blank white
+    # page**: 25,346 bytes against 110,103 for the same window at its own
+    # 638x620. A successful render of nothing is the exact failure this module's
+    # docstring says it exists to prevent, and I introduced it with the override
+    # and found it by looking at the picture - which is the argument for looking
+    # at pictures rather than checking the exit status.
     if hasattr(window, "set_default_size"):
         chosen_w, chosen_h = window.get_default_size()
-        if os.environ.get("CHRONOA_FORCE_SIZE"):
+        if os.environ.get("CHRONOA_FORCE_SIZE") and not window.get_modal():
             window.set_default_size(WIDTH, HEIGHT)
         elif chosen_w <= 0 and chosen_h <= 0:
             window.set_default_size(WIDTH, HEIGHT)
