@@ -665,8 +665,58 @@ def hooks() -> "tuple[tuple, tuple]":
     return (tuple(_HOOKS_PRE), tuple(_HOOKS_POST))
 
 
+#: Whether `_install_builtin_hooks` has run. A module-level flag rather than a
+#: truthiness test on the list, so a hook list emptied by a test cannot silently
+#: turn the gate back off.
+_BUILTIN_HOOKS_INSTALLED = False
+
+
+def _install_builtin_hooks() -> None:
+    """Register the hooks that must be live for every dispatch, once.
+
+    **`register_hook` had zero callers.** The mechanism was built, documented as
+    the way Chronoa reduces dispatch "to the two edges", and left dormant - and
+    the one hook written for it was the consent gate for the phone skill:
+
+        skills/phone.py
+            Sending and calling also need the person to confirm **this** message
+            to **this** recipient. A skill runs in a sandbox child with no
+            window, so the question is asked by `confirm_outgoing`, a dispatcher
+            pre-hook that runs in the application process (registered in
+            `tools.py`).
+
+    That sentence is a promise, and nothing kept it: `confirm_outgoing` had no
+    reference anywhere in the tree, so `send` and `call` were dispatched with
+    **no confirmation at all** - the model could send a text from this person's
+    phone to anyone, unasked, despite the approval file, the 120-second one-shot,
+    and the guard against a model supplying its own approval all being written
+    and unreachable.
+
+    **Installed here rather than at application startup**, because startup would
+    leave every headless path - the `shani-chronoa` CLI, a skill run, a
+    scheduled task - dispatching without the gate. A consent check that only
+    exists when a window is open is not a consent check.
+
+    The import is inside the function so `skills.phone` importing `tools` does
+    not recurse at import time.
+    """
+    global _BUILTIN_HOOKS_INSTALLED
+    if _BUILTIN_HOOKS_INSTALLED:
+        return
+    _BUILTIN_HOOKS_INSTALLED = True
+    try:
+        from shani_chronoa.skills.phone import confirm_outgoing
+    except Exception:                                   # noqa: BLE001
+        logger.warning("could not register the outgoing-call confirmation hook",
+                       exc_info=True)
+        _BUILTIN_HOOKS_INSTALLED = False
+        return
+    register_hook(pre=confirm_outgoing)
+
+
 def _dispatch(name: str, arguments: dict, by_reference: bool = False,
               origin: str = ORIGIN_USER) -> DispatchResult:
+    _install_builtin_hooks()
     """Every actuator, with the hands light on for the duration.
 
     The light is opened before the handler lookup and closed in a `finally`, so
