@@ -314,6 +314,56 @@ class TestTheReportPairsAllThreeOutcomes:
         assert out.count("exact p = ") == 3, out
 
 
+class TestTheReportCallsIt:
+    """**The integration point.** Everything above drives `paired_table`
+    directly, which is what a test does when it is testing a function. Nobody
+    checked that `report()` *calls* it - and the failure mode of not calling it
+    is a report that looks complete, because the marginal table is still there.
+    Found by running `report()` on synthetic arms shaped like the predicted
+    finding rather than by reasoning about the wiring."""
+
+    def _arms(self):
+        base = [{"id": "c%d" % i, "tool": i < 170, "args": i < 170,
+                 "seen": "" if i < 170 else "no tool", "unavailable": False}
+                for i in range(220)]
+        grammar = [dict(r, seen="") for r in base]          # form up, choice flat
+        request = [dict(r, tool=i < 175, args=i < 175,
+                        seen="" if i < 175 else "no tool")
+                   for i, r in enumerate(base)]
+        return {"+greedy": {"rows": base},
+                "+greedy+constrained": {"rows": grammar},
+                "+greedy+request": {"rows": request}}
+
+    def test_report_prints_the_paired_section(self, capsys):
+        ta.report(self._arms(), ["+greedy", "+greedy+constrained",
+                                 "+greedy+request"], 220)
+        out = capsys.readouterr().out
+        assert "paired acted (form)" in out, out
+        assert "paired right tool" in out, out
+        assert "exact p =" in out, out
+
+    def test_a_grammar_that_only_changes_form_reads_as_such(self, capsys):
+        """**The shape of the finding the run exists to produce**, asserted on
+        the report a reader reads: form up, choice flat, p = 1."""
+        ta.report(self._arms(), ["+greedy", "+greedy+constrained",
+                                 "+greedy+request"], 220)
+        out = capsys.readouterr().out
+        choice = out.split("paired right tool")[1].split("paired")[0]
+        assert "+0.0 pts" in choice, choice
+        assert "p = 1.000" in choice, choice
+        form = out.split("paired acted (form)")[1].split("paired right tool")[0]
+        assert "+22.7 pts" in form, form
+
+    def test_a_partial_run_says_so_rather_than_pretending_to_be_three(self, capsys):
+        arms = self._arms()
+        ta.report(arms, ["+greedy", "+greedy+constrained"], 220)
+        out = capsys.readouterr().out
+        assert "only 2 of 3 arms ran" in out, out
+        assert "Arms 2 and 3 differ only in whether the grammar is enforced" \
+            not in out, (
+            "the closing note explains a comparison that is not in the report")
+
+
 class TestFormAndChoiceArePairedSeparately:
     """**The form/choice split is the finding**, so pairing must preserve it:
     an arm that made every answer well-formed and no more of them right is a

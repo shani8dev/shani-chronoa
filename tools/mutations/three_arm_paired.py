@@ -168,6 +168,20 @@ MUTATIONS = [
         'new': '                note = ""',
     },
     {
+        'label': 'the report stops printing the paired comparison at all',
+        'why': '**the failure mode of not calling it is a report that looks '
+               'complete**, because the marginal table above is still there and '
+               'still reads like an answer. Everything else in this set tests '
+               '`paired_table` directly, so without a witness on the call site '
+               'the function could stop being used and every test would stay '
+               'green - the `Registry.register` / `Gateway.may_execute` shape.',
+        'expect': ['test_report_prints_the_paired_section',
+                   'test_a_grammar_that_only_changes_form_reads_as_such'],
+        'file': _SRC,
+        'old': '    if len(arms) > 1:\n        paired_table(results, arms)',
+        'new': '    if False:\n        paired_table(results, arms)',
+    },
+    {
         'label': 'form is no longer paired separately from choice',
         'why': '**the split is the finding.** A grammar that makes every '
                'answer well-formed and no more of them right is a different '
