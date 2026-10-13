@@ -123,11 +123,46 @@ def test_the_environment_reaches_the_subprocess(user_tessdata, monkeypatch):
     assert captured["env"].get("TESSDATA_PREFIX") == str(user_tessdata)
 
 
+def _real_callers(name, skip):
+    """Files that **call** `name`, by AST. Not by substring.
+
+    **The first version of this assertion was a substring match, and it passed
+    against code that did not call the function at all.** The docstring added by
+    the fix *names* `languages.tesseract_env()` while the implementation
+    re-implemented its glob inline - so `"tesseract_env(" in text` found my own
+    prose and reported a caller that did not exist.
+
+    An `ast.FunctionDef` stores its name as a string, never as an `ast.Name`, so
+    the definition cannot match either. What is left is a real reference.
+    """
+    import ast
+
+    root = Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"
+    found = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name in skip:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                got = (func.attr if isinstance(func, ast.Attribute)
+                       else func.id if isinstance(func, ast.Name) else None)
+                if got == name:
+                    found.append(path)
+                    break
+    return found
+
+
 def test_tesseract_env_now_has_a_caller():
     """The smallest claim that was false, and the reason this file exists:
     `languages.tesseract_env()` had no caller in the tree."""
-    root = Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"
-    callers = [p for p in root.rglob("*.py")
-               if "tesseract_env(" in p.read_text(encoding="utf-8", errors="replace")
-               and p.name != "languages.py"]
-    assert callers, "tesseract_env() still has no caller"
+    callers = _real_callers("tesseract_env", {"languages.py"})
+
+    assert callers, (
+        "tesseract_env() is called by nothing. A substring search will NOT find "
+        "this: the docstring above names the function while the code re-implements "
+        "its glob, so the search finds prose and reports a caller that is not one.")

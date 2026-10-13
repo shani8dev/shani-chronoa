@@ -62,8 +62,18 @@ def _tessdata_dir() -> "str | None":
     `ocr.find_tessdata_dir()` reads `TESSDATA_PREFIX` out of the environment and
     falls back to the system directory; `languages.tessdata_dir()` is where
     Chronoa *installs* a language's `traineddata`. `languages.tesseract_env()` is
-    the function that would put the second into the first - and it had **no
-    caller in the tree**.
+    the function that puts the second into the first.
+
+    **It is called here, and the first version of this fix did not call it.**
+    That version re-implemented the same `is_dir()` + `*.traineddata` glob inline,
+    so the prefix it computed was right and the function I had set out to wire was
+    still unreached - and `tests/test_tesseract_is_told_where_its_data_is.py`
+    passed anyway, because its "has a caller" assertion was a **substring match
+    against a docstring** that happened to name it. That is the same mistake the
+    repo's own tests warn about twice, committed by me.
+
+    So the answer now *comes from* `tesseract_env()` and the fallback is layered on
+    top of it, rather than the two being computed independently and agreeing.
 
     So the panel offered to download Hindi OCR data into a directory that
     `find_tessdata_dir()` never looked at, and tesseract was invoked without a
@@ -78,9 +88,13 @@ def _tessdata_dir() -> "str | None":
     """
     from shani_chronoa import languages
 
-    directory = languages.tessdata_dir()
-    if directory.is_dir() and any(directory.glob("*.traineddata")):
-        return str(directory)
+    # The user's own directory, answered by the function that owns the question.
+    # `tesseract_env()` returns `{}` when that directory has no data in it, which
+    # is the same "nothing installed" answer `tessdata_dir()` gives, reached
+    # through one implementation instead of a second copy of its glob.
+    installed = languages.tesseract_env().get("TESSDATA_PREFIX")
+    if installed:
+        return str(installed)
     from shani_chronoa.senses import ocr
 
     return ocr.find_tessdata_dir()
