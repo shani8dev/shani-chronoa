@@ -23269,6 +23269,58 @@ Sparse against dense, measured with `getsizeof` and extrapolated, because the
 factor is the entire argument for the sparse form: **18,796 records would be
 9.86 GB dense against 5.41 MB sparse, 1,821x less.**
 
+### The suite hangs because eight tests write into the live database
+
+`tests/test_file_index.py` hung for 30 minutes at zero CPU and made a whole-suite
+run unfinishable. Bisected to one test, then to one line:
+
+```python
+report = F.index_directory(home, embed=False)      # no db=
+```
+
+`db=None` resolves to `index_path()` - **the live index, the one the running
+application reads and writes.** And `WALK_CEILING = 60000`, so that one test
+built 60,005 files and wrote **60,005 rows into the person's real file index**.
+It hung against the app's write lock. **Seven more tests did the same thing**,
+building files under `tmp_path` and then indexing them into the live database.
+
+Two of those then turned out to agree only because of it: `test_it_counts_what_
+was_indexed` indexed with `_three()` and read `F.status()` with **no `db=`** -
+so the writer and the reader were both the live index, and the test passed
+because it had polluted the state it read. Give the writer its own database and
+they stop agreeing, which is the fix, not the regression.
+
+**54 passed in 348 s** (was: never), and the live index is **byte-identical**
+before and after by `md5sum`.
+
+The guard for the guard is a source scan, because the failure is invisible at
+runtime - a test that writes to the live index still passes. It found **three
+more** call sites on its first run that a `grep` had missed. Mutation-checked
+three ways; all three caught.
+
+### `_entries_of` held the file, every line, and every record at once
+
+`_entries()` is 117 MB per panel refresh and stays uncapped, because capping it
+reintroduces the rotation bug it exists to prevent. But the *transient* was
+avoidable. `read_text()` then `splitlines()` means the file's text, every line of
+it, and every parsed dict are live simultaneously. Measured on this machine's own
+archive: **76.1 MB peak against a 37.3 MB result.**
+
+Streamed one line at a time: **peak 76.1 -> 37.5 MB**, result unchanged, and
+**byte-identical** on every input including a missing file, a directory, and an
+empty one. The `OSError` still returns `[]` from anywhere in the file, not the
+records read so far - a reader that reports a half-read file as a short file is
+the shape of quiet wrongness already in this file.
+
+### And the 0600-directory leak I had recorded was the wrong file
+
+The note in this file said `test_skill_workbench.py` leaks mode-600 directories
+that block pytest's `rm_rf`. It does not: the leaked `logs.2` / `logs.3` are
+**directories**, from `test_call_log_rotation.py`, and they do not reproduce -
+`rotate()` refuses a directory, `test_a_log_directory_is_refused_rather_than_
+renamed` pins it, and the file now leaves **44 passed and no garbage behind**.
+The leaked directories were from before that guard landed.
+
 ### The blast radius, and a suite that hangs
 
 `pytest tests/` as one process **hung for 30 minutes at zero CPU** and reported

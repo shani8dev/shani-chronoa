@@ -68,6 +68,17 @@ def corpus(tmp_path):
 
 
 def _db(tmp_path):
+    """A private index for one test.
+
+    **`F._connect()` with no argument opens the *live* index** - `index_path()`,
+    the one the running application reads and writes. Eight tests here built
+    their files under `tmp_path` and then handed them to that database, so the
+    suite was indexing temporary directories into the person's real file index,
+    reading results back alongside whatever else was in there, and could block
+    against the application holding a write lock. One of them wrote
+    `WALK_CEILING + 5` = **60,005** rows that way, which is what made a
+    whole-suite run hang for 30 minutes at zero CPU.
+    """
     return F._connect(tmp_path / "index.sqlite3")
 
 
@@ -339,7 +350,7 @@ class TestTheEmbeddingIsBatched:
         root.mkdir()
         for index in range(count):
             (root / f"f{index}.txt").write_text(f"the wifi box drops link {index}\n")
-        F.index_directory(root, embed=True)
+        F.index_directory(root, embed=True, db=_db(tmp_path))
         return sizes
 
     def test_twenty_files_are_embedded_in_one_call(self, monkeypatch, tmp_path):
@@ -375,7 +386,7 @@ class TestTheEmbeddingIsBatched:
         root.mkdir()
         for index in range(8):
             (root / f"h{index}.txt").write_text(f"the btrfs rollback needs slot {index}\n")
-        report = F.index_directory(root, embed=True)
+        report = F.index_directory(root, embed=True, db=_db(tmp_path))
         assert report["indexed"] == 8, report
         # **`degraded`, not `problems`.** A short batch is a *degradation* - the
         # files were read and indexed, some just have no vector - and `problems`
@@ -538,7 +549,7 @@ class TestTheWalkSkipsTheMachinesOwnHoard:
 
     def test_the_report_has_no_cache_noise(self, tmp_path):
         home = self._home(tmp_path)
-        report = F.index_directory(home, embed=False)
+        report = F.index_directory(home, embed=False, db=_db(tmp_path))
         assert report["problems"] == [], report["problems"]
         assert report["indexed"] == 2, report
         assert report["examined"] == 2, (
@@ -568,7 +579,12 @@ class TestTheWalkSkipsTheMachinesOwnHoard:
         home.mkdir()
         for index in range(F.WALK_CEILING + 5):
             (home / f"f{index}.txt").write_text("note")
-        report = F.index_directory(home, embed=False)
+        # **Its own database.** Without `db=` this resolves to `index_path()`,
+        # the live index, so the test wrote 60,005 rows into the database the
+        # running application reads - and a whole-suite run hung for 30 minutes
+        # at zero CPU right here. The walk is what is under test; where its rows
+        # land is not.
+        report = F.index_directory(home, embed=False, db=_db(tmp_path))
         assert report["indexed"] <= F.WALK_CEILING, (
             "more was indexed than the ceiling allows")
         # the report says so rather than silently stopping
@@ -588,15 +604,25 @@ class TestTheIndexAnswersWhatItHolds:
     """
 
     def _three(self, tmp_path, embed: bool = False):
+        """Three files indexed into a **private** database, which it returns.
+
+        It used to return nothing and index into the live one, and the three
+        tests below read `F.status()` with no `db=` - so they only agreed with
+        each other because the same live index was both written and read. Give
+        the writer its own database and that coupling breaks: each test has to
+        name the one it means. Which is the point - a test whose answer depends
+        on what some other test left behind is not measuring its own subject.
+        """
         (tmp_path / "a.txt").write_text("the wifi box")
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "b.md").write_text("the btrfs rollback")
         (tmp_path / "nested.txt").write_text("another note")
-        F.index_directory(tmp_path, embed=embed)
+        db = _db(tmp_path)
+        F.index_directory(tmp_path, embed=embed, db=db)
+        return db
 
     def test_it_counts_what_was_indexed(self, tmp_path):
-        self._three(tmp_path)
-        state = F.status()
+        state = F.status(db=self._three(tmp_path))
         assert state["indexed"] == 3, state
         assert state["embedded"] == 0, state
 
@@ -617,8 +643,7 @@ class TestTheIndexAnswersWhatItHolds:
             "absent index must be an answer, not a crash")
 
     def test_it_names_the_directory_the_files_share(self, tmp_path):
-        self._three(tmp_path)
-        state = F.status()
+        state = F.status(db=self._three(tmp_path))
         assert state["root"] == str(tmp_path), state
 
     def test_files_in_more_than_one_tree_still_answer(self, tmp_path):
@@ -629,7 +654,7 @@ class TestTheIndexAnswersWhatItHolds:
         two.mkdir()
         (one / "a.txt").write_text("first")
         (two / "b.txt").write_text("second")
-        db = F._connect()
+        db = _db(tmp_path)
         for root in (one, two):
             F.index_directory(root, embed=False, db=db)
         state = F.status(db=db)
@@ -648,8 +673,7 @@ class TestTheIndexAnswersWhatItHolds:
         monkeypatch.setattr(local_embed, "embed",
                             lambda texts, **k: [[1.0, 0.0] for _ in texts])
         monkeypatch.setattr(local_embed, "configured", lambda: True)
-        self._three(tmp_path, embed=True)
-        state = F.status()
+        state = F.status(db=self._three(tmp_path, embed=True))
         assert state["embedded"] == 3, state
 
 
@@ -673,7 +697,11 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         work.mkdir()
         (notes / "a.txt").write_text("the wifi box drops the link")
         (work / "b.txt").write_text("the wifi box is in the office")
-        db = F._connect()
+        # `_db(base)`, not `_db(tmp_path)`: this helper is handed the directory
+        # it should build in, and there is no `tmp_path` in scope here. Naming a
+        # variable that does not exist reads exactly like the bug it replaced -
+        # the live index - right up until it raises.
+        db = _db(base)
         F.index_directory(notes, embed=False, db=db)
         F.index_directory(work, embed=False, db=db)
         return notes, work, db
@@ -727,7 +755,7 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         monkeypatch.setattr(local_embed, "similarity",
                             lambda a, b: 0.9)
 
-        db = F._connect()
+        db = _db(tmp_path)
         # **Written with vectors.** Indexing with `embed=False` leaves every
         # `vector` column NULL, so `SELECT path, vector FROM docs WHERE vector
         # IS NOT NULL` returns nothing and the guard under test is never reached
@@ -785,7 +813,7 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         work.mkdir()
         (notes / "a.txt").write_text("the wifi box")
         (work / "c.txt").write_text("the deploy")
-        db = F._connect()
+        db = _db(tmp_path)
 
         F.index_directory(notes, embed=False, db=db)
         assert F.status(db=db)["indexed"] == 1, F.status(db=db)
@@ -810,7 +838,7 @@ class TestTheIndexAndTheSearchAgreeAboutScope:
         live = tmp_path / "live"
         live.mkdir()
         (live / "keep.txt").write_text("still here")
-        db = F._connect()
+        db = _db(tmp_path)
         F.index_directory(live, embed=False, db=db)
         empty = tmp_path / "empty"
         empty.mkdir()
@@ -841,7 +869,8 @@ lines.
         return root
 
     def test_the_walker_names_the_directories_it_declined(self, tmp_path):
-        report = F.index_directory(self._tree(tmp_path), embed=False)
+        report = F.index_directory(self._tree(tmp_path), embed=False,
+                                   db=_db(tmp_path))
         assert report["skipped_directories"] == [".cache", ".git", "node_modules"], (
             report["skipped_directories"])
         assert report["indexed"] == 1, report
@@ -852,7 +881,8 @@ lines.
         root = tmp_path / "clean"
         root.mkdir()
         (root / "a.txt").write_text("note")
-        assert F.index_directory(root, embed=False)["skipped_directories"] == []
+        report = F.index_directory(root, embed=False, db=_db(tmp_path))
+        assert report["skipped_directories"] == []
 
     def test_a_file_that_reads_fine_is_never_called_unreadable(self, tmp_path, monkeypatch):
         """**The bug the field split fixes.** A file that was read and indexed
@@ -863,7 +893,7 @@ lines.
         root = self._tree(tmp_path)
         monkeypatch.setattr(local_embed, "embed",
                             lambda texts, **k: None)      # no server at all
-        report = F.index_directory(root, embed=True)
+        report = F.index_directory(root, embed=True, db=_db(tmp_path))
         assert report["indexed"] == 1, report
         # the one text file is indexed and NOT in problems
         assert not any("a.txt" in p for p in report["problems"]), report["problems"]
@@ -878,9 +908,60 @@ lines.
         for index in range(20):
             (root / f"f{index}.txt").write_text(f"the wifi box {index}")
         monkeypatch.setattr(local_embed, "embed", lambda texts, **k: None)
-        report = F.index_directory(root, embed=True)
+        report = F.index_directory(root, embed=True, db=_db(tmp_path))
         assert len(report["degraded"]) == 1, (
             f"{len(report['degraded'])} entries for 20 files - a per-file "
             "entry is the cache-noise defect in a new place")
         assert "20" in report["degraded"][0], report["degraded"]
         assert report["indexed"] == 20, report
+
+
+class TestNoTestInThisFileTouchesTheLiveIndex:
+    """The guard for the guard.
+
+    `F._connect()` with no argument opens `index_path()` - the **live** database,
+    the one the running application reads and writes. Eight tests here built
+    files under `tmp_path` and then handed them to that database, so the suite
+    indexed temporary directories into the person's real file index, read results
+    back alongside whatever else was there, and could block against the app
+    holding a write lock. One wrote `WALK_CEILING + 5` = **60,005** rows that
+    way, and a whole-suite run hung for 30 minutes at zero CPU on it.
+
+    Fixing the eight call sites fixes today's bug. **This is what stops it
+    coming back**, and it is a source scan rather than a runtime check because
+    the failure is not visible at runtime: a test that writes to the live index
+    still passes.
+
+    The test has to be able to fail, so it is mutation-checked both ways -
+    putting one call site back to the live database fails it.
+    """
+
+    def test_every_connection_and_every_index_names_its_own_database(self):
+        import ast
+        import pathlib
+
+        tree = ast.parse(pathlib.Path(__file__).read_text())
+        bare_connects, db_less_walks = [], []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name == "_connect" and not node.args and not node.keywords:
+                bare_connects.append(node.lineno)
+            if name == "index_directory" and not any(k.arg == "db" for k in node.keywords):
+                db_less_walks.append(node.lineno)
+        # `_connect` inside the helper itself is the one legitimate bare call -
+        # it is the helper that supplies the path.
+        helper_line = next(n for n, line in enumerate(
+            pathlib.Path(__file__).read_text().splitlines(), 1)
+            if line.startswith("def _db("))
+        bare_connects = [n for n in bare_connects if n != helper_line + 1]
+        offenders = ([("F._connect() with no path (the LIVE index)", n)
+                      for n in bare_connects]
+                     + [("index_directory without db= (the LIVE index)", n)
+                        for n in db_less_walks])
+        assert not offenders, (
+            "these call sites resolve to the live file index rather than a test's "
+            "own:\n  %s"
+            % "\n  ".join("%s at line %d" % (what, n) for what, n in offenders))
