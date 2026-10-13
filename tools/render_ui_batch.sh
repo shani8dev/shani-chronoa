@@ -382,6 +382,16 @@ render_once() {
     [[ -n $content ]] || return 1
     (( content >= MIN_CONTENT_PCT )) || return 1
 
+    # **And something has to be drawn in the middle.** A window-shaped border
+    # around an empty window is real ink - measured 14% of the image against a
+    # 5% floor - so the percentage above cannot see it. The condition is the
+    # absence of interior ink rather than a second threshold, because a threshold
+    # here would reject the real `shortcuts` window, which measures 4%.
+    local interior
+    interior="$(_interior_ink "$out")"
+    [[ -n $interior ]] || return 1
+    (( interior > 0 )) || return 1
+
     return 0
 }
 
@@ -422,10 +432,23 @@ _content_percent() {
     #
     # So the measure is contrast against the background: the most common colour
     # in the sample is the background by definition, and the question is how
-    # much of the image is something else. That separates all four cases
-    # measured on this repository's targets - a transparent page and a white
-    # page both score 0, the orange-framed `main` scores ~20, and a real window
-    # scores far above that.
+    # much of the image is something else.
+    #
+    # **Two holes, both found by measuring a real target rather than a fixture.**
+    # The `empty` window rendered at 31% and was a blank page:
+    #
+    # - **`[:3]` dropped alpha**, so its **62,269 fully transparent** pixels
+    #   counted as content. A pixel that was never painted is not content and
+    #   not background either, so they are now excluded from the population
+    #   entirely - which is what makes "the background" mean something.
+    # - **No tolerance**, so its `(243,243,243)` marks against a `(248,248,248)`
+    #   background - a delta of **5**, imperceptible - counted as ink. The cue
+    #   layer's own measurement puts antialiasing fringes at 3, so 8 is above the
+    #   noise and far below any mark a person can see.
+    #
+    # An image that opened and is entirely unpainted **is** measurable and its
+    # answer is 0, which is different from an image this could not read: that one
+    # prints nothing and the gate fails it.
     #
     # **Sampled, not exhaustive**: every 8th pixel, 1/64 of the image, fast
     # enough to run per target. Background is a whole-image property and a
@@ -447,15 +470,81 @@ w, h = im.size
 if w < 1 or h < 1:
     sys.exit(0)
 step = 8
+TOLERANCE = 8          # see above: antialiasing fringes measure 3
 colours = []
 for y in range(0, h, step):
     for x in range(0, w, step):
-        colours.append(px[x, y][:3])
+        r, g, b, a = px[x, y]
+        if a == 0:
+            continue      # never painted: neither content nor background
+        colours.append((r, g, b))
 if not colours:
+    print(0)              # readable, and empty - not the same as unreadable
     sys.exit(0)
 background = Counter(colours).most_common(1)[0][0]
-print(int(100 * sum(1 for c in colours if c != background) / len(colours)))
+marks = sum(1 for c in colours
+            if max(abs(c[i] - background[i]) for i in range(3)) > TOLERANCE)
+print(int(100 * marks / len(colours)))
 PYOPACITY
+}
+
+
+_interior_ink() {
+    # **How much ink is inside a margin, as an integer percentage.**
+    #
+    # This exists because `_content_percent` alone cannot tell a **window** from
+    # **a window-shaped border**: the rounded frame `CHRONOA_FORCE_SIZE` produces
+    # around an empty main window is real high-contrast ink and measures 14% of
+    # the image, so it clears the floor. The interior of that frame is empty, and
+    # a real window's interior is not - orb, organ strip, transcript and composer
+    # all sit well inside it.
+    #
+    # **The gate asks whether it is zero, not whether it beats a threshold.**
+    # Measured, a percentage here is the wrong instrument: the real `shortcuts`
+    # window has only **4%** interior ink and is still a real render, so a floor
+    # would reject it and a floor that did not reject it would be tuned to this
+    # one machine. "Something is drawn in the middle" needs no number at all.
+    #
+    # The 12% margin is the smallest that excludes a window's own frame and its
+    # title bar on every size measured (460x640 through 1280x860) while leaving
+    # the orb, which sits near the top, inside.
+    python3 - "$1" <<'PYINTERIOR' 2>/dev/null
+import sys
+from collections import Counter
+
+try:
+    from PIL import Image
+except Exception:
+    sys.exit(0)
+try:
+    im = Image.open(sys.argv[1]).convert("RGBA")
+except Exception:
+    sys.exit(0)
+px = im.load()
+w, h = im.size
+if w < 1 or h < 1:
+    sys.exit(0)
+MARGIN = 0.12
+TOLERANCE = 8
+step = 8
+colours = []
+inner = []
+for y in range(0, h, step):
+    for x in range(0, w, step):
+        r, g, b, a = px[x, y]
+        if a == 0:
+            continue
+        colours.append((r, g, b))
+        if MARGIN * w <= x <= (1 - MARGIN) * w and MARGIN * h <= y <= (1 - MARGIN) * h:
+            inner.append((r, g, b))
+if not colours or not inner:
+    print(0)
+    sys.exit(0)
+background = Counter(colours).most_common(1)[0][0]
+marks = sum(1 for c in inner
+            if max(abs(c[i] - background[i]) for i in range(3)) > TOLERANCE)
+print(int(100 * marks / len(inner)))
+PYINTERIOR
 }
 
 render() {

@@ -22343,3 +22343,130 @@ unphotographed.** `main` at its own 460x640 is now a real, complete picture - th
 orb, "Ready", the model row, all eight organ lights, the shortcut buttons and the
 composer - and 460 is what the window opens at, so that render is the newcomer's
 actual first view rather than a narrow version of it.
+
+## The render gate passed a blank page at 31%, and a frame around nothing at 14% (2026-10-13)
+
+The `_content_percent` gate added earlier today was **itself the false pass it
+was written to catch**, in two independent ways. Both were found by measuring a
+real target rather than a fixture.
+
+### Hole one: a pixel that was never painted was counted as ink
+
+`empty` rendered and the sweep called it **PASS at 31%**. It is a blank page. The
+sampler took `px[x, y][:3]`, which **drops alpha**, so the image's **62,269 fully
+transparent pixels** were compared as RGB black against a background they were
+never part of. Measured on the real file:
+
+    background (248,248,248,34) x201911     the alpha-34 wash
+    (0,0,0,0)              x 62269          never painted - counted as content
+    (243,243,243,42)       x 17639          a delta of 5 - imperceptible
+
+A pixel that was never painted is **not content and not background**, so `alpha
+== 0` is now excluded from the population entirely. **And that is what makes
+"the background" mean anything** - it is defined as the most common colour of
+the *painted* pixels.
+
+### Hole two: a delta of 5 is antialiasing, not a mark
+
+`TOLERANCE = 8`. The cue layer's own measurement puts subpixel antialiasing
+fringes at **3**, so 8 is above the noise and far below anything a person sees.
+Without it, `empty`'s `(243,243,243)`-on-`(248,248,248)` counted as a page.
+
+### The floor was not the third hole - the *shape* of the ink was
+
+With both fixed, `empty` measures **0% and fails**, and real renders still pass.
+But the `CHRONOA_FORCE_SIZE` frame around an empty main window measures **14%**
+and **still clears a 5% floor**, because the rounded orange frame *is* real
+high-contrast ink and the frame grows with the canvas while the interior stays
+empty.
+
+**No threshold on "how much ink" separates those**, so the question has to be
+*where* the ink is. `_interior_ink()` measures the same contrast inside a 12%
+margin, and the gate asks **is it zero** - a presence test with no tuned number,
+because a percentage there is the wrong instrument: the real `shortcuts` window
+has only **4%** interior ink and is a genuine render, so any floor would reject
+it and any floor that did not would be fitted to this machine.
+
+**Measured on every real target this repository has produced:**
+
+| target | overall | interior ink | verdict |
+|---|---:|---:|---|
+| `empty` (blank page) | **0%** | **0%** | **FAIL** |
+| `main` with the size override (frame only) | 14% | **0%** | **FAIL** |
+| `main` at 1280x860 (frame only) | 13% | **0%** | **FAIL** |
+| `main` at its own 460x640 | 17% | 10% | PASS |
+| `shortcuts` (real, before the subtitle fix) | 9% | 4% | PASS |
+| `shortcuts` (real, after it) | 13% | 5% | PASS |
+
+Seven of seven correct, including the two that are false passes and the two
+real renders that a naive interior *floor* would have rejected.
+
+### Readable-and-empty is 0; unreadable is nothing
+
+`_opaque_percent`'s rule applied to this pair of measures: an image that opened
+and is entirely unpainted **is** measurable and its answer is `0`, while a
+truncated file, a non-PNG or a missing Pillow prints **nothing** and the gate
+**fails** it. The old gate passed all three - the same defect as a blank page
+passing, because "no answer" and "no content" are not the same answer.
+
+### 7 new tests, 5 mutations caught, 1 equivalent - and one vacuous fixture
+
+**The fixture was broken before the code was, and running is what said so.**
+`_faint_wash` used `(x + y) % 2`, and the sampler steps by **8** - so every
+sampled `x` and `y` is even, `(x + y) % 2` is *always* 0, and the checkerboard
+aliased into a **single flat colour**. The test passed at any tolerance
+whatsoever: I set `TOLERANCE = 0` and it stayed green. `x % 3` instead, which
+does not alias against an 8-step grid, and the same mutation moves it to **37%**.
+
+**The mutation I wrote first was equivalent.** Weakening `if a == 0:` to
+`if a == False:` changed nothing, because `0 == False` in Python. Deleting the
+skip moves `half-transparent` from **0% to 50%**.
+
+| mutation | result |
+|---|---|
+| interior measured over the whole image (the shipped false pass) | **1 failed** |
+| `(( interior > 0 ))` dropped from the gate | **1 failed** |
+| the `alpha == 0` skip deleted | **0% -> 50%**, fails |
+| `TOLERANCE = 8` -> `0` | **0% -> 37%**, fails |
+| readable-and-empty printing nothing | returns `None`, fails |
+| `if a == False:` | **equivalent** - `0 == False` |
+
+**And the driver's FAIL line finally quotes what it measured**, which is the
+sentence that sent the previous four diagnoses looking for a missing file rather
+than a rejected one.
+
+### `_keep_log` paid for itself twice, in two consecutive attempts
+
+This is the entry the `keep the diagnostic` change was made for. Two sweeps in
+succession reported **`0 rendered, 2 not` with no PNG on disk**, and both causes
+were named from the kept log on the **first** attempt:
+
+    NameError: name '_count_descendants' is not defined
+    AttributeError: 'TransformNode' object has no attribute 'get_n_children'
+
+The first is the *same* defect this file recorded earlier today, and the reason
+it recurred is the one that entry names: **the traceback says the call is at line
+336, and on disk it is at 362 with the definition at 313** - `render_ui.py` was
+**edited after the render ran**, so the helper did not exist at capture time and
+does now. **An absence measured against a file being written measures the
+author's progress, not the repository**, which is the `code_hl` shape and the
+third time this file has hit it.
+
+**A diagnostic nobody can read is not a diagnostic.** Four earlier attempts at
+this produced nothing because the sandbox deleted the log on exit; the first
+sweep after that change put a traceback on disk.
+
+### Not claimed: the driver-level end-to-end
+
+**The gate has not yet been shown accepting a real capture *through the driver
+itself*.** `render_ui.py` is 93 insertions of another session's uncommitted work
+and is currently broken in **two separate places** (`_count_descendants`
+undefined, then `_node_size` calling `get_n_children()` on a `Gsk.Node`), so
+every render target currently produces no file. It is theirs, the rules forbid
+editing it, and fixing a capture path cannot be verified on a box where every
+render is broken.
+
+The evidence above is **the seven real PNGs scored by the driver's own extracted
+functions**, plus 15 tests and 5 mutations. An end-to-end pass needs a renderer
+that runs, and saying otherwise is the confident wrong answer this file has
+recorded against its own harness four times.
