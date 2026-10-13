@@ -23200,6 +23200,16 @@ run-to-run drift is larger than the effect; only alternating the two builds
 separates them. Worth saying plainly because the first measurement was
 **correctly executed and useless**, which is a different failure from a wrong one.
 
+**The headline speedup, measured both ways.** On a quiet box: 12.56 -> 1.62 ms,
+**7.8x**. Mid-run the other session put `ffmpeg` at 214% and the box hit load
+7.4, and a fresh reading said 2.74 ms - which would have demoted the result to
+4.6x on the strength of a contended measurement. So both sides were re-measured
+**interleaved under that same load**: 21.03/21.11/23.63 before against
+2.72/3.07/3.29 after, **6.9x, 7.7x, 7.2x**. Both absolutes inflate; the ratio
+does not, because both builds are measured in the same conditions. An absolute
+number compared against one taken twenty minutes earlier is not a measurement of
+anything.
+
 ### Then the space half, which found a leak of my own making
 
 Having bounded the corpus cache I checked whether I had bounded the one above
