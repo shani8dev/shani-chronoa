@@ -238,7 +238,14 @@ class TestBuild:
 
 class TestTheToggle:
     def test_it_reflects_the_config_key(self, chronoa_config):
-        assert chronoa_config.get_bool("background-mode-enabled", False) is False
+        """The switch shows whatever the key says, in both directions.
+
+        **The key is put in a known state first.** `background-mode-enabled` ships
+        `true`, so a test that only ever sets it to `true` never changes anything and
+        asserts about a transition that did not happen. This is the same "assert the
+        default and move on" shape as five other tests in this exercise.
+        """
+        chronoa_config.set("background-mode-enabled", "false")
         off = _switches(daemon.build(_app(chronoa_config)))[0]
         assert off.get_active() is False
 
@@ -246,7 +253,18 @@ class TestTheToggle:
         on = _switches(daemon.build(_app(chronoa_config)))[0]
         assert on.get_active() is True
 
+
     def test_flipping_it_writes_that_key_and_nothing_else(self, chronoa_config):
+        """A flip writes the one key it is bound to, and only that key.
+
+        **The key is put in a known state first.** `background-mode-enabled` ships
+        `true`, so `set_active(True)` was a no-op, nothing was written, and every
+        assertion about a *write* was being made against a switch nobody flipped -
+        which is precisely the thing this test exists to check. The seventh test in
+        this exercise with the same shape, and the first where it hid a missing write
+        rather than a wrong value.
+        """
+        chronoa_config.set("background-mode-enabled", "false")
         widget = daemon.build(_app(chronoa_config))
         switch = _switches(widget)[0]
         other_before = chronoa_config.get_bool("privacy-mode", True)
@@ -260,13 +278,20 @@ class TestTheToggle:
             "the toggle wrote a second key"
         )
 
+
     def test_the_write_lands_in_this_test_s_own_config_directory(
         self, chronoa_config, tmp_path
     ):
         """The keyfile backend this suite runs on puts its store under
         `$XDG_CONFIG_HOME`, which the harness points at this test's own home. So
         finding the key *by name* in that file is what proves the write went to a
-        temp directory and not to a real user's dconf."""
+        temp directory and not to a real user's dconf.
+
+        **The key is shut first.** It ships `true`, so `set_active(True)` changed
+        nothing and there was no write to find - the assertion below was failing on
+        a write that had never been attempted.
+        """
+        chronoa_config.set("background-mode-enabled", "false")
         store = Path(os.environ["XDG_CONFIG_HOME"]) / "glib-2.0" / "settings" / "keyfile"
         switch = _switches(daemon.build(_app(chronoa_config)))[0]
         switch.set_active(True)
@@ -275,9 +300,17 @@ class TestTheToggle:
         assert "background-mode-enabled" in store.read_text(encoding="utf-8")
         assert str(tmp_path) in str(store)
 
+
     def test_a_refused_write_puts_the_switch_back(self, chronoa_config, monkeypatch):
         """A switch showing a setting nobody changed is the most misleading
-        thing this panel could do, so it is re-derived from the key."""
+        thing this panel could do, so it is re-derived from the key.
+
+        **The key is shut first, or this asserts nothing.** It ships `true`, so
+        the switch started on, `set_active(True)` was a no-op, no write was
+        attempted, no refusal happened - and the switch correctly stayed on. The
+        failure was real but the reason was not the one being tested.
+        """
+        chronoa_config.set("background-mode-enabled", "false")
         widget = daemon.build(_app(chronoa_config))
         switch = _switches(widget)[0]
 
