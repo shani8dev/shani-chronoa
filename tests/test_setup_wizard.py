@@ -91,7 +91,22 @@ def test_pressing_download_is_not_consent(monkeypatch):
     setup step set it, then the gate would open on being asked - and "the person
     agreed" would mean "the person clicked", which is not consent, especially
     with a 1.1 GB download behind it.
+
+    **The gate is now shut by this test rather than by the default**, which is
+    the one thing the default can no longer supply. The key ships `true`: a
+    fresh install that had not been through the setup switch refused every
+    download, so speech input could not work out of the box and nine
+    provisioning steps each began by refusing.
+
+    Asserting `not ...` against a default that is deliberately `true` would
+    also have stopped testing the refusal path at all - it fails on the first
+    line, before reaching the assertion that matters.
+
+    What this holds is narrower, and still true: **with the gate shut, asking
+    for a download does not open it.** The refusal must leave the key exactly
+    as it found it.
     """
+
     data = b"GGUF" + os.urandom(2000)
     spec = ModelSpec("qwen3-0.6b", "noconsent.gguf", len(data),
                      hashlib.sha256(data).hexdigest(), "", "https://huggingface.co/x")
@@ -99,7 +114,11 @@ def test_pressing_download_is_not_consent(monkeypatch):
     monkeypatch.setattr(local_llm, "server_binary", lambda: "/usr/bin/llama-server")
     monkeypatch.setattr(local_llm, "start_service", lambda: "")
     monkeypatch.setattr(local_llm, "gpu_devices", lambda: [])
-    assert not ChronoaConfig().get_bool("model-download-enabled", False)
+    # Shut the gate the way a person who does not want downloads shuts it. The
+    # keyfile backend is per-test, so this cannot leak into the next one.
+    ChronoaConfig().set("model-download-enabled", "false")
+    assert not ChronoaConfig().get_bool("model-download-enabled", False), (
+        "this test needs the gate shut in order to test the refusal, and it is not")
     with pytest.raises(ConsentRequired):
         setup_wizard.setup_brain("qwen3-0.6b",
                                  transport=_serve({"noconsent.gguf": data}))

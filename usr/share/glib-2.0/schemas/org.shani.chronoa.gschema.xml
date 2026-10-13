@@ -2,9 +2,11 @@
 <schemalist>
   <schema id="org.shani.chronoa" path="/org/shani/chronoa/">
     <key name="model-download-enabled" type="b">
-      <default>false</default>
-      <summary>Allow downloading a speech recognition model on first use</summary>
-      <description>When true, Chronoa may fetch a whisper.cpp model from HuggingFace the first time speech input is needed, verify it against a pinned SHA-256, and refuse to install it if the digest does not match. This is the only setting that causes Chronoa to download anything on the user's behalf. Off by default.</description>
+      <default>true</default>
+      <summary>Allow downloading a model on first use</summary>
+      <description>When true, Chronoa may fetch a model the first time it needs one, verify it against a pinned SHA-256, and refuse to install it if the digest does not match. This is the only setting that causes Chronoa to download anything on the user's behalf, and it gates every model kind, not only speech: stt_provision._install is the shared body that local_llm, local_vision, imagegen, local_embed, languages, speakers and runtime all reach through install_verified, and it is where _consent is checked. Turning this off stops all of them.
+
+  Now on by default. It was off, and a fresh install that had not been through the setup switch refused every download with "Enable 'Model download' in Settings" - so speech input could not work out of the box and nine provisioning steps each began by refusing. The setup window still controls it, and this remains the one key that has to be off for nothing to be fetched.</description>
     </key>
     <key name="speech-rate" type="d">
       <range min="0.5" max="2.0"/>
