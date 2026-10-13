@@ -23631,3 +23631,45 @@ without the split view that paints the sidebar. Reverted.
 
 **Two fixes reverted this session, and this entry is what any third attempt has
 to beat: a 53/32/13 spread on an unchanged commit.**
+
+### The main window was not a window (2026-10-13)
+
+`85c11ab` added the empty-state starter row and centred it with
+`row.set_halign(Gtk.Alignment.CENTER)`. `Gtk.Alignment` is GTK3.
+
+    hasattr(Gtk, "Alignment") -> False
+    ChronoaWindow(app)       -> AttributeError: 'gi.repository.Gtk' object has
+                                no attribute 'Alignment'
+
+Measured, not inferred. The line is the third statement of `_build_starter_row`
+and sits **above** that function's `try:`; `_build_starter_row` is called from
+`_setup_ui` (`window.py:1906`); `_setup_ui` is called unguarded from `__init__`
+(`window.py:1467`). So the exception escapes before one widget exists.
+
+**The repo tree is the product** - there is no `/usr/lib/shani-chronoa` install
+to be stale - so this was HEAD, not a build left behind.
+
+**Scale, against `git archive HEAD` on its own tree:**
+
+    tests/test_enter_reaches_the_orb.py + tests/test_mode_strip.py
+      -> 1 failed, 15 passed, 10 errors
+      -> 11 of them the identical "has no attribute 'Alignment'"
+
+25 test files construct `ChronoaWindow`. The commit that shipped the feature
+and the commit that could not construct a window are the same commit, and the
+suite said so on the day it landed.
+
+**Guard: a scan and a build, because they fail for different reasons.**
+`tests/test_the_main_window_builds.py` asserts `hasattr(Gtk, "Alignment")` is
+False (so the scan cannot pass for the wrong reason), scans `gui/**.py` for
+five removed GTK3 spellings ignoring comments, and builds the real window and
+asserts it packed content. Run against mutations, on a snapshot:
+
+| mutation | caught by |
+|---|---|
+| the reverted `Gtk.Alignment.CENTER` | scan **and** build |
+| the same in a `rail.py` helper nothing calls | scan alone (build stayed green) |
+
+**3 mutations, 3 caught, 0 survivors.** The second row is the reason the scan
+exists: a start-up crash in a cold path is invisible to a test that only starts
+the parts of the product this display reaches.

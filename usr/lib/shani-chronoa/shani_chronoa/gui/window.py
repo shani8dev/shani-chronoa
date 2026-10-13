@@ -3187,8 +3187,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         to add it.
         """
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.set_halign(Gtk.Alignment.CENTER)
-        row.set_valign(Gtk.Alignment.CENTER)
+        row.set_halign(Gtk.Align.CENTER)
+        row.set_valign(Gtk.Align.CENTER)
         row.set_visible(False)
         try:
             from shani_chronoa.gui.surfaces import available_surfaces
