@@ -23945,3 +23945,61 @@ the slot made a global, and the fallback dropped. Run on a snapshot at
   HEAD's `assistant.py` and `tools.py` swapped in (`28 failed, 17 passed` both
   ways). Likewise `guardrail_enum.py`'s missing `"why"` key, which is committed
   and unmodified.
+## The window's minimum promised a window with no conversation in it (2026-10-13)
+
+Carried from a review pass and finished here. `set_size_request(380, 480)` declared
+the smallest window the app would occupy, and **that window had 58 pixels of
+conversation in it.**
+
+### The measurement, and why it is arithmetic rather than judgement
+
+The transcript's height is an exact linear function of the window's height, with a
+floor where the chrome's own minimums bind. Measured on the real window:
+
+| window width | chrome | transcript |
+|--------------|--------|------------|
+| <= 560 | 448px | `max(58, height - 448)` |
+| >= 760 | 411px | `max(69, height - 411)` |
+
+The **37px** between the two is the organ strip compacting: eight status lights
+stop needing a row of their own once there is width for them. Above the floor the
+transcript absorbs every extra pixel of height **exactly** - `predicted(380, 640) -
+predicted(380, 620) == 20` - so height is the lever and width is not.
+
+**Width is genuinely not a lever, and that is recorded so the next pass
+re-measures rather than re-derives it.** The transcript measured **192 at every
+width from 380 to 560** at 640 tall. A planned narrowing of the default width was
+dropped on that measurement.
+
+So `480 - 448 = 32`, and the floor answers **58** - about two lines. The minimum
+was not a tight fit for a small window; it was a window with nothing in it.
+
+### The fix treats the symptom, and says so
+
+`set_size_request` now declares **380x570**: 448 + 120 = 568, and 120 is the
+smallest transcript worth calling a conversation (roughly six lines; below that
+the transcript is a peephole rather than a place a reply is read).
+
+**The root cause is larger than the number and is not fixed here:** 448px of fixed
+chrome in a 480px window, of which an 88px orb is a fifth. Raising the minimum
+makes the promise honest; it does not make the chrome smaller. That is the next
+thing to shrink, and it is a design change rather than a defect fix.
+
+### The test reads the number out of the product
+
+`declared_minimum()` parses `_setup_window` rather than restating the pair, so a
+change to the minimum arrives as a different answer instead of as a file still
+asserting what it remembered. The measured curves are **recorded data, not
+re-taken per run** - a table of numbers the file asserts is a fixture, and saying
+so is the difference between a fixture and a claim.
+
+**And one test of mine was wrong in the way this file records most often.** Its
+"is the sidebar open?" predicate was a typed `800`, which sorted the measured
+**760px** row into *collapsed* - so it compared the wide transcript against the
+narrow one and reported a disagreement where the data agreed. The threshold is
+`ChronoaWindow.SIDEBAR_COLLAPSE_WIDTH` now, read from the module. The first
+version of that fix read it off `window` rather than off the class, and every
+test in the class raised `AttributeError`; the constant is a class attribute, and
+the failure named it.
+
+9 tests, green on an unchanged broadway display with `DISPLAY` unset.

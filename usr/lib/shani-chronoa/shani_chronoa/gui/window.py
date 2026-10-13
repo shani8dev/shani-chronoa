@@ -977,17 +977,6 @@ class _ModeStrip(Gtk.Box):
         # and never reached one. Measured, six combinations, before and after.
         return {"cloud": "cloud",
                 "local": "local-answers"}.get(mode, "local-then-cloud")
-
-    def _read_plan_mode(self) -> bool:
-        """Read the plan-mode module directly, which is what owns the state.
-
-        Not through `ChronoaConfig`: plan mode is a process-wide switch with its
-        own module and its own setter, so asking a second time through settings
-        is how the two come to disagree.
-        """
-        from shani_chronoa import planmode
-        return bool(planmode.is_enabled())
-
     #: Below this window width the chips show icons only. Measured: with words
     #: the strip needs 512px, the window can be 380px, and between the two the
     #: strip was clipped at the right - losing Dictate first.
@@ -1536,7 +1525,22 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
     def _setup_window(self) -> None:
         self.set_title("Shani Chronoa")
         self.set_default_size(460, 640)
-        self.set_size_request(380, 480)
+        # **The minimum is as tall as the conversation it promises, not as short
+        # as the chrome allows.** Measured on the real window, the transcript is
+        # an exact linear function of the window's height with a floor where the
+        # chrome's own minimums bind: `max(58, height - 448)` below 760 wide, and
+        # `max(69, height - 411)` above it. So the 480 this used to declare left
+        # `max(58, 32)` = **58px** - about two lines - in the smallest window the
+        # app would occupy. 448 + 120 is 568, and 120 is the smallest transcript
+        # worth calling a conversation (roughly six lines; below that the
+        # transcript is a peephole rather than a place a reply is read).
+        #
+        # **This treats the symptom and the root cause is recorded in AGENTS.md:**
+        # 448px of fixed chrome in a 480px window is the real number, and an orb
+        # at 88px is a third of the declared minimum. A minimum that is honest
+        # beats a minimum that promises a window with nothing in it; the chrome
+        # is the next thing to shrink.
+        self.set_size_request(380, 570)
         self.set_decorated(True)
         self._apply_css()
         self._apply_motion_preference()
