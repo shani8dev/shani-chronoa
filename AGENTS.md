@@ -23417,3 +23417,58 @@ defects" this file records for `XDG_RUNTIME_DIR`, `GSETTINGS_BACKEND`,
 display of its own - the six UNMEASURABLE of run 4 were display contention, as
 the re-pointed witnesses predicted, and the two corrected witnesses caught the
 two mutations they had been unable to fail).
+## The empty state now answers "what can I ask?" (2026-10-13)
+
+**Thirty-four panels across seven groups is a wall, and the composer's
+placeholder said only "Type a message…"** - so the person a newcomer most is,
+one who has just finished setup, had to guess a question and then read a list
+to find out whether they had guessed right. The list is the answer and it was
+behind the guessing.
+
+`_starter_row` puts five chips in the empty state. **Built from
+`available_surfaces()`**, the same registry the sidebar reads, so the row and
+the sidebar cannot disagree about what exists - and a hand-written list of
+examples would be wrong the day a panel was renamed, invisibly, because an
+example that no longer works still reads as a sentence.
+
+**Clicking asks; it does not navigate.** The chip fills the composer and puts
+the caret in it. Sending would take a turn on somebody's behalf from a click
+they meant as reading, and opening the panel would answer a different question
+than the chip names - and a newcomer who has only ever opened panels never
+learns they can just ask.
+
+**Five, not thirty-four**, because the row's job is to show that asking is
+something you can do here. At the size of the sidebar it *is* the sidebar.
+
+### `TranscriptView` had no way to say whether it was empty
+
+`len(self._transcript)` on a `Gtk.ScrolledWindow` raises `TypeError`, and the
+first version put that inside a `try` whose `except` said `empty = True` - so
+the row could never hide and **every transcript would carry five example
+questions under it**. **A check that cannot run, caught, becomes a check that
+always passes**, and it passed in the direction that made the new feature look
+working.
+
+So `TranscriptView.is_empty()` is now a public question rather than a guess,
+and `_refresh_starter_row` **fails closed** - if emptiness cannot be read, the
+row hides, because the safe wrong answer is the one that adds nothing to a
+transcript that already has turns in it.
+
+### What this is not
+
+**Not visually verified.** The capture still photographs a window's background
+only (948 descendants, 509 mapped, 0-4% content against a 5% floor), so
+whether five chips above the composer *look* like an invitation is unverified.
+What is verified is behavioural: the window builds with the row in it, the
+count is five and read out of the module, the words come from the registry and
+not from a literal, the chips exist as surfaces, and the emptiness check asks
+something that answers.
+
+**And two things I nearly got wrong, both by not checking first.** The orb's
+"Start listening (Enter)" tooltip - a real defect, since `toggle-listening` had
+no accelerator anywhere while Enter sent the composer - **was already fixed by
+another session**; `_on_input_key_pressed` now reads *"Enter on nothing starts
+listening"* and I was one command from duplicating it. And I reported "10
+panels are ungrouped", which was my own tool being wrong: `DEFAULT_SECTION`
+assigns them deliberately. **Reading a design is not the same as reading the
+current design.**

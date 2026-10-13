@@ -1247,6 +1247,12 @@ class _ModeStrip(Gtk.Box):
         chip.update_property(
             [Gtk.AccessibleProperty.LABEL], [f"{what}, currently {word}"])
 
+#: How many starter chips the empty state shows. **Five, not thirty-four**:
+#: the row's job is to show that asking is something you do here, and a wall of
+#: chips on the main screen would be the wall it was added to dissolve.
+_STARTER_CHIPS = 5
+
+
 class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMixin,
                     Adw.ApplicationWindow):
 
@@ -1875,6 +1881,31 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._detail_label.set_visible(False)
         main_box.append(self._detail_label)
 
+        # **The empty state's answer to "what can I ask?"**
+        #
+        # Thirty-four panels across seven groups is a wall, and the composer's
+        # placeholder said only "Type a message…". So the person a newcomer most
+        # is - one who has just finished setup and wants to know what the thing
+        # can do - had to guess a question and then read a list to find out
+        # whether they had guessed right. That is the wrong order: the list is
+        # the answer and it was behind the guessing.
+        #
+        # **Built from the registry, so it cannot go stale.** A hand-written
+        # list of examples would be wrong the day a panel was added - and the
+        # wrongness is invisible, because an example that no longer works still
+        # reads as a sentence. `available_surfaces()` is the same source the
+        # sidebar reads, so this row and the sidebar cannot disagree about what
+        # exists. It is the panel titles, which are the one description of a
+        # panel that is already kept true next to it.
+        #
+        # **Clicking asks, it does not navigate.** Filling the composer and
+        # sending is the demonstration; opening a panel teaches that panels are
+        # a separate shape of thing, and a newcomer who has only ever opened
+        # panels never learns that they can just ask. So the chip puts the
+        # question in the box and puts the caret in it.
+        self._starter_row = self._build_starter_row()
+        main_box.append(self._starter_row)
+
         self._transcript = TranscriptView(
             config=self._config,
             caps=self._caps,
@@ -2191,6 +2222,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # widgets that can disagree.
         self._mode_strip = _ModeStrip(self._app, self._config)
         main_box.append(self._mode_strip)
+        self._refresh_starter_row()
 
         # **The answer controls ride with Send rather than sitting above it.**
         # Measured at the size this window opens at: the composer row is 496px
@@ -3146,6 +3178,80 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
         GLib.idle_add(one, priority=GLib.PRIORITY_DEFAULT_IDLE)
 
+    def _build_starter_row(self) -> Gtk.Box:
+        """Chips that ask one question each, drawn from the surface registry.
+
+        **Nothing here is hand-written.** Every word comes from the `TITLE` the
+        panel already declares, so a panel that is renamed is renamed here in
+        the same commit and one that is added appears without anybody deciding
+        to add it.
+        """
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.set_halign(Gtk.Alignment.CENTER)
+        row.set_valign(Gtk.Alignment.CENTER)
+        row.set_visible(False)
+        try:
+            from shani_chronoa.gui.surfaces import available_surfaces
+
+            names = list(available_surfaces())
+        except Exception:                 # noqa: BLE001
+            logger.info("starter row: no surface registry to read", exc_info=True)
+            return row
+
+        # **A handful, not all thirty-four.** The point is to show that asking is
+        # a thing you can do here, not to replace the sidebar on the main
+        # screen - thirty-four chips is the wall this row exists to dissolve.
+        for name in names[:_STARTER_CHIPS]:
+            surface = available_surfaces()[name]
+            title = surface[0] if isinstance(surface, (tuple, list)) else str(surface)
+            chip = Gtk.Button(label=title)
+            chip.add_css_class("flat")
+            chip.add_css_class("dim-label")
+            chip.set_tooltip_text(f"Ask about {title}")
+            chip.update_property(
+                [Gtk.AccessibleProperty.LABEL], [f"Ask about {title}"])
+            chip.connect("clicked", self._on_starter_chip_clicked, name, title)
+            row.append(chip)
+        return row
+
+    def _on_starter_chip_clicked(self, _button, name: str, title: str) -> None:
+        """Put the question in the box, with the caret in it.
+
+        **It does not send, and it does not open the panel.** Sending would take
+        a turn on somebody's behalf from a click they meant as reading; opening
+        the panel would answer a different question than the one the chip
+        names. Filling the composer and focusing it keeps the next move theirs,
+        which is the whole point of the row.
+        """
+        try:
+            self._set_input_text(f"What can you tell me about {title.lower()}?")
+        except Exception:                 # noqa: BLE001
+            logger.debug("starter chip: composer unavailable", exc_info=True)
+        entry = getattr(self, "_input_entry", None)
+        if entry is not None:
+            entry.grab_focus()
+
+    def _refresh_starter_row(self) -> None:
+        """The row belongs to an empty conversation and nothing else.
+
+        **It is checked rather than remembered.** A boolean flipped at submit
+        time disagrees with the transcript the moment a turn is cleared, a
+        conversation is switched, or an undo removes the only message - and the
+        failure is a row of chips sitting under a full transcript, or a
+        newcomer left with no examples in a conversation that is empty.
+        """
+        row = getattr(self, "_starter_row", None)
+        if row is None:
+            return
+        try:
+            empty = self._transcript.is_empty()
+        except Exception:                 # noqa: BLE001
+            # **Fail closed - hidden, not shown.** If the question cannot be
+            # asked, the safe wrong answer is the one that adds nothing to a
+            # transcript that already has turns in it.
+            empty = False
+        row.set_visible(empty)
+
     def _show_surface(self, name: str) -> None:
         """Push a panel onto the content view.
 
@@ -3651,7 +3757,8 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                     "Which model answers", "a locally installed model",
                     rows[0][3] if len(rows[0]) > 3 and rows[0][3]
                     else "preferences-system-symbolic",
-                    (lambda: self._mode_strip._model_chip.popup()),
+                    (lambda: self._open_chip_dropdown(
+                        self._mode_strip._model_chip)),
                     group="Modes", weight=0))
         except Exception:  # noqa: BLE001 - a missing tier list is not a reason
             logger.debug("palette: the model rows are unreadable", exc_info=True)
@@ -3693,6 +3800,58 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 group="Modes", weight=0))
         return out
 
+    def _inside_window(self, widget) -> bool:
+        """Whether `widget` can reach this window by walking parents.
+
+        **Ancestry, not visibility, and the distinction is the whole point.** A
+        widget inside a hidden box *is* a descendant of the window and is
+        mapped never, so a check that answered "is it shown" would call a
+        palette nested in `_question_row` reachable. `Gtk.Popover` has the same
+        contract from the other side: its parent must be inside a toplevel
+        before it can make a surface to draw into, and GTK says so itself -
+        *"Widgets must be inside a toplevel container before realizing them"*.
+        """
+        node = widget
+        while node is not None:
+            if node is self:
+                return True
+            node = node.get_parent()
+        return False
+
+    def _open_chip_dropdown(self, chip) -> bool:
+        """Open a mode chip's own dropdown, wherever the chip currently lives.
+
+        **Five of the chips are not in the window at all.** `5ef5c62` moved the
+        model switch off the strip to make room, and its parent commit moved
+        plan, ambient, hands-free and reply style with it; nothing re-parented
+        any of them, so `popup()` on one of those asks GTK for a popup surface
+        it cannot have. Measured on a presented window: all five report
+        `ancestors to window: None`.
+
+        So the **popover moves and the chip stays**. Re-parenting the chip
+        would put a control back on a strip that measures 97% full - which is
+        the reason it was moved - and would rebuild the "never appended but
+        still one keystroke from usable" assumption that turned out to be
+        untrue. The popover carries the menu, the radio marks and the refresh;
+        only its anchor changes.
+
+        **The anchor is the palette**, which *is* in the window, so the dropdown
+        appears over the list the person just pressed Enter in. And the move is
+        undone the moment the chip is back in the tree, so a chip that is ever
+        re-appended to the strip gets its own anchor again rather than a
+        popover stranded over the palette.
+        """
+        popover = chip.get_popover() if hasattr(chip, "get_popover") else None
+        if popover is None:
+            return False
+        anchor = chip if self._inside_window(chip) else getattr(self, "_palette", None)
+        if anchor is None:
+            return False
+        if popover.get_parent() is not anchor:
+            popover.set_parent(anchor)
+        popover.popup()
+        return True
+
     def _activate_mode(self, action_name: str) -> None:
         """Leave a mode's own dropdown open on its current row.
 
@@ -3700,18 +3859,29 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         value, and the dropdown is where the values are; opening it is what
         makes the palette an index of modes rather than a wall of switches
         where one stray Enter commits a privacy setting.
+
+        **The chips live on `_mode_strip`, not on the window.** Every one of the
+        seven names below is assigned inside `_ModeStrip.__init__`, and this
+        looked them up with `getattr(self, ...)` - on the window, which never
+        holds any of them. So the lookup answered `None` for all seven and
+        `if chip is not None` never fired: **every palette mode entry did
+        nothing**, including the three whose chips *are* on the strip and could
+        have been opened. A name that resolves to `None` reads exactly like a
+        control that is not there, which is the failure this whole palette was
+        built to avoid.
         """
+        strip = getattr(self, "_mode_strip", None)
         chip = {
-            "answer-rules": getattr(self, "_rules_chip", None),
-            "toggle-plan-mode": getattr(self, "_plan_chip", None),
-            "answer-egress": getattr(self, "_answer_chip", None),
-            "answer-ambient": getattr(self, "_ambient_chip", None),
-            "answer-presence": getattr(self, "_presence_chip", None),
-            "hands-free": getattr(self, "_hands_chip", None),
-            "reply-style": getattr(self, "_style_chip", None),
+            "answer-rules": getattr(strip, "_rules_chip", None),
+            "toggle-plan-mode": getattr(strip, "_plan_chip", None),
+            "answer-egress": getattr(strip, "_answer_chip", None),
+            "answer-ambient": getattr(strip, "_ambient_chip", None),
+            "answer-presence": getattr(strip, "_presence_chip", None),
+            "hands-free": getattr(strip, "_hands_chip", None),
+            "reply-style": getattr(strip, "_style_chip", None),
         }.get(action_name)
         if chip is not None and hasattr(chip, "popup"):
-            chip.popup()
+            self._open_chip_dropdown(chip)
 
     #: Set by a caller that wants to decide rewinds itself; None means use the
     #: real dialogue. It is a seam for tests, and the seam takes the **action**
@@ -4379,6 +4549,7 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
 
     def _submit_input(self) -> None:
         """Send whatever is typed, from Enter or the button.
+        self._refresh_starter_row()
 
         Both call this rather than duplicating it, so the send button cannot
         drift from the key binding - the bug class where a control is wired to
