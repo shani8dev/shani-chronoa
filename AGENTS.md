@@ -20272,3 +20272,80 @@ a 10px dot looked like a defect. `sidebar.py:387` sets
 named in words on hover, and the dot is a summary of a labelled indicator rather
 than the indicator. The grep for it was one line; **the defect was in the
 hypothesis, which is what the measurement is for.**
+
+## The Export panel said "Needs attention" about a machine that had said nothing yet (2026-10-13)
+
+The 33 panel renders had not been looked at. `voice`, `skills` and `machine` are
+clean; `export` was not, and the defect is one this file has already fixed **in
+the sibling panel** earlier today.
+
+> 🔴 **Needs attention**
+> Nothing to export - there is no open conversation yet - the first thing you say
+> becomes one
+
+A fresh install, working perfectly, carrying a red dot and the app's one warning
+colour. It is the **absence-shaped wrong answer**, and it is the identical defect
+`compare` held for its empty store — where this file already records that the
+fix was `STATUS_OK` with *"Nothing to compare yet"*. **`compare.py` was corrected
+and `export.py` was its unfixed twin**, which is the "one fix, one place" shape
+this file records for `wpctl` (three copies), the finite check (four) and
+`capabilities._GROUPS`.
+
+### The fix could not be a blanket `STATUS_OK`, and that is the measurement
+
+`_open_conversation` returns a `reason` from **four** causes, and the caller
+collapsed all four into red:
+
+| line | reason | a fault? |
+|---|---|---|
+| 491 | the store could not be opened | **yes** |
+| 494 | `NO_CONVERSATION_REASON` — nothing said yet | no |
+| 498 | the open conversation could not be read | **yes** |
+| 500 | the open conversation has no messages yet | no |
+
+Blanket-`OK` would **delete a red alarm about a real failure** — the over-fix
+this file records for the `get_children` guard, where "the call must be absent"
+would have been satisfied by deleting the working `hasattr`.
+
+So `_open_conversation` now returns a **fourth element**, `could_not_read`, and
+the row branches on it. **Carried as a flag rather than inferred from the
+reason's text**, because deciding "is this a fault?" by matching an error's
+wording is how `manage_triggers` once armed every malformed source — it matched
+the openings of its readers' refusal sentences.
+
+### Measured both ways, in pixels and in the widget
+
+| | before | after |
+|---|---|---|
+| status row word | **Needs attention** | **Ready** |
+| detail | "Nothing to export - …" | "Nothing to export yet - …" |
+| the dot's own colour | **`(239, 68, 68)`** = `#ef4444`, the literal in `.status-attention` | **`(34, 181, 88)`** = `rgba(34,197,94,0.9)` from `.status-ok` |
+| render | 185,548 B, sha `f6b2f4686cc2` | 185,303 B, sha `b51438252d01` |
+
+The colour is the app's own CSS constant read back out of the rendered pixels,
+so "the dot is green" is not a description of a picture — it is the hex the
+stylesheet declares.
+
+**Four tests, both directions, and the shipped defect restored fails 4 of 4.**
+The half that must survive is asserted first: a store that cannot be opened is
+still `STATUS_ATTENTION`, and the panel says *"Could not read the conversation
+store"* rather than *"Nothing to export yet"*. **A fix that cannot be over-applied
+is not a fix yet**, and this one could have been. 52 passed / 1 skipped in the
+file.
+
+**And one of my own four was a check that could not fail, in a new costume.** It
+asserted `count("True") == 2` in the helper's source — *counting* rather than
+*measuring*, the same mistake as every length-assertion this file has retracted.
+Replaced with the method driven directly (it touches no `self`), which is what
+caught that `_open_conversation`'s two `True`s and two `False`s are a fact about
+what it **decides**, not about how many times a word appears.
+
+### The sentence is still said three times, and that is left alone
+
+The reason appears in the banner, in the status row's detail, and in the section
+description beneath it. **That is real and it was measured, and it is not fixed
+here** — the repetition predates this defect, the status row's detail is where
+the *cause* belongs rather than under the section heading, and removing one of
+the three is an editorial judgement about which two carry information. Recorded
+rather than tidied, because the one thing that was wrong here was a **red dot on
+a working machine**, and that is fixed and pinned.

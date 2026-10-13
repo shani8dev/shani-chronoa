@@ -475,30 +475,48 @@ class _ExportView(Gtk.Box):
     def _store(self) -> Any:
         return getattr(self._app, "percept_store", None)
 
-    def _open_conversation(self) -> Tuple[Optional[Path], str, str]:
-        """`(root, conversation id, reason it is not there)`.
+    def _open_conversation(self) -> Tuple[Optional[Path], str, str, bool]:
+        """`(root, conversation id, reason it is not there, could not be read)`.
 
         `conversation_store.session_dir()` is resolved per call rather than
         taken from the app, because that is how every other reader of the
         store resolves it and a panel holding its own copy would read a
         different directory than the assistant writes.
+
+        **The fourth element is the whole point of this signature.** The reasons
+        this can return are two different facts wearing one string:
+
+        | reason | could not be read |
+        |---|---|
+        | the store could not be opened | **yes** |
+        | no conversation is open yet | no |
+        | the open conversation could not be read | **yes** |
+        | the open conversation has no messages yet | no |
+
+        The panel records a red `STATUS_ATTENTION` when this is true and a green
+        `STATUS_OK` when it is not - the same split `machine.py` makes between a
+        sense that **failed** and one working **by design**. It is returned as a
+        flag rather than decided by matching the reason text: deciding "is this
+        a fault?" from the wording of an error is how `manage_triggers` once
+        armed every malformed source, because it matched the openings of its
+        readers' refusal sentences.
         """
         try:
             root = conversation_store.session_dir()
             data = conversation_store.index(root)
         except Exception as exc:  # noqa: BLE001 - a store that cannot be opened says so
             logger.warning("could not open the conversation store", exc_info=True)
-            return None, "", f"{type(exc).__name__}: {exc}"
+            return None, "", f"{type(exc).__name__}: {exc}", True
         sid = str(data.get("active") or "")
         if not sid:
-            return root, "", NO_CONVERSATION_REASON
+            return root, "", NO_CONVERSATION_REASON, False
         try:
             turns = _turns(root, sid)
         except Exception as exc:  # noqa: BLE001
-            return root, "", f"{type(exc).__name__}: {exc}"
+            return root, "", f"{type(exc).__name__}: {exc}", True
         if not turns:
-            return root, "", "the open conversation has no messages yet"
-        return root, sid, ""
+            return root, "", "the open conversation has no messages yet", False
+        return root, sid, "", False
 
     # -- building -----------------------------------------------------------
 
@@ -511,7 +529,7 @@ class _ExportView(Gtk.Box):
             child = following
         self._rows = []
 
-        root, sid, reason = self._open_conversation()
+        root, sid, reason, could_not_read = self._open_conversation()
         if reason:
             self._body.append(self._banner(f"Nothing to export from a conversation: {reason}."))
 
@@ -523,9 +541,17 @@ class _ExportView(Gtk.Box):
         # opened for, before the rows that
         # hold the exports.
         if reason:
+            # **Not "Needs attention" for a machine working perfectly.** This row
+            # was `STATUS_ATTENTION` for every one of the four reasons
+            # `_open_conversation` can return, so a fresh install with nothing
+            # said yet carried a red dot on the Export row - the same defect
+            # `compare` held for its empty store until a render showed it, and
+            # the same fix `compare.py` records as `STATUS_OK` / "Nothing to
+            # compare yet". This is that correction in the sibling it missed.
             self._body.append(self.status_recorder.row(
-                common.STATUS_ATTENTION,
-                "Nothing to export",
+                common.STATUS_ATTENTION if could_not_read else common.STATUS_OK,
+                ("Could not read the conversation store" if could_not_read
+                 else "Nothing to export yet"),
                 reason))
         elif root is not None and sid:
             try:
@@ -654,7 +680,7 @@ class _ExportView(Gtk.Box):
         """Built at the moment of the press, not at build time."""
         if kind == "facts":
             return facts_export(self._store())
-        root, sid, reason = self._open_conversation()
+        root, sid, reason, _could_not_read = self._open_conversation()
         if reason or root is None or not sid:
             return None, reason or "there is no open conversation"
         exporter = {

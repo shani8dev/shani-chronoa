@@ -814,3 +814,79 @@ def test_letting_tool_messages_through_must_break_the_guarantee(root, talking, s
     restored = surface.json_export(root, talking)[0].text
     assert restored == clean
     assert TOOL_TEXT not in restored
+
+# -- the empty state ---------------------------------------------------------
+
+
+class TestNothingToExportIsNotAFault:
+    """A machine with nothing to export **yet** is working, and said so in red.
+
+    Rendered on 2026-10-13: the panel's own status row read a red
+    **"Needs attention"** with the detail *"there is no open conversation yet -
+    the first thing you say becomes one"*, and the sidebar dot was `#ef4444`.
+    Both halves are the absence-shaped wrong answer this repository records
+    everywhere else, and it is the defect `compare` carried for its empty store
+    until a render showed it - the same correction, in the sibling it missed.
+
+    **Both directions are asserted, because the fix can be over-applied.** Every
+    reason `_open_conversation` returns was collapsed into `STATUS_ATTENTION`,
+    and two of the four really are faults: a store that cannot be opened, and a
+    conversation that cannot be read. Blanket-`STATUS_OK` would delete a red
+    alarm about a real failure, which is the over-fix this file records for the
+    `Gtk.BOX_SECONDARY` and `get_children` guards.
+    """
+
+    def test_nothing_to_export_yet_is_ready_not_attention(self, root, store):
+        """The bug's own state: a real store with no conversation in it."""
+        page = surface.build(_app(store))
+        assert page.status() == common.STATUS_OK, (
+            f"a fresh machine with nothing to export is {page.status()!r}, not a "
+            f"fault: {_labels(page)}")
+
+    def test_the_word_on_the_row_says_ready_not_needs_attention(self, root, store):
+        shown = " ".join(_labels(surface.build(_app(store))))
+        assert "Needs attention" not in shown, shown
+        assert "Ready" in shown, shown
+
+    def test_a_store_that_cannot_be_opened_is_still_attention(self, root, store,
+                                                              monkeypatch):
+        """The half that must survive: this one really could not be told."""
+        def _boom():
+            raise OSError("the store is not readable")
+        monkeypatch.setattr(conversation_store, "session_dir", _boom)
+        page = surface.build(_app(store))
+        assert page.status() == common.STATUS_ATTENTION, (
+            f"a store that could not be opened reads {page.status()!r}: {_labels(page)}")
+        shown = " ".join(_labels(page))
+        assert "Could not read the conversation store" in shown, shown
+
+    def test_the_flag_both_ways_rather_than_by_matching_the_reason_text(self,
+                                                                       monkeypatch):
+        """The distinction is carried as a **flag**, not inferred from wording.
+
+        Deciding "is this a fault?" by matching the reason's text is the
+        `manage_triggers` defect: it matched the openings of its readers'
+        refusal sentences and so armed every malformed source. A first version
+        of this test asserted `count("True") == 2` in the helper's source, which
+        is counting rather than measuring - it passed or failed for the number
+        of times a word appears, not for what the function decides.
+
+        The method touches no `self`, so it is driven directly.
+        """
+        import inspect
+        src = inspect.getsource(surface._ExportView.refresh)
+        assert "could_not_read else common.STATUS_OK" in src, (
+            "the status row no longer branches on the could-not-read flag")
+
+        root, sid, reason, could_not_read = surface._ExportView._open_conversation(
+            None)
+        assert (reason, could_not_read) == (surface.NO_CONVERSATION_REASON, False), (
+            f"nothing said yet is ({reason!r}, {could_not_read!r}), not a fault")
+
+        def _boom():
+            raise OSError("the store is not readable")
+        monkeypatch.setattr(conversation_store, "session_dir", _boom)
+        _, _, reason, could_not_read = surface._ExportView._open_conversation(None)
+        assert could_not_read is True, (
+            f"a store that could not be opened reported {reason!r} as not a fault")
+        assert "OSError" in reason, reason
