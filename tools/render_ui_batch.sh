@@ -472,34 +472,85 @@ render() {
     # bytes run by hand and reports FAIL through this script.
     mkdir -p "$(dirname "$out")"
 
-    if render_once "$target" "$out"; then
-        printf '  PASS  %-28s %8s bytes\n' "$target" "$(stat -c%s "$out")"
-        return 0
-    fi
-
-    # One retry. A cold display genuinely can lose the first frame - the
-    # renderer settles for 1500 ms on everything but the main window - but a
-    # retry that turned a permanent NO NODE into a reported PASS would be a
-    # check that cannot fail, so the retry only ever *adds* a second chance and
-    # a second failure still reports.
-    if render_once "$target" "$out"; then
-        printf '  PASS  %-28s %8s bytes (second attempt)\n' "$target" "$(stat -c%s "$out")"
-        return 0
-    fi
-
-    # **Recycle the display before the second attempt.**
+    # **Every attempt is scored, the display is recycled *between* them, and the
+    # best picture is kept whether it passed or not.**
     #
-    # A sweep runs every render against one broadway daemon, and a daemon that
-    # has served a few dozen surfaces stops giving new ones: measured, a 6-state
-    # sweep passed and a 12-state sweep stopped after two, with every later
-    # target reporting "no file written" and nothing in its log. The count is
-    # not fixed, which is exactly why it read as flakiness rather than as a
-    # server that had run out of room - and a second attempt against the *same*
-    # exhausted display cannot succeed, so the retry was reporting a real fault
-    # as a page defect.
-    recycle_display
+    # Three defects, all measured on this driver by running it, and the third is
+    # the one that lies:
+    #
+    # 1. **The FAIL line said "no file written" while a file existed.** Rendered
+    #    live: `FAIL  main  no file written`, with **23,374 bytes** sitting in the
+    #    output directory. The picture was *rejected* - 4% content against a 5%
+    #    floor - and "no file written" sends the next reader looking for a
+    #    missing file rather than at a rejected one. **This is the absence-shaped
+    #    wrong answer**, and the very gate that added the measure is what made the
+    #    sentence wrong.
+    # 2. **`recycle_display` ran after both attempts** - ten lines below a comment
+    #    saying *"a second attempt against the same exhausted display cannot
+    #    succeed"*. The paragraph described the fix and the code did the opposite.
+    #    Same defect this driver already records for `rm -f`, in a different
+    #    function: **a paragraph explaining why something is dangerous is not a
+    #    control.**
+    # 3. **Both attempts wrote to `$out` and nothing removed it between them**, so
+    #    only one picture could survive and the survivor was whichever ran last -
+    #    arbitrary, where `render_once`'s own return value already carries the
+    #    score that would order them.
+    #
+    # The score is read for **every** attempt rather than only the passing ones,
+    # because the rejected picture is the one a reader needs the figure for.
+    # `best_pct` orders the attempts by that same `_content_percent` the gate
+    # uses, so the artefact kept is the one with the most on it.
+    local best_pct=-1 best_file="" attempt_pct="" last_pct="" note=""
+    local n
+    for n in 1 2; do
+        local try="${out}.try${n}"
+        rm -f "$try"
+        render_once "$target" "$try" || true
+        attempt_pct="$(_content_percent "$try")"
+        if [[ -n $attempt_pct ]]; then
+            last_pct="$attempt_pct"
+            if (( attempt_pct > best_pct )); then
+                best_pct="$attempt_pct"
+                best_file="$try"
+                (( n == 2 )) && note=", best of two attempts"
+            fi
+        fi
+        # **Between** the attempts, which is what the old comment said and did
+        # not do: a cold or exhausted daemon is the documented reason a first
+        # frame is lost, so the retry runs against a display of its own.
+        (( n < 2 )) && recycle_display
+    done
 
-    printf '  FAIL  %-28s no file written\n' "$target"
+    # The best picture becomes *the* artefact whether or not it clears the floor:
+    # a rejected render is still the best evidence of what went wrong, and it is
+    # what the FAIL line below quotes.
+    [[ -n $best_file ]] && mv -f "$best_file" "$out"
+    # **And the attempt that lost is removed**, so the output directory holds one
+    # picture per target rather than two. The winner's own `.tryN.log` stays
+    # beside it - a log named for the attempt that produced the picture is more
+    # use than one named for the target - and `render_once`'s sandbox log is what
+    # the NO NODE check below still reads.
+    rm -f "${out}.try1" "${out}.try2"
+
+    if (( best_pct >= MIN_CONTENT_PCT )); then
+        printf '  PASS  %-28s %8s bytes (%s%% content%s)\n' \
+            "$target" "$(stat -c%s "$out")" "$best_pct" "$note"
+        return 0
+    fi
+
+    # **Say what was measured.** The old line said "no file written" whatever had
+    # happened, which is false whenever a picture exists and was *rejected* - and
+    # the gate that introduced the measurement is what made the sentence wrong.
+    # Measured: `FAIL main no file written` beside a 23,374-byte file. A failure
+    # line that sends the reader looking for a missing file rather than a
+    # rejected one is the absence-shaped wrong answer this driver exists to catch,
+    # and it was printing one of its own.
+    if [[ -n $last_pct ]]; then
+        printf '  FAIL  %-28s %8s bytes, %s%% content (floor %s%%)\n' \
+            "$target" "$(stat -c%s "$out")" "$last_pct" "$MIN_CONTENT_PCT"
+    else
+        printf '  FAIL  %-28s no file written\n' "$target"
+    fi
     local log="$SANDBOX/$(echo "$target" | tr '/:' '__').log"
     if grep -q "NO NODE" "$log" 2>/dev/null; then
         # Name the cause rather than reporting a bare failure. This one is

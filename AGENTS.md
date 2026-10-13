@@ -22179,3 +22179,93 @@ of a later empty one - **the same class as the original `[[ -s $out ]]` bug, one
 level up**: the decision is made from the last attempt rather than from whether
 a picture was ever obtained. Unfixed here; it is the next thing to change, and
 the change is to score the best attempt rather than the final one.
+
+## The blank main window was a diagnostic probe raising inside the capture path (2026-10-13)
+
+Three entries above chase `main` coming back blank through pool exhaustion, a
+concurrent mutation run, and an unrealised `GskCairoRenderer`, and the last of
+them ends **"the blank is confirmed, the cause is not"**. It is now known, and
+none of the three theories was right.
+
+    File "render_ui.py", line 352, in _print_capture_state
+      total, mapped, capped = _count_descendants(widget)
+    NameError: name '_count_descendants' is not defined
+
+`_count_descendants` **is defined** - and the traceback says the *call* was at
+line **352** while the definition sits at **347** today. `render_ui.py` is
+modified in the working tree: **the probe was mid-edit when the render ran**, so
+an undefined helper raised inside `_render` before any capture happened. That is
+the `code_hl` shape - a tree in motion, and an absence measured against it
+measures the author's progress - and the fourth time this session that a
+confident reading about the tree was contradicted by re-measuring.
+
+**A probe that can raise is a probe that can destroy what it is measuring**, which
+this file states about `display.get_n_monitors()` two entries up; this is the
+same defect in the function written to replace it.
+
+**And the fix for finding it was made earlier the same hour.** `render_once`
+writes the renderer's stderr to `$SANDBOX/<target>.log` and the sandbox is deleted
+when the sweep exits; `_keep_log` now copies it beside the output. Four
+attempts at this diagnosis had produced nothing because **nobody kept the file
+that showed it** - the first sweep after that change put the traceback on disk.
+
+**`main` now renders: 30,870 bytes at 17% content**, the first real picture of
+the main window in this repository's history. At the window's own 460x640 it
+shows the orb, "Ready", the model row, all eight organ lights, the shortcut
+buttons and the composer. So the window was never the problem; the instrument was,
+which is the direction this file keeps meeting.
+
+## Three defects in the render driver, and the one that printed a lie (2026-10-13)
+
+Fixed in `tools/render_ui_batch.sh`. All three were measured by running the
+driver, and all three are the same shape: **the verdict came from the last thing
+that happened rather than from the best evidence available.**
+
+1. **Both attempts wrote to `$out` and nothing removed it between them**, so only
+   one picture could survive and the survivor was whichever ran last - arbitrary,
+   where `render_once`'s own return value already carries the score that would
+   order them.
+2. **`recycle_display` ran after both attempts** - **ten lines below a comment
+   saying** *"a second attempt against the same exhausted display cannot
+   succeed"*. The paragraph described the fix and the code did the opposite.
+   This is the `rm -f` cascade this driver already records, in a different
+   function, and the lesson is the file's own: **a paragraph explaining why
+   something is dangerous is not a control.**
+3. **The FAIL line said `no file written` whatever had happened.** Measured live:
+   `FAIL  main  no file written` with **23,374 bytes** sitting in the output
+   directory. The picture was *rejected* - 4% content against a 5% floor - and
+   "no file written" sends the reader looking for a missing file instead of a
+   rejected one. **The gate that introduced the measurement is what made the
+   sentence wrong**, and it was the driver's own absence-shaped wrong answer.
+
+Each attempt is now scored by `_content_percent`, the display is recycled
+**between** them, and the best picture becomes *the* artefact whether or not it
+clears the floor - so the FAIL line can quote what it measured.
+
+### The fix itself had three defects, and running it found all three
+
+- **The FAIL printed twice.** My replacement's span ended at `recycle_display`,
+  and the original `printf` sat *after* it, so the measured line and the stale
+  one both fired. Found by reading the run's own output, not the diff.
+- **Attempt litter.** The losing attempt was left on disk beside the winner, so
+  the output directory held two pictures per target. Now removed; the winning
+  attempt's `.tryN.log` is kept, because a log named for the attempt that
+  produced the picture beats one named for the target.
+- **I claimed "erased a good attempt" before measuring it.** The surviving file
+  scores **4%**, below the floor - so the gate was right about it and "good" was
+  never established. **Best-of-two** is still the right behaviour (arbitrary is
+  not best, and the score is available), but the justification I wrote was not
+  the justification the run supports, and it is corrected here rather than left.
+
+### One observation, open, and not claimed as a defect
+
+The shortcut hints - `widgets.py:1044`, *"Ctrl+K for anything else · Ctrl+F to
+find in this conversation · ? for what Chronoa can do"* - are appended to
+`TranscriptView._rows` **at construction**, so a fresh view does hold them and
+`test_shortcuts_are_discoverable` reads a widget that really contains the text.
+**They are not visible in the first render of the main window**, whose transcript
+region is blank. Whether the window seeds a turn, the scroller gives the row no
+height, or the row is simply not reached, is **not established** - and a finding
+whose cause is unmeasured is the thing this file records most often.
+
+Anchors: **60 sets, 495 anchors, all still match.**
