@@ -820,6 +820,43 @@ def build(app: Any) -> Gtk.Widget:
     # using that", and neither was answerable here.
     root.append(_engine_box(app))
 
+    # --- what `current.gguf` actually points at -------------------------------
+    #
+    # **`model_registry.active_entry()` had no caller in the tree.** Its own
+    # docstring calls it the fix to a measured defect, and the defect is still
+    # live - reproduced while wiring this:
+    #
+    #     current.gguf -> someone-elses-model-Q4_K_M.gguf   (not in SPECS)
+    #     local_llm.active()  -> ''          so every reader renders ABSENT
+    #     active_entry()      -> {'name': 'someone-elses-model-Q4_K_M.gguf',
+    #                              'vouched': False}
+    #
+    # So a person who points this machine at an imported or shared model - the
+    # normal thing to do with a model somebody else handed them - is told no
+    # model is loaded, while one is loaded and answering. The cards below cannot
+    # show it either: they come from `local_llm.TIERS`, so an imported model has
+    # no card to mark.
+    #
+    # **Named, with the vouched flag rather than a verdict.** `vouched=False`
+    # means "not a tier we shipped a hash for", which is a fact about the file,
+    # not a reason to call it absent.
+    _active = None
+    try:
+        from shani_chronoa import model_registry
+        _active = model_registry.active_entry()
+    except Exception:  # noqa: BLE001 - an unreadable registry is its own row
+        _active = None
+    if _active:
+        _name = str(_active.get("name") or _active.get("filename") or "the model")
+        _vouched = bool(_active.get("vouched"))
+        root.append(common.status_row(
+            common.STATUS_OK,
+            f"Loaded: {_name}",
+            ("one of the models this build ships" if _vouched else
+             "not a model this build shipped a hash for - it was put here by "
+             "something else, so nothing here can vouch for it. It is loaded and "
+             "it is what answers.")))
+
     # The panel's own health, above the two lists:
     # how many models are installed, how many are
     # available, how many could not be read. One
