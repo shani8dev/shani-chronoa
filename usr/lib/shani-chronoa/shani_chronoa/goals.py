@@ -447,18 +447,6 @@ def dependencies_settled(run: GoalRun, step: PlannedStep) -> bool:
 # steps cannot see their inputs - and it names the step that is in the way,
 # because a refusal nobody can locate is a refusal nobody will fix.
 # ---------------------------------------------------------------------------
-
-def dependents_of(run: GoalRun, variable_name: str) -> "list[str]":
-    """The steps that would lose an input if `variable_name` went away.
-
-    **Direct dependents only, and that is the wrong question here.** See
-    `downstream_of`, which is what the refusal uses: the person is deciding
-    whether to take a step out of *their* plan, and what they need to know is
-    the whole cost, not the first step of it.
-    """
-    return [s.variable_name for s in run.steps if variable_name in s.depends_on]
-
-
 def downstream_of(run: GoalRun, variable_name: str) -> "list[str]":
     """Every step that stops being runnable, transitively, in plan order.
 

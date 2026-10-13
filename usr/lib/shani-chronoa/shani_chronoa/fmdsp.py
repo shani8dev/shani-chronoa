@@ -547,16 +547,6 @@ def _convolve(x: "list[float]", taps: "list[float]") -> "list[float]":
 
 def _is_integer_rational(up: int, down: int) -> bool:
     return down % up == 0
-
-
-def resample_to(x: "list[float]", target_rate: int, rate: int) -> "list[float]":
-    """Resample to a new rate, reducing the fraction first."""
-    if target_rate <= 0 or rate <= 0:
-        raise ValueError("rates must be positive")
-    divisor = math.gcd(int(target_rate), int(rate))
-    return resample(x, target_rate // divisor, rate // divisor)
-
-
 # --- spectrum -----------------------------------------------------------------
 
 

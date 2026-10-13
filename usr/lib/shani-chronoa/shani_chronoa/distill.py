@@ -337,13 +337,6 @@ def parse_choice(text: str, known: Optional[Sequence[str]] = None) -> Optional[s
     # told to answer with a name and nothing else tends to put it last.
     named = [t for t in tokens if _NAME.fullmatch(t)]
     return named[-1] if named else None
-
-
-async def default_teacher(prompt: str) -> str:
-    """Ask whichever model is configured. Kept as the historical entry point."""
-    return await resolve().ask(prompt)
-
-
 def prompt_for(cases: Sequence[RoutingCase], case: RoutingCase) -> str:
     """The question, with the same menu every time so the answers are comparable."""
     menu = sorted({name for c in cases for name in c.expect})
