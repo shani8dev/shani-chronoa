@@ -42,15 +42,6 @@ DEFAULT_TIMEOUT = 4.0
 POLL = 0.05
 
 
-class Busy(Exception):
-    """Raised when transcription should not start yet.
-
-    A distinct exception rather than a `False` return, so a caller that forgets
-    to handle it fails loudly at the first turn instead of silently transcribing
-    whenever it felt like it.
-    """
-
-
 def wait(busy: Optional[Callable[[], bool]], timeout: float = DEFAULT_TIMEOUT,
          poll: float = POLL, now: Callable[[], float] = time.monotonic,
          sleep: Callable[[float], None] = time.sleep) -> Tuple[bool, str]:
@@ -59,6 +50,29 @@ def wait(busy: Optional[Callable[[], bool]], timeout: float = DEFAULT_TIMEOUT,
     `now` and `sleep` are parameters so a test can drive the clock rather than
     really waiting four seconds - which is the difference between a test that
     proves the timeout and a test that measures how long four seconds is.
+
+    **This returns rather than raising, and the `Busy` exception it was designed
+    to raise is gone.** That exception's docstring claimed:
+
+        A distinct exception rather than a `False` return, so a caller that
+        forgets to handle it fails loudly at the first turn instead of silently
+        transcribing whenever it felt like it.
+
+    Nothing raised it, and `Gate.run()` - the only caller - returns a bool and
+    records `last_reason`. So the docstring described a contract this module did
+    not have, and a caller who believed it would write `except Busy:` that never
+    fires: the silent failure the docstring existed to prevent. The class was
+    removed rather than re-documented, because the thing worth keeping is *why
+    the return replaced the raise*, and that is here:
+
+    - **a timeout of zero must not defer.** assistd's
+      `gpu_busy_timeout_ms = 0` means "ask, and do not queue behind a stream that
+      may never end". An exception would have to be raised at a moment when the
+      caller had already committed to waiting.
+    - **losing what was said is worse than a slow transcript.** On timeout this
+      returns a reason saying so and the caller proceeds, which is why the
+      "fail loudly" instinct was the wrong one: the loud thing is *dropping the
+      user's words*.
     """
     if busy is None:
         return False, "no busy probe: transcribing now"
