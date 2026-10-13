@@ -50,6 +50,13 @@ SETTINGS_TARGETS = {
     "my_files": "privacy",
     "meetings": "privacy",
     "phone_link": "privacy",
+    # `bluetooth-gatt-enabled` is the same privacy switch `devices.py` and
+    # `phone.py` route to, so this panel routes there too.
+    "wearables": "privacy",
+    # `phone-control-enabled`, the same switch the phone panel routes to.
+    # A phone reached over adb is not a wearable and not a Bluetooth peer,
+    # so it is its own panel - and neither desktop has one.
+    "android": "privacy",
     "triggers": "tool-activity",
     "skills": "tool-activity",
     "voice": "voice",
@@ -188,6 +195,15 @@ SURFACE_IDS = (
     "calendar",
     "devices",
     "phone",
+    # Paired Bluetooth LE devices and what they say about themselves. The
+    # reader existed with no panel: `bluetooth_gatt` was reachable only by a
+    # model deciding to call it, which is the wrong shape for a person who
+    # owns the strap.
+    "wearables",
+    # A USB-debugging phone over adb. `android_device` was found by the
+    # CLI matrix - both images ship adb and nothing used it - and had no
+    # panel of any kind.
+    "android",
     "desktop",
     "diagnostics",
     "export",

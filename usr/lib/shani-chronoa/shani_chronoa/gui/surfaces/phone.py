@@ -1,12 +1,27 @@
-"""The Phone surface: what a smartwatch does with the phone, from this computer.
+"""The Phone surface: the phone, from this computer.
 
 Calls (a dialer, answer, hang up, recent calls), messages (conversations, a
-thread, reply), contacts (search, call, text), the phone's music, and finding a
-watch or band. It adds no transport: everything goes through `phone.py` (GSConnect,
-KDE Connect, or plain Bluetooth through `phone_bluez`), `skills/bluetooth_call`,
-`skills/media_control` and `find_device` - the same code the assistant uses,
-behind the same consent keys, so a switch that stops the assistant stops this
-panel too.
+thread, reply), contacts (search, call, text), the phone's music, and file
+transfer. It adds no transport: everything goes through `phone.py` (GSConnect,
+KDE Connect, or plain Bluetooth through `phone_bluez`), `skills/bluetooth_call`
+and `skills/media_control` - the same code the assistant uses, behind the same
+consent keys, so a switch that stops the assistant stops this panel too.
+
+**The watch half moved to `wearables.py` on 2026-10-13, and the title moved with
+it.** This panel used to be titled "Watch", with an argument for why: it was
+*what a smartwatch does with the phone*, so a sidebar reading "Phone" would send
+a newcomer to place a call and hand them wristwatch integration instead. That
+argument was sound **for what the panel then held** - and it stopped being true
+when the watch half moved out, because a panel of calls, messages, contacts,
+music and files is exactly what its title said it was. Leaving "Watch" on a
+panel with no watch in it would have been the error the comment was written
+against, in the other direction.
+
+What moved and why is written out at the top of `wearables.py`: the GATT reads
+were already its subject, and `skills/watch.py`'s MoYoung protocol is a
+different one that happens to answer to the same `bluetooth-gatt-enabled` switch.
+Splitting one switch's two protocols across two panels meant the only page that
+could set `watch-companion-enabled` was not the page about the watch.
 
 **Nothing slow runs on the main thread.** Listing messages over Bluetooth MAP
 and pulling contacts over PBAP each take seconds (measured ~24 s for 813
@@ -38,17 +53,21 @@ from shani_chronoa.gui.surfaces import common  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
-#: **"Watch", not "Phone".** The panel is *"what a smartwatch does with the
-#: phone, from this computer"* - there is no dialling in it at all. A newcomer
-#: reading a sidebar for the first time sees "Phone", wants to place a call,
-#: opens it, and finds wristwatch integration. **A title that promises a thing
-#: the panel does not do is worse than an unclear one**, because the unclear one
-#: gets clicked and this one gets trusted.
-TITLE = "Watch"
+#: **"Phone", and it says what the panel now holds.** It read "Watch" until
+#: 2026-10-13, with a careful argument: the panel was *what a smartwatch does
+#: with the phone*, and a title of "Phone" would have sent a newcomer to place a
+#: call and handed them wristwatch integration instead. **A title that promises a
+#: thing the panel does not do is worse than an unclear one** - that argument was
+#: right about the old contents and became wrong the moment the watch half moved
+#: to `wearables.py`. Calls, messages, contacts, music and files are what is in
+#: here, so "Phone" is now the honest word, and the watch is one panel away
+#: under the name that describes it.
+TITLE = "Phone"
 ICON = "call-start-symbolic"
 SECTION = "Phone and remote"
-SUBTITLE = ("Calls, messages, contacts and music on your phone, and finding your watch - "
-            "through the phone link, or plain Bluetooth when there is none.")
+SUBTITLE = ("Calls, messages, contacts, music and files on your phone - through "
+            "the phone link, or plain Bluetooth when there is none. Your watch "
+            "and other Bluetooth devices are on the Wearables panel.")
 #: Reading the phone takes seconds; build this panel when it is opened, not at start.
 PREBUILD = False
 
@@ -75,8 +94,6 @@ GATE_TARGET = "settings:privacy"
 
 SEND_KEY = "phone-messages-send-enabled"
 CALL_KEY = "bluetooth-call-enabled"
-GATT_KEY = "bluetooth-gatt-enabled"
-COMPANION_KEY = "watch-companion-enabled"
 
 ROW_CSS = "phone-row"
 
@@ -251,8 +268,7 @@ class PhonePanel:
                                      ("messages", "Messages", self.messages_tab),
                                      ("contacts", "Contacts", self.contacts_tab),
                                      ("music", "Music", self.music_tab),
-                                     ("files", "Files", self.files_tab),
-                                     ("watch", "Watch", self.find_tab)):
+                                     ("files", "Files", self.files_tab)):
             stack.add_titled(builder(), name, title)
         set_content(common.scrolled(body))
         self.find_phone()
@@ -708,120 +724,6 @@ class PhonePanel:
             ok, why = result
             self.file_note.set_text(f"Sent {name} to {dev.name}." if ok else f"Not sent: {why}")
         _in_thread(lambda: ph.act(dev, "share", path), done)
-
-    # --- find a watch -----------------------------------------------------------
-
-    def find_tab(self) -> Gtk.Widget:
-        box = common.page_body(10)
-        self.find_note = _label("", dim=True)
-        self.wearables = common.page_body(0)
-        box.append(self.wearables)
-        box.append(self.find_note)
-        if not self.ok(GATT_KEY):
-            self.notice(self.wearables, f"Reaching your watch is off ('{GATT_KEY}' in Settings, Privacy).")
-            return box
-        keep = Gtk.Box(spacing=8)
-        keep_switch = Gtk.Switch(active=self.ok(COMPANION_KEY), valign=Gtk.Align.CENTER)
-        keep_label = _label("Keep my watch connected to this computer - its find-my-phone, music and "
-                            "camera buttons then work here. The Da Fit app on your phone cannot reach "
-                            "the watch while this is on.", dim=True)
-        keep_label.set_hexpand(True)
-        keep.append(keep_label)
-        keep.append(keep_switch)
-
-        def toggled(sw, _pspec):
-            if getattr(sw, "_reverting", False):
-                return
-            try:
-                self.config.set(COMPANION_KEY, "true" if sw.get_active() else "false")
-            except Exception as exc:  # noqa: BLE001 - shown, and the switch put back once
-                self.find_note.set_text(f"Could not change it: {exc}")
-                sw._reverting = True
-                sw.set_active(not sw.get_active())
-                sw._reverting = False
-        keep_switch.connect("notify::active", toggled)
-        box.prepend(keep)
-
-        def work():
-            from shani_chronoa.skills import bluetooth_gatt as bg
-            from shani_chronoa import phone_bluez
-            phones = {a for a, _n, _c in phone_bluez.phones()}
-            return [(m, n) for m, n in bg.paired() if bg.looks_like_low_energy(m) and m not in phones]
-
-        def done(result):
-            if isinstance(result, Exception):
-                self.notice(self.wearables, f"Could not list devices: {result}")
-                return
-            _clear(self.wearables)
-            lb = _list()
-            for _mac, name in result:
-                note = _label("", dim=True)
-                note.set_selectable(True)
-                health = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=4,
-                                     row_spacing=4, max_children_per_line=6)
-                for label, args in (("Activity & sleep", {"action": "summary"}),
-                                    ("Heart rate", {"action": "measure", "what": "heart_rate"}),
-                                    ("Blood oxygen", {"action": "measure", "what": "blood_oxygen"}),
-                                    ("Blood pressure", {"action": "measure", "what": "blood_pressure"})):
-                    health.append(_button(label, lambda a=args, n=name, l=note: self.watch(n, a, l)))
-                health.append(_button("Battery", lambda n=name, l=note: self.watch_read(n, "battery level", l)))
-                buttons = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, column_spacing=4,
-                                      row_spacing=4, max_children_per_line=6)
-                buttons.append(_button("Settings", lambda n=name, l=note: self.watch(n, {"action": "settings"}, l)))
-                buttons.append(_button("Sync time", lambda n=name, l=note: self.watch(n, {"action": "sync_time"}, l)))
-                buttons.append(_button("Info", lambda n=name, l=note: self.watch_info(n, l)))
-                buttons.append(_button("Find", lambda n=name: self.find(n), suggested=True))
-                msg = Gtk.Box(spacing=6)
-                text = Gtk.Entry(hexpand=True, placeholder_text="Message to show on the watch")
-                msg.append(text)
-                msg.append(_button("Send to watch", lambda n=name, t=text, l=note: self.watch(
-                    n, {"action": "notify", "sender": "Chronoa", "text": t.get_text()}, l)))
-                # Plain labels, not an ActionRow: a list row outside a list
-                # raised gtk_list_box_row_grab_focus criticals (measured).
-                card = common.page_body(6)
-                for side in ("top", "bottom", "start", "end"):
-                    getattr(card, f"set_margin_{side}")(12)
-                title = _label(name)
-                title.add_css_class("heading")
-                card.append(title)
-                card.append(_label("Bluetooth Low Energy watch or band", dim=True))
-                card.append(_label("Health", dim=True))
-                card.append(health)
-                card.append(_label("Watch", dim=True))
-                card.append(buttons)
-                card.append(msg)
-                card.append(note)
-                lb.append(card)
-                self.watch_read(name, "battery level", note)
-            self.wearables.append(lb if result else _label("No watch or band is paired.", dim=True))
-        _in_thread(work, done)
-        return box
-
-    def watch_read(self, name: str, what: str, note: Gtk.Label) -> None:
-        note.set_text(f"Reading {what}...")
-        _in_thread(lambda: _tool("bluetooth_gatt", {"action": "read", "device": name, "characteristic": what}),
-                   lambda r: note.set_text(str(r)))
-
-    def watch(self, name: str, arguments: dict, note: Gtk.Label) -> None:
-        slow = arguments.get("action") == "measure"
-        note.set_text("Measuring - keep the watch on and still, up to a minute..." if slow else "Asking the watch...")
-        _in_thread(lambda: _tool("watch", {**arguments, "device": name}),
-                   lambda r: note.set_text(str(r).split(" (unverified")[0]))
-
-    def watch_info(self, name: str, note: Gtk.Label) -> None:
-        note.set_text("Reading the watch's details...")
-
-        def work():
-            parts = []
-            for what in ("manufacturer name", "firmware revision", "software revision", "battery level"):
-                parts.append(_tool("bluetooth_gatt", {"action": "read", "device": name, "characteristic": what}))
-            return "\n".join(parts)
-        _in_thread(work, lambda r: note.set_text(str(r)))
-
-    def find(self, name: str) -> None:
-        self.find_note.set_text(f"Sending {name} the find signal...")
-        _in_thread(lambda: _tool("find_device", {"device": name}),
-                   lambda r: self.find_note.set_text(str(r).split(" (unverified")[0]))
 
 
 def build(app: Any) -> Gtk.Widget:
