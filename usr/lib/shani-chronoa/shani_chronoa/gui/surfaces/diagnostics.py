@@ -1077,6 +1077,60 @@ def _model_server(instance: str) -> Probe:
     return probe
 
 
+def _kernel() -> Tuple[str, str]:
+    """What the kernel itself has logged - at errors *and*, when there are none, at
+    warnings.
+
+    **`kernel_log.read_ring()` existed and had no caller in the tree.** Its
+    docstring is one line: *"Public entry, so a caller can ask for a lower level
+    than `err`."* That is this row.
+
+    The sense itself reads **errors only** - line 174 of that module hardcodes
+    `_read_dmesg("err")` / `_read_kmsg(3)` rather than going through the public
+    entry - and its wording when there are none is *"The kernel ring buffer holds
+    nothing at error level or worse"*, which a person reads as **my machine is
+    quiet**. Most of the hardware noise somebody opens Diagnostics to see logs at
+    **warning**: USB resets, GPU faults, throttling, deprecation notices.
+
+    **Three answers, and `None` is not one of them.** `read_ring` returns `None`
+    when the ring could not be read and `[]` when it was read and was empty -
+    which is the distinction that module's own docstring insists on (*"Reads
+    UNKNOWN on a machine where the ring cannot be read, never zero"*) and which a
+    truthiness check would throw away. So an unreadable ring is
+    `STATUS_UNKNOWN`, and only a ring read to be empty can go on to ask about
+    warnings at all.
+    """
+    from shani_chronoa.senses import kernel_log
+
+    errors = kernel_log.read_ring(3)
+    if errors is None:
+        return STATUS_UNKNOWN, (
+            "the kernel ring buffer could not be read at all - it needs "
+            "permission (dmesg is restricted on most systems), so this is not "
+            "evidence that the kernel is quiet")
+    if errors:
+        newest = errors[-1].strip()[:150]
+        return STATUS_NOT_WORKING, (
+            f"{len(errors)} message(s) at error level or worse. Most recent: "
+            f"{newest}")
+
+    # **Readable and empty at error level.** That is the only state in which the
+    # lower level is worth asking for - asking it first would make a quiet kernel
+    # look busy with warnings every time someone looked.
+    warnings = kernel_log.read_ring(4)
+    if warnings is None:
+        return STATUS_UNKNOWN, (
+            "the ring buffer holds nothing at error level, but it could not be "
+            "read at warning level, so quieter complaints are not ruled out")
+    if warnings:
+        newest = warnings[-1].strip()[:150]
+        return STATUS_NOT_WORKING, (
+            f"nothing at error level, but {len(warnings)} at warning level or "
+            f"below. Most recent: {newest}")
+    return STATUS_WORKING, (
+        "the ring buffer holds nothing at error level or at warning level")
+
+
 # -- the rows, in the order they are shown -----------------------------------
 
 #: `(section title, section description, [(row title, probe)])`. The order is
@@ -1146,6 +1200,14 @@ _SECTIONS: Tuple[Tuple[str, str, Tuple[Tuple[str, Probe], ...]], ...] = (
             ("vision server (port 8767)", _model_server("vision")),
             ("embed server (port 8768)", _model_server("embed")),
             ("imagine server (port 8769)", _model_server("imagine")),
+        ),
+    ),
+    (
+        "The kernel",
+        "What the kernel itself has logged. Errors first; warnings only when there "
+        "are no errors, so a quiet machine does not read as a busy one.",
+        (
+            ("Kernel ring buffer", _kernel),
         ),
     ),
 )
