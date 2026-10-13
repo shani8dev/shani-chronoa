@@ -20438,3 +20438,35 @@ Twice now, a `mutate.py` run wiped **uncommitted** work in `conversation.py` and
 looks like a mystery rather than a restore. The lesson is not to leave work
 uncommitted across a window in which another session is running: this batch was
 committed within seconds of the tests passing for exactly that reason.
+
+## Every other "absence reported as a fault" was measured, and all of them are correct (2026-10-13)
+
+`export` was not a one-off: it is a shape this file has now corrected four times
+(the `heard-sound` dead switch, the Compare panel's empty store, the `0 MB`
+download, and this). So rather than look at 29 more renders for the same
+symptom, the whole population was swept: **every `STATUS_ATTENTION` in
+`gui/surfaces/`**, each classified by what it is actually attached to.
+
+**One live instance. Five cleared, and the clearances are the useful half** -
+each is a place a reader would otherwise "fix", and two of them are the
+reference implementation of the rule `export` broke.
+
+| panel | its red row | verdict |
+|---|---|---|
+| `inventory` | "N of M functions absent" | **branch unreachable.** `organism.INVENTORY` is **17 built, 14 partial, 0 absent** - so `counts[ABSENT] == 0` always and the first branch always fires. **"Fixing" this would have been editing a guard no organ reaches**, which is the `defensible redundancy` outcome, not a defect. |
+| `calendar` | "No calendar backend" | **correct, and it is the reference.** `_permitted()` is consulted at **line 472, before** the no-backend branch, so consent-off never reaches red. Consent-off renders `STATUS_OFF` **"Calendar is not granted"** (grey "Turned off") and an empty range renders `STATUS_OK` "No events in range". **The vocabulary expresses the distinction; one sibling already does exactly what `export` should have.** |
+| `desktop` | "The desktop search provider is not installed" | **defensible, and the measurement is what says so.** `PKGBUILD:273` installs `shani-chronoa-search` with `install -Dm755` unconditionally and line 304 its D-Bus service - **no optdepend gates it**. So on an installed system its absence *is* a broken install, which is what attention is for. |
+| `skills`, `workbench` | "No skills loaded" | **correct.** The detail is *"The registry returned nothing"*, and the render measured **256 skills** - so this fires only on a registry that has genuinely failed. **A registry that returned nothing on a healthy machine is a fault**, which is the opposite of export's case. |
+| `model`, `models` | "No model is chosen" | **defensible.** No model means the assistant cannot answer, and this file already records `set_can_answer()` overriding the idle "Ready" for exactly that reason. |
+| `voice` | "No voice engine is available" | **defensible.** `espeak-ng` is a hard `depends`, so no engine at all means a broken install rather than a missing one. |
+
+**The two that would have been most tempting to "fix" are `inventory` (dead
+branch) and `desktop` (looks like a missing optional package, is a shipped
+binary).** Both would have been confident wrong answers with a green suite and a
+plausible commit message, and neither was distinguishable from `export` by
+reading the status call - only by counting the organs and reading the PKGBUILD.
+
+**And `calendar` is why the export fix is not a judgement call.** It is the same
+vocabulary, the same `StatusRecorder`, one directory away, doing it correctly -
+which is the strongest available evidence that "nothing to export yet" belongs at
+`STATUS_OK` and was an oversight rather than a deliberate reading.
