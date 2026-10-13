@@ -159,7 +159,22 @@ class TestTheSwitchesAreReal:
         keys = {k.get("name"): k for k in root.iter("key")}
         assert key in keys, f"{key} is not in the schema, so its gate can never open"
         default = keys[key].find("default")
-        assert default is not None and default.text.strip() == "false"
+        assert default is not None, f"{key} has no default at all"
+        assert default.text.strip() in ("true", "false"), (
+            f"{key} is not a boolean: {default.text!r}")
+
+        # **Polarity comes from the preset, not from this file.** It used to
+        # assert `== "false"`, which is a choice rather than a defect, and it
+        # broke when `git-write-enabled` was correctly turned on by `everyday`.
+        # The destructive half is still checked: `git-push` is in
+        # `DESTRUCTIVE_CONSENT_KEYS` and must stay shut, and moving a default
+        # without moving the preset now fails here.
+        from shani_chronoa import capabilities
+
+        everyday = capabilities.PRESETS["everyday"][2]
+        assert (default.text.strip() == "true") is bool(everyday(key)), (
+            f"{key} defaults to {default.text.strip()!r} but the everyday preset "
+            f"says {bool(everyday(key))}, so the schema and PRESETS have drifted")
 
     def test_the_gate_opens_when_the_switch_is_on(self, repo, tmp_path, monkeypatch):
         """The control that stops this being a permanent refusal."""

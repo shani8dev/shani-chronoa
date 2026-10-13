@@ -474,6 +474,9 @@ def test_trying_a_voice_does_not_need_the_setting(monkeypatch):
     _kokoro_archives(monkeypatch)
     voices.install_kokoro(config=type("C", (), {"get_bool": lambda self, k, d: True})(),
                           transport=_kokoro_archives(monkeypatch))
+    # **Shut by this test.** `kokoro-tts-enabled` ships on, so "the setting is
+    # off" was asserting nothing.
+    ChronoaConfig().set("kokoro-tts-enabled", "false")
     t = tts_mod.PiperTTS(config=ChronoaConfig())
     assert t.engine("hello") != "kokoro", "the setting is off"
     t.kokoro_trial_voice = "af_sky"

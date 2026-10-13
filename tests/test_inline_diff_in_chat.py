@@ -64,7 +64,16 @@ def test_the_card_shows_the_changed_lines(edit, tmp_path):
 
 
 def test_a_refused_write_shows_no_diff(gsettings_env, tmp_path, monkeypatch):
-    """Control: with the consent key off nothing is written, so nothing is shown."""
+    """Control: with the consent key off nothing is written, so nothing is shown.
+
+    **The key is shut by this test.** `file-edit-enabled` is in the `everyday`
+    preset and ships on, so this was not a control at all - it was the granted
+    case, and `inline_diff is None` was being asked of a write that had been
+    allowed and carried out.
+    """
+    from shani_chronoa.config import ChronoaConfig
+
+    ChronoaConfig().set("file-edit-enabled", "false")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     from shani_chronoa.gui import blocks
     from shani_chronoa.skills import edit_file
