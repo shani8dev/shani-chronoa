@@ -161,15 +161,26 @@ def test_empty_state_names_what_to_do(window):
     first = window._transcript._rows.get_first_child()
     assert "transcript-placeholder" in first.get_css_classes()
     assert first.get_label()
-    # The empty state is the placeholder *and* the suggestion chips. What must
-    # still hold is that nothing *else* is there, so a cleared transcript can
-    # never grow stray rows.
-    sibling = first.get_next_sibling()
-    if sibling is not None:
-        assert "suggestion-bar" in sibling.get_css_classes(), (
-            f"unexpected row in the empty state: {sibling.get_css_classes()}"
-        )
-        assert sibling.get_next_sibling() is None
+    # **Two deliberate rows, both named by the class that identifies them**: the
+    # shortcut hints and the suggestion chips. Both are appended in
+    # `show_placeholder` and nowhere else, so a row that is *neither* is exactly
+    # the stray this test exists to catch - which is why the rule is "every row
+    # must be one of these two" rather than the literal `suggestion-bar`.
+    #
+    # It was that literal once, and the strip's shortcut hints failed it. The
+    # hint had briefly been folded into the placeholder's markup to satisfy this
+    # test, which cost it the app's own dim style - and the fix attempted after
+    # that, `<span class="dim-label">`, **empties the label**: GTK refuses
+    # `class` on a Pango `<span>` and `set_markup` leaves nothing behind, so the
+    # prompt and the shortcuts both vanished. Measured, and recorded in
+    # `gui/widgets.py`'s own comment beside the line it cost.
+    DELIBERATE = ("suggestion-bar", "dim-label")
+    row = first.get_next_sibling()
+    while row is not None:
+        classes = row.get_css_classes() or []
+        assert any(c in classes for c in DELIBERATE), (
+            f"unexpected row in the empty state: {classes}")
+        row = row.get_next_sibling()
 
 
 def test_first_turn_replaces_the_placeholder(window):

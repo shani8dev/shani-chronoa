@@ -998,15 +998,37 @@ class TranscriptView(Gtk.ScrolledWindow):
         # is indistinguishable from a stray row that a cleared transcript grew -
         # so the sentence went **into** the placeholder instead. One widget
         # fewer, and the invariant survives untouched.
-        label = Gtk.Label()
-        label.set_markup(
-            "Ask something, or press the orb to speak.\n"
-            "<span size='small'>Ctrl+K for anything else  ·  Ctrl+F to find "
-            "in this conversation  ·  ? for what Chronoa can do</span>")
+        label = Gtk.Label(label="Ask something, or press the orb to speak.")
         label.add_css_class("transcript-placeholder")
         label.set_wrap(True)
         label.set_halign(Gtk.Align.CENTER)
         self._rows.append(label)
+
+        # **A row of its own, carrying `dim-label`, and not a `<span>` inside
+        # the placeholder.** Both alternatives were tried and measured:
+        #
+        # - **`size='small'` inside the placeholder's markup** works, keeps the
+        #   empty state at two rows, and is *not* the app's dim style - so the
+        #   shortcuts would not follow a theme change to `dim-label` that every
+        #   other quiet line in the app does follow.
+        # - **`<span class="dim-label">`** is refused by GTK, measured on this
+        #   box rather than assumed: *"Failed to set text ... due to error
+        #   parsing markup: Attribute 'class' is not allowed on the <span>
+        #   tag"*, and `set_markup` leaves the label **empty** rather than
+        #   falling back to plain text - so the prompt and the shortcuts both
+        #   disappear, and `get_text()` answers `""`. There is no `class`
+        #   attribute on a Pango `<span>` to reach GTK's CSS with.
+        #
+        # So the hint is a label with the same class every other dimmed line
+        # uses, and `test_window_ux`'s invariant is taught the second
+        # deliberate row rather than weakened.
+        keys = Gtk.Label(
+            label="Ctrl+K for anything else  ·  Ctrl+F to find in this "
+                  "conversation  ·  ? for what Chronoa can do")
+        keys.add_css_class("dim-label")
+        keys.set_wrap(True)
+        keys.set_halign(Gtk.Align.CENTER)
+        self._rows.append(keys)
 
         suggestions = capabilities.startup_suggestions(self._caps)
         if suggestions and self._on_suggestion is not None:

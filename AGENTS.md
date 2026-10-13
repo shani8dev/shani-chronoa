@@ -19561,3 +19561,78 @@ percentage** beside the byte count, and treat a target under a stated floor as
 **NOT RENDERED** rather than as a pass - because a capture that photographs less
 than its target is worse than `NO NODE`, since it looks like a render. The floor
 is not a guess: the four pages above sit at 7.2% and 100%, with nothing between.
+gui: a shortcut hint that lost the app's own dim style, and two tests that wanted different shapes
+
+The empty state carries the shortcut hints so Ctrl+K is discoverable, and I had
+folded them into the placeholder's markup to satisfy `test_window_ux`'s invariant
+that the empty state is the placeholder and the suggestion bar and nothing else.
+That cost the hint the app's dim style - `size='small'` is not the rule every
+other quiet line follows - and `test_shortcuts_are_discoverable` said so.
+
+The fix attempted first was `<span class="dim-label">`, and **GTK refuses it**:
+*"Attribute 'class' is not allowed on the <span> tag"*, and `set_markup` leaves
+the label **empty** rather than falling back to plain text, so the prompt and the
+shortcuts both vanished and `get_text()` answered "". Measured, not assumed - and
+a reminder that a markup attribute is a guess until the library answers.
+
+So the hint is a label with `dim-label`, and the invariant is taught the second
+deliberate row rather than weakened: every row must be one of the two
+class-bearing ones, which still fails on a third.
+
+**Two of my own tests wanted incompatible shapes for the same line** - one wanted
+a row of its own, one forbade a row - and the way that showed up was one of them
+going red while the other was green. Neither was wrong about the property they
+share (a hint must not compete with the prompt); only about the mechanism.
+
+3 mutations on the snapshot, 3 caught: a stray row added (the invariant's whole
+purpose), the hint losing `dim-label`, and the hints ceasing to name shortcuts.
+Snapshot byte-identical afterwards.
+
+## A clean full-suite measurement, and 31 failures of which 17 were not failures (2026-10-13)
+
+The chunked run earlier in the session was contaminated - I edited `window.py`
+while five chunks were running, so those runs read two versions of it. Re-ran
+with the fixed runner and nothing touched during: **574 test files, 10 chunks,
+10,809 passed and 32 failures**. All ten chunks reached a summary this time, which
+is the check the last run skipped.
+
+**Re-run serially in their own process - 17 of the 31 were not failures.**
+`test_question_presenter` (5), `test_obex_receive` (5), `test_incoming_call` (4),
+`test_the_application_starts`, `test_skill_workbench`, `test_driving_panel`: every
+one passes alone. Parallel shards remain what this file has always said they are.
+
+**Six files still fail, and every one is another session's committed work**:
+`8c92258` (`delete_file` -> trash, which is why the registry is **256** and
+`test_schema_caps` expects 257), their uncommitted `README.md`, their
+`modelfmt` (5d17297, the model-card line), `1db21c4` (`tool_select`, *"explain
+gravity"* still offering tools), and `model_registry.verify_digest` - the last
+being the only enforcement-shaped orphan left in the tree.
+
+**And the `.pyc` trap, fourth occurrence.** `test_packaging` failed twice on 333
+stray bytecode files. Chased properly rather than cleaned and forgotten: **0
+after running that file alone, 0 after either half of the batch, 0 after each
+file individually, and 0 after the whole batch** - so the writer is not any of
+them and the residue came from the 10-chunk sweep. `PYTHONDONTWRITEBYTECODE=1` is
+set on every command here, so the sweep's own `setsid env` line is what carried
+it. Not reproduced, not claimed as fixed: recorded because **four cleanings have
+each been followed by the same red test**, and the habit is the only durable
+answer.
+
+## An action count I could not measure statically, three times over (2026-10-13)
+
+Checking a numeric claim in this file, which says **27** actions in one entry and
+**36** in another. Three attempts, each a different instance of the trap this
+file records most often:
+
+1. `ast.Call` with `func.attr == "SimpleAction"` matched **zero** - the code is
+   `Gio.SimpleAction.new("quit", None)`, a `.new()` call, not a constructor.
+2. Accepting `new_stateful` as well gave **29** - and the seven still missing are
+   the strip's chips, which **work**, because they are built in a `for` loop from
+   a tuple, so the action's name is a **variable** and no literal exists.
+3. So **a static AST scan cannot answer this question at all.** The test that
+   drives `_create_actions()` and records what `add_action` received is the only
+   valid instrument, and it agrees with the **36**.
+
+**A scan that finds nothing is not a finding**, and a scan that finds *some* is
+worse, because the number it prints is right. Three of the four runs printed a
+plausible figure (0, 27, 29) and every one was an artefact of the pattern.
