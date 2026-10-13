@@ -23279,6 +23279,17 @@ batch results measure the batch, and the fix was what this file already records
 for `test_skill_workbench.py`: **one process per node**, no shared tmp, no
 module-level GTK state carried between tests.
 
+One process per node: **16 fail with this change, 22 with HEAD.** Fourteen fail
+under both. The remaining two looked like mine until they were run five times
+each side - `test_silence_is_not_a_request` and
+`test_voice_styles_measured[assistant]` - and they fail **5 of 5 with HEAD too**,
+so the solo run's "passes with HEAD" was itself the flake.
+
+**Every failure under this change also fails without it: 0 attributable.** And
+HEAD shows six *more* failures than the branch does, which is the wrong direction
+for a regression and the reason the 32/31, 21/32, 31/31 spread could not have been
+read as one.
+
 ## Ctrl+K built a palette that was never in the window, and a ceiling that crushed it (2026-10-13)
 
 Three things were asked for: make the command palette appear, make it and the
