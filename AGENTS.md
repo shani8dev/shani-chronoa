@@ -24272,3 +24272,95 @@ reporting "could not measure", which is the same shape one level down.
 is that `Gtk.WidgetPaintable` + `_deepest_node` cannot do it, because the only
 nodes on offer belong to composites that paint no children. The route that does
 work is **not** a longer wait, and nothing here names it.
+## `set_column_spacing(6)` is the whole separation, and three rules beside it are dead (2026-10-13)
+
+From the organ-strip item. I set out to show that
+`test_the_organ_lights_are_separated_by_a_gap` guards a phantom, and **that
+hypothesis was wrong**. The measurement says the opposite, and the real finding
+is one layer down.
+
+**Measured on a real mapped `ChronoaWindow`, with the window's own stylesheet,
+using the same `get_allocation()` read `test_organ_strip_is_centred.py` already
+proves works:**
+
+| | measured |
+|---|---|
+| organ lights found | **8 of 8** |
+| gap between each adjacent pair | **6, 6, 6, 6, 6, 6, 6** |
+| `set_column_spacing()` | **6** |
+| cell width minus label natural width | **0 on all eight** |
+
+So **the entire label-to-label separation is the spacing.** Not spacing plus
+padding - the spacing alone. And the cell is exactly as wide as its label, which
+means the horizontal padding is not being applied either.
+
+**Which retires my own claim.** I had written that the existing test's floor of
+`>= 4` "passes with the symptom it names fully present" because the separation
+has a second contributor the test does not watch. **There is no second
+contributor.** `set_column_spacing(6)` is the only thing separating the eight
+lights, so `>= 4` is guarding the whole property, and the test I wrote to
+replace it had a floor picked to pass - which is why it was deleted rather than
+landed.
+
+### The live defect this exposed
+
+`organs.ORGAN_IDLE_CSS` declares
+
+    .organ         { padding: 2px 6px; border-radius: 8px; }
+    .organ-idle    { background-color: alpha(currentColor, 0.05); }
+    .organ-active  { background-color: rgba(239, 68, 68, 0.18); }
+
+and `window.py:_apply_organ_css` loads that sheet. **The padding half is
+measured as absent** - cell width equals label natural width on all eight, so
+`padding: 2px 6px` is contributing nothing. That is the same defect class as the
+three CSS classes removed in `8d36b7f`, one declaration deeper: **a rule that
+styles nothing is an unfulfilled claim about how a thing looks**, and here the
+unreachable rules are the pill the eight lights are supposed to sit on.
+
+**Not established, and it would be the confident wrong answer to assume it:**
+whether the sheet loads at all. The obvious next probe read
+`StyleContext.get_color()` - which is the **foreground**, not the background, so
+it returned the same inherited value for every cell and answered nothing. And
+`Pango` widths measured with no theme resolved (`"listening"` at 10px came back
+14px wide), so every font-size comparison was garbage. **The padding measurement
+stands on allocations and nothing else.**
+
+### Five instruments, all of which produced a plausible number
+
+Every route to "how wide is the gap" other than allocations failed, and each
+failed *quietly*:
+
+1. **The label's own `get_allocation().x`** - parent-relative, and each label's
+   parent is its own cell, so every x was 0 and every gap came back **negative**
+   (-39 to -57px, i.e. minus the label widths). Negative is impossible between
+   two siblings laid out left to right, so the instrument was wrong.
+2. **The `FlowBoxChild`'s allocation** - shares a parent, and gives a clean
+   **6px**, but undercounts: the padding lives *inside* the child. A plausible
+   number that is not the one being asked for.
+3. **A font-size read via `get_font_description()`** - returned `None` for every
+   label, and my own `else` branch printed **"sheet is NOT applied"**. An empty
+   measurement read as a verdict, which is the `report_candidates` and
+   `deadcode.py` shape, reached through a third API.
+4. **Pango widths with no theme resolved** - 14px for nine characters.
+5. **`StyleContext.get_color()`** - foreground, answering a background question.
+
+**Only allocations told the truth, and they are the instrument this repository
+had already established.** "Constructing a widget is not the same as it being
+legible" extends to measuring one: five of the six readings here were numbers,
+and five were wrong.
+
+### What this means for the open items that were waiting on a render
+
+The two organ-strip findings recorded this week - that the eight labels still
+read as one run-on string at 760 and 1024, and that the gap test does not
+protect that - **do not survive this measurement.** With 6px between two
+lowercase words and nothing else, the labels are as separated as this design
+makes them; whether that is *enough* is a typographic judgement, not a defect
+this tree has, and the honest position is that the strip has one separator and it
+is 6px wide.
+
+Not changed, because nothing measured here says a change is warranted: the
+spacing, the floor, or the dead rules. **The dead rules are recorded rather than
+fixed** because whether `ORGAN_IDLE_CSS` loads at all is not established, and
+"delete the sheet" on an unanswered question is how `style.py`'s own comment about
+two stylesheets for one strip goes from stale to wrong.
