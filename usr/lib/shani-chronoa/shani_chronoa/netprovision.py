@@ -279,6 +279,23 @@ def _subnet_hosts(subnet: ipaddress.IPv4Network, gateway: str,
 
 
 def lab_network_namespace(name: str) -> str:
+    """A lab network's namespace is the network's **own** name. Unchanged.
+
+    **The identity is the point, and it is load-bearing.** A subnet namespace is
+    `network--subnet` and a bridge is `br-network`, so the obvious "tidy this up"
+    move is to prefix the network's own namespace too - and that would orphan
+    every live one. This module's own docstring says why that is not a tidy-up:
+
+        A network that already exists is an error, not a repair. Overwriting a
+        live namespace because a name was reused is how you disconnect something
+        real.
+
+    `ip netns add` and every `ip netns exec` have to agree on the name or teardown
+    looks for something that is not there. This function had **no caller**, while
+    the creation site used the bare `network.name` literal - so the convention was
+    written down in one place and followed, by hand, in about ten others. It is
+    called at the creation site now, where the name is chosen.
+    """
     return name
 
 
@@ -507,7 +524,11 @@ def build_plan(network: LabNetwork) -> List[Step]:
     bridge = bridge_name(network.name)
 
     # --- the lab network's own namespace: a bridge acting as its router.
-    steps.append(Step(["ip", "netns", "add", network.name],
+    # **`lab_network_namespace()` rather than the bare literal.** It returns the name
+    # unchanged, so this changes no output; what it does is put the "a network's
+    # namespace is its own name" decision on the line that creates it, instead of in
+    # a helper nothing called while ten sites repeated the literal by hand.
+    steps.append(Step(["ip", "netns", "add", lab_network_namespace(network.name)],
                       f"create namespace {network.name}"))
     steps.append(Step(["ip", "netns", "exec", network.name, "ip", "link", "add",
                         "name", bridge, "type", "bridge"], f"bridge {bridge}"))
