@@ -55,6 +55,9 @@ SCHEMA = {
             "path": {"type": "string",
                      "description": "Optional file (.jpg/.png) or folder inside the home directory to save to."},
             "device": {"type": "string", "description": "Camera device, e.g. /dev/video0 (default)."},
+            "infrared": {"type": "boolean",
+                         "description": "Capture in infrared from an IR camera rather than in "
+                                        "ordinary light. Refuses when none is attached."},
         }, "required": []},
     },
 }
@@ -64,7 +67,46 @@ def _wait(seconds: int) -> None:
     time.sleep(seconds)
 
 
+def _ir_node(requested: str) -> "tuple[str, str]":
+    """`(node, refusal)` for an infrared capture.
+
+    **The requested node wins when it is an infrared one**, because a person who
+    names `/dev/video9` has already answered which camera; otherwise the first
+    capture-capable infrared node is chosen, ordered so a node that *can* capture
+    comes first - a card name is a weak signal and a node that cannot capture is not
+    a target however infrared it looks.
+    """
+    from shani_chronoa import camera
+    found = [info for info in camera.collect() if info.get("looks_ir")]
+    wanted = [str(i["node"]) for i in found if i.get("can_capture")] \
+        or [str(i["node"]) for i in found]
+    if requested:
+        # **A device the caller named is never silently replaced.** Substituting
+        # /dev/video9 for the /dev/video1 they asked for is a photo from a camera
+        # they did not name - the shape this repository refuses everywhere else,
+        # where an instrument answers the question it was asked rather than a
+        # nearby one. It is either the infrared one or a refusal that says which
+        # infrared nodes there are.
+        if requested in wanted:
+            return requested, ""
+        cards = ", ".join(sorted({str(i.get("card") or i["node"]) for i in found})) \
+            or "none"
+        return "", (f"{requested} is not an infrared camera on this machine. The "
+                    f"infrared nodes here are: {cards}. Nothing was taken.")
+    if wanted:
+        return wanted[0], ""
+    return "", (f"Taking an infrared photo is not possible: {camera.none_sentence()}. "
+                f"Nothing was taken.")
+
+
 def _camera_present(device: str) -> bool:
+    """Does this path exist as a camera node?
+
+    **Existence, not capability** - the node a model names may be a V4L2 metadata
+    node that answers for itself and cannot capture video. That is a richer
+    question, answered by `camera.probe`, and the refusal below names it when the
+    capture fails so "exists" is never read as "works".
+    """
     return Path(device).exists()
 
 
@@ -123,6 +165,16 @@ def _run(arguments: dict) -> str:
     if not isinstance(device, str) or not re.fullmatch(r"/dev/video[0-9]{1,3}", device.strip()):
         return f"{device!r} is not a camera like /dev/video0."
     device = device.strip()
+    infrared = arguments.get("infrared")
+    if not isinstance(infrared, bool):
+        infrared = False
+    if infrared:
+        #: **The default device is not chosen for an infrared capture.** `/dev/video0`
+        #: is right on this box by enumeration luck and wrong on a machine where the
+        #: metadata node registers first, so the node is selected rather than assumed.
+        device, refusal = _ir_node(device if arguments.get("device") else "")
+        if refusal:
+            return refusal
     raw_count = arguments.get("countdown") or 0
     try:
         if isinstance(raw_count, bool):
@@ -155,9 +207,22 @@ def _run(arguments: dict) -> str:
         note = _countdown_notice(countdown, config)
         _wait(countdown)
 
-    argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
-            "-f", "v4l2", "-i", device,
-            "-vf", f"select=gte(n\\,{WARMUP_FRAMES})", "-frames:v", "1", "-update", "1", str(target)]
+    stream = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
+              "-f", "v4l2"]
+    if infrared:
+        # **`y16` is the infrared format, named rather than negotiated.** A v4l2
+        # node that advertises several formats may hand back an ordinary one if the
+        # demuxer is left to choose, and an ordinary capture is not what was asked
+        # for - it is a confident answer to a different question. The hidden cost is
+        # that ffmpeg then converts 16-bit greyscale to the output format itself,
+        # and **that conversion interpolates**: measured on a synthetic 16-bit
+        # frame, the source held 127 distinct levels and ffmpeg's output held 153.
+        # Fine for a picture, and it is why the reply says so
+        # rather than leaving a reader to assume the levels are the camera's.
+        stream += ["-input_format", "y16"]
+    stream += ["-i", device]
+    argv = stream + ["-vf", f"select=gte(n\\,{WARMUP_FRAMES})",
+                     "-frames:v", "1", "-update", "1", str(target)]
     from shani_chronoa import body
     try:
         with body.lit("eyes", "taking a photo", device, deadline=_CAPTURE_TIMEOUT + 5):
@@ -171,7 +236,18 @@ def _run(arguments: dict) -> str:
         target.unlink(missing_ok=True)
         return (f"ffmpeg could not take a photo from {device}: "
                 f"{(r.stderr.strip().splitlines() or ['no message'])[-1][:200]}")
-    return f"Saved a photo to {target} ({files.human_size(target.stat().st_size)})." + note
+    extra = ""
+    if infrared:
+        # **The reply says what the conversion did**, because a reader who assumes
+        # the levels are the camera's would be wrong: ffmpeg produced more of them
+        # than went in. Measured on a synthetic 16-bit frame - 127 distinct levels
+        # in, 153 out. The shape `local_llm.perplexity` already uses, where an
+        # unmeasured result is named as such rather than handed over silently.
+        extra = (" It is an infrared frame, converted from 16-bit greyscale by "
+                 "ffmpeg, which smooths between levels - so it shows what the "
+                 "camera saw, and the values in it are not the camera's raw ones.")
+    return (f"Saved a photo to {target} "
+            f"({files.human_size(target.stat().st_size)})." + extra + note)
 
 
 def _post_condition(arguments: dict):

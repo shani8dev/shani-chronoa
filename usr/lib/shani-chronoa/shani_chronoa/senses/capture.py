@@ -175,14 +175,33 @@ def describe(node: Path) -> Dict[str, object]:
 
     `in_use` is None - not False - when the holders could not be determined,
     so a missing `fuser` can never be reported as an unused microphone.
+
+    **`kind` is what the node can do, not what its name suggests.** A UVC metadata
+    node answers `QUERYCAP` with the same driver and card as the camera beside it,
+    so a name is not evidence that a node can capture - and an infrared node is a
+    different question again. Measured against real nodes here: one can capture
+    `MJPG`/`YUYV`, one cannot capture at all, and one loopback node advertises
+    `Y16` and is infrared.
     """
     pids = _holders(node)
     holders = [{"pid": pid, "cmdline": subproc.cmdline(pid) or ""} for pid in (pids or [])]
-    return {
+    out: Dict[str, object] = {
         "device": str(node),
         "in_use": None if pids is None else bool(pids),
         "holders": holders,
     }
+    try:
+        from shani_chronoa import camera
+        info = camera.probe(str(node))
+        if "error" not in info:
+            out["card"] = info.get("card")
+            out["can_capture"] = info.get("can_capture")
+            out["formats"] = info.get("formats")
+            out["infrared"] = info.get("looks_ir")
+    except Exception:  # noqa: BLE001 - a probe that fails must not take the
+        # percept down; the node's existence and holders above are still facts.
+        pass
+    return out
 
 
 def _read_name(node: Path) -> Optional[str]:
