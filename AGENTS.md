@@ -23052,6 +23052,42 @@ So the decision frame, all measured: 31.1 h/epoch unattended and reachable;
 10.5 GB and comfortable; **9.1 points of ceiling**; and **17 s per request** of
 serving cost on a 4-core CPU box. Three of those four say go.
 
+### Which was wrong about two of them, because it timed a different model
+
+`tools/rerank.py --train` is implemented and was **run**, and it says the first
+two numbers above are wrong - by about a factor of eleven. `lora_timing.py` times
+the **causal LM with its 151k-way vocabulary head**, padded to a fixed 512
+tokens. The recipe in this very file specifies the opposite: "a scalar head, not
+instruction format". So the harness that produced the decision frame was not
+measuring the architecture the decision was about.
+
+Measured on the architecture that would ship, bf16, 4 threads, 8 real requests:
+
+| | `lora_timing.py` (LM + vocab head) | `--train` (encoder + scalar head) |
+|---|---:|---:|
+| per pair | ~67 s | **8.2 s** |
+| one epoch | 31.1 h | **2.67 h** |
+| peak RSS | 10.5 GB | **5.31 GB** |
+
+**So the hours were never the constraint and the memory never bound.** What
+remains is one objection, and it is the one that was never a measurement: ~17 s
+of selection per request against a dict lookup, for at most 9.1 points. That is
+still a product call - but it is now the *only* one, instead of the fourth of
+four, and two of the other three have been measured away.
+
+Written and run, in four shape errors worth keeping: `torch.bf16` does not exist
+(it is `torch.bfloat16`); a bf16 backbone and an fp32 head cannot meet in a
+`Linear`; PyTorch's `cross_entropy` cannot tell a `[1, C]` batch from `[N, C, d]`
+and raised `Expected target size [1, 1], got [1]`, so the objective is written
+out as `logsumexp(scores) - scores[0]`, which is the same loss with the label
+visible as a position; and `setup+load` first printed `0.0 s` because the timer
+started *after* the load.
+
+**The adapter is saved and nothing reads it.** `tool_select` does not load a
+LoRA; wiring one in is the separate decision, and its price is the ~17 s above.
+An 8-step run is not evidence that the objective learns anything - each step is a
+different request, so the loss series is a sample of the data, not a curve.
+
 **`tools/rerank.py --train` deliberately raises rather than pretending.** The
 harness that would decide it exists and the numbers it needed are printed by
 `--dry-run`; a training loop that has never been run is the machinery-whose-only-
