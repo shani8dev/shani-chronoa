@@ -20011,3 +20011,55 @@ guess: across 17 wizard pages and 4 window pages, every genuine render is
 **100%** and every false pass measured **7.2%** or **96.2% transparent**. Nothing
 sits in between, and **no byte count separates them** - a false pass at 129,834
 bytes outranks a real page at 25,932.
+
+## The Languages page had a download that measured "0 MB" (2026-10-13)
+
+The Languages wizard page is one of the seventeen this audit rendered for the
+first time ever. Reading it turned up a row saying
+
+> **ਪੰਜਾਬੀ - Punjabi** — **0 MB** - text only (no voice yet)
+
+beside eleven rows carrying real sizes. Measured, not inferred:
+
+| language | bytes | rendered | honest |
+|---|---:|---|---|
+| Tamil | 3,237,963 | 3 MB | 3.1 MiB |
+| Gujarati | 1,418,394 | 1 MB | 1.4 MiB |
+| **Punjabi** | **497,721** | **0 MB** | **486.1 KiB** |
+| Nepali | 1,002,911 | 1 MB | 979.4 KiB |
+
+`{n / 1e6:.0f}` rounds anything under 500,000 bytes to zero, so a real 486 KiB
+download rendered as **a download of nothing** - the absence-shaped wrong answer
+this file records everywhere else. It is the **same bug class already fixed in
+`edit_image`** (*"`0 KB, was 0 KB` for anything under 512 bytes"*), and
+`files.human_size` - which exists precisely to avoid it - was used **zero times**
+in `setup_wizard.py`.
+
+**Two copies of it, which is the part worth keeping.** There was a `_mb` helper
+at `setup_wizard.py:964`, and the Languages page inlined its own
+`f"{languages.install_size(code) / 1e6:.0f} MB"` beside it. One contract, two
+implementations, one of which nobody was reading - the shape this file records
+for `wpctl` (three copies), the finite check (four), and `capabilities._GROUPS`.
+The page now goes through the helper, so a second page cannot reintroduce it.
+
+**And the units meet in exactly one place.** `human_size` is 1024-based and `_mb`
+is 1000-based; both are right in their own convention, so the small-value branch
+is the only point on a row where a KiB sits next to an MB. That is stated in the
+docstring rather than left as a surprise.
+
+### The render that verified nothing, which is the part I nearly filed as verification
+
+The first application was **overwritten by a concurrent mutation run** (pid
+318684), whose `finally` restore puts the original text back over anything
+written while it holds the file. I only noticed because the verification render
+came back at **77,108 bytes - byte-identical to the pre-fix render**.
+
+**A render whose size does not move is a render that proved nothing**, and it is
+the same lesson as `setup:cloud-keys`' 129,834-byte false pass, reached from the
+opposite direction: that one was too big, this one was unchanged. Neither is
+detectable by "a file appeared", which is the whole of the sweep's PASS test.
+
+**The fix was staged outside the tree** (`/tmp/opencode/fix_mb.py`, both anchors
+asserted) precisely because `/tmp` is not something a `finally` in the repository
+can restore. Applying an edit to a file another process holds open is not a
+commit race; it is writing into something that is about to be overwritten.

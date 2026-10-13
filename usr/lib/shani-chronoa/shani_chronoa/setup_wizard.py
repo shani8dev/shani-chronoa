@@ -962,7 +962,29 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         "checked before use.")
 
     def _mb(size_bytes: float) -> str:
+        """A download size in the units a person expects, and **never "0 MB"**.
+
+        `{:.0f}` on anything under 500,000 bytes rounds to zero, so a real
+        download rendered as a download of nothing. Measured 2026-10-13 by
+        rendering the Languages page - the first time any wizard page had been
+        rendered in this repository - where **Punjabi** read
+        *"0 MB - text only (no voice yet)"* beside eleven rows carrying real
+        sizes. It is **497,721 bytes**, so the honest answer is 486 KiB, and
+        `files.human_size` already existed to say it.
+
+        `human_size` is 1024-based (MiB) and this is 1000-based (MB); both are
+        right in their own convention, so the small-value branch is where the two
+        meet, and it is the only place on a row where the units differ.
+
+        Imported here rather than at module scope, because this module is
+        imported by the MCP server and the CLI and keeps its GUI imports inside
+        `build_window` on purpose.
+        """
+        from shani_chronoa import files
+
         mb = float(size_bytes) / 1e6
+        if mb < 0.5:
+            return files.human_size(size_bytes)
         return f"{mb:.0f} MB" if mb < 1000 else f"{mb / 1000:.1f} GB"
 
     core = Adw.PreferencesGroup(
@@ -2218,7 +2240,10 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     for code, lang in languages.LANGUAGES.items():
         check = Gtk.CheckButton(active=code in la["chosen"])
         has = ("voice and text" if lang.voice else "text only (no voice yet)")
-        subtitle = ("added" if code in la["reads"] else f"{languages.install_size(code) / 1e6:.0f} MB") + " - " + has
+        # Through `_mb`, not a second copy of the division - the Languages page
+        # carried its own `f"{... / 1e6:.0f} MB"`, and so had the same "0 MB"
+        # bug the helper now cannot have.
+        subtitle = ("added" if code in la["reads"] else _mb(languages.install_size(code))) + " - " + has
         row = Adw.ActionRow(title=lang.label, subtitle=subtitle, activatable_widget=check)
         row.add_prefix(check)
         lang_group.add(row)
