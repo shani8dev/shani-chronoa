@@ -592,9 +592,17 @@ sentence in the menu instead. Re-measured 2026-10-12 after `b81f323` landed, on
 which this had become a live failure in **twelve** menu labels rather than three,
 and across **all five** dropdowns rather than one table - see
 "A menu item is a name, not a sentence" below. The fix is not splitting one string
-in two; it is using the column that was already there. Separately, the cloud-keys
+in two; it is using the column that was already there. Separately, ~~the cloud-keys
 wizard page asks for **640px of a 560px window** - the same defect this file records
-as fixed once at 590px, and still unfixed.
+as fixed once at 590px, and still unfixed.~~ **Re-measured 2026-10-13: neither
+number is current and the page is not overflowing at all.**
+`test_no_wizard_page_needs_a_sideways_scrollbar[cloud-keys]` **passes**, as do all
+16 wizard pages in that file - so "still unfixed" was a stale label, and this file
+contradicted itself about it twice (see "Other suite fixes" further down, which
+records the 590px fix as done). **A recorded open defect that is fixed reads as
+work still to do, and this one had been carried since 2026-10-12.** What cloud-keys
+*does* still do is fail to render at all, for an unrelated reason - see "The third
+false pass" below.
 
 Committing my version of `gui/window.py` or `setup_wizard.py` while they hold
 uncommitted work in both would drop it, which is the destructive path operation this
@@ -19499,3 +19507,57 @@ have written down, and `AGENTS.md` already carries the standing warning about it
 is right and it is also **not enough**: it says don't believe the FAIL, and the
 right response to "don't believe the FAIL" is to find out why, not to file it.
 The cause here was a defect in the thing that produced the FAIL.
+
+## The third false pass: `cloud-keys` writes 129KB of nothing and the sweep calls it PASS (2026-10-13)
+
+The 17 `setup:*` pages had **never once been rendered** in this repository's
+history - "0 of 17" - so the first sweep of them is the first look at any of it.
+Three of four render correctly on the first attempt (`brain` 100% opaque, `ears`
+100%, `done` 100%, each a real page with its title bar, body, orb mark and
+`Next:` button). **One does not.**
+
+    page:setup:cloud-keys.png   129,834 bytes   alpha: 87.1% transparent, 7.2% opaque
+    page:setup:brain.png         30,265 bytes   alpha: 100% opaque
+    page:setup:ears.png          44,057 bytes   alpha: 100% opaque
+    page:setup:done.png          25,932 bytes   alpha: 100% opaque
+
+**It is the largest file in the sweep and it is a photograph of almost nothing.**
+What it contains is the page's own description text - *"Chronoa needs a key to talk
+to a provider on your behalf..."* - rendered in the theme's foreground colour at a
+default font size, on transparency, with no window chrome and no controls. So it
+is not a page, and **the sweep reported `PASS` on it**, because a valid PNG was
+written and that is the whole of the PASS test.
+
+**Alpha coverage is the detector, and it has now caught all three instances.** The
+first two were the main-window pages at 96.2% transparent; this one is 87.1%. A
+target that settles early, or whose deepest renderable node is not the window,
+produces exactly this signature, and **no byte count distinguishes it** - 129KB of
+detached text outranks a real 30KB page.
+
+### The cause is a recorded renderer trap, not a page defect
+
+`cloud-keys` is the one wizard page holding **editable fields**, and this file
+already records that shape: *"An editable widget has no surface to draw into when
+snapshotted detached. Measured side by side in one mapped window: `Gtk.SearchEntry`,
+`Adw.EntryRow` and `Adw.StatusPage` all return `None`, while a plain `Gtk.Entry`
+and a `Gtk.Label` both return real nodes."*
+
+The renderer walks down to the deepest node that yields one, so on this page it
+walks past the unrenderable entry rows and stops on a **bare label**, captured
+detached - foreground with nothing painted behind it, which is the same artifact
+this file records for the task card.
+
+**The page's layout is fine, and that is measured rather than assumed.** The
+recorded cause for this page was a width overflow (struck above);
+`tests/test_ui_layout_contract.py -k "scrollbar or wizard"` is **16 passed**, so
+no wizard page asks for a sideways scrollbar. **Width was never why this page
+did not render.**
+
+### What a sweep of this shape has to print
+
+The PASS column is written by "a file appeared", and that cannot see any of the
+three false passes this audit has produced. A page sweep should report **opaque
+percentage** beside the byte count, and treat a target under a stated floor as
+**NOT RENDERED** rather than as a pass - because a capture that photographs less
+than its target is worse than `NO NODE`, since it looks like a render. The floor
+is not a guess: the four pages above sit at 7.2% and 100%, with nothing between.
