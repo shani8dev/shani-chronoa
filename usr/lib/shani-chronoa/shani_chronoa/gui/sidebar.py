@@ -113,6 +113,31 @@ def _open_settings(app, target: str) -> None:
 SIDEBAR_TITLE_LINES = 1
 
 
+def _announce_status(key: str, status: str) -> None:
+    """Put a panel's health into its row's accessible name and tooltip.
+
+    **Both, because they are read by different people.** The tooltip is what a
+    sighted reader who notices a colour they do not recognise hovers to ask; the
+    accessible label is the only thing a screen reader ever says about the row.
+    Updating one and not the other leaves half the users with no key - and the
+    half is whichever one nobody tested.
+    """
+    page = _STATUS_ANNOUNCED.get(key)
+    if page is None:
+        return
+    row, title = page
+    row.update_property(
+        [Gtk.AccessibleProperty.LABEL], [f"{title} - {status}"])
+    row.set_tooltip_text(f"{title} - {status}")
+
+
+#: panel id -> (row, title), filled while the rows are built. Kept beside
+#: `_surface_rows` rather than derived from it, because the accessible label
+#: needs the *display* title and `_surface_rows` stores it lowercased for the
+#: search.
+_STATUS_ANNOUNCED: "dict[str, tuple]" = {}
+
+
 def _words_in(name: str) -> str:
     """Every word of a panel's own description, lowercased, for searching.
 
@@ -384,6 +409,7 @@ class SidebarPage(Adw.NavigationPage):
                 group.add(row)
                 self._surface_rows[name] = (row, title.lower(), icon, section)
                 self._surface_words[name] = _words_in(name)
+                _STATUS_ANNOUNCED[name] = (row, title)
             self._rows_by_title[section] = entries
 
         self._chat_row = chat_row
@@ -438,6 +464,17 @@ class SidebarPage(Adw.NavigationPage):
         if status is None:
             dot.set_visible(False)
             return
+        # **The dot says its name out loud.** The health dot is the sidebar's
+        # loudest signal - a column of green, orange and grey beside every panel
+        # - and it had no key anywhere: no legend, and the row's accessible
+        # label was the title alone. So a newcomer sees a colour they cannot
+        # read and a screen-reader user is told the panel is called "Memory" and
+        # nothing at all about whether it is healthy.
+        #
+        # **The status values are already words** - "ok", "attention",
+        # "unknown" - so this adds no vocabulary of its own to keep true, and a
+        # status nobody thought to name does not silently become a colour.
+        _announce_status(key, status)
         if status not in common.STATUS_CLASSES:
             raise ValueError(
                 f"unknown status {status!r}; expected one of "
