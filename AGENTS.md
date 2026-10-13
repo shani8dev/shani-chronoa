@@ -19172,3 +19172,54 @@ caller builds the tooltip like every other row.
 
 **Naming the code that produced a claim is the good habit here and it is kept.**
 It was in the wrong place.
+
+## Two class names with nothing behind them, and a provenance string in the wrong place (2026-10-13)
+
+Both found by rendering, not by reading. Both are the "the code says it does
+something and the screen says otherwise" shape.
+
+### `machine-reading-table` was added by the panel and styled nowhere
+
+`gui/surfaces/machine.py` builds a sense's reading through
+`common.key_values()` - a two-column table, on purpose, because the module's own
+docstring says a reading handed to a label is *"six wrapped lines of the same
+weight, and the number anyone came for has to be found by reading"*. It then does
+`table.add_css_class("machine-reading-table")`.
+
+**That class name appeared nowhere else in the package.** `machine-reading` -
+`ROW_CSS`, the marker a test walks to find every sense row - was the same. So
+the table was built correctly and then rendered with **no container at all**,
+which is why AGENTS.md had carried *"Not changed, noted: Machine's readings are
+monospace blocks outside the row cards"* for a while. The reason was two class
+names with no rule behind them, not a layout that could not be fixed.
+
+The fix is an inset: a left margin ties the reading to the row above it and a
+background separates data from page. The monospace is kept deliberately - these
+are aligned columns read off sysfs, and the alignment is the point.
+
+**Measured on the reading itself rather than on the picture**, because the first
+probe printed a `Percept`'s `repr()` instead of its `content` and reported "1
+line, 1 with a colon", which would have said `key_values` had nothing to lay
+out. The content is `key: value` / indented throughout, which is exactly the
+shape that helper documents it handles - so the table was right and only its
+container was missing.
+
+### `voice`: naming the code that produced a claim, in the wrong place
+
+The "Pitch, tempo and rate" row ended with a literal
+`PiperTTS.timbre_description(), PiperTTS.timbre_effects(), PiperTTS.timbre_problem()`
+**in its body text**.
+
+**The whole panel is against that.** `_row(title, detail, tooltip)` is called
+with `f"...\nRead from {engine.source}"`, so every claim on the page names the
+code that produced it *in the tooltip*. This one row spliced it into the detail
+instead - and the caller passed the detail as its own tooltip, which is why the
+string appeared twice and was useful in neither.
+
+`_timbre_row` now returns the provenance as a third element and the caller
+builds the tooltip the way the engine, speech-in and model-file rows all do.
+
+**The habit is kept, because the habit is good.** "Name the code that produced
+this" is why this page can be audited at all - `source` is a field on every
+`_Engine`, and the Kokoro and Piper rows carry `kokoro-tts-enabled` and
+`PiperTTS.voice_path` for the same reason. It was in the wrong place, not wrong.

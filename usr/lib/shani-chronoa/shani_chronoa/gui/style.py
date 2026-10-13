@@ -165,6 +165,31 @@ class StyleMixin:
             font-family: monospace;
             font-size: 12px;
         }
+        /* A machine-state sense's reading, under the row that names it.
+
+           **`machine-reading` and `machine-reading-table` were both added by
+           `gui/surfaces/machine.py` and neither had a rule here.** The panel
+           built a proper two-column key/value table for a reading - on purpose,
+           because "the number anyone came for has to be findable" - and then
+           rendered it with no container at all, so the result read as a bare
+           preformatted dump on the page background rather than as data belonging
+           to the sense named directly above it. AGENTS.md had this down as
+           *"Not changed, noted: Machine's readings are monospace blocks outside
+           the row cards"* - the reason was two class names with nothing behind
+           them.
+
+           The inset is what does the work: a left margin ties the reading to
+           its row, and a background separates the data from the page. The
+           monospace is kept deliberately - these are aligned columns read off
+           sysfs and aligning them is the point. */
+        .machine-reading-table {
+            margin: 2px 0 4px 12px;
+            padding: 6px 10px;
+            background-color: alpha(@theme_fg_color, 0.05);
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+        }
         /* The header row's own buttons sit in the block's padding, so they get
            the dim treatment rather than competing with the code. */
         .reply-block button {
