@@ -22269,3 +22269,77 @@ height, or the row is simply not reached, is **not established** - and a finding
 whose cause is unmeasured is the thing this file records most often.
 
 Anchors: **60 sets, 495 anchors, all still match.**
+
+## The shortcut list read as a paragraph, because five subtitles wrapped (2026-10-13)
+
+Rendered `shortcuts` and looked at it. **Five of the eleven rows in "General"
+had their accelerator on a line of its own, hard against the left edge**, under
+a description - while the six rows whose subtitle happened to be short kept it
+right-aligned beside the title:
+
+    In-app browser          Shift Ctrl U          <- orphaned, far left
+    Show or hide the panels     F9                <- orphaned
+    Show or hide the Now rail  F10                <- orphaned
+    The body register       Shift Ctrl B          <- orphaned
+    Hands-free listening     Shift Ctrl W          <- orphaned
+    Set Chronoa up          Shift Ctrl S          <- orphaned
+
+So the column that makes a shortcut list read as a list existed for exactly the
+rows that had the least to say. That is the mode strip's **"a menu item is a
+name, not a sentence"** arriving in a different widget, and like that one it is
+invisible to every check that does not look - the rows carry correct text, the
+accelerators are registered, and `test_about.py` passed throughout.
+
+**Cause, measured on libadwaita 1.9.1:** `Adw.ShortcutsItem` keeps the
+accelerator right-aligned beside the title until the subtitle wraps, and then
+drops it below the description. The fix is the subtitle.
+
+**The budget is the table's own break, not a number chosen to pass.** Eleven of
+the sixteen subtitles are **46-65 characters** and five were **95-116**, with
+nothing in between; 70 and 75 fit the same eleven, which is what shows the gap is
+real rather than a threshold picked to split the difference. Five rewritten, all
+now 34-58.
+
+### Where the cut sentence goes, and where it honestly cannot
+
+`Shortcut` gained a `detail` field and `_tooltip_for()` shows it - **on the
+`Adw.PreferencesGroup` fallback only**. `Adw.ShortcutsItem` is a **model** in both
+the 1.8 and 1.9 spellings, so on the native dialog that runs here the shorter
+subtitle is genuinely all the row can say. Recorded on the constant and on the
+helper rather than papered over, the same way `ShortcutsWindow` already records
+that `parent` is honoured by the fallback and ignored on 1.9.
+
+**My first version called `set_tooltip_text` on both model builders.** The suite
+caught it on the first run with the exact message -
+
+    AttributeError: 'ShortcutsItem' object has no attribute 'set_tooltip_text'
+
+- which is the module's own docstring being right ("both the section and the item
+are plain models, not widgets") and me having read past it. Two of the three
+builders were wrong and the third was right, which is what an unguarded
+assumption about one of three shapes produces.
+
+### Verified by rendering again, not by the test
+
+All **eleven** rows hold the accelerator in the column, and the card now fits the
+dialog instead of overflowing it - content 36% -> 42% because the rows are one
+line shorter and "Conversation" and "This window" are reachable. 18 passed in
+`tests/test_about.py`; the new budget guard was **mutated and confirmed red**
+(`1 failed, 17 passed`, a subtitle pushed past 65), the file restored
+byte-identical, pyflakes clean.
+
+### And the harness still cannot photograph the main window above 460px
+
+`CHRONOA_FORCE_SIZE=1` **blanks `main` at every size tried** - 1024x700 and
+1280x860 both come back as a white rectangle inside the orange frame, at 14%
+content, which **clears the 5% floor the gate added earlier today**. Without the
+override the same target renders for real at its own 460x640. So the override -
+added to make the wide layouts reachable - is what stops them being reachable, and
+the frame-only image scores high enough to pass because the frame grows with the
+canvas while the interior stays empty.
+
+**Not fixed, and it is the reason the wide main-window layouts are still
+unphotographed.** `main` at its own 460x640 is now a real, complete picture - the
+orb, "Ready", the model row, all eight organ lights, the shortcut buttons and the
+composer - and 460 is what the window opens at, so that render is the newcomer's
+actual first view rather than a narrow version of it.

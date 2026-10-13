@@ -82,6 +82,30 @@ logger = logging.getLogger(__name__)
 Adw.init()
 
 
+#: **A subtitle must fit one line, or the accelerator leaves its column.**
+#:
+#: Measured on this box at the dialog's own width, by rendering it and looking:
+#: `Adw.ShortcutsItem` keeps the key right-aligned beside the title until the
+#: subtitle wraps, and then puts the key **on a line of its own, hard against the
+#: left edge**. Five rows did that, so a shortcut list read as a paragraph for
+#: exactly the rows that had the most to say - which is the mode strip's
+#: "a menu item is a name, not a sentence", arriving in a different widget.
+#:
+#: **65 is this table's own break and not a number chosen to pass.** Eleven of the
+#: sixteen subtitles are 46-65 characters and five are 95-116; nothing lies in
+#: between. 70 and 75 fit the same eleven, which is what shows the gap is real
+#: rather than a threshold I picked to split the difference.
+#:
+#: **Where the cut sentence goes, and where it does not.** It becomes the row's
+#: `detail`, and `_tooltip_for` shows it - on the `Adw.PreferencesGroup`
+#: fallback, which is a widget. `Adw.ShortcutsItem` is a **model** in both
+#: spellings, so on the native 1.9 dialog that runs here the shorter subtitle is
+#: genuinely all the row can say, and the clauses left off are left off. Stated
+#: here so the next reader does not assume the row is hiding something it can
+#: reveal.
+SUBTITLE_MAX = 65
+
+
 class Shortcut(NamedTuple):
     """One row: what the app calls it, what it really runs, and its key.
 
@@ -94,6 +118,10 @@ class Shortcut(NamedTuple):
     action: str
     accelerator: str = ""
     subtitle: str = ""
+    #: The whole sentence when `subtitle` had to be cut to fit. Never read
+    #: off the screen - the row carries it as a tooltip - so a person
+    #: scanning the list is not held up by it and one who wants it hovers.
+    detail: str = ""
 
 
 class ShortcutSection(NamedTuple):
@@ -113,6 +141,7 @@ SHORTCUT_SECTIONS = (
         ),
         Shortcut(
             "In-app browser", "open-browser", "<Ctrl><Shift>u",
+            "Needs WebKitGTK, and says so when it is missing.",
             "Needs WebKitGTK. Without it the key does nothing and the browser "
             "says which package is missing.",
         ),
@@ -122,6 +151,7 @@ SHORTCUT_SECTIONS = (
         ),
         Shortcut(
             "Show or hide the Now rail", "toggle-rail", "F10",
+            "What Chronoa is doing, what it changed, how it is armed.",
             "The right-hand column: what Chronoa is doing, what it changed "
             "that can be taken back, and how it is currently armed.",
         ),
@@ -131,16 +161,19 @@ SHORTCUT_SECTIONS = (
         ),
         Shortcut(
             "The body register", "show-body", "<Ctrl><Shift>B",
+            "Every organ, what it is for, and which light shows it.",
             "Every organ, what it is for, and which lights show it. The strip "
             "above the composer is the same thing, live.",
         ),
         Shortcut(
             "Hands-free listening", "toggle-wake-word", "<Ctrl><Shift>W",
+            "The wake phrase, on or off. Push to talk works without it.",
             "Turn the wake phrase on or off. Needs a speech recognition model "
             "installed; push to talk works without one.",
         ),
         Shortcut(
             "Set Chronoa up", "setup", "<Ctrl><Shift>s",
+            "The model, the ears and the voice.",
             "The model, the ears and the voice. Also the button in the header, "
             "and “Set up Chronoa again” under Settings.",
         ),
@@ -269,6 +302,28 @@ def _section_19(section: ShortcutSection) -> "Adw.ShortcutsSection":
     return widget
 
 
+def _tooltip_for(shortcut: Shortcut) -> str:
+    """The row's detail, on the one builder that can carry it.
+
+    **Only the fallback has a widget to hang a tooltip on**, and that is a fact
+    about libadwaita rather than about this module: `Adw.ShortcutsItem` is a
+    **model** in both the 1.8 and 1.9 spellings - `_section_19`'s own docstring
+    says so and the measurement agrees -
+
+        AttributeError: 'ShortcutsItem' object has no attribute 'set_tooltip_text'
+
+    - so on the native dialog the longer sentence has nowhere to go and the
+    shortened subtitle is all the row can say. That is **recorded rather than
+    papered over**, the same way `ShortcutsWindow` records that `parent` is
+    honoured by the fallback and ignored on 1.9.
+
+    The first version of this fix called `set_tooltip_text` on both model
+    builders. The test file caught it on the first run with that exact message,
+    which is what a test naming the API you are about to use is for.
+    """
+    return shortcut.detail or shortcut.subtitle
+
+
 def ShortcutsWindow(application=None, parent=None) -> Gtk.Widget:
     """Every key this app really binds, in the app's own three groupings.
 
@@ -361,6 +416,7 @@ class _FallbackShortcutsWindow(Gtk.Window):
         row = Adw.ActionRow(title=shortcut.title)
         if shortcut.subtitle:
             row.set_subtitle(shortcut.subtitle)
+        row.set_tooltip_text(_tooltip_for(shortcut))
         row.add_suffix(self._shortcut_label(shortcut))
         return row
 

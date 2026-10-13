@@ -440,3 +440,53 @@ def test_the_about_window_says_what_this_is(built):
     assert len(comments) > 200, "a one-line about dialog is not a 'what this is' section"
     for expected in ("whisper.cpp", "llama.cpp", "MCP", "not somewhere else"):
         assert expected in comments, f"{expected!r} is missing from the about text"
+
+def _rows_over_budget(module):
+    """The shortcut rows whose subtitle would wrap, by the module's own budget."""
+    return [
+        (section.title, sc.title, len(sc.subtitle or ""))
+        for section in module.SHORTCUT_SECTIONS
+        for sc in section.shortcuts
+        if len(sc.subtitle or "") > module.SUBTITLE_MAX
+    ]
+
+
+def test_a_subtitle_that_would_wrap_is_refused():
+    """**A wrapped subtitle pushes the accelerator out of its column**, and that
+    is only visible in a picture.
+
+    Rendered before the budget existed: `Adw.ShortcutsItem` holds the key
+    right-aligned beside the title until the subtitle wraps, and then drops it
+    onto **a line of its own, hard against the left edge**. Five of the eleven
+    rows did it, so the shortcut list read as a paragraph for exactly the rows
+    that had the most to say - which is the mode strip's "a menu item is a name,
+    not a sentence", arriving in a different widget.
+
+    The budget is the table's own break rather than a number chosen to pass:
+    eleven subtitles are 46-65 characters and five were 95-116, with nothing in
+    between. 70 and 75 fit the same eleven.
+    """
+    module = pytest.importorskip("shani_chronoa.gui.about")
+    over = _rows_over_budget(module)
+    assert not over, (
+        "these subtitles wrap, so the accelerator leaves its column and lands "
+        f"under the description, left-aligned: {over}"
+    )
+
+
+def test_the_budget_check_can_fail(monkeypatch):
+    """**The control.** A guard that no input can fail is not a guard, and this
+    one asserts an *absence* - so the only way to know it is looking is to
+    tighten the budget until the real table breaks it.
+
+    That is also what proves the test reads `SUBTITLE_MAX` rather than a number
+    of its own, which is the `skills_total` mistake: a second copy of the
+    threshold is a second thing to keep in step.
+    """
+    module = pytest.importorskip("shani_chronoa.gui.about")
+    monkeypatch.setattr(module, "SUBTITLE_MAX", 10)
+    over = _rows_over_budget(module)
+    assert over, (
+        "every subtitle passed a 10-character budget, so the check is not "
+        "reading SUBTITLE_MAX - or it is reading a copy of it"
+    )
