@@ -22743,3 +22743,90 @@ to the top" indistinguishable.
 **fit** is measured above and recorded here rather than pinned by a threshold
 that would only be fitted to this machine. 12 tests, and 255 pass across the
 seven suites that touch `widgets.py`.
+
+## Two more readers had the same defect, and the third of them was a person (2026-10-13)
+
+The entry above fixed `_entries` and `dream` and said *"three of seven readers"*
+- and the other four were found by sweeping the population rather than by
+tripping over them again. Both new ones are worse than the three already fixed.
+
+**`learning.load()` is the reader for training.** `train_and_save`,
+`merge_models` and two more fit their models from it, so a rotation meant fitting
+the outcome model on whatever had been written since. Measured on a copy of this
+machine's own log through the real rotation path:
+
+    whole history:              18,794 examples in 0.40s
+    after ONE rotation:              0
+    after the fix:             18,794 examples in 0.40s   (LOST: 0 of 18,794)
+
+**`WINDOW` is 200,000 and the whole history is 18,794**, so the cap was never the
+binding constraint - the file boundary was. A model fitted on nothing is reported
+with a corpus the report never mentions, which is the absence-shaped wrong answer
+this whole change exists to prevent, reached through the fix.
+
+**`settings_window/activity.py::_log_tail` is the Tool Activity panel**, which is
+the surface that answers *"what has Chronoa done"*. It read one generation, and
+its `exists` is true and it has lines to show, so **no note fires**: a person saw
+a short history with nothing saying it was short. `tail.size` renders as *"the log
+weighs X"*, so a size taken from the part it read would have claimed a 19 MB log
+weighs 1 KB. After: **321 rows before a rotation, 321 after**, and 18.0 MiB
+reported for a log that is 18.0 MiB.
+
+**And the over-fix was caught by a test in a file I had not read.** Reading every
+chunk is only correct while a chunk that cannot be read does not take the rest
+with it - so the first version `continue`d past an unreadable chunk, and
+`test_an_unreadable_log_is_not_reported_as_an_empty_one` went red: a permission
+error was being reported as **"The log is there and empty"**, which is *less*
+honest than what shipped. The rule is now what this panel's own docstring says a
+person acts on - a chunk that cannot be read contributes nothing, and a tail from
+which **nothing at all** could be read is a read failure (`read_any`). The set
+carries **two** over-fix mutations for the two directions, because the obvious
+wrong repair is to report `unreadable` whenever any chunk failed, and no
+assertion about how many rows were shown would have caught that.
+
+### The sweep that found them, and why the obvious version of it is a crying wolf
+
+Every shipped function that mentions a log-path resolver, and whether it routes
+through `log_files()`:
+
+    functions touching a resolver:      26
+    of those, NOT routing:             21   <- a gate asserting "must route" cries wolf
+
+**21 of 26.** They are *path resolvers* (`_log_path`, `log_dir`), *callers* that
+pass a path to a reader which routes, *writers* (`_write_to_log`, `rotate`),
+`stat()`-only revision markers, and `dream-*.txt` globs that are not this log at
+all. Filtered to functions that **both** touch a resolver and open it, **every
+remaining case is legitimate** - so there is no unrouted reader left, and the
+gate's population is the six that need a documented reason rather than 26. **This
+is the "a scanner that reports 54 files is worse than no scanner" conclusion
+reached three times in this file**, and the honest residue is the measurement
+rather than a permanent red suite.
+
+### Two of my own mistakes, and the second is the one that would have shipped
+
+- **The cache-revision mutation was a measured equivalent, and my first reason for
+  it was a guess the run corrected.** I wrote "carrying every chunk is defence in
+  depth against an archive being pruned without the active log changing, and *if
+  it is caught, the reason here is wrong*". It was not caught - because **a
+  rotation renames the active log away and writes a new one from empty, so its
+  own `(size, mtime)` changes on every rotation, and a rotation is the only event
+  that changes the archive set.** Measured over three rotations: archives 0->1->2->3
+  and the active log's revision changed every time. So there is no reachable state
+  the multi-chunk key would have caught, and the reason is simpler than defence in
+  depth.
+- **`load()`'s over-fix guard had no witness at all.** `test_one_unreadable_
+  archive_does_not_blind_the_reader` drove only the panel, so the mutation
+  `one unreadable archive blinds the training reader` came back a **survivor**
+  while its panel twin was caught. **A witness that covers half the readers of a
+  property reads as coverage of all of them** - and my own fix was what made the
+  suite assert `>= 5` where the right claim was `>= 5, and not "this whole log is
+  unreadable"` (the unreadable archive's records genuinely cannot be read; losing
+  the readable ones is the defect).
+
+44 tests in `tests/test_call_log_rotation.py`, 89 across it and the panel.
+`tools/mutations/call_log_rotation.py`: **24 mutations, 22 caught, 0 survivors, 2
+equivalent (both documented), 0 unmeasurable, 0 stale**, and no line reading "NOT
+caught by". 357 passed / 1 failed across every test file touching learning, dream,
+distill or the activity panel; the failure is pre-existing (`1db21c4`, "explain
+gravity still offers tools") and proved by swapping my two source files for HEAD's
+**in a snapshot** and getting the identical failure.

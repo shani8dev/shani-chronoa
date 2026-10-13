@@ -28,6 +28,8 @@ TEST_FILE = 'tests/test_call_log_rotation.py'
 _TT = 'usr/lib/shani-chronoa/shani_chronoa/tool_tracking.py'
 _LEARN = 'usr/lib/shani-chronoa/shani_chronoa/learning.py'
 _DREAM = 'usr/lib/shani-chronoa/shani_chronoa/dream.py'
+_ACTIVITY = ('usr/lib/shani-chronoa/shani_chronoa/settings_window/'
+              'activity.py')
 
 MUTATIONS = [
     {
@@ -312,5 +314,116 @@ MUTATIONS = [
         'file': _DREAM,
         'old': '    for chunk in reversed(tool_tracking.log_files(path)):',
         'new': '    for chunk in tool_tracking.log_files(path):',
+    },
+    {
+        'label': 'the outcome model is trained on one generation again',
+        'why': '**The severe one, restored verbatim.** `load()` is the reader for '
+               'training - `train_and_save`, `merge_models` and two more fit '
+               'their models from it. Measured on a copy of the real log through '
+               'the real rotation path: 18,794 examples, then **0** after one '
+               '`rotate()`. `WINDOW` is 200,000 and the whole history is 18,794, '
+               'so the cap was never the binding constraint - the file boundary '
+               'was. Nothing in the report says which corpus it fitted.',
+        'expect': ['test_the_training_reader_sees_the_whole_history_after_a_rotation',
+                   'test_training_reads_what_a_rotation_just_archived'],
+        'file': _LEARN,
+        'old': '    chunks = tool_tracking.log_files(source)',
+        'new': '    chunks = [source]',
+    },
+    {
+        'label': 'the training cache keys on the active log alone',
+        'why': 'EQUIVALENT, measured rather than argued, and **my first reason '
+               'for it was a guess the run corrected.** I wrote that carrying '
+               'every chunk was defence in depth against an archive being pruned '
+               'without the active log changing, and added "if it is caught, the '
+               'reason here is wrong". It was not caught, and the reason it is '
+               'not is simpler than defence in depth: **a rotation renames the '
+               'active log away and the replacement is written from empty, so '
+               'the active log\'s own `(size, mtime)` changes on every single '
+               'rotation - and a rotation is the only event that changes the '
+               'archive set at all.** Measured over three rotations: archives '
+               '0->1->2->3, and the active log\'s revision changed every time. '
+               'So there is no reachable state in which the archives move and the '
+               'active log does not, and the multi-chunk revision is a '
+               'statement of what the key means rather than extra work.',
+        'equivalent': True,
+        'expect': [],
+        'file': _LEARN,
+        'old': '    revisions: List[tuple] = []\n'
+               '    for chunk in chunks:\n'
+               '        try:\n'
+               '            st = chunk.stat()',
+        'new': '    revisions: List[tuple] = []\n'
+               '    for chunk in chunks[:1]:\n'
+               '        try:\n'
+               '            st = chunk.stat()',
+    },
+    {
+        'label': 'one unreadable archive blinds the training reader',
+        'why': 'The over-fix guard. "Read every chunk" is only correct while a '
+               'chunk that cannot be read does not take the rest with it: the '
+               'first version returned `[]` for the whole corpus, which is how one '
+               'permission error on an archive becomes "this machine has no '
+               'history" - and an empty corpus trains a model and reports it.',
+        'expect': ['test_one_unreadable_archive_does_not_blind_the_reader'],
+        'file': _LEARN,
+        'old': '            logger.debug("outcome model: could not read %s: %s", chunk, exc)\n'
+               '            continue',
+        'new': '            logger.debug("outcome model: could not read %s: %s", chunk, exc)\n'
+               '            return []',
+    },
+    {
+        'label': 'the Tool Activity panel reads one generation again',
+        'why': '**The one a person reads.** This is the surface that answers '
+               '"what has Chronoa done", so a one-generation tail shows a short '
+               'history with nothing saying it was short - `exists` is true and '
+               'there are lines to show. The same absence the learning readers '
+               'had, on the surface least likely to be checked.',
+        'expect': ['test_the_panel_reads_the_archives'],
+        'file': _ACTIVITY,
+        'old': '        chunks = list(reversed(tool_tracking.log_files(path)))',
+        'new': '        chunks = list(reversed(tool_tracking.log_files(path)))[-1:]',
+    },
+    {
+        'label': 'the panel reports only the part it read as the log\'s size',
+        'why': 'It renders `tail.size` as *"the log weighs X"*, so a size taken '
+               'from one generation would claim a 19 MB log weighs 1 KB - a '
+               'confident wrong number in the one sentence that tells a person how '
+               'much history there is.',
+        'expect': ['test_the_panel_does_not_understate_how_big_the_log_is'],
+        'file': _ACTIVITY,
+        'old': '            total += chunk.stat().st_size',
+        'new': '            total += 0',
+    },
+    {
+        'label': 'one unreadable archive is reported as the whole log failing',
+        'why': '**The over-fix in the other direction**, and the reason this set '
+               'has two of them rather than one. `read_any` is what keeps a '
+               'single unreadable chunk from blinding the panel, and the obvious '
+               'wrong repair is to report `unreadable` whenever *any* chunk '
+               'failed. That puts "could not be read" on a log the panel has '
+               'just read most of - a claim about the whole history from one '
+               'file the filesystem would not hand over, which is the absence-'
+               'shaped wrong answer the panel exists not to make. Removing '
+               '`read_any` entirely is caught by the *other* witness in the same '
+               'test (a fully unreadable log reporting as empty), so the pair '
+               'holds both directions.',
+        'expect': ['test_one_unreadable_archive_does_not_blind_the_reader'],
+        'file': _ACTIVITY,
+        'old': '    if not read_any:',
+        'new': '    if unreadable:',
+    },
+    {
+        'label': 'one unreadable archive blanks the Tool Activity panel',
+        'why': 'The over-fix guard for the panel, and the more expensive half of '
+               'it: the panel would say nothing has been recorded, which is a '
+               'claim about the machine rather than about one file it could not '
+               'read.',
+        'expect': ['test_one_unreadable_archive_does_not_blind_the_reader'],
+        'file': _ACTIVITY,
+        'old': '            logger.debug("activity: could not read %s: %s", chunk, exc)\n'
+               '            continue',
+        'new': '            logger.debug("activity: could not read %s: %s", chunk, exc)\n'
+               '            return _LogTail(True, 0, [], False, str(exc))',
     },
 ]

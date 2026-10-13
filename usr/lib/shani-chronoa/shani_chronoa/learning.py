@@ -3613,54 +3613,76 @@ def load(path: Optional[Path] = None, limit: int = 200_000,
 
     Cached per revision of the file; see `_EXAMPLE_CACHE`.
     """
-    source = path or _log_path()
+    source = Path(path) if path is not None else _log_path()
     # A stable, order-independent key for the filter, so `{a, b}` and `{b, a}`
     # share a cache entry instead of parsing the whole log twice.
     filter_key = "" if only_tools is None else "\x00".join(sorted(only_tools))
     cache_key = (str(source), filter_key)
-    try:
-        stat = source.stat()
-        cached = _EXAMPLE_CACHE.get(cache_key)
-        if cached is not None and cached[0] == (stat.st_size, stat.st_mtime):
-            return cached[1]
-    except OSError:
-        pass
-    try:
-        handle = source.open("r", encoding="utf-8", errors="replace")
-    except OSError as exc:
-        logger.debug("outcome model: no log at %s: %s", source, exc)
-        return []
+    from shani_chronoa import tool_tracking
+    # **Oldest-first, across every kept chunk.** Rotation moves the oldest
+    # records into `tool_calls.log.N`, and this is the reader for *training*
+    # (`train_and_save`, `merge_models` and two more), so reading only the active
+    # log meant **fitting the outcome model on whatever had been written since the
+    # last rotation.** Measured on a copy of this machine's own log through the
+    # real rotation path: 18,794 examples, then after one `rotate()` and one
+    # recorded call, **0** - and a model fitted on nothing is reported with a
+    # corpus the report never mentions. `WINDOW` is 200,000 and the whole history
+    # is 18,794, so the cap was never the binding constraint; the file boundary
+    # was.
+    #
+    # The revision carries **every chunk**, not just the active log, because a
+    # rotation moves records *out of* the active log: keying on the active log
+    # alone would serve a stale answer after one.
+    chunks = tool_tracking.log_files(source)
+    revisions: List[tuple] = []
+    for chunk in chunks:
+        try:
+            st = chunk.stat()
+        except OSError:
+            revisions.append((str(chunk), -1, -1))
+            continue
+        revisions.append((str(chunk), st.st_size, st.st_mtime))
+    cached = _EXAMPLE_CACHE.get(cache_key)
+    if cached is not None and cached[0] == tuple(revisions):
+        return cached[1]
     examples: List[Example] = []
-    with handle:
-        for line in handle:
-            if len(examples) >= limit:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except ValueError:
-                continue
-            if not isinstance(record, dict) or not record.get("tool_name"):
-                continue
-            verdict = str(record.get("verdict") or "").lower()
-            if verdict not in VERDICTS:
-                continue
-            if only_tools is not None and str(record.get("tool_name")) not in only_tools:
-                continue
-            examples.append(Example(
-                tuple(active_vector(features(record))),
-                VERDICTS.index(verdict)))
-        # The window is a working set, not an archive. The log on disk keeps
-        # everything; this keeps what a recent-experience model can actually use.
-        if len(examples) > WINDOW:
-            examples = examples[-WINDOW:]
-    try:
-        stat = source.stat()
-        _EXAMPLE_CACHE[cache_key] = ((stat.st_size, stat.st_mtime), examples)
-    except OSError:
-        pass
+    for chunk in chunks:
+        if len(examples) >= limit:
+            break
+        try:
+            handle = chunk.open("r", encoding="utf-8", errors="replace")
+        except OSError as exc:
+            # **One unreadable chunk must not blind the reader to the rest.** The
+            # first version returned `[]` here, which is how a single permission
+            # error on an archive becomes "this machine has no history".
+            logger.debug("outcome model: could not read %s: %s", chunk, exc)
+            continue
+        with handle:
+            for line in handle:
+                if len(examples) >= limit:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict) or not record.get("tool_name"):
+                    continue
+                verdict = str(record.get("verdict") or "").lower()
+                if verdict not in VERDICTS:
+                    continue
+                if only_tools is not None and str(record.get("tool_name")) not in only_tools:
+                    continue
+                examples.append(Example(
+                    tuple(active_vector(features(record))),
+                    VERDICTS.index(verdict)))
+    # The window is a working set, not an archive. The log on disk keeps
+    # everything; this keeps what a recent-experience model can actually use.
+    if len(examples) > WINDOW:
+        examples = examples[-WINDOW:]
+    _EXAMPLE_CACHE[cache_key] = (tuple(revisions), examples)
     return examples
 
 class OutcomeModel:

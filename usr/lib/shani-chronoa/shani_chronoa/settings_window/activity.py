@@ -210,34 +210,86 @@ class _LogTail(NamedTuple):
 
 
 def _log_tail(path) -> _LogTail:
-    """The newest lines of the on-disk log, without reading all of it."""
+    """The newest lines of the on-disk log, without reading all of it.
+
+    **Across the archives, newest chunk first.** Rotation moves the oldest records
+    into `tool_calls.log.N`, so a tail of the active log alone is a tail of *one
+    generation* - and this panel would show a person a short history with nothing
+    saying it was short, because `exists` is true and there are lines to show.
+    That is the same absence the learning readers had, and it is the one a
+    person is most likely to read, since this is the panel that answers "what has
+    Chronoa done".
+
+    `size` is the **whole** log's, not the part that was read, because the panel
+    renders it as *"the log weighs X"* - and reading one generation would have
+    it claim a 19 MB log weighs 1 KB.
+    """
+    from shani_chronoa import tool_tracking
     try:
-        if not path.exists():
-            return _LogTail(False, 0, [], False, "")
-        size = path.stat().st_size
+        chunks = list(reversed(tool_tracking.log_files(path)))
     except OSError as exc:
-        # `exists()` can raise as well as answer False: a log directory the user
-        # cannot search is not an absent log.
         return _LogTail(True, 0, [], False, str(exc))
-    start = max(0, size - _TOOL_LOG_TAIL_BYTES)
-    try:
-        with path.open("rb") as handle:
-            if start:
-                handle.seek(start)
-            blob = handle.read(_TOOL_LOG_TAIL_BYTES)
-    except OSError as exc:
-        return _LogTail(True, size, [], start > 0, str(exc))
-    text = blob.decode("utf-8", "replace")
-    if start:
-        # Whatever was cut off the front is a fragment of a record, not a record.
-        # Keeping it would put a guaranteed parse failure in front of every read
-        # of a log larger than the cap, and this panel would then report a
-        # corrupt log on a perfectly healthy one.
-        text = text.split("\n", 1)[1] if "\n" in text else ""
-    lines = list(files.iter_lines(text))
+    if not chunks:
+        return _LogTail(False, 0, [], False, "")
+    total = 0
+    for chunk in chunks:
+        try:
+            total += chunk.stat().st_size
+        except OSError as exc:
+            return _LogTail(True, total, [], False, str(exc))
+    remaining = _TOOL_LOG_TAIL_BYTES
+    blobs = []
+    truncated = False
+    read_any = False
+    unreadable = ""
+    for chunk in chunks:
+        if remaining <= 0:
+            truncated = True
+            break
+        try:
+            size = chunk.stat().st_size
+            started_mid = size > remaining
+            with chunk.open("rb") as handle:
+                if started_mid:
+                    truncated = True
+                    handle.seek(size - remaining)
+                    handle.readline()
+                    remaining = 0
+                else:
+                    remaining -= size
+                blob = handle.read()
+            read_any = True
+        except OSError as exc:
+            # **One unreadable chunk must not blind the panel to the rest.** The
+            # first version returned `[]` for the whole tail here, which is how a
+            # single permission error on an archive becomes "nothing has been
+            # recorded". It is the panel's own four states that settled the rule
+            # below: a chunk that cannot be read contributes nothing, and a tail
+            # from which *nothing at all* could be read is a read failure.
+            unreadable = unreadable or str(exc)
+            logger.debug("activity: could not read %s: %s", chunk, exc)
+            continue
+        text = blob.decode("utf-8", "replace")
+        if started_mid:
+            # Whatever was cut off the front is a fragment of a record, not a
+            # record. Keeping it would put a guaranteed parse failure in front of
+            # every read of a log larger than the cap, and this panel would then
+            # report a corrupt log on a perfectly healthy one.
+            text = text.split("\n", 1)[1] if "\n" in text else ""
+        blobs.append(text)
+    if not read_any:
+        # **Nothing at all could be read is a read failure, not an empty log.**
+        # `test_an_unreadable_log_is_not_reported_as_an_empty_one` caught my first
+        # version of this, which swallowed every error and reported "The log is
+        # there and empty" about a file the panel had just been refused - and this
+        # panel's own docstring says a person acts differently on the two.
+        return _LogTail(True, total, [], truncated, unreadable)
+    # newest chunk first was the *budget* order; the lines themselves are a time
+    # series, so they go back oldest-first
+    lines = list(files.iter_lines("".join(reversed(blobs))))
     if len(lines) > _TOOL_LOG_TAIL_LINES:
         lines = lines[-_TOOL_LOG_TAIL_LINES:]
-    return _LogTail(True, size, lines, start > 0, "")
+    return _LogTail(True, total, lines, truncated, "")
 
 
 def _live_calls() -> tuple:

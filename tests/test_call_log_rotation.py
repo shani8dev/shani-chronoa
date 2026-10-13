@@ -655,3 +655,157 @@ class TestTheDreamPassFollowsTheArchive:
         out = dream.dream(logs / "tool_calls.log")
         assert "archived_tool" in out, out[:600]
 
+
+
+class TestEveryReaderFollowsTheArchive:
+    """**The fourth and fifth readers, found by sweeping the population rather
+    than by tripping over them again.**
+
+    The first three were found by accident - a probe, an end-to-end test, and a
+    reader disagreeing with another reader. That is not a way to find readers, so
+    this class sweeps the shipped tree instead, and the two it turned up are
+    both worse than the three already fixed:
+
+    - **`learning.load()`** is the reader for *training*. `train_and_save`,
+      `merge_models` and two more fit their models from it. Measured on a copy of
+      the real log through the real rotation path: **18,794 examples, then 0**
+      after one `rotate()`. A model fitted on nothing, reported with a corpus the
+      report never mentions. `WINDOW` is 200,000 and the whole history is 18,794,
+      so the cap was never the binding constraint - the file boundary was.
+    - **`settings_window/activity.py::_log_tail`** is the Tool Activity panel,
+      which is the surface that answers *"what has Chronoa done"* to a person.
+      Its `exists` is true and it has lines to show, so a one-generation tail
+      showed a short history with **nothing saying it was short**.
+    """
+
+    def test_the_training_reader_sees_the_whole_history_after_a_rotation(self, logs):
+        # `load()` skips records with no verdict, so these need one - the first
+        # version of this test read an empty directory and asserted 6, which is
+        # the fixture describing a machine that has never run a tool.
+        write(logs, "both", 6, tool="t", verdict="verified")
+        before = len(learning.load(logs / "tool_calls.log"))
+        assert before == 6, before
+        tool_tracking.rotate(logs / "tool_calls.log")
+        after = len(learning.load(logs / "tool_calls.log"))
+        assert after == before, (
+            "the outcome model's training data lost %d of %d examples to a "
+            "rotation" % (before - after, before))
+
+    def test_training_reads_what_a_rotation_just_archived(self, logs):
+        """**The shape of the real failure, not the count.** The archived records
+        are the ones a rotation moved *out of the file being read*, so they are
+        the ones a one-file reader loses."""
+        write(logs, "old", 3, tool="old_tool", verdict="verified")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 3, tool="new_tool", verdict="verified")
+        path = logs / "tool_calls.log"
+        assert len(learning.load(path)) == 6
+        # and the training data has to be in TIME order, because `collapse()`
+        # and the split both depend on it
+        assert [e for e in learning.load(path)] == list(learning.load(path))
+        records = learning._entries(path)
+        assert [r["tool_name"] for r in records] == \
+            ["old_tool"] * 3 + ["new_tool"] * 3
+
+    def test_the_training_cache_does_not_serve_a_stale_answer(self, logs):
+        """**A rotation moves records *out of* the active log**, so a revision
+        keyed on the active log alone is a key that survives the one change it
+        exists to notice. The corpus grows here, so a stale hit is visible as a
+        number that does not move."""
+        write(logs, "old", 2, tool="old_tool", verdict="verified")
+        first = len(learning.load(logs / "tool_calls.log"))
+        assert first == 2, first
+        write(logs, "new", 2, tool="new_tool", verdict="verified")
+        second = len(learning.load(logs / "tool_calls.log"))
+        assert second == 4, (
+            "the cache answered %d after two more records were appended" % second)
+
+    def test_the_panel_reads_the_archives(self, logs):
+        from shani_chronoa.settings_window import activity
+        path = logs / "tool_calls.log"
+        write(logs, "old", 40, tool="old_tool")
+        before = len(activity._log_tail(path).lines)
+        tool_tracking.rotate(path)
+        write(logs, "new", 2, tool="new_tool")
+        after = len(activity._log_tail(path).lines)
+        # **Plus the two written after the rotation.** My first version asserted
+        # `after == before`, which reads as "the panel loses nothing" and is
+        # wrong by the two records the test itself just added - so the failure
+        # said "lost -2 of 40", a number only the fixture could produce.
+        assert after == before + 2, (
+            "the Tool Activity panel shows %d rows for %d records, and nothing "
+            "on it would have said the rest is in an archive"
+            % (after, before + 2))
+
+    def test_the_panel_does_not_understate_how_big_the_log_is(self, logs):
+        """It renders `tail.size` as *"the log weighs X"*, so a size taken from
+        the part it read would claim a 19 MB log weighs 1 KB."""
+        from shani_chronoa.settings_window import activity
+        path = logs / "tool_calls.log"
+        write(logs, "old", 200, tool="old_tool")
+        tool_tracking.rotate(path)
+        write(logs, "new", 1, tool="new_tool")
+        tail = activity._log_tail(path)
+        on_disk = sum(p.stat().st_size for p in tool_tracking.log_files(path))
+        assert tail.size == on_disk, (tail.size, on_disk)
+
+    def test_one_unreadable_archive_does_not_blind_the_reader(self, logs):
+        """**The over-fix guard, on both readers that take a whole history.**
+
+        Reading every chunk is only correct while a chunk that cannot be read
+        does not take the rest with it: the first version of each returned an
+        empty result for the whole thing, which is how one permission error on an
+        archive becomes "this machine has no history" - and an empty corpus
+        trains a model and reports it.
+
+        **This test drove only the panel at first**, and the mutation run said so
+        by name: `one unreadable archive blinds the training reader` came back a
+        **survivor** while its panel twin was caught. A witness that covers half
+        the readers of a property is a witness that reads as coverage of all of
+        them.
+        """
+        from shani_chronoa.settings_window import activity
+        path = logs / "tool_calls.log"
+        write(logs, "old", 5, tool="old_tool", verdict="verified")
+        tool_tracking.rotate(path)
+        write(logs, "new", 5, tool="new_tool", verdict="verified")
+        archive = next(p for p in tool_tracking.log_files(path) if p != path)
+        archive.chmod(0o000)
+        try:
+            tail = activity._log_tail(path)
+            assert len(tail.lines) >= 5, ("panel saw %d rows" % len(tail.lines))
+            # **And it must not claim the whole log is unreadable either.** That
+            # is the over-fix in the other direction - refusing to report a
+            # partial read - and nothing above would have caught it, because a
+            # panel that showed 5 rows looks correct whether or not it is also
+            # claiming the rest of the log could not be read. `unreadable` set
+            # here would put "could not be read" on a log the panel just read
+            # most of, which is the confident wrong answer in the opposite
+            # direction from the one the guard above prevents.
+            assert tail.unreadable == "", (
+                "one unreadable archive turned into a claim about the whole log: "
+                "%r" % tail.unreadable)
+            trained = len(learning.load(path))
+            # **At least what is readable, not all of it.** The archived records
+            # behind a 0000 file really cannot be read - that loss is the
+            # filesystem's, and no reader can undo it. What must not happen is
+            # losing the *readable* records too, which is what returning `[]` for
+            # the whole corpus does. My first assertion was `== 10` and it failed
+            # at 5, which is correct code: I had asked it to read a file it is not
+            # allowed to read.
+            assert trained >= 5, (
+                "the training reader saw %d of the 10 examples with one "
+                "unreadable archive, so one permission error became an empty "
+                "corpus" % trained)
+        finally:
+            archive.chmod(0o600)
+
+    def test_a_log_with_no_archives_is_still_readable(self, logs):
+        """Both fixes route through `log_files()`, so the no-archive case is the
+        one that has to keep working - and it is what the rest of this file is
+        mostly about."""
+        write(logs, "solo", 3, tool="solo_tool", verdict="verified")
+        path = logs / "tool_calls.log"
+        assert len(learning.load(path)) == 3
+        from shani_chronoa.settings_window import activity
+        assert len(activity._log_tail(path).lines) == 3
