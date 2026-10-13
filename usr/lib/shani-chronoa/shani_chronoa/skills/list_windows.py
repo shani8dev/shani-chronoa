@@ -128,6 +128,57 @@ def act(verb: str, arguments: dict, call) -> str:
     return said.format(label=label, backend=backend.name)
 
 
+#: Rows whose verbs are asked for. `controllable()` walks `_frames()` per call,
+#: so a listing of 60 windows would enumerate the whole bus 60 times; a bounded
+#: probe with an honest note about the remainder is better than an unbounded one
+#: that turns an instant listing into a slow one.
+_PROBED = 12
+
+
+def _verbs_for(backend, window, asked: bool) -> "str | None":
+    """What verbs this window offers, for the listing to show.
+
+    **`AtspiBackend.controllable()` existed and had no caller in the tree.** Its
+    docstring is one line - *"The verbs this window offers, for a listing to show"* -
+    and this listing is the thing it was written for.
+
+    Without it the closing line told you the same thing about every window:
+
+        Use the id with focus_window, close_window or arrange_window.
+
+    Measured on a frame reporting only `window.close`:
+
+    | verb pressed | result |
+    |---|---|
+    | `close` | offered |
+    | `minimize` | **refused**: "this application does not offer 'minimize' on the accessibility bus (GTK4 apps do; GTK3 apps and Chromium-based browsers do not)" |
+    | `maximize` | **refused**, same message |
+
+    and on a frame reporting `activate`, all three refused. So the advice was a
+    guaranteed failure for most windows, and the function that would have said so
+    was the one thing not called.
+
+    Returns `None` when the backend has no answer - which is every backend except
+    `AtspiBackend`, where `controllable` is not declared at all - and when the
+    probe budget is spent. Callers treat `None` as *say nothing*, never as *none
+    offered*: a listing that cannot tell should not assert an empty set.
+    """
+    from shani_chronoa import windows
+
+    probe = getattr(backend, "controllable", None)
+    if probe is None or not asked:
+        return None
+    try:
+        verbs = probe(window.id)
+    except windows.WindowError:
+        return "verbs unknown - it left the bus while being listed"
+    except Exception:  # noqa: BLE001 - a probe must not fail the listing
+        return None
+    if not verbs:
+        return "no verbs on the accessibility bus"
+    return ", ".join(verbs)
+
+
 def _via_backend(backend, arguments: dict) -> str:
     """The window list from the desktop's own window control, with usable ids."""
     from shani_chronoa import windows
@@ -142,10 +193,27 @@ def _via_backend(backend, arguments: dict) -> str:
                 f"window(s) are open - call list_windows with no filter to see them all.")
     if not found:
         return f"{backend.name} reports no open windows."
+    # The verbs go **after** the cap, not before it: probing a window that is
+    # then withheld would spend bus round-trips on rows nobody sees. The budget
+    # covers the rows that are actually shown, and the note below says when the
+    # run stopped early rather than letting the tail look unprobed.
     kept, withheld = files.cap_list([windows.describe(w) for w in shown], _MAX_WINDOWS)
+    probed = 0
+    rows = []
+    for row, window in zip(kept, shown):
+        asked = probed < _PROBED
+        verbs = _verbs_for(backend, window, asked)
+        if asked:
+            probed += 1
+        rows.append(f"{row}  <{verbs}>" if verbs else row)
     note = files.withheld_note("window", withheld, widen="narrow it with title_contains")
+    if probed < len(kept):
+        note += (f"  The verbs of the last {len(kept) - probed} window(s) were not "
+                 f"checked: each check walks the accessibility bus, and the listing "
+                 f"stops at {_PROBED} so it stays quick. Narrow it with "
+                 f"title_contains to see those.\n")
     return (f"{len(found)} window(s) from {backend.name}; showing {len(shown)}:\n"
-            + "\n".join(f"  {row}" for row in kept) + f"\n{note}"
+            + "\n".join(f"  {row}" for row in rows) + f"\n{note}"
             + "  Use the id with focus_window, close_window or arrange_window.")
 
 
