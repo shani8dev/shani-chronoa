@@ -23258,3 +23258,23 @@ history. Reported, not fixed.
 Sparse against dense, measured with `getsizeof` and extrapolated, because the
 factor is the entire argument for the sparse form: **18,796 records would be
 9.86 GB dense against 5.41 MB sparse, 1,821x less.**
+
+### The blast radius, and a suite that hangs
+
+`pytest tests/` as one process **hung for 30 minutes at zero CPU** and reported
+nothing, so it was killed by PID and replaced by 25 chunks with a per-chunk cap.
+That run: **9,100 passed**, 53 failed or errored across 17 files, 1 chunk hung.
+
+The hung chunk bisected to a single file: **`tests/test_file_index.py`, which
+hangs on its own** - 24 of the other 24 files finish in 1-39 s each. Run against
+HEAD's `tool_select.py` and `learning.py` instead of mine it **still hangs**
+(rc=124 either way), so it is pre-existing and it is what makes a whole-suite run
+unfinishable on this machine.
+
+**Then the 53 failures refused to be attributed at all.** Running them in one
+batch, swapping only my two files for HEAD's, gave totals of **32/31, then
+21/32, then 31/21** across three alternating rounds - the same code producing 21
+or 32 failures depending on the run. "Fails only with mine" went 5, 0, 10. So
+batch results measure the batch, and the fix was what this file already records
+for `test_skill_workbench.py`: **one process per node**, no shared tmp, no
+module-level GTK state carried between tests.
