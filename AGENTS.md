@@ -21492,3 +21492,58 @@ an inference:
    the `rm -f` cascade fixed, asked again from the port side.
 3. whether it is time-of-day or load, by rendering the *same* target twice
    minutes apart - which is the control this whole episode lacked.
+
+## What the blank renders actually are (2026-10-13)
+
+The entry two above ends "not established" after four attempts. **It is
+established**, and it took one change to find out: **stop deleting the log.**
+
+    Gsk:ERROR:../../../gsk/gskrenderer.c:130:gsk_renderer_dispose:
+        assertion failed: (!priv->is_realized)
+    Bail out!
+
+**The capture completes and the process then aborts at teardown.** The renderer
+prints its `WROTE` line, writes the PNG, and dies in `gsk_renderer_dispose` with
+a `GskCairoRenderer` that was never realised. So the PNG on disk is real, valid,
+20,000-odd bytes - and blank, because nothing was ever rasterised into it.
+
+That is the **third** recorded instance of a renderer that needs
+`Gsk.CairoRenderer.new()` -> `realize(None)` before `render_texture`, and the
+first where the abort was visible and nobody was keeping the file that showed it.
+
+**So the previous entry's correction stands and is now explained.** Not pool
+exhaustion (0 ports held), not a concurrent mutation run (no lock, `window.py`
+byte-identical to HEAD) - and the window *is* being built; it is the rasteriser
+that never comes up. `CHRONOA_FORCE_SIZE` and the target are not implicated: the
+same commit renders 100% opaque when the display is warm and 0.2% when it is
+cold, which is why the control this episode lacked is **render the same target
+twice, minutes apart**.
+
+### The change that found it, which is worth more than the finding
+
+`render_once` wrote the renderer's stderr to `$SANDBOX/<target>.log` and the
+sandbox was deleted when the sweep exited. **Four consecutive attempts at this
+diagnosis produced nothing, and the reason is not that the evidence was hard to
+read - it is that nobody kept it.** The log is now copied beside its output, so
+a failed target leaves `<target>.log` next to the blank PNG.
+
+**A diagnostic nobody can read is not a diagnostic**, and this file has several
+checks whose failure mode is silence - the alpha gate added above is one, and
+this log is the other. Both were the same omission: a thing that could have told
+the truth had nowhere to be read.
+
+### What to do about the abort, in order
+
+1. **Realise the renderer before capturing** - `Gsk.CairoRenderer.new()` then
+   `realize(None)`, which this file's own "Rendering the UI to a PNG" section
+   prescribes and which the capture path appears to skip. The abort names the
+   function and the missing call.
+2. **and treat the abort as the failure.** A renderer that bails after writing
+   should not leave a file the sweep can count. `Bail out!` is on stderr and
+   nothing reads stderr, so a process that died mid-capture and one that
+   finished look identical from outside - which is the same shape as the
+   `-rs` flag finding this file records, where a check stopped looking and still
+   printed a tally.
+
+**Not done here**, and the reason is that a renderer fix needs a warm display to
+prove it, and this pass has not had one since the pool went cold.

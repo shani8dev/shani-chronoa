@@ -281,6 +281,15 @@ start_display() {
     echo ":$num"
 }
 
+_keep_log() {
+    # Copy the renderer's log next to its output. **Always, not only on failure** -
+    # the failure is discovered by whoever reads the file afterwards, and a log
+    # kept only for failures has to guess which those were.
+    local log="$1" out="$2"
+    [[ -s $log ]] || return 0
+    cp "$log" "${out%.png}.log" 2>/dev/null || return 1
+}
+
 render_once() {
     local target="$1"
     local out="$2"
@@ -316,6 +325,22 @@ render_once() {
     # worse, so nothing sits near the line. `MIN_OPAQUE_PCT` is overridable
     # because a legitimate future target might be a thin popover - and an
     # overridable threshold is still a threshold, where "a file appeared" is not.
+    # **Keep the log when the target fails.**
+    #
+    # `render_once` writes the renderer's own stderr to `$SANDBOX/<target>.log`
+    # and the sandbox is deleted when the script exits - so the one artefact that
+    # names the cause is thrown away on every failed attempt. Four consecutive
+    # attempts to diagnose the blank renders produced no diagnosis, and the
+    # reason is here: not that the traceback was hard to read, but that nobody
+    # kept it. **A diagnostic nobody can read is not a diagnostic.**
+    #
+    # Copied beside the output rather than kept in the sandbox, so it survives the
+    # sweep that produced it and can be looked at afterwards - which is the whole
+    # difference between "the renderer printed nothing useful" and a sentence
+    # naming a line.
+    if ! _keep_log "$log" "$out"; then
+        :
+    fi
     [[ -s $out ]] || return 1
     local opaque
     opaque="$(_opaque_percent "$out")"
