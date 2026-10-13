@@ -257,8 +257,13 @@ class SuggestionBar(Gtk.FlowBox):
 
     __gtype_name__ = 'SuggestionBar'
 
-    def __init__(self, suggestions, on_chosen, reduce_motion: bool = False) -> None:
+    def __init__(self, suggestions, on_chosen, reduce_motion: bool = False,
+                 short_words=None) -> None:
         super().__init__()
+        # `short_words` maps a full question to the name its chip shows. It is
+        # keyword-defaulted rather than required so every existing caller and
+        # test that passes plain strings keeps working unchanged.
+        short_words = short_words or {}
         self.set_selection_mode(Gtk.SelectionMode.NONE)
         # Fill, not centre: a FlowBox wraps against the width it is *given*, and
         # a centred one is handed only its single-line natural width - so it
@@ -278,12 +283,17 @@ class SuggestionBar(Gtk.FlowBox):
 
         for suggestion in suggestions:
             button = Gtk.Button()
-            # A label inside the button rather than on it, so it can ellipsise.
-            # `Gtk.Button(label=...)` has no ellipsize: a long suggestion made
-            # one chip 300px+ wide with nothing to shrink it, and the row's own
-            # wrapping cannot help a single chip that is wider than the window.
-            # Thirty of these fit; this one did not.
-            chip_label = Gtk.Label(label=suggestion, ellipsize=Pango.EllipsizeMode.END,
+            # **The chip says the name; the question is what is sent.**
+            # Measured on the real window at 460x640: the six full questions
+            # need 349px in a 162px viewport, so 187px of the empty state - the
+            # whole capability signal - sat below the fold, and the chips were
+            # one per line while two fitted. The chip has nowhere to put a
+            # sentence, so it carries `SUGGESTION_WORDS` and the tooltip, the
+            # accessible name and the click payload keep the question in full.
+            # A prompt with no entry falls back to the question itself, so this
+            # can only ever fail by being too long - never by being missing.
+            chip_text = short_words.get(suggestion, suggestion)
+            chip_label = Gtk.Label(label=chip_text, ellipsize=Pango.EllipsizeMode.END,
                                    xalign=0)
             button.set_child(chip_label)
             button.add_css_class("suggestion-chip")
@@ -1051,7 +1061,8 @@ class TranscriptView(Gtk.ScrolledWindow):
         suggestions = capabilities.startup_suggestions(self._caps)
         if suggestions and self._on_suggestion is not None:
             bar = SuggestionBar(
-                suggestions, self._on_suggestion, self._reduce_motion
+                suggestions, self._on_suggestion, self._reduce_motion,
+                capabilities.SUGGESTION_WORDS,
             )
             bar.update_property(
                 [Gtk.AccessibleProperty.LABEL],
@@ -1701,8 +1712,31 @@ class TranscriptView(Gtk.ScrolledWindow):
                 # Scrolled back to the bottom by hand: follow again from here.
                 self._following = True
             if self._following:
+                # **The empty state is read from the top; a conversation is
+                # followed to the bottom.** `__init__` sets `_following = True`
+                # and nothing has scrolled it away, so this branch runs on a
+                # transcript that has no turns in it - and it was jumping to the
+                # bottom of the suggestion bar, which took the placeholder and
+                # the shortcut hints off the top with it.
+                #
+                # Measured on a real window at its own 460x640: `_rows` is
+                # **375px** of content in a **201px** viewport and the scrollbar
+                # read `value=194`, so the prompt (y=0..18) and the hints
+                # (y=28..65) were both scrolled out of sight and the first
+                # screen showed nothing but the middle of a chip row.
+                #
+                # **So "the newest turn" has to mean something.** With the
+                # placeholder up there is no turn to follow, and the content is a
+                # prompt rather than a tail - which is the whole reason it is at
+                # the top. The suggestion bar is 294px of the 375 and still
+                # overflows, so a scrollbar remains; that is a window with more
+                # to show, not a control that does nothing.
+                #
+                # `_append_turn` clears the placeholder before it scrolls, so the
+                # first real turn is followed to the bottom exactly as before.
                 adjustment.set_value(
-                    max(0.0, adjustment.get_upper() - adjustment.get_page_size()))
+                    0.0 if self._is_placeholder()
+                    else max(0.0, adjustment.get_upper() - adjustment.get_page_size()))
             self._set_jump_button(not self._following)
         return GLib.SOURCE_REMOVE
 

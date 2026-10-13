@@ -22655,3 +22655,91 @@ for two and the count was padding. Every replacement was already in the runner's
 37 tests. 17 mutations, **16 caught, 1 equivalent (documented), 0 survivors, 0
 unmeasurable, 0 stale**, and no line reading "NOT caught by". 284 passed across
 the rotation, learning, dream, distill and outcome-model suites.
+
+## The empty state had the capability signal, and 187px of it was below the fold (2026-10-13)
+
+Asked to make the empty composer capability-driven - "a Try asking row built
+from `available_surfaces()`". **It is already there**, and measuring it before
+building it is the whole entry.
+
+`SuggestionBar` has been in the empty state throughout. `show_placeholder()`
+adds three rows: the prompt, a dim line of shortcut hints, and the bar. The bar
+is built from `capabilities.startup_suggestions(self._caps)`, which is filtered
+against the live registry, so a skill that is not loaded is never offered; and
+clicking **fills** the composer rather than sending, which the module's own
+docstring gives as the reason. Real window, its own 460x640:
+
+```
+[0] h=  18  Ask something, or press the orb to speak
+[1] h=  37  Ctrl+K for anything else  ·  Ctrl+F to find...  ·  ? for what...
+[2] h=294  SuggestionBar
+
+empty state total  : 349px
+transcript viewport: 162px
+-> DOES NOT FIT, over by 187px
+```
+
+**So the premise is wrong and the conclusion is right.** The signal was built,
+correct and registry-derived - and invisible, which reads exactly like absent.
+The chips were also on six rows while using 199/134/201/272/243/149px of a ~380px
+column: two fitted per row and GTK gave one each.
+
+### The fix is the mode strip's own rule, applied to a chip
+
+`SUGGESTION_WORDS` holds a **name** per prompt - `Battery left?`, `Which
+model?`, `Search the web` - keyed by the full question, so the registry gate is
+untouched and a prompt can only be shortened if the skill that owns it really
+loaded. The chip prints the name; the tooltip, the accessible name and the click
+payload all carry the question in full.
+
+This is **"a menu item is a name, not a sentence"** arriving in a third widget,
+for the same reason and with the same consequence: a chip renders `label` and
+nothing beside it, so it can only hold a label. And it is safe only because of
+the property that already existed - the click **fills**, so the person reads the
+full question in the composer and can edit it before it goes anywhere.
+
+After, same window, same probe: **149px in 162px, FITS**, two rows of three
+(chips 104-132px).
+
+### 5 mutations, 5 caught - and the first survivor was a test that never reached the product
+
+Reverting the one line where the transcript passes the table **left all 31
+tests green**, because every test in the new file built a `SuggestionBar`
+directly and never touched `TranscriptView.show_placeholder()`. That is this
+file's own *"a test that reaches past the call site to the function behind it is
+testing the function"*, and it is the whole defect - the widget right, the
+product unchanged. `test_the_empty_state_itself_prints_the_names` builds the real
+window; that mutation now fails.
+
+| mutation | caught by |
+|---|---|
+| the chip sends its short word instead of the question | 2 |
+| a word dropped from the table (chip goes long again) | 2 |
+| **the transcript stops passing the table** | **1 - and 0 before the product test** |
+| the empty-state scroll fix restored (ships as it was) | 1 |
+| the over-fix - always scroll to the top | 1 |
+
+The last two are the `_apply_follow` fix that had been sitting uncommitted and
+untested from earlier today, so it is in the same commit rather than shipped on
+trust. Its motivating measurement was the **375px in a 201px** overflow this
+entry's own change largely removes; the rule it encodes still stands, and
+`_sized()` sets the adjustment explicitly because an unallocated view reports
+`upper == page_size == 0` and would make "followed to the bottom" and "scrolled
+to the top" indistinguishable.
+
+### Three of my own errors, each recorded because each looked like the product
+
+- **Two existing tests failed on correct code.** `test_ui_surfaces` derived the
+  expected question from the chip's *visible* label - true only while label and
+  question were the same string. The failure text was the confirmation:
+  `window.get_input_text()` returned `'How much battery is left?'` while the
+  test expected `'Battery left?'`. **The click had sent the right thing.**
+- **My helper read the wrong level**: `FlowBoxChild.get_child()` is the
+  **Button**, not the Label, so six chips compared as six empty strings.
+- **A dict popped while being iterated** - `RuntimeError`, which is why one test
+  failed for a reason with nothing to do with chips.
+
+**Not claimed: a pixel test.** The behaviour is asserted without a display; the
+**fit** is measured above and recorded here rather than pinned by a threshold
+that would only be fitted to this machine. 12 tests, and 255 pass across the
+seven suites that touch `widgets.py`.

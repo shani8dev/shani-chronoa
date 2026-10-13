@@ -969,6 +969,38 @@ _SUGGESTION_ORDER: tuple[str, ...] = (
     "Take a screenshot",
 )
 
+#: The **name** of each prompt above, for a chip too narrow to hold the
+#: question. The key is the full question, which is what `startup_suggestions`
+#: gates on and what clicking sends, so a prompt can only be shortened if the
+#: skill that owns it really loaded.
+#:
+#: **This is the same decision the mode strip already made** - "a menu item is a
+#: name, not a sentence" - for the same reason and with the same consequence:
+#: a widget that renders `label` and nothing beside it can only fit a label.
+#: There is nowhere for a tooltip to go on a chip a finger is about to cover, so
+#: the chip says "Battery left?" and the tooltip, the accessible name and the
+#: text sent all carry the question in full.
+#:
+#: **Measured, and this is not a guess.** At the window's own 460x640 the six
+#: full questions need **349px in a 162px viewport** - 187px of the empty state
+#: was below the fold, so the capability signal was present and invisible. The
+#: chips were also using 199/134/201/272/243/149px of a ~380px column, two to a
+#: row's worth, with GTK handing out one per line.
+#:
+#: A missing entry is not an error: the chip falls back to the full question, so
+#: a new skill added to `_SUGGESTION_ORDER` without a word here still works and
+#: simply wraps. `tests/test_empty_state_shows_what_can_be_asked.py` asserts the
+#: budget rather than this table, so a word that stops fitting is caught by its
+#: width and not by having been forgotten.
+SUGGESTION_WORDS: dict[str, str] = {
+    "How much battery is left?": "Battery left?",
+    "What time is it?": "What time?",
+    "Set a timer for 10 minutes": "Set a timer",
+    "Which model would fit this machine?": "Which model?",
+    "Search the web for the Arch wiki": "Search the web",
+    "Take a screenshot": "Screenshot",
+}
+
 _HELP_SUGGESTION = "What can you do?"
 
 

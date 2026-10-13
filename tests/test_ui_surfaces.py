@@ -101,6 +101,27 @@ def _chip_text(chip):
     return chip.get_label()
 
 
+def _chip_question(chip):
+    """The full prompt a chip offers - **not** the name printed on it.
+
+    A chip shows `capabilities.SUGGESTION_WORDS[question]`, so the visible text
+    is deliberately not the question. Two tests used to derive the question from
+    the chip's own label, which held only while the two were the same string and
+    then read as a broken product the moment they diverged.
+
+    The tooltip is authoritative rather than a third copy: `SuggestionBar`
+    builds it as `f"Send: {question}"` from the same variable it passes to
+    `clicked`, so the click payload and the spoken prompt cannot drift apart
+    without this returning something the registry does not offer.
+    """
+    tooltip = chip.get_tooltip_text() or ""
+    prefix = "Send: "
+    assert tooltip.startswith(prefix), (
+        f"chip tooltip {tooltip!r} does not carry the prompt it speaks"
+    )
+    return tooltip[len(prefix):]
+
+
 class TestSuggestionBar:
     def test_it_builds_one_chip_per_prompt(self):
         bar = SuggestionBar(["One", "Two", "Three"], lambda *a: None)
@@ -149,25 +170,41 @@ class TestEmptyState:
         assert len(_chips(window)) == before
 
     def test_each_chip_is_a_focusable_button_with_a_spoken_prompt(self, app):
+        from shani_chronoa import capabilities
+
         window = ChronoaWindow(app, config=_Closed())
         chips = _chips(window)
         assert chips
+        offered = set(capabilities.startup_suggestions(window._transcript._caps))
         for chip in chips:
             assert chip.get_focusable(), "a chip a keyboard cannot reach"
             # The accessible LABEL is set with `update_property`, but this
             # PyGObject build exposes no getter for it, so the tooltip is the
-            # readable proxy - it carries the same prompt text.
-            assert chip.get_tooltip_text() == f"Send: {_chip_text(chip)}"
+            # readable proxy - and it carries the **question**, which is what a
+            # screen reader should say, not the two-word name on the chip.
+            question = _chip_question(chip)
+            assert question in offered, (
+                f"{question!r} is not a prompt the live registry offers, so this "
+                f"chip offers something Chronoa cannot honour"
+            )
 
 
 class TestClickFillsRatherThanSends:
     def test_clicking_a_chip_fills_the_input(self, app):
         window = ChronoaWindow(app, config=_Closed())
         chips = _chips(window)
-        shown = _chip_text(chips[0])
         chips[0].emit("clicked")
-        assert window.get_input_text() == shown
-        assert window.get_input_text() != "", "clicking a suggestion did nothing"
+        filled = window.get_input_text()
+        assert filled, "clicking a suggestion did nothing"
+        # **The question, not the chip's short name.** This is the whole safety
+        # of printing a name instead of the sentence: the name is only ever a
+        # label, and what lands in the composer - where a person reads and edits
+        # it before sending - is the full question. A chip that filled "Battery
+        # left?" would be a suggestion Chronoa cannot answer, offered by the
+        # empty state that exists to show what it can.
+        assert filled == _chip_question(chips[0]), (
+            f"the composer got {filled!r}, which is not the question this chip names"
+        )
 
     def test_clicking_does_not_send_the_message(self, app):
         """Sending on click would make a wrong suggestion uneditable and
