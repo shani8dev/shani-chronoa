@@ -21445,3 +21445,50 @@ shown accepting a real capture through the driver itself - only through the
 same measurement code, against a known 99%-opaque PNG. The three population
 tests cover the comparison; the driver-level positive needs a pool that has
 recovered.
+
+### Correction: the blank renders are NOT pool exhaustion, and the cause is not established
+
+The entry above blames exhaustion. **That was not measured when it was written,
+and it is wrong.** Measured, immediately afterwards:
+
+| what I claimed | what is true |
+|---|---|
+| "~8 renders against a 31-number pool", exhaustion | **2 live daemons, 0 ports held** in the 8080+ band, 17 socket files with nothing listening |
+| a concurrent mutation run rewriting the tree | **no `run.lock`, `window.py` byte-identical to HEAD** with the fix in it |
+
+So neither cause holds and `main` **still renders 0.2% opaque at HEAD**. The
+cause is unknown.
+
+**The claim got in because it agreed with the conclusion I had already reached.**
+That is the same shape as `skills_total`, `42/87/70` and "105 characters" - a
+number or a cause produced by a pattern rather than a measurement, then acted on
+- and this file's own instruction is *"environmental is a claim, not a verdict"*
+and *"a failure list nobody re-measures is worse than no list"*. I did the
+re-measure in the wrong direction: having decided the pool was exhausted, I
+looked for the pool being exhausted.
+
+**And the second false lead was my own `pgrep`.** `pgrep -f "mutate.py"` matched
+the shell command containing that string, so a concurrent mutation run appeared
+to be in flight when there was none. This is the recorded `pkill`/`ps | grep`
+self-match trap, and **the workspace rule names the bracket guard as the fix for
+`grep` and nothing else** - which is why it keeps arriving by a new route.
+
+**What the gate bought anyway, and why the correction matters less than it
+looks.** `render_once` measures opacity and says so, so the blank is now reported
+as blank. **That is true whatever the cause is** - and it is the property the
+render harness was missing independent of this fault. The diagnosis is open; the
+check is not.
+
+**What is worth measuring next, in this order** - each a measurement rather than
+an inference:
+
+1. **the render log.** `render_once` writes `$SANDBOX/<target>.log` and the
+   sandbox is deleted on exit, so the traceback that would name the cause has
+   been thrown away on every attempt. **Keeping the log when a target fails**
+   is a two-line change and the absence of it is why this entry ends in "not
+   established" after four attempts.
+2. whether `start_display` reports success while the daemon it started dies -
+   the same "a live daemon is a thing to wait for, not a file to delete" shape
+   the `rm -f` cascade fixed, asked again from the port side.
+3. whether it is time-of-day or load, by rendering the *same* target twice
+   minutes apart - which is the control this whole episode lacked.
