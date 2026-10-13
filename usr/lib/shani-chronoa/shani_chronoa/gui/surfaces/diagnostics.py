@@ -951,40 +951,67 @@ def _atspi_extra() -> Tuple[str, str]:
 def _checkpoint_count(root: Optional[Path] = None) -> Tuple[str, str]:
     """Whether the session store has checkpoint files sitting beside its history.
 
-    `conversation_store.list_checkpoints` is the one place that knows how to
-    enumerate them; a probe should use it rather than reimplementing the glob,
-    so the answer never drifts from the tooling that reads the files. A missing
-    session directory is the normal "nothing done yet" state, not a fault, so
-    that reports nothing rather than a red dot.
+    `conversation_store.list_sessions` and `conversation_store.list_checkpoints`
+    are the two places that know how to enumerate them - the first names the
+    conversations, the second counts what is stored for one - so this asks both
+    rather than reimplementing either glob, and the answer cannot drift from the
+    tooling that reads the files. `list_checkpoints` is per-session, which is why
+    the conversation list is needed at all.
+
+    **Zero checkpoints is not one fact, it is two, and they have opposite
+    remedies.** Nothing has ever been said on this machine, so there is nothing
+    to rewind and the subsystem is working; a conversation exists that has no
+    saved turn states, so rewinding it would silently do nothing and that *is* a
+    fault. Both used to read as red, which put a warning on a fresh install and
+    on the section's own words - *"A missing session dir is not an error"*.
 
     `root` is optional and used primarily by tests; in production the default
     `conversation_store.session_dir()` is used so the answer always follows the
-    same XDG resolution the rest of the app uses.
+    same XDG resolution the rest of the app uses. It is read, never created:
+    `list_sessions` goes through `index()`, which makes the directory, so a
+    read-only probe asking about a store that was never used must not be the
+    thing that brings it into existence.
     """
     from shani_chronoa import conversation_store
 
     if root is None:
         root = conversation_store.session_dir()
     if not root.exists():
-        return STATUS_NOT_WORKING, (
-            f"{root} does not exist yet - the history store is empty, "
-            f"so there is nothing to count"
+        return STATUS_WORKING, (
+            f"{root} does not exist yet - no conversations have been started "
+            f"on this machine, so there is nothing to rewind"
+        )
+
+    try:
+        sessions = conversation_store.list_sessions(root)
+    except Exception as exc:  # noqa: BLE001 - the probe reports, it does not raise
+        return STATUS_UNKNOWN, (
+            f"the conversation store at {root} could not be read "
+            f"({type(exc).__name__}), so it is not known whether anything "
+            f"is missing"
         )
 
     total = 0
     by_session: Dict[str, List[int]] = {}
-    for path in sorted(root.glob("*.ckpt.*.jsonl")):
-        try:
-            sid = path.parent.name
-            n = int(path.stem.split(".")[-1])
-            total += 1
-            by_session.setdefault(sid, []).append(n)
-        except (ValueError, IndexError):
+    for row in sessions:
+        sid = str(row.get("id") or "")
+        if not sid:
             continue
+        nums = conversation_store.list_checkpoints(root, sid)
+        if not nums:
+            continue
+        total += len(nums)
+        by_session[sid] = nums
 
     if total == 0:
-        return STATUS_NOT_WORKING, (
-            "no checkpoint files were found - the store has no saved turn states"
+        if sessions:
+            return STATUS_NOT_WORKING, (
+                f"{len(sessions)} conversation(s) are saved but no checkpoint "
+                f"files were found - rewinding them would silently do nothing"
+            )
+        return STATUS_WORKING, (
+            "no checkpoints, and no conversations either - there is nothing "
+            "to rewind yet"
         )
 
     lines = [f"{total} checkpoint file(s), in {len(by_session)} conversation(s)"]

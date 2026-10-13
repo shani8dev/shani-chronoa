@@ -20821,3 +20821,121 @@ no findings and no attention.
 The next person with a broadway daemon and time should: render the question
 state at a size the chat column is not clipping, and add a permission-prompt
 target that drives `asking.py` rather than `questions.py`.
+
+## "Conversation checkpoints" was red on a machine where nothing had been said (2026-10-13)
+
+The `export` fix two entries above was the fourth correction of this shape, and
+the first entry asked for the whole population to be swept rather than the other
+29 renders looked at. The sweep cleared every other `STATUS_ATTENTION`. **The
+next instance was in a panel the sweep could not see**, because it is the
+Diagnostics panel's **own three-word vocabulary** - `working` / `not working` /
+`could not determine` - rather than `common.STATUS_*`. Six panels were cleared;
+the seventh has its own words and was not in the scan.
+
+**Its docstring stated the rule it broke.** `diagnostics._checkpoint_count`:
+
+> A missing session directory is the normal "nothing done yet" state, **not a
+> fault**, so that reports nothing rather than a red dot.
+
+and **both** branches below it returned `STATUS_NOT_WORKING` - including the
+`not root.exists()` branch, which is the exact case the sentence names. A panel
+section above it says the same thing in prose: *"A missing session dir is not an
+error - it means no conversations have been started yet."* So the panel
+contradicted itself twice, in one file, in the same words.
+
+**Zero checkpoints is two facts, and the code treated it as one.**
+
+| state | was | now | why |
+|---|---|---|---|
+| store never created | red | **green** | nothing to rewind |
+| store empty | red | **green** | nothing to rewind |
+| **conversation saved, no checkpoint** | red | **red** | rewinding it would silently do nothing |
+| store unreadable | *green, counting zero* | **"could not determine"** | it could not find out |
+| checkpoints present | green | green | unchanged |
+
+The third row is the one a blanket fix would have deleted, and it is why the
+sentence above is a **two-state** change rather than a colour change: the
+remedies are opposite. The fourth was a **confident wrong answer** the old code
+could not produce, because it never asked.
+
+### The docstring was also wrong about which function knows how to count
+
+> `conversation_store.list_checkpoints` is the one place that knows how to
+> enumerate them; a probe should use it rather than reimplementing the glob
+
+`list_checkpoints(root, sid)` is **per-session** - it needs the conversation id,
+which the probe did not have, which is *why* the glob was there. So the probe
+now asks `list_sessions` for the ids and `list_checkpoints` for each one's count,
+and the docstring's claim becomes true rather than aspirational.
+
+**And the probe no longer creates the store it asks about.** `list_sessions` goes
+through `index()`, which makes the directory; `root.exists()` is checked first, so
+a read-only diagnostic is not the thing that brings an unused store into
+existence. Measured: the directory is still absent after the probe asks about it.
+
+### The old fixture described a state the store cannot produce
+
+The test wrote `session1.ckpt.1.jsonl` and `session2.ckpt.2.jsonl` into a
+directory and asserted `"in 1 conversation(s)"` - **one**, while writing two
+files. It passed only because the old glob counted *files* and called that
+"conversations". `list_sessions` reads the **index**, so a directory of
+checkpoint files with no index holds no conversations at all: the fixture could
+never have reached the assertion it was checking. Fixtures now go through
+`new_session` / `append` / `checkpoint`, and **two of the old assertions were
+counting the wrong thing** - conversations where the probe counts files.
+
+That is why the mutation run found two survivors on the first pass, and both
+were the fixture's shape rather than a missing check: `sessions[:1]` (only the
+first conversation counted) and `total += 1` (files counted as conversations)
+left **38 green**, because every other case in the file builds one conversation.
+Two tests now carry two.
+
+### 7 mutations, 7 caught, 0 survivors
+
+The shipped defect restored in either empty branch, the **over-fix** (a saved
+conversation without a checkpoint reported as fine), an unreadable store read as
+a clean zero, the directory guard removed, and both counting mutations. Run on a
+**snapshot** at `/tmp/opencode/snap-diag`, never the shared tree, and the source
+restored byte-identical afterwards.
+
+**Two of my harness faults, and the first produced six false cleans.** Forcing
+`GDK_BACKEND=broadway` with no `BROADWAY_DISPLAY` segfaulted before any summary,
+and the harness counted `exit != 0` as **caught** - a table of six passes that
+measured nothing. The second was `env -i`, which strips `XDG_RUNTIME_DIR` and
+`DISPLAY` and segfaults at GTK widget construction. Both are this file's own
+rule arriving from a new direction: **a run with no summary is `UNMEASURABLE`,
+never "caught"**, which is what `MutationDidNotParse` exists to say in
+`tools/mutate.py`.
+
+**And I measured my own fix with the wrong instrument first.** `grep "nothing to
+rewind yet"` returned **0** in a file that demonstrably contained the fix,
+because the sentence is split across two source lines. The same substring check
+then reported the snapshot as unfixed and I nearly re-copied the tree. It is the
+`skills_total` / `42/87/70` / "105 characters" mistake: **a number measured with
+a pattern, then acted on.**
+
+### Measured, not eyeballed
+
+`panel:diagnostics` re-rendered after the fix, **205,661 B, 100% opaque** (so a
+real render, not the detached-subtree false pass). Chromatic text by row, the
+content column only:
+
+| row | pixels |
+|---|---|
+| Local model server - genuinely broken | **6,148 red** |
+| Speech in - genuinely broken | (above) |
+| Speech out (espeak-ng) | green |
+| **Conversation checkpoints** | **green, 0 red** |
+| Microphone, Audio path | green |
+
+The instrument is the reason the zero means something: it found red in two rows
+and green in four, and **the two rows that should be red still are** - this is
+not "everything turned green".
+
+### The repetition is left in, and named
+
+The reason now appears in the row's detail **and** in the section's prose above
+it, as it did before. That is the same judgement recorded on `export`: the cause
+belongs in the row, the section explains the group, and which two of the three
+say it best is editorial. What was wrong here was **a red dot on a working
+machine**, and that is fixed and pinned.

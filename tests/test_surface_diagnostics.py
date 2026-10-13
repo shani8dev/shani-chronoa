@@ -584,49 +584,180 @@ class TestTwoMoreProbesThatExistedAndWereNotAsked:
             assert status in surface.STATUS_WORDS, (
                 f"{probe.__name__} used {status!r}, which is not one of the three")
 
-def test_conversation_checkpoints_row():
-    """The checkpoint row reports count and session breakdown when files exist.
+class TestTheCheckpointRow:
+    """Four states, and the one word that separates the first two from the third.
 
-    A real probe is used to enumerate the checkpoint files, so this test
-    validates that the probe works with the actual tooling. The session
-    directory is created under XDG_DATA_HOME, which the diagnostics panel
-    uses at import time. The test uses a temporary directory that is not
-    XDG_DATA_HOME to avoid interfering with the running diagnostics test
-    suite.
+    The row used to answer red to every empty case, including on a machine where
+    nothing had ever been said - so a fresh install carried the panel's warning
+    colour for a subsystem that was working. **Zero checkpoints is not one fact:**
+    an empty store has nothing to rewind, while a saved conversation with no
+    checkpoint is a real gap, because rewinding it would silently do nothing.
+    The remedies are opposite, so the statuses have to be.
+
+    The fixture is built through `conversation_store`'s own writers rather than
+    by dropping `.ckpt.N.jsonl` files into a directory. That earlier fixture
+    described a state the store cannot produce: `list_sessions` reads the
+    **index**, so a directory of checkpoint files with no index holds no
+    conversations - which is why the assertions below are written against a real
+    session rather than against a file name.
     """
-    from pathlib import Path
-    import tempfile
 
-    # Create a temporary session directory with checkpoint files
-    with tempfile.TemporaryDirectory() as tmpdir:
-        sessions_dir = Path(tmpdir) / "sessions"
-        sessions_dir.mkdir()
-        # Create a couple of checkpoint files with valid session names
-        (sessions_dir / "session1.ckpt.1.jsonl").write_text("1\n2\n3\n")
-        (sessions_dir / "session2.ckpt.2.jsonl").write_text("10\n20\n30\n40\n")
+    @staticmethod
+    def _saved(root, checkpoint=False):
+        """Write a real conversation through the store, optionally checkpointing."""
+        from shani_chronoa import conversation_store
 
-        # Load the diagnostics panel (this imports _checkpoint_count)
+        root.mkdir(parents=True, exist_ok=True)
+        sid = conversation_store.new_session(root)
+        path = conversation_store.session_path(root, sid)
+        conversation_store.append(
+            {"role": "user", "content": "what time is it"}, path)
+        conversation_store.append(
+            {"role": "assistant", "content": "it is half past four"}, path)
+        if checkpoint:
+            conversation_store.checkpoint(root, sid)
+        return sid
+
+    def test_a_saved_checkpoint_is_reported_with_its_conversation(self, tmp_path):
         from shani_chronoa.gui.surfaces import diagnostics
 
-        # The probe should report working status with a count and session breakdown
-        status, detail = diagnostics._checkpoint_count(sessions_dir)
+        self._saved(tmp_path / "sessions", checkpoint=True)
+        status, detail = diagnostics._checkpoint_count(tmp_path / "sessions")
         assert status == diagnostics.STATUS_WORKING
-        assert "2 checkpoint file(s)" in detail
+        assert "1 checkpoint file(s)" in detail
         assert "in 1 conversation(s)" in detail
-        assert "sessions" in detail
-        assert "1, 2" in detail
+        assert "numbers 1" in detail
 
-        # Negative control: an empty session directory is not a fault, it is
-        # "nothing done yet" - and must not be reported as a working subsystem
-        empty = Path(tmpdir) / "empty"
+    def test_an_empty_store_is_nothing_to_rewind_not_a_fault(self, tmp_path):
+        """The shipped defect: an untouched machine read as broken."""
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        empty = tmp_path / "empty"
         empty.mkdir()
         status, detail = diagnostics._checkpoint_count(empty)
-        assert status == diagnostics.STATUS_NOT_WORKING
-        assert "no checkpoint files were found" in detail
+        assert status == diagnostics.STATUS_WORKING, (
+            "a store nobody has ever used is working, not a fault")
+        assert "nothing to rewind yet" in detail
 
-        # And a directory that does not exist at all is the same answer, not a
-        # probe failure: the store has simply never been used.
-        gone = Path(tmpdir) / "gone"
+    def test_a_store_that_was_never_created_reads_the_same_way(self, tmp_path):
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        gone = tmp_path / "gone"
         status, detail = diagnostics._checkpoint_count(gone)
-        assert status == diagnostics.STATUS_NOT_WORKING
+        assert status == diagnostics.STATUS_WORKING
         assert "does not exist yet" in detail
+
+    def test_a_conversation_with_no_checkpoint_is_still_a_fault(self, tmp_path):
+        """The over-fix guard: a fix that cannot be over-applied is not a fix yet.
+
+        Blanket-"working" would have silenced a real red alarm - a saved
+        conversation whose rewind would quietly do nothing - which is the
+        over-fix this repository records for `get_children`, where requiring the
+        call to be absent is satisfied by deleting the working `hasattr`.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        root = tmp_path / "gap"
+        self._saved(root)
+        status, detail = diagnostics._checkpoint_count(root)
+        assert status == diagnostics.STATUS_NOT_WORKING, (
+            "a saved conversation with no checkpoint cannot be rewound; "
+            "that is a fault and not the same as an empty machine")
+        assert "rewinding them would silently do nothing" in detail
+
+    def test_a_store_that_cannot_be_read_says_so_rather_than_guessing(
+            self, tmp_path, monkeypatch):
+        """Neither working nor red: the probe could not find out."""
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import conversation_store
+
+        root = tmp_path / "broken"
+        self._saved(root)
+        monkeypatch.setattr(
+            conversation_store, "list_sessions",
+            lambda r: (_ for _ in ()).throw(ValueError("index is corrupt")))
+
+        status, detail = diagnostics._checkpoint_count(root)
+        assert status == diagnostics.STATUS_UNKNOWN, (
+            "an unreadable store must not report a clean count of zero")
+        assert "could not be read" in detail
+
+    def test_the_probe_does_not_create_the_directory_it_asks_about(self, tmp_path):
+        """`list_sessions` goes through `index()`, which makes the directory.
+
+        A read-only diagnostic that brings an unused store into existence is a
+        write the person did not ask for, and it would make the *next* probe -
+        and the next run of this very test - see a different machine.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        gone = tmp_path / "never-used"
+        diagnostics._checkpoint_count(gone)
+        assert not gone.exists(), (
+            "asking about a store that was never used must not be what creates it")
+
+    def test_two_conversations_are_both_counted(self, tmp_path):
+        """The population every other test here has one of.
+
+        Every other case in this class builds exactly one conversation, so a
+        probe that looked at only the first would satisfy all of them - the
+        mutation run said so: `sessions[:1]` left 38 green. Counting is the whole
+        claim the positive test makes, and one of something does not measure it.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        root = tmp_path / "sessions"
+        first = self._saved(root, checkpoint=True)
+        second = self._saved(root, checkpoint=True)
+        assert first != second, "the fixture must build two distinct conversations"
+
+        status, detail = diagnostics._checkpoint_count(root)
+        assert status == diagnostics.STATUS_WORKING
+        assert "2 checkpoint file(s)" in detail, (
+            "two conversations each holding a checkpoint is two checkpoint "
+            f"files, not one per conversation: {detail!r}")
+        assert "in 2 conversation(s)" in detail
+        # Both sessions named, so "only the first" cannot satisfy this.
+        assert first in detail and second in detail
+
+    def test_the_count_is_of_files_not_of_conversations(self, tmp_path):
+        """A conversation holding two checkpoints is two files.
+
+        The same confusion as above from the other side - counting
+        conversations and counting files agree at one of each - so the fixture
+        gives one conversation two checkpoints and the assertion is on the total.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import conversation_store
+
+        root = tmp_path / "sessions"
+        sid = self._saved(root, checkpoint=True)
+        conversation_store.checkpoint(root, sid)
+        conversation_store.checkpoint(root, sid)
+
+        status, detail = diagnostics._checkpoint_count(root)
+        assert status == diagnostics.STATUS_WORKING
+        assert "3 checkpoint file(s)" in detail, (
+            f"three checkpoints is three files: {detail!r}")
+        assert "in 1 conversation(s)" in detail
+
+    def test_the_two_answers_really_are_different(self, tmp_path):
+        """The control that makes the two assertions above mean something.
+
+        Without it, "empty is working" and "a conversation without checkpoints is
+        not working" could both hold on code that answered the same thing twice -
+        and a blanket-`STATUS_WORKING` fix would satisfy the first and quietly
+        delete the second.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        gap = tmp_path / "gap"
+        self._saved(gap)
+
+        empty_status = diagnostics._checkpoint_count(empty)[0]
+        gap_status = diagnostics._checkpoint_count(gap)[0]
+        assert empty_status != gap_status, (
+            "an untouched machine and a machine with an unrewindable "
+            "conversation must not report the same thing")
