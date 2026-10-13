@@ -19636,3 +19636,61 @@ file records most often:
 **A scan that finds nothing is not a finding**, and a scan that finds *some* is
 worse, because the number it prints is right. Three of the four runs printed a
 plausible figure (0, 27, 29) and every one was an artefact of the pattern.
+
+## The wizard's "fill the void" mark was drawn on top of the text it was meant to sit under (2026-10-13)
+
+The void-mark fix - *"The void now carries Chronoa's orb"* - was never rendered,
+because the 17 `setup:*` pages had **never once been rendered in this
+repository's history**. The first sweep of them found it.
+
+**Measured on `setup:extras`, not eyeballed.** The mark's blue pixels occupy
+**y=705..798, x=593..686**. The row-card borders on that page fall at y=**693**,
+**748** and **803**, so the mark was drawn across **two** of them, covering the
+word "speaker" in *"Who said what - split a recording by speaker"* - with **824
+near-white text pixels** immediately to its left. The page's layout is correct
+(`test_ui_layout_contract.py` is 16 passed; no wizard page asks for a sideways
+scrollbar), so the only thing wrong was a decoration painted on top of the page.
+
+**Cause: `_void_has_room` asked whether the content scrolls, which is a different
+question from whether there is space to put something in.**
+
+```python
+return adjustment.get_upper() <= adjustment.get_page_size() + 1
+```
+
+A page whose content ended **six pixels** above the window answered "yes, there
+is a void", and a **112px** mark was drawn centred over the last rows. The mark's
+size is now read out of the SVG it is drawn from (`MARK_PX`, derived rather than
+typed so redrawing it cannot leave a threshold below it) and the gap has to hold
+it.
+
+**And the gap has to be measured off the content, not off the adjustment — which
+the first version of the fix got wrong in the other direction.** `upper` is the
+*allocated* height of the scrolled child, and that child is an `Adw.Clamp` with
+`vexpand`, so it is handed the whole viewport and reports `upper == page_size`
+**whatever its contents measure**. Thresholding on `upper` therefore removed the
+mark from `setup:brain`, whose two lines of text leave roughly 500px of obvious
+void.
+
+**That over-fit was caught by rendering the two pages, not by a test** - the 46
+wizard tests were green throughout, before and after, and the existing
+`_void_has_room` cases still pass because they pass an adjustment with no
+`content_height` and fall back to `upper`. The caller now measures the clamp's
+**natural** height and passes the number in, which also keeps `Gtk` out of
+module scope (`Gtk` is imported inside `build_window` on purpose - this module is
+imported by the MCP server and the CLI).
+
+Verified by rendering, both directions:
+
+| page | before | after |
+|---|---|---|
+| `setup:extras` | mark **over two row cards**, 5,839 px | **mark absent** |
+| `setup:brain` | mark present, 5,832 px at y=659..752 | **identical**, 5,832 px at y=659..752 |
+
+**The four failures I got while measuring this were mine.** Running the wizard
+suites alongside a concurrent render gave 4 failed / 176 passed in
+`test_mode_choice_routes_the_flow.py` and `test_cloud_branch_is_honest.py`; run
+without the competing display they are **10 passed**, and in isolation also
+passed. That is this file's own concurrency trap - D-Bus names, and now broadway
+displays - and it is the **fifth** time this session that concurrency, not the
+code, manufactured a failure that looked like a defect.

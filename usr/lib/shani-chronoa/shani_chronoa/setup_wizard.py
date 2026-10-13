@@ -467,8 +467,46 @@ def _jump_label(text: str):
     return row
 
 
-def _void_has_room(adjustment) -> bool:
-    """Whether a page's content is shorter than its window, so there is a void.
+def _mark_px() -> int:
+    """The mark's own size, read out of the SVG it is drawn from.
+
+    Derived rather than typed so that redrawing the mark cannot leave a threshold
+    below it - the same reasoning that derives `<sense-name>-sense-enabled` from
+    a sense's name rather than keeping a second spelling.
+    """
+    import re
+    # The blob is **bytes**, and `re` refuses a str pattern on a bytes subject -
+    # which is a TypeError at import rather than a wrong number, so it cannot
+    # pass unnoticed. Decode a short prefix rather than the whole document.
+    text = _ORB_MARK_SVG[:400].decode("utf-8", "replace")
+    match = re.search(r'width="(\d+)"', text)
+    return int(match.group(1)) if match else 128
+
+
+#: A void has to be able to **hold the mark**, which is what this missed.
+#:
+#: `_void_has_room` asked whether the content scrolls, which is a different
+#: question from whether there is space to put something in. A page whose content
+#: ends **one pixel** above the window answered "yes, there is a void", and a
+#: 112px mark was drawn centred over the last rows.
+#:
+#: Measured on `setup:extras`, rendered 2026-10-13 - the first time any wizard
+#: page had ever been rendered in this repository. The mark's blue pixels measure
+#: **y=705..798, x=593..686**, and the row-card borders on that page fall at y=
+#: 693, 748 and 803: so it was drawn across **two** of them, covering the word
+#: "speaker" in *"Who said what - split a recording by speaker"*, with 824
+#: near-white text pixels immediately to its left. The page's own layout is
+#: correct (`test_ui_layout_contract.py` is 16 passed, no wizard page asks for a
+#: sideways scrollbar) - the only thing wrong was a decoration drawn on top of it.
+MARK_PX = _mark_px()
+
+#: The mark plus a little air, so a void exactly the size of the mark does not
+#: leave it touching the content above or below.
+VOID_NEEDED_PX = MARK_PX + 24
+
+
+def _void_has_room(adjustment, content_height=None) -> bool:
+    """Whether a page's content leaves a void **the mark can actually sit in**.
 
     **`upper <= page_size` is the no-scrollbar case**, but it is also what an
     *unallocated* scroller reports - `upper` and `page_size` are both 0 before
@@ -479,10 +517,32 @@ def _void_has_room(adjustment) -> bool:
 
     So a page that has never been measured is not a page with room in it, and
     the answer is False rather than a guess in either direction.
+
+    **A void of any size is not a void.** The mark is `MARK_PX` square, so the
+    gap has to be at least that; anything less is a page with no room, and the
+    honest answer is no mark rather than a mark over the text. Measured on
+    `setup:extras`: a **six-pixel** gap passed the old test, and a 112px mark was
+    drawn across two row cards, covering the word "speaker".
+
+    **And the gap has to be measured off the content, not off the adjustment.**
+    `upper` is the *allocated* height of the scrolled child, and this child is an
+    `Adw.Clamp` with `vexpand`, so it is handed the whole viewport and reports
+    `upper == page_size` **whatever its contents measure**. The first version of
+    the threshold used `upper` and therefore removed the mark from `setup:brain`,
+    whose two lines of text leave roughly 500px of obvious void - the fix was
+    over-fitted and caught by re-rendering the two pages rather than by the unit
+    tests, which were green throughout.
+
+    So the caller **measures the content and passes the number in** rather than
+    this function reaching for a widget: `Gtk` is deliberately not imported at
+    module scope here (the MCP server and the CLI import this module on a machine
+    with no display), and a pure function of two integers is what can be tested
+    without one. `upper` remains the fallback for a caller with nothing to measure.
     """
     if adjustment.get_page_size() <= 1:
         return False
-    return adjustment.get_upper() <= adjustment.get_page_size() + 1
+    needed = adjustment.get_upper() if content_height is None else content_height
+    return (adjustment.get_page_size() - needed) >= VOID_NEEDED_PX
 
 
 def _orb_mark():
@@ -735,7 +795,11 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
         overlay.add_overlay(mark)
 
         def _mark_follows_the_void(adjustment) -> None:
-            mark.set_visible(_void_has_room(adjustment))
+            # Measured off `clamp`, not off `adjustment.get_upper()` - the
+            # clamp has `vexpand`, so the adjustment reports a full-height child
+            # whatever its contents measure. See `_void_has_room`.
+            natural = clamp.measure(Gtk.Orientation.VERTICAL, -1)[1]
+            mark.set_visible(_void_has_room(adjustment, natural))
 
         for signal in ("changed", "value-changed"):
             scroller.get_vadjustment().connect(signal, _mark_follows_the_void)
