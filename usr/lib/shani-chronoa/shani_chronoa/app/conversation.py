@@ -443,7 +443,22 @@ class ConversationMixin:
         if isinstance(result, Exception):
             logger.error(f"Processing error: {result}")
             if self.window:
-                self.window.set_response(f"Error: {result}")
+                # **A failure is not an answer.** This went through
+                # `set_response`, which builds the assistant's turn - so a
+                # Python exception appeared in the transcript **in the
+                # assistant's own bubble**, styled as its reply, and read as
+                # Chronoa having said `Error: <repr>`. It was also the only
+                # thing on screen that could not be regenerated, because it
+                # looked like a completed answer.
+                #
+                # `add_notice_row` is the same seam the compaction and cloud
+                # notes use, and its own docstring says why: *"a note about the
+                # turn, not something the assistant said."* The kind is `error`
+                # rather than `compaction` so it is not dimmed - a failure has to
+                # be louder than the housekeeping it now sits beside.
+                self.window.add_notice_row(
+                    f"Chronoa could not finish that turn. {result}",
+                    "error")
                 self.window.set_orb_state("error")
                 self.window.set_status("Ready")
             return GLib.SOURCE_REMOVE

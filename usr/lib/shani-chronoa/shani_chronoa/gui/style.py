@@ -434,6 +434,14 @@ class StyleMixin:
         .status-dot.status-unknown { color: rgba(245,158,11,0.95); }
         .status-dot.status-off { color: rgba(140,140,150,0.95); }
 
+        /* A turn that failed. Same `#ef4444` as `.status-attention` rather than
+           a second red: one warning colour in the app, so a person who has
+           learned it in the status line sees the same signal here. The row keeps
+           `turn-notice` as well, which is the marker `_keeps_across_replies`
+           reads - so the failure survives a later reply in the same turn. */
+        .turn-error label,
+        .turn-error image { color: #ef4444; }
+
         /* The dot. A round swatch rather than a glyph, because a glyph has to
            come from the icon theme and an icon theme is free not to have it -
            the whole class of bug where a missing name renders as an empty box.

@@ -19771,3 +19771,89 @@ verbatim:
 | the route returns silently | 1 failed |
 | every key treated as installed | 1 failed |
 | the subtitle stops saying "download" | 1 failed |
+## A failed turn was drawn in the assistant's own bubble, reading as its answer (2026-10-13)
+
+The second thing the UI review found, and it is on the path everybody walks when
+something goes wrong.
+
+`app/conversation.py`'s `_on_response_ready` had one line for the failure case:
+
+    self.window.set_response(f"Error: {result}")
+
+`set_response` **builds the assistant's turn**. So a Python exception was
+appended to the transcript in the assistant's own bubble, in the assistant's
+styling, reading as something Chronoa had said:
+
+> **you**  what's the weather
+> **Chronoa**  Error: HTTPConnectError(...)
+
+Three consequences, and the first is the visible one. It was not offered for
+regeneration, because regeneration is offered on **answers** - so the one turn
+that most needed redoing was the one that looked finished. And a person reading
+back through a conversation had to work out which of the assistant's turns were
+replies and which were crash dumps.
+
+The fix routes it to `add_notice_row(..., "error")` - the same seam the
+compaction and cloud notes use, whose own docstring states the rule this broke:
+*"a note about the turn, not something the assistant said."*
+
+**`error` is a new kind rather than a reuse of `compaction`, and the reason is
+prominence.** Every other notice is housekeeping and is `dim-label` on purpose,
+because it should recede behind the reply. A turn that **did not happen** is the
+thing a person most needs to see, and dimming it would have made the notice
+quieter than the fake bubble it replaced - a fix that is a regression. So the
+error row is undimmed, carries `turn-error`, and takes the app's **one** warning
+colour `#ef4444` - the same value `.status-attention` already uses, so a person
+who has learned it in the status line sees the same signal here. A second red
+would be a second thing to learn.
+
+### The marker is added beside `turn-notice`, never instead of it
+
+`_keeps_across_replies` keys on `turn-notice`, which is what lets a note outlive
+the turn's text. The error row carries **both** classes. A failure that vanishes
+the moment anything else is said in that turn has no value at all.
+
+### Two mutations ran clean, and both were gaps in my own tests
+
+| mutation | first run | what it actually breaks |
+|---|---|---|
+| the warning icon removed | **survived** | nothing — no test looked at the icon |
+| `_keeps_across_replies` repointed from `turn-notice` to `turn-error` | **survived** | **every compaction and cloud note**, silently |
+
+The second is the instructive one. Repointing the predicate at `turn-error`
+leaves **every error row working** - which is the only thing this file was
+written to check - so it reads as harmless, while the rows that were keeping
+that marker alive quietly stop surviving. **A test that checks the new thing does
+not check the old thing it shares a mechanism with**, and from inside the new
+test the two are indistinguishable.
+
+**7 mutations, 7 caught** after both witnesses were added, including the shipped
+defect restored verbatim:
+
+| mutation | |
+|---|---|
+| `set_response(f"Error: {result}")` (**the shipped bug**) | 1 failed |
+| filed as a `compaction` note | 1 failed |
+| the error row dimmed like a note | 1 failed |
+| the `turn-error` marker removed | 2 failed |
+| the `turn-notice` marker dropped | 5 failed |
+| the warning icon removed | 1 failed |
+| the survival marker repointed at `turn-error` | 1 failed |
+
+### Three harness slips of my own, and the first is the recurring one
+
+1. **`ModelPicker.__new__`** - `popdown` is a `Gtk.Popover` vfunc, and a Python
+   attribute on an uninitialised GObject does not shadow it, so all four new
+   picker tests failed with *"object ... is not initialized"*.
+   `TestTheChoice` documents this trap in full and I walked into it anyway,
+   because the fixture was the thing doing the constructing.
+2. **`get_sensitive()` is not the inverse of `set_activatable()`.** Measured on
+   this libadwaita: `set_activatable(False)` leaves `get_sensitive()` reading
+   `True`. The picker's first dead-row test used `get_sensitive()`, so **it
+   passed with the dead end fully restored** - the one thing a regression test
+   written to catch dead rows must not be.
+3. **A helper that set the machine state hid two tests' own setups**, and the
+   next test then failed for the same reason because it never arranged the
+   machine either. I wrote *"a test that does not set up the machine it
+   measures is measuring the fixture"* into the helper's docstring and broke it
+   one line later.

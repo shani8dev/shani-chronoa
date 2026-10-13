@@ -112,6 +112,14 @@ def reading_width(child: Gtk.Widget) -> Gtk.Widget:
 #: Marks a housekeeping notice inside a turn, so a new reply text keeps it.
 TURN_NOTICE_CSS = "turn-notice"
 
+#: **A turn that failed, which is not the same thing as a note about it.**
+#:
+#: Added *alongside* `turn-notice` rather than instead of it, because
+#: `_keeps_across_replies` keys on `turn-notice` - and an error row has to
+#: survive a later reply in the same turn exactly as a compaction note does, or
+#: the failure vanishes the moment anything else is said.
+TURN_ERROR_CSS = "turn-error"
+
 
 def _keeps_across_replies(child) -> bool:
     """A turn's child that is about the turn rather than the reply's text."""
@@ -1525,6 +1533,8 @@ class TranscriptView(Gtk.ScrolledWindow):
             self._current_assistant = self._append_turn("assistant", "")
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         row.add_css_class(TURN_NOTICE_CSS)
+        if kind == "error":
+            row.add_css_class(TURN_ERROR_CSS)
         # Neither `cloud-symbolic` nor `view-convert-symbolic` is a glyph this
         # theme ships - checked with `Gtk.IconTheme.has_icon`, which is what
         # `test_ui_layout_contract.py::test_every_surface_icon_exists_on_this_machine`
@@ -1542,13 +1552,21 @@ class TranscriptView(Gtk.ScrolledWindow):
         # chain of `if kind ==` in every caller.
         icons = {"cloud": "network-transmit-receive-symbolic",
                  "away": "preferences-system-time-symbolic",
-                 "compaction": "format-justify-fill-symbolic"}
+                 "compaction": "format-justify-fill-symbolic",
+                 # Checked in Adwaita and Yaru by path, not by `has_icon`,
+                 # which has been wrong in this repo before.
+                 "error": "dialog-warning-symbolic"}
         icon = Gtk.Image.new_from_icon_name(
             icons.get(kind, icons["compaction"]))
         icon.add_css_class("dim-label")
         row.append(icon)
         label = Gtk.Label(label=sentence)
-        label.add_css_class("dim-label")
+        # **A failure is not dimmed.** Every other kind here is housekeeping and
+        # is *meant* to recede behind the reply; a turn that did not happen is
+        # the thing a person most needs to see, and dimming it would make the
+        # notice quieter than the fake assistant bubble it replaces.
+        if kind != "error":
+            label.add_css_class("dim-label")
         label.set_xalign(0.0)
         label.set_wrap(True)
         row.append(label)
