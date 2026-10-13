@@ -20209,3 +20209,59 @@ reading as a product defect three files away.
 chunks.** None of the failures are from this work - the 69-error chunk is live
 audio in parallel shards, `model_registry.verify_digest` is the other session's,
 and the models-card failure is this box having no local model.
+
+## The sidebar dots were measured, not guessed, and the red one is honest (2026-10-13)
+
+An earlier note in this file carried "4 of 13 coloured dots non-green (amber ×2,
+red ×2, the red at bottom being **Export**, uninvestigated)" and filed nothing,
+because two probes had already been shown to lie. Measured properly this time,
+the number is **three**, and the cause of each is named:
+
+| state | colour | rows |
+|---|---|---|
+| `status-ok` | green | Conversations, Compare, Activity, Skills, Triggers, Goals, Workbench, Diff (**8**) |
+| `status-unknown` | amber | Memory, Routines (**2**) |
+| `status-attention` | red | **Driving** (**1**) |
+| `status-off` | grey | My files, Meetings (**2**) |
+
+**13 dots, 8 + 2 + 1 + 2. The earlier "red ×2" was wrong and Export is not on a
+dot at all** - the item below the visible sidebar is the bottom of the scroll, so
+a dot inferred as "the next one down" was never measured to exist.
+
+### And the one red dot is the panel telling the truth
+
+`driving.py:120` records `STATUS_ATTENTION` with the word **"No display this
+driver can measure"**, and the driver is `xdotool` - which is **absent from this
+box**, as this file already records. So on a headless render the dot is an
+accurate report, not a warning about nothing: the panel genuinely cannot place a
+window here.
+
+**This is the fourth time the health vocabulary has been right and the *reading*
+of it wrong**, after `heard-sound`'s dead switch, the `0 MB` download two
+entries ago, and `cloud-keys`' 129KB false pass. A red mark in a screenshot is a
+claim about colour until something asks what produced it.
+
+### The instrument that finally worked, because the first three did not
+
+The dots are at **x = 36..40** - which is inside the same column as the row
+**icons** (x = 32..44). The first probe scanned x = 55..85, found exactly one
+chromatic pixel cluster, and reported it as *the entire status column*; it was
+the **Routines icon's orange badge**. The second lumped icons and dots together
+and concluded "coloured pixels live at 32..44", which is true and says nothing
+about which is which. The third guessed y-coordinates from looking at a picture
+and hit empty rows three times.
+
+What worked was **chroma clustering over the correct column** - and the only
+reason the column was found is that the one dot the wrong probe *did* find was
+magnified, cropped and looked at rather than reported. **A magnified crop is a
+different instrument from a coordinate scan**, and here it was the one that said
+the instrument was aimed at the wrong pixels.
+
+### The "colour-only indicator" hypothesis was wrong, and checking cost one grep
+
+Colour alone excludes colourblind users, so a sidebar whose only state signal is
+a 10px dot looked like a defect. `sidebar.py:387` sets
+`dot.set_tooltip_text(f"{title}: {STATUS_WORDS[status]}")` - so the state is
+named in words on hover, and the dot is a summary of a labelled indicator rather
+than the indicator. The grep for it was one line; **the defect was in the
+hypothesis, which is what the measurement is for.**
