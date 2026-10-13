@@ -49,11 +49,25 @@ MUTATIONS = [
     },
     {
         "file": _LEARNING,
-        "old": "    cached = _HISTORY_CACHE.get(key)\n    if cached is not None and cached[0] == (stat.st_size, stat.st_mtime):\n        return cached[1]\n",
+        "old": "    cached = _HISTORY_CACHE.get(key)\n    if cached is not None and cached[0] == tuple(revisions):\n        return cached[1]\n",
         "new": "    cached = None\n",
         # The cache is the only thing that makes this affordable on a hot path.
         # Measured on the real 19 MB log: 16.3 ms to parse the tail, ~0.1 ms for
         # the cached read. Without it every tool selection re-parses.
+        #
+        # **The anchor rotted on 2026-10-13 and nobody noticed for a day.** It
+        # named the single-file form - `(stat.st_size, stat.st_mtime)` for the
+        # active log - and making `_durable_records` follow the archives replaced
+        # it with `tuple(revisions)` over every chunk. The mutation stopped
+        # applying silently, and `--check-anchors` is the only thing that can
+        # see it.
+        #
+        # It was missed because the anchor check was run **per set**
+        # (`--check-anchors call_log_rotation`) instead of with no argument. The
+        # gate is global; scoping it to the set being edited is a way of not
+        # running it, and this repository's own note is that the cheap half "is
+        # the line most likely to be quoted" - which is exactly why it has to be
+        # run with no argument and not only where you last looked.
         "label": "the per-revision cache never hits",
         "expect": ["test_an_unchanged_log_is_not_reparsed"],
     },
