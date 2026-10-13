@@ -1053,11 +1053,32 @@ def _guardrail_refuses(name: str, arguments):
     # template leads, and `message` is the fallback for the verdicts that
     # carry only a reason (INVALID).
     said = reason.template or reason.message
+    # **Four refusals, four sentences.** Every non-VALID verdict used to become
+    # the same `Not run. <reason>`, which is what let two verdicts the guardrail
+    # documents go years without anyone noticing nothing acted on them - the
+    # dispatch could not tell them apart, so producing them would have changed
+    # nothing. What each one is *for* is now said:
+    #
+    # - `reask` - the model can answer this. It is put back as a question, not
+    #   reported as a fault.
+    # - `retry` - the template already asks for the call again.
+    # - `stop` - the value is blank and asking again with the same emptiness will
+    #   not help. Its message says it was not run, so it is not prefixed again.
+    # - `invalid` - something supplied is actually wrong. Reported plainly.
+    if reason.should_reask:
+        # **No `{name} did not run:` prefix.** `said` already opens with the tool's
+        # own name - "files needs the required argument 'path'" - so the first
+        # version said *files did not run: files needs...* and read like a stutter.
+        text = said + " Please supply it and call again."
+    elif reason.should_stop:
+        text = said
+    else:
+        text = ("Not run. " + said)
     # `ran=False` again carries the meaning: the tool never executed. UNVERIFIED
     # rather than FAILED for the same reason as the reaction layer above - the
     # call did not run and break, it never ran at all.
     return DispatchResult(
-        text=("Not run. " + said),
+        text=text,
         verdict=verification.Verdict.UNVERIFIED,
         ran=False,
     )

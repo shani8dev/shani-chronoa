@@ -186,23 +186,30 @@ def as_argument_object(raw) -> "tuple[Optional[dict], str]":
 def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
     """Verdict on whether this call is well-formed enough to run.
 
-    Returns a `GuardrailResult`. **Three of the five declared verdicts are
-    reachable today; two are not yet produced:**
+    Returns a `GuardrailResult`. **All five verdicts are reachable, and each is
+    reached by a shape test rather than a judgement** - which is the module's
+    whole thesis. The split is by audience and by whether asking again can help:
 
-    | verdict | produced by `check()`? | what it means |
+    | verdict | what it means | what reaches it |
     |---|---|---|
-    | `valid` | yes | the call is well-formed; run it |
-    | `invalid` | yes | the call is malformed; do not run, report the reason |
-    | `retry` | yes, once | well-formed, but should be retried with `template` (a string argument that starts `ERROR:`) |
-    | `reask` | **no** | the model should be asked again; the reason is a question for the model, not a human |
-    | `stop` | **no** | the call must never run; a hard stop with a reason |
+    | `valid` | the call is well-formed; run it | the fall-through |
+    | `reask` | the model should be asked again; the reason is a question for the model, not a human | a **required argument is missing** |
+    | `retry` | well-formed, but should be retried with `template` | a string argument starting `ERROR:` - a parse failure a template fixes |
+    | `stop` | the call must never run | a **required argument present but blank** - supplied, and says nothing |
+    | `invalid` | a supplied value is actually wrong; report it | wrong type, or an extra argument the schema forbids |
 
-    **This list used to claim all five were reachable**, which sent the wrong way
-    twice: `should_reask` and `should_stop` were read as two verdicts the dispatch
-    layer acted on, when no code path constructs either verdict and nothing reads
-    those two properties. `should_retry` is reachable but redundant - the RETRY
-    payload is its `template`, and `tools.py` uses `reason.template or
-    reason.message` directly and deliberately, with the reason written down there.
+    **`reask` and `stop` used to be unreachable**, and the docstring claimed all
+    five were live. Nothing constructed either verdict and nothing read
+    `should_reask`/`should_stop`, so a reader would have gone looking for dispatch
+    handling of two verdicts that could not occur. They were unreachable because
+    one case was folded into `invalid` and the other was not checked at all.
+
+    **`stop` closes a hole rather than inventing a category.** Measured before
+    this change: `path=""` and `path="   "` both returned **`valid`**, so the tool
+    ran with an empty path and the failure surfaced from the tool rather than from
+    the layer that exists to catch it. A required argument that is blank is not a
+    question the model can answer - it supplied the argument - so it cannot be
+    `reask`, and no template can put a value in a string the model left empty.
 
     A returned `GuardrailResult` is the decision the dispatch layer acts on -
     naming the argument, what was wrong, and what was expected. A traceback
@@ -217,14 +224,39 @@ def check(name: str, arguments: dict, schema: dict) -> GuardrailResult:
 
     # A missing required argument is the common case, and the one most likely to
     # be a hallucinated call rather than a real request.
+    #
+    # **`REASK`, not `INVALID`.** The split is by *audience*, which is what the
+    # two verdicts have always meant. A missing argument is a **question the model
+    # can answer** - "which path?" - so the right response is to ask it again.
+    # `invalid` is for a supplied value that is actually wrong, which is a fact to
+    # report rather than a question to put back.
     for required in schema.get("required") or []:
         if required not in arguments:
             known = ", ".join(sorted(properties)) or "none declared"
             return GuardrailResult(
-                GuardrailResult.INVALID,
+                GuardrailResult.REASK,
                 message=(
-                    f"{name} was called without the required argument "
-                    f"'{required}'. It accepts: {known}."
+                    f"{name} needs the required argument '{required}', which "
+                    f"was not given. It accepts: {known}."
+                ),
+            )
+        # **A blank required argument is `STOP`, and this used to be a hole.**
+        # Measured: `path=""` and `path="   "` both returned `valid`, so the tool
+        # ran with an empty path and the failure came from the tool rather than
+        # from the thing that is supposed to catch it.
+        #
+        # It is `stop` rather than `reask` because asking again does not help:
+        # the model *did* supply the argument, and what it supplied is nothing.
+        # `retry` covers the other "nothing useful" shape - an `ERROR:` echo,
+        # which a template fixes - and this is the one no template can.
+        value = arguments.get(required)
+        if isinstance(value, str) and not value.strip():
+            return GuardrailResult(
+                GuardrailResult.STOP,
+                message=(
+                    f"{name} was given an empty value for '{required}'. The "
+                    f"argument is there but says nothing, so it was not run - "
+                    f"asking again needs a real value, not an empty one."
                 ),
             )
 
