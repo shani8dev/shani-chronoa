@@ -653,7 +653,20 @@ class SandboxExecutor:
             # The filter goes into the bwrap process's own `preexec_fn`, so it
             # would be installed before bwrap's `mount` calls; see
             # `_seccomp_conflicts_with_bwrap` for the measurement.
-            if _PENDING_SECCOMP.get("enabled"):
+            #
+            # **The predicate is asked here rather than implied by the enclosing
+            # `if use_bwrap:`.** It is tautological today - inside that branch
+            # `use_bwrap` is True, so the call returns True and the old
+            # `if _PENDING_SECCOMP.get("enabled")` gives the same answer. It is
+            # called anyway because the function it names had **no caller in the
+            # tree**, and this is the decision it was written for: if a later
+            # edit moves this block out of that branch - reordering the argv
+            # build, hoisting the block for an early return - the answer travels
+            # with it and the filter is still withheld. Left implicit, the guard
+            # was one refactor away from installing a filter that stops
+            # bubblewrap from starting at all.
+            if (_seccomp_conflicts_with_bwrap(config.level, use_bwrap)
+                    and _PENDING_SECCOMP.get("enabled")):
                 _PENDING_SECCOMP["enabled"] = False
                 if config.level.value not in _SECCOMP_SKIPPED_FOR_BWRAP:
                     _SECCOMP_SKIPPED_FOR_BWRAP.add(config.level.value)
