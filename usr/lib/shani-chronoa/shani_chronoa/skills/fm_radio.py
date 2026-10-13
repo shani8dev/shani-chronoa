@@ -563,6 +563,42 @@ def _is_big() -> bool:
     return sys.byteorder == "big"
 
 
+def _mix(left: float, right: float) -> float:
+    """`(left + right) / 2` - the mono sum of a stereo sample.
+
+    A downmix rather than a pick, and the difference is said out loud in the
+    decode answer: FM stereo puts a 38 kHz subcarrier in the difference signal, so
+    choosing one channel over the other would throw away half of what was received
+    for no reason a caller could see.
+    """
+    return (left + right) / 2.0
+
+
+def _write_audio(arguments: dict, capture: str,
+                 mono: "list[float]") -> str:
+    """Where `decode`'s audio goes, or `""` when the caller asked for none.
+
+    **Beside the capture it came from**, named after it, unless `out` says
+    otherwise. There is no "where Chronoa puts files for you" helper in
+    `files.py` - the question is not answered anywhere in the package - so
+    inventing one directory here would be a convention nobody else follows. Next to
+    the file the person already has is somewhere they can find without being told.
+
+    `out=""` writes nothing and says so, which is the honest answer for someone who
+    only wanted the numbers.
+    """
+    asked = str(arguments.get("out") or "").strip()
+    if asked == "-":
+        return ""
+    if asked:
+        target = os.path.expanduser(asked)
+    else:
+        stem = os.path.splitext(os.path.basename(capture))[0]
+        target = os.path.join(os.path.dirname(os.path.abspath(capture)),
+                              f"{stem}.audio.wav")
+    return write_wav(target, mono, AUDIO_RATE)
+
+
 def write_wav(path: str, samples: "list[float]", rate: int) -> str:
     """16-bit mono WAV, the shape every player here takes."""
     peak = max((abs(v) for v in samples), default=0.0)
@@ -677,12 +713,36 @@ def run(arguments: dict) -> str:
             return (f"{expanded} holds {len(iq)} samples, which is too few to "
                     "demodulate. Nothing was received.")
         deemphasis = float(arguments.get("deemphasis_us") or 75.0)
-        audio = demodulate(iq, rate, deemphasis_us=deemphasis)
-        seconds = len(audio) / rate
-        hz, strength = dominant_tone(audio, rate)
-        out = [f"Demodulated {len(audio):,} samples ({seconds:.2f}s at {rate:,} Hz "
-               f"sample rate) from {expanded}.",
-               f"Peak audio level: {max((abs(v) for v in audio), default=0.0):.3f}"]
+        try:
+            audio = demodulate(iq, rate, deemphasis_us=deemphasis)
+        except Exception as exc:  # noqa: BLE001 - said, never raised at a skill
+            return (f"{expanded} could not be demodulated ({type(exc).__name__}: "
+                    f"{exc}). Nothing was received.")
+        # **Three wrong-shape assumptions, all of which crashed.**
+        #
+        # `demodulate` returns `list[tuple[float, float]]` - stereo (left, right)
+        # pairs, because the stereo difference signal is the point of the
+        # demodulator - at `AUDIO_RATE` (32 kHz), *not* at the IQ sample rate this
+        # capture was recorded at.
+        #
+        # So `max((abs(v) for v in audio))` raised `TypeError: bad operand type
+        # for abs(): 'tuple'`, and `dominant_tone(audio, rate)` - which takes a
+        # flat `list[float]` - raised `TypeError: can only concatenate tuple (not
+        # "float") to tuple`. Neither was caught: the only `try` in this block
+        # wraps `read_iq_wav`. Measured here on a real 0.1 s stereo IQ capture,
+        # `run()` raised out of the function, so **this action had never worked**,
+        # and nothing in the suite covered it.
+        #
+        # And `len(audio) / rate` mixed the two rates: 3200 audio samples over a
+        # 250 kHz IQ rate reads as 0.01 s, when the clip is 0.10 s - 7.8x short.
+        mono = [_mix(left, right) for left, right in audio]
+        seconds = len(mono) / AUDIO_RATE
+        hz, strength = dominant_tone(mono, AUDIO_RATE)
+        peak = max((abs(v) for v in mono), default=0.0)
+        out = [f"Demodulated {len(mono):,} audio samples ({seconds:.2f}s at "
+               f"{AUDIO_RATE:,} Hz) from {expanded}, which was captured at "
+               f"{rate:,} Hz.",
+               f"Peak audio level: {peak:.3f}"]
         if strength > 0.05:
             out.append(f"A tone is dominant at about {hz:.0f} Hz "
                        f"(relative strength {strength:.3f}) - that is a test tone or a "
@@ -691,6 +751,26 @@ def run(arguments: dict) -> str:
             out.append("No dominant tone, which is what speech sounds like here. "
                        "That means audio was present but it is not a continuous tone, "
                        "so this says nothing about which station it was.")
+
+        # **The audio used to be thrown away here.** A person who demodulated a
+        # recording got "Peak audio level: 0.412" and no way to hear it, and
+        # `write_wav` - whose docstring is "16-bit mono WAV, the shape every player
+        # here takes" - sat in this module with no caller at all. Demodulating is
+        # the expensive part; discarding the result made the whole action a dead
+        # end.
+        try:
+            where = _write_audio(arguments, expanded, mono)
+        except OSError as exc:
+            return "\n".join(out + [
+                f"The audio could not be written to a file ({exc}), so it is lost - "
+                "the numbers above are all that remains of it."])
+        if where:
+            if peak < 1e-4:
+                out.append(f"Wrote {where}, which is **silence**: the peak level is "
+                           "below 0.0001, so nothing was demodulable. Written "
+                           "anyway so the file matches what was measured.")
+            else:
+                out.append(f"Wrote {where} - open it to listen.")
         return "\n".join(out)
 
     if action == "scan":
@@ -822,6 +902,13 @@ SCHEMA = {
                     "description": "For scan: what frequency the capture was centred on, "
                                    "so a tone can be reported in MHz rather than Hz.",
                 },
+                  "out": {
+                      "type": "string",
+                      "description": "For decode: where to write the demodulated audio as "
+                                     "a 16-bit mono WAV, so it can actually be listened to. "
+                                     "Defaults to a .audio.wav beside the capture. Use "
+                                     "out='-' for the numbers only and no file.",
+                  },
                 "deemphasis_us": {
                     "type": "integer",
                     "description": "For decode: the de-emphasis constant, 75 for North "
