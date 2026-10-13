@@ -1048,6 +1048,27 @@ def _model_server(instance: str) -> Probe:
                 f"{unit} is answering on 127.0.0.1:{port} (its /health returned 200); "
                 f"{setup}"
             )
+        if not binary:
+            # **Never configured is not a fault** - which this docstring says two
+            # paragraphs up and this function then contradicted on every
+            # unconfigured server: *"a server with no env file was never
+            # configured, and that is a different answer from one that is
+            # configured and not answering."* The Model servers section says it a
+            # third time: *"Each may be asleep, which is a normal state for all
+            # three."*
+            #
+            # All three are the wizard's **opt-in extras** - Eyes, Imagine,
+            # Memory - so on a default install every one of them is red, which
+            # put three alarms on a machine answering everything it was asked.
+            # `STATUS_UNKNOWN` would be a lie (this determined the answer) and
+            # `STATUS_NOT_WORKING` is an alarm about something nobody broke, so
+            # the row is green and names the door: the absence-shaped wrong
+            # answer this panel has now corrected three times.
+            return STATUS_WORKING, (
+                f"{unit} is not running, and nothing is wrong: {setup}. This is "
+                "an optional extra, so leaving it out is a choice rather than a "
+                "fault - setup's Optional extras page is what installs it"
+            )
         return STATUS_NOT_WORKING, (
             f"nothing is answering on 127.0.0.1:{port}, so {unit} is not serving; "
             f"{setup}"

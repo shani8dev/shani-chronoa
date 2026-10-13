@@ -20939,3 +20939,91 @@ it, as it did before. That is the same judgement recorded on `export`: the cause
 belongs in the row, the section explains the group, and which two of the three
 say it best is editorial. What was wrong here was **a red dot on a working
 machine**, and that is fixed and pinned.
+
+## The model servers were three red rows on every default install (2026-10-13)
+
+The checkpoint entry above asked for the whole population swept rather than the
+other 29 renders looked at, and the next instance was in this panel's **second**
+vocabulary: `diagnostics` does not use `common.STATUS_*`, it has its own three
+words. A scan of `STATUS_ATTENTION` cannot see it, which is why six panels were
+cleared and this one was not looked at.
+
+`_model_server` answers for Eyes, Imagine and Memory - the wizard's **opt-in
+extras** - and it distinguished "answering" from "not answering" with no third
+state for "never set up". So a machine that had installed nothing optional
+carried **three red rows** in the panel whose job is to say what is broken.
+
+**Its own docstring already had the missing case, and its own prose said it twice:**
+
+> a server with no env file was never configured, and that is a different answer
+> from one that is configured and not answering.
+
+> The loopback servers setup starts. **Each may be asleep, which is a normal
+> state for all three.**
+
+`read_env` already returned `("", ())` for a server setup never wrote, and the
+function already branched on it - to build the `setup` sentence - and then fell
+through to red anyway. The code had the fact and answered the wrong question with
+it.
+
+### Two states, and the remedy is the point
+
+| env file | answering | answer |
+|---|---|---|
+| present | yes | working |
+| **present** | no | **not working** - somebody wanted this server |
+| **absent** | no | **working** - an extra nobody installed |
+
+`STATUS_UNKNOWN` was the tempting middle and it is a lie: this *determined* the
+answer, it did not fail to. And a green row that says "nothing is wrong" without
+naming a door is a dead end the person has to find elsewhere - the row names
+setup's Optional extras page.
+
+**The middle row is the one a blanket fix deletes**, so it has its own test
+beside the fix's. This file records three fixes in this panel that could be
+over-applied and one that was.
+
+### 7 mutations, 7 caught - 5 by the runner, 2 verified by hand
+
+| mutation | |
+|---|---|
+| the never-configured branch gone (**the shipped defect**) | 3 failed |
+| **every non-answering server is green (the over-fix)** | 3 failed |
+| an unconfigured extra reports "could not determine" | 1 failed |
+| the row stops saying the absence is not a fault | 1 failed |
+| the row stops naming the page that installs it | 1 failed |
+| the remedy sentence is cut at the fault | 1 failed |
+| the imagine row reports the vision server | 1 failed |
+
+**The runner reported the first two as `UNMEASURABLE`, and they are not.** It
+printed `1 error in 0.52s` for both while the other five measured normally, and
+by hand - twice, including through the runner's own `_test_env()` scratch dirs -
+both produce **3 failed, 43 passed**. So the two are caught and the *harness* is
+what could not measure them, which is the direction this file cares about: a run
+that could not measure is reported unmeasurable rather than as a survivor, and
+the honest report is that five were measured by the tool and two by a person.
+
+**And the survivor that was real: my own witness.** The Imagine-row mutation
+survived twice. The test called `_model_server(instance)` directly, so rewiring
+`_SECTIONS` left every direct call unchanged - the probe still describes whatever
+instance it is handed. **A test that reaches past the table to the function
+behind it is testing the function, not the panel**, which is the same rule as
+"patch a name where it is read, not where it is re-exported" and this file's own
+`goals.remove` regression. It now walks the section's rows, which is what the
+panel renders, and the control is per-row: each row must name **its own** server
+and **no other**, so a row naming no server at all or all three fails too.
+
+### The prose check was the wrong instrument twice
+
+The first version read `inspect.getsource` and asserted a substring. It failed on
+the sentence that was sitting right there, because the description is written as
+two adjacent string literals and the join leaves the quote between them:
+
+    "...which is a "  "normal state for all three."
+                      ^^ the `"` `"` the pattern walks into
+
+Two wrong instruments in one test: a **source-text read for a claim about what a
+person sees**, and a pattern over text a line break rewrites. `_SECTIONS` holds
+the rendered string, so the claim is asked of the thing it is about - the second
+time this session a pattern read as an absence, after
+`grep "nothing to rewind yet"` on the checkpoint entry.

@@ -584,6 +584,181 @@ class TestTwoMoreProbesThatExistedAndWereNotAsked:
             assert status in surface.STATUS_WORDS, (
                 f"{probe.__name__} used {status!r}, which is not one of the three")
 
+def _rows_of(diagnostics, heading):
+    """The `(title, probe)` rows of one section, read off the table the panel
+    actually renders.
+
+    **A helper rather than an inline comprehension** because three tests need
+    the same answer and a hand-copied list of the three servers would be a
+    second inventory that can drift from `_SECTIONS` without anything noticing.
+    """
+    for title, _description, rows in diagnostics._SECTIONS:
+        if title == heading:
+            return rows
+    raise AssertionError(f"no section titled {heading!r}")
+
+
+class TestTheModelServerRows:
+    """A server setup never configured is not a fault.
+
+    These are the wizard's **opt-in extras** - Eyes, Imagine, Memory - so a
+    default install leaves all three red, and the Model servers section's own
+    prose says the opposite of the colour: *"Each may be asleep, which is a
+    normal state for all three."*
+
+    The two states are separated in the code, not in the row:
+
+    | env file | answering | answer |
+    |---|---|---|
+    | present | yes | working |
+    | **present** | no | **not working** - somebody wanted this server |
+    | **absent** | no | **working** - never installed, nothing is broken |
+
+    The middle row is the one that must survive a blanket fix: it is the same
+    "a fix that cannot be over-applied is not a fix yet" guard the checkpoint
+    row carries, and the file has now hit it twice.
+    """
+
+    INSTANCES = ("vision", "embed", "imagine")
+
+    def test_a_configured_server_that_is_not_answering_is_still_not_working(
+            self, monkeypatch):
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import model_service
+
+        monkeypatch.setattr(model_service, "is_up", lambda i: False)
+        monkeypatch.setattr(
+            model_service, "read_env", lambda i: ("/usr/bin/llama-server", ("-m",)))
+
+        status, detail = diagnostics._model_server("vision")()
+        assert status == diagnostics.STATUS_NOT_WORKING, (
+            "a server that was configured and is not answering is a fault")
+        assert "is not serving" in detail
+
+    def test_a_server_setup_never_configured_is_not_a_fault(self, monkeypatch):
+        """The shipped defect: three red rows on every default install."""
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import model_service
+
+        monkeypatch.setattr(model_service, "is_up", lambda i: False)
+        monkeypatch.setattr(model_service, "read_env", lambda i: ("", ()))
+
+        status, detail = diagnostics._model_server("vision")()
+        assert status == diagnostics.STATUS_WORKING, (
+            "an optional extra nobody installed is not a broken subsystem")
+        assert "nothing is wrong" in detail
+        assert "optional extra" in detail
+        # The remedy is named, because a dead end the person has to find
+        # elsewhere is the failure this panel records most often.
+        assert "Optional extras" in detail
+
+    def test_every_declared_extra_answers_the_same_way(self, monkeypatch):
+        """All three rows are the same question, so one experiment each.
+
+        A fix applied to one instance and not the other two is the shape this
+        repo keeps correcting - `capabilities._GROUPS` by name - and here the
+        rows differ by nothing but a port.
+
+        **Through `_SECTIONS`, not through `_model_server` directly.** Two
+        versions of this test called the probe by name and it was a **SURVIVOR**
+        on a mutation that rewires the section: swapping the Imagine row's probe
+        for the vision one leaves every direct call unchanged, because the probe
+        still describes whatever instance it is handed. The panel renders from
+        `_SECTIONS`, so the section is where the wiring has to be checked - and
+        a test that reaches past the table to the function behind it is testing
+        the function, not the panel.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import model_service
+
+        monkeypatch.setattr(model_service, "is_up", lambda i: False)
+        monkeypatch.setattr(model_service, "read_env", lambda i: ("", ()))
+
+        rows = _rows_of(diagnostics, "Model servers")
+        assert len(rows) == len(self.INSTANCES), (
+            f"expected one row per declared extra: "
+            f"{[title for title, _ in rows]}")
+
+        seen = {}
+        for title, probe in rows:
+            instance = title.split()[0]
+            assert instance in self.INSTANCES, (
+                f"a Model servers row names an instance this fix does not "
+                f"cover: {title!r}")
+            status, detail = probe()
+            seen[instance] = status
+            # **Each row describes its own server.** Three rows all reading
+            # "working" is a green panel in which two of them may be lying.
+            assert instance in detail, (
+                f"the {instance} row describes something else: {detail!r}")
+            others = [o for o in self.INSTANCES if o != instance]
+            assert not any(o in detail for o in others), (
+                f"the {instance} row also names "
+                f"{[o for o in others if o in detail]}: {detail!r}")
+
+        assert set(seen.values()) == {diagnostics.STATUS_WORKING}, (
+            f"every unconfigured extra should read the same way: {seen}")
+
+    def test_a_server_that_is_answering_is_reported_as_such(self, monkeypatch):
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import model_service
+
+        monkeypatch.setattr(model_service, "is_up", lambda i: True)
+        monkeypatch.setattr(
+            model_service, "read_env", lambda i: ("/usr/bin/llama-server", ("-m",)))
+
+        status, detail = diagnostics._model_server("imagine")()
+        assert status == diagnostics.STATUS_WORKING
+        assert "is answering on" in detail
+
+    def test_the_two_answers_really_are_different(self, monkeypatch):
+        """The control that makes the two assertions above mean something.
+
+        Without it, "absent is working" and "configured-but-down is not working"
+        could both hold on code that answered one thing twice - and a
+        blanket-`STATUS_WORKING` would satisfy the first and delete the second.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+        from shani_chronoa import model_service
+
+        monkeypatch.setattr(model_service, "is_up", lambda i: False)
+        monkeypatch.setattr(model_service, "read_env", lambda i: ("", ()))
+        absent = diagnostics._model_server("embed")()[0]
+
+        monkeypatch.setattr(
+            model_service, "read_env",
+            lambda i: ("/usr/bin/llama-server", ("-m",)))
+        configured = diagnostics._model_server("embed")()[0]
+
+        assert absent != configured, (
+            "never-configured and configured-but-down are different facts")
+
+    def test_the_section_says_a_sleeping_server_is_normal(self):
+        """The prose that the red contradict, read off the built panel.
+
+        **Not an `inspect.getsource` substring check.** The sentence is written as
+        two adjacent Python string literals, so the contiguous runtime text does
+        not exist in the source at all - my first two attempts asserted the
+        substring directly and then against whitespace-normalised source, and
+        both failed on wording that was sitting right there. Reading the source
+        for a sentence is a pattern match; reading the **row a person reads** is
+        a measurement, and it is the one that also catches a wording change that
+        matters.
+        """
+        from shani_chronoa.gui.surfaces import diagnostics
+
+        titles = {row[0] for row in diagnostics._SECTIONS}
+        assert "Model servers" in titles, (
+            "the section this fix rests on must still exist")
+
+        described = {row[0]: row[1] for row in diagnostics._SECTIONS}
+        prose = " ".join(described["Model servers"].split())
+        assert "asleep" in prose and "normal state" in prose, (
+            f"the Model servers section must still call a sleeping server a "
+            f"normal state, otherwise the green row has nothing behind it: "
+            f"{prose!r}")
+
+
 class TestTheCheckpointRow:
     """Four states, and the one word that separates the first two from the third.
 
