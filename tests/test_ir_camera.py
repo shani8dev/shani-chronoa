@@ -359,3 +359,111 @@ class TestInfraredVideo:
         assert "probe ran" not in str(out), (
             "a non-bool `infrared` reached the camera probe, so 'yes' would record "
             "video through a camera nobody chose")
+
+
+class TestTheCaptureSenseDescribesWhatANodeCanDo:
+    """`senses/capture.describe()` gained three fields, and they had no test.
+
+    **The broad `except Exception` around the probe is the reason these tests
+    exist.** A probe that fails silently is the shape this repository records for
+    `gui/surfaces/models.py` - "`except: pass` around a probe is how a panel ends up
+    quietly incomplete" - and it is the same code here: a `describe()` that cannot
+    probe would still return device, holders and in_use, so a reader could not tell
+    "the camera is free" from "this node could not be asked at all".
+    """
+
+    @staticmethod
+    def _node():
+        from shani_chronoa.senses import capture
+        return capture
+
+    def test_the_probe_fields_are_added(self, monkeypatch):
+        capture = self._node()
+        monkeypatch.setattr(capture, "_holders", lambda n, timeout=2.0: [42])
+        monkeypatch.setattr(capture.subproc, "cmdline", lambda pid: "/bin/ffmpeg")
+        monkeypatch.setattr("shani_chronoa.camera.probe", lambda node: {
+            "node": "/dev/video9", "card": "Test IR Cam", "can_capture": True,
+            "device_caps": 0x04200001, "formats": ["Y16 "], "formats_error": None,
+            "looks_ir": True})
+        out = capture.describe(pathlib.Path("/dev/video9"))
+        assert out["device"] == "/dev/video9"
+        assert out["can_capture"] is True
+        assert out["formats"] == ["Y16 "]
+        assert out["infrared"] is True
+        assert out["card"] == "Test IR Cam"
+        assert out["in_use"] is True, "the holders half is unaffected by the probe"
+
+    def test_a_node_that_cannot_capture_is_not_described_as_a_camera(self, monkeypatch):
+        """**The load-bearing one.** A metadata node answers `QUERYCAP` with a
+        sensible name, so `card` alone would describe it as a working camera."""
+        capture = self._node()
+        monkeypatch.setattr(capture, "_holders", lambda n, timeout=2.0: None)
+        monkeypatch.setattr("shani_chronoa.camera.probe", lambda node: {
+            "node": "/dev/video1", "card": "Integrated Camera", "can_capture": False,
+            "device_caps": 0x04a00000, "formats": [], "formats_error": "ENUM_FMT refused",
+            "looks_ir": False})
+        out = capture.describe(pathlib.Path("/dev/video1"))
+        assert out["can_capture"] is False
+        assert out["infrared"] is False
+
+    def test_a_probe_that_raises_never_takes_the_percept_down(self, monkeypatch):
+        """**And the broad `except` is bounded rather than trusted.** The node's
+        existence and its holders are still facts when the probe fails, so the
+        answer is thinner rather than absent - and thinner is the honest shape."""
+        capture = self._node()
+        monkeypatch.setattr(capture, "_holders", lambda n, timeout=2.0: [42])
+        monkeypatch.setattr(capture.subproc, "cmdline", lambda pid: "/bin/ffmpeg")
+
+        def _boom(node):
+            raise OSError("the probe is not available")
+
+        monkeypatch.setattr("shani_chronoa.camera.probe", _boom)
+        out = capture.describe(pathlib.Path("/dev/video9"))
+        assert out["device"] == "/dev/video9"
+        assert out["in_use"] is True
+        assert "can_capture" not in out, (
+            "the probe raised and describe() still reported a capability, so a node "
+            "that could not be asked reads as one that can")
+        assert "formats" not in out
+        assert "infrared" not in out
+
+    def test_a_probe_that_cannot_open_the_node_says_so(self, monkeypatch):
+        """**`error` is not silently dropped either**, because "not a V4L2 device"
+        and "an infrared camera" are different facts."""
+        capture = self._node()
+        monkeypatch.setattr(capture, "_holders", lambda n, timeout=2.0: [])
+        monkeypatch.setattr("shani_chronoa.camera.probe", lambda node: {
+            "node": "/dev/video9", "error": "QUERYCAP refused - not a V4L2 device"})
+        out = capture.describe(pathlib.Path("/dev/video9"))
+        assert out["in_use"] is False
+        assert "can_capture" not in out, (
+            "a node whose QUERYCAP was refused reported a capture capability")
+
+    def test_a_card_name_that_merely_contains_the_letters_is_not_infrared(
+            self, monkeypatch):
+        """**The weak test, bounded at the sense layer too.**
+
+        `camera.is_ir()` accepts a card name containing "ir" because it is the only
+        thing that catches a device whose driver never reports an IR format - and
+        "First Camera" contains "ir". That is documented in `is_ir()` as a false
+        positive in the *description*, and this is the assertion that keeps it a
+        false positive in the description *only*: a card named that is reported as
+        not infrared, so nobody acts on the band and asks a camera for `y16`.
+
+        It is also the fixture that makes the over-fix visible. Replacing
+        `looks_ir` with `"ir" in card.lower()` at the call site passes every other
+        test here - because the other fixtures' card names happen not to contain
+        "ir" - and fails this one. A control that agrees with the code on its own
+        fixture is not a control, which is the same lesson as the `[:1]` slice.
+        """
+        capture = self._node()
+        monkeypatch.setattr(capture, "_holders", lambda n, timeout=2.0: None)
+        monkeypatch.setattr("shani_chronoa.camera.probe", lambda node: {
+            "node": "/dev/video1", "card": "First Camera", "can_capture": False,
+            "device_caps": 0x04a00000, "formats": [], "formats_error": None,
+            "looks_ir": False})
+        out = capture.describe(pathlib.Path("/dev/video1"))
+        assert out["infrared"] is False, (
+            "a card named 'First Camera' was reported as infrared, so the card-name "
+            "substring test is being read as evidence rather than as the weak "
+            "fallback it is documented to be")
