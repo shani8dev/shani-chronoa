@@ -122,12 +122,82 @@ class TestItIsNotATrap:
 
 
 class TestWhatItBlocksIsTheMaintainedAnswer:
-    def test_it_blocks_exactly_the_gated_tools(self):
-        """No second list. A parallel one would drift from the consent keys."""
+    """**This class asserted the opposite of what it now asserts, and the
+    assertion was the bug.**
+
+    It read *"plan mode blocks exactly the gated tools"* - and that premise is
+    wrong for the tools that matter most. Measured when it was written: plan
+    mode blocked **92** tools and allowed `write_text_file` and `apply_patch`,
+    so entering plan mode did not stop the model writing your files. **A
+    consent key is not the maintained answer to "does this change something"** -
+    it answers "does this need a switch switched on", which is a different
+    question, and the two answers differ on the file-writing tools.
+
+    `MUTATING_TOOLS` is the answer to the question being asked, so that is what
+    is asserted - with `TALKS_ONLY` taken back out, because asking a question is
+    not touching the machine and a plan mode that cannot ask anything is
+    unusable.
+
+    **The old assertion is kept as a control.** It now fails, and the failure
+    names the tools where the two answers differ, which is the measurement the
+    change was made on.
+    """
+    def test_it_blocks_everything_that_changes_something(self):
+        """**The union, and both halves are load-bearing.**
+
+        `MUTATING_TOOLS` is the answer to *"does this change something"*;
+        `gated_by` is the answer to *"does this need a switch"*. The first
+        version of this test asserted only the first and named `airplane_mode` -
+        a tool that changes the machine and has no consent key of its own beyond
+        the radio one, so it is in the second set and not the first. Asserting
+        one half drops the other, and the half dropped is the half that was
+        already there before this change.
+
+        Measured today over 256 tools: **130 blocked**, against 92 for the
+        consent-key answer alone.
+        """
+        from shani_chronoa.capabilities import MUTATING_TOOLS, TALKS_ONLY
+
         planmode.set_enabled(True)
-        for name, description in DESCRIPTIONS.items():
-            expected = bool(gated_by(name, description))
+        expected_blocked = (set(MUTATING_TOOLS)
+                            | {n for n, d in DESCRIPTIONS.items()
+                               if gated_by(n, d)}) - set(TALKS_ONLY)
+        for name in DESCRIPTIONS:
+            expected = name in expected_blocked
             assert bool(planmode.blocked_reason(name)) is expected, (
-                f"{name}: plan mode disagrees with the consent keys about "
-                f"whether this changes anything"
-            )
+                f"{name}: plan mode disagrees with the maintained answer about "
+                f"whether this changes anything")
+        assert len(expected_blocked) >= 130, (
+            f"only {len(expected_blocked)} tools blocked - the file-writing tools "
+            f"this change was made for would be through again")
+
+    def test_the_two_answers_really_do_differ(self):
+        """**The control: the old assertion must still be false.**
+
+        Without this, a change that made the two sets identical would pass the
+        test above and quietly restore the premise - and the 38 tools where they
+        differ are the whole reason the answer moved.
+        """
+        from shani_chronoa.capabilities import MUTATING_TOOLS, TALKS_ONLY
+
+        gated = {n for n, d in DESCRIPTIONS.items() if gated_by(n, d)}
+        blocked = set(MUTATING_TOOLS) - set(TALKS_ONLY)
+        assert blocked - gated, (
+            "every mutating tool is gated, so the two answers coincide and the "
+            "question of which is maintained has gone away - re-measure before "
+            "assuming either is right")
+        for name in ("write_text_file", "apply_patch"):
+            assert name in blocked - gated, (
+                f"{name} is the tool the old plan mode let through; if it is "
+                f"now gated, re-measure the whole decision")
+
+    def test_a_question_is_not_a_change(self):
+        """`ask_user` is in `MUTATING_TOOLS` because a question has an effect -
+        it appears. Blocking it would make plan mode a session in which nothing
+        can be asked, which is not what the mode is for."""
+        from shani_chronoa.capabilities import TALKS_ONLY
+
+        planmode.set_enabled(True)
+        for name in sorted(TALKS_ONLY):
+            assert planmode.blocked_reason(name) == "", (
+                f"{name} asks rather than changes, and plan mode blocks it")

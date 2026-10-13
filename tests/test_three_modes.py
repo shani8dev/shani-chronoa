@@ -6,8 +6,17 @@ now carries exactly three, and each answers a different question:
 | chip | question | enforced in |
 |---|---|---|
 | **Plan** | what would you do? | the dispatch path, and it asks |
-| **Auto** | will it stop me to ask? | the permission layer's refusal |
+| **Ask first / No questions** | will it stop me to ask? | the permission layer's refusal |
 | **Build** | what is it working on? | which tools the model is shown |
+
+**The second chip is called "Auto" in the table of the design and says
+"No questions" on screen, and the difference is the point.** `DONT_ASK`
+*refuses* what it cannot ask about; it does not act freely. "Auto" on a strip
+invites the opposite reading, which this file's own
+`test_auto_does_not_say_it_may_act_freely` exists to prevent - and the strip was
+briefly shipping "Auto" as the chip's word, in a commit whose tests here were
+already red, so nothing objected. `test_permission_posture_chip.py` holds the
+word now; this file holds the three questions.
 
 **The last of those is the weakest and is written as such.** Plan and Auto are
 checks and refusals. Build changes which schemas reach the model - a strong
@@ -112,7 +121,7 @@ def test_the_three_chips_answer_three_different_questions():
                                   window_module._ModeStrip._PLAN,
                                   window_module._ModeStrip._CAPABILITY)
              for row in table}
-    assert words == {"Ask first", "Auto", "Working", "Plan", "General",
+    assert words == {"Ask first", "No questions", "Working", "Plan", "General",
                      "Build"}, words
 
 
@@ -154,7 +163,7 @@ def test_auto_is_a_permission_not_a_workflow():
     try:
         permissions.set_mode(permissions.Mode.DONT_ASK)
         strip.refresh()
-        assert strip._auto_label.get_text() == "Auto"
+        assert strip._auto_label.get_text() == "No questions"
         permissions.set_mode(permissions.Mode.DEFAULT)
         strip.refresh()
         assert strip._auto_label.get_text() == "Ask first"
@@ -163,8 +172,14 @@ def test_auto_is_a_permission_not_a_workflow():
 
 
 def test_auto_does_not_say_it_may_act_freely():
-    """Auto *refuses* anything it cannot ask about. A reader who takes the
-    word as "it will do as it likes" is wrong by the whole safety model."""
+    """The chip does not say "Auto", and the tooltip says *refused*.
+
+    `DONT_ASK` refuses anything it cannot ask about. A reader who takes the
+    word as "it will do as it likes" is wrong by the whole safety model - so the
+    word is "No questions" and the row's sentence carries both halves: that
+    risky calls are refused rather than asked about, and that this is not
+    permission to act freely.
+    """
     row = next(r for r in window_module._ModeStrip._AUTO if r[0] == "auto")
     assert "refus" in row[2].lower(), row[2]
     assert "not permission to act freely" in row[2].lower(), row[2]
@@ -257,7 +272,7 @@ def test_all_three_can_be_on_at_once():
         planmode.set_enabled(True)
         buildmode.set_enabled(True)
         strip.refresh()
-        assert strip._auto_label.get_text() == "Auto"
+        assert strip._auto_label.get_text() == "No questions"
         assert strip._plan_label.get_text() == "Plan"
         assert strip._rules_label.get_text() == "Build"
     finally:

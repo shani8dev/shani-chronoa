@@ -327,9 +327,24 @@ class _ModeStrip(Gtk.Box):
         ("ask", "Ask first",
          "It asks before anything that needs permission",
          "dialog-question-symbolic"),
-        ("auto", "Auto",
+        # **"No questions", not "Auto".** The tooltip already said the mode
+        # *refuses* rather than asks, and it already disclaimed acting freely -
+        # and the word on the chip said the opposite of both. A mode strip is
+        # read from across the room and the word is what survives; "Auto" on a
+        # strip means *it may act freely*, which is precisely what
+        # `permissions.DONT_ASK` refuses to be.
+        #
+        # This regressed in the strip redesign, which renamed the table to
+        # `_AUTO` and carried the old word with it. `test_permission_posture_chip`
+        # was already red at the time - it looks for `_PERMISSION` - so nothing
+        # objected, and the word that names the mode backwards shipped. **A test
+        # that was failing when the change was made cannot catch the change**,
+        # which is why `test_the_word_does_not_say_auto` is in the file that
+        # goes with this change and not in the one that was red.
+        ("auto", "No questions",
          "It does not interrupt you: anything needing permission is refused "
-         "rather than asked about. This is not permission to act freely",
+         "rather than asked about. This is not permission to act freely, and it "
+         "lasts until Chronoa restarts",
          "mail-unread-symbolic"),
     )
 

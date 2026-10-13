@@ -190,6 +190,37 @@ def _outstanding() -> "list[dict]":
     return outstanding
 
 
+def _what_it_would_do(steps) -> str:
+    """The plan's tools in order, duplicates collapsed - beside the count.
+
+    **A count is not a plan.** "3 steps, nothing has been done" is the sentence
+    for a run whose shape you cannot see, and approving it means saying yes to
+    three things nobody was shown. A model that asks for the same write five
+    times has still described **one** write, so the names collapse - while the
+    count stays the number of *steps*, so a plan that writes five files says
+    five and never five copies of one line.
+
+    **The dedup used to live in `planmode.refused_tools()`**, and that function
+    read the wrong thing: the **live** refusal list, which is this turn's, while
+    a card is handed a stored run whose steps may be from any earlier turn. Two
+    answers to "what would this do" is one too many, and the card is holding the
+    run - so the helper sits here and reads what the card actually has.
+    """
+    steps = list(steps or ())
+    tools: "list[str]" = []
+    for step in steps:
+        name = getattr(step, "tool_name", "") or ""
+        if name and name not in tools:
+            tools.append(name)
+    if not tools:
+        return f"{len(steps)} step" + ("" if len(steps) == 1 else "s")
+    shown = ", ".join(tools[:3])
+    if len(tools) > 3:
+        shown += f" and {len(tools) - 3} more"
+    return (f"{len(steps)} step" + ("" if len(steps) == 1 else "s")
+            + ": " + shown)
+
+
 def _plans_waiting() -> "list[dict]":
     """Plans plan mode made, in the shape `_row` already draws.
 
@@ -222,11 +253,9 @@ def _plans_waiting() -> "list[dict]":
             continue
         if run.awaiting_reason != goals_module.PLAN_AWAITING_REASON:
             continue
-        steps = len(run.steps)
         out.append({
             "status": "awaiting",
-            "content": f"{run.goal} - {steps} step"
-                       + ("" if steps == 1 else "s")
+            "content": f"{run.goal} - {_what_it_would_do(run.steps)}"
                        + ", nothing has been done",
             "blocked_by": [],
         })

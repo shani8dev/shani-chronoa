@@ -537,13 +537,17 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
             logger.warning("unknown answer-permission choice %r", key)
             action.set_state(GLib.Variant("s", permissions.get_mode()))
             return
-        # **The strip's two keys are the permission layer's own two modes.** A
-        # third is accepted and not offered: Settings' combo writes `explore`
-        # through `permissions.set_mode` directly and must keep working, and
-        # read-only deliberately left the strip (see `buildmode.read_only_note`).
+        # **Two keys, two modes, and nothing else in the table.**
+        #
+        # This carried an `"explore"` entry for a while. It was **unreachable** -
+        # the key is rejected above - and it read as a working route to a mode
+        # the strip does not offer, which is the one thing a lookup table must
+        # not do. Settings' combo writes `permissions.set_mode` directly and
+        # never came through here, which is why `_PERMISSION_KEYS` excludes
+        # `explore` and why the mapping excludes it too. Read-only left the
+        # strip deliberately; see `buildmode.read_only_note`.
         wanted = {"ask": permissions.Mode.DEFAULT,
-                  "auto": permissions.Mode.DONT_ASK,
-                  "explore": permissions.Mode.EXPLORE}.get(key)
+                  "auto": permissions.Mode.DONT_ASK}.get(key)
         if wanted is None:
             logger.warning("unknown answer-permission choice %r", key)
             action.set_state(GLib.Variant("s", permissions.get_mode()))

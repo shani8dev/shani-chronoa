@@ -89,9 +89,24 @@ def test_no_match_hides_every_row_and_says_so(window):
 
 
 def test_clearing_the_search_restores_the_list(window):
+    """**Every row comes back, counted from the tables rather than typed.**
+
+    This said `3 + len(EVERYDAY_TASKS)` and the window answered **21**, because
+    the *"What you can do"* shortcuts section landed after it and its five rows
+    are rows. A hand-kept count of a window's contents is a claim about the
+    window, and it goes stale the moment anything is added - which is what a
+    count in a test usually means. Both lengths are now read off the module.
+    """
     from shani_chronoa import capabilities
+    from shani_chronoa.gui.widgets import HelpWindow
+
     window.filter("timer")
-    assert window.filter("") == 3 + len(capabilities.EVERYDAY_TASKS)
+    expected = 3 + len(capabilities.EVERYDAY_TASKS) + len(
+        HelpWindow._SHORTCUT_ACTIONS)
+    assert window.filter("") == expected, (
+        f"clearing the search restored {window.filter('')} rows, not {expected}"
+        f" - a count read off the module is the only one that survives a new"
+        f" section landing")
     assert len(_visible_labels(window)) == 3
     assert not window._empty.get_visible()
 

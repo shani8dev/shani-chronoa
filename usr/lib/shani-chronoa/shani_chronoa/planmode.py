@@ -132,20 +132,6 @@ def refusals() -> "list[tuple[str, dict]]":
         return [(tool, dict(args)) for tool, args in _refusals]
 
 
-def refused_tools() -> "list[str]":
-    """The refused tool names in order, without duplicates.
-
-    **Duplicates collapsed, order kept.** A plan that lists the same tool five
-    times because the model asked five times is noise; a plan that lists them
-    once each in the order they came is readable.
-    """
-    out: "list[str]" = []
-    for tool, _args in refusals():
-        if tool not in out:
-            out.append(tool)
-    return out
-
-
 #: The options offered when plan mode meets a call it would otherwise refuse.
 #: **"Do it now" first**, because the common answer to "what would you do?"
 #: followed by silence is yes, and a dialog that leads with "no" teaches people

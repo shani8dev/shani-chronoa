@@ -981,30 +981,32 @@ class TranscriptView(Gtk.ScrolledWindow):
         that has to be discovered and dismissed.
         """
         self.clear()
-        label = Gtk.Label(label="Ask something, or press the orb to speak.")
+        # **The shortcuts are in this label, not a row of their own.**
+        #
+        # Ctrl+K is now the home of four mode controls - when it is, nobody will
+        # ever find them, and that is a regression the strip caused. The
+        # placeholder already exists to give a new user something to act on,
+        # and a keyboard shortcut nobody can discover is a control that is not
+        # there. **Both keys are named with what they do**, because "Ctrl+K"
+        # alone is not a reason to press it and the word *palette* appears
+        # nowhere else in the interface.
+        #
+        # It was a **second row** at first, and
+        # `test_empty_state_names_what_to_do` failed with *"unexpected row in
+        # the empty state"*. That test's invariant is the right one - the empty
+        # state is the placeholder and the suggestion chips, and a third sibling
+        # is indistinguishable from a stray row that a cleared transcript grew -
+        # so the sentence went **into** the placeholder instead. One widget
+        # fewer, and the invariant survives untouched.
+        label = Gtk.Label()
+        label.set_markup(
+            "Ask something, or press the orb to speak.\n"
+            "<span size='small'>Ctrl+K for anything else  ·  Ctrl+F to find "
+            "in this conversation  ·  ? for what Chronoa can do</span>")
         label.add_css_class("transcript-placeholder")
         label.set_wrap(True)
         label.set_halign(Gtk.Align.CENTER)
         self._rows.append(label)
-
-        # **The shortcuts, in the one place a new person is guaranteed to look.**
-        # Ctrl+K is now the home of four mode controls - when it is, nobody will
-        # ever find them, and that is a regression this strip caused. The
-        # placeholder already exists to give a new user something to act on,
-        # and a keyboard shortcut nobody can discover is a control that is not
-        # there.
-        #
-        # **Both keys are named with what they do**, because "Ctrl+K" alone is
-        # not a reason to press it and the palette is called a palette nowhere
-        # else in the interface.
-        keys = Gtk.Label(
-            label="Ctrl+K for anything else  ·  Ctrl+F to find in this "
-                  "conversation  ·  ? for what Chronoa can do")
-        keys.add_css_class("dim-label")
-        keys.add_css_class("caption")
-        keys.set_wrap(True)
-        keys.set_halign(Gtk.Align.CENTER)
-        self._rows.append(keys)
 
         suggestions = capabilities.startup_suggestions(self._caps)
         if suggestions and self._on_suggestion is not None:

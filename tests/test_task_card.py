@@ -45,7 +45,17 @@ def store():
     return goals.GoalStore(goals.store_root())
 
 
-def _plan(store, goal, steps=2):
+#: Real tool names, and deliberately **not** `tool0`, `tool1`. A fixture whose
+#: every step names a different tool can never exercise the dedup, so the test
+#: written for it passes whether or not the collapse exists - the same trap as
+#: `"first, second, third"` already being alphabetical, which the Compare
+#: panel's own tests hit.
+_TWO_WRITES = [("write_text_file", {"path": "/a"}),
+               ("write_text_file", {"path": "/c"}),
+               ("delete_file", {"path": "/b"})]
+
+
+def _plan(store, goal, steps=2, refusals=None):
     """A stored plan, in this test's own store.
 
     **No `run_id`.** `plan_from_refusals` takes the goal and the refusals and
@@ -53,7 +63,7 @@ def _plan(store, goal, steps=2):
     id is a caller naming its way into someone else's run.
     """
     return goals.plan_from_refusals(
-        goal,
+        goal, refusals if refusals is not None else
         [(f"tool{i}", {"path": f"/f{i}"}) for i in range(steps)])
 
 
@@ -78,10 +88,100 @@ def test_the_row_says_how_many_steps_and_that_nothing_happened():
 
 
 def test_one_step_is_not_plural():
+    """The property is the pluralisation, so it is asserted as the count and
+    the word rather than as a comma.
+
+    It was `"1 step," in content` - which pinned the punctuation between the
+    count and whatever follows it, so adding the tool names failed a test about
+    grammar. **A test that reads the shape of the sentence stops working when
+    the sentence gets more informative.**
+    """
     _plan(store, "rename one file", steps=1)
     content = task_card._plans_waiting()[0]["content"]
-    assert "1 step," in content, content
-    assert "steps" not in content, content
+    assert "1 step" in content, content
+    assert "1 steps" not in content and "steps:" not in content, content
+
+
+def test_a_plan_names_what_it_would_do():
+    """**A count is not a plan.** Three steps and nothing else is the sentence
+    for a run whose shape cannot be seen, and approving it means saying yes to
+    three things nobody was shown. The tools are named, in the order the model
+    asked for them."""
+    _plan(store, "tidy up", refusals=_TWO_WRITES)
+    content = task_card._plans_waiting()[0]["content"]
+    assert "write_text_file" in content, content
+    assert "delete_file" in content, content
+
+
+def test_the_same_tool_asked_three_times_is_named_once():
+    """**Three writes are three steps and one line to read.**
+
+    The count stays three, because the plan really does perform three writes -
+    collapsing that would understate what approval means. The *names* collapse,
+    because a model that asks for the same write five times has still described
+    one write, and a list of it is noise.
+
+    **The control that gives this teeth:** `test_a_plan_names_what_it_would_do`
+    uses the same fixture with the same repeated `write_text_file`, so a card
+    that simply dropped duplicates with no count at all would fail here and pass
+    there."""
+    _plan(store, "tidy up", refusals=[
+        ("write_text_file", {"path": "/a"}),
+        ("write_text_file", {"path": "/b"}),
+        ("write_text_file", {"path": "/c"}),
+    ])
+    content = task_card._plans_waiting()[0]["content"]
+    assert content.count("write_text_file") == 1, content
+    assert "3 steps" in content, content
+
+
+def test_a_step_with_no_name_reads_as_a_count_not_as_a_colon():
+    """The empty branch has a witness, because a mutation removing it left the
+    file **fully green**.
+
+    `_what_it_would_do` guards on `if not tools` because `tools` is built from
+    `getattr(step, "tool_name", "")`, so a step with no name gives `tools == []`
+    and `", ".join([])` is `""` - the row would read *"goal - : , nothing has
+    been done"*, a colon and nothing after it.
+
+    **Driven through the helper, and that is the honest part.** The only producer
+    of these runs, `goals.plan_from_refusals`, does `if not tool: continue`, so
+    it *refuses* to build a nameless step - writing the test through it gave
+    `IndexError` on an empty list, which is what sent me here. So the guard is
+    reachable from a `PlannedStep` a caller built by another route, which is
+    exactly the case a guard is for: the row must not render as a dangling colon
+    because some producer was more permissive than this one.
+
+    The mutation that removed the branch is in this file's header's list of what
+    has to keep failing.
+    """
+    import types
+
+    nameless = types.SimpleNamespace(tool_name="")
+    said = task_card._what_it_would_do([nameless, nameless])
+    assert said == "2 steps", said
+    assert ":" not in said, said
+
+
+def test_a_plan_with_more_tools_than_fit_still_says_how_many():
+    """Three shown, a count for the rest - and **the four hidden ones are
+    actually hidden**.
+
+    The third assertion is the one the mutation run asked for. It asserted only
+    that "and 4 more" appeared, which a card that printed all seven *and then*
+    the count also satisfies - so widening `tools[:3]` to `tools` left the file
+    **fully green**. The list is built by joining all of `tools` before the slice
+    is applied, so the check has to be on what is **not** there.
+
+    Why the bound exists at all: a plan naming twenty tools renders a row two
+    hundred characters wide on a card that has a footer to get to.
+    """
+    _plan(store, "sweep", refusals=[
+        (f"tool{i}", {"path": f"/f{i}"}) for i in range(7)])
+    content = task_card._plans_waiting()[0]["content"]
+    assert "and 4 more" in content, content
+    assert "7 steps" in content, content
+    assert "tool3" not in content, content
 
 
 def test_a_plan_reads_as_waiting_for_you_not_as_todo():

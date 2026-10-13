@@ -19295,3 +19295,142 @@ sha-distinctness across pages**, not on bytes on disk.
 render builds a bare `Gtk.Application` that never registers it. **A FAIL here is
 the harness's, not the page's**, and the renderer already has a working `quick-ask`
 target that builds the real window.
+
+## The chunk runner believed a log written against a tree that no longer existed (2026-10-13)
+
+Ran the full suite in 10 chunks to check this session's core changes against
+everything. The runner reported eight chunks **"already done"** - and every one
+of those logs was from **01:00-01:09**, against a tree whose last commit was
+**02:54**. So it reported a green tally for a suite that had not run since the
+strip redesign, the plan-mode change and three commits' worth of everything else.
+
+The condition was `[ -s "$log" ] && grep -qE 'passed|failed|error' "$log"` -
+**existence and nothing else**. This is the stale-label failure this file records
+as worse than a missing label, with the label attached to a *measurement*: a chunk
+skipped on the strength of a log from a different tree reads as a chunk that
+passed. Fixed to compare each log against the newest source file, and the STALE
+line **names the file** so a reader can tell a harness artefact from a real
+regression without opening the tree.
+
+**A second defect behind it, found by the test I wrote for the first.** The
+check asked `find ... -newer "$LOGS"`, and `$LOGS` is a **directory** - so two
+logs of very different ages were judged by whichever was written last, and a
+directory touched after the last code change made every log look current however
+old it was. **The defect the check exists to remove, reproduced inside the fix.**
+`-nt` asks the question actually being asked, one log at a time. And the same
+confusion was in the test: it compared against `tmp_path.stat()`, the temp
+*directory's* mtime, which is now - so it demanded a source file be newer than
+the current moment and failed while the runner named files correctly.
+**Comparing a log against its own directory is not a staleness check, and it is
+easy to write by accident in both the gate and its witness.**
+
+Also fixed: `CHUNKS=2` after `CHUNKS=8` iterated **four** manifests, because
+`split` overwrites `chunk_aa` and leaves a previous run's higher-numbered
+manifests behind. **A chunking parameter that does not change the chunks is a
+parameter that lies.** `DRY_RUN=1` prints the decision and launches nothing - a
+test that starts eight parallel pytest shards manufactures exactly the D-Bus
+contention this file spends whole entries diagnosing.
+
+`tests/test_suite_chunks_are_not_stale.py` (7), both directions: a log newer
+than the code is skipped, **the same log back-dated is re-run**.
+
+### And what the sweep found once it was actually measuring the current tree
+
+**51 failures in 10 chunks; re-run serially, 11 were parallel-shard flakes that
+pass alone** and the rest were real. Two were mine, and both are the same shape:
+
+**1. The strip said "Auto", and `DONT_ASK` *refuses*.** `_AUTO`'s row carried
+the word **"Auto"** - while `permissions.Mode.DONT_ASK` refuses anything it
+cannot ask about, and the tooltip two lines below said *"This is not permission
+to act freely"*. **The word on the chip said the opposite of the mode it
+selects.** AGENTS.md already recorded the decision this reversed: *"Auto on a
+mode strip reads as it may act freely, which is the opposite of this mode."* It
+regressed in `3fc562b` because `test_permission_posture_chip.py` **was already
+red** - looking for `_ModeStrip._PERMISSION`, which the same commit renamed to
+`_AUTO` - so nothing objected. **A test that was failing when the change was
+made cannot catch the change**, which is why the word is now held by a file that
+is green. It is **"No questions"**.
+
+That file was red for most of its life (**7 failed / 9 passed** at `c9ea23e`)
+and it **contradicted itself**: one test asserted the strip offered
+`[DEFAULT, DONT_ASK, EXPLORE]` while another asserted `EXPLORE` was *not* on it.
+Two tests, one file, opposite claims - which is how a red file hides a question
+nobody has to answer. The measurement settles it: explore refuses **165** of 256
+tools against plan's **130**, and **50** of them are ones plan mode allows. So
+the honest name is **two**, asserted, with the third's exclusion witnessed by the
+measurement rather than by a comment in a table.
+
+**Its three original assertions were three counts**, and each counted the wrong
+thing: `len(_PERMISSION) + 6` failed when the strip was redesigned to five chips;
+counting the strip's tables found 8 against 5 and reported a missing chip when
+the missing thing was that Ambient, hands-free and reply style are drawn by
+`refresh()` and reached from the palette **by design**. The property is one line
+and does not go stale: **the chip is a child of the strip.** Same class as this
+file's `WINDOW_TOKENS` finding - a reservation its own default exceeds, and a
+count that is a claim about the whole window.
+
+**2. My plan-mode test asserted the premise I had already disproved.** It read
+*"plan mode blocks exactly the gated tools"*, and that premise is wrong for the
+tools that matter most: measured when written, plan mode blocked **92** and
+allowed `write_text_file` and `apply_patch`, so entering plan mode did not stop
+the model writing your files. The code had already moved to
+`MUTATING_TOOLS`; the test still asserted the answer it rejected. It now asserts
+**the union** - `MUTATING_TOOLS | gated_by`, less `TALKS_ONLY` - because the first
+version of the fix asserted only the first half and named `airplane_mode`, a
+tool that changes the machine and lives in the second set. **Asserting one half
+drops the other, and the half dropped is the half that was already there.**
+
+The old assertion is **kept as a control**: `test_the_two_answers_really_do_differ`
+requires `write_text_file` and `apply_patch` to still be in `blocked - gated`,
+because a change that made the two sets identical would restore the premise
+quietly and the 38 tools where they differ are the whole reason the answer moved.
+
+### Three smaller ones, each a stale count
+
+- **The empty state grew a third row.** The shortcut hints were a sibling of the
+  placeholder, and `test_empty_state_names_what_to_do` failed with *"unexpected
+  row in the empty state"* - its invariant is the right one (the empty state is
+  the placeholder and the suggestions, and a third sibling is indistinguishable
+  from a stray row a cleared transcript grew). **The sentence went into the
+  placeholder instead**: one widget fewer, and the invariant survives untouched.
+- **The Help window's row count was 16 and the window had 21**, because the
+  *"What you can do"* section landed after it. It reads both lengths off the
+  module now - **a hand-kept count of a window's contents is a claim about the
+  window**, and it goes stale the moment anything is added.
+- **`planmode.refused_tools()` had exactly one caller: its own test.** It read
+  the **live** refusal list, which is this turn's, while the plan card is handed
+  a **stored** run whose steps may be from any earlier turn. Deleted; the collapse
+  moved to `task_card._what_it_would_do`, which reads `run.steps`. Two answers to
+  "what would this do" is one too many, and the card is holding the run.
+
+**And the card now says it.** It read *"3 steps, nothing has been done"* - a
+count is not a plan, and approving it means saying yes to three things nobody was
+shown. It names the tools, with duplicates collapsed (a model that asks for the
+same write five times has described one write) and the count kept as the number
+of **steps**, so three writes still reads as three.
+
+**7 mutations, 7 caught**, and **two of them found witnesses I did not have**:
+widening `tools[:3]` to `tools` left the file green, because my test asserted
+"and 4 more" appears - which a row printing all seven *and then* the count also
+satisfies; the assertion has to be on what is **absent**. And removing the
+`if not tools:` branch was green too, so it now has a witness driven through the
+helper directly - because `plan_from_refusals` does `if not tool: continue` and
+*refuses* to build a nameless step, which is exactly why the guard is there.
+**A guard whose only producer makes it unreachable is still a guard**, and the
+row would otherwise read `goal - : , nothing has been done`.
+
+### What was not mine, and how that was established
+
+Six files still fail after all of the above, and **every one belongs to another
+session's committed work**: `8c92258` (`delete_file` -> trash, which is why the
+registry is **256** and `test_schema_caps` still expects 257), `5d17297`
+(`modelfmt`, the model-card line), `1db21c4` (`tool_select`, *"explain gravity"*
+still offering tools), the other session's uncommitted `README.md`, and
+`model_registry.verify_digest` - which `test_no_enforcement_control_is_unwired`
+names, and whose digest is **never checked**, because hashing a multi-gigabyte
+model on every scan is why nothing calls it. `refused_tools` was the only
+enforcement-shaped orphan in the tree, and it was **mine**.
+
+`cultivation.py` is modified and uncommitted, carrying another session's
+ladder-balanced experiment result. **Not staged and not committed** - it is their
+in-flight work.

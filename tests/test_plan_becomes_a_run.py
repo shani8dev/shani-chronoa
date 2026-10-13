@@ -80,14 +80,27 @@ def test_a_new_turn_starts_an_empty_plan(state):
         "that outlives turns")
 
 
-def test_repeated_tools_are_listed_once_each_in_order(state):
+def test_repeated_refusals_are_all_kept_not_collapsed(state):
+    """**Every refusal is a step, and three writes are three writes.**
+
+    The first version of this file asserted `refused_tools() == ["write_text_file",
+    "delete_file"]` - collapsing the repeat - because a *display* helper had been
+    given the wrong data source. It read `planmode.refusals()`, which is **this
+    turn's** live state, so it could only ever describe the turn it was asked
+    about. It is deleted; the collapse lives on the card, which is handed a
+    stored run and is the thing a person reads (`test_task_card.py`).
+
+    **What this file now holds is the half that must not collapse**, and it is
+    the reason the display helper was wrong in the first place: a plan
+    assembled from refusals that quietly drops two of the three writes it was
+    asked for describes less work than the model intended, and approving it
+    would approve the wrong thing.
+    """
     planmode.set_enabled(True)
     planmode.begin_turn()
-    tools.execute_tool("write_text_file", {"path": "/a"})
-    tools.execute_tool("delete_file", {"path": "/b"})
-    tools.execute_tool("write_text_file", {"path": "/c"})
-    assert planmode.refused_tools() == ["write_text_file", "delete_file"], (
-        planmode.refused_tools())
+    for path in ("/a", "/b", "/c"):
+        tools.execute_tool("write_text_file", {"path": path})
+    assert len(planmode.refusals()) == 3, planmode.refusals()
 
 
 def test_nothing_is_recorded_when_plan_mode_is_off(state):
