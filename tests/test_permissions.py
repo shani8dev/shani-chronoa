@@ -193,6 +193,15 @@ class TestTheAllowHalfIsWired:
         )
 
     def test_allow_once_is_consumed_by_being_used(self):
+        # **The consent key is shut by this test.** `calendar-read-enabled` is in
+        # the `everyday` preset and ships on, and that is a *broader* grant
+        # than the per-call rule this test is about: with the key on, the second
+        # call is permitted by the key and an exhausted ALLOW_ONCE changes
+        # nothing. The scenario needs the per-call rule to be the only thing
+        # granting access.
+        from shani_chronoa.config import ChronoaConfig
+
+        ChronoaConfig().set("calendar-read-enabled", "false")
         permissions.add_rule("calendar_events", "*",
                              permissions.Decision.ALLOW_ONCE, session_only=True)
         first = execute_tool("calendar_events", {"range": "today"})
