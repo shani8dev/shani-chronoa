@@ -98,22 +98,84 @@ def _count_sentence(rows: "list", listed: "list") -> "tuple[str, str]":
     return title, detail
 
 
-def _when(stamp: float, now: "Optional[float]" = None) -> str:
-    """`Today 14:02`, `Yesterday 09:10`, `Tuesday 18:30`, `02 Oct`, `02 Oct 2025`."""
-    now = time.time() if now is None else now
+def _days_between(stamp: float, now: float) -> int:
+    """Whole days from `stamp` to `now`, by calendar date rather than by seconds.
+
+    By calendar, because "yesterday" is a day on the wall and not a 24-hour span:
+    a conversation at 23:50 and one at 00:10 the next morning are ten minutes
+    apart and on different sides of the word.
+    """
     then, today = time.localtime(stamp), time.localtime(now)
-    days = (datetime.date(today.tm_year, today.tm_mon, today.tm_mday)
+    return (datetime.date(today.tm_year, today.tm_mon, today.tm_mday)
             - datetime.date(then.tm_year, then.tm_mon, then.tm_mday)).days
-    clock = time.strftime("%H:%M", then)
+
+
+def _day_label(stamp: float, now: "Optional[float]" = None) -> str:
+    """`Today`, `Yesterday`, `Tuesday`, `02 Oct`, `02 Oct 2025` - the heading.
+
+    The same vocabulary `_when` always used, with the clock taken off, because the
+    two were one string and a grouped list needs them apart. **One implementation
+    of the vocabulary**, so the heading and the row cannot drift into saying
+    "Yesterday" and "Tuesday" about the same day.
+    """
+    now = time.time() if now is None else now
+    days = _days_between(stamp, now)
+    then, today = time.localtime(stamp), time.localtime(now)
     if days <= 0:
-        return f"Today {clock}"
+        return "Today"
     if days == 1:
-        return f"Yesterday {clock}"
+        return "Yesterday"
     if days < 7:
-        return time.strftime("%A ", then) + clock
+        return time.strftime("%A", then)
     if then.tm_year == today.tm_year:
         return time.strftime("%d %b", then)
     return time.strftime("%d %b %Y", then)
+
+
+#: A clock is shown only while the day word could still mean more than one
+#: conversation. "Today 14:02" and "Tuesday 08:05" identify one; "02 Sep 08:00"
+#: does not - it is a date and a time with no way to tell which matters - which
+#: is why this module has always dropped the clock past a week rather than
+#: printing both. Bounded here rather than re-derived in three callers.
+_CLOCK_WITHIN_DAYS = 7
+
+
+def _clock(stamp: float, now: "Optional[float]" = None) -> str:
+    """`14:02` - or `""` for anything older than a week.
+
+    **The row's half of the date, not the day word's.** With the day in a
+    heading above it, a clock is redundant the moment the heading is unambiguous:
+    every conversation under "02 Oct" is on 2 October whoever made it. It is kept
+    while the heading is "Today" or "Tuesday", where a day can hold a dozen
+    conversations and the order is the only thing that separates them.
+
+    Returning `""` rather than a date is the module's own pre-existing behaviour -
+    `_when` said `02 Sep`, not `02 Sep 08:00` - so this is the one rule behind
+    both the row and `_when` rather than two ladders that can disagree.
+    """
+    now = time.time() if now is None else now
+    if _days_between(stamp, now) >= _CLOCK_WITHIN_DAYS:
+        return ""
+    return time.strftime("%H:%M", time.localtime(stamp))
+
+
+def _when(stamp: float, now: "Optional[float]" = None) -> str:
+    """`Today 14:02`, `Yesterday 09:10`, `Tuesday 18:30`, `02 Oct`, `02 Oct 2025`.
+
+    **The day and the clock in one string, which is what this file used to put on
+    every row**, and the exact ladder it always walked - a clock inside the week, a
+    bare date past it. It is now built from the same two functions the panel's own
+    headings and rows use, so there is one vocabulary and one rule about when a
+    clock is worth printing.
+
+    The trailing shape matters: `_clock` returning `""` is what keeps a September
+    conversation reading `02 Sep` rather than `02 Sep 08:00`, and
+    `tests/test_surface_conversations.py::test_row_dates_are_relative` pins it.
+    """
+    now = time.time() if now is None else now
+    day = _day_label(stamp, now)
+    clock = _clock(stamp, now)
+    return f"{day} {clock}" if clock else day
 
 
 def _matches(haystack: str, query: str) -> bool:
@@ -152,6 +214,12 @@ class _ConversationsView(Gtk.Box):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._app = app
         self._row_widgets: List[tuple] = []
+        #: `(heading, rows under it)` per day, in the order the days appear. Kept
+        #: beside `_row_widgets` rather than inside it because the two answer
+        #: different questions: a row is "does the query match this", a heading is
+        #: "does the query match **any** of these" - and only the second one can be
+        #: computed from the first.
+        self._day_rows: List[tuple] = []
         self._group = common.group()
         # Same 12px inset as the filter row, so the list and the controls
         # above it share one left edge.
@@ -256,6 +324,13 @@ class _ConversationsView(Gtk.Box):
         for row, _open_btn, _delete, _haystack in self._row_widgets:
             self._group.remove(row)
         self._row_widgets = []
+        # **The headings have to be removed too, or a second refresh stacks a
+        # second copy of every day above the first.** They go after the rows
+        # because they sit above them, and `PreferencesGroup.remove` is by
+        # reference - the same trap the row loop above documents.
+        for heading, _rows_under in self._day_rows:
+            self._group.remove(heading)
+        self._day_rows = []
 
         if error is not None:
             self._present_empty("dialog-error-symbolic", UNREADABLE, str(error))
@@ -268,7 +343,17 @@ class _ConversationsView(Gtk.Box):
 
         self._present_rows()
         root = conversation_store.session_dir()
+        # One `now` for the whole pass: reading the clock per row means a refresh
+        # that straddles midnight puts one conversation under "Today" and the
+        # next under "Yesterday" with both stamped the same way, and the heading
+        # is then a claim about a time this loop invented.
+        now = time.time()
+        last_day = None
         for item in rows:
+            day = _day_label(item["updated"], now)
+            if day != last_day:
+                self._add_day_heading(day)
+                last_day = day
             haystack = item["title"]
             notice = ""
             try:
@@ -280,11 +365,16 @@ class _ConversationsView(Gtk.Box):
             except OSError:
                 text = ""
             haystack = haystack + " " + text
-            self._add_row(item, haystack, notice)
+            self._add_row(item, haystack, notice, now)
         self._apply_filter(self.search.get_text())
 
-    def _add_row(self, item: dict, haystack: str, notice: str = "") -> None:
+    def _add_row(self, item: dict, haystack: str, notice: str = "",
+                 now: "Optional[float]" = None) -> None:
         """Add one conversation's row, and remember the widgets it is made of.
+
+        `now` is **passed in rather than read here**, because `_refresh` already
+        reads it once for the day headings: two reads straddling midnight would
+        put a conversation under "Today" with a row stamped "Yesterday".
 
         Both controls are `Gtk.Button`s inside an `Adw.ActionRow`, rather than a
         row whose own title is the conversation's name and whose suffix is a
@@ -309,7 +399,17 @@ class _ConversationsView(Gtk.Box):
         title.set_ellipsize(Pango.EllipsizeMode.END)
         title.add_css_class("conversation-title")
         text.append(title)
-        bits = [_when(item["updated"])]
+        # **The clock, not `Today 14:02`.** The day is now a heading above the
+        # group, and repeating it on every row is what made a returning reader
+        # read down past three dates to learn whether anything had happened today.
+        # **Appended, not prepended, and only when there is one.** `_clock` is
+        # empty for anything past a week, and a list starting with `""` joins to
+        # a leading `" · "` - a row that opens with a separator and says nothing
+        # before it.
+        bits = []
+        clock = _clock(item["updated"], now)
+        if clock:
+            bits.append(clock)
         count = int(item.get("messages") or 0)
         bits.append(f"{count} message{'s' if count != 1 else ''}")
         if item["active"]:
@@ -360,6 +460,34 @@ class _ConversationsView(Gtk.Box):
             row = common.row("", "", suffix=actions)
         self._group.add(row)
         self._row_widgets.append((row, open_btn, delete, haystack))
+        if self._day_rows:
+            self._day_rows[-1][1].append(row)
+
+    def _add_day_heading(self, day: str) -> None:
+        """One heading for a run of rows from the same day.
+
+        **There is no `common.heading()`** - `heading` is a CSS class name used
+        inside `common.group()` and one other builder, and the first version of
+        this called it and would have raised `AttributeError` on the first store
+        with two days in it. An `Adw.PreferencesRow` holding the label is what the
+        rows below already use, so it is what this uses.
+
+        **And it is not activatable, on purpose.** A heading that is a focus stop
+        is a Tab that goes nowhere: `compare.py` had exactly this, because
+        `_row()` made headings, counts and instructions selectable and every
+        heading in that panel became a Tab stop.
+        """
+        label = _label(day)
+        label.set_xalign(0.0)
+        label.add_css_class("dim-label")
+        if common.adw_ready():
+            row = Adw.PreferencesRow()
+            row.set_child(label)
+        else:
+            row = common.row("", "", suffix=label)
+        row.set_activatable(False)
+        self._group.add(row)
+        self._day_rows.append((row, []))
 
     def _branch_button(self, item: dict) -> Gtk.Button:
         """Continue from a copy, keeping the original as it was.
@@ -570,6 +698,13 @@ class _ConversationsView(Gtk.Box):
             row.set_visible(show)
             if show:
                 visible += 1
+        # **A heading with nothing under it is a lie** - it names a day the filter
+        # found nothing from, so typing one word leaves "Tuesday" above an empty
+        # gap. This is the half that makes grouping safe to add to a list with a
+        # search box on it, and it is derived from the rows rather than tracked
+        # separately, so a row the filter cannot reach cannot leave one behind.
+        for heading, rows_under in self._day_rows:
+            heading.set_visible(any(r.get_visible() for r in rows_under))
         if not self._row_widgets:
             # Nothing to filter: whatever the store said is still the answer.
             return

@@ -24096,3 +24096,87 @@ statement about the tree. `tests/test_the_chrome_carries_nothing_that_does_nothi
 the fix cannot rot silently.
 
 45 passed across the chrome, palette, palette-mode-entry and window suites.
+
+## The conversations list is grouped by day, and the row stopped repeating it (2026-10-13)
+
+A UI-review item: **nothing in the app is anchored in time.** The conversations
+list was flat, newest-first, with `Today 14:02` on every row - so a person
+returning after a weekend read down past three dates to learn whether anything
+happened today, and found the same word repeated forty times.
+
+The panel now heads each run of rows with its day, and the row carries only what
+the heading does not: `Today` / `Yesterday` / `Tuesday` above, `14:02` below.
+
+### One rule, and it is why `_clock` can return nothing
+
+The pre-existing ladder is **not** uniform - it is `Today 14:02`,
+`Yesterday 09:10`, `Tuesday 18:30`, `02 Sep`, `02 Sep 2025` - and the last two
+have **no clock at all**. That is the module's own long-standing behaviour and the
+first version of this change broke it.
+
+`tests/test_surface_conversations.py::test_row_dates_are_relative` caught it:
+`assert '02 Sep 08:00' == '02 Sep'`. The unification I had written was
+`_when = day + " " + clock`, which forces a clock onto every date - so the same
+class of bug this change exists to remove, reintroduced one function over.
+
+The rule that actually explains the ladder: **a clock is printed only while the
+day word could still mean more than one conversation.** Inside the week a day can
+hold a dozen of them and the clock is what separates them; past it the heading is
+a date that identifies the conversation by itself, and `02 Sep 08:00` is a time
+attached to a day nobody can place. So `_CLOCK_WITHIN_DAYS = 7`, `_clock` returns
+`""` past it, and `_when` is `_day_label` plus `_clock` **when there is one**.
+
+**One implementation of the vocabulary**, which was the point of splitting it:
+`_day_label` is the heading, `_clock` is the row, `_days_between` is the calendar
+arithmetic both share. Two ladders that can disagree was the state before.
+
+### Three more things this had to get right, all found by running
+
+- **There is no `common.heading()`.** The first version called it and would have
+  raised `AttributeError` on the first store with two days in it - `heading` is a
+  CSS class name inside `common.group()` and one other builder. An
+  `Adw.PreferencesRow` holding the label is what the rows below already use.
+- **A heading with nothing under it is a lie.** It names a day the search found
+  nothing from, so `_apply_filter` hides a heading whose rows the query matched
+  none of - derived from the rows rather than tracked separately.
+- **`Adw.PreferencesGroup` wraps its rows in boxes of its own**, so a heading's
+  parent is an internal `Box` and not the group. The first assertion walked *up*
+  and reported correct code as unattached - the minimap test's mistake again.
+
+### Four witnesses of my own that could not fail, and the mutation run found all four
+
+**16 mutations, 16 caught, 0 survivors** - but only after this, and the four are
+worth more than the tally because every one was green:
+
+1. **The row assertion compared `_clock` against itself.** `meta.startswith
+   (conversations._clock(NOW))` is satisfied by a `_clock` that grew into
+   `time.strftime("%d %b %H:%M", ...)` - each row reading `13 Oct 14:02`, the
+   exact duplication being removed. It asserts the **shape** of the text now.
+2. **The filter test's fixture could not reach the mutation.** Three conversations
+   over three days means every heading holds **one** row, so a filter that pinned
+   any heading with more than one row open passed it. And the first fix still
+   missed: the query was `"Conversation 1"`, which matches a *today* row, so
+   today's heading was legitimately visible either way. Measured across five
+   queries to find the one that empties a multi-row day.
+3. **`now` is load-bearing and the fixture hid it.** `_refresh` reads the clock
+   once and `_add_row` is handed it; dropping either the argument or the call-site
+   pass leaves the parameter intact and every test green, because the fixture
+   **pins `time.time()` to a constant**. Separating the instants needed two tries -
+   and `now` only decides *whether* to print a clock (the time of day comes from
+   the stamp), so the instants must straddle the seven-day boundary, in the
+   direction `date(now) - date(stamp)`. The witness now makes the clock **move
+   during the refresh**, which is the scenario being protected.
+4. **`test_when_is_built_from_the_two` asserted the claim that caused the
+   regression** - it joined day and clock unconditionally, so fixing the product
+   turned the test red. It asserts the join **follows the clock** now.
+
+**And one honest survivor that was not one.** Dropping `now` at the call site
+first survived because the two instants were on the same side of the boundary and
+so produced the same clock - a fixture that cannot tell the behaviours apart
+passes the mutation that removes one of them.
+
+`tests/test_the_conversation_list_is_grouped_by_day.py` (17), and the nine
+conversation suites plus the layout contract: **246 passed, 1 failed** - and that
+one, `test_no_surface_overflows_a_narrow_window[phone]`, **reproduces identically
+with `conversations.py` at HEAD** (`phone needs 823px` both ways, one-file swap in
+a snapshot), so it is pre-existing.
