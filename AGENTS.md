@@ -24577,3 +24577,39 @@ looking is not an attribution.
 52 passed and 1 expected failure across the five affected suites; the one is
 `test_at_1280_both_columns_are_back`, the deliberate `pytest.fail` for a rail
 that needs more than the 1024x768 broadway caps.
+
+### And the commit above swept in twenty-three files, because a stray `.` is a path
+
+`263f946` is titled about the window minimum and contains **26 files, 1445
+insertions, 619 deletions**. Twenty-three of them are other sessions' uncommitted
+work - `tests/test_no_unwired_public_helper.py`, `tool_select.py`,
+`tts.py`, `ui_driver.py`, `README.md` and the rest.
+
+**The mechanism is one character.** The command was
+
+    git commit --only AGENTS.md tests/...py usr/.../window.py -m "..." .
+
+and `--only` scopes **paths, not lines** - so the trailing `.` was a fourth path
+meaning *the whole tree*. The three files I meant were in there; so was everything
+else that was dirty. This is the third instance this file records of a commit
+carrying work it is not about (`c3ba7b5`, `ec6b295`), and the first where the
+cause was a stray argument rather than a shared file.
+
+**Nothing was lost, and the reason is worth stating:** the commit moved no bytes.
+`git diff HEAD` was empty the moment it landed, so what it recorded *was* the
+working tree, and every file's contents are unchanged on disk. The harm is purely
+attribution - those files are now in history under a message that does not
+mention them, and their next commits will be partial. One of them
+(`test_no_unwired_public_helper.py`) was edited again by its owner within minutes,
+so that owner's commit carries the delta rather than the whole change; their work
+is intact either way.
+
+**Recorded rather than fixed, for the reason this file already gives:** rewriting
+a commit another session may have already built on is a person's decision, not a
+mechanical one, and two sessions are committing in this tree continuously.
+
+**The rule that follows, in the form that prevents it:** the path list ends at
+the last path. There is no trailing `.`, there is no `-a`, and the check that
+would have caught it is the one this file already prescribes - `git show --stat`
+naming the line count *before* the commit is pushed. I ran that check **after**,
+which is how I know the number is 26.
