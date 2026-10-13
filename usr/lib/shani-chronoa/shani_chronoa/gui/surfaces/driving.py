@@ -134,8 +134,8 @@ class _DrivingView(Gtk.Box):
         _replace(self._facts_slot, common.scrolled(group, 400))
 
     def _rows(self) -> "List[Row]":
-        return [self._knowable_row(), self._portal_row(), self._cue_row_fact(),
-                *self._window_rows()]
+        return [self._knowable_row(), self._portal_row(), self._on_top_row(),
+                self._cue_row_fact(), *self._window_rows()]
 
     def _knowable_row(self) -> Row:
         try:
@@ -148,6 +148,64 @@ class _DrivingView(Gtk.Box):
         return Row("Screen", "answered", Row.KNOWN,
                    "an element's position can be read, so a click can be aimed "
                    "and then checked")
+
+    def _on_top_row(self) -> Row:
+        """Whether a window is actually the thing on top - the click question.
+
+        **`ui_driver.is_on_top()` had no caller in the tree.** The other rows here
+        ask whether a position can be read, whether the portal answers and where
+        the windows are; none of them asks the one that decides whether a click
+        lands where the reply says it did.
+
+        That is not hypothetical, and the function's own docstring is the record
+        of it: `flatpak run com.slack.Slack` is the only working way to raise the
+        window, and the moment anything runs from a terminal **the terminal raises
+        itself** and covers Slack's left column. Measured by OCR of the region a
+        click was about to use, it read `deepu`, `Jisha`, `Nevin`, `Abdul` - the
+        agent's own terminal output - and every click at the right pixel for a
+        whole afternoon was a click on the terminal.
+
+        **All three answers are said, because there are three.** `False` means the
+        window's text is not on screen, so something is over it. `True` means it
+        is. `None` is *could not tell* - no capture, no OCR - and
+        `is_on_top`'s own docstring is emphatic that it is deliberately not
+        `True`: "a check that answers 'yes' when it could not look has no power to
+        refuse anything." So it reads as unknown here too, not as a pass.
+        """
+        # **A real window's title is the probe.** `is_on_top` defaults `probe` to
+        # the window's title, and the title is the one thing a cover does not
+        # display - a terminal shows titles too, which is the whole reason the
+        # function prefers a probe and falls back to the title only when nothing
+        # better was given. Asking about a named window rather than "the screen"
+        # is what turns "something is over it" into a statement about a window.
+        probe = ""
+        try:
+            found = ui_driver.windows()
+            if found:
+                first = found[0]
+                probe = (first[0] if isinstance(first, (list, tuple)) and first
+                         else str(first))
+        except Exception:  # noqa: BLE001 - no list is the "could not tell" case
+            probe = ""
+        try:
+            on_top = ui_driver.is_on_top(probe)
+        except Exception as exc:  # noqa: BLE001 - an unexpected shape, said plainly
+            return Row("Window on top", f"could not be asked ({type(exc).__name__})",
+                       Row.UNKNOWN)
+        if on_top is None:
+            return Row("Window on top", "could not tell", Row.UNKNOWN,
+                       "this needs a full-screen capture and OCR, and there was "
+                       "no text to read. That is not a pass: a click may still "
+                       "land on whatever is over the window.")
+        if on_top:
+            return Row("Window on top", "on top", Row.KNOWN,
+                       "its own text is on screen, so a click aimed inside it "
+                       "reaches it")
+        return Row("Window on top", "something is over it", Row.UNKNOWN,
+                   "the window's text is not on screen - on this desktop the "
+                   "usual cover is this agent's own terminal, which raises itself "
+                   "the moment anything runs from it. A click aimed inside the "
+                   "window would land on the cover instead.")
 
     def _portal_row(self) -> Row:
         """The RemoteDesktop portal - the route a native Wayland window takes.
