@@ -247,3 +247,109 @@ class TestTheOfferedSetIsBounded:
         for case in _scored()[:40]:
             got = set(_offered(case["say"]))
             assert set(TS.CORE) <= got, (case["id"], got)
+
+class TestTheCoreFloorIsPricedNotWaste:
+    """The 40% was measured, attributed to CORE, and reclaiming it cost 2 of 8.
+
+    Across the 220 scorable cases `select_tools` offers **1,390** schemas, and
+    **553 score no word match at all** - `get_datetime` on 212, `ask_user` on
+    177, `web_search` on 163. Almost none of that is a ranking artefact: it is
+    `CORE`, unioned in unconditionally.
+
+    So the number reads as the dilution fix, and the experiment says otherwise.
+    `tools/probe_core_cost.py` ran the same cases against the same server with
+    CORE admitted only when it ranks: **7/8 as shipped against 5/8** conditional.
+    The two that break are `chat-joke` and `vague-delete`, and they break
+    *towards* the floor - the model asks a question when it should just reply,
+    and tries to delete when it should ask. `ask_user` is the answer to a vague
+    request, and a model that is not offered it guesses.
+
+    This class exists so the arithmetic is not read as a defect a third time.
+    """
+
+    def test_the_zero_match_tools_are_core_and_are_named(self):
+        """Attribution rather than a total: 553 is the number, and *where it
+        comes from* is what decides whether it is waste."""
+        import json
+        cases = json.loads((pathlib.Path(__file__).resolve().parents[1]
+                            / "tools" / "eval_cases.json").read_text())["cases"]
+        usable = [c for c in cases if c.get("expect") and c["expect"][0].get("tool")]
+        offered = 0
+        zero = 0
+        from collections import Counter
+        who = Counter()
+        from shani_chronoa import tool_select as S, tools as T
+        for case in usable:
+            sent = [S._name(t) for t in S.select_tools(case["say"], T.TOOLS)]
+            offered += len(sent)
+            scored = {n for _s, n, _h in
+                      S.ranked(case["say"], T.TOOLS, learned={})}
+            for name in sent:
+                if name not in scored:
+                    zero += 1
+                    who[name] += 1
+        # **`offered` is not pinned, and that is measured rather than lazy.**
+        # `select_tools` reads the live tool-call log (`ranked(request, tools)`
+        # with `learned=None` -> `weights_from_tracker(_tracker())`), so the
+        # denominator moves between runs - this same test measured **1390** and
+        # then **1380** on one box with no edit between them. Pinning it would
+        # fail on a machine that had been used. `zero` and the *attribution*
+        # below are the stable facts; the ratio is what the claim rests on.
+        assert zero == 553, (
+            f"{zero} schemas score no word match, against 553 measured - the "
+            f"size of the floor has moved, so re-derive the 40% claim")
+        assert 0.35 < zero / offered < 0.45, (
+            f"{zero}/{offered} = {100*zero/offered:.0f}% of the offered budget "
+            f"scores no match; the claim this class rests on is that it is ~40%")
+        assert who.most_common(1)[0][0] == "get_datetime", (
+            f"{who.most_common(1)[0][0]} is the most frequent; the claim is "
+            f"that CORE is where the floor lives")
+        # **Not "exactly CORE", because the first version of this assertion was
+        # wrong and right for an instructive reason.** `browse` also scores no
+        # match on a small number of requests - it arrives from
+        # `wants_a_browser`, the cue path, and `AGENTS.md` already records that
+        # its protection costs the tool-selection budget. So CORE is *the
+        # overwhelming* source and not the only one, and a claim that said
+        # otherwise would have been a false negative about a second, smaller
+        # leak the repo already knows about.
+        assert set(who) - set(S.CORE) <= {"browse"}, (
+            f"{sorted(set(who) - set(S.CORE))} score no match and are neither "
+            f"CORE nor the known browser cue")
+        core_share = sum(who[n] for n in S.CORE)
+        assert core_share / zero > 0.98, (
+            f"CORE is {100*core_share/zero:.1f}% of the zero-match budget; the "
+            f"claim is that it is the overwhelming source, not merely a large one")
+        # The specific counts, not floors. A floor lets the docstring's numbers
+        # drift to nothing while the test stays green, which is how a measured
+        # figure becomes folklore - and these three are the whole reason the 40%
+        # is read as a *constant* rather than as ranking noise.
+        assert who["get_datetime"] == 212 and who["ask_user"] == 177 \
+            and who["web_search"] == 163, (
+            f"per-tool counts {{get_datetime: {who['get_datetime']}, "
+            f"ask_user: {who['ask_user']}, web_search: {who['web_search']}}} "
+            f"against 212 / 177 / 163 measured - re-derive before quoting")
+
+    def test_conditional_core_is_refused_by_the_measurement_not_by_taste(self):
+        """The refusal is recorded so nobody re-litigates it from the budget.
+
+        `7/8` and `5/8` are quoted with the arm that broke, because a number with
+        no mechanism beside it is an invitation to try again.
+        """
+        from shani_chronoa import tool_select as S
+        source = (pathlib.Path(__file__).resolve().parents[1]
+                  / "usr" / "lib" / "shani-chronoa/shani_chronoa/tool_select.py"
+                  ).read_text()
+        assert "7/8 as shipped against 5/8" in source, (
+            "the measured verdict on the CORE floor is no longer in the module "
+            "that declares it - the next reader will reach for the same fix")
+        # The attribution too, and in the same place. A total with no per-tool
+        # counts is what makes 40% read as waste; the counts are what say it is a
+        # constant. Asserted against the module because the numbers are the
+        # module's own claim and a mutation there is invisible to any test that
+        # only re-derives them from the selector.
+        assert "`get_datetime` on 212, `ask_user` on 177, `web_search` on 163" \
+            in source, (
+            "the CORE floor's per-tool attribution is no longer where CORE is "
+            "declared, so the 40% reads as an unexplained total")
+        assert "tool_select.CORE" not in source
+        assert S.CORE == ("ask_user", "get_datetime", "web_search")

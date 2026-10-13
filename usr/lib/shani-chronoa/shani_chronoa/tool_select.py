@@ -105,6 +105,23 @@ def _cap_to_window(keep: Set[str], tools: List[dict], scored: List[tuple],
 #: treats every turn as an instruction to use one, so each unconditional member
 #: is a tool it may reach for when the right answer is to just reply. It is a
 #: fine tool and it ranks on merit - it just must not be free.
+#:
+#: **And the size of that floor was measured as 40% of the whole budget, which
+#: looks like the dilution fix and is not.** Across the 220 scorable cases
+#: `select_tools` offers 1,390 schemas and **553 score no word match at all** -
+#: `get_datetime` on 212, `ask_user` on 177, `web_search` on 163. Almost none of
+#: it comes from ranking; it is this constant.
+#:
+#: Reclaiming it was tried and measured, and it costs 2 of 8 cases
+#: (`tools/probe_core_cost.py`, same server, same cases, CORE admitted only when
+#: it ranks): **7/8 as shipped against 5/8 conditional**. The two that break are
+#: `chat-joke` and `vague-delete`, and they break *towards* the floor - the
+#: model asks a question instead of replying, and tries to delete instead of
+#: asking. `ask_user` is not overhead, it is the answer to a vague request, and a
+#: model that is not offered it guesses. So the 40% is the price of the fallback,
+#: not waste to reclaim, and **a budget figure is not a defect** - which is the
+#: third time this file has been right about the arithmetic and wrong about what
+#: it meant.
 CORE = ("ask_user", "get_datetime", "web_search")
 
 #: How strongly a tool must outscore the conversation path before that path
