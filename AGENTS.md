@@ -6539,9 +6539,16 @@ Pre-existing failures seen in this pass, all failing on untouched HEAD too:
 `test_config_gsettings.py::test_api_key_defaults_are_empty_not_quoted`,
 `test_slash_menu_opens.py::test_typing_a_slash_opens_the_menu...` (flaky, 1/2).
 
-Not changed, noted: Machine's readings are monospace blocks outside the row
-cards; the 8-word organ strip shows no state at rest; the Models switcher shows
-a red "blocked" glyph on both tabs.
+~~Not changed, noted: Machine's readings are monospace blocks outside the row
+cards;~~ the 8-word organ strip shows no state at rest; the Models switcher shows
+a red "blocked" glyph on both tabs. **The first clause was stale by 2026-10-13
+and is struck**: it was fixed by the `machine-reading-table` rule (see "Two class
+names with nothing behind them"), which a grep confirmed and **a render then
+confirmed properly** — the reading now sits in an inset card with its own
+background and a left margin, against the bare text on the page background this
+line describes. The render pair is what makes the strike trustworthy rather than
+another claim that a fix landed. **The other two clauses are untouched and
+unverified here.**
 
 ## Twenty skills from the matrix shortlist (2026-10-07)
 
