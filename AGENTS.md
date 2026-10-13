@@ -23311,6 +23311,32 @@ empty one. The `OSError` still returns `[]` from anywhere in the file, not the
 records read so far - a reader that reports a half-read file as a short file is
 the shape of quiet wrongness already in this file.
 
+### The same streaming, applied to `dream.read_log`, was reverted
+
+`dream.read_log` had the identical shape - `handle.read()`, decode the whole
+payload, `splitlines()` it - and **57.7 MB peak against 0 MB retained**, three
+live copies of an 18.9 MB chunk to count records it does not keep. Streaming it
+gave **27.4 MB** and an identical `Reading(records=19112, unreadable=0)`.
+
+**Then the A/B said it was slower: +23%, and it lost all three interleaved
+rounds.** Iterating a binary handle costs Python-level work per line that one
+`read()` plus a C-level `splitlines()` does not. So it is 30 MB for 50 ms on a
+**background consolidation pass**, on a machine with 24.6 GB available - and
+this file's own rule is that a trade has to say which side binds. Neither does.
+**Reverted.**
+
+Which leaves the difference that made it worth doing at all:
+
+| | time | peak |
+|---|---|---:|
+| `_entries_of`, `read_text` -> streamed | 0.282 -> **0.288 s** (unchanged) | 76.1 -> **37.5 MB** |
+| `dream.read_log`, `read_text` -> streamed | 0.206 -> **0.254 s** (+23%) | 57.7 -> 27.4 MB |
+
+Same technique, opposite verdicts, and the only reason to tell them apart is
+that the second one was measured both ways. **Half the peak for free** is worth
+having; **half the peak for a quarter more time** is not, and I would have
+written up the second one as a win on the strength of the memory number alone.
+
 ### And the 0600-directory leak I had recorded was the wrong file
 
 The note in this file said `test_skill_workbench.py` leaks mode-600 directories
