@@ -21848,7 +21848,7 @@ written as a comprehension:
 
 `for n in ... for n in ...` **rebinds the same name inside its own
 comprehension**, so the value half reads `.value` off an `ast.Name` and raises
-`AttributeError`. Distict loop names, stated in a comment rather than left for
+`AttributeError`. Distinct loop names, stated in a comment rather than left for
 the next reader. **pyflakes is clean on a shadowed comprehension** - it is a
 runtime fault, and only running the test found it.
 
@@ -21909,3 +21909,66 @@ a test ran.**
 
 Final state: **58 sets, 473 anchors of 471 declared mutations, all match the
 code**; **651 witnesses across 58 sets, all resolve to a real test id**.
+
+## The whole-population sweep, and why a stub-built one reports the stub (2026-10-13)
+
+The entry above found that the absence-as-fault sweep was scoped to
+`common.STATUS_*` and could not see `diagnostics`. The obvious follow-up is the
+**complete** population: build every surface, read every status row, classify.
+
+**It ran, and it measured the stub.** All 34 surfaces built and every row printed,
+and the answers were largely *"Ready"* - including `driving`, whose red dot this
+file has already measured twice as real ("No display this driver can measure").
+The difference is that each row was built with `types.SimpleNamespace()` as the
+app, and `common._permitted(app)` reads `app.config` - so a stub has no settings,
+the gates cannot be read, and the rows answer differently than they do on a
+machine. `model` reported `unknown - no settings object` for the same reason.
+
+**So a sweep over stub-built surfaces is a measurement of the stub**, and the
+deduction it supports is zero. That is the `fake_bin` `PATH`,
+`GSETTINGS_BACKEND`, scratch-`XDG_DATA_HOME` and `keyfile` lessons arriving from a
+fifth direction - and this is the one where the *instrument was the finding*,
+because two of the four rows above are ones this file records as correct and one
+is a measured red.
+
+Two things the honest run does establish:
+
+- **`export` reads `Ready`.** The fix at the top of this stretch is visible in the
+  same instrument, which is the value of running it even with the limitation.
+- **`daemon` reads `off (background-mode-enabled)`** - consent off, grey, correct.
+
+### And the two panels that would answer it cannot be rendered here at all
+
+`panel:driving` and `panel:model` were re-rendered to look at them properly, and
+both came back **byte-identical**, 31,882 bytes, sha `1cca6443fd2e`, **0% opaque
+and 99.2% partial**. Two different panels producing one photograph is this file's
+recorded false-pass signature, and the batch correctly reported `0 rendered, 2
+not`. With `VERBOSE=1` the cause is named and it is the harness, not the page:
+
+    Gsk:ERROR:../../../gsk/gskrenderer.c:130:gsk_renderer_dispose:
+      assertion failed: (!priv->is_realized)
+
+A renderer crash on dispose. Neither panel uses `Adw.EntryRow`,
+`Gtk.SearchEntry` or `Adw.StatusPage`, so it is not the editable-widget class this
+file already documents. **Recorded as an open limitation, not as a finding**: no
+claim is available about `driving` and `model` from a render here, and the sweep
+could not answer for them either.
+
+### What the population actually is, and what is known about it
+
+| surface | known state | from |
+|---|---|---|
+| `diagnostics` (22 rows) | 4 red, all genuine, each naming its remedy | driven through its own `_SECTIONS` |
+| `export` | Ready | the fix at the top of this stretch |
+| `daemon` | `off`, consent off | this sweep |
+| everything else that reads `app.config` | **unmeasured here** | a stub app changes the answer |
+
+`diagnostics` is the panel this audit can actually measure, because its probes
+are **zero-argument by design** - *"so this asks the engines directly rather than
+reading `app.stt`"*. That is the property that makes it auditable, and it is why
+the one genuinely reachable population was worth measuring completely.
+
+**The next pass wants a config stub rather than a `SimpleNamespace`** - the
+`gsettings_env` fixture already builds one, and a sweep that substitutes it for
+the app would measure the panels instead of the harness. That is a real change
+with its own review, and it is named here rather than half-built.
