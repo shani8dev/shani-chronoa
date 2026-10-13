@@ -164,53 +164,74 @@ def _fake_sox(tmp_path: Path, body: str) -> "tuple[Path, Path]":
 
 # --- 1. Kokoro is opt-in -----------------------------------------------------
 
-def test_kokoro_is_not_the_engine_when_the_setting_is_off(kokoro_installed, only_espeak,
-                                                          chronoa_config):
-    """The control for the whole change: everything installed, Kokoro still off.
+def test_kokoro_is_the_engine_when_the_setting_is_on(kokoro_installed, only_espeak,
+    chronoa_config):
+    """Everything installed, Kokoro on: it is the engine, and it can be declined.
 
-    Asserted through the real `voices` files and the real `kokoro.problem()`,
-    so the only thing that can make this pass is Kokoro being *able* to speak
-    and the gate declining to use it.
+    Asserted through the real `voices` files and the real `kokoro.problem()`, so
+    the only thing that can make this pass is Kokoro being *able* to speak and
+    the gate choosing it.
+
+    **This is the reverse of what it was.** It used to be the control for
+    "Kokoro is opt-in", and it failed with the reason: *"Kokoro was made the
+    default without being benchmarked: at RTF 1.22 it cannot finish before
+    playback would start, so every reply opened with seconds of silence."*
+
+    That measurement is still true and still recorded - 6.39 s of wall clock for
+    5.225 s of audio on the dev machine, against espeak-ng's 3.7 s in 0.018 s -
+    and it is now an **accepted cost**, chosen with the number in hand rather
+    than by accident. So the test asserts both directions: on means Kokoro, and
+    one switch still gets you back to espeak-ng, because a voice the user cannot
+    decline is not a default, it is a removal.
     """
     dispatcher = tts.PiperTTS(piper_path=str(only_espeak), config=chronoa_config)
     assert dispatcher.kokoro_problem() == "", (
-        "this test is about opting out of a voice that works; if Kokoro cannot "
-        "speak here, it proves nothing"
-    )
-
-    assert dispatcher.engine(SENTENCE) == "espeak-ng", (
-        "Kokoro was made the default without being benchmarked: at RTF 1.22 it "
-        "cannot finish before playback would start, so every reply opened with "
-        "seconds of silence"
+        "this test is about the engine that is chosen; if Kokoro cannot speak "
+        "here, it proves nothing"
     )
 
     chronoa_config.set(tts.PiperTTS.KOKORO_KEY, "true")
-
     assert dispatcher.engine(SENTENCE) == "kokoro", (
-        "turning the setting on must restore exactly the behaviour it had when "
-        "it was the default - the user has to be able to choose the voice"
+        "the setting is on and a working Kokoro was not chosen"
+    )
+
+    chronoa_config.set(tts.PiperTTS.KOKORO_KEY, "false")
+    assert dispatcher.engine(SENTENCE) == "espeak-ng", (
+        "turning the setting off must restore exactly the behaviour Kokoro had "
+        "before it was the default - the user has to be able to choose the voice"
     )
 
 
-def test_the_kokoro_setting_is_off_in_a_fresh_profile(chronoa_config):
+
+def test_the_kokoro_setting_is_on_in_a_fresh_profile(chronoa_config):
     """The default, read through the dispatcher's own reader.
 
-    A schema default of `true` would be invisible here and obvious everywhere
+    A schema default of `false` would be invisible here and obvious everywhere
     else: this is the state every new install starts in.
+
+    **Reversed from opt-in to on.** See
+    `test_kokoro_is_the_engine_when_the_setting_is_on` for the measurement behind
+    the choice and for the switch that still gets espeak-ng back.
     """
-    assert chronoa_config.get_bool(tts.PiperTTS.KOKORO_KEY, True) is False
-    assert tts.PiperTTS(config=chronoa_config)._kokoro_enabled() is False
+    assert chronoa_config.get_bool(tts.PiperTTS.KOKORO_KEY, True) is True
+    assert tts.PiperTTS(config=chronoa_config)._kokoro_enabled() is True
+
 
 
 def test_skipping_kokoro_is_announced_with_the_reason(kokoro_installed, only_espeak,
-                                                      chronoa_config, caplog, monkeypatch):
+    chronoa_config, caplog, monkeypatch):
     """Which engine, and why not the other one.
 
     The reason has to name the switch: a user who cannot tell why their
     assistant sounds like espeak-ng has no way to ask, and a reason naming
     python-onnxruntime-cpu would send them to install a 100 MB runtime for a
     voice they never asked for.
+
+    **The switch is turned off by this test.** Kokoro is the default now, so
+    without this there is no skip to announce and none of the three assertions
+    below would be about anything.
     """
+    chronoa_config.set(tts.PiperTTS.KOKORO_KEY, "false")
     monkeypatch.setattr(tts, "_ANNOUNCED", set())
     dispatcher = tts.PiperTTS(piper_path=str(only_espeak), config=chronoa_config)
 
@@ -224,6 +245,7 @@ def test_skipping_kokoro_is_announced_with_the_reason(kokoro_installed, only_esp
         f"with the switch off, the runtime is not the reason and naming it "
         f"sends the user after the wrong package: {said}"
     )
+
 
 
 # --- 2. the timbre pass ------------------------------------------------------
@@ -526,6 +548,27 @@ def voice_window(tmp_path_factory, compiled_schema_dir):
     return payload
 
 
+def _kokoro_schema_default() -> bool:
+    """What a fresh install reads for the Kokoro switch, taken from the schema.
+
+    **Not written down here.** This file's assertions broke when the default
+    moved, twice, and both times because the expected value was a literal in the
+    test rather than a fact about the schema. The one thing that must not drift
+    silently is whether the row writes at all, and that is asserted against the
+    opposite of this value rather than against a constant.
+    """
+    from xml.etree import ElementTree
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    schema = (root / "usr/share/glib-2.0/schemas"
+              / "org.shani.chronoa.gschema.xml")
+    for key in ElementTree.parse(schema).getroot().iter("key"):
+        if key.get("name") == tts.PiperTTS.KOKORO_KEY:
+            return key.findtext("default") == "true"
+    raise AssertionError("%s is not declared in the schema" % tts.PiperTTS.KOKORO_KEY)
+
+
 class TestTheVoiceRowsAreRealControls:
     def test_the_group_exists(self, voice_window):
         assert "Voice output" in voice_window["groups"], voice_window["groups"]
@@ -541,28 +584,41 @@ class TestTheVoiceRowsAreRealControls:
         assert voice_window["pitch_row_kind"] == "SpinRow"
 
     def test_flipping_the_switch_writes_the_setting(self, voice_window):
-        assert voice_window["kokoro_before"] is False, (
-            "the harness must start from the default, or this proves nothing"
-        )
-        assert voice_window["kokoro_after"] is True, (
-            "the row did not write the setting; a switch that only draws itself "
-            "is the defect this whole file is about elsewhere"
-        )
-        assert voice_window["kokoro_switch_state"] is True
+        """**Both ends are derived from the default, neither is written down.**
+
+        The fixture flips the switch to whatever it is *not*
+        (`set_active(not kokoro_before)`), so it is a real transition whichever way
+        the default points. These assertions used to be the literal pair
+        `False` then `True`, which only held while the key shipped `false` - and a
+        row that stops writing the setting entirely looks identical to a row that
+        writes it, when the flip is a no-op.
+        """
+        default = _kokoro_schema_default()
+
+        assert voice_window["kokoro_before"] is default, (
+            "the harness did not start from the schema default, or this proves "
+            "nothing: got %r, expected %r" % (voice_window["kokoro_before"], default))
+        assert voice_window["kokoro_after"] is (not default), (
+            "the row did not write the setting; a switch that only draws itself is "
+            "the defect this whole file is about elsewhere")
+        assert voice_window["kokoro_switch_state"] is (not default)
+
 
     def test_the_running_dispatcher_reads_the_flip_without_a_restart(self, voice_window):
         """The round trip: row -> the app's config -> the object that speaks.
 
         `enabled_after_flip` is asked of the live dispatcher rather than of a
         freshly built one. Two `ChronoaConfig` instances do not see each other's
-        writes, so a dispatcher that kept its own would answer False here while
-        the switch beside it showed on - and every reply would keep using
-        espeak-ng with nothing to show for it.
+        writes, so a dispatcher that kept its own would answer the *default* here
+        while the switch beside it showed the flip - and every reply would keep
+        using the same voice with nothing to show for it.
         """
-        assert voice_window["enabled_after_flip"] is True, (
-            "the setting was written but the running dispatcher still reads the "
-            "old value, so the switch would only take effect after a restart"
-        )
+        expected = not _kokoro_schema_default()
+
+        assert voice_window["enabled_after_flip"] is expected, (
+            "the setting was written but the running dispatcher still reads the old "
+            "value, so the switch would only take effect after a restart")
+
 
     def test_the_engine_answers_consistently_with_that_switch(self, voice_window):
         """Kokoro if it can speak, espeak-ng if it cannot - and it says which.
