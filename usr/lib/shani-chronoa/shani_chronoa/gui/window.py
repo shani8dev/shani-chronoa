@@ -1234,6 +1234,33 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 "Answers with %s. Click to change it - switching loads the "
                 "model and restarts the local server" % self._model_word())
 
+    def _answering_kind(self) -> str:
+        """`"cloud"`, `"local"` or `""` - which engine is holding the turn.
+
+        **A stand-in for `ChronoaApplication.current_llm_kind()`, and the
+        stand-in is the point.** This window is built by the renderer with a
+        bare `Gtk.Application` that has no `llm` at all, and by a dozen test
+        fixtures that have no application; a reader which raised would put a row
+        on screen that only the real app can produce - the
+        `_note_engine_disagreement` shape this file already records: *"a strip
+        that cannot check is a strip that says nothing, which is the status quo
+        and not worse"*.
+
+        **`""` rather than `"none"`**, because **"" means "nobody could say" and
+        "none" means "there is no engine"**, and only the second is a fact about
+        the machine. A window that cannot tell falls through to the local
+        registry, which is the answer it gave before this existed.
+        """
+        reader = getattr(self._app, "current_llm_kind", None)
+        if reader is None:
+            return ""
+        try:
+            return str(reader() or "")
+        except Exception:                               # noqa: BLE001
+            logger.debug("could not read which engine is answering",
+                         exc_info=True)
+            return ""
+
     def _model_word(self) -> str:
         """The chosen model's word, **taken from the strip's own row table**.
 
@@ -1250,6 +1277,29 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         the shortest answer and the only one that cannot drift.
         """
         try:
+            # **Ask the engine before the local registry.** This row answers
+            # "what is answering me", and for a machine that configured a
+            # provider the local registry's answer is always `""` - nothing is
+            # downloaded - so it fell through to the placeholder row and the
+            # window read **"Answers with  No model"** while a provider held
+            # every turn. Rendered and measured, and it is the one line on the
+            # main window a newcomer looks at when deciding whether to bother
+            # asking: it says the app cannot answer.
+            #
+            # **`current_llm_kind()` reads the object holding the turn**, not a
+            # setting, because the engine is selected and re-decided at startup
+            # and by the fallback - `_maybe_enable_cloud_fallback` returns early
+            # on an existing chain and never reconsideres. The same reader is
+            # what `_note_engine_disagreement` uses, so the row and the warning
+            # beside it cannot answer this from different sources.
+            #
+            # **"a cloud provider", not the provider's name.** `CloudLLMChain`
+            # knows which one answered, but only *after* a turn - and a row that
+            # is empty until somebody asks is a row that cannot answer the
+            # question it exists for on a fresh window. The specific provider is
+            # named by the egress chip and the Privacy panel.
+            if self._answering_kind() == "cloud":
+                return "a cloud provider"
             strip = getattr(self, "_mode_strip", None)
             rows = strip._model_rows() if strip is not None else ()
             active = local_llm.active() or ""

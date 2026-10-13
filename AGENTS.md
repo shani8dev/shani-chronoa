@@ -21240,3 +21240,80 @@ after listing what would go, nothing tracked, `test_packaging` 28 passed after.
 **A red packaging test means "clean `/tmp`" more often than it means "fix the
 code"** - and this time it meant neither: it meant "the leaner ran without the
 flag it always has".
+
+## A machine configured in the cloud was told it had no model (2026-10-13)
+
+Asked to review the main UI as a newcomer who has cloud and wants to ask
+everything. The first thing that render raised is on the main window's most
+important line, and it is a question about **who is answering**, which is the
+one thing a newcomer looks at to decide whether Chronoa can answer them at all.
+
+    Answers with  No model
+
+`ChronoaWindow._model_word()` reads **only the local registry**:
+`local_llm.active()` and the strip's `_model_rows()`. On a machine that
+configured a provider, nothing is downloaded, so the registry's answer is always
+`""`, the rows fall through to their placeholder row, and the row reads "No
+model" **while a provider holds every turn**.
+
+**The app already had the right reader.** `current_llm_kind()` returns
+`local`/`cloud`/`none` **from the object holding the turn** - and its own
+docstring says why a setting cannot answer it, because the engine is *selected*
+and re-decided at startup and by the fallback. It is what
+`_note_engine_disagreement` already uses, so the warning and the row were two
+answers to one question from two sources. It is now one reader, `_answering_kind`,
+used by both.
+
+**"a cloud provider", not the provider's name.** `CloudLLMChain` knows which one
+answered, but only *after* a turn - and a row that is empty until somebody asks
+is a row that cannot answer the question it exists for on a fresh window. The
+specific provider is named by the egress chip and the Privacy panel.
+
+### Two controls, because a fix that cannot be over-applied is not a fix yet
+
+Nothing answering must still read "No model", and a machine with a local model
+must not be told its replies come from a provider - **which is the more alarming
+of the two wrong answers, because it is the privacy one**. Both are asserted,
+and the third-engine control asserts the three engines get three different words
+rather than one answer three times.
+
+### 5 mutations, 4 caught, 1 equivalent (documented), 0 survivors
+
+| mutation | |
+|---|---|
+| the cloud branch gone (**the shipped defect**) | 3 failed |
+| **any engine that exists is called a provider (the over-fix)** | 3 failed |
+| cloud named as "another model" | 1 failed |
+| a raising engine reader propagates | 1 failed |
+| the missing-reader guard gone | **equivalent** |
+
+**The equivalent is the finding, and getting to it cost two wrong turns worth
+recording.** `_answering_kind` guards the same path twice - an explicit
+`if reader is None` and a `try/except` around the call - so deleting either
+leaves the other. Deleting **both** is caught, which is what shows the pair is
+load-bearing rather than one of them dead.
+
+The first turn was worse: the survivor was reported as a **coverage gap** and it
+was a **witness that could not fail**. The test asserted the degradation
+through `_model_word`, whose blanket `except` answers `"No model"` whether the
+reader works or not - so removing the guard changed nothing the test could see.
+**A test that reaches its subject through a caller that swallows exceptions
+cannot fail.** The property belongs to the reader, so it is now asked of the
+reader, directly, for both faults.
+
+**And the fixture made all three of the cloud tests fail for the wrong reason
+twice.** `_model_word` calls `self._answering_kind()`, and a bare
+`SimpleNamespace` does not carry methods from the class - so the call raised,
+the blanket `except` answered "No model", and the *local-model* control failed
+too, which reads exactly like the defect surviving the fix. Same trap as this
+file's `Gtk.Popover.__new__` and as `test_model_picker.py`'s, which was written
+to record it.
+
+### And what the render could not show
+
+`render_ui.py`'s `main` builds a bare `Gtk.Application`, so there is no engine to
+ask and the row still reads "No model" in the capture - **the picture cannot
+show this fix**, because the harness builds the one machine the fix is about
+wrong. The row is verified by driving the real reader against a stand-in engine,
+and a `main:cloud` render target - an app with a `CloudLLMChain` - is the honest
+way to see it, and is recorded rather than built here.
