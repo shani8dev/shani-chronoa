@@ -71,6 +71,40 @@ class TestTheShapeRequestSaysWhatTheGrammarWouldHaveSaid:
         assert "no other text" in text
 
 
+class TestThePromptsArePinnedToTheirExactText:
+    """Golden strings, because a refactor here would move both arms together.
+
+    `_arm_prompt`, `_decision_prompt` and `_argument_prompt` were lifted out of
+    `_constrained` after a 220-case run had already been launched against the
+    inline version. **Both arms would have moved together**, so every score in
+    that run stays comparable to the refactored code - or none of them do, and
+    there is no way to tell from the numbers. Verified once against the inline
+    code across 40 combinations (5 tools x 2 heads x 2 arms x 2 steps): all
+    byte-identical. These literals make that a standing property rather than a
+    one-off claim.
+    """
+
+    def test_the_decision_prompt(self, offered):
+        schema = local_llm.pick_schema(offered)
+        assert local_llm._decision_prompt("", offered, schema, enforce=True) == (
+            "\n\nDecide what to do with the user's last message. If one of these tools does it, choose that "
+            "tool. If it is a question you can answer yourself, or chat, choose none.\nTools:\n"
+            + local_llm.tool_menu(offered))
+
+    def test_the_argument_prompt(self, offered):
+        weather = next(t for t in offered if t["function"]["name"] == "get_weather")
+        schema = local_llm.argument_schema(weather)
+        assert local_llm._argument_prompt("", weather, schema, enforce=True) == (
+            "\n\nCall get_weather: " + weather["function"].get("description", "")
+            + "\nGive its arguments for the user's last message.")
+
+    def test_the_head_is_prepended_verbatim(self, offered):
+        schema = local_llm.pick_schema(offered)
+        for head in ("", "You are Chronoa. ", "x" * 4000):
+            for enforce in (True, False):
+                assert local_llm._decision_prompt(head, offered, schema, enforce).startswith(head)
+
+
 class TestTheControlArmIsTheGrammarArmPlusASuffix:
     """**The single variable.** If this fails the two arms are not comparable
     and a difference between them cannot be read as the grammar's."""

@@ -59,16 +59,6 @@ CASES = "time,weather,volume,set_timer,reminder"
 
 ARMS = ("+greedy", "+greedy+constrained", "+greedy+request")
 
-#: What each arm would mean, printed next to the number so a reader cannot
-#: mistake a tie for a win.
-READ = {
-    ("+greedy", "+greedy+constrained"):
-        "the grammar bought something the unconstrained model did not have",
-    ("+greedy+constrained", "+greedy+request"):
-        "the grammar bought something the same request did not already have",
-}
-
-
 def _wait(port: int, seconds: int = 180) -> bool:
     for _ in range(seconds):
         time.sleep(1.0)
@@ -80,9 +70,30 @@ def _wait(port: int, seconds: int = 180) -> bool:
     return False
 
 
-def score_arm(rows: "list[dict]") -> "tuple[int, int]":
-    """(right tool, right tool and arguments). The same pair task_eval prints."""
-    return sum(1 for r in rows if r.get("tool")), sum(1 for r in rows if r.get("args"))
+def score_arm(rows: "list[dict]") -> "tuple[int, int, int, int]":
+    """(acted, right tool, right tool and arguments, scorable).
+
+    **`acted` is the form half and `tool` is the choice half**, reported
+    separately because that split *is* the finding. Measured directly: given a
+    schema whose only legal value was `get_datetime` and a question about the
+    weather, the constrained model answered `get_datetime` - the one value it was
+    allowed - having already decided the question was not about the time. So the
+    grammar moves `acted` and leaves `tool` where it was.
+
+    A single combined number cannot show that. "Same score" would read as "the
+    grammar did nothing" when the honest reading is "the grammar made the answer
+    well-formed and no more likely to be right", and those call for opposite
+    decisions about adopting it.
+
+    Rows the service failed are excluded from every denominator rather than
+    counted as misses, and the count is printed - a 429 is not a wrong answer.
+    """
+    scorable = [r for r in rows if not r.get("unavailable")]
+    acted = sum(1 for r in scorable if r.get("seen") != "no tool")
+    return (acted,
+            sum(1 for r in scorable if r.get("tool")),
+            sum(1 for r in scorable if r.get("args")),
+            len(scorable))
 
 
 def main(argv=None) -> int:
@@ -142,18 +153,33 @@ def main(argv=None) -> int:
         print("\n" + "=" * 78)
         print("%d cases, temperature 0, one server, %.0fs (%.1fs a case a arm)"
               % (n, elapsed, elapsed / max(1, n * len(ARMS))))
-        print("%-22s %8s %8s" % ("arm", "tool", "tool+args"))
+        dropped = sum(1 for arm in ARMS
+                      for r in results.get(arm, {}).get("rows", []) if r.get("unavailable"))
+        if dropped:
+            print("(%d row(s) the service failed are excluded from every "
+                  "denominator, not counted as misses)" % dropped)
+        print()
+        print("%-22s %-10s %-12s %s" % ("arm", "acted", "right tool", "tool+args"))
         tallies = {}
         for arm in ARMS:
             rows = results.get(arm, {}).get("rows", [])
             tallies[arm] = score_arm(rows)
-            print("%-22s %5d/%-2d %5d/%-2d" % ((arm, tallies[arm][0], n,
-                                                 tallies[arm][1], n)))
+            d = tallies[arm][3]
+            print("%-22s %4d/%-5d %5d/%-6d %5d/%-6d" % (
+                arm, tallies[arm][0], d, tallies[arm][1], d, tallies[arm][2], d))
         print()
-        for (a, b), meaning in READ.items():
-            print("  %s vs %s: %+d tool+args -- %s"
-                  % (b, a, tallies[b][1] - tallies[a][1], meaning))
-        print("\n  a tie on that line is the paper's result, not a null one.")
+        print("  acted = a tool was called at all (form).  right tool = the right "
+              "one (choice).")
+        print("  %s vs %s: form %+d, choice %+d"
+              % (ARMS[1], ARMS[0], tallies[ARMS[1]][0] - tallies[ARMS[0]][0],
+                 tallies[ARMS[1]][1] - tallies[ARMS[0]][1]))
+        print("  %s vs %s: form %+d, choice %+d  <- same request, grammar is the "
+              "only difference"
+              % (ARMS[1], ARMS[2], tallies[ARMS[1]][0] - tallies[ARMS[2]][0],
+                 tallies[ARMS[1]][1] - tallies[ARMS[2]][1]))
+        print()
+        print("  form up and choice flat is the grammar working exactly as far as")
+        print("  it can: well-formed, no more likely to be right.")
         return code
     finally:
         proc.terminate()

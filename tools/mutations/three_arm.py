@@ -123,4 +123,14 @@ MUTATIONS = [
         'old': '    local_llm.REQUEST_ONLY = config == "+greedy+request"',
         'new': '    local_llm.REQUEST_ONLY = config in ("+greedy+request", "+greedy+constrained")',
     },
+    {
+        'label': 'the decision instruction is reworded',
+        'why': 'both arms move together, so every number stays self-consistent '
+               'and becomes incomparable with the run already recorded. A '
+               'wording change is invisible in a score and visible only here.',
+        'expect': ['test_the_decision_prompt'],
+        'file': _SRC,
+        'old': '        ("\\n\\nDecide what to do with the user\'s last message. If one of these tools does it, choose that "',
+        'new': '        ("\\n\\nDecide what to do with the user\'s last message. If one of these tools does it, prefer that "',
+    },
 ]
