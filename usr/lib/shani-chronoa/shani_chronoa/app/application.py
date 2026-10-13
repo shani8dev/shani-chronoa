@@ -753,6 +753,84 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         action.set_state(GLib.Variant("s", key))
         self._refresh_strip()
 
+    def _on_answer_cloud_model(self, action, value) -> None:
+        """Choose which model a **cloud** provider answers with.
+
+        **The twin of `answer-model`, and it is a separate action because the
+        two switches do different things.** `answer-model` points `current.gguf`
+        at another tier on this machine and restarts llama-server. A cloud choice
+        has no symlink and no server: it is a setting the chain reads when it is
+        built. One action covering both would have to know which kind of thing
+        it was handed, and every caller would have to be right about it.
+
+        **Writing the setting is not enough, and that is the reason this
+        exists.** `CloudLLMChain.__init__` reads the keys and the chosen models
+        **once**, so a model picked while the app is running waits for the chain
+        to be rebuilt - and the only rebuilds are startup, the privacy toggle,
+        the fallback toggle and `select_llm("cloud")`. So this calls the last of
+        those, on purpose.
+
+        **Only when a provider is already answering.** `select_llm("cloud")` on a
+        machine answering locally would move a person off this machine without
+        being asked, which is the opposite of what picking a model asks for. The
+        choice is still saved - so it is what answers next time - and that is
+        said in the log rather than left to be discovered.
+
+        **Two refusals, both by name**: a provider nobody has registered, and a
+        registered provider with no model setting, where `set_cloud_model`
+        returns early and the choice would be discarded without a word.
+        """
+        from shani_chronoa import cloud_llm
+        from shani_chronoa.config import MODEL_SETTINGS
+
+        try:
+            provider_id = value.get_child_value(0).get_string()
+            model = value.get_child_value(1).get_string()
+        except Exception:                              # noqa: BLE001
+            logger.error("answer-cloud-model: expected (provider, model)")
+            return
+
+        provider = cloud_llm.PROVIDERS.get(provider_id)
+        if provider is None:
+            logger.warning("answer-cloud-model: no provider is registered as "
+                           "%r, so nothing was changed", provider_id)
+            return
+        model = model.strip()
+        if not model:
+            logger.warning("answer-cloud-model: %s was given no model",
+                           provider_id)
+            return
+        if MODEL_SETTINGS.get(provider_id) is None:
+            # **`set_cloud_model` returns early on an id it does not name**, so
+            # this would look like it worked and be discarded. The picker offers
+            # exactly the providers in `PROVIDERS`, so a gap here is a registry
+            # mistake rather than a person's mistake - and it has to be visible
+            # when it happens rather than reported as a successful choice.
+            logger.warning("answer-cloud-model: %s has no entry in "
+                           "MODEL_SETTINGS, so a choice could not be saved",
+                           provider_id)
+            return
+
+        self.config.set_cloud_model(provider_id, model)
+
+        if self.current_llm_kind() != "cloud":
+            # Saved for next time, and said rather than assumed.
+            logger.info("answer-cloud-model: this machine is answering locally, "
+                        "so %s is saved as %s's choice for when the cloud "
+                        "answers", model, provider_id)
+            self._refresh_strip()
+            return
+
+        problem = self.select_llm("cloud")
+        if problem:
+            logger.warning("answer-cloud-model: %s is saved for %s but the "
+                           "chain did not rebuild - %s", model, provider_id,
+                           problem)
+        else:
+            logger.info("answer-cloud-model: now answering with %s via %s",
+                        model, provider_id)
+        self._refresh_strip()
+
     def _refresh_strip(self) -> None:
         """Redraw the mode strip after an action wrote its setting.
 
@@ -1458,6 +1536,16 @@ class ChronoaApplication(VoiceMixin, BrainMixin, ConversationMixin, DesktopInteg
         barge_in_vad_action = Gio.SimpleAction.new("toggle-barge-in-vad", None)
         barge_in_vad_action.connect("activate", self._toggle_barge_in_vad)
         self.add_action(barge_in_vad_action)
+
+        # **Which cloud model answers**, as `(provider, model)` - two values, so
+        # this is a plain parameterised action rather than one of the stateful
+        # `s` chips above. A stateful action would have to carry the pair in a
+        # single string, and every reader would have to split it correctly to
+        # learn which provider a model belongs to.
+        cloud_model_action = Gio.SimpleAction.new(
+            "answer-cloud-model", GLib.VariantType.new("(ss)"))
+        cloud_model_action.connect("activate", self._on_answer_cloud_model)
+        self.add_action(cloud_model_action)
 
         model_download_action = Gio.SimpleAction.new("toggle-model-download", None)
         model_download_action.connect("activate", self._toggle_model_download)

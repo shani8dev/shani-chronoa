@@ -146,6 +146,42 @@ def _halo_size(level: float) -> tuple[int, int]:
     return px, px
 
 
+# The orb's own side, which only has to be as large as the halo it contains.
+# 88 holds the halo at rest (84); 124 holds it at full input level (120).
+_ORB_RESTING_PX = 88
+_ORB_LIVE_PX = 124
+
+# **The states whose halo actually moves.** Taken from the two places that feed
+# it a real level - `set_input_level` (listening) and `set_playback_level`
+# (speaking), each of which deliberately ignores every other state so a level
+# that arrives after a turn ended cannot make the halo pulse at nothing - and
+# not from a guess about which state "feels" big. The first version of this said
+# LISTENING alone and would have clipped the halo for the whole length of every
+# spoken reply.
+_LIVE_STATES = frozenset({AssistantState.LISTENING, AssistantState.SPEAKING})
+
+
+def _orb_size(state: AssistantState) -> int:
+    """How big the orb is in a given state.
+
+    **Pure, for the same reason `_halo_size` is**: the state-to-size mapping is
+    assertable without a display, and the number is the one this whole change
+    turns on.
+
+    **Why it is not always 124.** The button was sized for the halo's
+    *maximum*, so a silent room carried the same 40px of reserve as a loud one.
+    Measured on the real window at its own 460x640, the chat column is 566px
+    and the orb took **124 of them** - more than the entire conversation's
+    **162px**, and it never gave any of it back: after three real turns the
+    transcript was **161px**, one pixel smaller than when it was empty.
+
+    So a person asking their third question reads it in a box 77% the height of
+    a decorative microphone. The halo only reaches its maximum in `_LIVE_STATES`,
+    so that is the only place the reserve is worth carrying.
+    """
+    return _ORB_LIVE_PX if state in _LIVE_STATES else _ORB_RESTING_PX
+
+
 class ChronoaOrbWidget(Gtk.Button):
     """The orb - the window's single visual statement of assistant state.
 
@@ -165,8 +201,10 @@ class ChronoaOrbWidget(Gtk.Button):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        # Roomier than the 80px orb so the level halo has somewhere to go.
-        self.set_size_request(124, 124)
+        # **No size request here.** `_apply_state(AssistantState.IDLE)` at the end
+        # of this method sets it, and having both produced a mutation that could
+        # not fail: hardcoding 124 here changed nothing, because the very next
+        # call overwrote it with the resting size. One place sets the size.
         self.add_css_class("flat")
         self.add_css_class("chronoa-orb")
 
@@ -236,6 +274,10 @@ class ChronoaOrbWidget(Gtk.Button):
             self._halo.remove_css_class(f"halo-{candidate.value}")
         self.add_css_class(f"state-{state.value}")
         self._halo.add_css_class(f"halo-{state.value}")
+        # The halo only reaches its maximum in the states that feed it a level,
+        # so those are the states that carry the room for it.
+        side = _orb_size(state)
+        self.set_size_request(side, side)
 
 
 class SuggestionBar(Gtk.FlowBox):

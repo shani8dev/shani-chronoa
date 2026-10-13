@@ -1061,6 +1061,15 @@ MODEL_SETTINGS = {
     "openai": "openai-model", "anthropic": "anthropic-model",
     "google": "google-model", "groq": "groq-model",
     "opencode-zen": "opencode-zen-model", "openrouter": "openrouter-model",
+    # **Your own server, and the one this table was silently wrong about.**
+    # `set_cloud_model` returns early on an id it does not name, and it did not
+    # name `custom` - measured: `set_cloud_model("custom", "m")` wrote *nothing*
+    # while the same call for `kilo` and `google` wrote their key. The setup
+    # wizard's row for "Your own server" listed that server's own models and
+    # every one of them was discarded on selection, so the dropdown looked
+    # exactly like the working ones. `app/brain.py:218` reads exactly this key,
+    # so it is both the right name and the only one anything reads.
+    "custom": "custom-llm-model",
 }
 
 

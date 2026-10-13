@@ -573,13 +573,27 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
             # which is the exact failure this journal exists to catch.
             _journal_clear()
 
-        hit = [t for t in entry["expect"] if _witness_hit(t, failed)]
-        missed = [t for t in entry["expect"] if t not in hit]
+        # **`entry.get("expect")`, not `entry["expect"]`.** The documented
+        # contract is "every mutation either names a witness *or* carries
+        # `equivalent: True` with a `why`" - so an equivalent mutation is
+        # *allowed* to have no `expect` at all. This read it unconditionally,
+        # before the `equivalent` branch below, so such a mutation raised
+        # `KeyError: 'expect'`, which aborted the set and left every mutation
+        # after it unmeasured **while the tally still printed a summary** -
+        # the same class the `MutationDidNotParse` handling above exists to
+        # prevent, reached from the branch that is supposed to be a safe
+        # exit. Measured on `palette_modes` 2026-10-13: five mutations
+        # reported, then `0 mutations, 0 caught, 0 survivors` over a run that
+        # had measured five. All 24 other equivalents in this tree happen to
+        # carry `expect` as well, so nothing else had ever reached it.
+        expect = entry.get("expect") or []
+        hit = [t for t in expect if _witness_hit(t, failed)]
+        missed = [t for t in expect if t not in hit]
         if hit:
             caught += 1
             if verbose:
-                extra = (f"  (also: {sorted(_unexplained(failed, entry['expect']))})"
-                         if _unexplained(failed, entry["expect"]) else "")
+                extra = (f"  (also: {sorted(_unexplained(failed, expect))})"
+                         if _unexplained(failed, expect) else "")
                 print(f"    -> caught by {', '.join(hit)}{extra}")
                 if missed:
                     print(f"    -> NOT caught by {', '.join(missed)}")
@@ -598,7 +612,7 @@ def run_set(name: str, path: Path, verbose: bool = True) -> dict:
                 print(f"    -> equivalent mutant, kept: {entry.get('why', '')}")
             continue
 
-        unexplained = _unexplained(failed, entry["expect"])
+        unexplained = _unexplained(failed, expect)
         measured = summary
         if skipped:
             # **Say the run skipped tests rather than implying it covered

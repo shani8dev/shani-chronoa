@@ -1279,6 +1279,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             "Which model answers. Switching loads it and restarts the local "
             "server, so the next reply uses it")
         button.set_popover(model_picker.ModelPicker(self._app))
+        # **Held, not inlined.** The palette fetches a provider's list into the
+        # cache this picker reads, and an inline popover would keep showing the
+        # rows it drew before the answer arrived until the next reopen. The
+        # handle is what lets a fetch refresh it - and it is also the only
+        # thing that makes "the picker and the palette cannot disagree" a
+        # property rather than a hope.
+        self._model_picker = button.get_popover()
         button.update_property(
             [Gtk.AccessibleProperty.LABEL],
             ["Which model answers. Choose a locally installed model."])
@@ -1947,6 +1954,29 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._question_row.add_css_class("cajita-question")
         self._question_row.set_visible(False)
         main_box.append(self._question_row)
+
+        # **The palette is parented here, and until this line it was never on
+        # screen.** `_build_palette` built it, fed it 50 entries, set it
+        # invisible and wired the key handler - and added it to **nothing**.
+        # Measured on the built window before this change: before the press
+        # `visible=False parent=None`; after the real handler returned `True`,
+        # `visible=True parent=None`; 400 ms later `mapped=False` and **not in
+        # the window's widget subtree** at all. A `Gtk.Box` cannot be a
+        # toplevel, so there was never a surface for it to appear on.
+        #
+        # **Why it survived**: `tests/test_command_palette.py` builds the widget
+        # standalone, where everything works, and
+        # `test_shortcuts_are_discoverable.py` asserts the *text* "Ctrl+K for
+        # anything else". Nothing ever asked whether it was in the window -
+        # which is this repository's own "a test that calls the function is not
+        # a test that the skill is reachable", in a widget.
+        #
+        # **Directly under the transcript, and inline rather than overlaid**,
+        # because the transcript is `vexpand`: showing the palette takes its
+        # height out of the conversation and hiding it gives the space back, so
+        # nothing moves and the composer is never pushed off. Same idiom as
+        # `_question_row` above.
+        main_box.append(self._palette)
         self._pending_question = None
         self._question_widgets: list = []
 
@@ -3439,7 +3469,126 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 f"/{name}", "command", "system-run-symbolic",
                 (lambda n=name: self._run_command(f"/{n}")),
                 group="Commands", weight=0))
+        entries.extend(self._palette_cloud_entries())
         return entries
+
+    def _palette_cloud_entries(self):
+        """Cloud models, for the people who search rather than browse.
+
+        **Built from the same cache the picker reads**, so the palette and the
+        picker cannot disagree about which models exist - which is the
+        second-source-of-truth failure `ModelPicker`'s own docstring is written
+        against, and the reason those two widgets share one cache rather than
+        each fetching.
+
+        **A refusal is an entry, not a silence.** `cloud_llm.cached_models`
+        returns `(models, why)`, and when `why` is set the row carries it. A
+        provider that refused and a provider nobody asked yet read identically
+        if both were dropped, and "no models here" is a claim about a provider
+        rather than about this screen.
+
+        **A model with no row cannot be chosen**, so a provider that has never
+        been fetched gets one entry offering to read its list rather than
+        nothing: the palette is a discovery surface, and "nothing here" for a
+        provider the person has a key for is the wrong answer.
+        """
+        from shani_chronoa import cloud_llm
+        from shani_chronoa.gui import palette as palette_module
+
+        out = []
+        order = (list(cloud_llm.BYOK_PROVIDER_ORDER)
+                 + list(cloud_llm.DEFAULT_PROVIDER_ORDER)
+                 + [cloud_llm.CUSTOM_ID])
+        for provider_id in order:
+            provider = cloud_llm.PROVIDERS.get(provider_id)
+            if provider is None:
+                continue
+            label = provider.name if provider_id != cloud_llm.CUSTOM_ID \
+                else "Your own server"
+            if not cloud_llm.models_asked(provider_id):
+                out.append(palette_module.Entry(
+                    f"{label} models", "read its model list",
+                    "network-transmit-receive-symbolic",
+                    (lambda p=provider_id: self._read_cloud_models(p)),
+                    group="Cloud models", weight=0))
+                continue
+            models, why = cloud_llm.cached_models(provider_id)
+            if not models:
+                # **A refusal is pressable, and pressing it asks again.**
+                # `collect()` drops an entry with no `run`, so a refusal given
+                # no callback would vanish from the palette entirely - and a
+                # provider that answered "HTTP 401" would read the same as one
+                # that was never configured. The reason stays on screen, and
+                # the press is the obvious thing to do about it.
+                out.append(palette_module.Entry(
+                    f"{label}", why or "gave no model list",
+                    "network-transmit-receive-symbolic",
+                    (lambda p=provider_id: self._read_cloud_models(p)),
+                    group="Cloud models", weight=0))
+                continue
+            # **`collect()` drops an entry with no `run`,** so every row here
+            # carries one - a model, a provider to read, and a refusal to ask
+            # again - rather than silently vanishing from a filtered list.
+            for model in models:
+                out.append(palette_module.Entry(
+                    model, label, "network-transmit-receive-symbolic",
+                    (lambda p=provider_id, m=model: self._answer_cloud_model(p, m)),
+                    group="Cloud models", weight=0))
+        return out
+
+    def _read_cloud_models(self, provider_id: str) -> None:
+        """Fetch one provider's list off the main loop, then refresh the palette."""
+        from shani_chronoa import cloud_llm
+
+        try:
+            keys = dict(self._app.config.cloud_llm_api_keys() or {})
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("palette: cloud keys unreadable: %s", exc)
+            keys = {}
+        try:
+            base = self._app.config.get("custom-llm-base-url", "")
+        except Exception:  # noqa: BLE001
+            base = ""
+
+        def work():
+            try:
+                cloud_llm.fetch_models(provider_id,
+                                       api_key=keys.get(provider_id, ""),
+                                       base_url=base)
+            except Exception:  # noqa: BLE001
+                logger.debug("palette: %s would not answer", provider_id,
+                             exc_info=True)
+            # The picker shares this cache, so it refreshes too rather than
+            # waiting for its own reopen to notice.
+            picker = getattr(self, "_model_picker", None)
+            GLib.idle_add(lambda: (picker is None or picker.rebuild(), False)[1])
+            if self._palette.get_visible():
+                self._palette.set_entries(self.palette_entries())
+
+        import threading
+        threading.Thread(target=work, name="chronoa-palette-models",
+                         daemon=True).start()
+
+    def _answer_cloud_model(self, provider_id: str, model: str) -> None:
+        """Hand a palette model choice to the app's own action, then close."""
+        if not self._activate_cloud_model(provider_id, model):
+            return
+        self._close_palette()
+
+    def _activate_cloud_model(self, provider_id: str, model: str) -> bool:
+        """Whether the choice reached the app's action. One door, three callers."""
+        action = getattr(self, "activate_action", None)
+        if action is None:
+            logger.debug("palette: nothing to hand the cloud choice to")
+            return False
+        try:
+            action("app.answer-cloud-model",
+                   GLib.Variant("(ss)", (provider_id, model)))
+        except Exception:  # noqa: BLE001
+            logger.warning("palette: could not switch to %s on %s", model,
+                           provider_id, exc_info=True)
+            return False
+        return True
 
     #: Every mode, by name, **built from the strip's own tables**.
     #:
@@ -3520,10 +3669,26 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
                 current = reader() if callable(reader) else ""
             except Exception:                           # noqa: BLE001
                 current = ""
-            row = next((r for r in table if r[0] == current), None)
-            icon = row[3] if row and len(row) > 3 and row[3] else "preferences-system-symbolic"
+            # **The same row `_draw` picks, for the title as well as the line.**
+            # It used `table[0][1]`, which is the table's *first* row's word -
+            # a constant, identical whatever state the app is in. Across the 20
+            # rows these seven tables hold, the palette named the right one
+            # **7 times** and the wrong one 13: Chronoa `Asleep` was listed as
+            # "Here", `Plan` as "Working", `Build` as "General", "Brief" as
+            # "Ordinary", and every cloud egress as "Nothing leaves".
+            #
+            # The subtitle was already the current row's line, so each row was
+            # half right - a plausible description of the wrong state, which is
+            # harder to notice than being plainly wrong. And it disagreed with
+            # the chip beside it, which does read the state.
+            #
+            # **On a default machine none of this shows**: every mode is then
+            # its table's first row, which is what the 7 are. The defect is
+            # invisible until somebody changes something.
+            row = next((r for r in table if r[0] == current), table[0])
+            icon = row[3] if len(row) > 3 and row[3] else "preferences-system-symbolic"
             out.append(palette_module.Entry(
-                table[0][1], row[2] if row else "", icon,
+                row[1], row[2], icon,
                 (lambda a=action_name: self._activate_mode(a)),
                 group="Modes", weight=0))
         return out
@@ -4107,18 +4272,59 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
             self._draft_timeout = None
         composer_draft.clear(composer_draft.draft_path(self._draft_key))
 
+    def _composer_is_empty(self) -> bool:
+        """True when Enter has nothing to send.
+
+        **Three things count as something to send, and all three must be absent.**
+        The text is compared the way `_submit_input` compares it - stripped -
+        so this cannot disagree with what would actually be submitted; the
+        attachments are read off the list itself rather than through
+        `take_attachments()`, which *consumes* them; and a pending question is
+        the third, because a question is answered from its own buttons and
+        opening a microphone unasked in the middle of a permission prompt is
+        the surprise this file records most of its entries about.
+        """
+        if self._input_text().strip():
+            return False
+        if getattr(self, "_attachments", ()):
+            return False
+        return self._pending_question is None
+
     def _on_input_key_pressed(self, _view, keyval, _keycode, state) -> bool:
-        """Enter sends; Shift+Enter is a newline.
+        """Enter sends; Shift+Enter is a newline; Enter on nothing starts listening.
 
         The convention every chat UI has, and the one a person who cannot reach
         the Send button needs: without Shift there is no way to type two lines,
         and without Enter there is no way to send from the keyboard.
+
+        **The third case is the orb's key, which the orb's own tooltip promised.**
+        It read *"Start listening (Enter)"* while `toggle-listening` had no
+        accelerator anywhere in the tree - so a newcomer on the empty state
+        pressed Enter and got nothing at all, because the composer's Enter is
+        send and an empty send returns early. The rule written into
+        `_on_window_key_pressed` twenty lines below this one says what that
+        teaches: *a hint that names a key which is not bound is worse than no
+        hint.*
+
+        Enter with nothing typed, nothing attached and no question pending is
+        therefore the one keypress on this screen that reaches voice - which is
+        what makes the promise true rather than deleting it. It goes through the
+        **same app action the orb button uses**, so the two cannot drift; that
+        is the reason `_submit_input` exists for the send button and the Enter
+        key, and it applies here for the same reason.
+
+        **It is a toggle, like the orb.** A second Enter ends the turn early
+        rather than waiting out the silence, because that is what
+        `_toggle_listening` already does for a press of the orb itself.
         """
         if keyval != Gdk.KEY_Return and keyval != Gdk.KEY_KP_Enter:
             return False
         shift = bool(state & Gdk.ModifierType.SHIFT_MASK)
         if shift:
             return False            # let it through: a newline
+        if self._composer_is_empty():
+            self._app.activate_action("toggle-listening", None)
+            return True
         self._on_input_activate(self._input_entry)
         return True
 

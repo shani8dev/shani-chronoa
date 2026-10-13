@@ -41,7 +41,10 @@ import shutil
 import threading
 from typing import Callable, Dict, List, Optional, Tuple
 
-from shani_chronoa.config import ChronoaConfig  # noqa: E402  (the factory above needs the real class)
+from shani_chronoa.config import (  # noqa: E402  (the factory above needs the real class)
+    API_KEY_SETTINGS,
+    ChronoaConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1492,6 +1495,40 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     # the moment they are about to send every question somewhere, which is the
     # only moment the sentence matters.
     from shani_chronoa import cloud_llm
+
+    def _load_models(provider_id: str, api_key: str = "") -> "tuple[list[str], str]":
+        """`(ids, why)` for one provider, **with the person's key and address**.
+
+        **The key was never sent, and that made three providers unreachable.**
+        The page called `offerable_models(provider_id)` with no `api_key`, so
+        the default `""` applied, so `list_models` built no `Authorization`
+        header - and `cloud_llm.py`'s own docstring records that the keyed
+        providers *"reject an unauthenticated request outright"*. Measured
+        against each provider's own `base_url`: **openai and groq answer 401
+        without a key**, so neither could ever list a model here, on any
+        machine, whether a key was saved or not, and the row said the provider's
+        own URL "could not be read (HTTP Error 401)" - which reads as *your key
+        is wrong or missing* when in fact **no key was ever offered**.
+
+        **And the address, for the one provider whose URL is a setting.**
+        `custom` is "your own server on another machine, with a port in it", so
+        its `base_url` is whatever the person typed; without passing it here it
+        has no URL to fetch and answers "no address has been set" on a machine
+        that has one.
+
+        One implementation, so the gear below and the page's own first pass
+        cannot disagree about what a provider answers - which is the second
+        door this page already had, and the reason a fix here is a fix
+        everywhere rather than in the first reader only.
+        """
+        try:
+            return cloud_llm.offerable_models(
+                provider_id, api_key=api_key or "",
+                base_url=config.get("custom-llm-base-url", ""),
+            )
+        except Exception as exc:  # noqa: BLE001 - a report, not a crash
+            return [], str(exc)
+
     keys_page, box = page(
         "Cloud keys", "cloud-keys",
         "Chronoa needs a key to talk to a provider on your behalf. Keys are "
@@ -1548,23 +1585,145 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
     )
     box.append(models)
     pickers: Dict[str, Gtk.DropDown] = {}
-    for provider_id in list(cloud_llm.BYOK_PROVIDER_ORDER) + list(
-            cloud_llm.DEFAULT_PROVIDER_ORDER):
+    key_editors: Dict[str, tuple] = {}
+    # Per-provider handles the fill thread needs on the main loop. **Dicts,
+    # not closure defaults**: the refusal callback is queued with
+    # `GLib.idle_add` and runs after this loop has finished, so a name it
+    # captured would be the *last* provider's row - which is the
+    # `key = ...`-in-a-loop bug this page has already paid for once.
+    note_for: Dict[str, Gtk.Label] = {}
+    row_for: Dict[str, Adw.ActionRow] = {}
+    words_for: Dict[str, str] = {}
+    # **"Your own server" is named in neither tuple**, which is correct - it is
+    # not a BYOK-required provider and not one of the free gateways, and
+    # `app/brain.py` prepends it on its own when an address has been set. Which
+    # means a loop over those two tuples builds **no row for it at all**: the
+    # same defect anthropic had, one level down. Measured, this page built nine
+    # provider rows out of the ten it can configure, and the missing one was the
+    # only one needing an address, a model *and* a key.
+    for provider_id in (list(cloud_llm.BYOK_PROVIDER_ORDER)
+                        + list(cloud_llm.DEFAULT_PROVIDER_ORDER)
+                        + [cloud_llm.CUSTOM_ID]):
         provider = cloud_llm.PROVIDERS.get(provider_id)
         if provider is None:
+            # **This branch is now unreachable, and it used to be a silent
+            # deletion.** `anthropic` was in `BYOK_PROVIDER_ORDER` and not in
+            # `PROVIDERS`, so this line dropped it - no row, no key, no model
+            # choice, and nothing saying it was absent - while `app/brain.py`
+            # built an `AnthropicLLM` from the key the moment one was saved.
+            # Both lists are named in one place now and a provider in one and
+            # not the other is a defect rather than a shrug, so the refusal
+            # says which id rather than continuing past it.
+            logger.warning("wizard cloud-keys: %s is ordered but not "
+                           "registered, so it has no row", provider_id)
             continue
+        is_custom = provider_id == cloud_llm.CUSTOM_ID
+        if is_custom:
+            name, model_word = "Your own server", "a model the server lists"
+        else:
+            name, model_word = provider.name, provider.default_model
         row = Adw.ActionRow(
-            title=provider.name,
-            subtitle=f"answers with {provider.default_model} until you pick another")
+            title=name,
+            subtitle=f"answers with {model_word} until you pick another")
         picked = Gtk.DropDown.new_from_strings(["reading the list..."])
         picked.set_valign(Gtk.Align.CENTER)
         picked.set_sensitive(False)
         picked.update_property([Gtk.AccessibleProperty.LABEL],
-                               [f"Model for {provider.name}"])
-        row.add_suffix(picked)
+                               [f"Model for {name}"])
+
+        # ── the key, in the row that needs it ────────────────────────
+        # **A gear on every provider, because the key and the model are one
+        # decision about one provider and this page made them two.** The key
+        # lives in the "Providers" group above and the model in this one, so
+        # the moment you discover you needed a key - the dropdown is disabled
+        # and says so - the control that fixes it is in a different part of
+        # the page. The gear opens it *here*, on the row that turned it off.
+        #
+        # **`preferences-system-symbolic` because it is measured present in
+        # Adwaita on this machine** - the rule this file has been bitten by
+        # three times, each time by a plausible name that is Yaru-only and
+        # draws an empty box that reads as a broken control. It is also the
+        # icon `_AMBIENT`'s own table already uses on the mode strip, so it is
+        # known to resolve here rather than assumed to.
+        gear = Gtk.Button(icon_name="preferences-system-symbolic",
+                          valign=Gtk.Align.CENTER)
+        gear.add_css_class("flat")
+        gear.set_tooltip_text(
+            f"Set up {name}."
+            + (" Its address, the model it lists and an optional key."
+               if is_custom else
+               (" A key is mandatory here."
+                if provider.requires_key else
+                " It works without one, at a lower rate limit.")))
+        gear.update_property([Gtk.AccessibleProperty.LABEL],
+                             [f"Set up {name}"])
+
+        fields: list[tuple] = []
+        if is_custom:
+            # **Three fields, because your own server is three settings and
+            # one of them is an address.** A gear that revealed only a key
+            # would leave the two this provider actually needs on another page
+            # - and the address is the one carrying the host and the port.
+            for label, key, placeholder in (
+                    ("Server address", "custom-llm-base-url",
+                     "http://192.168.1.20:8080/v1"),
+                    ("Model name", "custom-llm-model", "as the server lists it")):
+                field = Gtk.Entry(hexpand=True, placeholder_text=placeholder)
+                field.set_text(config.get(key, ""))
+                field.update_property([Gtk.AccessibleProperty.LABEL],
+                                      [f"{name} {label}"])
+                fields.append((label, key, field))
+        key_field = Gtk.Entry(hexpand=True, placeholder_text="paste your key")
+        key_field.set_visibility(False)     # a key is not shoulder-surfed
+        key_field.update_property([Gtk.AccessibleProperty.LABEL],
+                                  [f"{name} API key"])
+        fields.append(("API key", API_KEY_SETTINGS
+                       .get(provider_id, f"{provider_id}-api-key"), key_field))
+        entered.setdefault(provider_id, "")
+
+        key_note = wrapping("")
+        key_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for label, key, field in fields:
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            caption = Gtk.Label(label=label, xalign=0)
+            caption.add_css_class("dim-label")
+            line.append(caption)
+            line.append(field)
+            key_box.append(line)
+        key_box.append(key_note)
+        key_box.set_visible(False)         # hidden until the gear is pressed
+
+        suffix = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        suffix.set_valign(Gtk.Align.CENTER)
+        suffix.append(picked)
+        suffix.append(key_box)
+        row.add_suffix(suffix)
+        row.add_prefix(gear)
         row.set_activatable_widget(picked)
         models.add(row)
         pickers[provider_id] = picked
+
+        def show_key(*_a, pid=provider_id, box_=key_box, btn=gear,
+                     row_=row, nm=name, word=model_word) -> None:
+            """Open the editor in this row. **Toggles**, so the same control
+            closes it - a gear that only ever opens leaves no way back."""
+            opening = not box_.get_visible()
+            box_.set_visible(opening)
+            btn.set_icon_name("window-close-symbolic" if opening
+                              else "preferences-system-symbolic")
+            btn.set_tooltip_text(f"Close the {nm} settings" if opening
+                                 else f"Set up {nm}.")
+            row_.set_subtitle(
+                "address, model and key are below" if opening else
+                f"answers with {word} until you pick another")
+            if opening:
+                fields[0][2].grab_focus()
+
+        gear.connect("clicked", show_key)
+        key_editors[provider_id] = (fields, key_note, key_box)
+        note_for[provider_id] = key_note
+        row_for[provider_id] = row
+        words_for[provider_id] = model_word
 
     model_status = wrapping("")
     box.append(model_status)
@@ -1579,27 +1738,48 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             from shani_chronoa.config import ChronoaConfig as _Config
 
             saved = _Config().cloud_llm_models()
+            # **The keys, so the keyed providers are asked as themselves.**
+            # Reading them here rather than closing over the page's `existing`
+            # is deliberate: this thread is started before anything typed on
+            # this page is saved, and it must describe the machine as it is,
+            # not as this page hopes it will be.
+            have = _Config().cloud_llm_api_keys()
             listed, refused = 0, []
             for provider_id, picked in pickers.items():
-                try:
-                    ids, why = _cl.offerable_models(provider_id)
-                except Exception as exc:  # noqa: BLE001 - a report, not a crash
-                    ids, why = [], str(exc)
+                ids, why = _load_models(provider_id,
+                                        api_key=have.get(provider_id, ""))
                 if not ids:
                     # **The reason is kept, not just the fact.** A dropdown left
                     # disabled with nothing said reads as "this provider has no
                     # models"; `why` says which of the two it actually was -
                     # a 401 because the key is missing, or nothing reachable.
                     refused.append((provider_id, why))
-                    def leave_off(picked=picked) -> bool:
+                    def leave_off(picked=picked, note=note_for[provider_id],
+                                  row=row_for[provider_id],
+                                  word=words_for[provider_id]) -> bool:
                         picked.set_sensitive(False)
+                        # **The reason on the row that turned the control
+                        # off.** It used to reach only the summary label at the
+                        # bottom of the page, so a disabled dropdown explained
+                        # itself only to somebody who scrolled past it - and a
+                        # dropdown that is off with no reason reads as a bug
+                        # rather than as a provider that could not be asked.
+                        note.set_label(why)
+                        row.set_subtitle(
+                            f"{why} - answering with {word} in the meantime")
                         return False
                     GLib.idle_add(leave_off)
                     continue
                 listed += 1
                 default = _cl.PROVIDERS[provider_id].default_model
+                # **Your own server has no default model in the registry** -
+                # it is whatever the person typed, on a machine nobody else
+                # can see - so an empty one is the normal answer, not a
+                # missing one. Inserting it would put a **blank option** at the
+                # top of a dropdown, which is a control that looks broken
+                # rather than one that has nothing to show.
                 current = saved.get(provider_id) or default
-                if current not in ids:
+                if current and current not in ids:
                     ids.insert(0, current)
 
                 def apply(provider_id=provider_id, picked=picked, ids=ids,
@@ -1644,6 +1824,101 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
             config.set_cloud_model(provider_id, item.get_string())
 
     fill()
+
+    # ── the gear actually does something ─────────────────────────────
+    # Saving the key re-asks that one provider, on a thread, and fills its
+    # dropdown. **Without this the gear is decoration**: the key would be
+    # stored and the row would stay disabled until the page was rebuilt, so
+    # the person would save a key and watch the one thing that key was for
+    # stay greyed out - which reads as "the key did not work" rather than as
+    # "nothing has looked again yet".
+    #
+    # **One provider, not all nine.** This is the same walk as the page's
+    # first pass, so it is exactly what would happen to have been re-run; the
+    # difference is that it is cheap enough to do the moment a person is
+    # waiting for it.
+    def save_one_key(provider_id: str) -> None:
+        fields, note, _box = key_editors[provider_id]
+        setting = API_KEY_SETTINGS.get(provider_id,
+                                                 f"{provider_id}-api-key")
+        by_key = {key: field for _label, key, field in fields}
+        # **The key is the only field that may be left blank.** Your own server
+        # is configured by its address and its model, and its key is explicitly
+        # optional there ("only if the server asks for one"), so refusing to save
+        # without one would make the single provider that needs no key the
+        # single provider that cannot be configured. Every *other* field is
+        # required, because a blank address is not a server.
+        key_value = (by_key[setting].get_text().strip()
+                     if setting in by_key else "")
+        missing = [label for label, key, field in fields
+                   if key != setting and not field.get_text().strip()]
+        if missing:
+            note.set_label(f"{', '.join(missing)} is empty, so nothing was "
+                           "saved.")
+            return
+        for _label, key, field in fields:
+            value = field.get_text().strip()
+            if key in API_KEY_SETTINGS.values():
+                if not value:
+                    # **An empty key must not overwrite a working one.** The
+                    # remedy for a mistyped key is to type it again, not to
+                    # lose the one that already worked.
+                    continue
+                config.set_api_key(key, value)
+                entered[provider_id] = value
+            else:
+                config.set(key, value)
+        picked = pickers[provider_id]
+        note.set_label("Saved. Reading this provider's models again...")
+        picked.set_model(Gtk.StringList.new(["reading the list..."]))
+        picked.set_sensitive(False)
+
+        def work() -> None:
+            from gi.repository import GLib
+
+            ids, why = _load_models(provider_id, api_key=key_value)
+            default = cloud_llm.PROVIDERS[provider_id].default_model
+            if ids and default and default in ids:
+                ids.remove(default)
+            if ids:
+                ids.insert(0, default or ids[0])
+            current = config.cloud_llm_models().get(provider_id) or default
+
+            def apply() -> bool:
+                if not ids:
+                    # **The reason, not just the fact.** "This provider still
+                    # cannot be reached" and "your key was refused" are
+                    # different problems with different fixes, and the sentence
+                    # the fetch returns is the only thing that knows which.
+                    note.set_label(
+                        f"The key was saved, but {why or 'that provider'}"
+                        " still gave no model list.")
+                    picked.set_model(Gtk.StringList.new([default]))
+                    picked.set_selected(0)
+                    picked.set_sensitive(False)
+                    return False
+                note.set_label(f"Saved. {len(ids)} model(s) offered; "
+                               f"{default or 'the first'} is the default.")
+                picked.set_model(Gtk.StringList.new(ids))
+                picked.set_selected(
+                    ids.index(current) if current in ids else 0)
+                picked.set_sensitive(True)
+                return False
+
+            GLib.idle_add(apply)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    for _pid, (_fields, _note, _box) in key_editors.items():
+        # **Enter saves.** A key field with no way to commit it is the
+        # `Gtk.TextView`-in-a-`Gtk.Entry` shape: the value is on screen and
+        # nothing has it. `activate` is the signal an `Entry` emits for
+        # Enter, and it is distinct from the row's own activation, so the
+        # gear's toggle is not stolen by it.
+        for _lbl, _k, _fld in _fields:
+            _fld.connect("activate",
+                         lambda _e, pid=_pid: save_one_key(pid))
+
     # A label of its own, not part of the description above: appended there it
     # widened the page to 590px of 560 and gave it a sideways scrollbar.
     box.append(wrapping("Those are chat only: no provider listens or speaks without a key."))
@@ -1658,7 +1933,7 @@ def build_window(application, config=None, on_finished: Optional[Callable[[], No
 
     def save() -> None:
         for provider_id, value in entered.items():
-            config.set_api_key(config.API_KEY_SETTINGS[provider_id], value)
+            config.set_api_key(API_KEY_SETTINGS[provider_id], value)
         typed = sum(1 for v in entered.values() if v)
         key_status.set_label(
             f"Saved {typed} key(s). Chronoa will "

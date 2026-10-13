@@ -129,6 +129,20 @@ class CloudProvider(NamedTuple):
     default_model: str
     requires_key: bool = False
 
+    #: Whether "what models do you have?" can be asked over the OpenAI-shaped
+    #: `{base_url}/models` every entry here otherwise uses. **Two are not, and
+    #: the reason belongs to the provider rather than to us:**
+    #:
+    #: - `google` answers **404** (measured 2026-10-13) - Gemini's API is not
+    #:   OpenAI-shaped, which this module's docstring already recorded;
+    #: - `anthropic` authenticates with `x-api-key` and an `anthropic-version`
+    #:   header, which is why `AnthropicLLM` is its own native adapter.
+    #:
+    #: A provider that cannot be listed still **has a model, and is still used**
+    #: - `default_model` is what answers - so this says *the choice is fixed*,
+    #: never *there are no models*. Those are opposite claims.
+    model_list: bool = True
+
 
 # Order matters: this is the default fallback sequence, chosen by the live
 # test above, not alphabetically or from the source config. OpenCode Zen is
@@ -155,8 +169,36 @@ PROVIDERS: dict[str, CloudProvider] = {
                                 "openrouter/free", requires_key=True),
     "google": CloudProvider(
         "google", "Google Gemini", "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash", requires_key=True,
+        "gemini-2.0-flash", requires_key=True, model_list=False,
     ),
+    # **Anthropic was missing from this table and is in `BYOK_PROVIDER_ORDER`,
+    # which is the whole defect.** Every UI in the tree iterates `PROVIDERS`
+    # (`setup_wizard.py`'s key rows and model rows, `offerable_models`) while
+    # the engine iterates `BYOK_PROVIDER_ORDER` (`app/brain.py:211`), so a
+    # provider in one and not the other is one Chronoa *uses* and you cannot
+    # see. Measured: `offerable_models("anthropic")` answered *"no provider is
+    # registered as 'anthropic'"*, and the wizard's loop skipped it with
+    # `if provider is None: continue` - **no row, no key, no model choice, and
+    # nothing on screen saying it was absent** - while `brain.py` built an
+    # `AnthropicLLM` from the key the moment one was saved.
+    #
+    # `model_list=False` because Anthropic is the one provider here whose API is
+    # **not** OpenAI-shaped: it authenticates with `x-api-key` and needs an
+    # `anthropic-version` header, which is why `AnthropicLLM` is its own native
+    # adapter rather than an `OpenAICompatibleLLM`. `{base_url}/models` would
+    # 401 on every call, so the row says the model is fixed instead of making
+    # a request that cannot work.
+    "anthropic": CloudProvider(
+        "anthropic", "Anthropic", "https://api.anthropic.com/v1",
+        "claude-haiku-4-5-20251001", requires_key=True, model_list=False,
+    ),
+    # **Your own server, on another machine, with a port in the address.**
+    # `base_url` is empty *by design*: the address is whatever the person typed
+    # into Settings, so there is no single URL to put in a table. `list_models`
+    # takes it as an argument rather than reading a config itself, because this
+    # module is imported by the MCP server and the CLI and must not depend on
+    # settings to answer a question about a provider.
+    "custom": CloudProvider("custom", "Your own server", "", ""),
 }
 
 DEFAULT_PROVIDER_ORDER = ("llm7", "kilo", "blockrun")
@@ -284,7 +326,8 @@ def _headers(pid: str, key: str) -> dict:
 
 
 def list_models(provider_id: str, timeout: float = 12.0,
-                api_key: str = "") -> "tuple[list[str], str]":
+                api_key: str = "",
+                base_url: str = "") -> "tuple[list[str], str]":
     """The models a provider offers, and a reason if they could not be listed.
 
     **Every provider here speaks the OpenAI wire** (the custom one and the six
@@ -317,7 +360,22 @@ def list_models(provider_id: str, timeout: float = 12.0,
     provider = PROVIDERS.get(provider_id)
     if provider is None:
         return [], f"no provider is registered as {provider_id!r}"
-    url = provider.base_url.rstrip("/") + "/models"
+    # **A provider that cannot be listed is answered without a request.**
+    # Asking would 401 or 404 every time and the reason would be about the
+    # shape of the API rather than the model - which is the sentence a person
+    # needs in order to know that the model is fixed and working.
+    if not provider.model_list:
+        return [], (f"{provider.name} does not publish a model list over an "
+                    f"OpenAI-shaped API, so it answers with {provider.default_model}")
+    # **The address is the caller's, for a provider whose URL is a setting.**
+    # Read here rather than from a config so this module keeps no dependency on
+    # settings - it is imported by the MCP server and the CLI, which ask it
+    # questions with no user session behind them.
+    base = (base_url or provider.base_url or "").rstrip("/")
+    if not base:
+        return [], (f"no address has been set for {provider.name} yet - "
+                    "Settings, Your own model server")
+    url = base + "/models"
     headers = {"User-Agent": "chronoa-cloud-models"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -365,7 +423,8 @@ _FREE_MARK = (":free", "auto/free", "-free")
 
 
 def offerable_models(provider_id: str, timeout: float = 12.0,
-                      api_key: str = "") -> "tuple[list[str], str]":
+                      api_key: str = "",
+                      base_url: str = "") -> "tuple[list[str], str]":
     """`(what a person may pick, why there is none)` - the chosen model first.
 
     **A bounded, ordered view of a much larger list, and it says so.** Every
@@ -393,7 +452,8 @@ def offerable_models(provider_id: str, timeout: float = 12.0,
     provider = PROVIDERS.get(provider_id)
     if provider is None:
         return [], f"no provider is registered as {provider_id!r}"
-    ids, why = list_models(provider_id, timeout=timeout, api_key=api_key)
+    ids, why = list_models(provider_id, timeout=timeout, api_key=api_key,
+                           base_url=base_url)
     if not ids:
         return [], why
 
@@ -403,9 +463,88 @@ def offerable_models(provider_id: str, timeout: float = 12.0,
             continue
         (free if any(mark in model for mark in _FREE_MARK) else rest).append(model)
 
-    ordered = [provider.default_model] + free[: _MENU_LIMIT - 1] \
-        + rest[: max(0, _MENU_LIMIT - 1 - len(free))]
+    # **An empty `default_model` is not an option, and used to be put in one.**
+    # "Your own server" has no registry default - the model is whatever the
+    # person typed, on a machine nobody else can see - and this line made it
+    # the *first* entry of the list unconditionally. Measured against a server
+    # offering `vendor-experimental-1` and `-2`: the menu came back
+    # `["", "vendor-experimental-1", "vendor-experimental-2"]`, so the wizard's
+    # dropdown opened on a **blank line** that selecting saves as an empty
+    # model. For the other nine providers this line was always a real name, so
+    # nothing caught it. Only the entry that is *defined* by having no default
+    # reaches it, and a blank option in a chooser reads as a broken control
+    # rather than as "choose one".
+    head = [provider.default_model] if provider.default_model else []
+    ordered = head + free[: _MENU_LIMIT - len(head)] \
+        + rest[: max(0, _MENU_LIMIT - len(head) - len(free))]
     return ordered[:_MENU_LIMIT], ""
+
+
+# ── one shared list of what a provider offers ────────────────────────────
+#
+# **Two surfaces need this list and neither may fetch on the main loop.**
+# Kilo alone publishes 390 models; asking ten providers at open time is a
+# network round trip each, which is seconds of a frozen window. So the list is
+# fetched **off the thread, once, and read from here** by both the model picker
+# under the composer and the Ctrl+K palette - which is the point: two readers,
+# one answer, rather than a picker and a palette that can disagree about which
+# models exist.
+#
+# **No lock.** A dict read and a dict assignment are each atomic under the GIL,
+# and every value written here is a finished tuple, so a reader sees either the
+# old list or the new one and never a half-built one. A lock would guard a
+# window this cannot open.
+_MODEL_CACHE: dict = {}
+
+
+def cached_models(provider_id: str) -> "tuple[list[str], str]":
+    """`(models, why)` from the last fetch - `([], "")` if never fetched.
+
+    **`([], "")` is deliberately ambiguous**, and the callers must not read it
+    as "this provider has no models": it means *nobody has asked yet*. That is
+    the difference between an answer and an absence, which is the distinction
+    this repository keeps being bitten by, so the honest states are kept apart by
+    a separate `asked()` rather than by the shape of this return value.
+    """
+    return list(_MODEL_CACHE.get(provider_id, ((), "")))
+
+
+def models_asked(provider_id: str) -> bool:
+    """Whether anyone has fetched this provider's list yet."""
+    return provider_id in _MODEL_CACHE
+
+
+def fetch_models(provider_id: str, api_key: str = "", base_url: str = "",
+                 timeout: float = 12.0) -> "tuple[list[str], str]":
+    """Ask a provider what it offers, and remember the answer.
+
+    **Blocking, so it belongs on a worker** - and this repository's own rule is
+    that a fetch on the main loop is a frozen window. The GUI calls
+    `cached_models()` to read and this to fill.
+
+    **A refusal is cached too**, with its reason, so a provider that is
+    unreachable does not get re-asked on every repaint - and so the reason is
+    still there to show rather than becoming a spinner that never resolves.
+    """
+    ids, why = offerable_models(provider_id, timeout=timeout, api_key=api_key,
+                               base_url=base_url)
+    _MODEL_CACHE[provider_id] = (tuple(ids), why)
+    return list(ids), why
+
+
+def forget_models(provider_id: str = "") -> None:
+    """Drop one provider's list, or all of them.
+
+    **After a key changes, and nothing else.** The list is a function of the
+    provider *and the key*, because the keyed providers answer differently - and
+    `openai` with no key returns 401 while `openai` with one returns a
+    catalogue. A cache keyed on the provider alone would keep showing the
+    refusal after the person has fixed it.
+    """
+    if provider_id:
+        _MODEL_CACHE.pop(provider_id, None)
+    else:
+        _MODEL_CACHE.clear()
 
 
 def keys_sentence(probes: dict) -> str:
@@ -494,7 +633,12 @@ def custom_provider(base_url: str, model: str = "") -> "CloudProvider | None":
 # handled separately (see AnthropicLLM) since it isn't OpenAI-compatible.
 BYOK_PROVIDER_ORDER = ("anthropic", "openai", "google", "groq", "openrouter", "opencode-zen")
 
-_ANTHROPIC_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+#: **Read out of the registry, not written beside it.** This used to be a
+#: literal of its own, so adding Anthropic to `PROVIDERS` would have left two
+#: places naming the same model - the `wpctl` shape this repository has been
+#: bitten by three times, in three files. One source, and a change to the
+#: default cannot leave the chain answering with the old one.
+_ANTHROPIC_DEFAULT_MODEL = PROVIDERS["anthropic"].default_model
 _ANTHROPIC_MAX_TOKENS = 1024
 _ANTHROPIC_API_VERSION = "2023-06-01"
 

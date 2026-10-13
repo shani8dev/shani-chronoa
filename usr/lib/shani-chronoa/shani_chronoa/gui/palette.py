@@ -25,7 +25,27 @@ from typing import Callable, List, NamedTuple, Optional
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gdk, Gtk  # noqa: E402 - after require_version
+gi.require_version("Pango", "1.0")
+from gi.repository import Gdk, Gtk, Pango  # noqa: E402 - after require
+
+
+#: How tall the result list may grow before it starts scrolling.
+#:
+#: Measured on this widget, `CommandPalette` rows: **6 entries ask for 252px,
+#: 20 for 840px, 50 for 2100px** - and `min == natural` at every one, with
+#: `issubclass(Gtk.ListBox, Gtk.Scrollable)` **False**. A bare list therefore
+#: cannot shrink, so on the 640px-tall window the app opens at, two thirds of
+#: the palette was unreachable.
+#:
+#: 420px is a **ceiling, not a height**: below it the palette is exactly as tall
+#: as its rows need, which is how the six-row case read before. It is not a
+#: tuned number - it is about six rows, the last count that fits whole.
+#:
+#: The widget's own `measure()` in an unpresented probe reports 98px whatever
+#: the entry count, because nothing is allocated; **the list's 252/840/2100 is
+#: the figure that matters**, and this is why it is quoted rather than the
+#: palette's.
+_MAX_HEIGHT_PX = 420
 
 
 class Entry(NamedTuple):
@@ -111,7 +131,43 @@ class CommandPalette(Gtk.Box):
 
         self._list = Gtk.ListBox()
         self._list.set_selection_mode(Gtk.SelectionMode.SINGLE)
-        self.append(self._list)
+        # **A scroller, because the list cannot shrink.** Measured on this
+        # palette: the entries ask for **252px (6), 840px (20) and 2100px
+        # (50)**, `min == natural` at every count, and
+        # `issubclass(Gtk.ListBox, Gtk.Scrollable)` is **False** - so with the
+        # bare list the palette was 2140px tall on a 640px window and
+        # everything below the fold was unreachable. `Gtk.ListBox` is not
+        # scrollable and cannot be made so; the scroller is the whole of the
+        # answer.
+        #
+        # **`self._list` stays the ListBox**, because `_refilter`, `_row`,
+        # `_move`, `_selected_index` and `_select` all address it, and a
+        # reader that re-pointed them at the scroller would be testing
+        # `Gtk.Scrollable`, which is the API that does not exist.
+        scroller = Gtk.ScrolledWindow()
+        # A cap rather than a demand: fewer than about six rows and the palette
+        # is exactly as tall as its rows need, which is how it read before.
+        scroller.set_max_content_height(_MAX_HEIGHT_PX)
+        # **And the cap needs this half to be a cap rather than a crush.** Set
+        # on its own, `max-content-height` does not make the scroller *grow*
+        # toward the cap - it only refuses to be told it may be taller, and a
+        # `ScrolledWindow` asks for very little by default. Measured in a
+        # presented 320x900 window, identical widgets, only this flag differing:
+        #
+        #   50 entries, flag off -> 58px, upper 2100, scrolls  (58px is one row)
+        #   50 entries, flag on  -> 420px, upper 2100, scrolls
+        #    3 entries, flag off -> 58px, upper 126, scrolls   <- false scrollbar
+        #    3 entries, flag on  -> 126px, upper 126, no scroll
+        #
+        # So without it the palette would open a single row tall and would draw
+        # a scrollbar over three entries that fit. This is the measured reason
+        # the flag is here and not merely plausible.
+        scroller.set_propagate_natural_height(True)
+        scroller.set_propagate_natural_width(True)
+        scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroller.set_child(self._list)
+        self._scroller = scroller
+        self.append(scroller)
 
         self._empty = Gtk.Label(label="Nothing matches that.")
         self._empty.add_css_class("dim-label")
@@ -167,11 +223,27 @@ class CommandPalette(Gtk.Box):
         text.set_hexpand(True)
         title = Gtk.Label(label=entry.title)
         title.set_xalign(0.0)
+        # **Both labels ellipsise, and this is a defect the layout contract
+        # could not see until the palette was in the window at all.** These two
+        # labels were built with neither `set_wrap` nor `set_ellipsize` - and
+        # because `_build_palette` added the palette to *nothing*, no test ever
+        # walked them. Parenting it (`window.py`) put fourteen of them inside
+        # the main window, and `test_the_main_window_wraps_or_ellipsises_its_
+        # long_text` immediately named all fourteen: three pre-existing mode
+        # subtitles ("It answers anything, using whatever tools fit the ...")
+        # and ten new cloud ones.
+        #
+        # **A hidden control's labels are still a defect the moment it is
+        # shown**, and this is the clearest instance in the tree of a test that
+        # could not fail - not because it was weak, but because its subject
+        # was not in the tree.
+        title.set_ellipsize(Pango.EllipsizeMode.END)
         text.append(title)
         if entry.subtitle:
             subtitle = Gtk.Label(label=entry.subtitle)
             subtitle.add_css_class("dim-label")
             subtitle.set_xalign(0.0)
+            subtitle.set_ellipsize(Pango.EllipsizeMode.END)
             text.append(subtitle)
         row.append(text)
         row.update_property(

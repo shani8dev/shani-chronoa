@@ -182,8 +182,53 @@ class TestThePopover:
         return model_picker.ModelPicker(None)
 
     @staticmethod
+    def _local_rows(picker):
+        """The **local tiers**' ActionRows - the first list box, not every row.
+
+        The popover carries two sections now ("On this machine" and "In the
+        cloud"), and counting all of them would make this file's assertions
+        about tiers a statement about the provider registry as well. The cloud
+        section has its own tests; this one is about what a *download* does to
+        the list of tiers.
+
+        **Depth-first, first `Gtk.ListBox` wins**, because the two sections are
+        appended in that order and the local one is what these tests are about.
+        """
+        import gi
+
+        gi.require_version("Gtk", "4.0")
+        Gtk = gi.repository.Gtk
+
+        def first_listbox(node):
+            if node is None:
+                return None
+            if isinstance(node, Gtk.ListBox):
+                return node
+            child = node.get_first_child() if hasattr(node, "get_first_child") \
+                else None
+            while child is not None:
+                found = first_listbox(child)
+                if found is not None:
+                    return found
+                child = child.get_next_sibling()
+            return None
+
+        box = first_listbox(picker.get_child())
+        if box is None:
+            return []
+        out, child = [], box.get_first_child()
+        while child is not None:
+            if hasattr(child, "get_title"):
+                out.append(child.get_title())
+            child = child.get_next_sibling()
+        return out
+
+    @staticmethod
     def _rows(picker):
-        """The ActionRows actually inside the popover, read off the widget."""
+        """Every ActionRow in the popover, both sections, read off the widget."""
+        import gi
+
+        gi.require_version("Gtk", "4.0")
         out, stack = [], [picker.get_child()]
         while stack:
             node = stack.pop()
@@ -211,11 +256,22 @@ class TestThePopover:
         `Gtk.Popover.remove` went missing unnoticed and shipped.
         """
         picker = self._picker(machine)
-        assert len(self._rows(picker)) == 3
+        assert len(self._local_rows(picker)) == 3
         for _ in range(3):
             picker.rebuild()
-        assert len(self._rows(picker)) == 3, (
-            f"{len(self._rows(picker))} rows after three rebuilds - the "
+        assert len(self._local_rows(picker)) == 3, (
+            f"{len(self._local_rows(picker))} rows after three rebuilds - the "
+            f"popover is accumulating rather than refilling")
+        # **And the whole popover does not grow either.** The tier count is the
+        # stable population, but the cloud rows are rebuilt too, and a rebuild
+        # that appended rather than refilled would grow *those* first. (The
+        # count is taken once after the first rebuild and compared after the
+        # rest - a tautological `n == n` would pass on a popover that grows.)
+        total = len(self._rows(picker))
+        for _ in range(3):
+            picker.rebuild()
+        assert len(self._rows(picker)) == total, (
+            f"{len(self._rows(picker))} rows where there were {total} - the "
             f"popover is accumulating rather than refilling")
 
     def test_an_unreadable_list_leaves_a_saying_rather_than_a_bare_box(
@@ -235,14 +291,28 @@ class TestThePopover:
 
         monkeypatch.setattr(local_llm, "installed", _raise, raising=False)
         picker.rebuild()
-        child = picker.get_child()
-        assert child is not None, (
-            "an unreadable tier list produced an empty popover with no "
-            "explanation on it")
-        label = child if isinstance(child, Gtk.Label) else None
-        said = label.get_label() if label is not None else ""
-        assert "tiers" in said and "read" in said, (
-            f"the popover says {said!r} - an explanation naming what could "
+        # **The label is inside the scroller now**, so `get_child()` is a
+        # `Gtk.ScrolledWindow` rather than the `Gtk.Label` this used to reach
+        # directly - the same reason `Gtk.Popover` has no `remove`. The property
+        # is unchanged and still the one that matters: the sentence is on
+        # screen, and it names what could not be read. Read it by walking, so
+        # the test does not depend on where in the tree it sits.
+        said = []
+        stack = [picker.get_child()]
+        while stack:
+            node = stack.pop()
+            if node is None:
+                continue
+            if isinstance(node, Gtk.Label):
+                said.append(node.get_label())
+            if hasattr(node, "get_first_child"):
+                child = node.get_first_child()
+                while child is not None:
+                    stack.append(child)
+                    child = child.get_next_sibling()
+        text = " ".join(said)
+        assert "tiers" in text and "read" in text, (
+            f"the popover says {text!r} - an explanation naming what could "
             f"not be read is the point, not just that a widget exists")
 
 
