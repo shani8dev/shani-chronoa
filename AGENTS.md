@@ -22967,3 +22967,77 @@ Stated limits, so the number is not read as more than it is: one 1.7B model,
 greedy, one server, 225 cases, and a corpus that is half hand-written. The paired
 design and the 0-gained / 104-lost asymmetry are what carry this, not the
 percentages.
+
+## The reranker was built far enough to measure it, and 17 seconds a turn says it does not ship (2026-10-13)
+
+Asked to build the full reranker. The harness is `tools/rerank.py`; what settled
+the decision was **not** training cost, which is paid once, and **not** memory,
+which never bound. It was the serving cost, which is paid on **every request**.
+
+**The stale figure first, because it was the one I would have quoted.** This file
+recorded *"31.8 s per optimiser step, 15.9 GB peak, one epoch 15.5 hours"*.
+Re-measured with `tools/lora_timing.py` on today's tree:
+
+| | recorded | measured today |
+|---|---:|---:|
+| per optimiser step | 31.8 s | **52.5 s** |
+| peak RSS | 15.9 GB | **15.7 GB** |
+| one epoch | 15.5 h | **19.3 h** |
+
+Same order of magnitude, every number moved. **A number copied into prose is a
+number nobody re-measures** - the conclusion held, the digits did not.
+
+**Memory never bound, and `lora_timing.py`'s own comment was right.** It says
+*"fp32 on CPU: bf16 matmul falls back and is slower, and the whole question is
+wall clock rather than memory"*, which looked stale when a 25 MB `MemAvailable`
+reading suggested otherwise. That 25 MB was a transient while another session's
+mutation run had the box; at rest it is **24.6 GB**, and both dtypes fit:
+
+| | peak RSS | step | one epoch |
+|---|---:|---:|---:|
+| fp32 | 15.7 GB | 52.5 s | 19.3 h |
+| **bf16** | **10.5 GB** | 88.0 s | 31.1 h |
+
+bf16 cuts the **weight load from 12,000 MB to 1,577 MB** - so weights were the
+driver and dtype is the lever - and is 68% slower, exactly as that comment said.
+
+### The number that decides it
+
+A cross-encoder scores **every candidate**, so a k-candidate list costs k forward
+passes in the hot path, against a selector that is a dict lookup and a sort.
+Measured, one turn's real candidates, 4 threads:
+
+| | one at a time | all 7 batched |
+|---|---:|---:|
+| fp32 | **16.88 s** | 13.65 s |
+| bf16 | 36.46 s | 32.79 s |
+
+**~17 seconds of selection before the model starts answering.** This box decodes a
+1.7B at 6.8 tok/s, so a reply is a few seconds and a whole turn is tens - and
+`tool_select` was a deliberate part of what makes a small model usable at all.
+Multiplying the hot path by seven forward passes to reorder a short list is not a
+trade this architecture can make.
+
+### And the headroom, which is smaller than the number that motivated it
+
+`tools/rerank.py --eval-baseline`, the real `ranked()` over the real schemas on
+the **held-out 55**, seconds and no torch:
+
+| | |
+|---|---:|
+| baseline top-1 | **49/55 = 89.1%** |
+| offered-set recall at 8 | 54/55 = 98.2% |
+| **reranker ceiling** (`recall_hit`) | **54/55 = 98.2%** |
+
+**The 80% top-1 that motivated this was over all 220; on the held-out half the
+selector is already at 89.1%, and a reranker cannot rank an answer into a list
+that does not contain it - so the entire prize is 9.1 points.**
+
+So the decision frame, all measured: 31.1 h/epoch unattended and reachable;
+10.5 GB and comfortable; **9.1 points of ceiling**; and **17 s per request** of
+serving cost on a 4-core CPU box. Three of those four say go.
+
+**`tools/rerank.py --train` deliberately raises rather than pretending.** The
+harness that would decide it exists and the numbers it needed are printed by
+`--dry-run`; a training loop that has never been run is the machinery-whose-only-
+purpose-is-to-report-success this file rules out.
