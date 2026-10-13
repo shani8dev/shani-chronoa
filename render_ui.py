@@ -39,6 +39,7 @@ Usage: render_ui.py <settings|main|help|tool-activity|empty|panel:NAME|page:WIND
 
 import json
 import os
+from pathlib import Path
 import sys
 
 import gi
@@ -571,17 +572,34 @@ def _drive_composer(window, state: str) -> None:
         window._set_input_text("compare these two files\nand tell me which is newer")
     elif state == "attachment":
         window._set_input_text("what is in this screenshot?")
-        for name in ("screenshot.png", "notes.txt"):
-            try:
-                window._attachments.add(name)
-            except Exception:
-                pass
+        # **`add_attachments(paths)`, not `_attachments.add(name)`.** The
+        # attribute is a **list**, so `.add` does not exist - and the bare
+        # `except Exception: pass` that used to wrap it swallowed the
+        # `AttributeError`. So `composer-attachment` photographed a composer with
+        # no attachments, reported `PASS`, and was indistinguishable from
+        # `composer-empty`. This file already records the trap twice - "the
+        # enumerator reported 18 states while silently" dropping one, and "every
+        # organ state photographed the same idle strip and reported no error" -
+        # and a third instance was sitting in the same function, in the same
+        # costume.
+        window.add_attachments([Path("screenshot.png"), Path("notes.txt")])
     elif state == "question":
-        try:
-            window._question_row.set_visible(True)
-            window._question_entry.get_buffer().set_text("Delete this file?")
-        except Exception:
-            pass
+        # **There is no `_question_entry`.** The question is a `Gtk.Box` that
+        # `gui/questions.py` appends a label to, and the render used to call
+        # `window._question_entry.get_buffer()` - which raised, under a bare
+        # `except`. So the row was made visible and left **empty**, and
+        # `composer-question` photographed the empty state.
+        #
+        # Built the way `questions.make_question_presenter` builds it
+        # (`questions.py:128-137`), because that is the real path and a lookalike
+        # would be a picture of the harness rather than of the product.
+        window._clear_question_widgets()
+        label = Gtk.Label(label="Delete this file?")
+        label.set_wrap(True)
+        label.set_xalign(0.0)
+        window._question_widgets.append(label)
+        window._question_row.append(label)
+        window._question_row.set_visible(True)
     elif state == "speaking":
         window._sync_from_state(AssistantState.SPEAKING)
     elif state == "thinking":
