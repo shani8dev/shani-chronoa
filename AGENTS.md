@@ -19066,3 +19066,109 @@ For anything that reads accumulated state - installed models, a tool log, a
 ledger - the copy answers a different question from the original, and the
 difference reads exactly like a defect. The batch is green in the real tree:
 **130 passed, 0 failed, 16.65 s**, including the startup probe.
+
+## Four renderer defects, and a poisoned display pool I created myself (2026-10-13)
+
+`512d4f2` consolidated four render scripts into one renderer and one driver.
+**Three of the four defects below shipped in that commit and were found only by
+running it**, which is this file's own rule stated the hard way.
+
+### 1. `recycle_display` read `$num` before assigning it, and killed the sweep
+
+```bash
+recycle_display() {
+    local old_pid="$START_DISPLAY" num
+    ...
+    sock="/run/user/$(id -u)/broadway$((num + 1)).socket"   # <-- num unbound here
+    num="$(pick_display)" || return 1
+```
+
+Under `set -u` an unbound variable is **fatal**, not a warning - so the first
+render that failed and reached its retry took the whole sweep down with it.
+Measured: **23 of 34 panels, then nothing, and no summary printed**, because the
+summary is the last thing the script does.
+
+### 2. The stale-socket reclaim was self-defeating, and it poisoned four displays
+
+The reclaim removed a `broadway*.socket` file it believed nobody was listening
+on. **But `ss -xl` lists a unix socket by its filesystem path**, so a live daemon
+whose socket file had been unlinked is *invisible* to the check that decides
+whether to unlink it. So one reclaim turned a working display into a
+**permanently unusable** number: no socket left to detect, port still bound,
+every future start refused with `Address already in use`.
+
+Four numbers (`:94 :96 :109 :112`) were poisoned this way, and the result was
+that a sweep with **six genuinely free numbers** in `:90-:120` printed
+`no free broadway display in :90-:120` - naming a resource shortage that was
+four dead files and a self-inflicted wound.
+
+**The fix is to ask the daemon rather than predict.** Whether a number is free
+is decided by `start_display` waiting for its socket, with the next number tried
+on failure. The reclaim is now gated on the **port** being free as well as the
+socket being present, and `BROADWAY_PORT_BASE=8080` is *measured*: `:116 -> 8196`
+and `:118 -> 8198` started by hand, matching `:94 -> 8174`, `:96 -> 8176`,
+`:109 -> 8189`, `:112 -> 8192`.
+
+Proved by a planted control - a live daemon on `:90` with its socket unlinked:
+the sweep skipped `:90` and took `:91`, and did **not** recreate the socket.
+
+### 3. `py_compile` and pyflakes both pass on a `UnboundLocalError`
+
+Narrowing the capture size for a window that chose its own size assigned
+`WIDTH` inside `on_activate`. Python makes a name local for the **whole**
+function the moment it is assigned anywhere in it, so every earlier read became
+a read of an unassigned local and the first target raised
+`UnboundLocalError: cannot access local variable 'WIDTH'`. One `global` fixes it.
+
+It is a **scoping** fact, not a syntax or name error, so nothing static sees it -
+the same shape as the `async def` handlers this file records as having compiled
+clean and never been awaited. It cost the sweep the panel I was fixing.
+
+### And the one that was the harness's fault, not the product's
+
+Quick Ask declares `set_default_size(460, -1)` and is a popup over somebody's
+work. Forcing 1280x900 on it produced a full screen with ~730px of nothing under
+it, which reads as a layout defect. **A window that sized itself now keeps its
+own size**: `quick-ask` went **25,730 -> 19,047 bytes** and the artifact is
+what it is in the app.
+
+## Two product defects the render showed, both in files clean at HEAD
+
+### `compare`: every row was a focus stop, and the first one painted a selection
+
+`"Pick two conversations to compare."` came back **inside an orange box**. It was
+not a stray style: `_row()` called `set_selectable(True)` unconditionally, and a
+selectable GTK4 label is a focus stop that paints its own accent highlight once
+it holds focus. `_group` built its heading, its empty `None` and its
+`and 12 more` count through the same helper, so **every heading in the panel was
+a Tab stop** - this file's own Diff-panel finding (content reachable by pointer
+only) is the same trade the other way round.
+
+Selectable is now opt-in and only the questions ask for it: a heading, a count
+and an instruction have nothing to copy.
+
+Two more in the same panel:
+
+- **The sentence ended mid-clause in the source** - *"ask something twice and it
+  will"* - not a wrapping problem, the string simply stopped there. It now
+  completes and wraps.
+- **The empty store was `STATUS_ATTENTION`** while the comment immediately below
+  it said *"An empty store that was read is an answer, not a fault. Amber is for
+  a panel that could not find out; this one could."* The reasoning had been
+  applied to the block two lines further on. Red **"Needs attention"** for a
+  machine working perfectly now reads **green "Ready"**.
+
+### `voice`: provenance in the body text instead of the tooltip
+
+The "Pitch, tempo and rate" row ended with a literal
+`PiperTTS.timbre_description(), PiperTTS.timbre_effects(), PiperTTS.timbre_problem()`.
+
+**The whole panel is against that**: `_row(title, detail, tooltip)` is built with
+`f"...\nRead from {engine.source}"`, so every claim names the code that produced
+it *in the tooltip*. This one row spliced it into the detail - and the caller
+passed the detail as its own tooltip, which is why it was on screen twice and
+useful in neither. `_timbre_row` now returns the provenance separately and the
+caller builds the tooltip like every other row.
+
+**Naming the code that produced a claim is the good habit here and it is kept.**
+It was in the wrong place.

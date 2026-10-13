@@ -111,40 +111,86 @@ trap cleanup EXIT
 # `pkill -f gtk4-broadwayd` would match its own command line and would kill a
 # display another session is using.
 recycle_display() {
-    local old_pid="$START_DISPLAY" num
-    [[ -n $old_pid ]] && kill "$old_pid" 2>/dev/null
+    # **The first version built a socket path from `$num` one line before
+    # assigning it.** Under `set -u` that is a fatal error, not a warning, so the
+    # first render that failed and reached its retry took the whole sweep down
+    # with it - 23 of 34 panels, then nothing, and the summary never printed. It
+    # shipped in 512d4f2 and only running it found it, which is this repository's
+    # own rule about the cost of reading a diff instead of running the thing.
+    [[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
     START_DISPLAY=""
-    local sock
-    sock="/run/user/$(id -u)/broadway$((num + 1)).socket"
-    num="$(pick_display)" || return 1
-    start_display "$num" >/dev/null
-    DISP=":$num"
+    acquire_display
 }
 
-pick_display() {
-    local n sock
+# Start a broadway daemon on the first number in :90-:120 that **actually comes
+# up**, and set DISP and START_DISPLAY.
+#
+# **This asks the daemon rather than predicting.** The previous version picked a
+# number and returned it, and the sweep then failed with *"broadway :109 did not
+# come up: Unable to listen to port 8189"* - a number whose socket file was gone
+# but whose **port was still held** by a live daemon. So neither the socket nor
+# any port formula is a reliable predictor: a daemon can be alive, port-bound and
+# socket-less, which is exactly what this script's own reclaim produces when it
+# unlinks the socket of a daemon that has not finished binding.
+#
+# The pool is only :90-:120, so "try the next one" is the whole strategy.
+#: Where broadway's port for display N is: `8080 + N`. Measured on this box by
+#: starting :116 and :118 by hand (ports 8196, 8198) and by four observed
+#: "Address already in use" failures. It is used only to decide whether a number
+#: is *already taken*; whether a daemon actually starts is still decided by
+#: `start_display` waiting for its socket, so a wrong base costs a wasted
+#: attempt and not a wrong render.
+BROADWAY_PORT_BASE=8080
+
+acquire_display() {
+    local n sock port
     for n in $(seq 90 120); do
         sock="/run/user/$(id -u)/broadway$((n + 1)).socket"
         # **A stale socket blocks its number forever if only its presence is
         # checked.** `gtk4-broadwayd` removes its socket on a clean exit but not
-        # when it is killed, and this script's own cleanup kills by pid - so a
-        # run interrupted between the two leaves a socket file with nothing
-        # listening on it. `[[ -e ]]` sees that file and skips the number, and
-        # the pool is only :90-:120, so a handful of interrupted runs made every
-        # display number unavailable and the script reported "no free broadway
-        # display" - which names a resource shortage and is actually 41 dead
-        # files.
+        # when it is killed, and this script's own cleanup kills by pid - so an
+        # interrupted run leaves a socket file with nothing listening on it.
+        # `[[ -e ]]` sees that file and skips the number, and a handful of
+        # interrupted runs made every number unavailable, so the script reported
+        # "no free broadway display" - which names a resource shortage and is
+        # actually a pile of dead files.
+        # **A display number is in use if EITHER its socket is bound OR its
+        # port is listening, and it is only reclaimed when neither is.**
         #
-        # So: a socket nobody is listening on is stale and is removed, and a
-        # socket somebody *is* listening on is genuinely in use.
+        # The first version consulted the socket alone, and that was
+        # self-defeating in a way worth writing down. `ss -xl` lists a unix
+        # socket *by its filesystem path*, so a live daemon whose socket file
+        # has been unlinked is invisible to it - and unlinking one is exactly
+        # what the reclaim did. So a single reclaim turned a working display
+        # into a **permanently poisoned** number: no socket to detect, port
+        # still bound, every future start refused with *"Address already in
+        # use"*. Measured: four numbers (:94, :96, :109, :112) were unusable and
+        # invisible at the same time, which is why a sweep that had six genuinely
+        # free numbers reported *"no free broadway display in :90-:120"*.
+        #
+        # So the port is the load-bearing check, not the socket. `8080 + N` is
+        # measured, not remembered: confirmed by starting :116 and :118 by hand
+        # (ports 8196 and 8198) and by four observed failures (:94 -> 8174,
+        # :96 -> 8176, :109 -> 8189, :112 -> 8192).
+        local port=$((BROADWAY_PORT_BASE + n))
+        if ss -tln 2>/dev/null | grep -qE ":${port}[[:space:]]"; then
+            continue                          # the port is held: not ours to take
+        fi
         if [[ -S $sock ]]; then
-            if ss -xl 2>/dev/null | grep -q "broadway$((n + 1)).socket"; then
-                continue
-            fi
+            # Port free and socket file present: nothing is serving it, so the
+            # file is left by a daemon that was killed rather than one that
+            # exited. Safe to remove *now that the port has been checked*.
             rm -f "$sock"
         fi
-        printf '%s' "$n"
-        return 0
+        if start_display "$n" >/dev/null 2>&1; then
+            DISP=":$n"
+            return 0
+        fi
+        # Not free after all - the daemon printed why and its socket never
+        # appeared. Reap it and move on rather than abandoning the sweep.
+        [[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
+        START_DISPLAY=""
+        rm -f "$sock"
     done
     echo "no free broadway display in :90-:120" >&2
     return 1
@@ -347,7 +393,7 @@ for t in titles:
 PY
 }
 
-DISP="$(start_display "$(pick_display)")" || exit 1
+acquire_display || exit 1
 echo "chronoa render: display $DISP, ${WIDTH}x${HEIGHT}, -> $OUTDIR"
 echo "                 $SANDBOX is scratch; nothing here touches your real XDG dirs"
 mkdir -p "$OUTDIR"

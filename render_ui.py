@@ -617,6 +617,18 @@ def _all_states():
 
 
 def on_activate(app):
+    # **`global` is load-bearing, not tidiness.** The sizing block below narrows
+    # `WIDTH`/`HEIGHT` for a window that chose its own size, and Python makes a
+    # name local for the *whole* function the moment it is assigned anywhere in
+    # it - so every earlier read inside this function became a read of an
+    # unassigned local and the very first target raised
+    # `UnboundLocalError: cannot access local variable 'WIDTH'`.
+    #
+    # **`py_compile` passes on it and so does pyflakes**: it is a scoping fact,
+    # not a syntax or a name error, and it only shows by running a render. That is
+    # this repository's own "an `async def` handler that compiled fine and was
+    # never awaited" shape, and it cost a sweep the panel I was fixing.
+    global WIDTH, HEIGHT
     if THEME:
         Gtk.Settings.get_default().set_property("gtk-theme-name", THEME)
     if WHICH.startswith("panel:"):
@@ -842,8 +854,26 @@ def on_activate(app):
         else:
             window.add_user_turn("how much disk space is left?")
             window.set_response("Root has **38G** free of 120G.\n- `/` is 32% full")
+    # **A window that sized itself keeps its own size.**
+    #
+    # Quick Ask declares `set_default_size(460, -1)` and is a popup over somebody's
+    # work. Forcing 1280x900 on it turned a 460x170 panel into a full screen with
+    # ~730px of nothing under it, which reads as a layout defect and is one only
+    # in the render - the same failure mode as the mode-strip capture that
+    # stretched a `Gtk.Box` into five full-height columns. A window that has not
+    # chosen is sized to the capture.
+    #
+    # `get_default_size()` returns `(-1, -1)` before anything has set one, so a
+    # fresh window falls through to the capture size.
     if hasattr(window, "set_default_size"):
-        window.set_default_size(WIDTH, HEIGHT)
+        chosen_w, chosen_h = window.get_default_size()
+        if chosen_w <= 0 and chosen_h <= 0:
+            window.set_default_size(WIDTH, HEIGHT)
+        else:
+            if chosen_w > 0:
+                WIDTH = min(WIDTH, chosen_w)
+            HEIGHT = chosen_h if chosen_h > 0 else HEIGHT
+            window.set_default_size(WIDTH, HEIGHT)
     # **The capture and the quit are armed BEFORE present().** `present()` on a
     # modal dialog runs a *nested* main loop, so every statement after it in this
     # function never executes - and the process then exits 0 having printed

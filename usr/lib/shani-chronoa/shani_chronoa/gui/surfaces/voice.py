@@ -577,7 +577,7 @@ def _voice_in_use(dispatcher: "tts.PiperTTS", chosen: Optional[str]) -> _Voice:
     return _Voice(name, label, "piper", engine_finds, f"{name} ({label}). {state}. {heard}")
 
 
-def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str]:
+def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str, str]:
     """(title, detail) for the SoX pass, including why it was skipped.
 
     `timbre_description()`, `timbre_effects()` and `timbre_problem()` are the
@@ -585,6 +585,15 @@ def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str]:
     a transform that will not run. The defaults are a genuine third state and are
     said as one: no effects means SoX is not started at all, which is why an
     untouched reply is byte-for-byte what its engine wrote.
+
+    The third element is the provenance, **returned rather than spliced into the
+    detail**. Every other row here keeps it in the tooltip, and this one ended
+    with 'Read from PiperTTS.timbre_description(), PiperTTS.timbre_effects(),
+    PiperTTS.timbre_problem()' in the body text, where it reads as debug output
+    rather than as where an answer came from. The caller could not undo it either:
+    it passed the detail as the tooltip too, so the string was in both places and
+    useful in neither. Naming the code that produced a claim is worth doing and
+    this panel does it throughout - in the place the other thirty claims use.
     """
     source = "PiperTTS.timbre_description(), PiperTTS.timbre_effects(), PiperTTS.timbre_problem()"
     try:
@@ -595,7 +604,9 @@ def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str]:
         engine_rate = float(getattr(dispatcher, "rate", 1.0))
     except Exception as exc:  # noqa: BLE001 - a probe that raised is unknown
         logger.debug("cannot read the timbre settings", exc_info=True)
-        return "unknown", f"unknown - the timbre settings could not be read: {_clip(exc)}"
+        return ("unknown",
+                f"unknown - the timbre settings could not be read: {_clip(exc)}",
+                source)
 
     speed = f"The engine's own speaking speed (speech-rate) is {engine_rate:g}x, applied by the engine itself. "
     if not effects:
@@ -603,7 +614,7 @@ def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str]:
                   "identity values" if not binary else "sox is not run at all")
         return ("Pitch, tempo and rate",
                 f"the voice is left exactly as the engine wrote it - pitch 0, tempo 1, rate 1, so {no_sox}. "
-                f"{speed}Read from {source}")
+                f"{speed}", source)
     applied = f"applied by sox ({binary}) as: sox <reply.wav> <out.wav> " + " ".join(effects)
     if problem:
         # The sentence that matters is the second one: `synthesize()` treats a
@@ -611,8 +622,8 @@ def _timbre_row(dispatcher: "tts.PiperTTS") -> Tuple[str, str]:
         # how a preference nobody asked for would stop somebody's speech.
         return ("Pitch, tempo and rate - NOT applied",
                 f"{wanted} is configured, but {problem}. The reply still speaks: a skipped preference is "
-                f"never a lost reply. {speed}Read from {source}")
-    return ("Pitch, tempo and rate", f"{wanted} is {applied}. {speed}Read from {source}")
+                f"never a lost reply. {speed}", source)
+    return ("Pitch, tempo and rate", f"{wanted} is {applied}. {speed}", source)
 
 
 # ---------------------------------------------------------------------------
@@ -993,8 +1004,12 @@ class _VoiceSurface(Gtk.Box):
         self._now_rows.append(self._voice_detail_row)
         _add(self._now_group, self._voice_detail_row)
 
-        timbre_title, timbre_detail = _timbre_row(dispatcher)
-        self._timbre_row = _row(timbre_title, timbre_detail, timbre_detail)
+        timbre_title, timbre_detail, timbre_source = _timbre_row(dispatcher)
+        # **The tooltip is built here rather than handed the detail**, which is how
+        # the engine, speech-in and model-file rows all carry their provenance.
+        # Passing the detail as its own tooltip is what put it on screen twice.
+        self._timbre_row = _row(timbre_title, timbre_detail,
+                                f"Read from {timbre_source}")
         self._now_rows.append(self._timbre_row)
         _add(self._now_group, self._timbre_row)
 

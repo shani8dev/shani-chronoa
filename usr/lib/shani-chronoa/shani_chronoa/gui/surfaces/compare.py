@@ -168,11 +168,33 @@ def _messages(root, sid: str) -> "tuple[list, bool]":
     return messages, truncated
 
 
-def _row(text: str, dim: bool = False) -> Gtk.Label:
+def _row(text: str, dim: bool = False, selectable: bool = False) -> Gtk.Label:
+    """One line of the panel. `selectable` is opt-in, and only content gets it.
+
+    **This used to be `set_selectable(True)` unconditionally**, and a selectable
+    GTK4 label is a focus stop that paints its own accent-highlighted background
+    once it holds focus. Measured in a render: *"Pick two conversations to
+    compare."* came back inside an orange box, which reads as a text selection
+    rather than as an instruction - and it was the *first* focusable widget in
+    the panel, so whichever row the window focused is the one that looked
+    selected.
+
+    It was never about that one line. `_group` built its heading, its empty
+    "None" and its "and 12 more" count through here too, so **every heading in
+    the panel was a Tab stop** - this file's own Diff-panel finding, which was
+    *content* reachable by pointer only, is the same trade the other way round:
+    here the non-content is focusable and nothing says what pressing Tab will
+    land on.
+
+    Selectable is for text somebody might want to copy, so only the questions
+    themselves ask for it. A heading, a count and an instruction have nothing to
+    copy.
+    """
     label = Gtk.Label(label=text)
     label.set_xalign(0.0)
     label.set_wrap(True)
-    label.set_selectable(True)
+    if selectable:
+        label.set_selectable(True)
     if dim:
         label.add_css_class("dim-label")
     return label
@@ -195,7 +217,8 @@ def _group(title: str, items: "tuple[str, ...]", dim: bool = False,
         box.append(_row("None", dim=True))
         return box
     for text in items[:limit]:
-        box.append(_row("• " + diff_module.for_display(text), dim))
+        box.append(_row("• " + diff_module.for_display(text), dim,
+                        selectable=True))
     if len(items) > limit:
         # Counted, not hidden: a capped list that does not say it was capped
         # reads as the whole answer.
@@ -277,23 +300,31 @@ class _CompareView(Gtk.Box):
                 "are kept on this machine"))
             self._result_box.append(_row(UNREADABLE))
             return
+        # **An empty store that was read is an answer, not a fault.** Amber is
+        # for a panel that could not find out; this one could, and the answer is
+        # that there is nothing to compare - which is the same convention the
+        # other empty stores use. This row was `STATUS_ATTENTION`, so the render
+        # showed **red "Needs attention"** for a machine that was working
+        # perfectly and had simply not been asked anything yet.
         if not self._rows:
             self._status_slot.append(self.status_recorder.row(
-                common.STATUS_ATTENTION, "Nothing to compare yet",
+                common.STATUS_OK, "Nothing to compare yet",
                 "two conversations are needed before this panel can say "
-                "anything; ask something twice and it will"))
+                "anything; ask something twice and there will be two to "
+                "choose from"))
             self._result_box.append(_row(NEED_TWO))
             return
-        # **An empty store that was read is an answer, not a fault.** Amber is
-        # for a panel that could not find out; this one could, and the answer
-        # is that there is nothing to compare.
         self._status_slot.append(self.status_recorder.row(
             common.STATUS_OK,
             f"{len(self._rows)} conversation(s) to compare between"))
         if len(self._rows) < 2:
             # One conversation is not a comparison, and saying "pick two" when
             # there is one to pick is an instruction nobody can follow.
-            self._result_box.append(_row(ONLY_ONE if self._rows else NEED_TWO))
+            # **Not `ONLY_ONE if self._rows else NEED_TWO`.** The empty case
+            # returned above, so `self._rows` is non-empty by the time this line
+            # runs and the `else` could never be taken - a branch that reads as
+            # a decision and is not one.
+            self._result_box.append(_row(ONLY_ONE))
             return
 
         titles = [title for _sid, title in self._rows]
