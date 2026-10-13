@@ -1470,12 +1470,33 @@ def tool_title(tool: str) -> str:
 ACTION_CONSENT_KEYS = tuple(sorted(
     {k for k in GATED.values() if not k.endswith("-sense-enabled")} | set(DESTRUCTIVE_CONSENT_KEYS)))
 
+#: Keys no preset enables, because they are not permissions at all - they change
+#: what the machine *does* whether or not anyone asks, or they capture people who
+#: never agreed to it. The distinction from `DESTRUCTIVE_CONSENT_KEYS` is the
+#: point: those are things Chronoa does **to this machine when asked**, and a
+#: person asking is the consent. These are things that happen on their own.
+#:
+#: `meeting-enabled` records the room, `packet-capture-enabled` reads every
+#: packet on an interface including other people's traffic, and
+#: `wake-word-enabled` is an always-on microphone. None of them is a dead end a
+#: person hits by asking for something; each is a standing intrusion, which is
+#: the one thing a default should not be.
+#:
+#: `full` still enables them, because a person who has chosen "Full control" has
+#: chosen, and the settings window offers each as its own switch.
+NEVER_DEFAULTED_ON = frozenset({
+    "meeting-enabled",
+    "packet-capture-enabled",
+    "wake-word-enabled",
+})
+
 PRESETS = {
     "chat": ("Chat only", "Answers and reads, but changes nothing on this computer",
              lambda key: False),
     "everyday": ("Everyday", "Changes settings, writes and edits files, controls apps; never deletes, "
-                             "stops or powers off anything",
-                 lambda key: key not in DESTRUCTIVE_CONSENT_KEYS or key == "file-edit-enabled"),
+                             "stops or powers off anything, and never records the room",
+                 lambda key: (key not in DESTRUCTIVE_CONSENT_KEYS or key == "file-edit-enabled")
+                 and key not in NEVER_DEFAULTED_ON),
     "full": ("Full control", "Everything Chronoa can do, including deleting files and powering off",
              lambda key: True),
 }

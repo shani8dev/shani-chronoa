@@ -198,3 +198,143 @@ def test_a_stale_compiled_schema_is_what_the_recorder_expects():
     assert result.returncode in (0, 1), (
         "glib-compile-schemas is not available, so the schema cannot be rebuilt "
         "and a stale compiled schema could not be fixed: %s" % result.stderr[:120])
+
+# --- the line between "works out of the box" and "invades" ------------------
+#: Keys that ship **off**, each with the reason it is not merely a gate.
+#:
+#: The distinction being drawn: a consent gate is fine on by default, because it
+#: only permits something *when the person asks*. What has to stay off is a
+#: capability that runs **unprompted**, or that captures **people who are not the
+#: user** - those change the machine's resting state or record third parties
+#: without anyone having agreed to it.
+UNPROMPTED_OFF = {
+    "wake-word-enabled":
+        "always-on microphone. This one is not a gate at all - it changes what "
+        "the machine is doing whether or not anyone asks, so it is the same "
+        "class of decision as a screen recorder rather than a permission.",
+    "meeting-enabled":
+        "records the room. The people in it are recorded without being asked.",
+    "packet-capture-enabled":
+        "reads every packet crossing an interface, which on a shared network "
+        "includes other people's traffic.",
+}
+
+#: Off because they move data to a third party, or for a stated engineering
+#: reason. Not the same category as the three above - just not defaults.
+EGRESS_OR_SPECIAL_OFF = {
+    "cloud-stt-enabled": "sends audio off the machine",
+    "cloud-tts-enabled": "sends audio off the machine",
+    "cloud-fallback-enabled": "sends a conversation to a free cloud model",
+    "debug-mode": "a debugging switch",
+    "setup-complete": "flipping it skips first run",
+    "setup-dismissed": "flipping it pretends the wizard was closed",
+    "start-hidden-at-login": "starting silently at login is surprising",
+    "sandbox-seccomp-enabled":
+        "a security control, and there is a measured bwrap interaction "
+        "(`executor._seccomp_conflicts_with_bwrap`) - turning it on blind could "
+        "break sandboxed skills rather than protect anything",
+}
+
+
+def test_the_unprompted_capabilities_ship_off():
+    """**The restraint half.** The rest of this file turns things on; this is the
+    part that says what stays off and why.
+
+    Each entry names a capability that runs without being asked, or that records
+    someone who did not agree to it. A default is the thing a person gets without
+    choosing, so these three are the ones where a default is the intrusion.
+    """
+    settings = _settings()
+
+    for key, why in sorted(UNPROMPTED_OFF.items()):
+        assert settings.get_boolean(key) is False, (
+            "%s ships on by default: %s" % (key, why))
+
+
+def test_the_egress_and_special_keys_ship_off():
+    settings = _settings()
+
+    for key, why in sorted(EGRESS_OR_SPECIAL_OFF.items()):
+        assert settings.get_boolean(key) is False, (
+            "%s ships on by default: %s" % (key, why))
+
+
+def test_every_off_list_entry_is_a_real_boolean_key():
+    """The lists have to describe the schema, not an idea of it. A typo here would
+    otherwise sit in the file looking like coverage."""
+    root = ET.parse(SCHEMA_XML).getroot()
+    declared = {
+        key.get("name")
+        for schema in root.findall("schema")
+        for key in schema.findall("key")
+        if key.get("type") == "b"
+    }
+
+    for name, entries in (("UNPROMPTED_OFF", UNPROMPTED_OFF),
+                          ("EGRESS_OR_SPECIAL_OFF", EGRESS_OR_SPECIAL_OFF)):
+        unknown = sorted(set(entries) - declared)
+        assert not unknown, "%s names keys the schema does not declare: %s" % (
+            name, unknown)
+
+
+def test_sense_defaults_match_the_set_the_code_documents():
+    """**What would have caught the one mistake in this whole exercise.**
+
+    `config._SENSE_DEFAULT_ENABLED` is a hand-written set of 25 senses with a
+    paragraph of reasoning for each exclusion - `containers`, `listeners` and
+    `stale` were moved off on 2026-09-30 because they report process identity and
+    the user's work; `sessions` because it is other people's presence. That
+    reasoning is only worth anything if the schema agrees with it.
+
+    A blanket "turn on every sense" looks identical to this from inside the
+    schema, and it is how `containers`, `listeners`, `stale`, `sessions`, `git`,
+    `hearing` and 40 more were briefly turned on by mistake. The schema is now
+    required to match the code's own list, key for key.
+    """
+    from shani_chronoa import config as chronoa_config
+
+    settings = _settings()
+    assert chronoa_config._SENSE_DEFAULT_ENABLED, (
+        "_SENSE_DEFAULT_ENABLED is empty, so this would compare against nothing")
+
+    wrong = {}
+    for sense, key in chronoa_config._SENSE_CONSENT_KEYS.items():
+        want = sense in chronoa_config._SENSE_DEFAULT_ENABLED
+        if settings.get_boolean(key) != want:
+            wrong[key] = (sense, settings.get_boolean(key), want)
+
+    assert not wrong, (
+        "schema sense defaults disagree with _SENSE_DEFAULT_ENABLED for %d key(s): %s"
+        % (len(wrong), wrong))
+
+
+def test_the_senses_the_code_deliberately_excludes_are_off():
+    """Named individually, because the set is the whole point.
+
+    Each of these was excluded from `_SENSE_DEFAULT_ENABLED` for a reason worth
+    keeping visible, and a schema default is the only thing deciding it -
+    `SENSITIVITY` is declared and enforced nowhere.
+    """
+    from shani_chronoa import config as chronoa_config
+
+    settings = _settings()
+    excluded = {
+        "containers-sense-enabled": "reports container names and images - the user's work",
+        "listeners-sense-enabled": "resolves each socket to an owner process name and PID",
+        "stale-sense-enabled": "reports a per-PID executable path",
+        "sessions-sense-enabled": "reports who *else* is on this machine",
+        "git-sense-enabled": "uncommitted filenames and branch names are work product",
+        "hearing-sense-enabled": "opens the microphone",
+        "sound-sense-enabled": "opens the microphone",
+        "heard-sound-sense-enabled": "opens the microphone, listening for events",
+        "location-sense-enabled": "asks where the machine is",
+        "vision-sense-enabled": "reads the screen",
+        "web-sense-enabled": "sends queries off the machine",
+    }
+    for sense in excluded:
+        assert sense not in chronoa_config._SENSE_DEFAULT_ENABLED, (
+            "%s was added to _SENSE_DEFAULT_ENABLED: %s" % (sense, excluded[sense]))
+
+    for key in sorted(excluded):
+        assert settings.get_boolean(key) is False, (
+            "%s ships on by default: %s" % (key, excluded[key]))

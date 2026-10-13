@@ -97,12 +97,25 @@ class TestStringQuoting:
         assert wake_phrase == "hey chronoa"
 
     def test_boolean_settings_parse_correctly(self, chronoa_config):
-        # Baseline: booleans already round-trip (gsettings prints them unquoted).
-        assert chronoa_config.privacy_mode is True
-        assert chronoa_config.auto_start is False
-        assert chronoa_config.cloud_fallback_enabled is False
-        assert chronoa_config.barge_in_vad_enabled is False
+        """`gsettings get` answers `true`/`false` as *quoted* GVariants, and a
+        config that kept the quotes would report `"'false'"` - truthy - to every
+        caller.
 
+        **This asserts the type, not the value.** It used to assert four specific
+        defaults, inside a class named `TestStringQuoting`, where the values are not
+        the subject: the subject is that a boolean arrives as a bool. Two of the four
+        were later turned on for good reasons, and the test reported working code as
+        broken - the fifth time this repository has encoded a default as an
+        assertion instead of a behaviour.
+        """
+        for name in ("privacy_mode", "auto_start", "cloud_fallback_enabled",
+                     "barge_in_vad_enabled", "model_download_enabled"):
+            value = getattr(chronoa_config, name)
+            assert isinstance(value, bool), (
+                f"{name} came back as {type(value).__name__} ({value!r}), not a bool - "
+                "a quoted GVariant would read as truthy")
+            assert not (isinstance(value, str) and value.strip("'\"")), (
+                f"{name} is still quoted: {value!r}")
 
 class TestFreshInstanceRoundTrip:
     """A value set through one instance must be read back unquoted by a fresh instance."""

@@ -72,12 +72,12 @@
       <description>How long Chronoa waits in silence before treating a spoken request as finished. Raise it if you are cut off mid-sentence; lower it for quicker replies.</description>
     </key>
     <key name="sound-cues-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Play a short sound when Chronoa starts listening or did not understand</summary>
       <description>Uses the desktop sound theme (freedesktop), so it can be heard without looking at the window.</description>
     </key>
     <key name="follow-up-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Listen for a follow-up after a spoken reply</summary>
       <description>After answering a spoken request, keep the microphone open for six seconds so "and make it ten minutes" needs no wake phrase. A transcript that is only the reply heard back from the speakers is ignored.</description>
     </key>
@@ -142,7 +142,7 @@
       <description>Which Kokoro voice speaks when the Kokoro voice is turned on: af_sarah, af_bella, af_nicole, af_sky, bf_emma or bf_isabella. Chosen on the setup window's Voice page.</description>
     </key>
     <key name="kokoro-tts-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Speak with the Kokoro neural voice</summary>
       <description>Off by default, and the default is the measured one. Kokoro sounds like a person where espeak-ng sounds like a speech chip, but on a four-core laptop with onnxruntime's CPU provider it took 6.39 s of wall clock to produce 5.225 s of audio (real-time factor 1.22), so it cannot finish before playback would start - every reply would open with about 6 s of silence. With this off, the chain below it runs exactly as before: Piper, then RHVoice, then espeak-ng. Turn it on and Kokoro is preferred again wherever it can speak the reply's script. Changing this does not download anything: Kokoro also needs its model, from Settings or voices.install_kokoro.</description>
     </key>
@@ -152,7 +152,7 @@
       <description>The URL of the Ollama inference server.</description>
     </key>
     <key name="auto-start" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Auto-start on login</summary>
       <description>Whether to automatically start shani-chronoa on user login.</description>
     </key>
@@ -222,7 +222,7 @@
       <description>Optional. Sent as an Authorization: Bearer header to custom-llm-base-url and nothing else. Empty sends no header at all, which is what a local server on this machine usually needs. When a keyring is available the value is stored there instead of here.</description>
     </key>
     <key name="barge-in-vad-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Interrupt spoken replies as soon as you start talking</summary>
       <description>When true, continuously monitors the microphone while Chronoa is speaking and interrupts immediately on detected speech, instead of only interrupting on the next button press or wake word. Off by default: there is no acoustic echo cancellation, so on speakers (not headphones) the mic may pick up Chronoa's own voice and self-interrupt.</description>
     </key>
@@ -527,12 +527,12 @@
       <description>When true, Chronoa may mount or unmount a filesystem through the desktop disk service, so that service's own authorisation rules apply. Off by default: mounting runs code from a device that was not there a moment ago, and unmounting something in use can lose work. Listing what is mounted needs no permission.</description>
     </key>
         <key name="idle-timeout-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa change when the screen blanks</summary>
       <description>Off: Chronoa can report the current idle timeout and whether the screen locks, but cannot change either. It has its own key rather than sharing the lock skill's, because whether the machine locks itself is a standing policy decision rather than a one-off action.</description>
     </key>
     <key name="sleep-inhibit-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa hold the machine awake</summary>
       <description>Off: Chronoa can report what is currently holding the machine awake, but cannot take a hold of its own. Its own key rather than sharing the idle timeout's, because a bounded hold for the next few minutes is a different decision from changing the machine's idle policy. Every hold it takes is bounded and lapses on its own, so an enabled key cannot leave the machine unable to sleep.</description>
     </key>
@@ -542,7 +542,7 @@
       <description>Off: Chronoa can report whether the desktop is set to a light or dark appearance but cannot change it. Restyling a desktop unasked, mid-document, is disruptive in a way that reading it is not.</description>
     </key>
     <key name="timezone-control-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa change the system timezone</summary>
       <description>Off: Chronoa can report the current timezone and list the available ones but cannot change it. It is a system-wide change that moves every timestamp on the machine at once, and it needs root.</description>
     </key>
@@ -572,7 +572,7 @@
       <description>Off: Chronoa cannot measure your connection speed. A test downloads and uploads several megabytes to Cloudflare's speed-test servers, which costs money on a metered or mobile connection. Privacy mode refuses it regardless.</description>
     </key>
 <key name="bluetooth-control-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa switch the Bluetooth adapter</summary>
       <description>Off: Chronoa can report which Bluetooth devices are paired and whether the adapter is on, but cannot turn it off. Separate from the bluetooth sense's own permission, because noticing a headset and being willing to have it disconnected mid-call are different agreements.</description>
     </key>
@@ -587,7 +587,7 @@
       <description>When true, Chronoa may ask a paired Bluetooth device what it says about itself - a watch's or headset's battery level, a heart-rate strap's reading, which services a fitness band offers - and make a paired watch or band buzz so it can be found (fixed, known-safe commands only). Off by default. This is separate from switching the adapter on and off, and from noticing that a device is paired: on a wearable, the values it exposes describe the person wearing it, and that is not the same agreement as being willing to have a headset disconnected. A device that cannot be read is reported as unreadable, never as having nothing to report.</description>
     </key>
     <key name="bluetooth-media-remote-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Bluetooth remotes control music on this computer</summary>
       <description>When true, this computer offers its music player over Bluetooth (AVRCP), so the play, pause and skip buttons of a paired headset, speaker, watch or car control what is playing here. Only paired devices can use it.</description>
     </key>
@@ -597,7 +597,7 @@
       <description>When true, this computer advertises itself as "Chronoa Remote", a Bluetooth keyboard with media keys. Once the phone pairs it, Chronoa can press the phone's camera shutter, play/pause, next, volume, and type text into the phone. It also offers Find Me (a tag or watch can make this computer ring), its battery level and the time. Off by default because it makes this computer discoverable to every phone nearby.</description>
     </key>
     <key name="watch-companion-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Keep my watch connected to this computer</summary>
       <description>When true (and reaching the watch is allowed), Chronoa keeps a MoYoung/Da Fit watch connected so its own buttons work with this computer: find-my-phone rings here, its music buttons control the player, its camera button takes a photo, and what is playing shows on the watch. Off by default because the watch takes one connection: while this holds it, the Da Fit app on a phone cannot reach it.</description>
     </key>
@@ -632,7 +632,7 @@
       <description>When true, Chronoa may read a directory's text files and PDFs, embed them with the small local embedding model, and keep an index you can search. Off by default, and it stays off until you name a directory - the index is only ever built for a path you asked about. The embedding model is a 146 MB download; without it the search still works, but only by keyword, and it says so rather than returning results that look semantic. Files that cannot be read - a binary, an encrypted PDF, one with no permission - are named in the report instead of being skipped quietly.</description>
     </key>
     <key name="meeting-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa record a whole meeting</summary>
       <description>When true, Chronoa may open the microphone and hold it for up to two hours, then write a transcript with who said what and notes from the local model. Off by default, and deliberately so: an ordinary spoken turn holds the microphone for twenty seconds, dictation for five minutes, and this for hours - with other people's voices in it. Everything it writes stays on this computer: whisper.cpp transcribes, sherpa-onnx tells voices apart, the local model writes the notes, and nothing is uploaded. A recording that fails part-way is reported as a fragment, never as the whole meeting.</description>
     </key>
@@ -647,12 +647,12 @@
       <description>When true, Chronoa may read an NFC tag that is tapped against a reader on this computer, and write a link to an NFC Forum sticker. Off by default. Tags sit in public places and carry whatever somebody chose to put on them, often other people's links, so reading one is reading a stranger's message rather than this machine's own data. Writing is narrower still and is limited to Ultralight/NTAG stickers: rewriting the sectors of a bank card, a transit pass or a hotel key is irreversible and can leave the card unusable. Separately, most laptops have no NFC reader at all, and a machine without one is reported as having none rather than as failing.</description>
     </key>
     <key name="mic-control-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa mute the microphone</summary>
       <description>Off: Chronoa can report whether the microphone is muted but cannot change it. Output volume and mute are separate skills that need no such permission; this covers the input side, which is the more privacy-relevant of the two.</description>
     </key>
     <key name="screen-lock-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa lock this session</summary>
       <description>Off: Chronoa cannot lock the screen. It has its own permission rather than sharing input control, because it does not act on the interface - it ends the current session's access to the machine, and a person mid-sentence loses the floor.</description>
     </key>
@@ -712,7 +712,7 @@
       <description>Reports how many updates are waiting, and how old the package database the comparison was made against is. On by default: it reads the local package database and never leaves the machine.</description>
     </key>
     <key name="comms-typing-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa type into chat and mail windows</summary>
       <description>Off: driving another app's controls works, but a window that is a chat or mail surface is refused before a keystroke, because text typed there leaves the machine. On: it may be typed into when you ask directly. Its own switch, so agreeing that Chronoa may drive your apps is not the same as agreeing it may send a message.</description>
     </key>
@@ -912,12 +912,12 @@
       <description>When true, Chronoa may see your phone through GSConnect (GNOME) or KDE Connect (Plasma), ring it so you can find it, ping it, and send it a file or link. Off by default. Sending text messages, reading the phone's notifications and remote input are not offered at all.</description>
     </key>
     <key name="phone-messages-read-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa read your phone's text messages</summary>
       <description>When true, Chronoa may read text messages from your paired phone when you ask - the latest, those from a contact, or the unread ones. Off by default, and separate from letting Chronoa use the phone at all: seeing that a phone is paired and can be rung is nothing like reading what your family said to you. A phone that cannot be read is reported as refusing, never as having no messages.</description>
     </key>
     <key name="phone-messages-send-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Let Chronoa send text messages and place calls from your phone</summary>
       <description>When true, Chronoa may send a text message from your paired phone, and open its dialer to place a call, when you ask. Off by default, and separate from reading: a message leaves this machine and appears on the other end, so it needs its own agreement. Chronoa drafts the text and asks you before anything is sent, and reports a refusal rather than sending something you did not confirm.</description>
     </key>
@@ -942,12 +942,12 @@
     </key>
 
     <key name="background-mode-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Keep Chronoa's automatic rules running in the background</summary>
       <description>When true, Chronoa's automatic rules and senses keep running after its window is closed, through the systemd user service shani-chronoa-daemon. It never listens to the microphone - the wake phrase stays a window feature - and it never runs the rules at the same time as the window. Applied the next time Chronoa starts.</description>
     </key>
     <key name="global-shortcut-enabled" type="b">
-      <default>false</default>
+      <default>true</default>
       <summary>Talk to Chronoa with a keyboard shortcut</summary>
       <description>When true, Chronoa asks the desktop (through its shortcut portal, on GNOME and Plasma) for a system-wide shortcut that starts and stops listening, even when another window has focus. The desktop shows its own dialog the first time, where the key can be changed. Takes effect the next time Chronoa starts.</description>
     </key>
@@ -997,7 +997,7 @@
       <description>When true, Chronoa may build and tear down isolated lab networks on this machine: a network namespace holding a bridge, with named subnets in namespaces of their own, connected by veth pairs. Off by default, and separate from the network sense and from WiFi control on purpose. Those two are about the machine's existing connectivity - reading link state, or joining a network that already exists. This one creates new network interfaces and needs the machine administrator's password to do it, which is why it is a separate agreement rather than a wider version of the same switch. It reaches nothing beyond this machine: every address it hands out is private, and the single masquerade rule it adds is scoped to the lab's own address range and its own uplink. It only ever removes networks it built, and it shows the exact plan before changing anything.</description>
     </key>
     <key name="packet-capture-enabled" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Let Chronoa watch the packets crossing a network interface</summary>
       <description>When true, Chronoa may watch packets crossing one network interface for a few seconds and report what it saw: who sent to whom, which protocol, how large, and the TCP flags. Off by default, and it has its own switch rather than joining the network sense's, because it is the only permission here that reads what is inside a packet rather than only the kernel's counters about it. On a machine with a browser open, most of what crosses is encrypted, but not all of it, and anything unencrypted on the wire is visible to this. Reports summaries only, never payload text, and is bounded by packet count, seconds and output length so a capture always ends. Reporting how many bytes each interface has carried needs no permission at all - that reads the kernel's own counters and changes nothing.</description>
     </key>
