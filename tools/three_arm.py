@@ -46,7 +46,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
+import random
 import subprocess
 import sys
 import time
@@ -102,6 +104,147 @@ def score_arm(rows: "list[dict]") -> "tuple[int, int, int, int]":
             len(scorable))
 
 
+#: The three outcomes a row can be right about, in the order the report prints
+#: them. `acted` is the form half and `tool`/`args` are the choice half; the
+#: split is the finding, so all three are paired rather than only the strict one.
+OUTCOMES = (("acted", "acted (form)"),
+            ("tool", "right tool"),
+            ("args", "tool+args"))
+
+
+def _right(row: dict, outcome: str) -> bool:
+    """Whether one row is right about one outcome.
+
+    **`acted` is read the way `score_arm` reads it** rather than through a
+    second definition, so the paired table and the marginal table cannot report
+    different things about the same run.
+    """
+    if outcome == "acted":
+        return row.get("seen") != "no tool"
+    return bool(row.get(outcome))
+
+
+def mcnemar_p(b: int, c: int) -> float:
+    """Two-sided exact binomial p for `b` discordant wins against `c`.
+
+    **Exact, and no `scipy`**: the statistic is the smaller tail of a fair coin
+    flipped `b + c` times, which is a sum of binomials and therefore arithmetic.
+    Zero discordant pairs returns 1.0 rather than raising - *no case changed
+    hands is the strongest possible null result*, and it is the result this
+    experiment is most likely to produce.
+    """
+    n = b + c
+    if n == 0:
+        return 1.0
+    k = min(b, c)
+    tail = sum(math.comb(n, i) for i in range(k + 1)) / (2.0 ** n)
+    return min(1.0, 2.0 * tail)
+
+
+def paired_ci(pairs: "list[tuple[bool, bool]]", draws: int = 2000,
+              seed: int = 20261013) -> "tuple[float, float]":
+    """Percentile bootstrap CI for the mean of `(b - a)` over paired cases.
+
+    **Paired, because the cases are.** Two arms see the same 220 requests on one
+    server at temperature 0, so most rows are identical and the disagreement
+    lives in a handful of cases; resampling the *difference* keeps that, where a
+    CI over two independent proportions would throw it away and report a
+    several-times-wider interval for the same run.
+
+    The seed is fixed so the interval is a property of the data rather than of
+    the run - an interval that moves when the process restarts is a number
+    nobody can quote.
+    """
+    if not pairs:
+        return (0.0, 0.0)
+    rnd = random.Random(seed)
+    n = len(pairs)
+    diffs = []
+    for _ in range(draws):
+        total = 0
+        for _ in range(n):
+            a, b = pairs[rnd.randrange(n)]
+            total += int(b) - int(a)
+        diffs.append(total / n)
+    diffs.sort()
+    lo = diffs[int(0.025 * draws)]
+    hi = diffs[min(draws - 1, int(0.975 * draws))]
+    return (lo, hi)
+
+
+def paired(rows_a: "list[dict]", rows_b: "list[dict]", outcome: str) -> dict:
+    """(result dict) comparing two arms case by case on one outcome.
+
+    **The denominator is the intersection, and the shortfall is reported.** A case
+    the service failed in one arm has no measurement there, so pairing it over
+    the union would count a missing answer as a disagreement - which is the
+    absence-shaped wrong answer this repository records everywhere else. Every
+    drop is counted and named, because a pairing that quietly loses 40 cases is
+    the same defect wearing a denominator.
+    """
+    def scored(rows):
+        return {r["id"]: r for r in rows
+                if r.get("id") and not r.get("unavailable")}
+
+    a, b = scored(rows_a), scored(rows_b)
+    common = sorted(set(a) & set(b))
+    pairs = [(_right(a[i], outcome), _right(b[i], outcome)) for i in common]
+    b_only = sum(1 for x, y in pairs if y and not x)
+    a_only = sum(1 for x, y in pairs if x and not y)
+    n = len(pairs)
+    diff = ((b_only - a_only) / n) if n else 0.0
+    lo, hi = paired_ci(pairs) if n else (0.0, 0.0)
+    return {"outcome": outcome, "n": n, "a_only": a_only, "b_only": b_only,
+            "both": sum(1 for x, y in pairs if x and y),
+            "neither": sum(1 for x, y in pairs if not x and not y),
+            "dropped": len(set(a) ^ set(b)),
+            "diff": diff, "lo": lo, "hi": hi,
+            "p": mcnemar_p(a_only, b_only)}
+
+
+def paired_table(results: dict, arms: "list[str]") -> None:
+    """Print the paired comparison for every arm pair and every outcome.
+
+    **Why this exists at all.** The marginal table answers "what fraction was
+    right", which on 220 cases carries roughly +/- 6 points of noise whether or
+    not the arms differ. The decision this run exists for - *does the grammar buy
+    anything, or does the format request do it* - is a comparison of the *same*
+    cases, and the evidence for it is the handful that changed hands. Reporting
+    only the marginals would let a real 3-point effect read as a tie and a tie
+    read as a result, which are opposite decisions.
+    """
+    base = arms[0]
+    for outcome, label in OUTCOMES:
+        print("")
+        print("  paired %s  (case by case, not two independent proportions)"
+              % label)
+        for arm in arms[1:]:
+            rows_a = results.get(base, {}).get("rows", [])
+            rows_b = results.get(arm, {}).get("rows", [])
+            if not rows_a or not rows_b:
+                print("    %-22s vs %-22s  no result to pair" % (base, arm))
+                continue
+            r = paired(rows_a, rows_b, outcome)
+            note = ""
+            if r["dropped"]:
+                note = "   [%d case(s) could not be paired]" % r["dropped"]
+            print("    %-22s -> %-22s  %+.1f pts  [95%% %+.1f .. %+.1f]"
+                  % (base, arm, r["diff"] * 100, r["lo"] * 100, r["hi"] * 100))
+            print("      %d case(s): %d flipped to right, %d flipped to wrong, "
+                  "%d already right, %d already wrong%s"
+                  % (r["n"], r["b_only"], r["a_only"], r["both"],
+                     r["neither"], note))
+            print("      exact p = %.3f%s"
+                  % (r["p"], "  (no case changed hands)"
+                     if r["a_only"] + r["b_only"] == 0 else ""))
+    if len(arms) == 3:
+        print("")
+        print("  Arms 2 and 3 differ only in whether the grammar is enforced, so")
+        print("  the second pair is the experiment. A tie there means the format")
+        print("  request did the work; form up with choice flat means the grammar")
+        print("  made answers well-formed and no more likely to be right.")
+
+
 def report(results: dict, arms: "list[str]", n: int, dropped: int = 0) -> None:
     """The form/choice table, as its own function so a partial run prints it."""
     print("")
@@ -135,6 +278,8 @@ def report(results: dict, arms: "list[str]", n: int, dropped: int = 0) -> None:
         print("")
         print("  !! only %d of %d arms ran - this is not a three-arm result"
               % (len(arms), len(ARMS)))
+    if len(arms) > 1:
+        paired_table(results, arms)
 
 
 def main(argv=None) -> int:
