@@ -20788,3 +20788,36 @@ already cited for the chimera retraction, so that claim now stands on the paper
 rather than on a summary - and *Crowded in B-Space* (2604.16826), the one the
 111x delta-norm spread was measured against. Both were found by the shipped tool
 in about a second, which is the return on having built it.
+
+### Unresolved: the question row still does not appear in the capture
+
+Recorded so it is not mistaken for fixed. `composer-question` now drives a real
+API - `_clear_question_widgets()`, a wrapped label appended to `_question_row`,
+then `set_visible(True)` - rather than calling an attribute that does not exist
+under a bare `except`. The capture grew from **30,606 to 90,967 bytes**, which
+shows the code path changed. **Looking at the picture, the question row is still
+not on screen.**
+
+Two paths put a question on screen and the render follows only one:
+
+- `gui/asking.py:55-64` - the **interactive** one: the question, a row of option
+  buttons, a dimmed hint, then `set_visible(True)`.
+- `gui/questions.py:128-137` - the **`ask_user` skill** one: a bare label.
+
+The render now mirrors the second. Whether the row is being clipped, is placed
+outside the visible part of the chat column, or needs the option buttons before it
+allocates any height is **not established**. `main_box` is `self._chat_column` and
+the row is appended to it, so on paper it should appear between the transcript
+and the composer - and it does not.
+
+**What is worth knowing: the trust moment has no picture at all.** No target
+exists for a permission prompt (`--list states` shows only `strip-*`,
+`composer-*` and `organ-*`), and the one question target that does exist
+photographs nothing. So the single interaction where the app asks a person
+whether to trust it with an action on their machine is the one interaction this
+project has never been able to look at - which is a plausible reason it has had
+no findings and no attention.
+
+The next person with a broadway daemon and time should: render the question
+state at a size the chat column is not clipping, and add a permission-prompt
+target that drives `asking.py` rather than `questions.py`.
