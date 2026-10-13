@@ -31,6 +31,7 @@ with no fonts exits **0 with an empty table**, which is reported as "no fonts
 listed" rather than as "all embedded".
 """
 
+import os
 import pathlib
 import re
 import shutil
@@ -54,6 +55,57 @@ _RENDER_DPI = 200
 _MAX_OCR_PAGES = 5
 
 
+def _tessdata_dir() -> "str | None":
+    """Where this user's tesseract data is, or None when there is none.
+
+    **Two resolvers existed and neither was joined to the other.**
+    `ocr.find_tessdata_dir()` reads `TESSDATA_PREFIX` out of the environment and
+    falls back to the system directory; `languages.tessdata_dir()` is where
+    Chronoa *installs* a language's `traineddata`. `languages.tesseract_env()` is
+    the function that would put the second into the first - and it had **no
+    caller in the tree**.
+
+    So the panel offered to download Hindi OCR data into a directory that
+    `find_tessdata_dir()` never looked at, and tesseract was invoked without a
+    `TESSDATA_PREFIX`, meaning it looked in `/usr/share/tessdata` and could not
+    find what Chronoa had just installed. Measured here with no data anywhere:
+    tesseract returns **empty output and no error at all** - and with a prefix
+    pointing at an empty directory it says `Error opening data file
+    .../eng.traineddata`. The silent case is the one a user hits.
+
+    One resolver now answers for both the languages offered and the environment
+    the subprocess runs in, so the two can no longer disagree.
+    """
+    from shani_chronoa import languages
+
+    directory = languages.tessdata_dir()
+    if directory.is_dir() and any(directory.glob("*.traineddata")):
+        return str(directory)
+    from shani_chronoa.senses import ocr
+
+    return ocr.find_tessdata_dir()
+
+
+def _tesseract_env() -> "dict[str, str]":
+    """The environment tesseract is run in: ours, plus `TESSDATA_PREFIX`.
+
+    `subprocess.run` inherits the parent environment when `env` is omitted, so
+    this starts from `os.environ` rather than from `{}` - an environment of only
+    `TESSDATA_PREFIX` would take `PATH` away and the binary itself would stop
+    being found.
+    """
+    env = dict(os.environ)
+    directory = _tessdata_dir()
+    if directory:
+        env["TESSDATA_PREFIX"] = str(directory)
+    else:
+        # Nothing installed anywhere: leave no stale prefix pointing at a
+        # directory with no data in it, which is the case that produced tesseract's
+        # "Error opening data file" for a language that was never there.
+        env.pop("TESSDATA_PREFIX", None)
+    return env
+
+
 def _installed_languages() -> List[str]:
     """The language codes tesseract can actually read on this machine.
 
@@ -64,7 +116,10 @@ def _installed_languages() -> List[str]:
     """
     try:
         from shani_chronoa.senses import ocr
-        return list(ocr.list_installed_languages(ocr.find_tessdata_dir()))
+        directory = _tessdata_dir()
+        if directory is None:
+            return []
+        return list(ocr.list_installed_languages(directory))
     except Exception:  # noqa: BLE001 - no reader means no languages to offer
         return []
 
@@ -118,7 +173,7 @@ def _ocr_image(image: str, timeout: int = 120):
     """`(returncode, text)` for one image, or `(None, reason)`."""
     try:
         r = subprocess.run(_tesseract_argv(image), capture_output=True,
-                           text=True, timeout=timeout)
+                           text=True, timeout=timeout, env=_tesseract_env())
     except subprocess.TimeoutExpired:
         return None, "reading the page as a picture took too long"
     except (subprocess.SubprocessError, OSError) as exc:
@@ -462,7 +517,8 @@ def _run(arguments: dict) -> str:
             # scanned-PDF branch: it was this code, inline, and duplicating it
             # is how a language setting stops applying to one kind of file.
             argv = _tesseract_argv(str(path))
-            r = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+            r = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=120, env=_tesseract_env())
         else:
             return f"I read PDFs and pictures; for {suffix or 'this'} files use read_text_file."
     except subprocess.TimeoutExpired:
