@@ -7,6 +7,7 @@ nothing said a megabyte of it had been withheld.
 """
 
 import sys
+import re
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
@@ -94,9 +95,25 @@ def test_the_card_is_handed_the_clipped_text(monkeypatch):
     # nothing missing.
     assert shown in recorded, (
         "the transcript and the model's own history disagree about this result")
-    assert "untrusted-content" in recorded, (
-        "the result reached the history without its provenance fence, which is "
-        "the injection hole `provenance` exists to close")
+
+    # **And the fence survives the clip, counted rather than assumed.**
+    # Clipped *after* the fence, a cut can take the closing marker with it - the
+    # model is then shown untrusted content with no marker on it, which is the
+    # exact hole `provenance` exists to close. Measured: fence-then-clip yields
+    # one open and zero close markers.
+    #
+    # This assertion is the one the mutation needed. The ordering test in
+    # `test_tool_activity_panel.py` reconstructs the shipped order as an
+    # expression and checks it - which cannot see a mutation to the real call
+    # site, because the real call site is not in the expression. The mutation that
+    # moved the clip inside the fence came back a **survivor** over a green suite
+    # for exactly that reason, and this is the fix: drive the turn, then count.
+    opens = len(re.findall(r"(?<!end-)untrusted-content-[0-9a-f]+", recorded))
+    closes = len(re.findall(r"end-untrusted-content-[0-9a-f]+", recorded))
+    assert (opens, closes) == (1, 1), (
+        f"the opened fence closes {closes} times, not once - the clip landed "
+        f"inside the fence and took the marker with it, so untrusted content "
+        f"now reaches the model reading as trusted")
 
 
 def test_a_result_inside_the_limit_reaches_the_card_whole(monkeypatch):

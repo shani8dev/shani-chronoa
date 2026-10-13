@@ -137,7 +137,7 @@ MUTATIONS = [
         "old": '                self.window.set_response(\n'
                '                    "The model is asleep, so nothing was started. Press "\n'
                '                    "\\"Wake up\\" in Settings > Models > Right now to load it, "\n'
-               '                    "or ask again and nothing will happen until you do.")\n',
+               '                    "then send your question again.")\n',
         "new": '                self.window.set_response(\n'
                '                    "no model")\n',
         "label": "the refusal names no way out",

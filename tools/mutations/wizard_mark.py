@@ -58,13 +58,26 @@ MUTATIONS = [
         "new": "",
         "label": "**the all-sixteen-pages bug, restored**: an unallocated "
                  "scroller reports room for the mark",
-        # **Measured**: `upper = page_size = 0` before layout, so `0 <= 0 + 1`
-        # is true and the mark appeared over `review`'s overflowing content.
-        "expect": ["test_the_mark_is_shown_exactly_when_the_content_cannot_scroll"],
+        "equivalent": True,
+        # **EQUIVALENT, and measured rather than reasoned.** Over **10,000**
+        # `(upper, page_size)` pairs the guard changes the answer **zero** times:
+        # `VOID_NEEDED_PX` is `MARK_PX + 24 = 136`, and an unallocated scroller
+        # reports `page_size = 0`, so `0 - 0 >= 136` is already False. The later
+        # threshold **subsumed** the guard that was written for exactly this bug
+        # - measured on this module, not argued.
+        #
+        # So the guard is defence-in-depth rather than load-bearing, and deleting
+        # it is not a regression. That is worth writing down rather than fixing:
+        # the temptation is to add a test that drives `_void_has_room(0, 0)` and
+        # asserts False, and **such a test cannot fail** - it passes with or
+        # without the guard, which is the "a control that cannot fail" trap in the
+        # one place it is easiest to fall into, because the property really was
+        # true once.
+        "expect": [],
     },
     {
         "file": _W,
-        "old": "    return adjustment.get_upper() <= adjustment.get_page_size() + 1\n",
+        "old": "    return (adjustment.get_page_size() - needed) >= VOID_NEEDED_PX\n",
         "new": "    return True\n",
         "label": "the mark is always shown, so it is drawn over a row",
         "expect": ["test_the_mark_is_shown_exactly_when_the_content_cannot_scroll",
@@ -72,7 +85,7 @@ MUTATIONS = [
     },
     {
         "file": _W,
-        "old": "    return adjustment.get_upper() <= adjustment.get_page_size() + 1\n",
+        "old": "    return (adjustment.get_page_size() - needed) >= VOID_NEEDED_PX\n",
         "new": "    return False\n",
         "label": "the mark is never shown, so the void is back",
         "expect": ["test_the_mark_is_shown_exactly_when_the_content_cannot_scroll"],

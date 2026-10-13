@@ -52,12 +52,21 @@ MUTATIONS = [
     },
     {
         "file": _ASM,
-        "old": "                result = _clip_tool_result(result)\n                self._record({\"role\": \"tool\", \"tool_call_id\": call.get(\"id\", \"\"),\n                              \"content\": provenance.fence(\n                                  result, source).text},\n",
-        "new": "                              \"content\": provenance.fence(\n                                  _clip_tool_result(result), source).text},\n",
+        "old": "                result = clipped\n"
+               "                self._record({\"role\": \"tool\","
+               " \"tool_call_id\": call.get(\"id\", \"\"),\n"
+               "                              \"content\": provenance.fence(\n"
+               "                                  result, source).text},\n",
+        "new": "                result = clipped\n"
+               "                self._record({\"role\": \"tool\","
+               " \"tool_call_id\": call.get(\"id\", \"\"),\n"
+               "                              \"content\": provenance.fence(\n"
+               "                                  _clip_tool_result(result),"
+               " source).text},\n",
         # The clip moved inside the fence - the ordering that loses the closing
         # marker, so untrusted content is shown with no marker on it. This is the
         # security property, and it is why the call sits where it does.
         "label": "the clip is applied inside the fence (the close marker is lost)",
-        "expect": ["test_the_clip_happens_before_the_fence"],
+        "expect": ["test_the_driven_turn_keeps_its_fence_markers_balanced"],
     },
 ]

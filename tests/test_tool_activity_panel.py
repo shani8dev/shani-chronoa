@@ -710,6 +710,73 @@ class TestNoToolResultMayEatTheConversation:
         assert "more characters not shown" in fenced, \
             "the truncation note was lost, so the model sees a cut it was never told about"
 
+    def test_the_driven_turn_keeps_its_fence_markers_balanced(self):
+        """**The real call site, driven rather than reconstructed.**
+
+        The test below reconstructs the shipped order as an expression -
+        `markers(fence(clip(x)))` - and checks it. That cannot see a mutation to
+        the call site, because the call site is not in the expression, which is
+        how the "clip inside the fence" mutation survived a green suite: it moved
+        the clip inside the real `provenance.fence(...)` and 44 tests passed.
+
+        So this drives a whole turn with an oversized result and counts the
+        markers on what was actually recorded. One open, one close; the mutant
+        that clips after fencing takes the close marker with it and reads (1, 0).
+        """
+        import asyncio
+        import re
+
+        from shani_chronoa import assistant as A
+
+        class _OneCall:
+            """Emits one tool call, then a plain answer - enough to drive a turn."""
+            def __init__(self):
+                self.turns = 0
+
+            async def chat_message(self, messages, tools=None, **kw):
+                self.turns += 1
+                if self.turns == 1 and tools:
+                    return {"role": "assistant", "content": "", "tool_calls": [
+                        {"id": "c1", "type": "function",
+                         "function": {"name": "read_log", "arguments": "{}"}}]}
+                return {"role": "assistant", "content": "done"}
+
+        big = "page text " * ((A.MAX_TOOL_RESULT_CHARS // 10) + 2)
+        real = A.execute_tool
+        A.execute_tool = lambda *a, **k: big
+        try:
+            assistant = A.Assistant(_OneCall())
+            seen = []
+            asyncio.run(assistant.handle(
+                "read the log",
+                on_tool_result=lambda n, a, r, ok: seen.append((n, str(r)))))
+        finally:
+            A.execute_tool = real
+
+        assert seen, "the turn produced no tool result at all"
+        tool_messages = [m for m in assistant._history if m.get("role") == "tool"]
+        assert tool_messages, "no tool message was recorded"
+        recorded = str(tool_messages[0].get("content", ""))
+        opens = len(re.findall(r"(?<!end-)untrusted-content-[0-9a-f]+", recorded))
+        closes = len(re.findall(r"end-untrusted-content-[0-9a-f]+", recorded))
+        assert (opens, closes) == (1, 1), (
+            f"the fence closes {closes} times, not once - the clip landed inside "
+            f"it and took the marker, so untrusted content reaches the model "
+            f"reading as trusted")
+
+        # **And the note still names what was really dropped.** A marker count
+        # alone cannot catch the mutant: clipping an already-clipped string keeps
+        # both markers, because the fence is applied to a well-formed string
+        # either way. What it does corrupt is the *number* - the second clip
+        # computes `dropped` against the already-cut text and reports ~196
+        # characters instead of the real amount, so the model is told a
+        # megabyte-and-a-bit became 196 characters. Measured: this is the only
+        # assertion in the file that distinguishes them.
+        withheld = len(big) - A.MAX_TOOL_RESULT_CHARS
+        assert f"{withheld:,} more characters not shown" in recorded, (
+            f"the note reports the wrong amount - the second clip counted "
+            f"{len(big) - withheld} characters of difference, not {withheld:,}")
+
     def test_the_clip_happens_before_the_fence(self):
         """The ordering, and it is a security property rather than a style choice.
 
