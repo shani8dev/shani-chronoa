@@ -23278,3 +23278,121 @@ or 32 failures depending on the run. "Fails only with mine" went 5, 0, 10. So
 batch results measure the batch, and the fix was what this file already records
 for `test_skill_workbench.py`: **one process per node**, no shared tmp, no
 module-level GTK state carried between tests.
+
+## Ctrl+K built a palette that was never in the window, and a ceiling that crushed it (2026-10-13)
+
+Three things were asked for: make the command palette appear, make it and the
+model picker scrollable, and put a searchable list of cloud providers and models
+in both. **The first was a layout defect and the second was a GTK-semantics
+defect, and the second would have shipped looking fixed.**
+
+### The palette reported success and drew nothing
+
+`_on_palette_key` set the palette visible, returned `True`, and Ctrl+K "worked".
+Measured on the built window: after the press `visible=True` and **`parent=None`**,
+`in_subtree=False`, `mapped=False` - 50 entries built and **0 containers**. A
+`Gtk.Box` with no parent is not a popover, a popup or a layer; it is a widget with
+nothing to draw on.
+
+Parented to the chat column, inline, directly under the transcript - the
+transcript is `vexpand`, so showing the palette takes its height from the
+conversation rather than from the window. The same idiom as `_question_row`.
+
+**And "somewhere in the window" was too weak an assertion to pin any of this.**
+A palette nested inside any hidden box *is* a descendant of the window and is
+mapped never, because a hidden ancestor takes its children with it. So the test
+asserts the **specific parent**, which is also what makes a mutation for the
+placement measurable at all: `self.set_child(self._palette)` was the original
+mutation and it was **UNMEASURABLE**, because replacing an `ApplicationWindow`'s
+only child aborts the window build and pytest printed no summary. The mutation
+that replaced it parents the palette **inside `_question_row`** - which is
+itself hidden, and which a "is it a descendant" test passes.
+
+### `set_max_content_height` alone is a crush, not a cap
+
+This is the half worth reading, because **the ceiling tests passed the whole time
+the surfaces were broken.** `set_max_content_height(420)` bounds the scroller's
+*request*. It does not make the scroller **ask** for that height, and a
+`Gtk.ScrolledWindow` asks for very little by default - so both surfaces came back
+at their own **58px**, about one row, and the 3-entry palette drew a scrollbar
+over content that fits.
+
+Measured in a presented 320x900 window, identical widgets, only
+`set_propagate_natural_height` differing:
+
+| | flag off | flag on |
+|---|---|---|
+| picker, 6 tiers + 848 models | **58px** | **420px** (upper 47,666) |
+| palette, 50 entries | **58px**, scrolls | **420px**, scrolls |
+| palette, 3 entries | **58px** + **scrollbar** | **126px, no scrollbar** |
+
+`test_the_picker_has_a_scroller_with_a_ceiling` **passes with the flag deleted**
+- measured, it did - so the two are separate mutations and the new test asserts
+the *flag*, not the ceiling.
+
+**Three instruments could not see this, and each was wrong for a reason this
+file already records.** An **unallocated** scroller reports `upper == page_size
+== 0`, so a probe reading the adjustment said "does not overflow" for every case
+including an 848-row list. Offering a **presented** widget 2000px returned
+`page=2000`, because `max-content-height` bounds a request and not an
+allocation - so the cap's own number had to be measured twice, from two
+directions, before either was believable. And a `Gtk.Popover` does not lay out
+its child until it is popped up, so the picker reads `upper=0 page=0` whatever the
+model count: **the height the picker produces in a real popover is not
+established, and is not claimed.** The flag is asserted; the resulting height is
+not.
+
+### One shared cache, because two surfaces could otherwise disagree
+
+`cloud_llm._MODEL_CACHE` is read by the picker and the palette, so they cannot
+answer "which models exist" differently. `cached_models()` returns `([], "")`
+when nothing has been fetched - deliberately ambiguous, which is why
+`models_asked()` exists to separate *"nobody looked"* from *"there are none"*.
+A refusal is cached **with its reason**, and `forget_models()` drops the cache
+on a key change. Fetching runs on a worker with `GLib.idle_add` rebuilding per
+provider, so opening either surface never blocks on HTTP and the list fills as
+answers arrive.
+
+`app.answer-cloud-model` takes `(ss)` rather than being a stateful chip, and is
+refused **by name** for an unknown provider, a blank model, or a provider with no
+`MODEL_SETTINGS` entry - the last of which happens *with* a rebuild so a refused
+choice still saves what the person had before it.
+
+### Four of my own witnesses could not fail, and the mutation run said so
+
+| mutation | what the run reported | why |
+|---|---|---|
+| an unregistered provider is accepted | **survivor**, 7 failed | the witness is caught by *both* provider guards, so removing either leaves it green - the test has to put the name in `MODEL_SETTINGS` **alone** |
+| the model name is saved with its spaces | **mis-named**, 1 failed | `expect` named `test_a_choice_is_written`, which passes an already-trimmed name; the run named the padded test that bit. Correct the name - do not write a test |
+| the palette is parented off the chat column | **unmeasurable** | replacing the window's only child aborts the build |
+| the scroller has no ceiling | **passed with the flag deleted** | `assert cap` is truthy, because GTK's default `max-content-height` is `-1` |
+
+The first two are the same failure this file has recorded several times: **a
+witness list that names tests passing either way reads as coverage while the
+mutation is covered by a different one.** The runner reporting "failed for
+another reason" is the only reason either was noticed.
+
+### And the flake was concurrency, which is the fourth time it has been the answer
+
+The palette probe's original fixed 1200ms deadline became **30 seconds of
+retries** for a window that was never coming, and it failed 1 batch in 7. The
+cause is the bus, not the clock: `ChronoaApplication` hardcodes
+`dev.shani.chronoa`, and `tests/test_slash_menu_opens.py` in the same batch
+registers it, so activation is **forwarded to that owner**. It now builds the
+window the way `do_activate` builds it - one call, the same constructor - and
+presents directly. With `test_slash_menu_opens.py` in the batch: **29 passed**.
+
+**And the mutation run's first two attempts reported 6 of 25 UNMEASURABLE**,
+because a regression batch of mine was hitting the **same broadway display**
+concurrently. Measured rather than assumed: 22 consecutive runs of that one test
+alone, **22 clean**. So the tally is only real when nothing else is on the
+display - the same "concurrency manufactures failures that look exactly like
+defects" this file records for `XDG_RUNTIME_DIR`, `GSETTINGS_BACKEND`,
+`fake_bin`'s `PATH` and the D-Bus name, now in a fifth costume.
+
+`tests/test_cloud_models_are_chooseable.py` (31),
+`tools/mutations/cloud_models.py` (25 mutations, 25 anchors; measured run 5:
+**25 mutations, 25 caught, 0 survivors, 0 equivalent, 0 unmeasurable**, 251s on a
+display of its own - the six UNMEASURABLE of run 4 were display contention, as
+the re-pointed witnesses predicted, and the two corrected witnesses caught the
+two mutations they had been unable to fail).
