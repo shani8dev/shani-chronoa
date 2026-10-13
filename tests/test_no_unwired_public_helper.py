@@ -175,6 +175,61 @@ ALLOWED = {
 _SELF = "test_no_unwired_public_helper.py"
 
 
+
+#: Unreferenced **private** callables. Kept separate from `ALLOWED` because the
+#: bar is different: a private name is allowed to be spare far more often, and
+#: merging the two lists would make the public one look arbitrary.
+#:
+#: Probed by asking what the guard deliberately skips: **0 unreferenced module
+#: constants** of 3557, and 14 unreferenced private functions of 3652.
+PRIVATE_ALLOWED = {
+
+    "_as_declared": "merge.py: remains of `gguf-py`'s typed writer, which this "
+        "module deliberately stopped using - its own docstring records that the "
+        "typed path 'lost 15 of 31 keys on a real Qwen3 file'. The metadata "
+        "section is now copied verbatim via `kv_section_bytes`.",
+    "_probe_writer": "merge.py: the same removed typed-writer path. A throwaway "
+        "GGUFWriter to validate key packing, for a writer nothing calls.",
+
+    "_is_integer_rational": "fmdsp.py: `resample()` chooses its decimation path "
+        "on `up == 1`, not on `down % up == 0` - and it is right to. A 1/2 ratio "
+        "is a rational number but is not pure decimation, so using this would be "
+        "a bug.",
+
+    "_tool_options": "tool_select.py: a one-line accessor for "
+        "`_tool_facts(tool).options`. `ranked()` scores against `facts.options` "
+        "directly (with the `option_df <= 3` rarity guard), so nothing needs the "
+        "accessor. Checked, not assumed: the enum words are read.",
+    "_read_plan_mode": "gui/window.py: one line wrapping `planmode.is_enabled()`, "
+        "which the module already calls directly at three other sites - so the "
+        "reason the docstring gives, 'not through ChronoaConfig', is being "
+        "honoured without the wrapper.",
+
+    "_forward_delay": "skills/bridge_topology.py: reads a bridge's STP forward "
+        "delay. Nothing in that module reads it, and `_read_int` exists there "
+        "only to serve it. STP timers are not meaningful for the single bridge a "
+        "lab network has, so surfacing one would be noise.",
+
+    "_remote": "skills/cloud_files.py: parses `remote:path/to/dir`. No call site "
+        "uses that spelling.",
+    "_udisks": "skills/manage_mount.py: runs `udisksctl status`; the module "
+        "invokes udisksctl itself at its own three sites.",
+    "_lsusb": "senses/devices.py: runs `lsusb`; the module shells out to lsusb at "
+        "its own sites.",
+    "_characteristics": "skills/bluetooth_gatt.py: filters GATT rows to "
+        "characteristics; the module builds its own row lists.",
+    "_numeric": "skills/solve_math.py: result formatting against `_digits()`.",
+    "_type_keys": "ui_driver.py: types text on the best route without checking "
+        "it arrived. Its own docstring says `type_text` does not use it 'because "
+        "it must *verify*', and no caller that only wants 'the keys were sent' "
+        "exists - so this is a spare entry point, not a missing capability.",
+    "_sidecars": "skills/apply_patch.py: reports `.rej` and `.orig`. The report "
+        "is written inline at the call site and is **narrower** - it lists `.rej` "
+        "only, deliberately: a `.orig` is the pre-patch backup, which is good "
+        "news rather than something to worry about.",
+}
+
+
 def _sources():
     """Every file that could hold a reference.
 
@@ -271,8 +326,44 @@ def _defined_public(used):
     return orphans
 
 
+def _defined_private(used):
+    """`{name: "file:line"}` for private callables nothing refers to.
+
+    **One underscore, dunders excluded.** `_read_int` appears in three unrelated
+    modules, so a private name is only ever a candidate within its own file - the
+    collision is the point of the convention.
+    """
+    orphans = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            name = node.name
+            if not name.startswith("_") or name.startswith("__"):
+                continue
+            if any((getattr(d, "id", None)
+                    or getattr(getattr(d, "func", None), "id", None))
+                   in _SKIP_DECORATORS for d in node.decorator_list):
+                continue
+            if used.get(name):
+                continue
+            orphans.setdefault(name, []).append(
+                f"{path.relative_to(ROOT)}:{node.lineno}")
+    return orphans
+
+
 def _orphans():
     return _defined_public(_referenced_names())
+
+
+def _private_orphans():
+    return _defined_private(_referenced_names())
 
 
 # --- the audit ----------------------------------------------------------------
@@ -401,3 +492,63 @@ def test_the_scan_can_still_see_an_intra_module_call():
         assert name not in orphans, (
             f"{name} is referenced only from its own module, and the scan is "
             f"discarding intra-module references again")
+
+def test_no_private_helper_is_called_by_nothing():
+    """**The gap this audit found.** Probing what the public check deliberately
+    skips: 0 unreferenced module constants of 3557, and 14 unreferenced private
+    functions of 3652. The first of those 14 was the bwrap/seccomp decision whose
+    answer was carried by indentation alone."""
+    orphans = _private_orphans()
+    unexpected = sorted(set(orphans) - set(PRIVATE_ALLOWED))
+
+    assert not unexpected, (
+        f"{len(unexpected)} private callable(s) that nothing references:\n"
+        + "\n".join(f"  {name}  ({', '.join(orphans[name])})" for name in unexpected)
+        + "\n\nEither wire it, delete it, or add it to PRIVATE_ALLOWED with a "
+          "reason.")
+
+
+def test_every_private_allowlist_entry_carries_a_reason():
+    without = sorted(name for name, why in PRIVATE_ALLOWED.items()
+                     if not why.strip())
+
+    assert not without, f"PRIVATE_ALLOWED entries with no reason: {without}"
+
+
+def test_both_audits_actually_find_their_allowlisted_orphans():
+    """**The control for a scan that goes blind.**
+
+    `test_no_private_helper_is_called_by_nothing` computes `unexpected` inside the
+    test and asserts it is empty - so neutering that computation to `[]` made the
+    test pass. Worse, the realistic version of the same failure is a *scan* that
+    quietly returns `{}`: the test would then be asserting nothing at all and read
+    as green.
+
+    So both scans are required to find the orphans they are known to contain. If
+    the reference pass loses a directory, the definition walk stops matching, or
+    the dunder filter changes shape, this fails instead of passing quietly.
+    """
+    public, private = _orphans(), _private_orphans()
+
+    missing_public = sorted(set(ALLOWED) - set(public))
+    assert not missing_public, (
+        f"the public scan no longer finds {missing_public}, so it has gone blind - "
+        f"the 'no unwired helper' test would now pass on an empty result")
+
+    missing_private = sorted(set(PRIVATE_ALLOWED) - set(private))
+    assert not missing_private, (
+        f"the private scan no longer finds {missing_private}, so it has gone "
+        f"blind for the same reason")
+
+    # And both are non-trivial: an audit that found nothing at all has stopped
+    # reading the tree, which is indistinguishable from a clean tree.
+    assert len(public) >= 20, f"the public scan found only {len(public)}"
+    assert len(private) >= 10, f"the private scan found only {len(private)}"
+
+
+def test_the_private_allowlist_is_not_stale():
+    orphans = _private_orphans()
+    gone = sorted(set(PRIVATE_ALLOWED) - set(orphans))
+
+    assert not gone, (
+        f"PRIVATE_ALLOWED names that are referenced again: {gone}. Remove them.")
