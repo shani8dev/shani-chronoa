@@ -14,11 +14,31 @@ import pytest
 class TestModelDownloadConsent:
     """`model-download-enabled` is the only setting that causes a download."""
 
-    def test_it_defaults_to_false(self, chronoa_config):
+    def test_it_defaults_to_true(self, chronoa_config):
         # Given: a fresh config with the schema's default
         # When: the consent gate is read
-        # Then: off, because Chronoa must never fetch bytes without being asked
-        assert chronoa_config.model_download_enabled is False
+        # Then: on, because a fresh install that cannot download a speech model
+        # cannot hear anything, and nine provisioning steps each began by
+        # refusing with "Enable 'Model download' in Settings".
+        assert chronoa_config.model_download_enabled is True
+
+    def test_shutting_it_refuses_the_download(self, chronoa_config):
+        """**The fail-closed half, which the default can no longer supply.**
+
+        The default is deliberately `true`, so "it is off" is no longer
+        something a fresh config demonstrates. What still has to hold is that a
+        person who does not want downloads can shut the gate and be refused -
+        which is the invariant the old `test_it_defaults_to_false` was standing
+        in for, and it is asserted here against an explicitly shut key.
+        """
+        from shani_chronoa.stt_provision import _consent
+
+        chronoa_config.set("model-download-enabled", "false")
+        allowed, reason = _consent(chronoa_config)
+
+        assert allowed is False, (
+            "the gate was shut and the download was allowed anyway")
+        assert "turned off" in reason, reason
 
     def test_it_is_a_value_and_not_a_method(self, chronoa_config):
         # A method missing @property is truthy forever, so the settings switch

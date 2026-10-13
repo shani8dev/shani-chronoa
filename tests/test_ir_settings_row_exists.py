@@ -137,11 +137,32 @@ def test_the_row_says_what_it_does(built):
 
 
 def test_the_switch_reads_the_stored_value(built):
-    """Reading, not writing: toggling tests nothing about the read path."""
+    """Reading, not writing: toggling tests nothing about the read path.
+
+    **The expected value is read from the schema, not written down here.** It
+    used to be a literal `False`, which made this a test of the *default* rather
+    than of the read path, and it failed the moment `ir-remote-enabled` was
+    correctly turned on - reporting a broken switch where there was none.
+
+    That is the fourth time this repository has encoded a default as an
+    assertion instead of a behaviour. A default is a choice; the read path is the
+    thing that can have a defect. Comparing against what GSettings says keeps the
+    test honest whichever way the default goes.
+
+    The harness matches rows by exact title and the keyfile backend is fresh, so
+    the stored value here *is* the schema default.
+    """
     row = built["rows"][0]
     if row["kind"] != "SwitchRow":
         pytest.skip("not a switch row")
-    # The keyfile backend starts empty, so the stored value is the schema's
-    # default - which is false.
-    assert row["active"] is False, (
-        "the infrared switch shows a value other than the stored default")
+
+    from gi.repository import Gio
+    from shani_chronoa.config import SCHEMA_ID
+    stored = Gio.Settings.new(SCHEMA_ID).get_boolean("ir-remote-enabled")
+
+    assert isinstance(row["active"], bool), (
+        f"the switch reported {row['active']!r}, which is not a bool")
+    assert row["active"] is stored, (
+        "the infrared switch shows %r but the stored value is %r, so the row does "
+        "not read what it is bound to" % (row["active"], stored))
+
