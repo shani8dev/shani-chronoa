@@ -21027,3 +21027,48 @@ person sees**, and a pattern over text a line break rewrites. `_SECTIONS` holds
 the rendered string, so the claim is asked of the thing it is about - the second
 time this session a pattern read as an absence, after
 `grep "nothing to rewind yet"` on the checkpoint entry.
+
+### The Model servers section cannot be photographed, which is now the third such gap
+
+The fix above is verified by tests and mutations; **it is not verified by a
+picture**, and the reason is worth writing down rather than leaving the commit
+claiming more than it shows.
+
+`_SECTIONS` has six sections in this order, and the third is the one under test:
+
+| # | section | rows |
+|---|---|---|
+| 0 | The brain and speech | 3 |
+| 1 | Conversations and checkpoints | 1 |
+| 2 | Microphone and audio | 3 |
+| 3 | Screen and desktop | 4 |
+| 4 | Optional extras | 8 |
+| **5** | **Model servers** | **3** |
+
+`panel:diagnostics` rendered at **900, 1500 and 2600** pixels tall. Every one
+stops at **section 2** - the last visible heading is *Microphone and audio*, with
+empty space below it - so sections 3, 4 and 5 are never in a capture at any
+height, and the red-pixel scan finds nothing there **because nothing is drawn**,
+not because the rows are green.
+
+That is the third time in this pass that a surface has no picture behind it, and
+it is the same shape as the two already recorded: **the permission prompt has no
+render target at all**, and the organ-strip gap needs a measurement nobody can
+take. The generalisation is that this project's instruments reach the **top** of a
+panel reliably and the bottom never; every defect found in this pass was in the
+part an instrument could reach, which is exactly what the permission-prompt entry
+warned about and did not act on.
+
+**What would close it**, in order:
+
+1. a render target that scrolls the panel's own scroller to a named section, or
+   a `section:<name>` target that builds only that section - the surface already
+   has `panel:` and `page:`, so a third addressing form is the gap;
+2. **and then** a check on every section that `common` marks scrollable, so
+   "the bottom of this panel has never been looked at" cannot recur silently -
+   the same population sweep the checkpoint entry asked for, applied to
+   *position* rather than to status vocabulary.
+
+Until (1) exists, **the honest claim for this commit is "verified by 46 tests and
+7 mutations, not by a render"**, and the red-pixel count on this panel means
+nothing below the fold.
