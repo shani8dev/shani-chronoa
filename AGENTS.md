@@ -20747,3 +20747,44 @@ So the change needs, in this order:
 Changing the constant first and rendering afterwards would be the same mistake as
 the one this session already made once - forcing a render size and checking byte
 counts, which produced a picture of a white rectangle and passed every check.
+
+
+## The constrained-decoding caution now has two independent sources, and the tool still truncates abstracts (2026-12)
+
+Ran the sweep through the shipped `web_search(source="arxiv")` - the entry point
+built for exactly this - rather than a hand-rolled script, which is the point of
+having built it. Six queries over the open question **"why do three fine-tunes
+move a tool-calling model from 4/5 to 0/3 at any scale?"**, and the answer is not
+in the LoRA literature; it is in the constrained-decoding line.
+
+**The one paper worth naming.** *From Hallucination to Structure Snowballing: The
+Alignment Tax of Constrained Decoding in LLM Reflection* (arXiv:**2604.06066**,
+cs.CL, Hongxu Zhou, 2026). "Alignment tax" is the name for a cost this repository
+had as a **single** source: `AGENTS.md` already recorded AdapTrack
+(arXiv:2510.17376) quoting "constrained decoding distorts the model's output
+intent... up to 7.84% on HumanEval, 6.42% on MBPP, 38.93% on API completion".
+2604.06066 is a **second, unrelated method reaching the same place from a
+different direction** - and two independent sources is what turns a caution into
+a measured position rather than one paper's result.
+
+**So the recommendation is unchanged and better supported.** The three-arm
+experiment the file already prescribes - base; grammar-constrained; and
+**format-request-without-enforcement** as the control - is the right shape for a
+second reason: without the third arm a gain is attributable to the grammar when
+arXiv:2607.18476 says the register alone does the work. That arm is the whole
+experiment, and it is still not run.
+
+**What I verified and what I did not, stated rather than implied.** Verified:
+the titles, authors, years, categories and URLs of six papers, read out of the
+real feed. **Not verified: any abstract, any number, any result.** `_parse_arxiv`
+puts the bibliographic facts first and the abstract is a **truncated tail** - a
+deliberate design decision in the module, not a defect - so everything above the
+title line in that paper's entry is what the tool exposes and everything below it
+I have not read. Citing a figure from 2604.06066 would be citing a title.
+
+**Two more from the same sweep, both named and neither read:**
+*Rethinking Inter-LoRA Orthogonality in Adapter Merging* (arxiv 2510.03262v2) -
+already cited for the chimera retraction, so that claim now stands on the paper
+rather than on a summary - and *Crowded in B-Space* (2604.16826), the one the
+111x delta-norm spread was measured against. Both were found by the shipped tool
+in about a second, which is the return on having built it.
