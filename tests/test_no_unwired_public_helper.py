@@ -273,6 +273,18 @@ _LEARNING_NAMES = {
 }
 
 
+#: Unreferenced **`@property` / `@cached_property` members**.
+#:
+#: These are the last declaration class the audit skipped, and skipping them was
+#: how `guardrail.should_reask` and `should_stop` survived - a property is read as
+#: an attribute (`result.should_stop`), never called, so reference *counting*
+#: against `name(` never sees it.
+#:
+#: No separate allowlist: all 117 are read. The dict exists so a future entry has
+#: to carry a reason, and so the empty result is an assertion rather than a shrug.
+PROPERTY_ALLOWED: dict = {}
+
+
 def _sources():
     """Every file that could hold a reference.
 
@@ -421,8 +433,46 @@ def _defined_classes(used):
     return orphans
 
 
+def _defined_properties(used):
+    """`{name: "file:line"}` for property members nothing reads.
+
+    **A property is read, never called**, so the name is looked up bare: the
+    reference pass already collects `ast.Attribute` attrs, so `result.should_stop`
+    is found the same way a bare mention would be. A reference-count against
+    `name(` finds none of them, which is how this class was missed.
+    """
+    orphans = {}
+    for path in sorted(PKG.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(errors="replace"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for cls in ast.walk(tree):
+            if not isinstance(cls, ast.ClassDef):
+                continue
+            for stmt in cls.body:
+                if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if not any((getattr(d, "id", None)
+                            or getattr(getattr(d, "func", None), "id", None))
+                           in ("property", "cached_property")
+                           for d in stmt.decorator_list):
+                    continue
+                if used.get(stmt.name):
+                    continue
+                orphans.setdefault(stmt.name, []).append(
+                    f"{path.relative_to(ROOT)}:{stmt.lineno}")
+    return orphans
+
+
 def _orphans():
     return _defined_public(_referenced_names())
+
+
+def _property_orphans():
+    return _defined_properties(_referenced_names())
 
 
 def _class_orphans():
@@ -658,4 +708,124 @@ def test_the_class_audit_can_still_see_learning_py():
     assert in_learning, (
         "no unreferenced class in learning.py at all - either the concurrent "
         "session wired them, or this audit has stopped reading that file")
+
+def test_no_property_member_is_unread():
+    """**The class that hid two verdicts.** `guardrail.should_reask` and
+    `should_stop` were both declared, both reachable in principle, and both read
+    by nobody - because a property is read as an attribute, so nothing that counts
+    `name(` ever saw them.
+
+    All 117 are read today, so this asserts an empty allowlist rather than
+    tolerating a list.
+    """
+    orphans = _property_orphans()
+    unexpected = sorted(set(orphans) - set(PROPERTY_ALLOWED))
+
+    assert not unexpected, (
+        f"{len(unexpected)} property member(s) nothing reads:\n"
+        + "\n".join(f"  {name}  ({', '.join(orphans[name])})" for name in unexpected))
+
+
+def test_the_property_scan_finds_a_property_nothing_reads(tmp_path, monkeypatch):
+    """**The control that makes an empty result mean something - and it has to
+    drive the scan itself.**
+
+    The first version of this parsed `guardrail.py` directly and only compared
+    its findings against the scan's. **Three mutations survived that**: the scan
+    skipping `guardrail.py` entirely, the scan returning `{}`, and the allowlist
+    gaining an entry the scan could not justify - all three passed, because
+    nothing here asked the scan to find anything. Reading a known-good file by
+    hand proves the file has properties, not that the scan looks.
+
+    So this builds a package with a property nothing references, points `PKG` at
+    it, and requires the scan to report that property by name. A scan that is
+    blind, or that skips a file, or that returns nothing, fails here.
+    """
+    module = tmp_path / "shani_chronoa" / "probe.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "class Probe:\n"
+        "    @property\n"
+        "    def a_property_nothing_reads(self):\n"
+        "        return 1\n"
+        "\n"
+        "    @property\n"
+        "    def also_unread(self):\n"
+        "        return 2\n",
+        encoding="utf-8")
+    # **A second module, named after the file the first version of this control
+    # read by hand.** A scan carrying `if path.name == "guardrail.py": continue`
+    # passes everything else here, because nothing else mentions that name - so
+    # the file that was the observed blind spot has to be the one the scan is
+    # asked about. Two modules, and the scan has to see both.
+    named = tmp_path / "shani_chronoa" / "guardrail.py"
+    named.write_text(
+        "class Probe:\n"
+        "    @property\n"
+        "    def behind_the_skipped_name(self):\n"
+        "        return 3\n",
+        encoding="utf-8")
+    # `_defined_properties` formats each finding as `path.relative_to(ROOT)`, so
+    # ROOT has to move with PKG - pointing only PKG at a temp tree raises
+    # ValueError rather than reporting anything.
+    monkeypatch.setattr(sys.modules[__name__], "PKG", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+
+    # An empty reference map: nothing is read, so both properties are orphans.
+    found = _defined_properties({})
+
+    assert found, (
+        "the property scan found nothing in a package that declares two unread "
+        "properties - it is blind, and an empty result would read as clean")
+    assert "a_property_nothing_reads" in found, (
+        "the scan walked the package but missed a plain @property: %s" % sorted(found))
+    assert "also_unread" in found, sorted(found)
+    assert "behind_the_skipped_name" in found, (
+        "the scan skipped a module by name - %s" % sorted(found))
+
+
+def test_the_property_scan_skips_nothing_it_should_see(tmp_path, monkeypatch):
+    """The negative control for the one above: a property that *is* referenced
+    must not be reported.
+
+    Without this, "the scan finds a property" would also be satisfied by a scan
+    that reports every property it sees, unread or not - which would make the
+    real test vacuous in the other direction.
+    """
+    module = tmp_path / "shani_chronoa" / "probe.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "class Probe:\n"
+        "    @property\n"
+        "    def read_by_someone(self):\n"
+        "        return 1\n",
+        encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "PKG", tmp_path)
+    monkeypatch.setattr(sys.modules[__name__], "ROOT", tmp_path)
+
+    assert _defined_properties({"read_by_someone": ["probe.py"]}) == {}, (
+        "a property that is referenced was reported as unread")
+    assert _defined_properties({}) , "the control above needs the scan to see it"
+
+
+def test_every_property_allowlist_entry_is_still_needed():
+    """**An allowlist entry nothing reports is a lie about why.**
+
+    `PROPERTY_ALLOWED` is empty today, so this passes - and it is the test that
+    stops it from becoming a place to park names. An entry added there silences
+    the real scan without any check that there was ever a finding, which is the
+    failure a reason-required list still allows.
+    """
+    orphans = _property_orphans()
+    stale = sorted(name for name in PROPERTY_ALLOWED if name not in orphans)
+
+    assert not stale, (
+        "these PROPERTY_ALLOWED entries correspond to nothing the scan reports, "
+        "so they suppress nothing and only misdescribe the tree: %s" % stale)
+
+def test_every_property_allowlist_entry_carries_a_reason():
+    without = sorted(name for name, why in PROPERTY_ALLOWED.items()
+                     if not why.strip())
+
+    assert not without, f"PROPERTY_ALLOWED entries with no reason: {without}"
 
