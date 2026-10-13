@@ -20563,3 +20563,44 @@ content intact.
 change was a byte count and an exit status, and all of them were satisfied by a
 picture of a white rectangle. Nothing short of looking at the image would have
 caught it, and the render batch reported `PASS` for both.
+
+## Looking at intermediate widths: the sidebar hyphenates "Meetings" (2026-10-13)
+
+With the harness able to render above 460 for the first time, the next useful
+thing was the width *between* the two layouts the app collapses at.
+
+Rendered `state:composer-question` at **760x700** (the target is a full window,
+not a bare widget):
+
+- 1024 wide: sidebar fine, title "Shani Chronoa", rail present.
+- **760 wide: the sidebar breaks single-word titles mid-word, with a hyphen.**
+
+      Meetin-
+      gs
+
+`sidebar.py:230` builds every row as `Adw.ActionRow(title=title)` and there is
+**no `set_ellipsize` anywhere in the file** (measured: zero occurrences).
+libadwaita wraps a title that does not fit, and Pango breaks a word with a
+hyphen when it cannot break at a space - so "My files" wraps at the space and
+looks fine, while **"Meetings" does not fit and comes out as two lines**. One
+word, one panel, and it is the only row that breaks.
+
+**Why it survived**: every render in this repo's history was 460 wide or the
+window's own 460, and at 460 the sidebar is **collapsed** - so the rows whose
+titles are long enough to break were never on screen in a picture. The defect
+was not invisible; it was *unreachable by the only instrument available*.
+
+**Not fixed here**, deliberately. The fix is small and located -
+`row.set_title_widget(Gtk.Label(label=title, ellipsize=Pango.EllipsizeMode.END,
+xalign=0))` in place of the title string - but it needs its own regression test
+at a width that actually breaks it, and a mutation run, and this session ended
+before I could do either properly. A one-line visual change with no witness is
+exactly the thing this file keeps warning about.
+
+**Also recorded, from the same render**: `state:composer-question` is
+indistinguishable from `state:composer-empty` - no question, no prompt, just the
+empty state. Either the builder does not put a pending question on screen or the
+target is misnamed, and **no render target exists for a permission prompt at
+all** (`--list states` shows only `strip-*`, `composer-*` and `organ-*`). So the
+one moment where the app asks a person to trust it with an action has never had a
+picture, which is a gap in the harness rather than in the product.
