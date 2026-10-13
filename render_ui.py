@@ -683,8 +683,28 @@ def on_activate(app):
         # WIDTHxHEIGHT and every glyph comes out scaled - legible, and wrong.
         window.set_default_size(WIDTH, HEIGHT)
         window.set_size_request(WIDTH, HEIGHT)
-        GLib.timeout_add(1800, lambda: _render(window, WIDTH, HEIGHT, OUT))
-        GLib.timeout_add(3200, lambda: (app.quit(), False)[1])
+        # **3500ms, not 1800, and for the same reason `panel:` uses it.** The
+        # main window seeds every panel's health dot on idle after it maps -
+        # twenty-odd `systemctl`/`busctl`/`gsettings` probes, measured at about two
+        # seconds - and a `main:*` page is that same window.
+        #
+        # At 1800ms this branch photographed a window that had not finished
+        # looking like itself, and **the sweep reported it as a pass**: a valid
+        # PNG is written whatever was on it. Measured by decoding the alpha
+        # channel rather than by looking: `page:main:conversation` was **96.2%
+        # fully transparent with 0.2% opaque**, `main:panels` and `main:listening`
+        # were ~99% *partially* transparent, and a third-party viewer composited
+        # the first onto white and showed a blank page. `page:settings:*` came out
+        # **100% opaque** from the same code, because `SettingsWindow` does not
+        # seed panels - which is what made it a settle problem rather than a
+        # rendering one.
+        #
+        # And `page:main:conversation` and `page:main:conversations` came back
+        # **byte-identical at 24,888 bytes each**: two pages, one photograph, both
+        # counted as passes. A short capture that still writes a file is worse
+        # than NO NODE, because it looks like a render.
+        GLib.timeout_add(3500, lambda: _render(window, WIDTH, HEIGHT, OUT))
+        GLib.timeout_add(5600, lambda: (app.quit(), False)[1])
         return None
     if WHICH.startswith("state:"):
         name = WHICH.split(":", 1)[1]

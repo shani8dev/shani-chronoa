@@ -19223,3 +19223,75 @@ builds the tooltip the way the engine, speech-in and model-file rows all do.
 this" is why this page can be audited at all - `source` is a field on every
 `_Engine`, and the Kokoro and Piper rows carry `kokoro-tts-enabled` and
 `PiperTTS.voice_path` for the same reason. It was in the wrong place, not wrong.
+
+## `page:` targets were rendering a window that had not finished looking like itself (2026-10-13)
+
+The first sweep of the 29 registry-declared pages reported **8 PASS, 2 FAIL** and
+every main-window page among them looked wrong in a way that had no name.
+
+**Measured, by decoding the alpha channel rather than by looking at the picture:**
+`page:main:conversation` was **96.2% fully transparent with 0.2% opaque**;
+`main:panels` and `main:listening` were ~99% *partially* transparent. A
+third-party viewer composites transparent PNG onto white, so `main:conversation`
+**displayed as a blank page** - which is how this was found, by expecting a
+conversation and getting white.
+
+The sharpest evidence is a hash. `page:main:conversation` and
+`page:main:conversations` came back **byte-identical, 24,888 bytes each, sha
+`1e124f5db6d6`**. Two different pages, one photograph, both counted as passes,
+because **a valid PNG is written whatever was on it**. A short capture that still
+writes a file is worse than `NO NODE`, because it looks like a render.
+
+**Cause, and it is a settle problem rather than a rendering one:** the `page:`
+branch settled at **1800ms**. The main window seeds every panel's health dot on
+idle after it maps - twenty-odd `systemctl`/`busctl`/`gsettings` probes, about two
+seconds. `page:settings:*` came back **100% opaque from the same code** because
+`SettingsWindow` does not seed panels. That asymmetry is what identified the
+window's own startup cost as the thing being missed.
+
+Raised to **3500ms**, matching what `panel:` had already been raised to for the
+same reason. After the fix:
+
+| page | before | after | alpha after |
+|---|---|---|---|
+| `main:conversation` | 24,888 B, 0.2% opaque | **151,142 B** | **100% opaque** |
+| `main:conversations` | 24,888 B, 0.2% opaque | **150,071 B** | **100% opaque** |
+| `main:listening` | 30,636 B | **147,821 B** | **100% opaque** |
+| `settings:system` | **FAIL**, no file | **50,322 B** | **100% opaque** |
+
+and the two main pages now hash **differently** (`365c4ff4a79e` vs
+`58bb873cf347`), so they are two pictures again instead of one filed twice.
+
+**A capture that photographs less than the target is a false pass**, and the
+sweep's PASS column cannot see it: it is written by "a file appeared". Any future
+renderer here that can settle early should be judged on **alpha coverage and
+sha-distinctness across pages**, not on bytes on disk.
+
+### Two harness bugs found on the way, one of them the *same* bug twice
+
+- **"No free broadway display in :90-:120" on an empty pool.** `kill` is
+  asynchronous: the socket file goes at once but the listening socket does not, so
+  `recycle_display` reached the number it had just released, saw its port still
+  held, skipped it, and repeated across neighbouring numbers while the kernel
+  finished tearing down. Measured on a pool with **0 daemons, 0 ports held and
+  three fresh `:90`/`:91`/`:92` starts working** - the shape of a race, not a
+  shortage. `recycle_display` now waits for the port to clear first, and a number
+  that will not come up costs **4s instead of 10s** so one slow number cannot eat
+  a sweep that has 31 to choose from.
+- **`[[ -n $VERBOSE ]]` under `set -uo pipefail`**, added while making failures
+  quiet, is a **fatal unbound variable**, and this script dies on an unset name
+  rather than on a false one. It is the **same defect as the `$num`-read-before-
+  assignment bug this file already documents**, written a second time eight
+  commits later. Caught before it ran a sweep by `bash -c 'set -u; [[ -n $VERBOSE ]]'`;
+  `VERBOSE` is now declared under the `set` line and read as `${VERBOSE:-}`.
+  **Both times this was found by executing, and `bash -n` passed on the broken
+  version both times.**
+
+### `page:main:quick-ask` fails in the harness and works in the product
+
+`ChronoaWindow.show_page("quick-ask")` is implemented - it looks up and activates
+`app.quick-ask` - and `ChronoaApplication` registers that action
+(`app/application.py:1286`). It returns `False` in the renderer only because the
+render builds a bare `Gtk.Application` that never registers it. **A FAIL here is
+the harness's, not the page's**, and the renderer already has a working `quick-ask`
+target that builds the real window.

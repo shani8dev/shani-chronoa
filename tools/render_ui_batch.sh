@@ -44,6 +44,16 @@
 
 set -uo pipefail
 
+# **A verbosity knob has to exist before `set -u` can be argued with.** This
+# script dies on an unset name, not on a false one, so reading `$VERBOSE` to
+# decide whether to explain a failed display is only safe if `VERBOSE` is always
+# set. Adding the read first and the assignment second produced the identical
+# fatal unbound-variable bug this file already documents twice - once for `$num`
+# read before assignment, and once in this very edit, caught by running
+# `bash -c 'set -u; [[ -n $VERBOSE ]]'` before trusting it. Declared here so the
+# question has an answer on the first line that asks it.
+VERBOSE="${VERBOSE:-}"
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(dirname "$HERE")"
 RENDERER="$REPO/render_ui.py"
@@ -117,8 +127,26 @@ recycle_display() {
     # with it - 23 of 34 panels, then nothing, and the summary never printed. It
     # shipped in 512d4f2 and only running it found it, which is this repository's
     # own rule about the cost of reading a diff instead of running the thing.
+    local old_num="${DISP#:}" waited=0
     [[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
     START_DISPLAY=""
+    # **Wait for the port to clear before asking for a display.**
+    #
+    # `kill` is asynchronous: the socket file goes immediately but the listening
+    # socket does not, so `acquire_display` could reach the number it had just
+    # released, see its port still held, skip it - and repeat that for a handful
+    # of neighbouring numbers while the kernel finished tearing the old one down.
+    # Measured as an intermittent *"no free broadway display in :90-:120"* on a
+    # pool with **0 daemons, 0 ports held and three fresh starts working**, which
+    # is the shape of a race rather than a shortage.
+    if [[ $old_num =~ ^[0-9]+$ ]]; then
+        local port=$((BROADWAY_PORT_BASE + old_num))
+        while ss -tln 2>/dev/null | grep -qE ":${port}[[:space:]]"; do
+            sleep 0.1
+            waited=$((waited + 1))
+            [[ $waited -gt 50 ]] && break
+        done
+    fi
     acquire_display
 }
 
@@ -206,9 +234,14 @@ start_display() {
     while [[ ! -e "/run/user/$(id -u)/broadway$((num + 1)).socket" ]]; do
         sleep 0.2
         waited=$((waited + 1))
-        [[ $waited -gt 50 ]] && {
-            echo "broadway :$num did not come up:" >&2
-            sed 's/^/    /' "$SANDBOX/broadway.log" >&2
+        # 4s, not 10. A number that cannot be taken costs this much before the
+        # loop moves on, and with a 31-wide pool a slow number used to be able to
+        # cost minutes of a sweep that had plenty of room.
+        [[ $waited -gt 20 ]] && {
+            [[ -n ${VERBOSE:-} ]] && {
+                echo "broadway :$num did not come up:" >&2
+                sed 's/^/    /' "$SANDBOX/broadway.log" >&2
+            }
             return 1
         }
     done
