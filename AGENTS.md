@@ -19434,3 +19434,68 @@ enforcement-shaped orphan in the tree, and it was **mine**.
 `cultivation.py` is modified and uncommitted, carrying another session's
 ladder-balanced experiment result. **Not staged and not committed** - it is their
 in-flight work.
+
+## The poisoned-display bug, reintroduced three lines below its own explanation (2026-10-13)
+
+`acquire_display`'s comment block explains, in detail, that deleting a
+`broadway*.socket` that a **live** daemon still owns makes a display number
+**permanently unusable** - invisible to the socket check, held by the port check,
+skipped by every future sweep. It names four numbers it poisoned doing that
+(`:94 :96 :109 :112`).
+
+**Three lines further down, the same function did exactly that on every failed
+start:**
+
+```bash
+if start_display "$n" >/dev/null 2>&1; then ... fi
+[[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
+START_DISPLAY=""
+rm -f "$sock"          # <-- deletes the socket of a daemon that may simply be slow
+```
+
+`start_display` gives a daemon **4s**. On a loaded box that is not always enough,
+and a daemon arriving at 4.1s had its socket unlinked *while it was alive* -
+which is the precise mechanism the comment above had already diagnosed and
+recorded a fix for.
+
+**Measured, on the first sweep of the 17 `setup:*` pages** (the last surface class
+in this audit that had never once been rendered):
+
+```
+PASS  page:setup:brain        30265 bytes
+FAIL  page:setup:cloud-keys   no file written     no free broadway display in :90-:120
+FAIL  page:setup:done         no file written     (same, and the same for all 15 after)
+```
+
+One page, then total pool exhaustion - and the pool was **0 daemons and 0 ports
+held** the moment the sweep exited. So this was not a shortage at all; **one slow
+start had cascaded into all 31 numbers**, because each attempt poisoned the next
+number it tried. The 16 FAILs were a single defect wearing a resource warning.
+
+**The fix is one condition, and it is the condition the port check already
+implies.** The socket is removed only once the port is *genuinely* free; if the
+port never frees, the file stays and the port check keeps that number out on its
+own. A live daemon is a thing to wait for, not a file to delete. `recycle_display`
+now shares the same `wait_port_free()` rather than carrying its own copy of the
+loop, so the two paths cannot drift - which is how the failure path ended up
+without the wait the recycle path had.
+
+Verified on the four pages that had cascaded, which are the smallest honest test
+of the claim: **4 rendered, 0 not** (`brain` 30,265 B, `cloud-keys` 129,834 B,
+`ears` 44,057 B, `done` 25,932 B), against 1 rendered and 3 pool-exhausted before.
+
+**The lesson is the one this file has recorded about itself four times, in a new
+costume: a fix whose explanation outlives it is a hazard.** The comment was
+correct, specific and attributed to measured failures - and it sat eleven lines
+above code doing the thing it warned against. **A paragraph explaining why
+something is dangerous is not a control**, and the only control here was `rm -f`
+being on the failure path at all.
+
+### And a sweep that reports "no free display" is reporting a *harness* fault
+
+Sixteen pages that "do not render" is the sentence this audit would otherwise
+have written down, and `AGENTS.md` already carries the standing warning about it
+(*"a page that does not render is not necessarily a broken page"*). That warning
+is right and it is also **not enough**: it says don't believe the FAIL, and the
+right response to "don't believe the FAIL" is to find out why, not to file it.
+The cause here was a defect in the thing that produced the FAIL.

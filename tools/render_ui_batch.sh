@@ -127,7 +127,7 @@ recycle_display() {
     # with it - 23 of 34 panels, then nothing, and the summary never printed. It
     # shipped in 512d4f2 and only running it found it, which is this repository's
     # own rule about the cost of reading a diff instead of running the thing.
-    local old_num="${DISP#:}" waited=0
+    local old_num="${DISP#:}"
     [[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
     START_DISPLAY=""
     # **Wait for the port to clear before asking for a display.**
@@ -139,14 +139,7 @@ recycle_display() {
     # Measured as an intermittent *"no free broadway display in :90-:120"* on a
     # pool with **0 daemons, 0 ports held and three fresh starts working**, which
     # is the shape of a race rather than a shortage.
-    if [[ $old_num =~ ^[0-9]+$ ]]; then
-        local port=$((BROADWAY_PORT_BASE + old_num))
-        while ss -tln 2>/dev/null | grep -qE ":${port}[[:space:]]"; do
-            sleep 0.1
-            waited=$((waited + 1))
-            [[ $waited -gt 50 ]] && break
-        done
-    fi
+    [[ $old_num =~ ^[0-9]+$ ]] && wait_port_free "$old_num"
     acquire_display
 }
 
@@ -169,6 +162,24 @@ recycle_display() {
 #: `start_display` waiting for its socket, so a wrong base costs a wasted
 #: attempt and not a wrong render.
 BROADWAY_PORT_BASE=8080
+
+# Wait for `<display>`\'s listening socket to actually go away.
+#
+# `kill` is asynchronous, so the socket *file* can be gone while the port is
+# still bound, and the reclaim that treats that as "free" is what poisons a
+# number. `ss -tln` shows the port; this waits for it. Returns 0 once the port
+# is clear, 1 if it is still held after ~5s - and **a caller that gets 1 must
+# leave the socket file alone**, because a number whose port is still bound is
+# correctly skipped by `acquire_display` and does not need removing.
+wait_port_free() {
+    local num="$1" waited=0 port=$((BROADWAY_PORT_BASE + $1))
+    while ss -tln 2>/dev/null | grep -qE ":${port}[[:space:]]"; do
+        sleep 0.1
+        waited=$((waited + 1))
+        [[ $waited -gt 50 ]] && return 1
+    done
+    return 0
+}
 
 acquire_display() {
     local n sock port
@@ -216,9 +227,26 @@ acquire_display() {
         fi
         # Not free after all - the daemon printed why and its socket never
         # appeared. Reap it and move on rather than abandoning the sweep.
+        # **This `rm` was the second half of a bug the comment above already
+        # describes having fixed once.** `start_display` gives a daemon 4s; on a
+        # loaded box that is not always enough, and a daemon that arrives at 4.1s
+        # had its socket file deleted here *while it was alive*. From that moment
+        # the number is invisible to the socket check and held by the port check,
+        # so `acquire_display` skips it forever - the exact "permanently poisoned
+        # number" this file already recorded for `:94 :96 :109 :112`.
+        #
+        # Measured: a 17-target sweep got **one** page (`setup:brain`, 30,265
+        # bytes) and then `no free broadway display in :90-:120` for every
+        # remaining one, on a pool that was **0 daemons and 0 ports held** the
+        # moment the sweep exited. One slow start had cascaded into all 31
+        # numbers, because each failed attempt poisoned the next.
+        #
+        # So the socket is removed only once the port is genuinely free. If it
+        # never frees, the file stays and the port check keeps the number out on
+        # its own - a live daemon is a thing to wait for, not a file to delete.
         [[ -n $START_DISPLAY ]] && kill "$START_DISPLAY" 2>/dev/null
         START_DISPLAY=""
-        rm -f "$sock"
+        wait_port_free "$n" && rm -f "$sock"
     done
     echo "no free broadway display in :90-:120" >&2
     return 1
