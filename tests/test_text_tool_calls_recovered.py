@@ -16,6 +16,19 @@ TOOLS = [{"type": "function", "function": {"name": "browse", "parameters": {
     "type": "object", "properties": {"action": {"type": "string"}, "url": {"type": "string"},
                                      "timeout": {"type": "number"}, "visible": {"type": "boolean"}}}}}]
 
+# The two tools the balanced-adapter ladder found the `function` spelling on.
+# Without them in the offer, `recover_tool_calls` refuses the call - which is the
+# offered-set rule working, and is why the first version of these tests failed
+# against a fixture offering only `browse`.
+TOOLS += [
+    {"type": "function", "function": {"name": "reminders", "parameters": {
+        "type": "object", "properties": {"number": {"type": "integer"},
+                                         "text": {"type": "string"},
+                                         "due": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "get_weather", "parameters": {
+        "type": "object", "properties": {"place": {"type": "string"}}}}},
+]
+
 XML = ("I'll open the site.\n<tool_call>\n<function=browse>\n<parameter=action>\nnavigate\n</parameter>\n"
        "<parameter=url>\nhttps://blazedemo.com/\n</parameter>\n<parameter=timeout>\n30\n</parameter>\n"
        "<parameter=visible>\ntrue\n</parameter>\n</function>\n</tool_call>")
@@ -225,3 +238,66 @@ class TestAFunctionBlockMustParseWhole:
         assert len(out["tool_calls"]) == 1, (
             "a blank line between parameters was treated as stray prose - the "
             "real template emits them, which is why the check is on stripped text")
+
+
+# ---------------------------------------------------------------------------
+# `function` as a third spelling of the name field, found by the balanced-adapter
+# ladder rather than invented.
+# ---------------------------------------------------------------------------
+
+FLAT = '{"arguments": {"number": 1, "text": "Call mom"}, "function": "reminders"}'
+NESTED = '{"function": {"name": "get_weather", "arguments": {"place": "Pune"}}}'
+
+
+def test_the_flat_function_key_names_the_tool():
+    """**Measured, not guessed.** The balanced-adapter ladder - three lumen
+    adapters with their 111x delta-norm spread removed - answered "make a
+    reminder" with exactly this object: right tool, right arguments, and the call
+    left as text because only `name` was read. `function` is OpenAI's own wrapper
+    key, so it is a spelling a small model converges on and not a private one.
+    """
+    out = recover_tool_calls({"role": "assistant", "content": FLAT}, TOOLS)
+    calls = out.get("tool_calls") or []
+    assert calls, "the flat `function` spelling was left as text"
+    assert calls[0]["function"]["name"] == "reminders"
+    assert json.loads(calls[0]["function"]["arguments"]) == {
+        "number": 1, "text": "Call mom"}
+
+
+def test_the_nested_openai_wrapper_is_unwrapped():
+    """`{"function": {"name": ...}}` is the same call with its name nested.
+
+    Handling the flat form and not the nested one would recover half of the
+    spellings a model actually emits, which reads as coverage while missing the
+    case that has a `name` inside.
+    """
+    out = recover_tool_calls({"role": "assistant", "content": NESTED}, TOOLS)
+    calls = out.get("tool_calls") or []
+    assert calls, "the nested wrapper was left as text"
+    assert calls[0]["function"]["name"] == "get_weather"
+
+
+def test_a_function_key_naming_a_tool_that_was_not_offered_stays_text():
+    """The offered-set rule is the safety property and it is unchanged.
+
+    A new key must not become a new way to call a tool nobody offered - which is
+    the whole reason this function gates on `offered` at all.
+    """
+    text = '{"arguments": {"path": "/"}, "function": "delete_everything"}'
+    assert recover_tool_calls({"role": "assistant", "content": text}, TOOLS) \
+        == {"role": "assistant", "content": text}
+
+
+def test_a_function_key_that_is_not_a_tool_name_stays_text():
+    """`{"function": "get_datetime"}` names a tool; `{"function": 7}` does not.
+
+    The nested branch reads `name` out of a dict, so the flat branch must refuse
+    a non-string too - a dict, a list and a number are all things a malformed
+    reply carries.
+    """
+    for bad in ('{"arguments": {}, "function": 7}',
+                '{"arguments": {}, "function": ["get_weather"]}',
+                '{"arguments": {}, "function": {"nested": "get_weather"}}',
+                '{"arguments": {}, "function": null}'):
+        out = recover_tool_calls({"role": "assistant", "content": bad}, TOOLS)
+        assert "tool_calls" not in out, f"{bad} was turned into a call"

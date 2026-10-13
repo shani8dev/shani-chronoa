@@ -1743,8 +1743,32 @@ def recover_tool_calls(message: dict, tools) -> dict:
             obj = json.loads(block)
         except ValueError:
             continue
-        name = obj.get("name") if isinstance(obj, dict) else None
-        args = obj.get("arguments", obj.get("parameters", {})) if isinstance(obj, dict) else None
+        # **`function` is the third spelling of the name field, and it was
+        # measured rather than guessed.** The balanced-adapter ladder
+        # (`tools/ladder_balanced.py`, three lumen adapters with their 111x delta
+        # norm spread removed) got a model that answered "make a reminder" with
+        # `{"arguments": {...}, "function": "reminders"}` - correct tool, correct
+        # arguments, and the call was left as text because only `name` and
+        # `parameters` were read. `function` is OpenAI's own wrapper key, so it
+        # is a spelling a small model converges on and not a private one.
+        # This is arXiv:2604.14862's finding from the other side: the same
+        # object under a different key is a different answer.
+        name, args = None, {}
+        if isinstance(obj, dict):
+            name = obj.get("name")
+            if name is None:
+                # The OpenAI wrapper nested: {"function": {"name": ..., ...}}
+                nested = obj.get("function")
+                name = nested.get("name") if isinstance(nested, dict) \
+                    else nested
+            args = obj.get("arguments", obj.get("parameters", {}))
+        # **Only a string may name a tool.** `name in offered` raises on an
+        # unhashable one, and a reply carrying `{"function": ["get_weather"]}`
+        # would take the whole turn down at the point the model has already
+        # answered - measured by a test built for it after the first version of
+        # this did exactly that.
+        if not isinstance(name, str) or not isinstance(args, dict):
+            name, args = None, {}
         if name in offered and isinstance(args, dict):
             calls.append({"id": f"recovered-{len(calls)}", "type": "function",
                           "function": {"name": name, "arguments": json.dumps(args)}})
