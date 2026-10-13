@@ -28,6 +28,9 @@ _SCHEMA = {
         "parameters": {"type": "object", "properties": {
             "device": {"type": "string", "description": "Camera device, e.g. /dev/video0."},
             "seconds": {"type": "number", "description": "How long to record (default 5, max 60)."},
+            "infrared": {"type": "boolean",
+                         "description": "Record in infrared from an IR camera rather than in "
+                                        "ordinary light. Refuses when none is attached."},
         }, "required": []},
     },
 }
@@ -52,6 +55,17 @@ def _run(arguments: dict) -> str:
         seconds = max(1, min(float(seconds), 60))
     except (TypeError, ValueError):
         return f"Could not use record length {seconds!r}."
+    infrared = arguments.get("infrared")
+    if not isinstance(infrared, bool):
+        infrared = False
+    if infrared:
+        # **The same refusal take_photo uses, for the same reason:** a device the
+        # caller named is never silently replaced, and the infrared node is chosen
+        # rather than assumed.
+        from shani_chronoa.skills import take_photo as _photo
+        device, refusal = _photo._ir_node(device if arguments.get("device") else "")
+        if refusal:
+            return refusal
     if not Path(device).exists():
         return f"No camera at {device}. Reading a camera needs the device to be present."
     if not shutil.which("ffmpeg"):
@@ -64,9 +78,17 @@ def _run(arguments: dict) -> str:
     while target.exists():
         target = out_dir / f"camera-{int(seconds)}s-{n}.mp4"
         n += 1
-    argv = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-f", "v4l2", "-i", device, "-t", str(seconds),
-            "-c:v", "libx264", "-pix_fmt", "yuv420p", str(target)]
+    stream = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+              "-f", "v4l2"]
+    if infrared:
+        # **`y16` by name, not negotiated** - a node advertising several formats may
+        # hand back an ordinary one, and an ordinary recording is not what was asked
+        # for. The smoothing compounds through the video path: a 127-level 16-bit
+        # source decoded to 206 levels after yuv420p, so the reply says so rather
+        # than leaving a reader to assume.
+        stream += ["-input_format", "y16"]
+    argv = stream + ["-i", device, "-t", str(seconds),
+                     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(target)]
     from shani_chronoa import body
     try:
         # "looking" for as long as the camera is open: this path drives ffmpeg
@@ -82,7 +104,12 @@ def _run(arguments: dict) -> str:
         target.unlink(missing_ok=True)
         return (f"ffmpeg could not record from {device}: "
                 f"{(r.stderr.strip().splitlines() or ['no message'])[-1][:200]}")
-    return f"Saved {target} ({target.stat().st_size / 1e6:.1f} MB) from {device}."
+    extra = ""
+    if infrared:
+        extra = (" It is infrared, converted from 16-bit greyscale, so it shows what "
+                 "the camera saw and the levels in it are smoothed rather than the "
+                 "camera's raw ones.")
+    return f"Saved {target} ({target.stat().st_size / 1e6:.1f} MB) from {device}." + extra
 
 
 POST_CONDITION = None

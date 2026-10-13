@@ -253,3 +253,109 @@ class TestTheSkillChoosesRatherThanAssumes:
             "being asked for")
         assert "infrared frame" not in out
         target.unlink(missing_ok=True)
+
+
+class TestInfraredVideo:
+    """`capture_video` takes the same `infrared` argument, for the same reasons.
+
+    **Every claim here was measured against the real camera before it was written**
+    - a `v4l2loopback` node advertising `Y16`, fed synthetic 16-bit frames: 58,791
+    bytes of h264 holding 90 frames, whose decoded content carried **206 distinct
+    levels from a 127-level source**. So the smoothing compounds through yuv420p,
+    and the reply has to say so.
+    """
+
+    @staticmethod
+    def _skill():
+        from shani_chronoa.skills import capture_video
+        return capture_video
+
+    @staticmethod
+    def _fake_ir_cameras(monkeypatch):
+        import shani_chronoa.camera as camera
+        monkeypatch.setattr(camera, "collect",
+                            lambda: [{"node": "/dev/video9", "card": "Test IR Cam",
+                                      "can_capture": True, "looks_ir": True,
+                                      "formats": ["Y16 "]}])
+        monkeypatch.setattr(camera, "ir_nodes", lambda: ["/dev/video9"])
+
+    @staticmethod
+    def _no_op_run(monkeypatch, skill, tmp_path):
+        """A capture that writes a file and records the argv it was given.
+
+        **`Path.exists` is deliberately NOT mocked.** An earlier version stubbed it
+        to always-True, which broke `capture_video`'s own filename-collision loop
+        (`while target.exists(): ... n += 1`) into an infinite spin - it burned
+        eight minutes of CPU before it was killed. The device really exists, so the
+        real answer is the right one, and a fixture that changes the thing being
+        tested is the failure this repository records under "a mock that was good
+        enough".
+        """
+        class _Config:
+            vision_sense_enabled = True
+
+            def sense_allowed_reason(self, name):
+                return ""
+
+        monkeypatch.setattr(skill, "ChronoaConfig", _Config)
+        monkeypatch.setattr(skill.shutil, "which", lambda n: "/x/ffmpeg")
+        monkeypatch.setattr(skill.files, "data_home",
+                            lambda: tmp_path / "data")
+        chosen = {}
+
+        class _Run:
+            returncode, stderr = 0, ""
+
+        def _fake(argv, **kw):
+            chosen["argv"] = argv
+            pathlib.Path(argv[-1]).write_bytes(b"x" * 64)
+            return _Run()
+
+        monkeypatch.setattr(skill.subprocess, "run", _fake)
+        return chosen
+
+    def test_an_infrared_node_is_chosen_not_assumed(self, monkeypatch, tmp_path):
+        skill = self._skill()
+        chosen = self._no_op_run(monkeypatch, skill, tmp_path)
+        self._fake_ir_cameras(monkeypatch)
+        out = skill._run({"infrared": True, "seconds": 1})
+        assert "Saved" in out
+        assert chosen["argv"].count("-input_format") == 1, (
+            "the infrared capture did not ask ffmpeg for y16, so the demuxer was "
+            "left free to hand back an ordinary format")
+        assert chosen["argv"][chosen["argv"].index("-input_format") + 1] == "y16"
+        assert "infrared" in out
+
+    def test_a_named_non_infrared_device_is_refused(self, monkeypatch, tmp_path):
+        skill = self._skill()
+        self._no_op_run(monkeypatch, skill, tmp_path)
+        self._fake_ir_cameras(monkeypatch)
+        out = skill._run({"infrared": True, "device": "/dev/video1", "seconds": 1})
+        assert "not an infrared camera" in out
+        assert "Test IR Cam" in out
+        assert "Nothing was taken" in out
+
+    def test_an_ordinary_recording_is_not_converted(self, monkeypatch, tmp_path):
+        """**The control.** A band that changes without being asked for is the same
+        defect as substituting a camera without being asked."""
+        skill = self._skill()
+        chosen = self._no_op_run(monkeypatch, skill, tmp_path)
+        out = skill._run({"seconds": 1})
+        assert "Saved" in out
+        assert "-input_format" not in chosen["argv"], (
+            "an ordinary recording asked ffmpeg for y16, so the band changed without "
+            "being asked for")
+        assert "infrared" not in out
+
+    def test_a_non_bool_infrared_is_not_a_request(self, monkeypatch):
+        """A truthy string is not a request. The schema says boolean, and the parse
+        has to agree with it - otherwise `"yes"` reaches the probe."""
+        import shani_chronoa.camera as camera
+        monkeypatch.setattr(camera, "collect",
+                            lambda: (_ for _ in ()).throw(
+                                AssertionError("the probe ran")))
+        from shani_chronoa.skills import take_photo
+        out = take_photo._run({"infrared": "yes", "path": "/nonexistent/x.png"})
+        assert "probe ran" not in str(out), (
+            "a non-bool `infrared` reached the camera probe, so 'yes' would record "
+            "video through a camera nobody chose")
