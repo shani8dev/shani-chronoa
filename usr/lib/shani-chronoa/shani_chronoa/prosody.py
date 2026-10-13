@@ -374,7 +374,17 @@ def song_plan(syllables: Sequence[Syllable], melody: Melody,
         # A little lead-in on the first piece, so the first shift does not start
         # on a transient and click.
         lead = 0.02 if not plan else 0.0
-        start_at = max(0.0, syllable.start - lead)
+        # **`syllable.onset`, not `syllable.start`, and the two return the same
+        # number today.** The property is the one that carries the reason: the
+        # shift has to arrive on the *consonant* going into the note, because real
+        # singing moves the pitch there, and bending to the target at the vowel
+        # "would sound like a late slide into every single note".
+        #
+        # Reading the property here rather than the field is what makes that
+        # reasoning load-bearing instead of a note in a class nobody consults -
+        # `Syllable.onset` had **no reader anywhere in the tree**, and this line
+        # was the one place the invariant actually applies.
+        start_at = max(0.0, syllable.onset - lead)
         stop_at = min(end_of_audio, syllable.end)
         if stop_at - start_at < 0.01:
             continue
@@ -501,5 +511,11 @@ def sing_effects(syllables: Sequence[Syllable], melody: Melody,
 
     The name is a small lie that is worth correcting here rather than in every
     caller: it returns `Slice` objects, and `apply_song` is what runs them.
+
+    **There are currently no callers of this name anywhere in the tree**, which
+    the previous wording implied otherwise. It is kept because it is public and
+    cheap to keep, not because something is using it - so the next person auditing
+    unreached names can see that the compat promise is what holds it up, and that
+    nothing would break if it were removed.
     """
     return song_plan(syllables, melody, total)
