@@ -64,15 +64,54 @@ def hide(bindir: Path, *names: str):
         fake(bindir, name, "exit 127\n").unlink()
 
 
-def grant(key: str, value: bool = True):
-    """Write a consent key through an *external* keyfile backend, as Settings would."""
+#: keyfile backends, **by path**. See `_consent_settings` for why.
+_consent_backends: dict = {}
+
+
+def _consent_settings():
+    """A keyfile backend for the current `$XDG_CONFIG_HOME`, cached by path.
+
+    **Cached by path, for two reasons that were both measured here.**
+
+    *Repeated writes.* A brand-new backend per call loses every write after the
+    first: it parses the keyfile into memory, so a second backend over the same
+    path starts from what it read last and the write does not land. Measured -
+    False then True left the key reading False.
+
+    *One directory at a time.* `isolated` repoints `$XDG_CONFIG_HOME` per test,
+    and a single process-wide `Gio.Settings` resolves that directory when it is
+    built. Cached per path, each test gets a backend of its own and none of them
+    writes into another's directory.
+
+    The path is taken from the environment on **every** call, not captured once,
+    because that is the thing `isolated` changes.
+    """
     import gi
     gi.require_version("Gio", "2.0")
     from gi.repository import Gio
     from shani_chronoa import config as config_mod
-    keyfile = str(Path(os.environ["XDG_CONFIG_HOME"]) / "glib-2.0" / "settings" / "keyfile")
-    backend = Gio.keyfile_settings_backend_new(keyfile, config_mod.SCHEMA_PATH, config_mod.SCHEMA_ID)
-    settings = Gio.Settings.new_with_backend(config_mod.SCHEMA_ID, backend)
+
+    path = os.path.join(os.environ["XDG_CONFIG_HOME"],
+                        "glib-2.0", "settings", "keyfile")
+    if path not in _consent_backends:
+        _consent_backends[path] = Gio.keyfile_settings_backend_new(
+            path, config_mod.SCHEMA_PATH, config_mod.SCHEMA_ID)
+    return Gio.Settings.new_with_backend(config_mod.SCHEMA_ID, _consent_backends[path])
+
+
+def grant(key: str, value: bool = True):
+    """Write a consent key the way Settings would.
+
+    `value=False` shuts it. A test that asserts a **refusal** has to say so
+    itself: the keys involved are in the `everyday` preset and now ship on, so a
+    test that relied on the default being off was never reaching the refusal it
+    was written to check.
+    """
+    import gi
+    gi.require_version("Gio", "2.0")
+    from gi.repository import Gio
+
+    settings = _consent_settings()
     settings.set_boolean(key, value)
     Gio.Settings.sync()
 
@@ -536,6 +575,10 @@ def test_default_apps_status_needs_no_consent(bindir):
 
 
 def test_default_apps_set_is_refused_without_consent(bindir):
+    # **The key is shut by this test.** It ships on - these are in the
+    # `everyday` preset - so a refusal was never reached and every
+    # assertion below was about a run that happened instead.
+    grant("default-apps-enabled", False)
     fake(bindir, "xdg-mime", _XDG_MIME)
     _apps()
     _, text = call("default_apps", {"action": "set", "target": "pdf", "app": "Document Viewer"})
@@ -643,6 +686,10 @@ _CANCEL = r"""q="$(dirname "$0")/queue"; grep -v "^$1 " "$q" > "$q.new"; mv "$q.
 
 
 def test_print_queue_lists_and_cancel_needs_consent(bindir):
+    # **The key is shut by this test.** It ships on - these are in the
+    # `everyday` preset - so a refusal was never reached and every
+    # assertion below was about a run that happened instead.
+    grant("print-control-enabled", False)
     fake(bindir, "lpstat", _LPSTAT)
     fake(bindir, "cancel", _CANCEL)
     _, text = call("print_queue", {})
@@ -699,6 +746,10 @@ def test_set_hostname_an_invalid_name_never_reaches_hostnamectl(bindir):
 
 
 def test_set_hostname_consent_rename_and_control(bindir):
+    # **The key is shut by this test.** It ships on - these are in the
+    # `everyday` preset - so a refusal was never reached and every
+    # assertion below was about a run that happened instead.
+    grant("hostname-control-enabled", False)
     fake(bindir, "hostnamectl", _HOSTNAMECTL)
     _, text = call("set_hostname", {})
     assert "named shanios" in text
@@ -744,6 +795,10 @@ def test_set_locale_keeps_the_other_settings(bindir):
 
 
 def test_set_locale_refuses_ungenerated_and_ungranted(bindir):
+    # **The key is shut by this test.** It ships on - these are in the
+    # `everyday` preset - so a refusal was never reached and every
+    # assertion below was about a run that happened instead.
+    grant("locale-control-enabled", False)
     fake(bindir, "localectl", _LOCALECTL)
     _, text = call("set_locale", {"action": "set", "locale": "de_DE.UTF-8"})
     assert "Refusing" in text and "locale-control-enabled" in text
@@ -767,6 +822,10 @@ def _mock_transport(hits):
 
 
 def test_speed_test_is_refused_until_granted_and_never_touches_the_wire(monkeypatch):
+    # **The key is shut by this test.** It ships on - these are in the
+    # `everyday` preset - so a refusal was never reached and every
+    # assertion below was about a run that happened instead.
+    grant("speed-test-enabled", False)
     from shani_chronoa.skills import speed_test as st
     hits = []
     monkeypatch.setattr(st, "_TRANSPORT", _mock_transport(hits))
