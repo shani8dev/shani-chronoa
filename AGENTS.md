@@ -21972,3 +21972,77 @@ the one genuinely reachable population was worth measuring completely.
 `gsettings_env` fixture already builds one, and a sweep that substitutes it for
 the app would measure the panels instead of the harness. That is a real change
 with its own review, and it is named here rather than half-built.
+
+## The 36 files in the repo root are conversation ids, and the shipped code does not write them (2026-10-13)
+
+The question had been asked three times without an answer, so it was answered by
+measurement instead: **trace the writer**. The names are the lead, and the lead
+decoded on the first try.
+
+**`conversation_store._new_id()` is `strftime("%Y%m%d-%H%M%S") + "-" +
+secrets.token_hex(2)`** - and `token_hex(2)` is **exactly four hex characters**.
+Every one of the 36 filenames matches that form. So these are **conversation
+session ids**, and whatever wrote them pointed the conversation store at the
+**repository root**.
+
+That narrows the writer to a caller of `new_session(root)` with a relative root,
+and rules out most of the field by measurement rather than by reasoning:
+
+| candidate | measured |
+|---|---|
+| `Assistant()` with no `session_path` | writes **nothing** - `_record` guards on `is not None` |
+| `session_dir()` itself | resolves to `data_home()/shani-chronoa/sessions`, never the CWD |
+| `tests/test_conversations.py` | its `root` fixture sets `XDG_DATA_HOME` to `tmp_path` |
+| `tests/test_assistd_sayri_harvest.py` | the fixture is an **in-memory list**; the file that matched `"content": "second"` writes no file |
+| `tests/test_conversation_store.py` | writes to the `tmp_path` fixture |
+| `gui/surfaces/compare.py`'s `_store_root` | read-only; it resolves a path and never creates one |
+
+**And the strongest lead, measured rather than argued.** `tests/test_compare_surface.py`
+is the test that calls `store.new_session(root)` and is **mine**, from the Compare
+panel landed 23 minutes after the burst. All three of its commits - `3bc852e`,
+`2b7d099`, `96791d8` - use `tempfile.mkdtemp(prefix="chronoa-compare-")`, which is
+**absolute**, so the committed code cannot have written them. Running the file and
+`test_conversations.py` against the live tree:
+
+    junk files before: 36
+    40 passed, 1 warning in 3.14s
+    junk files after : 36      delta 0
+
+**So the shipped tests do not leak, and the writer was a local draft that was
+changed before it was committed.** That is the most likely reading and it is not
+proved: a draft exists in no commit and in no reflog, so there is nothing left to
+read.
+
+### Where the trace stops, stated rather than dressed up
+
+- All 36 were written in **one ~60-second burst**, `23:36:35` to `23:37:00` on
+  Oct 12, and **nothing has been created since** - zero in the following 15 hours.
+  So a filesystem watch cannot fire, and that is why the trace is by evidence
+  rather than by interception.
+- The content is `{"role": "user", "content": "hello"}` followed by
+  `{"role": "user", "content": "second"}` - **two user turns and no assistant
+  reply**. A round-trip fixture does not look like that; a probe that only calls
+  `append()` twice does.
+- Two files in the tree contain `"content": "second"` and **neither writes a
+  file**: `test_conversation_store.py` uses `"first"`/`"second"` and a `tmp_path`,
+  and `test_assistd_sayri_harvest.py` uses `"first"`/`"second"` in memory. The
+  word `hello` pairs with `"first"`, not with `"second"`, in both.
+
+**So the writer was most likely an ad-hoc probe of mine from that stretch, not
+shipped code** - which is the same conclusion the `code_hl` entry reaches from the
+other direction, where a module read as unwired for ninety seconds because the
+other session was mid-write.
+
+**This resolves the original decision without a decision.** The files are not
+fixture data anyone needs - they are the debris of a probe, they are **not**
+gitignored so a bare `git add -A` takes all 36, and nothing in the tree reads
+them. Removing them by exact path is the third of the three options offered, and
+it is now the one the evidence supports; the writer is dead (zero in 15 hours) so
+nothing will re-create them.
+
+**The habit the entry is really about, and it is the fourth time in this file:**
+an agent probe that writes where the repository lives is a *write the person did
+not ask for*, exactly like the test that wrote the real keyfile and the probes
+that left `.pyc` under `usr/`. Every one of those was found by listing what
+changed and asking, not by reading code - and this one survived three questions
+because **there was nothing to read**: the writer was never committed.
