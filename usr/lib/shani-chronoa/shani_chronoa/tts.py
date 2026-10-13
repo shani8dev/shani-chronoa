@@ -209,8 +209,9 @@ class PiperTTS:
         a different answer for a reply in Hindi than for one in English.
         """
         reason = self._kokoro_reason(text)
-        chosen = self._engine(reason)
-        self._announce(chosen, reason)
+        piper_reason = self._piper_reason()
+        chosen = self._engine(reason, piper_reason)
+        self._announce(chosen, reason, piper_reason)
         return chosen
 
     #: The key that chooses the neural voice. Named rather than spelled at each
@@ -218,6 +219,12 @@ class PiperTTS:
     #: have to agree on it, and a typo in one of them is a switch that does
     #: nothing with nothing to say so.
     KOKORO_KEY = "kokoro-tts-enabled"
+
+    #: The key that decides whether the second engine in the chain is used at
+    #: all. `piper-voice` chooses *which* Piper voice; this chooses *whether*.
+    #: On by default, because Piper was unconditionally in the cascade before
+    #: it existed - so this is a switch to decline it, not to reach it.
+    PIPER_KEY = "piper-tts-enabled"
 
     def _kokoro_enabled(self) -> bool:
         """Whether the user has asked for the neural voice (or is trying one out in setup)."""
@@ -229,6 +236,35 @@ class PiperTTS:
             return bool(self._settings().get_bool(self.KOKORO_KEY, False))
         except Exception:  # noqa: BLE001 - an unreadable setting must not stop speech
             return False
+
+    def _piper_enabled(self) -> bool:
+        """Whether the user wants Piper in the chain at all.
+
+        **Defaults to on when the key cannot be read**, unlike `_kokoro_enabled`.
+        Piper was unconditionally in the cascade before this key existed, so
+        failing closed here would silently change the voice of every reply on a
+        machine whose schema predates it - the wrong direction for a *preference*,
+        even though it is the right one for a permission.
+        """
+        if self.piper_trial:
+            return True
+        try:
+            return bool(self._settings().get_bool(self.PIPER_KEY, True))
+        except Exception:
+            return True
+
+    def _piper_reason(self) -> str:
+        """Why Piper would not speak here, or "" when it would.
+
+        Only the switch. A missing program and a missing voice file are not
+        things a person acts on with a switch, and the cascade already falls
+        through when they are absent - announcing that on every reply would be
+        noise rather than honesty.
+        """
+        if self._piper_enabled():
+            return ""
+        return ("Piper is switched off in Settings (piper-tts-enabled); the reply "
+                "keeps the lighter voice below it in the chain")
 
     def _kokoro_reason(self, text: str) -> str:
         """Why Kokoro would not speak `text` here, or "" when it would.
@@ -260,7 +296,7 @@ class PiperTTS:
                     "so the reply keeps the voice for its own language")
         return ""
 
-    def _engine(self, kokoro_reason: str) -> Optional[str]:
+    def _engine(self, kokoro_reason: str, piper_reason: str = "") -> Optional[str]:
         """The cascade, given why Kokoro was not chosen.
 
         `kokoro_reason` empty is the whole opt-in gate: `_kokoro_reason`
@@ -272,7 +308,8 @@ class PiperTTS:
         """
         if not kokoro_reason:
             return "kokoro"
-        if os.path.exists(self.piper_path) and os.path.exists(self.voice_path):
+        if (not piper_reason and os.path.exists(self.piper_path)
+                and os.path.exists(self.voice_path)):
             return "piper"
         if shutil.which("RHVoice-test") and self._rhvoice_has_voice():
             return "rhvoice"
@@ -290,14 +327,18 @@ class PiperTTS:
         return None
 
     @staticmethod
-    def _announce(chosen: Optional[str], kokoro_reason: str) -> None:
-        """Say which engine is speaking, and why the better one was skipped."""
-        key = (chosen, kokoro_reason)
+    def _announce(chosen: Optional[str], kokoro_reason: str,
+                  piper_reason: str = "") -> None:
+        """Say which engine is speaking, and why the better ones were skipped."""
+        key = (chosen, kokoro_reason, piper_reason)
         if key in _ANNOUNCED:
             return
         _ANNOUNCED.add(key)
         if chosen == "kokoro":
             logger.info("Speaking with Kokoro")
+        elif piper_reason:
+            logger.info("Speaking with %s: Piper was not used because %s",
+                        chosen or "no engine", piper_reason)
         elif chosen == "cloud":
             # **Named explicitly, always.** A reply spoken by somebody else's
             # computer is the one case where the log line matters most, because

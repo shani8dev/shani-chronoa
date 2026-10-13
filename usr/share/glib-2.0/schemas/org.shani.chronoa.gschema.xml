@@ -141,6 +141,20 @@
       <summary>Kokoro voice</summary>
       <description>Which Kokoro voice speaks when the Kokoro voice is turned on: af_sarah, af_bella, af_nicole, af_sky, bf_emma or bf_isabella. Chosen on the setup window's Voice page.</description>
     </key>
+    <key name="piper-tts-enabled" type="b">
+      <default>true</default>
+      <summary>Speak with Piper when it is installed</summary>
+      <description>Piper is the second engine in the chain, after Kokoro. It had
+      no switch at all - only `piper-voice`, which chooses *which* voice and not
+      *whether* - so it could not be declined, only left uninstalled.
+
+      On by default, because that is what already happened: Piper was
+      unconditionally in the cascade, and turning this off is a choice rather
+      than a change. With it off the chain falls through to RHVoice, then
+      espeak-ng, then cloud speech, and the announcement says which one is
+      speaking and why Piper was not.
+      </description>
+    </key>
     <key name="kokoro-tts-enabled" type="b">
       <default>true</default>
       <summary>Speak with the Kokoro neural voice</summary>

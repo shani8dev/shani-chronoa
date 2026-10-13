@@ -661,3 +661,108 @@ class TestTheVoiceRowsAreRealControls:
             assert "sox" in subtitle, subtitle
         else:
             assert "Not applied" not in subtitle, subtitle
+
+
+# --- the Piper switch --------------------------------------------------------
+
+
+class TestPiperIsDeclinable:
+    """**Piper had no switch at all.** There was `piper-voice`, which chooses
+    *which* Piper voice, and nothing that chose *whether* - so Piper was
+    unconditionally in the cascade and could only be declined by uninstalling it.
+
+    `PIPER_KEY` ships `true`, because that is what already happened. These assert
+    the switch is reachable and actually moves the chain, not that Piper is off.
+    """
+
+    @pytest.fixture
+    def piper_installed(self, monkeypatch, tmp_path, only_espeak):
+        """Piper fully present - program and voice file - with espeak below it."""
+        monkeypatch.setattr(tts.shutil, 'which',
+                            lambda name: '/usr/bin/espeak-ng' if name == 'espeak-ng' else None)
+        binary = tmp_path / 'piper'
+        binary.write_text('#!/bin/sh\n')
+        voice = tmp_path / 'en_US-lessac-medium.onnx'
+        voice.write_bytes(b'onnx')
+        return binary, voice
+
+    def _dispatcher(self, piper_installed, config):
+        binary, voice = piper_installed
+        dispatcher = tts.PiperTTS(piper_path=str(binary), config=config)
+        dispatcher.voice_path = str(voice)
+        # Keep the cascade honest: a trial voice would short-circuit it to Kokoro.
+        dispatcher.kokoro_trial_voice = ''
+        dispatcher.kokoro_problem = lambda: 'not installed here'
+        return dispatcher
+
+    def test_the_key_is_declared_and_on_by_default(self):
+        """Presence first: a key the schema does not declare is a switch that
+        silently does nothing, which is the defect this file exists over."""
+        from xml.etree import ElementTree
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        schema = (root / "usr/share/glib-2.0/schemas"
+                  / "org.shani.chronoa.gschema.xml")
+        keys = {k.get("name"): k for k in ElementTree.parse(schema).getroot().iter("key")
+                if k.get("name")}
+
+        assert tts.PiperTTS.PIPER_KEY in keys, (
+            "%s is not declared in the schema, so nothing can set it"
+            % tts.PiperTTS.PIPER_KEY)
+        assert keys[tts.PiperTTS.PIPER_KEY].get("type") == "b"
+        assert keys[tts.PiperTTS.PIPER_KEY].findtext("default") == "true", (
+            "Piper was unconditionally in the cascade before this key existed, so "
+            "shipping it off would change the voice of every reply")
+
+    def test_piper_is_the_engine_when_the_switch_is_on(self, piper_installed,
+                                                       chronoa_config):
+        chronoa_config.set(tts.PiperTTS.PIPER_KEY, "true")
+        dispatcher = self._dispatcher(piper_installed, chronoa_config)
+
+        assert dispatcher._piper_reason() == ""
+        assert dispatcher.engine("hello there") == "piper"
+
+    def test_piper_is_skipped_when_the_switch_is_off(self, piper_installed,
+                                                     chronoa_config):
+        """The whole point of the key: Piper is installed and still not used."""
+        chronoa_config.set(tts.PiperTTS.PIPER_KEY, "false")
+        dispatcher = self._dispatcher(piper_installed, chronoa_config)
+
+        assert dispatcher._piper_enabled() is False
+        assert dispatcher._piper_reason(), "a declined Piper must say so"
+        chosen = dispatcher.engine("hello there")
+
+        assert chosen != "piper", (
+            "Piper is installed and switched off, and it was used anyway")
+        assert chosen == "espeak-ng", (
+            "with Piper declined the chain should fall through to espeak-ng, got %r"
+            % chosen)
+
+    def test_skipping_piper_names_the_switch(self, piper_installed, chronoa_config,
+                                            caplog, monkeypatch):
+        """A user who cannot tell why their voice changed has no way to undo it,
+        which is the same argument the Kokoro announcement makes."""
+        chronoa_config.set(tts.PiperTTS.PIPER_KEY, "false")
+        monkeypatch.setattr(tts, "_ANNOUNCED", set())
+        dispatcher = self._dispatcher(piper_installed, chronoa_config)
+
+        with caplog.at_level("INFO", logger="shani_chronoa.tts"):
+            dispatcher.engine("hello there")
+
+        said = "\n".join(r.getMessage() for r in caplog.records)
+        assert tts.PiperTTS.PIPER_KEY in said, (
+            "the announcement does not name %s, so the person cannot find the "
+            "switch that changed their voice: %r" % (tts.PiperTTS.PIPER_KEY, said))
+        assert "espeak-ng" in said, said
+
+    def test_a_piper_trial_ignores_the_switch(self, piper_installed, chronoa_config):
+        """Setup trialling Piper is how the voice is auditioned, so a person who
+        has the switch off must still hear it while they are choosing."""
+        chronoa_config.set(tts.PiperTTS.PIPER_KEY, "false")
+        dispatcher = self._dispatcher(piper_installed, chronoa_config)
+        dispatcher.piper_trial = True
+
+        assert dispatcher._piper_enabled() is True
+        assert dispatcher.engine("hello there") == "piper"
+

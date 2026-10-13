@@ -46,6 +46,16 @@ class VoicePage:
         if live is not None and hasattr(live, "use_config"):
             live.use_config(self.app.config)
 
+    def _set_piper(self, active: bool) -> None:
+        """Whether Piper is in the chain, through the same path as every other
+        switch - and the dispatcher is handed the new config immediately, or
+        the switch would draw itself and the voice would not change until a
+        restart."""
+        from shani_chronoa import tts
+
+        self._set_bool(tts.PiperTTS.PIPER_KEY, active)
+        self._hand_config_to_dispatcher()
+
     def _set_kokoro(self, active: bool) -> None:
         """The neural-voice opt-in, through the same path as every other switch."""
         from shani_chronoa import tts
@@ -206,12 +216,25 @@ class VoicePage:
             dispatcher.engine() or "no speech engine - replies are not spoken aloud",
         )
         self._switch(
+            group, "Use Piper when it is installed",
+            "The second voice in the chain, and the one most replies use "
+            "when the neural voice above is off. Piper had no switch at all "
+            "before this - only a row choosing which of its voices to use - so "
+            "it could not be declined, only left uninstalled. On by default, "
+            "which is what already happened. Turn it off and replies keep the "
+            "lighter voice below it.",
+            config.get_bool(tts.PiperTTS.PIPER_KEY, True),
+            self._set_piper,
+        )
+        self._switch(
             group, "Use the Kokoro neural voice",
-            "Off by default: it sounds like a person where the voices below sound "
-            "like a synthesiser, but it needs longer than the reply's own audio to "
-            "produce it, so every answer would open with seconds of silence. It "
-            "also needs its model, downloaded from Settings.",
-            config.get_bool(tts.PiperTTS.KOKORO_KEY, False),
+            "Sounds like a person where the voices below sound like a "
+            "synthesiser, but it needs longer than the reply's own audio to "
+            "produce it - measured at about 6 seconds for 5 seconds of audio "
+            "on a four-core laptop - so on slower hardware every answer can open "
+            "with seconds of silence. Its model is downloaded on first use. "
+            "Turn it off and Piper below speaks instead.",
+            config.get_bool(tts.PiperTTS.KOKORO_KEY, True),
             self._set_kokoro,
         )
         self._timbre_row(
