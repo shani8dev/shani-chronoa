@@ -23534,3 +23534,48 @@ wrong or the box was.
 **Recorded rather than guessed at a third time.** Two attempts at this have
 already been reverted, and this entry is the measurement that says what any
 next attempt has to beat.
+
+## The capture is a race, and it is not the capture's fault (2026-10-13)
+
+**Same commit, same target, same size, three runs: 53% content, 32%, 13%.**
+
+That is the measurement this whole session needed, and it was available at any
+time in a minute. It says the picture is a **race**, not a broken renderer: the
+capture fires on a fixed `GLib.timeout_add(settle, ...)` while the main window
+builds twenty panels one per main-loop turn at `PRIORITY_DEFAULT_IDLE`, each
+running real probes. That chain has **measured at 5.1-5.4 s** against a
+`settle` of 3500 ms - and its cost is whatever the machine is doing at the
+time. So the capture lands sometimes early, sometimes late, and photographs a
+window that is more or less finished.
+
+**Every "blank" in this file is this race**, including the ones attributed to
+pool exhaustion, a concurrent mutation run and an unrealised `GskCairoRenderer`.
+A window caught at 13% content *is* an almost-empty window, and it looks
+exactly like a broken one.
+
+The second measurement, from the same runs, says **which** part of the window
+the race costs:
+
+    at 53%:  sidebar alpha 255 throughout;  CONTENT 82% transparent
+    at 32%:  sidebar 88% transparent;         CONTENT 79% transparent
+    at 13%:  both largely transparent
+
+The sidebar rasterises when it is painted and not otherwise, like everything
+else. **There is no "the conversation pane is the thing that does not
+rasterise"** - there is a window that has not finished painting.
+
+### What a fix needs, and what it must not be
+
+**Wait for a real paint, not for a number.** `Gdk.FrameClock` emits `after-
+paint`; the capture belongs in that, once, rather than in a timeout that is
+hoping a paint happened to land first. **Raising `settle` is not a fix** - it
+is the same guess with a larger number, and it will lose again on a busier
+machine, which is the whole reason the guess is wrong.
+
+I tried making the content candidate recurse (`get_content()` at every level
+rather than only at the window). Measured: **it got worse** - 32%, and both
+regions went to ~80-88% transparent - because the deeper node was captured
+without the split view that paints the sidebar. Reverted.
+
+**Two fixes reverted this session, and this entry is what any third attempt has
+to beat: a 53/32/13 spread on an unchanged commit.**
