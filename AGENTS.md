@@ -20349,3 +20349,92 @@ the *cause* belongs rather than under the section heading, and removing one of
 the three is an editorial judgement about which two carry information. Recorded
 rather than tidied, because the one thing that was wrong here was a **red dot on
 a working machine**, and that is fixed and pinned.
+## A draft belongs to the conversation it was written for, and one test file was polluting every other (2026-10-13)
+
+The last item the UI review found, and the one that had been sitting in plain
+sight behind a fix.
+
+`show_conversation()` redraws the transcript and **never touched the composer**.
+So a half-typed question followed the person: open another conversation and the
+box still held what you were writing to the previous one, and Enter put it into
+the new one - silently, because the transcript then shows your question in a
+conversation it has nothing to do with.
+
+**`Ctrl+N` was already fixed for exactly this.** `_reset_conversation` clears the
+composer and carries a comment describing the bug in full - *"the next Enter sent
+a question about the previous conversation into the new one, and nothing on
+screen said so"*. So the hole was only in **switching**, and the existing fix
+**hid the shape of it**: the obvious conclusion from `clear_input()` on Ctrl+N is
+"the composer is handled", and it is handled on exactly one of the two paths.
+
+`composer_draft` already took an optional `path` on every function. Per-
+conversation drafts were supported at the module level the whole time; the
+window simply never passed one.
+
+### Text and files move together, or not at all
+
+A draft is a sentence *and* the attachments that sentence refers to. Restoring
+the words and leaving the chip bar empty shows somebody reading "check these
+three files" above nothing - the partial restore this module's own docstring
+calls worse than none. They go in **one** record, because one atomic replace is
+what keeps them from arriving out of step.
+
+The key is sanitised because it arrives from a session reference, and a
+reference containing `../` would write outside the directory whose `0o700` and
+`0o600` are load-bearing - a file holding what somebody was typing, written
+somewhere unprotected.
+
+### Switching is moved, not destroyed - and always empties first
+
+Going back finds what you left, which is what `Ctrl+N` used to throw away. And
+`set_conversation` clears the composer **before** restoring, because
+`restore_draft` returns early when there is no draft: without that line a
+conversation with nothing typed opened showing the previous one's words -
+**the misfire reintroduced one line after being fixed**, and the test written
+for it caught it on the first run.
+
+### Two more witnesses that could not fail
+
+| witness | why it passed on broken code |
+|---|---|
+| `_store` wrapped `draft_path` in a lambda that re-rooted its result | **the key sanitisation never ran**, so the escape test passed with `safe = str(key)` in place - a stub answering the question it was meant to check |
+| `assert _draft_timeout is None` after a switch | `_flush_draft` *also* sets it to `None`, so the attribute says "nothing pending" whether or not the timer was unregistered. `GLib.MainContext.find_source_by_id` is the only thing that tells those apart, and measured: non-None before `source_remove`, None after |
+
+And two fixtures of mine that did not reproduce production, in the two costumes
+this repo keeps finding: one typed a draft **before** naming the conversation,
+which production never does; the other typed *"belongs to beta"* while still in
+alpha and complained that alpha kept it - **which is the draft module working
+correctly.**
+
+### `test_composer_draft.py` was leaking a stub into the whole session
+
+`_point_store_at` assigns `composer_draft.draft_path = lambda key=None: target`
+**directly, not through `monkeypatch`, and never restores it** - and that lambda
+ignores its key. Run alongside the new file, five tests failed with *"both
+conversations resolve to the same draft file"*, which had nothing to do with
+per-conversation drafts and everything to do with a stub installed three files
+earlier. Now restored by an autouse fixture.
+
+The same defect `run_suite_in_chunks.sh` records as *"every chunk shared one
+`XDG_STATE_HOME`"*, reached through a module attribute instead of a directory: **a
+test that changes global state and does not give it back.**
+
+### 9 mutations, 9 caught, after fixing both vacuous witnesses
+
+| mutation | |
+|---|---|
+| switching does not empty the composer | 3 failed |
+| the armed save survives the switch | 1 failed |
+| every key shares one file | 4 failed |
+| the key is not sanitised | 1 failed |
+| the words are not cleared on a switch | 2 failed |
+| the files are not restored with the words | 1 failed |
+| empty text keeps its files | 1 failed |
+
+### The other session's mutation runs restore the tree from git
+
+Twice now, a `mutate.py` run wiped **uncommitted** work in `conversation.py` and
+`application.py` while my other files survived - so the damage is partial and
+looks like a mystery rather than a restore. The lesson is not to leave work
+uncommitted across a window in which another session is running: this batch was
+committed within seconds of the tests passing for exactly that reason.

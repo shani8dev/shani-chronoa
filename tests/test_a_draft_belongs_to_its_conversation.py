@@ -37,17 +37,19 @@ from shani_chronoa import composer_draft  # noqa: E402
 
 
 def _store(tmp_path, monkeypatch):
-    """The draft directory, with `draft_path(key)` real and pointed here."""
-    monkeypatch.setattr(composer_draft, "session_dir_hook",
-                        lambda: tmp_path, raising=False)
-    real = composer_draft.draft_path
+    """The draft directory, with `draft_path` itself left completely real.
 
-    def draft_path(key=None):
-        # The real naming, only rooted in the test's directory.
-        path = real(key)
-        path = tmp_path / path.name
-        return path
-    monkeypatch.setattr(composer_draft, "draft_path", draft_path)
+    **The session directory is moved, not `draft_path` replaced.** The first
+    version wrapped `draft_path` in a lambda that re-rooted whatever it
+    returned, which meant the **key sanitisation never ran** - so
+    `test_a_key_cannot_escape_the_session_directory` passed with
+    `safe = str(key)` in place. A stub that answers the question it is supposed
+    to be checking is the worst kind: it looked like coverage of a security
+    property and was coverage of its own lambda.
+    """
+    from shani_chronoa import conversation_store
+
+    monkeypatch.setattr(conversation_store, "session_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -216,14 +218,22 @@ class TestTheComposerFollowsTheConversation:
         # warning rather than on the behaviour. A real 30-second timeout is the
         # state being guarded against: typing arms the debounce, and switching
         # before it fires is ordinary.
-        window._draft_timeout = GLib.timeout_add_seconds(30, lambda: False)
+        armed = GLib.timeout_add_seconds(30, lambda: False)
+        window._draft_timeout = armed
         window._typed = "belongs to alpha"
         ChronoaWindow.set_conversation(window, "beta")
 
-        assert window._draft_timeout is None, (
-            "the pending save was left armed across the switch - it fires "
-            "later, under the new key, and writes the conversation being left "
-            "into the one being entered")
+        # **The source, not the attribute.** `assert _draft_timeout is None`
+        # passed with the `source_remove` deleted, because `_flush_draft` also
+        # sets it to None - so the attribute says "nothing pending" whether or
+        # not the timer was actually unregistered, and the debounced write is
+        # still sitting in the main context waiting to fire under the new key.
+        # `find_source_by_id` is the only thing here that can tell those apart,
+        # and measured on this box: non-None before `source_remove`, None after.
+        assert GLib.MainContext.default().find_source_by_id(armed) is None, (
+            "the debounced save is still registered with the main context - it "
+            "fires later, under the new key, and writes the conversation being "
+            "left into the one being entered")
         assert window._typed == "", (
             f"beta opened showing alpha's draft: {window._typed!r}")
 

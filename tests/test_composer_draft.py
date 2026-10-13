@@ -15,6 +15,8 @@ import stat
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "usr/lib/shani-chronoa"))
 
 from shani_chronoa import composer_draft  # noqa: E402
@@ -124,6 +126,31 @@ def test_the_path_follows_the_data_home(tmp_path, monkeypatch):
 
 
 _WINDOW_SEQ = 0
+
+
+#: The real resolver, kept so the stub can be taken back off again.
+_REAL_DRAFT_PATH = composer_draft.draft_path
+
+
+@pytest.fixture(autouse=True)
+def _restore_draft_path():
+    """Put the real `draft_path` back after every test in this file.
+
+    **This file assigns to the module attribute directly**, not through
+    `monkeypatch`, so without this the stub outlives the test: it is a bare
+    `composer_draft.draft_path = lambda key=None: target` that ignores its key
+    entirely, and every later test in the session inherits it. Measured: run
+    alongside `test_a_draft_belongs_to_its_conversation.py` and that file's five
+    tests failed with *"both conversations resolve to the same draft file"* -
+    a failure that had nothing to do with per-conversation drafts and everything
+    to do with a stub installed three files earlier.
+
+    The same defect `tools/run_suite_in_chunks.sh` records as *"every chunk
+    shared one `XDG_STATE_HOME`"*, reached through a module attribute instead
+    of a directory: a test that changes global state and does not give it back.
+    """
+    yield
+    composer_draft.draft_path = _REAL_DRAFT_PATH
 
 
 def _point_store_at(tmp_path):
