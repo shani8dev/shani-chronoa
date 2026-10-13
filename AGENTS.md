@@ -21072,3 +21072,171 @@ warned about and did not act on.
 Until (1) exists, **the honest claim for this commit is "verified by 46 tests and
 7 mutations, not by a render"**, and the red-pixel count on this panel means
 nothing below the fold.
+
+## The Diagnostics panel had its own vocabulary, and the absence sweep could not see it (2026-10-13)
+
+The entry above swept **every `STATUS_ATTENTION` in `gui/surfaces/`** and cleared
+five panels. That sweep was **scoped to `common.STATUS_*`** - and
+`diagnostics.py` does not use them. It has its own closed three-word vocabulary
+(`working` / `not working` / `could not determine`), because a *diagnostic* has to
+be able to say "not working" in a way the status line never does.
+
+So the panel the audit was least likely to look at - the one whose whole subject
+is "what is wrong here" - was the one the scan could not reach. **The first
+instance of the class the sweep was written to find was in the file it skipped.**
+Measured afterwards by re-running the sweep's intent against `STATUS_NOT_WORKING`:
+the population is **26 red sites in one file**, and `grep -rl '^STATUS_WORKING ='`
+confirms diagnostics is the only panel with its own words at all.
+
+### Two instances, and the second was on the panel's default path
+
+**1. "Conversation checkpoints" - a machine where nothing had been said.**
+Its docstring says a missing session directory is *"the normal 'nothing done yet'
+state, not a fault"*, and both branches below return red - including the exact
+case the sentence names. The section above it says it in prose. **The file
+contradicted itself twice, in the same words.**
+
+**2. The three model-server rows - Eyes, Imagine, Memory - on every default
+install.** Their docstring says *"a server with no env file was never configured,
+and that is a different answer from one that is configured and not answering"* -
+and both go red. The Model servers section says it a third time: *"Each may be
+asleep, which is a normal state for all three."*
+
+So the panel's own prose was right three times and its code wrong twice, in two
+different functions, about two different conditions. **That is the review this
+audit has been doing all session** - and the remediation is the same shape in
+both, which is why it is worth stating once: **where a docstring and a return
+value disagree, measure which one the screen follows.** Here it was the return,
+every time, and the prose was the only thing on the side of the person.
+
+### Zero checkpoints and zero configuration are each two facts
+
+| | was | now |
+|---|---|---|
+| store never created | red | **green** - nothing to rewind |
+| store empty | red | **green** - nothing to rewind |
+| conversation saved, no checkpoint | red | **red** - rewinding it would silently do nothing |
+| store unreadable | *green, counting zero* | **"could not determine"** |
+| extra never configured (env absent) | red | **green** - a choice, not a fault |
+| extra configured, not answering | red | **red** - somebody wanted it |
+| extra answering | green | green |
+
+**The two "red" rows that stay red are the whole fix.** A blanket colour change
+would have deleted a real alarm about a saved conversation that cannot be
+rewound, and another about a server somebody configured and then stopped - which
+is the over-fix this file records for the `get_children` guard. Both have their
+own test, in both files, and both were confirmed to fail under the over-fix
+mutation.
+
+An unreadable store used to report **a clean count of zero**, which the old code
+could not know and which nothing caught. It is `could not determine` now - the
+third word of the vocabulary, the one `STATUS_UNKNOWN` exists for.
+
+### And the docstring was wrong about which function knows how to count
+
+`_checkpoint_count` named `conversation_store.list_checkpoints` as *"the one
+place that knows how to enumerate them; a probe should use it rather than
+reimplementing the glob"*. **`list_checkpoints(root, sid)` is per-session.** The
+probe had no conversation id, which is *why* the glob existed. It now asks
+`list_sessions` for the ids and `list_checkpoints` for each, so the claim becomes
+true rather than aspirational.
+
+**And the probe was about to create the store it asked about.** `list_sessions`
+goes through `index()`, which makes the directory; `root.exists()` is checked
+first. A read-only diagnostic asking about a never-used store must not be the
+thing that brings it into existence, and it would have changed the *next* run's
+answer.
+
+### The old fixture described a state the store cannot produce
+
+It wrote two `.ckpt.N.jsonl` files into a directory with no index and asserted
+*"in 1 conversation(s)"* - **one**, while writing two files. It passed only
+because the old glob counted files and called them conversations. `list_sessions`
+reads the index, so a directory of checkpoint files with no index holds **no
+conversations at all**: the fixture could never have reached the claim it was
+checking. Fixtures now go through `new_session` / `append` / `checkpoint`.
+
+That is also why the first mutation run found **two survivors** - both were the
+fixture's shape, not a missing check: `sessions[:1]` (only the first conversation
+counted) and `total += 1` (files counted as conversations) left the file green,
+because every other case built exactly one conversation. Two tests now carry two.
+
+### 11 mutations, 11 caught, 0 survivors
+
+Both shipped defects restored verbatim, both over-fixes, the unreadable-store
+case, the directory guard, both counting mutations, the remedy no longer named,
+and a server that is answering reported as down. Run on a **snapshot** at
+`/tmp/opencode/snap-diag`, never the shared tree, source restored byte-identical.
+
+### Three harness faults, and every one produced a clean-looking result
+
+1. **Six false cleans.** Forcing `GDK_BACKEND=broadway` with no
+   `BROADWAY_DISPLAY` segfaulted before any summary, and the harness counted
+   `exit != 0` as **caught** - a table of six passes that measured nothing. A run
+   with no summary is `UNMEASURABLE`, never "caught" - the rule
+   `MutationDidNotParse` already states in `tools/mutate.py`, and I had it in
+   /tmp rather than in the file I was reading it from.
+2. **`env -i` strips `XDG_RUNTIME_DIR` and `DISPLAY`**, and the same suite
+   segfaults at GTK widget construction. Both segfaults read as product failures.
+3. **My own script lost its runner loop.** A `str.replace` patch wrote
+   `head + body` and dropped everything after the mutations table, so the first
+   run printed *nothing* and exited 0. Zero output from a passing harness and
+   zero output from a broken one look identical - which is the same statement the
+   chunk runner's `INCOMPLETE` makes.
+
+### And I measured my own fix with the wrong instrument, twice
+
+`grep "nothing to rewind yet"` returned **0** in a file that contained the fix,
+because the sentence is split across two source lines. The same substring check
+then reported my snapshot as unfixed and I nearly re-copied the tree.
+
+**Then it happened again, inside the test I was writing**: I asserted
+`"which is a normal state for all three" in inspect.getsource(...)` and it failed
+on wording that was two lines away - because **adjacent Python string literals do
+not join in raw source**. Whitespace-normalising fixes a split *line*, not a
+*literal boundary*. The sentence only exists once evaluated, so the assertion now
+reads `_SECTIONS`' own prose - which is what a person reads, which is only what a
+test should assert, and which cannot go stale.
+
+**Twice in one day a pattern read as an absence.** The instrument was the problem
+both times, and the second one is the more instructive: the first pattern was
+wrong on the file, the second was wrong on *Python*.
+
+### Measured, by driving the panel's own row table
+
+`_SECTIONS`, all 22 rows, with `XDG_DATA_HOME` pointed at the repo's own model
+cache so the answer is about this machine and not about a directory a probe
+invented:
+
+| row | verdict |
+|---|---|
+| Local model server - selected, not answering | **red** - configured but down |
+| Conversation checkpoints | **red** - a real conversation with no checkpoint |
+| Screen capture | **red** - every backend failed on this desktop |
+| `solve_math` | **red** - `python-symengine` is a hard `depends` |
+| vision / embed / imagine servers | **green** - never configured, nothing wrong |
+| speech out, microphone, audio path, ffmpeg… | green |
+
+**The first probe run reported four reds, two of which were my own harness.** A
+scratch `XDG_DATA_HOME` hid `ggml-base-q5_1.bin` and `Qwen3-1.7B-Q4_K_M.gguf`, so
+`_speech_in` and part of `_brain` read as broken on a box where both are present.
+That is the `fake_bin` `PATH` and `GSETTINGS_BACKEND` lesson in the opposite
+direction - **a probe that does not control its environment describes the machine
+it ran on, and here the machine did not exist.** Pointed at `cache/data-home`,
+`_speech_in` is green and the two reds that remain are real.
+
+**4 red of 22, and each one names its own remedy.** Three concerning an installed
+thing that is genuinely not working, and one a hard dependency absent on this
+Ubuntu box. The panel is now telling the truth about the machine it was given,
+which is the only claim it has ever been able to make.
+
+### The `.pyc` trap, and it was mine
+
+35 stray bytecode files under `usr/` after my own probes. Every command this
+session sets `PYTHONDONTWRITEBYTECODE=1`, so it was not a test run - it was the
+two ad-hoc probes I wrote with `cat > /tmp/opencode/...` and then ran with the
+variable set on the pytest line but not on the probe. Removed by exact path
+after listing what would go, nothing tracked, `test_packaging` 28 passed after.
+**A red packaging test means "clean `/tmp`" more often than it means "fix the
+code"** - and this time it meant neither: it meant "the leaner ran without the
+flag it always has".
