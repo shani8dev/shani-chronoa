@@ -21,6 +21,17 @@ from shani_chronoa.senses import memory
 
 logger = logging.getLogger(__name__)
 
+#: How long the reply stream must be quiet before the partial sentence in the
+#: buffer is released to speech. Long enough that a pause *inside* a token is not
+#: mistaken for a stall, short enough that the wait is not what a person notices.
+#: Chosen for the CPU-only case, where the sampler stalls for seconds and the
+#: first audible word would otherwise be late for no reason.
+STREAM_IDLE_SECONDS = 0.8
+
+#: How often the tick looks. A tenth of the threshold; when nothing is buffered
+#: the check is two attribute reads and a subtraction.
+STREAM_IDLE_POLL_MS = 100
+
 
 
 
@@ -275,6 +286,45 @@ class ConversationMixin:
             self._turn_pending = queue
         return queue
 
+    def _flush_idle_words(self) -> bool:
+        """Release a stalled partial sentence, so speech starts before the reply ends.
+
+        **Three halves of this were built and none connected.**
+        `SentenceBuffer.flush_idle()` - "after a pause in the stream: release up
+        to the last whole word" - had no caller; `SentenceBuffer.last_push` was
+        written twice and read by nothing; and the turn-end path called `flush()`,
+        which releases only what is *left*. So during streaming, `push()` releases
+        whole sentences as they complete and a partial one sits in the buffer
+        doing nothing.
+
+        That matters most where Chronoa is weakest. The sampler on a CPU-only
+        machine stalls for whole seconds mid-sentence, so a person hears nothing
+        until a sentence completes or the reply ends, and the first audible word
+        can be many seconds late for no reason other than where the pause fell.
+
+        `flush_idle()` decides the rest itself: nothing below
+        `MIN_SENTENCE_CHARS`, nothing with no space to cut at, and nothing while
+        `self._in_fence` - the buffer will not cut inside a fenced span, which is
+        provenance doing its job. So this only has to notice the pause.
+
+        Returns `True` to stay alive; `_turn_finished` removes it. Never raises:
+        no queue yet is the normal state before the first delta.
+        """
+        buffer = getattr(self, "_turn_buffer", None)
+        queue = getattr(self, "_turn_speech", None)
+        if buffer is None or queue is None:
+            return True
+        try:
+            if time.monotonic() - buffer.last_push < STREAM_IDLE_SECONDS:
+                return True
+            released = buffer.flush_idle()
+            if released:
+                queue.speak(released)
+        except Exception:  # noqa: BLE001 - a stalled buffer must not stop a turn
+            logger.debug("could not release an idle partial sentence",
+                         exc_info=True)
+        return True
+
     def _turn_finished(self) -> None:
         """A turn is over - whether it answered or failed. Start the next.
 
@@ -290,6 +340,13 @@ class ConversationMixin:
         `_submit` only runs now when the queue is empty of running work.
         """
         self._turn_in_flight = False
+        # **The idle tick is removed here**, and `_on_response_ready` calls this on
+        # both exits. A timeout that outlives its turn keeps reaching into a
+        # finished turn's buffer and queue, and the next turn inherits it.
+        _src = getattr(self, "_stream_idle_source", None)
+        if _src is not None:
+            GLib.source_remove(_src)
+            self._stream_idle_source = None
         if self._turn_queue:
             text, channel = self._turn_queue.pop(0)
             logger.info(f"Starting the next of {len(self._turn_queue) + 1} queued")
@@ -372,6 +429,8 @@ class ConversationMixin:
         self._turn_speech = self._new_speech_queue()
         self._turn_buffer = speech.SentenceBuffer()
         self._turn_streamed = []
+        self._stream_idle_source = GLib.timeout_add(
+            STREAM_IDLE_POLL_MS, self._flush_idle_words)
         self._turn_channel = channel
         self._turn_future = self._async.run(
             self.assistant.handle(text, sink=self.event_sink(),
