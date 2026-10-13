@@ -104,58 +104,78 @@ def read_log(path: Optional[Path] = None, limit_bytes: int = 32 * 1024 * 1024) -
     A tail is read rather than the whole file: a year of calls is tens of
     megabytes and a consolidation pass should not need it. `limit_bytes` bounds
     the read so a pathological log cannot exhaust memory.
+
+    **The budget is over the whole history, not over one file.** Rotation moves
+    the oldest records into `tool_calls.log.N`, so a reader that opened only the
+    active log would count one generation of the history and call it the
+    history - and nothing would say otherwise, because a smaller number is not
+    an error. `tool_tracking.log_files()` is oldest-first, so the chunks are
+    walked newest-first and the budget is spent where the recent calls are;
+    whatever falls past it is reported as `truncated` rather than skipped
+    quietly.
     """
     path = _log_file(path)
-    try:
-        size = path.stat().st_size
-    except OSError:
-        return Reading(0, 0)
-    truncated = size > limit_bytes
-    try:
-        with path.open("rb") as handle:
-            if truncated:
-                handle.seek(size - limit_bytes)
-                handle.readline()  # discard the partial first line
-            payload = handle.read()
-    except OSError as exc:
-        logger.debug("dream: could not read %s: %s", path, exc)
-        return Reading(0, 0)
-
+    from shani_chronoa import tool_tracking
     good = 0
     bad = 0
-    for line in payload.decode("utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line:
-            continue
+    truncated = False
+    remaining = limit_bytes
+    for chunk in reversed(tool_tracking.log_files(path)):
         try:
-            entry = json.loads(line)
-        except ValueError:
-            bad += 1
+            size = chunk.stat().st_size
+        except OSError as exc:
+            logger.debug("dream: could not stat %s: %s", chunk, exc)
             continue
-        if isinstance(entry, dict) and entry.get("tool_name"):
-            good += 1
-        else:
-            bad += 1
+        tail_only = size > remaining
+        truncated = truncated or tail_only
+        try:
+            with chunk.open("rb") as handle:
+                if tail_only:
+                    handle.seek(size - remaining)
+                    handle.readline()  # discard the partial first line
+                    remaining = 0
+                else:
+                    remaining -= size
+                payload = handle.read()
+        except OSError as exc:
+            logger.debug("dream: could not read %s: %s", chunk, exc)
+            continue
+
+        for line in payload.decode("utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                bad += 1
+                continue
+            if isinstance(entry, dict) and entry.get("tool_name"):
+                good += 1
+            else:
+                bad += 1
     return Reading(good, bad, truncated)
 
 
 def _entries(path: Path) -> List[dict]:
-    """The records themselves, or [] if the log is unreadable."""
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return []
-    out = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(entry, dict) and entry.get("tool_name"):
-            out.append(entry)
+    """The records themselves, oldest first, or [] if the log is unreadable.
+
+    **Delegates, and follows the archives.** This used to be its own copy of
+    `learning._entries_of` reading one file - a second implementation of
+    "parse this log's records", which is how `wpctl` ended up in three modules
+    and the finite check in four. And it read only the active log, so
+    `dream()`'s own reconciliation line (`read_log` may truncate; `_entries`
+    does not) silently rewrote the record count to one generation and the
+    consolidation pass reported a fraction of the history as the whole of it.
+
+    Measured: with three archived and three fresh records, this returned 3 and
+    `read_log` returned 6 - two readers of one file, disagreeing, with the
+    reconciliation hiding it rather than reporting it.
+    """
+    from shani_chronoa import learning, tool_tracking
+    out: List[dict] = []
+    for source in tool_tracking.log_files(path):
+        out.extend(learning._entries_of(source))
     return out
 
 

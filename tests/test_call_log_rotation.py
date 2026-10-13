@@ -51,11 +51,22 @@ def logs(tmp_path, monkeypatch):
     return d
 
 
-def write(directory, tag, n=1, tool="get_datetime"):
-    """Append `n` real records through the real tracker, not by writing bytes."""
+def write(directory, tag, n=1, tool="get_datetime", verdict=None):
+    """Append `n` real records through the real tracker, not by writing bytes.
+
+    **`verdict` is the sixth parameter and has to be named.**
+    `record_call(tool_name, args, result, duration_ms, origin, verdict,
+    evidence)` - the third positional is the *result*, and this helper's "ok"
+    lands there. Every record this file wrote before the keyword existed
+    therefore carried `verdict: None`, which is correct for a rotation test
+    (it is about count and order) and wrong for anything that reads verdicts.
+    Two tests here failed on exactly that before it was noticed, and the
+    signature is the only place a reader can see it.
+    """
     tracker = tool_tracking.ToolTracker(log_dir=directory)
     for i in range(n):
-        tracker.record_call(tool, {"tag": tag, "i": str(i)}, "ok", 1.0)
+        tracker.record_call(tool, {"tag": tag, "i": str(i)}, "ok", 1.0,
+                            verdict=verdict)
     return tracker
 
 
@@ -430,12 +441,217 @@ class TestTheLogIsNotCalledToolCallsLog:
         assert tags == ["old", "new"], tags
 
 
-class TestANamedPathIsStillOneFile:
+class TestANamedPathWithNoArchivesIsOneFile:
     def test_an_explicit_path_is_honoured_not_widened(self, logs, tmp_path):
-        """Three callers pass a file, and a caller naming a file is naming a
+        """A named path with **no archives beside it** is still just that file.
+
+        **This test's original reasoning was wrong and is the record of it.** It
+        read: *"Three callers pass a file, and a caller naming a file is naming a
         file. Widening it to the whole archive set would silently change what
-        those callers see."""
+        those callers see."* Widening it is the fix, not the hazard - the three
+        callers want the history and were getting one generation of it (see
+        `TestANamedPathFollowsTheArchives`). The *assertion* was right all along
+        and is still right, because `log_files()` derives `<path>.N` and returns
+        the file alone when none of those exist - so a fixture path is still one
+        file.
+
+        The class was named `TestANamedPathIsStillOneFile`, which is false for a
+        path that does have archives. A stale name on a passing test reads as
+        coverage of a property nobody is now asserting, so it is renamed rather
+        than left.
+        """
         one = tmp_path / "just-this-one.log"
         one.write_text(json.dumps({"tool_name": "x", "args": {"tag": "solo"}}) + "\n")
         got = [r["args"]["tag"] for r in learning._entries(one)]
         assert got == ["solo"], got
+
+    def test_a_named_path_does_not_gain_records_from_a_stranger(
+            self, logs, tmp_path):
+        """**The other direction, which the rename makes obvious.** An archive
+        beside *some other file* in the same directory is not this path's
+        history, and must not be read as though it were."""
+        mine = tmp_path / "mine.log"
+        mine.write_text(json.dumps({"tool_name": "x", "args": {"tag": "mine"}}) + "\n")
+        (tmp_path / "theirs.log.1").write_text(
+            json.dumps({"tool_name": "y", "args": {"tag": "theirs"}}) + "\n")
+        got = [r["args"]["tag"] for r in learning._entries(mine)]
+        assert got == ["mine"], got
+
+
+class TestANamedPathFollowsTheArchives:
+    """**The defect this whole file exists to prevent, found in the reader.**
+
+    `_entries()` took a named path as *exactly that file*, on the principle
+    recorded above. Four callers pass one and three of them pass the **active**
+    log on their default branch - `score_predictions` writes
+    `_entries(log or _log_path())`, which is the active log whenever its
+    argument is absent. Measured on a copy of this machine's own 18.9 MB log
+    through the real dispatch path, one `record_call()` after the first
+    rotation: **1 record returned of 19,111**, and nothing reported that 19,110
+    had gone.
+
+    `_durable_records()`, a few hundred lines above in the same file, had no
+    explicit-path branch and therefore got it right. Two readers of one file
+    disagreeing about what the file is, is what said so.
+    """
+
+    def test_a_named_path_returns_the_archived_records_too(self, logs):
+        write(logs, "old", 2, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+        got = sorted(r["args"]["tag"] for r in
+                     learning._entries(logs / "tool_calls.log"))
+        assert got == ["new", "old", "old"], got
+
+    def test_a_real_caller_that_names_a_path_still_sees_the_history(self, logs):
+        """**Driven through a shipped caller, not through `_entries`.** A test
+        that asks the reader whether it follows archives can be satisfied by a
+        reader that does; only a caller proves the fix reaches one.
+
+        `distill.recorded_verdicts` reads the log to decide what becomes training
+        data, so a verdict that only ever existed in an archive is one it would
+        have silently never learned from.
+        """
+        from shani_chronoa import distill
+        write(logs, "old", 1, tool="old_tool", verdict="failed")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        # Both sides need a verdict: `recorded_verdicts` keeps only
+        # failed/unverified/verified, so a `verdict=None` record is filtered out
+        # and the tool is absent for a reason that has nothing to do with
+        # rotation. Reading `{"old_tool": "failed"}` and concluding "the fresh
+        # tool was lost" would have been the wrong diagnosis twice over.
+        write(logs, "new", 1, tool="new_tool", verdict="verified")
+        verdicts = distill.recorded_verdicts(logs / "tool_calls.log")
+        assert "old_tool" in verdicts, verdicts
+        assert "new_tool" in verdicts, verdicts
+
+    def test_the_calibration_reader_gets_the_history_it_names(
+            self, logs, monkeypatch):
+        """`score_predictions` asks `_entries(log or _log_path())`, so on its
+        default branch it names the **active** log. Its own docstring says it is
+        *"the live check that calibration holds on calls the model had not seen
+        when it was fitted"* - so the reader that most needs the history was
+        reading one generation of it. Driven with no `log=` argument."""
+        write(logs, "old", 2, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+
+        # `score_predictions` returns early when there is nothing to score, so
+        # without this it never reaches the line under test and the spy records
+        # nothing - which is how a witness that cannot fail gets written.
+        monkeypatch.setattr(learning, "read_predictions",
+                            lambda path=None: [{"tool": "old_tool",
+                                                "p": 0.5}])
+        seen = {}
+        real = learning._entries
+
+        def spy(path=None):
+            # record what the caller *named* and what it actually got back
+            seen["named"] = str(path) if path is not None else None
+            got = real(path)
+            seen["records"] = len(got)
+            return got
+
+        monkeypatch.setattr(learning, "_entries", spy)
+        learning.score_predictions(path=None)
+        assert seen["named"] is not None, (
+            "score_predictions named no path, so this test is not covering the "
+            "line it claims to cover")
+        assert str(logs / "tool_calls.log") in seen["named"], seen
+        # **What it received, not merely what it asked for.** The first version
+        # asserted only `seen["named"]`, which is a *wiring* assertion: it says
+        # the caller reaches this line, and says nothing about the history the
+        # line then returns. The mutation run named it and reported "NOT caught
+        # by" - correct, because a test that checks the argument cannot catch a
+        # defect in the value.
+        assert seen["records"] == 3, seen
+
+
+class TestTheDreamPassFollowsTheArchive:
+    """`dream.read_log()` opened **one file** as well, so the two readers
+    disagreed about the same log: `_entries` supplied the data for the whole
+    history while `read_log` counted one generation of it. `dream()` papers over
+    that mismatch with a reconciliation line, which means the disagreement was
+    invisible *and* the counts it did report - `unreadable`, `truncated` -
+    described a fraction of the history without saying so."""
+
+    def test_the_dream_counts_the_archived_records_too(self, logs):
+        from shani_chronoa import dream
+        write(logs, "old", 2, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+        reading = dream.read_log(logs / "tool_calls.log")
+        assert reading.records == 3, reading
+
+    def test_a_history_that_fits_is_not_called_truncated(self, logs):
+        """The absence-shaped half: three records in two files read as
+        `truncated` would be a consolidation pass announcing it had less history
+        than it has, which is the failure this file is about."""
+        from shani_chronoa import dream
+        write(logs, "old", 2, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+        assert dream.read_log(logs / "tool_calls.log").truncated is False
+
+    def test_the_budget_is_spent_on_the_newest_records(self, logs):
+        """**The over-fix guard.** "Read every chunk" is only correct while the
+        budget still bounds the read: a consolidation pass must not read a year
+        of calls because the log is now in pieces. The budget is spent newest
+        first, so what survives is the recent tail and `truncated` says so."""
+        from shani_chronoa import dream
+        write(logs, "old", 20, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+        # **The limit is the active log's own size, read rather than typed.**
+        # My first version wrote 400 against ~200 bytes a record, which is less
+        # than the three records it had just written, so the budget cut *inside*
+        # the newest chunk and the test reported "2 of 3" - correct code, wrong
+        # expectation, and the same off-by-a-handful mistake as the rotation
+        # bounds. One record fits exactly; the archive's twenty do not.
+        limit = (logs / "tool_calls.log").stat().st_size
+        reading = dream.read_log(logs / "tool_calls.log", limit_bytes=limit)
+        assert reading.truncated is True, reading
+        assert reading.records == 1, (
+            "the budget was not spent newest-first: got %d of 21" % reading.records)
+
+    def test_the_dream_entries_helper_follows_the_archive(self, logs):
+        """**The third reader, named directly.** `dream._entries` is not
+        `learning._entries` - it was its own copy of the one-file parser, and a
+        source scan for `_entries(` reads it as the same name. Naming it here is
+        what separates "the consolidation pass reads the archive" from
+        "the two functions happen to share a spelling"."""
+        from shani_chronoa import dream
+        write(logs, "old", 2, tool="old_tool")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 1, tool="new_tool")
+        got = sorted(r["args"]["tag"] for r in dream._entries(logs / "tool_calls.log"))
+        assert got == ["new", "old", "old"], got
+
+    def test_the_dream_and_the_counter_agree(self, logs):
+        """**The disagreement is the defect, so it is the property.** With three
+        archived and three fresh records, the *unfixed* code returned 3 from
+        `_entries` and 6 from `read_log`, and `dream()`'s reconciliation line
+        rewrote the count to 3 rather than saying so. Two readers of one file
+        answering two numbers is the failure; a reader and a counter answering
+        one is the property."""
+        from shani_chronoa import dream
+        write(logs, "old", 3, tool="archived_tool", verdict="failed")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 3, tool="fresh_tool")
+        path = logs / "tool_calls.log"
+        assert dream.read_log(path).records == len(dream._entries(path)) == 6
+
+    def test_the_dream_pass_reports_the_archived_tool(self, logs):
+        """End to end, through `dream()` itself - the reader and the counter
+        agreeing is necessary, and a report that never mentions a tool with
+        three logged calls is not."""
+        from shani_chronoa import dream
+        # A tool whose calls all *verified* is reported as "nothing stands out",
+        # so the report names neither chunk. Failing it is what makes the
+        # archived records worth reading.
+        write(logs, "old", 3, tool="archived_tool", verdict="failed")
+        tool_tracking.rotate(logs / "tool_calls.log")
+        write(logs, "new", 3, tool="fresh_tool")
+        out = dream.dream(logs / "tool_calls.log")
+        assert "archived_tool" in out, out[:600]
+

@@ -3492,16 +3492,31 @@ def _entries(path: Optional[Path] = None) -> List[dict]:
     absence-shaped wrong answer this repository keeps meeting: nothing would
     report that records had stopped arriving, only that fewer were there.
 
-    An explicit `path` is still honoured - three callers pass one - and means
-    exactly that file, because a caller naming a file is naming a file.
+    **An explicit `path` names the *active log* of a history, and its archives
+    are part of that history.** My first version read such a path as exactly
+    that one file, on the principle that "a caller naming a file is naming a
+    file" - and four callers pass one, three of them the active log on their
+    own default branch: `score_predictions` writes `_entries(log or
+    _log_path())`, which is the active log whenever its argument is absent.
+    Measured against a copy of this machine's own log through the real dispatch
+    path, one `record_call()` after the first rotation: `_entries()` returned
+    **1 record of 19,111**, and nothing anywhere said 19,110 had gone. The
+    calibration check that names it is the one whose own docstring says it is
+    "the live check that calibration holds on calls the model had not seen when
+    it was fitted" - so the reader that most needs the history was the one
+    reading a single generation of it.
+
+    `_durable_records()` had it right already, a few hundred lines above in this
+    same file, with no explicit-path branch to get wrong. Two readers of the same
+    file disagreeing about what the file is, is what said so.
+
+    `log_files()` costs a path with no archives beside it nothing: it derives
+    `<path>.N` and returns the file alone when none exist. So this widens what a
+    caller sees only when the archives are really there.
     """
     from shani_chronoa import tool_tracking
-    if path is not None:
-        sources = [path]
-    else:
-        sources = tool_tracking.log_files(Path(_log_path()))
-        if not sources:
-            return []
+    sources = tool_tracking.log_files(Path(path) if path is not None
+                                      else Path(_log_path()))
     out: List[dict] = []
     for source in sources:
         out.extend(_entries_of(source))

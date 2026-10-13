@@ -27,6 +27,7 @@ TEST_FILE = 'tests/test_call_log_rotation.py'
 
 _TT = 'usr/lib/shani-chronoa/shani_chronoa/tool_tracking.py'
 _LEARN = 'usr/lib/shani-chronoa/shani_chronoa/learning.py'
+_DREAM = 'usr/lib/shani-chronoa/shani_chronoa/dream.py'
 
 MUTATIONS = [
     {
@@ -42,9 +43,9 @@ MUTATIONS = [
                    'test_records_come_back_in_time_order',
                    'test_log_files_is_oldest_first_with_the_active_log_last'],
         'file': _LEARN,
-        'old': '        sources = tool_tracking.log_files(Path(_log_path()))',
-        'new': '        sources = ([Path(_log_path())]\n'
-               '                  if Path(_log_path()).exists() else [])',
+        'old': '    sources = tool_tracking.log_files(Path(path) if path is not None\n'
+               '                                      else Path(_log_path()))',
+        'new': '    sources = [Path(path if path is not None else _log_path())]',
     },
     {
         'label': 'the tail reader follows the active log and ignores the archives',
@@ -224,17 +225,6 @@ MUTATIONS = [
         'new': '    if active.exists():\n        out.append(active)\n    return out[::-1]',
     },
     {
-        'label': 'a caller naming one file gets the whole archive set',
-        'why': 'three callers pass an explicit path, and a caller naming a file '
-               'is naming a file. Widening it silently changes what they see, and '
-               '`test_an_explicit_path_is_honoured_not_widened` is the only '
-               'thing that can tell the two apart.',
-        'expect': ['test_an_explicit_path_is_honoured_not_widened'],
-        'file': _LEARN,
-        'old': '    if path is not None:\n        sources = [path]\n    else:',
-        'new': '    if False:\n        sources = [path]\n    else:',
-    },
-    {
         'label': 'a log directory is rotated rather than refused',
         'why': '**A mistake I made while writing these tests, and a silent one.** '
                '`rotate()` was called with the *directory* at one point; the rename '
@@ -247,5 +237,85 @@ MUTATIONS = [
         'file': _TT,
         'old': '    if active.is_dir():',
         'new': '    if False:',
+    },
+    {
+        'label': 'a named path reads only that file again',
+        'why': '**The defect that actually shipped, restored verbatim.** '
+               '`_entries()` read an explicit path as exactly that file, on the '
+               'principle that "a caller naming a file is naming a file" - and '
+               'four callers pass one, three of them the ACTIVE log on their '
+               'default branch (`score_predictions` writes `_entries(log or '
+               '_log_path())`). Measured on a copy of this machine\'s own '
+               '18.9 MB log through the real dispatch path, one `record_call()` '
+               'after the first rotation: 1 record returned of 19,111, and '
+               'nothing said 19,110 had gone. The inverse of this mutation was '
+               'in the set until 2026-10-13 as `a caller naming one file gets '
+               'the whole archive set`, believed to be a defect. It was the '
+               'fix.',
+        'expect': ['test_a_named_path_returns_the_archived_records_too',
+                   'test_a_real_caller_that_names_a_path_still_sees_the_history',
+                   'test_the_calibration_reader_gets_the_history_it_names'],
+        'file': _LEARN,
+        'old': '    sources = tool_tracking.log_files(Path(path) if path is not None\n'
+               '                                      else Path(_log_path()))',
+        'new': '    sources = ([Path(path)] if path is not None\n'
+               '                else tool_tracking.log_files(Path(_log_path())))',
+    },
+    {
+        'label': 'the consolidation pass reads only the active log',
+        'why': '**The third reader, and the only one a source scan missed** '
+               'because `dream._entries` is not `learning._entries` - it is a '
+               'second copy of `_entries_of`, reading one file. Measured with '
+               'three archived and three fresh records: `read_log` returned 6, '
+               'this returned 3, and `dream()`\'s own reconciliation line '
+               'rewrote the count to 3 rather than reporting the disagreement - '
+               'so a consolidation pass announced a fraction of the history as '
+               'the whole of it. The fix delegates instead of duplicating, which '
+               'is the second copy of a parser this tree keeps being bitten by '
+               '(`wpctl` three times, the finite check four).',
+        'expect': ['test_the_dream_pass_reports_the_archived_tool',
+                   'test_the_dream_entries_helper_follows_the_archive'],
+        'file': _DREAM,
+        'old': '    for source in tool_tracking.log_files(path):\n'
+               '        out.extend(learning._entries_of(source))',
+        'new': '    for source in [path]:\n'
+               '        out.extend(learning._entries_of(source))',
+    },
+    {
+        'label': 'the dream counts only the active log',
+        'why': 'The same defect in the counter. `read_log` reported one '
+               'generation\'s worth of records while `_entries` supplied all of '
+               'them, so `unreadable` and `truncated` described a fraction of '
+               'the history without saying so - and the reconciliation line '
+               'made the disagreement invisible rather than reported.',
+        'expect': ['test_the_dream_counts_the_archived_records_too',
+                   'test_the_dream_and_the_counter_agree'],
+        'file': _DREAM,
+        'old': '    for chunk in reversed(tool_tracking.log_files(path)):',
+        'new': '    for chunk in list(tool_tracking.log_files(path))[-1:]:',
+    },
+    {
+        'label': 'the byte budget is never spent',
+        'why': '**The over-fix guard for "read every chunk".** Walking the '
+               'archives is only correct while the budget still bounds the '
+               'read: `limit_bytes` exists so a consolidation pass cannot read '
+               'a year of calls, and a log now split into nine files would '
+               'otherwise be nine chances to ignore it.',
+        'expect': ['test_the_budget_is_spent_on_the_newest_records'],
+        'file': _DREAM,
+        'old': '        tail_only = size > remaining',
+        'new': '        tail_only = False',
+    },
+    {
+        'label': 'the byte budget is spent on the oldest records first',
+        'why': 'The other over-fix: a reader that walks the chunks oldest-first '
+               'spends the budget on the archive and drops the recent calls - '
+               'the reflex layer and a running assistant read the *newest* '
+               'records, and a consolidation pass over a stale tail reports a '
+               'machine\'s history as it was months ago.',
+        'expect': ['test_the_budget_is_spent_on_the_newest_records'],
+        'file': _DREAM,
+        'old': '    for chunk in reversed(tool_tracking.log_files(path)):',
+        'new': '    for chunk in tool_tracking.log_files(path):',
     },
 ]
