@@ -195,8 +195,16 @@ def kind_of(filename: str) -> Tuple[str, str]:
     head, _, _tail = stem.partition("-")
     if head in _SIDECARS:
         return "sidecar", _SIDECARS[head]
+    # **Case-insensitive, and the lowercase form is the common one.** The table
+    # spells it `LoRA`, but the GGUF naming convention is used in lower case by
+    # the exporters that produce these files. Measured on this machine, in the
+    # real model directory: four files named `*-lora.gguf`, all lowercase, and
+    # `kind_of` called every one of them a `model`. `endswith("-LoRA")` is false
+    # for `-lora`, so the check silently did nothing and a filter that "drops
+    # adapters" was not dropping any.
+    lowered = stem.lower()
     for suffix, note in _TYPE_SUFFIXES.items():
-        if stem.endswith("-" + suffix):
+        if lowered.endswith("-" + suffix.lower()):
             return ("adapter" if suffix == "LoRA" else "vocab"), note
     hit = _SHARD_RE.search(filename)
     if hit:
@@ -269,6 +277,25 @@ def role_for(filename: str, fmt: str) -> Tuple[str, str]:
     wrong three ways at once on real files in one directory: it called
     `mmproj-SmolVLM2.gguf` a language model, and `nomic-embed-text-v1.5.gguf` one
     too. Both are decided here from the sidecar prefix and the name instead.
+
+    **And never a role for a file whose bytes were not identified at all.**
+    That is the same lesson arriving from the other side, and `identify()` is what
+    makes it checkable: it reports `unknown` with the first bytes as evidence, and
+    `unknown` is **not** in any `BACKENDS` entry's formats - so a role claimed for
+    such a file can only ever land in `catalog`'s `present` list, where the reason
+    read *"declared as llm, but no backend on this machine loads unknown for llm"*.
+
+    Measured on this machine, on real files: `catalog()` over the data directory
+    returned two `arg-0.bin` as *"declared as llm"*. They are **73-byte PNGs**
+    (`\x89PNG\r\n\x1a\n`) - screenshots passed to calls as attachments. A
+    confident false claim about two real files on disk.
+
+    The fix is not "trust the suffix less". A `.bin` is the one suffix that can be
+    anything, and the bytes are what say otherwise. `safetensors` is *positively*
+    identified and still claims `llm`, with the true reason *"no backend loads
+    safetensors for llm"* - which is worth saying, because it tells a person they
+    have a model file that Chronoa cannot run. That answer is kept; only the
+    guess is dropped.
     """
     stem = filename[:-len(".gguf")] if filename.endswith(".gguf") else filename
     kind, reason = kind_of(filename)
@@ -287,6 +314,17 @@ def role_for(filename: str, fmt: str) -> Tuple[str, str]:
         return "vision", "the projector half of a multimodal pair, loaded with --mmproj"
     if filename.startswith("mtp-"):
         return "vision", "multi-token-prediction heads for speculative decoding"
+    if fmt == "unknown":
+        # Placed **after** every case that is decided by the filename's *shape* on
+        # purpose. `mmproj-`, `mtp-` and the two Kokoro/Silero names are prefixes
+        # and exact names that mean the same thing whatever the bytes turned out to
+        # be, and the bytes are normally a machine-written file. This case is the
+        # opposite: a `.bin` whose first bytes are not a format anything here
+        # loads, so the only evidence left is a name - and `NOT_A_MODEL` above
+        # already covers the names whose meaning is *declared* rather than guessed.
+        return "", reason or (
+            f"the first bytes are not a format anything here loads, so nothing "
+            f"claims what {filename} is - the name is not evidence")
     if kind == "adapter":
         return "", reason
     low = stem.lower()

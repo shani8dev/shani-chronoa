@@ -79,6 +79,12 @@ def describe(path: Path, info: Optional[dict] = None) -> Dict[str, object]:
         # architecture this model implements". Without it nothing can load it, so
         # `classify` treats it as disqualifying rather than as a missing nicety.
         "architecture": meta("general.architecture"),
+        # What the file says it **is**. `general.type` is how a GGUF adapter says
+        # so, and it is the only evidence that outranks the filename: a LoRA
+        # written `mystery.gguf` declares `adapter` just as plainly as one written
+        # `thing-lora.gguf`.
+        "declared_type": meta("general.type"),
+        "adapter_type": meta("adapter.type"),
         # The spec says `general.size_label` is the size class "useful for leader
         # boards", which is exactly what a picker should print: the file names
         # itself, and a key somebody typed does not get to override it.
@@ -105,6 +111,16 @@ def classify(entry: Dict[str, object]) -> Tuple[str, str]:
     kind, reason = modelfmt.kind_of(str(entry["filename"]))
     if kind != "model":
         return kind, reason
+    declared = _text(entry.get("declared_type"))
+    adapter = _text(entry.get("adapter_type"))
+    if declared == "adapter" or adapter:
+        what = adapter or "adapter"
+        base = _text(entry.get("basename"))
+        return ("adapter",
+                f"the header declares it a {what}"
+                + (f" for {base}" if base else "")
+                + ", not a model to load by itself - it applies to a base model, "
+                  "and running it as one would fail")
     if not entry.get("architecture"):
         return ("not-a-model",
                 "no `general.architecture` in the header, so nothing knows what "
