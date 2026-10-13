@@ -22551,3 +22551,107 @@ is allocation at 460/760/1024, which is measurable; the picture is not yet.
 
 266 passed across 11 files (the 8 strip/composer suites, the layout contract,
 the member sweep and the model picker), no regressions.
+
+## The rotation shipped, and the reader kept one generation of it (2026-10-13)
+
+`tool_calls.log` is now size-capped and rotated: 16 MiB active, 8 archives, at
+990 bytes a record and 764 a day. The cap was needed - the log measured
+**18,914,951 bytes / 19,110 records over 25 days**, 276 MB a year, and this
+repository's own `log_files` skill described it as *"still growing, and
+unrotated"*. **The log is 18.9 MiB against a 16 MiB cap, so it is over the cap
+before a record is written and the next `record_call()` rotates it.**
+
+**Measured on a copy of the real file, through the real dispatch path, at the
+real size** - because a code path about to run on every write should have been
+run once before shipping rather than only on 40-byte fixtures.
+
+| | |
+|---|---|
+| records before | 19,110 |
+| records after one `record_call()` | **19,111** |
+| the first 19,110 | byte-identical and in order |
+| chunk modes | `tool_calls.log.1` 0600, `tool_calls.log` 0600 |
+| elapsed | **0.001 s** - a rename, not a copy |
+
+**So the retention half is clean, and the reader half - which is the half the
+whole change exists for - was not.**
+
+### The reader kept one generation, and said nothing
+
+`learning._entries()` read an explicit path as *exactly that file*, on the
+principle written into its own docstring: *"a caller naming a file is naming a
+file."* **Four callers pass one and three of them pass the active log on their
+own default branch** - `score_predictions` writes `_entries(log or
+_log_path())`, which is the active log whenever its argument is absent.
+
+    _entries(log) after the first rotation  ->  1 record of 19,111
+
+Nothing reported that 19,110 had gone. **The absence-shaped wrong answer this
+change was written to prevent, arrived through the change**, and the reader that
+most needed the history was reading one generation of it - `score_predictions`,
+whose own docstring calls itself *"the live check that calibration holds on calls
+the model had not seen when it was fitted"*.
+
+`_durable_records()` had it right already, a few hundred lines above in the same
+file, with no explicit-path branch to get wrong. **Two readers of one file
+disagreeing about what the file is, is what said so** - the disagreement, not
+either one of them, and not the test suite.
+
+### The mutation I believed was a defect was the fix
+
+The set carried `a caller naming one file gets the whole archive set`, with one
+witness and the same reasoning in its `why`. It is now the shipped behaviour, so
+it is **deleted**, and its inverse is the mutation. A mutation that reproduces the
+fix is not a mutation. The witness it cited survived it *correctly*: a path with
+no archives beside it **is** one file - which is why that test is still true, and
+why its class is renamed `TestANamedPathWithNoArchivesIsOneFile`. **A stale name
+on a passing test reads as coverage of a property nobody is asserting.**
+
+### Two more readers, and the end-to-end test is what found the third
+
+`dream` had its **own** `_entries`: a byte-for-byte copy of
+`learning._entries_of`, reading one file - which a source scan for `_entries(`
+reads as the same name. `dream.read_log` opened one file too, so the counter and
+the data disagreed (**3 archived + 3 fresh gave `read_log` 6 and `_entries` 3**)
+and `dream()`'s own reconciliation line **rewrote the count to 3 rather than
+reporting the disagreement**. A consolidation pass announced a fraction of the
+history as the whole of it.
+
+The duplicate parser is now a delegation - two implementations of "parse this
+log's records" is how `wpctl` ended up in three modules and the finite check in
+four - and `read_log`'s byte budget is spent newest-first *across the whole
+history*, with its own two over-fix mutations, because reading every chunk is
+only correct while something still bounds it.
+
+### Four tests that could not fail, all found by running them
+
+- **`record_call`'s third positional is `result`, not `verdict`.** The test
+  helper's `"ok"` has been landing there all along, so every record that file
+  wrote carried `verdict: None` - harmless for count and order, wrong for
+  anything reading verdicts, and it failed two of the new tests before the
+  signature was read. The trap is now in the helper's docstring.
+- **The byte budget's limit was typed** - 400 against ~200 bytes a record is less
+  than the three records just written, so the budget cut *inside* the newest
+  chunk and the test reported "2 of 3". Correct code, wrong expectation, and the
+  same off-by-a-handful mistake as the rotation bounds. Derived from the file now.
+- **The calibration witness asserted the argument, not the value** - a wiring
+  assertion. The runner named it and reported "NOT caught by", which is right.
+- **The dream report named neither chunk** because both tools' calls verified, so
+  `analyse` correctly said *"nothing stands out"*.
+
+### And five mutations had been printing "NOT caught by" on every run
+
+Correcting the defect exposed the set's own bookkeeping: eight names across five
+mutations could not bite, and **all eight were wrong rather than missing**. Two
+worth carrying: `test_a_write_below_the_cap_does_not_rotate` asserts a small
+write does **not** rotate, and with the size check deleted nothing ever rotates -
+same outcome, green with the defect. **A guard that can only fail in one
+direction needs the other direction's mutation to be seen at all**, which is why
+two mutations now share one witness rather than having two that do not
+discriminate. And one name was listed twice, so a single witness was standing in
+for two and the count was padding. Every replacement was already in the runner's
+`also:` line - *correct the name, do not write a new test*.
+
+37 tests. 17 mutations, **16 caught, 1 equivalent (documented), 0 survivors, 0
+unmeasurable, 0 stale**, and no line reading "NOT caught by". 284 passed across
+the rotation, learning, dream, distill and outcome-model suites.
