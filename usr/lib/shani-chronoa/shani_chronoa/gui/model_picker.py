@@ -65,7 +65,22 @@ def rows_for(app) -> "list":
         except Exception:  # noqa: BLE001
             short = str(getattr(spec, "key", ""))
         if spec.key not in installed:
-            subtitle = "not installed - this is a download, not a mode"
+            # **Pressing it does something.** The row used to say "this is a
+            # download, not a mode" and be **inert**, which is the worst of both:
+            # an instruction with no way to follow it, on the one screen a person
+            # with nothing installed reaches for. On a fresh machine every row
+            # read that and none could be pressed, so the picker - the control
+            # that exists to answer "which model answers" - was a dead end on
+            # exactly the question it was built for.
+            #
+            # Selecting it opens the setup wizard, which is the only thing in the
+            # app that installs a model, by the same `common.open_setup` the
+            # three panels with "not installed" rows already use. It does *not*
+            # hand the key to `app.answer-model`: that action refuses an
+            # uninstalled tier by name, correctly, and a correct refusal is
+            # still a dead end here.
+            subtitle = ("not installed - this is a download, not a mode. "
+                        "Select it to install")
         elif spec.key == active:
             subtitle = f"answering now - {getattr(spec, 'blurb', '') or short}"
         else:
@@ -138,7 +153,10 @@ class ModelPicker(Gtk.Popover):
             row = Adw.ActionRow()
             row.set_title(title)
             row.set_subtitle(subtitle)
-            row.set_activatable(usable and not active)
+            # **Every row except the answering one can be pressed.** An
+            # uninstalled row routes to the installer rather than being inert;
+            # `usable` alone made the whole picker unusable on a fresh machine.
+            row.set_activatable(not active)
             if active:
                 row.add_prefix(Gtk.Image.new_from_icon_name(
                     _CHECK))
@@ -155,15 +173,43 @@ class ModelPicker(Gtk.Popover):
             listing.append(row)
         self.set_child(listing)
 
+    @staticmethod
+    def _installed(key: str) -> bool:
+        """Whether `key` names a tier on this machine.
+
+        **Asked of `local_llm`, not read off the row.** The row was built from
+        `installed()` at open time and a download can finish while the popover is
+        open, so a row that was a download when it was drawn may be a mode now -
+        and pressing it should do what it now says.
+        """
+        try:
+            from shani_chronoa import local_llm
+
+            return key in set(local_llm.installed())
+        except Exception as exc:  # noqa: BLE001 - a probe must not break a click
+            logger.debug("model picker: could not read installed tiers: %s", exc)
+            return False
+
     def _choose(self, key: str) -> None:
-        """Hand the choice to the app's own action and close.
+        """Switch, or install - whichever the row is.
 
         **The action, not a call into `local_llm`.** `app.answer-model` restarts
         the service off the main loop and runs the quality gate - the thing that
         makes *installed* and *usable* different claims - and a picker that
         pointed `current.gguf` itself would read the new name while the old one
         was still answering.
+
+        **An uninstalled tier goes to the wizard instead**, which is the only
+        thing in the app that installs one. Measured on a fresh install: six
+        rows, every one of them a download, and not one of them pressable, so
+        the picker answered "no model answers" with the only control that could
+        have changed it doing nothing.
         """
+        if not self._installed(key):
+            from shani_chronoa.gui.surfaces import common
+
+            common.open_setup(self._app, self)
+            return
         app = self._app
         action = getattr(app, "activate_action", None)
         if action is None:

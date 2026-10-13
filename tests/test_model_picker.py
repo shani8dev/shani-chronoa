@@ -18,6 +18,7 @@ widgets rather than by reading the code:
 """
 
 import sys
+from types import SimpleNamespace
 
 import gi
 import pytest
@@ -65,6 +66,25 @@ def machine(monkeypatch):
     monkeypatch.setattr(local_llm, "active",
                         lambda: state["active"], raising=False)
     return state
+
+
+def _rows_of(picker):
+    """The picker's `Adw.ActionRow`s, in the order it built them."""
+    listing = picker.get_child()
+    out = []
+    stack = [listing]
+    while stack:
+        node = stack.pop(0)
+        if node is None:
+            continue
+        if isinstance(node, Adw.ActionRow):
+            out.append(node)
+        if hasattr(node, "get_first_child"):
+            child = node.get_first_child()
+            while child is not None:
+                stack.append(child)
+                child = child.get_next_sibling()
+    return out
 
 
 def _row(machine, key):
@@ -244,6 +264,17 @@ class TestTheChoice:
                 seen.append((name, parameter.get_string() if parameter else None))
                 return True
 
+        # **The picked tier is installed, because that is the path under test.**
+        # The fixture installs `qwen3-1.7b` and this picks `qwen3-8b`, so the
+        # pick was of a tier the machine does not have - and a picker that
+        # routes an absent tier to the installer (rather than handing a key that
+        # `answer-model` will refuse) answered *"setup"* instead. The test's
+        # subject is "a pick of an available model reaches the app's own
+        # action", so it now sets up exactly that. **A fixture that does not
+        # contain the thing the test operates on is describing a different
+        # machine**, which is the `GSETTINGS_BACKEND` and `fake_bin` lesson.
+        machine["installed"] = {"qwen3-8b"}
+
         picker = model_picker.ModelPicker(_App())
         # **On the class, not the instance.** `popdown` is a `Gtk.Popover`
         # vfunc, and assigning it on an *uninitialised* `__new__` object does
@@ -365,3 +396,113 @@ class TestTheRowAndTheChipAgree:
 
         win = W.ChronoaWindow.__new__(W.ChronoaWindow)
         win._refresh_model_word()          # must not raise
+
+class TestAFreshMachineIsNotADeadEnd:
+    """**The picker exists to answer "which model answers", and on a machine
+    with nothing installed it answered that and refused to be changed.**
+
+    Measured on a fresh install: six rows, every one carrying a download icon
+    and the sentence *"this is a download, not a mode"*, and **not one of them
+    pressable** - `set_activatable(usable and not active)`, and `usable` is
+    "installed". So the control that exists to change the answer gave no way to
+    change it, on precisely the machine where changing it is the first thing a
+    person needs to do.
+
+    The row was not wrong that a download is not a mode. It was wrong to *stop*
+    there: an instruction with no way to follow it is worse than no row, because
+    it reads as something the app has already considered and declined to do.
+    """
+
+    @staticmethod
+    def _picker(machine, monkeypatch):
+        # **It reads the machine state; it does not set it.** The first version
+        # forced `installed = set()` and `active = ""` here, which quietly
+        # overwrote whatever the calling test had arranged - so
+        # `test_pressing_an_installed_model_still_switches` switched nothing and
+        # `test_the_answering_row_is_the_only_one_that_is_inert` found no
+        # answering row at all, and both failed for reasons that had nothing to
+        # do with what they claim to check. **A helper that overwrites the
+        # fixture is a helper that describes a different machine.**
+        # **A real construction, not `__new__`.** `popdown` is a `Gtk.Popover`
+        # vfunc, and a Python attribute set on an *uninitialised* GObject does
+        # not shadow it - the call reaches the real method and raises
+        # "object ... is not initialized". Measured here first: all four tests in
+        # this class failed with exactly that, which is the fixture-shaped-like-
+        # the-call trap `TestTheChoice` documents and then walks into.
+        monkeypatch.setattr(model_picker.ModelPicker, "popdown",
+                            lambda self: None, raising=False)
+        return model_picker.ModelPicker(SimpleNamespace(
+            activate_action=lambda *a, **k: machine.setdefault("actions", []).append(a)))
+
+    def test_on_a_machine_with_nothing_installed_every_row_can_be_pressed(
+            self, machine, monkeypatch):
+        machine["installed"] = set()
+        machine["active"] = ""
+        picker = self._picker(machine, monkeypatch)
+        rows = _rows_of(picker)
+        assert rows, "the picker offered nothing"
+        # **`get_activatable()`, not `get_sensitive()`.** An `Adw.ActionRow` that
+        # has been deactivated is still *sensitive* as a widget - measured:
+        # `set_activatable(False)` leaves `get_sensitive()` reading `True` and
+        # only `get_activatable()` reads `False`. The first version of this test
+        # used `get_sensitive()`, so **every row passed whether or not the fix
+        # was in it** - the assertion could not fail, which is the one thing a
+        # regression test for "these rows are dead" must not be.
+        dead = [r for r in rows if not r.get_activatable()]
+        assert not dead, (
+            f"{len(dead)} of {len(rows)} rows cannot be pressed on a machine "
+            f"with no model installed - the picker is a dead end on the question "
+            f"it exists to answer")
+
+    def test_pressing_an_absent_model_opens_the_installer(self, machine, monkeypatch):
+        """**It must route somewhere that installs, not to a refusal.**
+
+        `app.answer-model` refuses an uninstalled tier by name, and that refusal
+        is correct - a download is not a mode. Handing it the key would therefore
+        turn a dead end into a correct refusal, which is still a dead end. The
+        only thing in the app that installs a model is the setup wizard, reached
+        the same way the three panels with "not installed" rows reach it.
+        """
+        import shani_chronoa.gui.surfaces.common as common
+
+        asked = []
+        monkeypatch.setattr(common, "open_setup",
+                            lambda app, widget=None: asked.append(widget))
+        picker = self._picker(machine, monkeypatch)
+        picker._choose("qwen3-8b")
+        assert asked, (
+            "pressing an uninstalled model did not open the installer - it must "
+            "go somewhere that can install it")
+        assert not machine.get("actions"), (
+            f"it also handed the key to an action: {machine['actions']}")
+
+    def test_pressing_an_installed_model_still_switches(self, machine, monkeypatch):
+        """**The control above must not cost the control this picker is for.**
+
+        The control for this one: it drives the *same* `_choose` with the tier
+        installed, so a fix that made every row open the wizard would leave the
+        picker's actual purpose - switching between models you have - unwitnessed.
+        """
+        machine["installed"] = {"qwen3-8b"}
+        machine["active"] = ""
+        import shani_chronoa.gui.surfaces.common as common
+
+        monkeypatch.setattr(common, "open_setup",
+                            lambda app, widget=None: pytest.fail(
+                                "an installed model opened the installer"))
+        machine["installed"] = {"qwen3-8b"}
+        machine["active"] = ""
+        picker = self._picker(machine, monkeypatch)
+        picker._choose("qwen3-8b")
+        assert ("app.answer-model",) == tuple(machine["actions"][0][:1]), machine["actions"]
+
+    def test_the_answering_row_is_the_only_one_that_is_inert(self, machine, monkeypatch):
+        """The active model is not a choice - pressing it would switch to itself."""
+        machine["installed"] = {"qwen3-1.7b"}
+        machine["active"] = "qwen3-1.7b"
+        picker = self._picker(machine, monkeypatch)
+        rows = _rows_of(picker)
+        dead = [r for r in rows if not r.get_activatable()]
+        assert len(dead) == 1 and dead[0].get_title().startswith("Medium"), (
+            f"expected only the answering row to be inert, got "
+            f"{[r.get_title() for r in dead]}")

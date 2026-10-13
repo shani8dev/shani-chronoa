@@ -19694,3 +19694,80 @@ without the competing display they are **10 passed**, and in isolation also
 passed. That is this file's own concurrency trap - D-Bus names, and now broadway
 displays - and it is the **fifth** time this session that concurrency, not the
 code, manufactured a failure that looked like a defect.
+## The model picker was a dead end on a fresh install, and said so while being one (2026-10-13)
+
+Asked to review the main UI for what a person would actually experience. The
+first thing that came out of reading the code was on the path **every** person
+walks: opening the app on a machine where nothing is installed.
+
+`gui/model_picker.py`'s rows are built from `local_llm.TIERS`, so a fresh
+machine lists all six tiers, each with a download icon and the subtitle
+**"not installed - this is a download, not a mode"** - and then:
+
+    row.set_activatable(usable and not active)
+
+`usable` is `spec.key in installed`, so **every row was inert**. Measured: on a
+machine with no model, six rows, six instructions to download something, and no
+way to press any of them. The picker exists to answer *"which model answers"* and
+on a fresh install it answered that and refused to be changed.
+
+**It is worse than a missing row, because the row explains itself.** A download
+is not a mode - that part is right, and `app.answer-model` correctly refuses an
+uninstalled tier by name. What was wrong was *stopping there*: an instruction
+with no way to follow it reads as something the app has already considered and
+declined to do, which is the dead-control class this file records in four other
+costumes.
+
+The fix routes the press to `common.open_setup` - **the consolidated door** the
+three panels with "not installed" rows already use, reached through
+`app.activate_action("setup")` so the header button and `Ctrl+Shift+S` stay the
+same path. It deliberately does **not** hand the key to `answer-model`: that
+would trade a dead end for a correct refusal, which is still a dead end.
+
+**And the press asks `local_llm` rather than trusting the row**, so a download
+that finishes while the popover is open switches the model instead of opening the
+wizard - the row was drawn before the fact and the click happens after it.
+
+### Three of my own tests were wrong in ways worth recording
+
+1. **`get_sensitive()` is not the inverse of `set_activatable()`.** Measured on
+   the installed libadwaita: `set_activatable(False)` leaves `get_sensitive()`
+   reading **`True`**, and only `get_activatable()` reads `False`. The first
+   version of the regression test used `get_sensitive()`, so **every row passed
+   with the dead end fully restored** - the one thing a test written to catch
+   dead rows must not be. It is the "a check that cannot fail" trap wearing the
+   costume of a control.
+2. **A helper that set the machine state hid two tests' own setups.** `_picker`
+   forced `installed = set()` and `active = ""`, so
+   `test_pressing_an_installed_model_still_switches` switched nothing and
+   `test_the_answering_row_is_the_only_one_that_is_inert` found no answering row.
+   Both failed for reasons unrelated to what they claim to check. Fixed to read
+   the state, and **the next test then failed for the same reason** - it never
+   arranged the machine either. **A test that does not set up the machine it
+   measures is measuring the fixture**, and I wrote that sentence into the helper
+   and then broke it one line later.
+3. **`ModelPicker.__new__` cannot build one.** `popdown` is a `Gtk.Popover` vfunc
+   and a Python attribute on an *uninitialised* GObject does not shadow it: all
+   four new tests failed with *"object ... is not initialized"* before the
+   fixture switched to a real construction. `TestTheChoice` documents this trap
+   and I walked into it anyway - **a documented trap is still a trap when the
+   fixture is the thing doing the constructing.**
+
+And a **pre-existing** test broke for a related reason and was wrong to:
+`test_a_pick_hands_the_key_to_the_apps_own_action` picked `qwen3-8b` while its
+fixture installed only `qwen3-1.7b`, so it was picking a tier the machine does
+not have. Its subject is "a pick of an available model reaches the app's own
+action", so it now installs what it picks - the `GSETTINGS_BACKEND` and
+`fake_bin` lesson: **a fixture that does not contain the thing the test operates
+on is describing a different machine.**
+
+**5 mutations, 5 caught**, the first being the shipped dead end restored
+verbatim:
+
+| mutation | |
+|---|---|
+| `set_activatable(usable and not active)` (**the shipped bug**) | **2 failed** |
+| the absent-model route removed | 1 failed |
+| the route returns silently | 1 failed |
+| every key treated as installed | 1 failed |
+| the subtitle stops saying "download" | 1 failed |
