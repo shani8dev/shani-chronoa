@@ -112,11 +112,14 @@ def filter_entries(entries: List[Entry], needle: str) -> List[Entry]:
 class CommandPalette(Gtk.Box):
     """The palette itself: a search entry over a list of destinations."""
 
-    CSS = "command-palette"
-
     def __init__(self, on_close: Optional[Callable[[], None]] = None) -> None:
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.add_css_class(self.CSS)
+        # **`CSS = "command-palette"` was applied to this box and styled by
+        # nothing** - not this package, not GTK, not libadwaita. The constant
+        # existed only to be applied once, and the one caller that read it was
+        # the line below. A class that styles nothing is an unfulfilled claim,
+        # not documentation; `CommandPalette`'s own measurements live at the top
+        # of this file, which is where a reader will actually look.
         self._on_close = on_close or (lambda: None)
         self._entries: List[Entry] = []
         self._visible: List[Entry] = []

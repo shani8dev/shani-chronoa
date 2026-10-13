@@ -1257,7 +1257,13 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         from shani_chronoa.gui import model_picker
 
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.add_css_class("composer-model-row")
+        # **`composer-model-row` was applied here and styled by nothing** -
+        # not this package's stylesheet, not GTK, not libadwaita (all three
+        # checked by asking). Removed rather than given a rule, because what
+        # the row should look like is a design decision and inventing one here
+        # would be a second answer to a question nobody has asked yet.
+        # `tests/test_the_chrome_carries_nothing_that_does_nothing.py` fails
+        # if a class with no rule comes back.
         row.set_margin_top(2)
         row.set_margin_bottom(2)
         row.set_margin_start(4)
@@ -1666,7 +1672,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # anything else looks.
         self._split.connect("notify::show-content", self._on_split_collapsed)
         header_bar.pack_start(self._sidebar_toggle)
-        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         header = Gtk.Label(label="Shani Chronoa")
         header.add_css_class("cajita-header")
         # May shorten. Unellipsised, the title reserved its full width and the
@@ -1680,8 +1685,12 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         self._mic_icon.set_pixel_size(16)
         self._mic_icon.set_tooltip_text("Microphone is in use")
         self._mic_icon.add_css_class("flat")
-        #: Hidden until the microphone is actually in use; the tooltip says why.
-        self._mic_icon.set_visible(False)
+        # **There was a `set_visible(False)` here**, with a docstring saying the
+        # icon is hidden until the microphone is in use - and `_sync_from_state`
+        # runs from `__init__` and shows it unconditionally, so the hide never
+        # survived the constructor it was written in. The header therefore
+        # always carries a microphone, and the line claimed otherwise. The
+        # tooltip below is the honest statement of when it means anything.
 
         # Quick Ask and the browser are actions with keyboard shortcuts, which is
         # the same as being invisible: a shortcut nobody knows about is not a
@@ -1776,8 +1785,6 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         for widget in (quick_button, self._browser_button, help_button,
                        self._overflow_button, setup_button, settings_button):
             header_bar.pack_end(widget)
-        self._header_row = header_row
-        self._header_bar = header_bar
         # The page was assembled before the bar existed (the column is built
         # top-down), so the bar goes into the holder now. An `Adw.Bin` exists
         # exactly for this: one slot, fillable later, no re-parenting.
@@ -1992,7 +1999,10 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         # Where an `ask_user` question appears. Hidden until a question is
         # actually pending, so it costs nothing the rest of the time.
         self._question_row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self._question_row.add_css_class("cajita-question")
+        # `cajita-question` is gone for the reason `composer-model-row` is -
+        # applied, styled by nothing anywhere. This row is also the one surface
+        # AGENTS.md records as having no render target at all, so it is the last
+        # row that should be carrying an unfulfilled claim about itself.
         self._question_row.set_visible(False)
         main_box.append(self._question_row)
 
@@ -2141,8 +2151,9 @@ class ChronoaWindow(StyleMixin, AskingMixin, AttachingMixin, ConversationsMenuMi
         input_row.append(self._stop_button)
         # **Stopping the turn, which the button above does not do.** That one is
         # `app.stop-speaking` - it stops the *voice* after the answer is made,
-        # and it is created hidden and never shown by anything, so "Stop
-        # speaking (Esc)" is a tooltip on a button that can never appear. A turn
+        # and it is shown whenever the state is SPEAKING or THINKING
+        # (`_sync_from_state`), so "Stop speaking (Esc)" is a tooltip on a button
+        # that appears on its own. A turn
         # that is thinking, streaming or mid-skill had no control at all:
         # `Decision.CANCEL` existed and worked, but only from inside the approval
         # prompt, so a turn could be stopped at exactly one moment - the one where

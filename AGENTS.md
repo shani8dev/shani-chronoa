@@ -24003,3 +24003,96 @@ test in the class raised `AttributeError`; the constant is a class attribute, an
 the failure named it.
 
 9 tests, green on an unchanged broadway display with `DISPLAY` unset.
+## The chrome carried three classes that styled nothing, and two comments that lied (2026-10-13)
+
+From a UI review. `composer-model-row`, `cajita-question` and
+`command-palette` were each applied to a widget and matched by **no selector in
+any stylesheet in the package** - not `style.py`, not any other. Asking the
+installed library as well answers False for all three (`hasattr` over `Gtk` and
+`Adw`), so none of them is a toolkit class either. `CommandPalette.CSS` existed
+solely to be applied on the next line and was read by nothing else.
+
+A class that styles nothing is an unfulfilled claim about how a thing looks, not
+documentation. What the model row or the question row *should* look like is a
+design decision, and inventing a rule in a cleanup pass would have been a second
+answer to a question nobody has asked.
+
+**Two comments said the opposite of the code beside them.**
+
+- `self._mic_icon.set_visible(False)`, with a docstring saying the icon is hidden
+  until the microphone is in use. **`_sync_from_state()` runs from `__init__`**
+  (`:1459`) and shows it unconditionally (`:2547`), so the hide never survived the
+  constructor it was written in. The header always carried a microphone.
+- `window.py`'s comment on `_turn_stop_button` read *"it is created hidden and
+  never shown by anything, so 'Stop speaking (Esc)' is a tooltip on a button that
+  can never appear"*. `:2558` shows it whenever the state is `SPEAKING` or
+  `THINKING`. **The comment was explaining a button that works, as a defect.**
+
+**And `header_row` was built, assigned twice, and read by nothing** - removed,
+along with the second dead attribute in the same commit.
+
+### The general guard is deliberately not built, and the measurement is why
+
+The obvious gate - *every class applied under `gui/` resolves to a selector in
+our stylesheet or is a documented toolkit class* - cannot be made sound on this
+box. Measured:
+
+| | count |
+|---|---:|
+| classes applied under `gui/` | **109** |
+| resolved by a selector in this package | **74** |
+| unresolved, applied in exactly one file | **26** |
+| unresolved, applied in two or more files | **9** |
+
+**Neither half of the unresolved 35 is separable.** `title-2` and `title-3` are
+libadwaita's own classes on `Adw.PreferencesGroup` and are applied once each, so
+"applied once" does not mean "ours"; and `model-picker` is ours, applied in two
+files, so "applied in many" does not mean "the toolkit's". **The toolkit half is
+undecidable here**: libadwaita compiles its stylesheet into a `GResource` and
+ships no `.css` on disk, and `hasattr` answers only for class names that happen to
+be Python attributes. A gate reporting 26 findings, most unverifiable on the
+machine running it, is *"a scanner that reports 54 files is worse than no
+scanner"* - the shape this file records three times.
+
+So the test guards the three removals, the palette's dead constant, the *other*
+direction (a rule for a class nothing applies), and a **planted violation** so
+the clean result means something.
+
+### **4 mutations caught, 2 survivors, and the survivors are honest**
+
+| mutation | |
+|---|---|
+| `composer-model-row` applied again | **caught** |
+| `cajita-question` applied again | **caught** |
+| `CommandPalette.CSS` restored with its `add_css_class` | **caught** |
+| a rule added for a class nothing applies | **caught** |
+| `header_row` built and populated again | **not covered here** |
+| the dead mic hide restored | **not covered here** |
+
+Both survivors are **behaviour-neutral by construction**, and the first version of
+the harness hid that by reporting them as caught. It classified on `" failed" in
+pytest_output`, and a warning's own text contains the word - so a table of six
+passes had two false ones in it. **The verdict is read from the summary line
+now**, which is the same correction this file records for the `-rs` flag and for
+a GTK teardown segfault read as a test result.
+
+Why neither is covered: restoring the mic hide changes nothing at any observable
+moment, because `_sync_from_state` overwrites it during construction; and the
+`header_row` mutation *re-parents* the sidebar toggle, which is a window-build
+concern this file deliberately does not hold. The window-build suite would catch
+it and **could not be run** to show that here - `pytest_ignore_collect` refuses
+to collect window-building files when no window can be built, and the stripped
+environment the snapshot runs in takes the display away. **Not claimed as caught.**
+
+### And the instrument was wrong twice before it was right
+
+The first scan collected only `str` constants, and `style.py`'s stylesheet is a
+**`b`-prefixed** triple-quoted literal - so it reported **114 classes as unstyled**,
+which read exactly like a finding and was entirely the instrument. The second
+attempt reported **38** and still cried wolf, because it flagged libadwaita's own
+classes. **98 -> 38 -> "not buildable here"**, and only the third number is a
+statement about the tree. `tests/test_the_chrome_carries_nothing_that_does_nothing.py`
+(5) carries the `str`/`bytes` half in its own docstring and plants a violation so
+the fix cannot rot silently.
+
+45 passed across the chrome, palette, palette-mode-entry and window suites.
