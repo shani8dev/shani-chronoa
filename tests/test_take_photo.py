@@ -104,7 +104,15 @@ def test_consent_off_refuses_before_anything(cam, monkeypatch):
     from shani_chronoa.config import ChronoaConfig
     ChronoaConfig().set("vision-sense-enabled", "false")
     out = tp._run({"countdown": 5})
-    assert out.startswith("Taking a photo is not permitted") and "vision-sense-enabled" in out
+    # **Either spelling** - the refusal names the Settings row ("Take and
+    # describe photos"), not the raw key, since `04316cc`. Asserting the key
+    # failed on a refusal that names the switch correctly; what this has to
+    # catch is a refusal that names nothing.
+    from shani_chronoa.capabilities import gate_label
+
+    assert out.startswith("Taking a photo is not permitted"), out
+    assert ("vision-sense-enabled" in out
+            or gate_label("vision-sense-enabled") in out), out
     assert cam["lines"]() == [] and cam["slept"] == []
     assert not _pictures(cam["home"]).exists()
 

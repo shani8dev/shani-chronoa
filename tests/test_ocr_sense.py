@@ -243,7 +243,16 @@ def test_consent_is_required_before_anything_runs(tmp_path, monkeypatch, chronoa
     result = ocr_mod.run({"path": str(_image(tmp_path))})
 
     assert isinstance(result, str)
-    assert "ocr-sense-enabled" in result
+    # **Either spelling.** The refusal names the Settings row now - *'Switch on
+    # "Text in images"'* - so this read *'ocr-sense-enabled'* against a sentence
+    # that never carries the raw key, and failed with a message pointing at the
+    # sense rather than at the assertion. What it has to catch is a refusal that
+    # names **nothing**: a person told to enable a setting with no way to find it.
+    # Same fix as `test_web_search.py` and `test_skills.py`.
+    from shani_chronoa.capabilities import gate_label
+
+    assert ("ocr-sense-enabled" in result
+            or gate_label("ocr-sense-enabled") in result), result
     assert not argv_log.exists()  # the binary was never invoked
 
 
