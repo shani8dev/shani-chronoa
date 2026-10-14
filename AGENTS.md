@@ -25936,3 +25936,77 @@ reason is the *verb* that was used first ("kept"), not an explanation.
 because another session's mutation run held the lock, so whether the group
 belongs inside `common.scrolled(body)` has not been checked. Recorded in
 `MAIN-UI-TODO.md` rather than guessed at.
+
+## "Fix all", second pass: another session's 2,430 lines, and the third panel with no dot (2026-10-14)
+
+Asked to commit all and push. **I flagged the hazard first and was told to go
+ahead anyway**, which is the owner's call to make and the right order to make it
+in: the working tree belonged to a session still writing to it - one file was
+**94 seconds** old - so committing could have captured a half-written state and
+collided with that session's own commits. The tree had gone idle by the time the
+instruction was repeated, and then all **14 files parsed** before anything went in.
+`3792014` carries five lint findings **on purpose**, named in its own message,
+because editing another session's code inside their commit is how two changes get
+tangled.
+
+### Five lint findings, and the two that were not deletions
+
+Fixed in `7391857` rather than amended, so `3792014`'s message stays honest about
+what it contained. Three were genuinely unused and are gone. **Two were a call kept
+for its side effect with its result thrown away, and deleting them would have
+deleted the check:**
+
+- the mock handler's `body = _json.loads(request.content)` - **the parse is the
+  check**. A malformed body raises there and fails the test, rather than the
+  handler quietly returning a canned reply.
+- `editor.py`'s `size = path.stat().st_size` - the size is never used; the `stat()`
+  is the whole point, and the `OSError` it raises is an answer the caller has to be
+  able to give.
+
+Both are now bare calls with the reason written down. **A lint finding is evidence
+about the code, not a verdict on it** - "assigned but never used" says the value
+went nowhere, and the question worth asking is what the *call* was for.
+
+### The Editor panel had no health dot: the third time
+
+`tests/test_surface_health_status.py` went red on the panel that landed with
+`3792014` - *"editor exposes no status(), so its sidebar row gets no health dot"*.
+**This is the same defect `android` and `wearables` each carried**, caught by the
+same guard, so it is the third firing and worth more than the fix.
+
+`window._panel_status` is duck-typed on purpose: a panel's `status` is a
+**callable** answering with a word from `common.STATUS_WORDS`, and
+`common.StatusRecorder` is how a panel supplies one. Editor drew its own
+`empty_state` and nothing else, so `build()` returned a bare `Adw.NavigationPage`
+with no `status` on it at all.
+
+It now draws its status row **through** the recorder, so the word the dot paints
+and the CSS class on screen are made once and cannot disagree; records
+**`attention`** for every refusal rather than `unknown` (*"could not determine"*
+understates a save that has already refused itself and said why); records
+**`ready`** with `set()` when a file opens, which is the case with no status page
+to draw on; and attaches `navigation.status = page.recorder.status`.
+
+**2 mutations, 2 caught.** Dropping the attachment fails **4**; recording the word
+without drawing the row fails **2**, including `test_the_dot_agrees_with_the_row_
+the_panel_shows` - the check that exists for exactly the disagreement this fixes.
+120 passed in that file, from 116 + 4 failed.
+
+### Still not fixed
+
+**`test_voice_loop_live` remains red**, and the honest summary has moved three
+times today, so the last word is the measured one: the private graph carries audio
+(48,101 frames standalone, 84,640 bytes under pytest), `pipewire` stays alive with
+an empty log, the failure is **neither cumulative nor style-specific**, and the
+symptom is an intermittent `pw_context_connect(): Host is down` - the socket
+present, nothing accepting - that varies run to run on a box with no audio
+hardware, a desktop PipeWire session, Bluetooth contending for the same socket and
+another session working alongside.
+
+**No guard was added for it, and that is the decision.** A liveness check or a
+longer sleep would very likely make the numbers better here and I could not tell
+whether it would hide a real failure on a healthy machine. Two guards written
+earlier today turned out wrong when measured - an ambient PipeWire probe that
+over-skipped **5 of 19** runnable tests, and an `--check-anchors` verdict that was
+green because the needle matched mid-line. **A fix that cannot be shown not to
+over-fire is not a fix.**
