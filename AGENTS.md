@@ -25512,3 +25512,62 @@ must satisfy.
   because it was reading a mutated tree, killed **by PID** (8952) - never by name, which
   is the rule this file records twice. Every subsequent run of that file carried a
   2 GB `ulimit -v`, so a runaway is a fast failure rather than a dead machine.
+
+## "Do all", measured: a ten-chunk sweep, two stale assertions, and a bytecode trap (2026-10-14)
+
+Asked to fix everything remaining. **The instrument came before the list**, because this
+file's own most-repeated lesson is that a failure list nobody re-measures is worse than
+no list: `tools/run_suite_in_chunks.sh`, ten chunks, one process each, serial, with a
+per-chunk state directory. **10,565 passed, 69 distinct failures over 34 files** - and
+every one of those 34 is being re-run serially in its own process before any of it is
+believed, which is the rule that separated 34 claimed failures from real ones the last
+three times.
+
+Two were diagnosable without that, and both are the same class as the four above.
+
+### `test_schema_caps`: the guard's count was remembered
+
+The literal was **257** and the registry is **256**, because the other session's
+`8c92258` retired `trash_file` when `delete_file` became a trash move. Right code,
+stale number - and the message reads *"a cap dropped a shipped skill"*, which points the
+next reader at the one work this file exists to prevent.
+
+**The count is derived from the source now.** Every `skills/*.py` is parsed and its
+`Skill(` constructors counted, skipping a `NOT_A_SKILL` module to match
+`discover_skills`' own rule. Measured: **256 declarations, 256 in the registry** - so the
+derivation is checkable rather than assumed, and it is the `skills_total` repair
+(`--refresh-coverage`, recorded above) applied to a second number.
+
+**It still has teeth.** `_SCHEMA_MAX_OPTIONS = 128 -> 99` is the shipped defect this file
+was written for - `solve_math` enumerates exactly 100 operations - and it fails
+`test_nothing_that_ships_is_refused` with 1 failed, 12 passed. Restored and re-run green.
+
+### The models-card truncation test only passed on a machine with a usable first tier
+
+`endswith((".", "here.", "machine."))` - all three are the endings the sentence has when
+the tier is **usable**. `requirements_met`'s reasons are noun phrases in parentheses, so
+the refused branch ends in `)`. **Measured: all six reasons end in `)`.** On a machine
+with no local model answering, which is every tier here, that is the branch that runs - so
+the assertion could only pass on a box where the first card happened to be the default.
+
+**A shape that depends on which machine the suite ran on** is the `fake_bin` `PATH`
+lesson in a fourth costume, and the failure text points at the product.
+
+The assertion is a terminator and a real truncation check: ends with `.` or `)`, **and**
+the branch that introduces a reason must have one after the colon - because
+"Not the default here: " with nothing after it is the sentence-cut-in-half the test is
+named for, and a terminator check alone would accept it if the clause ended in a period.
+
+**Two mutations, both caught, the first being the recorded defect itself**: dropping the
+reason (cut at the colon) fails 2; dropping the head fails 2.
+
+### And 48 stray `.pyc` files under `usr/`, which is a fourth red by itself
+
+None tracked in git, none newer than fifteen minutes, so not from the sweep in flight
+(the runner sets the flag). Removed by exact path after listing what would go and
+backing up; `test_packaging` goes **28 passed**. This file records this trap a fourth
+time and says each time that the habit is the only durable answer - the source is
+standalone `tools/*.py` runs, which import the package with no conftest involved.
+
+**Not claimed: which of the 34 are real.** That is the serial re-run's job, and this
+entry is deliberately not a verdict on them.
