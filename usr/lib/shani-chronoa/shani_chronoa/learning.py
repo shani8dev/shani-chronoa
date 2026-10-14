@@ -1516,7 +1516,15 @@ def weights_from_records(records: Iterable) -> Dict[str, float]:
         # `is`, not `==`: two different lists can hold equal records, and the
         # point of the key is that this object is the one already worked out.
         if cached is not None and cached[0] is records:
-            return cached[1]
+            # **A copy, because the cached dict is shared by identity.** Measured
+            # before this line existed: `a = weights_from_records(recs)` twice
+            # returns the *same object*, so a caller doing `weights["x"] = 99`
+            # rewrote the answer for every later caller, silently and with no
+            # error. No caller does that today - both consumers only read - so the
+            # hazard is latent rather than live. A cache that cannot be poisoned
+            # is worth one dict copy; one that merely has not been is a trap
+            # waiting for the next caller. ~256 entries, once per log revision.
+            return dict(cached[1])
     grouped: Dict[str, list] = {}
     for record in records:
         name = (record.get("tool_name") if isinstance(record, dict)
@@ -1529,6 +1537,12 @@ def weights_from_records(records: Iterable) -> Dict[str, float]:
         if len(_WEIGHTS_BY_RECORDS) >= _WEIGHTS_CACHE_MAX:
             _WEIGHTS_BY_RECORDS.pop(next(iter(_WEIGHTS_BY_RECORDS)))
         _WEIGHTS_BY_RECORDS[id(records)] = (records, weights)
+        # **A copy here too, and the first version missed this.** The copy on the
+        # cache-hit path was in place while the computing path returned `weights`
+        # itself - so the *first* caller received the live cached object, wrote to
+        # it, and every later caller got a faithful copy of the damage. Measured:
+        # `a = f(recs); a["x"] = 99; f(recs)` returned `{'x': 99.0}`.
+        return dict(weights)
     return weights
 
 

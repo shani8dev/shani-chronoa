@@ -440,7 +440,26 @@ _TOOL_FACTS_MAX = 1024
 class _ToolFacts:
     """One tool's request-independent facts. Immutable by convention."""
 
-    __slots__ = ("name", "body", "options", "words")
+    __slots__ = ("name", "body", "options", "words", "_frozen")
+
+    def __setattr__(self, name, value):
+        """**Frozen once built.** This object is cached and handed out to callers,
+        so a write would rewrite the answer for every *later* request rather than
+        this one - and there being no path that writes today is a weaker
+        guarantee than there being no way to. Populating uses `object.__setattr__`
+        so the constructor itself is unaffected.
+        """
+        # **`getattr` with a default, not `object.__getattribute__`.** The first
+        # assignment in `__init__` happens before `_frozen` exists, and
+        # `object.__getattribute__` raises on a missing attribute rather than
+        # returning one - which made the constructor itself fail. The anchor for
+        # this edit appeared **twice**, once per class, so it is replaced in both
+        # rather than asserted to be unique.
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                "%s is cached and shared; it is frozen after construction"
+                % type(self).__name__)
+        object.__setattr__(self, name, value)
 
     def __init__(self, name, body, options):
         #: Stemmed name words, as a `list` - `ranked()` reports the order's first
@@ -454,6 +473,7 @@ class _ToolFacts:
         #: `name | body`, cached because `ranked()`'s document-frequency pass
         #: needs exactly this union for every tool on every request.
         self.words = frozenset(name) | body
+        self._frozen = True
 
 
 def _tool_facts(tool: dict) -> "_ToolFacts":
@@ -591,7 +611,26 @@ class _Corpus:
     numbers that only change when a schema does.
     """
 
-    __slots__ = ("facts", "names", "df", "option_df", "n", "chars_by_name")
+    __slots__ = ("facts", "names", "df", "option_df", "n", "chars_by_name", "_frozen")
+
+    def __setattr__(self, name, value):
+        """**Frozen once built.** This object is cached and handed out to callers,
+        so a write would rewrite the answer for every *later* request rather than
+        this one - and there being no path that writes today is a weaker
+        guarantee than there being no way to. Populating uses `object.__setattr__`
+        so the constructor itself is unaffected.
+        """
+        # **`getattr` with a default, not `object.__getattribute__`.** The first
+        # assignment in `__init__` happens before `_frozen` exists, and
+        # `object.__getattribute__` raises on a missing attribute rather than
+        # returning one - which made the constructor itself fail. The anchor for
+        # this edit appeared **twice**, once per class, so it is replaced in both
+        # rather than asserted to be unique.
+        if getattr(self, "_frozen", False):
+            raise AttributeError(
+                "%s is cached and shared; it is frozen after construction"
+                % type(self).__name__)
+        object.__setattr__(self, name, value)
 
     def __init__(self, tools, facts):
         self.facts = facts
@@ -613,6 +652,7 @@ class _Corpus:
         # why this is here and not in `_ToolFacts`.
         self.chars_by_name = {name: len(json.dumps(tool))
                               for name, tool in zip(self.names, tools)}
+        self._frozen = True
 
 
 #: Keyed on the **identity of the per-tool facts**, and holding them. That is what
