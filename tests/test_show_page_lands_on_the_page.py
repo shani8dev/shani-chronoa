@@ -202,14 +202,37 @@ def test_a_page_title_falls_back_to_something_readable(monkeypatch):
 
 
 def test_a_page_title_comes_from_the_registry_not_a_hand_kept_list(monkeypatch):
+    from shani_chronoa.gui import surfaces
     from shani_chronoa.gui import window as window_mod
 
     # The real shape is `(TITLE, ICON, build)` - read out of
     # `available_surfaces`, not invented here.
-    entry = {"listening": ("Listening", "audio-input-microphone-symbolic",
-                        lambda app: None)}
-    monkeypatch.setattr(window_mod, "available_surfaces", lambda: entry,
-                        raising=False)
+    #
+    # **Two things were wrong, and the first hid the second.**
+    #
+    # The patch went to `window_mod.available_surfaces`, but `_surface_title`
+    # does its own `from shani_chronoa.gui.surfaces import available_surfaces`
+    # *inside the function*, so it never looks at the window module's
+    # attribute - the patch was a no-op and the function read the real registry.
+    # That is why this passed for as long as it did: the panel's real title was
+    # `"Listening"`, and the test wanted `"Listening"`. It was green by
+    # coincidence and was asserting nothing about the seam it names.
+    #
+    # `listening.py` then renamed itself to **`"App audio"`**, on purpose and
+    # with its reasons written down - it is system audio capture, not the
+    # microphone. That turned the coincidence into
+    # `assert 'App audio' == 'Listening'` and revealed the patch had never
+    # worked.
+    #
+    # **The title below is deliberately not the fallback's.** `_surface_title`
+    # falls back to `name.replace("_", " ").capitalize()`, which for this name
+    # is exactly `"Listening"` - so a test that wanted `"Listening"` would pass
+    # even if the registry were never read at all. `"App audio"` cannot be
+    # produced by the fallback, so the registry read is now load-bearing and the
+    # guard has teeth.
+    entry = {"listening": ("App audio", "audio-input-microphone-symbolic",
+                           lambda app: None)}
+    monkeypatch.setattr(surfaces, "available_surfaces", lambda: entry)
 
-    assert window_mod._surface_title("listening") == "Listening"
+    assert window_mod._surface_title("listening") == "App audio"
     assert window_mod._surface_title("not_there") == "Not there"
