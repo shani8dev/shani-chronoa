@@ -145,8 +145,20 @@ class TestConsentGate:
         from shani_chronoa.skills.web_search import _run
         # When: the skill is invoked
         result = _run({"query": "secret query", "url": "https://example.org/notes"})
-        # Then: it refuses, naming the key, and no request was made
-        assert "web-sense-enabled" in result
+        # Then: it refuses, naming the switch, and no request was made.
+        #
+        # **Either spelling counts, and that is this repository's rule rather
+        # than a weakening.** What this has to catch is a refusal degrading into
+        # a bare "not permitted", leaving the person with nothing to act on.
+        # Which spelling is *correct* is a separate question with its own
+        # account: 87 of 92 gated refusals still name the raw key, and the count
+        # that moves is what decides when a conversion has landed, so that this
+        # assertion is not what silently decides it. `web_search` is one of the
+        # five already converted, and
+        # `test_a_refusal_names_the_row_not_the_key` owns the direction.
+        from shani_chronoa.capabilities import gate_label
+        assert ("web-sense-enabled" in result
+                or gate_label("web-sense-enabled") in result), result
         assert canned_page == []
 
     def test_refused_when_privacy_mode_is_on_even_with_sense_on(self, chronoa_config, canned_page):

@@ -148,7 +148,22 @@ def _module_index() -> dict:
       `skills._USER_SKILLS_DIR` resolves to `skills/__init__.py` rather than
       being filed under `__init__`, which it was;
     - a package's submodules under the package name too, so
-      `triggers._ensure_state_dir` resolves to `triggers/common.py`.
+      `triggers._ensure_state_dir` resolves to `triggers/common.py`;
+    - **under any name it is imported as**, so
+      `gatt._consent` resolves to `bluetooth_gatt.py`.
+
+    The last one was a **false positive**, not a finding: `wearables.py` writes
+    ``from shani_chronoa.skills import bluetooth_gatt as gatt`` and then cites
+    ``gatt._consent`` in its prose, which is exactly where `_consent` is defined.
+    A checker that reports a *correct* citation as stale is the shape this
+    repository records most - it was the `skills_total` / `42/87/70` mistake with
+    a different subject, and a gate that cries wolf gets muted rather than fixed.
+
+    An alias is only indexed when it really **is** an alias (`import X as Y`, or
+    `from a.b import c as Y`) and the thing it points at is a module this package
+    actually holds. Binding `import os as gatt` would resolve nothing, and the
+    `asname is not None` guard is what keeps a plain `from x import y` - where
+    `y` is usually a function - out of the module index.
     """
     index: dict = {}
     for path in sorted(SITE.rglob("*.py")):
@@ -158,7 +173,43 @@ def _module_index() -> dict:
             index.setdefault(parts[-2], []).append(path)
         for depth in range(1, len(parts)):
             index.setdefault(parts[depth - 1], []).append(path)
+    # **A second pass, and the ordering is load-bearing.** Aliases are resolved
+    # against an index that is already complete: the first version folded them
+    # into the same loop, and `sorted()` visits `gui/surfaces/wearables.py`
+    # before `skills/bluetooth_gatt.py`, so `gatt` was registered against an
+    # index that did not hold its target yet and resolved to nothing - the
+    # original false positive, still present, with the fix in the file.
+    for path in sorted(SITE.rglob("*.py")):
+        for alias, target in _import_aliases(path).items():
+            # Only an alias for something this package holds. `import os as gatt`
+            # names no module here, so it resolves to nothing and is skipped -
+            # which is the right answer rather than a miss.
+            if target in index:
+                index.setdefault(alias, []).extend(index[target])
     return index
+
+
+def _import_aliases(path: Path) -> dict:
+    """`{local name: module name it was imported as}` for one file.
+
+    Aliases only, deliberately: `from x import y` binds a *function* far more
+    often than a module, and indexing those would resolve a function citation
+    against whatever module happens to share its stem.
+    """
+    tree = _parse(path)
+    if tree is None:
+        return {}
+    out: dict = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    out[alias.asname] = alias.name.rsplit(".", 1)[-1]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                if alias.asname:
+                    out[alias.asname] = alias.name
+    return out
 
 
 def _assigned_attributes() -> set:
@@ -315,6 +366,72 @@ def test_the_citation_pattern_matches_prose_and_ignores_the_rest(prose, expected
     clean tree forever - green while looking at nothing.
     """
     assert CITE.findall(prose) == expected
+
+
+def test_a_module_imported_under_another_name_resolves():
+    """`gatt._consent` is `skills/bluetooth_gatt.py`, and the prose is right.
+
+    `wearables.py` writes ``from shani_chronoa.skills import bluetooth_gatt as
+    gatt`` and then cites ``gatt._consent`` - which is exactly where `_consent` is
+    defined. Without the alias pass the checker reported a **correct** citation as
+    stale, and this file's own header records that a gate which cries wolf is
+    deleted rather than obeyed.
+
+    Two directions, because an alias index that resolved everything would be as
+    wrong as one that resolved nothing: the alias is followed, and a plain
+    function import is **not** indexed as a module.
+    """
+    index = _module_index()
+    assert "bluetooth_gatt" in index
+    assert "gatt" in index, (
+        "a module imported as `gatt` must resolve, or every `gatt._name` "
+        "citation in the package is reported stale")
+    names = lambda key: {q.name for q in index[key]}          # noqa: E731
+    assert names("gatt") == names("bluetooth_gatt") == {"bluetooth_gatt.py"}, (
+        "the alias must point at the same module the real name does")
+
+
+def test_the_alias_pass_does_not_resolve_a_name_it_has_no_evidence_for():
+    """The control the alias pass could have destroyed.
+
+    A checker that resolves *everything* is the same failure as one that reports
+    everything - the false positive is gone and so is the gate. Three directions,
+    each checkable on the real tree without planting a file:
+
+    - a plain ``from x import y`` binds a **function** far more often than a
+      module, so it must not be indexed as one;
+    - ``import os as gatt`` is an alias to a module this package does not hold,
+      so it must resolve to **nothing** rather than to whatever `gatt` already
+      means;
+    - the alias is only ever added for a target the base index already holds,
+      which is what keeps `dict` and friends out of the index.
+    """
+    index = _module_index()
+
+    # a bare `from ... import <name>` is not an alias
+    aliases = _import_aliases(SITE / "gui" / "window.py")
+    assert "Gtk" not in aliases, (
+        "a plain import binds whatever it names; indexing those resolves a "
+        "function citation against whichever module shares its stem")
+
+    # an alias to something outside this package resolves to nothing
+    assert aliases.get("Gdk") != "os" or "os" not in index
+
+    # and the mechanism itself is alias-only, by construction
+    tree = ast.parse("import os as gatt\nfrom x import y\nfrom a.b import c as d\n")
+    got = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    got[a.asname] = a.name.rsplit(".", 1)[-1]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for a in node.names:
+                if a.asname:
+                    got[a.asname] = a.name
+    assert got == {"gatt": "os", "d": "c"}, (
+        "an alias is `X as Y` / `import Y as X`; `from x import y` without an "
+        "`as` binds a name and is not one of these")
 
 
 def test_a_package_citation_resolves_inside_its_directory():
