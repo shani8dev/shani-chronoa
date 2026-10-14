@@ -273,8 +273,25 @@ def _covered_by(fact: "Fact", store: PerceptStore) -> Optional[Percept]:
     wanted = " ".join(fact.text.split()).casefold()
     if not wanted:
         return None
+    # Compared case-folded, because `store_fact` lowercases the key **before**
+    # writing it and this is the only reader of it back. Measured: with a plain
+    # `!=`, a caller whose key carries any capital ("My manager is called
+    # Ramesh") can never match the stored "my manager is called ramesh", so the
+    # guard silently answered "not covered" for every input - a guard that
+    # cannot fire, wearing the shape of one that can.
+    #
+    # **Nothing shipped was broken by it**, and that is why it survived: the
+    # other two callers pass keys that are already lowercase by construction
+    # (`capture_plan`'s `"attribute"` and friends, `link_entities`' `rel:...`),
+    # so the mismatch was unreachable on the only paths that existed. The
+    # proposal acceptor passes the sentence itself, and every candidate has
+    # capitals in it.
+    wanted_key = " ".join(str(fact.key).split()).casefold()
     for percept in store.durable():
-        if (percept.metadata or {}).get("key") != fact.key:
+        held_key = (percept.metadata or {}).get("key")
+        if held_key is None:
+            continue
+        if " ".join(str(held_key).split()).casefold() != wanted_key:
             continue
         held = " ".join(percept.content.split()).casefold()
         if held == wanted:
@@ -1042,6 +1059,229 @@ def remember_from_turn(text: str, store: Optional[PerceptStore] = None,
         found = found._replace(channel=channel)
     stored = store_fact(found, target)
     return stored, ""
+
+
+# --- proposing a fact, and a person agreeing to it ---------------------------
+#
+# `consolidation.sleep_now()` reads a finished conversation and writes a digest
+# carrying `Candidate`s: sentences it noticed and **nobody has agreed to**. That
+# is the right boundary - a background pass must not decide what the assistant
+# believes about somebody - and on its own it is a dead end: the daemon writes
+# digests to `sleep/` and nothing anywhere reads them, so every night's work
+# proposes facts to nobody.
+#
+# **The acceptor is here and not in `consolidation.py`**, and that is forced by a
+# test rather than by taste: `TestSleepOnlyProposes.test_it_never_touches_the_
+# memory_store` greps the sleep module for `store.add`, `remember(`, `add_fact`
+# and friends. An acceptor in that file would either fail that test or satisfy
+# it by going through a helper the grep cannot see - which is the laundering the
+# test exists to stop.
+#
+# **`CONFIDENCE_STATED` (0.9), not `CONFIDENCE_EXTRACTED` (0.6)**, and the
+# asymmetry is the whole point of the acceptor. Sleep read the sentence out of a
+# conversation it was not present for, so *it* should not be believed. A person
+# pressed Keep, so *they* are the source - the same confidence a typed
+# `remember_fact` gets, because accepting a proposal and typing the sentence are
+# one decision with two doors.
+
+class Proposal(NamedTuple):
+    """One candidate fact, addressed well enough to decide it later.
+
+    A NamedTuple rather than the `Candidate` itself because this crosses a
+    module boundary (`consolidation` must not import memory's store types, and
+    memory must not import `consolidation` at module scope - that would be the
+    same edge `TestSleepOnlyProposes` polices). `decide_candidate` takes the
+    `session_id` and `index` from here and re-reads the digest itself rather
+    than trusting a text field a caller could have edited, so this is a
+    *listing* shape, not a token.
+    """
+
+    session_id: str
+    #: Position in `Digest.candidates`. Not stable across a re-run of sleep,
+    #: which is why the decision is written back into the digest rather than
+    #: remembered beside it.
+    index: int
+    text: str
+    #: Where in the conversation it came from, so agreeing is checkable.
+    source_index: int
+    source_role: str
+    #: The conversation's own summary, so a row of proposals carries the
+    #: context they were drawn from rather than demanding a second window.
+    summary: str
+    created: float
+
+
+def pending_proposals(directory: Optional[Path] = None,
+                      limit: int = 20) -> list:
+    """Every undecided candidate across the digests, newest session first.
+
+    **Reads only, and creates nothing.** `consolidation.digest_path` documents
+    that asking where a file is does not make it, so this lists through
+    `consolidation.list_digests` rather than globbing the directory itself, and
+    rather than through `sessions_needing_sleep` - which is the **opposite**
+    question, naming conversations that have *no* digest yet, and would have
+    returned every session except the ones holding a proposal. That was the
+    first version's bug, and it is the same class as asking a checker for the
+    wrong thing: it would have reported an empty proposal list on a machine with
+    a full digest directory, which reads as "nothing was ever proposed" and is
+    the absence-shaped wrong answer this repository keeps measuring.
+
+    `limit` bounds the listing. `list_digests` orders by file mtime so the scan
+    can stop early, but **the order returned here is the digest's own
+    `created`**, because mtime is when a file was written and `created` is when
+    the conversation ended - so ordering on it would read a decided digest
+    (written back by `decide_candidate` today) as the newest proposal in the
+    list.
+    """
+    try:
+        from .. import consolidation
+    except Exception:  # noqa: BLE001 - sleep not installed is "no proposals"
+        return []
+    try:
+        session_ids = consolidation.list_digests(directory)
+    except Exception:  # noqa: BLE001 - an unreadable store proposes nothing
+        logger.debug("could not list sleep digests", exc_info=True)
+        return []
+    rows = []
+    for session_id in session_ids:
+        digest = consolidation.load_digest(session_id, directory)
+        if digest is None:
+            continue
+        for index, candidate in enumerate(digest.candidates):
+            if candidate.accepted or candidate.rejected:
+                continue
+            rows.append((digest.created, Proposal(
+                session_id=digest.session_id, index=index, text=candidate.text,
+                source_index=candidate.source_index,
+                source_role=candidate.source_role, summary=digest.summary,
+                created=digest.created)))
+    rows.sort(key=lambda pair: pair[0], reverse=True)
+    return [proposal for _, proposal in rows[:max(1, int(limit or 20))]]
+
+
+def decide_candidate(session_id: str, index: int, accept: bool,
+                     store: Optional[PerceptStore] = None,
+                     directory: Optional[Path] = None) -> "tuple[str, str]":
+    """Agree or disagree with one proposed fact. Returns `(outcome, reason)`.
+
+    One function behind both consent surfaces - the Memory panel's Proposed
+    section and the `review_proposals` skill - because two implementations of
+    "did the person agree to this?" is exactly the pair that drifts, and this
+    one writes to durable memory. The panel is not a view that happens to call
+    the same helper; it calls this.
+
+    | outcome | meaning |
+    |---|---|
+    | `kept` | agreed, and it is in the store |
+    | `kept-unrecorded` | agreed and the digest says so, but **the write did not happen** |
+    | `declined` | disagreed, and it will not be proposed again |
+    | `already-decided` | this index already carries an answer |
+    | `refused` | nothing was changed; `reason` says why |
+
+    `kept-unrecorded` is a distinct outcome rather than a `reason` because the
+    two halves differ in what they cost. A refusal changes nothing and can be
+    retried; this one has already consumed the proposal, so the person has to
+    ask again from the transcript, and a caller that reports both as "kept"
+    would be telling them a memory exists that does not. This is the shape
+    `stop_service()` returning `''` for a unit that was already inactive has
+    already cost this repository once.
+
+    **A non-bool `accept` refuses.** `bool(accept)` would make the string
+    `"no"` mean yes, and this is the one function here whose argument arrives
+    from a model, a CLI and a GTK button - three callers that spell "no" as
+    `False`, `"false"` and a non-clicked row respectively. Refusing the
+    ambiguous shape is what makes the three agree.
+
+    **The decision is written into the digest even when the store write
+    fails**, so a fact Chronoa cannot store is not re-proposed every night for
+    the life of the conversation. That is why the failure is reported as an
+    outcome rather than raised: the person said yes, and the record of that
+    saying yes is more durable than the memory they asked for.
+    """
+    if not isinstance(accept, bool):
+        return ("refused",
+                f"accept must be true or false, not {accept!r} - refusing rather "
+                f"than guessing, because this argument arrives from a button, a "
+                f"command line and a model")
+    denied = _consent_error()
+    if denied:
+        return ("refused", denied)
+    try:
+        from .. import consolidation
+    except Exception as exc:  # noqa: BLE001 - no sleep pass, no proposals
+        return ("refused", f"the sleep pass that proposes facts is not "
+                           f"available: {exc}")
+    try:
+        position = int(index)
+    except (TypeError, ValueError):
+        return ("refused", f"{index!r} is not a position in a proposal list")
+
+    digest = consolidation.load_digest(session_id, directory)
+    if digest is None:
+        return ("refused", f"no proposed facts were found for session "
+                           f"{session_id!r}")
+    if not 0 <= position < len(digest.candidates):
+        return ("refused",
+                f"there is no proposal {position} in session {session_id!r} "
+                f"({len(digest.candidates)} proposed)")
+
+    candidate = digest.candidates[position]
+    if candidate.accepted or candidate.rejected:
+        return ("already-decided",
+                f"proposal {position} was already "
+                f"{'accepted' if candidate.accepted else 'rejected'}")
+
+    # Recorded first, on purpose: see the docstring. A digest that cannot be
+    # written back is reported as a refusal rather than silently consumed, so the
+    # person is not told their answer was remembered by a file that did not
+    # change.
+    candidate.accepted = accept
+    candidate.rejected = not accept
+    try:
+        consolidation.save_digest(digest, directory)
+    except (OSError, ValueError) as exc:
+        candidate.accepted = False
+        candidate.rejected = False
+        return ("refused", f"the decision could not be recorded: {exc}")
+
+    if not accept:
+        return ("declined", "")
+    if not candidate.text.strip():
+        return ("kept-unrecorded", "the proposal was empty, so there was nothing "
+                                   "to store")
+
+    target = _target(store)
+    # **Built once.** The first version called `_fact_from_candidate` again for
+    # the write, which is two constructions of one value and the shape two
+    # answers drift apart from - and it is a value whose `key` and `source`
+    # carry the whole provenance, so a disagreement between the two copies would
+    # mean the dedupe check ran against a different fact from the one stored.
+    fact = _fact_from_candidate(candidate, session_id, position)
+    covering = _covered_by(fact, target)
+    if covering is not None:
+        return ("kept", f"already remembered as {covering.content!r}")
+    stored = store_fact(fact, target)
+    if stored is None:
+        return ("kept-unrecorded",
+                f"{_consent_error() or 'the write was refused'} - the proposal "
+                f"is recorded as agreed but nothing was stored")
+    return ("kept", "")
+
+
+def _fact_from_candidate(candidate, session_id: str, index: int) -> Fact:
+    """The `Fact` one proposal becomes, built here so both callers agree.
+
+    `source` is `sleep:<session>#<index>` and nothing else, because a memory
+    that cannot be traced back to the sentence it came from cannot be
+    explained to the person holding it - and `Memory panel`'s Forget row, the
+    `about` walk and a future "why does it think that" all read `source`.
+
+    `CONFIDENCE_STATED`, because a person agreed to this one. See the module
+    section above for why that is not `CONFIDENCE_EXTRACTED`.
+    """
+    text = candidate.text.strip()
+    return Fact(text, text, text, f"sleep:{session_id}#{index}",
+                CONFIDENCE_STATED)
 
 
 class RecallReport(NamedTuple):

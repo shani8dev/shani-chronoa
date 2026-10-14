@@ -64,6 +64,10 @@ _CONSENT_NAMES = (
 _IMPL = {
     "screenshot": "shani_chronoa.skills.screenshot",
     "cleanup_apply": "shani_chronoa.skills.cleanup_apply",
+    # Gated on `memory-sense-enabled` and does **not** consult it itself - the
+    # gate belongs in `decide_candidate`, so both the panel and this skill are
+    # refused by one check rather than two that could disagree.
+    "review_proposals": "shani_chronoa.skills.review_proposals",
     "git_commit": "shani_chronoa.skills.git_write",
     "git_branch": "shani_chronoa.skills.git_write",
     "git_push": "shani_chronoa.skills.git_push",

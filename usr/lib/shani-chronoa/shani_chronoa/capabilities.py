@@ -228,6 +228,13 @@ GATED: dict[str, str] = {
     # on a socket, which is the same shape as `browse`'s window-plus-protocol.
     # Off by default, like every actuator that can run arbitrary code.
     "vm": "vm-control-enabled",
+    # Answering a sentence the overnight sleep pass noticed. Gated on the
+    # memory sense's own key rather than a new one, because keeping a proposal
+    # IS remembering something and a second switch for the same decision is the
+    # shape `heard-sound` / `sound-sense-enabled` records as needing two keys
+    # only for two genuinely different acts. `list` rides the same gate: it is
+    # one door into one decision, and two doors are two things to keep in step.
+    "review_proposals": "memory-sense-enabled",
 }
 
 # The per-event-type trigger gates are *not* in `GATED` above, and deliberately
@@ -283,6 +290,10 @@ _GROUPS: dict[str, tuple[str, str]] = {
     "create_archive": ("Files", "Make or extract an archive"),
     "find_and_replace": ("Files", "Find and replace"),
     "list_percepts": ("What Chronoa knows", "What it perceives"),
+    # Beside `list_percepts` because it is the same question asked a day
+    # later: that one shows what is held, this one shows what was noticed and
+    # deliberately not held.
+    "review_proposals": ("What Chronoa knows", "What it noticed but did not keep"),
     "compute_hash": ("Files", "Checksum a file"),
     "manage_mount": ("Files", "Mount or unmount"),
     "get_battery_status": ("Power and screen", "Battery status"),

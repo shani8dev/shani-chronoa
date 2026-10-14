@@ -259,6 +259,27 @@ def store_dir(config: Optional[object] = None) -> Path:
     return root / "sleep"
 
 
+def digest_path(session_id: str, directory: Optional[Path] = None) -> Optional[Path]:
+    """Where one session's digest lives, or `None` if that is not a session id.
+
+    **One answer to both questions `save_digest` and `load_digest` ask**, which
+    is why it is here rather than duplicated: they each computed `store_dir()`
+    and then `f"{session_id}.json"` themselves, so a caller that wanted to tell
+    "there is no digest for this session" from "the digest is there and cannot be
+    read" - the two answers `load_digest` collapses into `None` - had to
+    re-derive the path convention and could get it wrong without anything
+    failing. It reads `None` for an id `save_digest` refuses, which is the point:
+    an unrefusable write and an unanswerable read of the same name.
+
+    The directory is not created. Asking where a file is does not make it.
+    """
+    from . import conversation_store
+    if not conversation_store.valid_id(session_id):
+        return None
+    target = store_dir() if directory is None else Path(directory)
+    return target / f"{session_id}.json"
+
+
 def save_digest(digest: Digest, directory: Optional[Path] = None) -> Path:
     """Write a digest, refusing a session id that could escape the directory.
 
@@ -266,29 +287,66 @@ def save_digest(digest: Digest, directory: Optional[Path] = None) -> Path:
     already exists to check exactly this; using it here means a crafted index
     cannot write outside `sleep/`.
     """
-    from . import conversation_store
-    if not conversation_store.valid_id(digest.session_id):
+    path = digest_path(digest.session_id, directory)
+    if path is None:
         raise ValueError(f"not a session id: {digest.session_id!r}")
-    target = store_dir() if directory is None else Path(directory)
-    target.mkdir(parents=True, exist_ok=True)
-    path = target / f"{digest.session_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(digest.to_dict(), indent=2))
     return path
 
 
 def load_digest(session_id: str, directory: Optional[Path] = None) -> Optional[Digest]:
-    from . import conversation_store
-    if not conversation_store.valid_id(session_id):
-        return None
-    target = store_dir() if directory is None else Path(directory)
-    path = target / f"{session_id}.json"
-    if not path.exists():
+    path = digest_path(session_id, directory)
+    if path is None or not path.exists():
         return None
     try:
         return Digest.from_dict(json.loads(path.read_text()))
     except (ValueError, TypeError, OSError):
         logger.warning("digest for %s is unreadable; ignoring it", session_id)
         return None
+
+
+def list_digests(directory: Optional[Path] = None) -> List[str]:
+    """Session ids that have a digest, newest first.
+
+    **The counterpart to `sessions_needing_sleep`, and it is deliberately not
+    that function.** That one names conversations with *no* digest yet - the
+    opposite question - so a reader wanting "what has sleep already written"
+    cannot use it. It was tried, and the result read as "nothing was ever
+    proposed" on a machine holding a full `sleep/` directory, which is the
+    absence-shaped wrong answer this repository keeps paying for.
+
+    The path convention stays here rather than being re-derived by the caller,
+    which is why `digest_path` was written: every digest is `<session_id>.json`
+    under `store_dir()`/`directory`, and a second answer to that is how
+    `save_digest` and `load_digest` came to disagree in the first place.
+
+    **Reads nothing and creates nothing**, including the directory - a caller
+    asking what sleep has produced is a read, and a read must not bring an
+    unused store into existence.
+
+    Ordered by **file mtime, newest first**, which is the cheap proxy for
+    "which digests are worth reading at all". It is a proxy: a digest's own
+    `created` is the fact, so a caller that has loaded them should re-sort on
+    that (which is what `senses.memory.pending_proposals` does). Ordering by
+    filesystem name instead would sort by conversation id, which is a
+    timestamp and so *roughly* chronological - "roughly" being the part that
+    makes a filename order the wrong answer to a "newest first" question.
+    """
+    from . import conversation_store
+    home = store_dir() if directory is None else Path(directory)
+    try:
+        if not home.is_dir():
+            return []
+        entries = [(path.stat().st_mtime, path.stem)
+                   for path in home.glob("*.json")]
+    except OSError as exc:
+        logger.warning("the sleep digests could not be listed: %s", exc)
+        return []
+    fresh = [pair for pair in entries
+             if conversation_store.valid_id(pair[1])]
+    fresh.sort(reverse=True)
+    return [session_id for _mtime, session_id in fresh]
 
 
 def sessions_needing_sleep(root: Optional[Path] = None,

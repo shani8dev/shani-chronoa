@@ -4,7 +4,7 @@ Every capability in one place, generated from the same table the Help window
 renders and the model is offered — `capabilities._GROUPS`. Nothing here is
 written by hand, so it cannot claim something the build does not have.
 
-**256 skills in 24 groups.** Each is a named, schema-typed module; the model
+**257 skills in 24 groups.** Each is a named, schema-typed module; the model
 calls them by name. There is deliberately **no** generic shell-exec tool — the
 whitelist *is* the design, so a new capability is a new named skill rather than
 a way to run anything at all.
@@ -35,7 +35,7 @@ The **Before it runs** column is the honest part:
   reporting them is in this group; that is the majority, deliberately.
 
 
-**92 of 256 are consent-gated and 16 are destructive.**
+**93 of 257 are consent-gated and 16 are destructive.**
 
 ## System
 
@@ -381,16 +381,6 @@ Systemd units and the journal.
 | `list_services` | System services | — |
 | `read_logs` | Read the system log | — |
 
-## Photos and video
-
-Read, edit and extract from media.
-
-| Skill | What it does | Before it runs |
-|---|---|---|
-| `photo_metadata` | When, where and with what camera a photo was taken | — |
-| `photos` | Find your photos by what is in them, what is written on them, or when they were taken | — |
-| `take_photo` | Take a photo or selfie with the webcam | needs `vision-sense-enabled` |
-
 ## What Chronoa knows
 
 Memory, percepts and what it has decided.
@@ -400,6 +390,17 @@ Memory, percepts and what it has decided.
 | `conversations` | Search, reopen, copy or export earlier conversations | **asks first, always** · needs `file-delete-enabled` |
 | `list_capabilities` | What it can do right now | — |
 | `list_percepts` | What it perceives | — |
+| `review_proposals` | What it noticed but did not keep | needs `memory-sense-enabled` |
+
+## Photos and video
+
+Read, edit and extract from media.
+
+| Skill | What it does | Before it runs |
+|---|---|---|
+| `photo_metadata` | When, where and with what camera a photo was taken | — |
+| `photos` | Find your photos by what is in them, what is written on them, or when they were taken | — |
+| `take_photo` | Take a photo or selfie with the webcam | needs `vision-sense-enabled` |
 
 ## Clipboard
 

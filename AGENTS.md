@@ -25868,3 +25868,71 @@ like the fix was the run that got lucky.
 Also recorded because it nearly cost the same work twice: **`git show HEAD:file >
 file` as a mutation restore silently discards an uncommitted edit of your own in
 that same file.** Snapshot the working file first, every time.
+
+## Sleep proposes a fact, a person agrees
+
+The overnight pass left `consolidation.Digest.candidates` sitting there with
+nothing able to answer them. Landed this session: **`decide_candidate(session_id,
+index, accept, store=None, directory=None) -> (outcome, reason)`** in
+`senses/memory.py`, and **two** consent surfaces that call it - the Memory
+panel's "Proposed" section and a `review_proposals` skill. One acceptor, two
+doors, because a person at the panel and a person in a conversation are asking
+the same question and must not be able to get different answers.
+
+Five outcomes, not two: `kept`, `kept-unrecorded`, `declined`, `already-decided`,
+`refused`. `kept-unrecorded` exists because **`store_fact` returns the `Percept`
+even when persisting failed** - it logs "Failed to persist" and hands back the
+value anyway, returning `None` only on consent denial, redaction or empty
+content. So "you agreed and it is written down" and "you agreed and it is not"
+are the same return value, and a boolean cannot tell them apart. Making the disk
+unwritable does not produce it either; the real route to it through the skill's
+subprocess is a **whitespace-only** candidate, which `decide_candidate` rejects
+before any store call.
+
+### The measurement
+
+**60 mutations, 55 caught, 0 survivors, 5 equivalent, 0 unmeasurable, 0 stale
+witnesses, 3 of 3 sets** (136 s) - `sleep_proposals` 19, `proposals_skill` 20,
+`proposals_panel` 21. Tests: 26 + 19 + 25.
+
+The first run of these sets reported **37 caught / 24 survivors**. All 24 were
+**mis-named witnesses, not coverage gaps**: each had exactly one failing test and
+it was the right one, just not the name in the `expect` list. Ten of them were
+that; the other fourteen were four mutations aimed at the wrong branch and four
+named after a witness that passed either way. **No new test was written for any
+of the 24** - correcting the name is the fix, and writing a test to satisfy a
+mis-aimed mutation produces coverage of the mutation rather than of the code.
+
+### A real defect, found in the unmutated tree
+
+`test_the_note_carries_the_reason_and_not_only_the_verdict` failed against
+**clean source**. `_DECISION_SENTENCES.get(outcome, reason or "Nothing changed.")`
+used `reason` only as the fallback for an outcome the table does not name, so a
+*known* outcome carried none - and `kept-unrecorded` rendered as **"You agreed to
+it, but it is NOT in your memory: "**, a sentence with a colon and nothing after
+it. Now the reason is appended for every outcome except `already-decided`, whose
+reason is the *verb* that was used first ("kept"), not an explanation.
+
+### The five equivalents, and why none of them is a gap
+
+- Two are the **digest rollback**. `decide_candidate` loads the digest, mutates
+  the object it loaded, and on a failed write returns the refusal and **discards
+  the object**. No caller holds it, so flags left set on it are read by nobody and
+  the file on disk is untouched either way. A guard against a caller nobody has yet
+  is not a coverage gap, it is a bet - and the file says so rather than leaving it
+  looking tested.
+- `_ANSWER[action]` derived as `action == "keep"` is equal for all three
+  enumerated values, and `guardrail` validates the enum before dispatch.
+- The out-of-range clamp is inert because the guard immediately above it only lets
+  a value through when the clamp is a no-op.
+- The panel's `[] if denied else pending_proposals()` is unreachable behind the
+  early `if denied:` return three lines below - which is worth recording, because
+  the clause *reads* like the gate and the early return is what actually is one.
+
+### Still not measured
+
+**The layout contract for the Proposed section is unknown, not passing.**
+`pytest tests/test_ui_layout_contract.py -k "memory or scroll"` was refused
+because another session's mutation run held the lock, so whether the group
+belongs inside `common.scrolled(body)` has not been checked. Recorded in
+`MAIN-UI-TODO.md` rather than guessed at.

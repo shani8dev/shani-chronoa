@@ -85,6 +85,53 @@ FACT_CSS = "memory-fact"
 GROUP_CSS = "memory-group"
 BANNER_CSS = "memory-privacy-banner"
 EMPTY_CSS = "memory-empty"
+#: The row that carries what the last decision actually did. A marker, so a test
+#: can find it without re-deriving the sentence it is holding.
+NOTE_CSS = "memory-decision-note"
+#: The "Proposed" group's own marker, distinct from `GROUP_CSS` so a test
+#: can find *this* group rather than every group on the page.
+PROPOSED_CSS = "memory-proposed"
+
+PROPOSED_TITLE = "Proposed"
+PROPOSED_DESCRIPTION = (
+    "Sentences Chronoa noticed in a finished conversation and did not save. "
+    "Nothing here is remembered until you keep it, and a dropped one is never "
+    "offered again."
+)
+PROPOSED_OFF_TITLE = "Nothing can be proposed while memory is turned off"
+PROPOSED_ANSWERED_TITLE = "Last answer"
+KEEP_LABEL = "Keep"
+DROP_LABEL = "Not now"
+
+#: `decide_candidate`'s outcomes, in the words a person reads. Carried verbatim
+#: rather than collapsed to a tick or a cross: `kept` and `kept-unrecorded` are
+#: different facts, and the second one means they agreed to something that is
+#: not in memory. Any outcome this table does not name falls back to the
+#: function's own reason, so an unlisted one is still explained rather than
+#: silently reported as success.
+#: Each entry is the **verdict**. The acceptor's `reason` is appended after it
+#: (see `_decide`), because the verdict alone is a colon and nothing - and the
+#: reason is the half a person can act on: "the write was refused" is something
+#: to retry and "memory is turned off" is something to switch on. The shipped
+#: version kept the reason only as the fallback for an outcome this table does
+#: not name, so `kept-unrecorded` rendered as *"You agreed to it, but it is NOT
+#: in your memory: "* - found by the test written to check the reason was
+#: carried at all, in the unmutated tree.
+_DECISION_SENTENCES = {
+    "kept": "Remembered - it will be in your memory now.",
+    "kept-unrecorded": "You agreed to it, but it is NOT in your memory.",
+    "declined": "Dropped, and it will not be offered again.",
+    "already-decided": "That one was already answered, so nothing changed.",
+}
+
+#: `already-decided`'s reason is the **verb** that was used first ("kept" /
+#: "declined"), not an explanation, so appending it would read *"so nothing
+#: changed. kept"*. Every other outcome carries a reason that explains, and an
+#: outcome this table does not name falls back to its reason *as* the sentence,
+#: which is the property that keeps a sixth outcome from being reported as a
+#: success the first time it exists.
+_REASON_IS_A_VERB = ("already-decided",)
+_UNDESCRIBED = "Something changed, and this panel cannot describe it."
 
 EMPTY_TITLE = "Nothing has been remembered"
 EMPTY_DETAIL = (
@@ -377,6 +424,24 @@ def _fact_row(percept: Any, now: float, durable_path: str, on_forget: Any) -> Gt
     return built
 
 
+def _provenance_line(proposal: Any) -> str:
+    """Where one proposal came from, in a form a person can check.
+
+    The conversation's own summary and the turn the sentence was in, because a
+    proposal is a thing to *agree with* and agreeing needs the context it was
+    read out of. `Candidate.source_index` is **zero-based** throughout
+    consolidation, so the "+1" is not decoration: the third message shown as
+    "2" would send a person looking at the wrong one.
+    """
+    said = f"turn {int(proposal.source_index) + 1}"
+    if proposal.source_role and proposal.source_role != "user":
+        said += f" by {proposal.source_role}"
+    summary = " ".join(str(proposal.summary or "").split())
+    if summary:
+        return f"From that conversation - {said}. It was about: {_clip(summary, 110)}"
+    return f"From that conversation - {said}."
+
+
 def _by_sense(percepts: List[Any]) -> "Dict[str, List[Any]]":
     """Grouped by sense, senses alphabetical, facts in the order the store gave.
 
@@ -407,6 +472,14 @@ class _MemorySurface(Adw.NavigationPage):
     def __init__(self, app: Any) -> None:
         self._store = _store_of(app)
         self._content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        #: What the last Keep / Not now press actually did, kept across the
+        #: `refresh()` that press causes. `refresh()` rebuilds every child, so a
+        #: note living inside the answered row would vanish with the row - and a
+        #: person who pressed Keep, saw the row disappear and saw nothing below
+        #: it, has been told a memory exists that may not. The outcome word
+        #: (`kept` and `kept-unrecorded` especially) is carried verbatim because
+        #: that distinction is the whole of the answer.
+        self._decision_note: Optional[str] = None
         #: The panel's health, in the row it writes at the top of itself and in
         #: the dot on its sidebar row. `refresh()` rebuilds the row, so the dot
         #: follows the last refresh rather than the state at build time - which
@@ -419,6 +492,97 @@ class _MemorySurface(Adw.NavigationPage):
 
         super().__init__(child=page_content, title=TITLE)
         self.refresh()
+
+    # -- proposals waiting for an answer -------------------------------------
+
+    def _decide(self, proposal: Any, accept: bool) -> None:
+        """Answer one proposed fact through the shared acceptor, then rebuild.
+
+        **`senses.memory.decide_candidate`, not a second decision here.** The
+        `review_proposals` skill is the other door onto the same question, in
+        another process and another layer, with no way to reach this file - so
+        the only thing keeping the two in step is that both call one function.
+        Two implementations of "did the person agree to this?" is exactly the
+        pair that drifts, and this one writes to durable memory.
+
+        The outcome becomes a visible note rather than a log line, because
+        `kept` and `kept-unrecorded` are different facts about a person.
+        """
+        try:
+            from shani_chronoa.senses.memory import decide_candidate
+
+            outcome, reason = decide_candidate(
+                proposal.session_id, proposal.index, accept, self._store)
+        except Exception:  # noqa: BLE001 - a refused decision must not take the window down
+            logger.warning("could not decide a proposed fact", exc_info=True)
+            self._decision_note = "That could not be recorded, so nothing changed."
+            self.refresh()
+            return
+        said = _DECISION_SENTENCES.get(outcome, _UNDESCRIBED)
+        if reason and outcome not in _REASON_IS_A_VERB:
+            said = f"{said} {reason}"
+        self._decision_note = said
+        self.refresh()
+
+    def _proposals_section(self) -> Optional[Gtk.Widget]:
+        """The "Proposed" group, or None when nothing is waiting.
+
+        **Silent when empty**, which is the opposite of the fact-list empty
+        state below and deliberately so. That one must say "no facts remembered"
+        because the panel is opened *to ask*; this is a section that appears when
+        something needs answering and is absent when it does not. A permanent
+        "nothing proposed" heading on a panel someone opened to look at their
+        facts is absence-as-noise, which this repository has now corrected in
+        four surfaces.
+
+        **With consent off it says why and offers no buttons.** A Keep that can
+        only ever refuse is a dead control, and the row would invite a press
+        whose only answer is a refusal.
+        """
+        try:
+            from shani_chronoa.senses.memory import _consent_error, pending_proposals
+
+            denied = _consent_error()
+            rows = [] if denied else pending_proposals()
+        except Exception:  # noqa: BLE001 - a missing sleep pass proposes nothing
+            logger.warning("could not read the sleep proposals", exc_info=True)
+            return None
+
+        # **A note outlives the row it answers.** Answering the last proposal
+        # empties `rows`, and the first version of this returned `None` there -
+        # taking the note with it. Measured, and it is the exact failure the note
+        # exists to prevent: with the store write failing, pressing Keep made
+        # the group vanish and the page read "No facts remembered yet", so a
+        # failed write was reported as a clean empty store. Silence is only the
+        # right answer when there is genuinely nothing to say *and* nothing to
+        # report having been said.
+        if not denied and not rows and not self._decision_note:
+            return None
+
+        group = common.group(PROPOSED_TITLE, PROPOSED_DESCRIPTION)
+        group.add_css_class(GROUP_CSS)
+        group.add_css_class(PROPOSED_CSS)
+
+        if denied:
+            _add(group, common.row(PROPOSED_OFF_TITLE, denied))
+            return group
+
+        if self._decision_note:
+            note = common.row(PROPOSED_ANSWERED_TITLE, self._decision_note)
+            note.add_css_class(NOTE_CSS)
+            _add(group, note)
+
+        for proposal in rows:
+            keep = Gtk.Button(label=KEEP_LABEL)
+            keep.connect("clicked", lambda _b, p=proposal: self._decide(p, True))
+            drop = Gtk.Button(label=DROP_LABEL)
+            drop.connect("clicked", lambda _b, p=proposal: self._decide(p, False))
+            suffix = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            suffix.append(drop)
+            suffix.append(keep)
+            _add(group, common.row(_clip(proposal.text, 90),
+                                   _provenance_line(proposal), suffix=suffix))
+        return group
 
     # -- remembering one -----------------------------------------------------
 
@@ -487,6 +651,13 @@ class _MemorySurface(Adw.NavigationPage):
                     common.STATUS_OK,
                     f"{len(percepts)} fact(s) remembered",
                     f"held by {len(_by_sense(percepts))} sense(s)"))
+
+        # What needs answering comes before what is already answered. This is the
+        # only row on the page a person has to *act* on, so it is placed above
+        # the entry bar rather than below the fact groups.
+        proposals = self._proposals_section()
+        if proposals is not None:
+            self._content.append(proposals)
 
         # The create half of CRUD, on the same page as the delete half: a page
         # that can only forget cannot be the answer to "remember this for me".

@@ -192,9 +192,15 @@ reorders by a dict lookup plus a learned multiplier, all in silence.
 - Diagnostics sections 3-5 absent from every capture (needs `section:<name>`).
 - Pre-existing split-view overflow at 380 wide (requested 403px).
 - Item 3 of the original design review (the acceptor for
-  `consolidation.Digest.candidates`) is **mid-build and uncommitted**:
-  `consolidation.digest_path()` plus the routed `save_digest`/`load_digest`.
-  Land it before starting this list, or hand it over explicitly.
+  `consolidation.Digest.candidates`) is **landed**: `decide_candidate()` in
+  `senses/memory.py`, with two consent surfaces calling it — the Memory panel's
+  "Proposed" section and the `review_proposals` skill. The item still open
+  below is 3-of-this-list, the command palette, which is a different thing.
+- **Still unmeasured:** whether the Proposed group belongs *inside*
+  `common.scrolled(body)`. `tests/test_ui_layout_contract.py` could not be run
+  for it (a concurrent mutation run held the lock), so the layout contract for
+  this section is **unknown, not passing**. Treat the section's placement as
+  unreviewed until that file has been run against it.
 - `--check-anchors`: one rot — `arxiv_search`'s anchor occurs 0 times at HEAD
   too, pre-existing in another session's set.
 - `test_settings_surface_is_complete::test_every_key_is_accounted_for` names
