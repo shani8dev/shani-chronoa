@@ -341,11 +341,20 @@ def train(limit: int = 0, out: str = "", dtype_name: str = "bf16") -> int:
         opt.step()
         opt.zero_grad()
         step_times.append(time.perf_counter() - step_start)
-        losses.append(float(loss))
+        # **`.detach()`, not `float(loss)`.** Converting a tensor that still
+        # carries `requires_grad` to a Python scalar warns on every step
+        # ("may lead to unexpected behavior") and keeps the autograd graph
+        # reachable from the number. Detaching says what is meant: this is a
+        # measurement, not a node in the graph.
+        losses.append(float(loss.detach()))
         if index < 3 or index % 25 == 0:
             print("  [%3d/%d] loss %.4f  %d cands  %.1fs"
                   % (index + 1, len(train_items), losses[-1], len(cands),
                      step_times[-1]))
+            # **Flushed, because this is a multi-hour job.** Under `nohup` stdout
+            # is block-buffered, so an unflushed print leaves the log holding
+            # nothing for hours - a run that looks dead and is not.
+            sys.stdout.flush()
     elapsed = time.perf_counter() - started
 
     mean_loss = sum(losses) / len(losses)
