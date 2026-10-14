@@ -23052,6 +23052,57 @@ So the decision frame, all measured: 31.1 h/epoch unattended and reachable;
 10.5 GB and comfortable; **9.1 points of ceiling**; and **17 s per request** of
 serving cost on a 4-core CPU box. Three of those four say go.
 
+### ...and then the last objection did not survive either
+
+"~17 s per request" was true and it was the wrong frame. It is the cost of the
+requests where the reranker is *needed*, not the cost of a request - and on the
+held-out 55, `ranked()` already ranks first correctly on **49**. The only errors
+a reranker can fix are ones where the answer was in the offered list at all:
+five, which is the ceiling. **So on 89% of requests the reranker is work spent on
+an answer that is already correct.**
+
+And the baseline already knows when it is unsure. Median top-2 score margin:
+
+| | |
+|---|---:|
+| when `ranked()` is right | **8.74** |
+| when it is wrong | **1.49** |
+
+That is a separating variable, so gate on it. Combined with int8 dynamic
+quantisation - measured on this box, one request's eight candidates, **each
+variant in its own process** so peak RSS is attributable:
+
+| | per request | peak RSS |
+|---|---:|---:|
+| fp32 | 10.91 s | 10.08 GB |
+| bf16 | 23.41 s | 3.14 GB |
+| **int8** | **2.80 s** | 14.96 GB |
+
+**int8 is 3.9x fp32, and bf16 is *slower* than fp32 on this CPU** - the same
+finding `lora_timing.py` recorded for training, now confirmed for serving.
+
+`tools/rerank.py --serve-plan`, the whole decision:
+
+| gate | fires | fp32 avg | int8 avg | of 5 fixable |
+|---|---:|---:|---:|---:|
+| none | 55/55 | 10.91 s | 2.80 s | 5 |
+| 1.0 | 3/55 (5%) | 0.60 s | 0.15 s | 2 |
+| 3.0 | 14/55 (25%) | 2.78 s | 0.71 s | 4 |
+| **8.0** | 25/55 (45%) | 4.96 s | **1.27 s** | **5 - all of them** |
+
+**1.27 s a request, recovering every recoverable error** - against the 17 s that
+was going to be the reason not to build it.
+
+**What is still unknown, and is not the same as unsafe:** whether int8 preserves
+the ranking. `--score-agreement` asks, and run against an *untrained* model it
+answers nothing - an untrained head has no correct order to distort, so "the
+order changed" describes two arbitrary orderings. It needs a trained adapter.
+
+The gate is not in that position. **It reads the baseline's own scores, so it
+cannot change an answer - only how often the reranker is asked.** That makes it
+free of accuracy risk, and it is the part worth building regardless of what
+happens to int8.
+
 ### Which was wrong about two of them, because it timed a different model
 
 `tools/rerank.py --train` is implemented and was **run**, and it says the first
