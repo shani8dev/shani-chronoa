@@ -253,15 +253,33 @@ def _scan(code: str, spec: Spec) -> Iterator[tuple]:
 
         # Triple-quoted, before the single-quote scan or `"""` reads as `""`
         # followed by a stray quote.
+        #
+        # **`continue`, and it is load-bearing.** This branch used to `break` out
+        # of the `for` and then fall through to the single-quote scan below,
+        # which still saw the *stale* `ch` - a `"` from the triple-quote marker
+        # that had just been consumed. Measured on `code_hl.tokenize` against
+        # real source: a docstring coloured the entire rest of the file as one
+        # string.
+        #
+        #     'return x + 1  # note'      <- keyword, name, number, comment
+        # became
+        #     '\n    return x + 1  # note\n'   <- one STRING token
+        #
+        # It passed every test here because the only Python sample any of them
+        # used had no docstring in it, and a lexer that colours too much is
+        # indistinguishable from one that colours correctly as long as you only
+        # look at the colours. `tests/test_code_hl_tokenize.py` asserts the
+        # join and the kinds on source that has one, which is what it takes to
+        # see it.
         if spec.triple:
-            for marker in spec.triple:
-                if code.startswith(marker, i):
-                    j = code.find(marker, i + len(marker))
-                    j = n if j < 0 else j + len(marker)
-                    yield STRING, code[i:j]
-                    i = j
-                    at_line_start = False
-                    break
+            marker = next((m for m in spec.triple if code.startswith(m, i)), None)
+            if marker is not None:
+                j = code.find(marker, i + len(marker))
+                j = n if j < 0 else j + len(marker)
+                yield STRING, code[i:j]
+                i = j
+                at_line_start = False
+                continue
 
         # A quoted string, honouring backslash escapes so a quote inside one
         # does not end it early.
@@ -391,6 +409,44 @@ def highlight(code: str, language: Optional[str] = None,
         else:
             parts.append(f'<span foreground="{palette[kind]}">{safe}</span>')
     return "".join(parts)
+
+
+def tokenize(code: str, language: Optional[str] = None) -> list:
+    """``[(kind or None, text), ...]`` for ``code`` - the stream, not the markup.
+
+    **This is the API every renderer other than the transcript wants.** Until it
+    existed the only public output was `highlight()`'s Pango markup, so the
+    `(kind, text)` pairs were reachable only from inside this module: a
+    consumer outside it had to parse markup back into tokens, or colour nothing.
+    That is what made an editor surface impossible - see `gui/surfaces/editor.py`,
+    which tags a `Gtk.TextBuffer` from this stream precisely because Arch's
+    `gtksourceview5` ships zero `.lang` definitions (module docstring above) and
+    so `GtkSourceView` has no language to load.
+
+    An unrecognised language yields one untagged token, matching
+    `highlight()`'s promise that unknown input comes back unchanged rather than
+    half-coloured. Consumers that need the real language name can ask
+    `_canonical`; this keeps the same "you asked, you got the truth" contract by
+    returning the raw text as a single untyped token.
+    """
+    name = _canonical(language)
+    if name is None:
+        return [(None, code)] if code else []
+    spec = LANGS[name]
+    tokens = (_scan_diff(code) if spec.line_based else _scan(code, spec))
+    return [(kind, text) for kind, text in tokens if text]
+
+
+def palette(dark: Optional[bool] = None) -> dict:
+    """The colour table `highlight()` and `tokenize()`'s callers both use.
+
+    Exposed because a consumer holding tokens now has to colour them itself, and
+    a second copy of these hexes would drift from the transcript's without
+    anything failing. `None` asks GTK what scheme the window is actually
+    drawing with, exactly as `highlight()` does.
+    """
+    is_dark = _is_dark() if dark is None else dark
+    return dict(_ON_DARK if is_dark else _ON_LIGHT)
 
 
 def languages() -> tuple:
