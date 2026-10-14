@@ -23080,6 +23080,36 @@ routing signal the literature says is hard, measured here on a sample of 55. So
 build int8 first and treat the gate as needing a trained model to validate, not
 as free money.
 
+**`arXiv:2507.06223` - Efficiency-Effectiveness Reranking FLOPs for LLM-based
+Rerankers.** This one is a critique of **this file's own headline number**, and
+the finding is precise: existing work evaluates reranker efficiency with "proxy
+metrics such as **latency**, the number of forward passes, input tokens, and
+output tokens", and those "depend on hardware and running-time choices (e.g.
+parallel or not, batch size, etc), often fail to account for model size" - which
+makes them "difficult to interpret" and **obscures the efficiency-effectiveness
+tradeoff**. Their replacement is hardware-independent: **RPP** (ranking quality
+per PetaFLOP) and **QPP** (queries per PetaFLOP), plus a FLOPs estimator that
+needs no experiments.
+
+**Checked against our own numbers, and it lands.** The int8 figure in this file -
+**3.9x** - is a *latency* proxy on one machine at one batch size. And it is not a
+FLOPs effect at all:
+
+| | |
+|---|---:|
+| FLOPs per pair, 85 tokens | **292.4 GFLOP** |
+| FLOPs per pair, fp32 vs int8 | **identical** |
+
+int8 changes no multiply-accumulate; the win is kernel and bandwidth (wider
+SIMD, less memory traffic). So **the 3.9x will not transfer to a machine with
+different SIMD or memory bandwidth**, and quoting it as "the reranker is 3.9x
+cheaper" overstates it. The honest form is "3.9x on this box", which is what the
+measurement actually supports and what this file now says.
+
+It does not change the recommendation - int8 is still unconditional and free of
+accuracy risk - but it does mean **the number is a property of this hardware**,
+and any claim that outlives the box should be stated in FLOPs.
+
 **`arXiv:2610.11650` - SkillContrast: Difference-Guided Text Selection for Agent
 Skill Reranking.** The closest paper on earth to this problem - agent *skill*
 reranking - and it reports **51.1-58.8% fewer model-input tokens** by keeping
