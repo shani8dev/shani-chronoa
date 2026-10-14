@@ -23052,6 +23052,44 @@ So the decision frame, all measured: 31.1 h/epoch unattended and reachable;
 10.5 GB and comfortable; **9.1 points of ceiling**; and **17 s per request** of
 serving cost on a 4-core CPU box. Three of those four say go.
 
+### arXiv stopped answering, and it was not this repository
+
+Measured 2026-10-14. Four calls to `export.arxiv.org/api/query`, three seconds
+apart:
+
+| | status | time |
+|---|---:|---:|
+| call 1 | `429 Rate exceeded` | 30.8 s |
+| call 2 | `429` | 15.8 s |
+| call 3 | **`503`** | 47.1 s |
+| call 4 | `200` | **14.9 s** |
+
+arXiv's edge in front of the export host is serving refusals, an outage and a
+success in sequence, and **even the success takes ~15 s**. `arxiv.org/abs/...` is
+200 in 0.38 s throughout, so this is the API host and not the archive.
+
+Three things followed from it, and only the first is a bug in this tree:
+
+1. **No interval between arXiv calls.** One `arxiv_search` asks **twice** when it
+   widens, so a single search was already a burst of two with no spacing.
+   arXiv's API terms ask for **three seconds** between calls and
+   `arxiv.org/robots.txt` carries `Crawl-delay: 15`; neither was honoured. Now
+   `_arxiv_throttle()` spaces every call 3 s in every process.
+2. **The shared 8 s read timeout is below arXiv's healthy latency.** 14.9 s for a
+   success, so a correctly-spaced call still times out. The generic JSON path and
+   arXiv's Atom endpoint do not have the same latency budget.
+3. **"The archive being unreachable" was the wrong sentence.** With a 429, a 503
+   and a timeout all arriving as the same `why`, that wording sends someone to
+   check whether arXiv is down while it is up and refusing us. It now splits the
+   two faults: `ConnectTimeout` really is unreachability and says so; a
+   `ReadTimeout`, `429` or `503` means the host was reached and then declined,
+   and says that - while still making **no claim about whether any paper exists**,
+   which is the guarantee the original message existed for.
+
+The existing test caught an over-generalisation in the middle of this: it pins
+`ConnectTimeout` -> "unreachable", and my first rewrite applied the rate-limit
+wording to it too. It was right and I was wrong.
+
 ### ...and then the last objection did not survive either
 
 "~17 s per request" was true and it was the wrong frame. It is the cost of the
