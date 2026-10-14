@@ -247,4 +247,62 @@ SCHEMA = {
     },
 }
 
+def POST_CONDITION(arguments: dict, tool: "str | None" = None):
+    """Whether the patch is now actually in the tree.
+
+    **The exit status cannot be asked, which is the reason this exists at all.**
+    This module's own docstring measures it on GNU patch 2.8: a hunk that does
+    *not* apply prints "1 out of 1 hunk FAILED -- saving rejects" and exits
+    **rc=0**. A reader that trusted rc would report a patch that changed nothing
+    as a success, so the check has to be a fact about the files.
+
+    **The fact is `patch` itself, asked again.** Re-run in `--dry-run`, an
+    already-applied patch is refused - "Reversed (or previously applied) patch
+    detected!  Skipping patch." - which is the same signal `_verdict` already
+    classifies as `already-applied`, and the same one this module reports to the
+    person. Asking the tool the question it answers correctly is what keeps the
+    post-condition and the answer from being two implementations.
+
+    **A `check` is UNVERIFIED, not FAILED.** `check` is a dry run and by design
+    changes nothing, so there is no effect to look for - and a check that
+    reported "this did not happen" about a call that was *supposed* not to change
+    anything would call a correct action a failure, which is the mistake
+    `verification._call` documents fixing for the clipboard skill.
+
+    **Nothing is guessed.** The patch file, the directory and the strip level are
+    resolved exactly as `_run_skill` resolves them, and if any of them will not
+    resolve the answer is `None` rather than a guess about some other directory -
+    a post-condition that verified the wrong path would be worse than none.
+    """
+    if str(arguments.get("action") or "check").strip().lower() != "apply":
+        return None
+
+    raw_patch = str(arguments.get("patch") or "").strip()
+    raw_target = str(arguments.get("path") or "").strip()
+    if not raw_patch:
+        return None
+    try:
+        patch_file = files.resolve_in_home(raw_patch)
+        target_dir = files.resolve_in_home(raw_target or "~")
+        strip = max(0, min(int(arguments.get("strip") or 0), 9))
+    except (files.PathProblem, TypeError, ValueError):
+        return None
+    if not patch_file.is_file() or not target_dir.is_dir():
+        return None
+
+    out, err, rc = _run(["patch", *_FLAGS, f"-p{strip}", "--dry-run",
+                         "--directory", str(target_dir),
+                         "--input", str(patch_file)])
+    verdict, detail = _verdict(out, err, rc)
+    if verdict == "already-applied":
+        return True
+    # The verdicts are hyphenated labels, not verbs - `would-apply`, `failed` -
+    # so interpolating one into a sentence reads as "would still failed this
+    # patch". The label is quoted as what `patch` is saying about the tree, and
+    # the sentence around it is the only English.
+    return (False, f"this patch is not in the tree yet - `patch` says "
+                   f"`{verdict}` for {target_dir}"
+                   + (f" ({detail})" if detail else ""))
+
+
 SKILLS = [Skill(name="apply_patch", schema=SCHEMA, run=_run_skill)]

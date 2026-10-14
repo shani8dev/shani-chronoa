@@ -502,8 +502,17 @@ class TestWebSearchPrivacy:
         from shani_chronoa.skills.web_search import _run
         # When: the skill is invoked
         result = _run({"query": "hello"})
-        # Then: it still refuses, and launches nothing
-        assert "web-sense-enabled" in result
+        # Then: it still refuses, and launches nothing.
+        #
+        # **Either spelling counts**, and the reason is the same as in
+        # `test_web_search.py`: what this has to catch is a refusal degrading into
+        # a bare "not permitted", and asserting the row label would turn a green
+        # test out of the 67 gated refusals that still name the raw key. Both
+        # halves are asserted - the switch is named, and the key is not - because
+        # a sentence naming both at once satisfies either half alone.
+        from shani_chronoa.capabilities import gate_label
+        assert ("web-sense-enabled" in result
+                or gate_label("web-sense-enabled") in result), result
         assert mock_launch_uri == []
 
 
