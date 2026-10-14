@@ -6,6 +6,7 @@ Each test fails for a named defect in the current code (failing-first / RED phas
 import logging
 import subprocess
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import SCHEMA_ID
 
 import pytest
@@ -394,8 +395,13 @@ class TestTheRefusalOnlyNamesASwitchThatExists:
             for alias in _SENSE_CONSENT_ALIASES[sense]:
                 chronoa_config.set(alias, "false")
             reason = chronoa_config.sense_allowed_reason(sense)
-            assert f"'{_SENSE_CONSENT_KEYS[sense]}'" in reason, (
-                f"{sense} refusal does not name its own key: {reason}")
+            assert gate_label(_SENSE_CONSENT_KEYS[sense]) in reason, (
+                f"{sense} refusal does not name the Settings row it means: "
+                f"{reason}")
+            assert _SENSE_CONSENT_KEYS[sense] not in reason, (
+                f"{sense} refusal names the raw key "
+                f"'{_SENSE_CONSENT_KEYS[sense]}', whose spelling no settings "
+                f"window shows: {reason}")
             for alias in _SENSE_CONSENT_ALIASES[sense]:
                 assert alias not in reason, (
                     f"{sense} refusal tells the user to enable the retired "

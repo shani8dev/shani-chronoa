@@ -82,16 +82,24 @@ class TestItFailsClosed:
         """Otherwise the user is told no without being told how to change it.
 
         Uses the real config rather than a fake: `sense_allowed_reason` is the
-        thing that names the key, so a hand-written stand-in would have been
+        thing that names the row, so a hand-written stand-in would have been
         testing my own stub.
+
+        **This asserted the raw gsettings key until 2026-10-14**, which was the
+        defect: it named `accessibility-sense-enabled` when the Settings row is
+        titled "Screen text (accessibility)". Both halves now - the row title is
+        present and the key is not - because either alone is satisfiable by a
+        sentence that names both things at once.
         """
-        assert "accessibility-sense-enabled" in A._run({})
+        said = A._run({})
+        assert "Screen text (accessibility)" in said, said
+        assert "accessibility-sense-enabled" not in said, said
 
 
 class TestUnavailableIsNotEmpty:
     """The distinction this whole module is built around."""
 
-    def test_a_dead_bus_does_not_report_an_empty_desktop(self, monkeypatch):
+    def test_it_says_could_not_look_when_the_bus_is_dead(self, monkeypatch):
         monkeypatch.setattr(A, "ChronoaConfig", _config_returning(True))
         def dead():
             raise A._Unavailable("the accessibility bus did not answer")

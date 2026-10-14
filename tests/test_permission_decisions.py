@@ -109,13 +109,20 @@ class TestNobodyToAsk:
         """The bare "the user did not allow" loses the only actionable line.
 
         There was no user, so there is nothing to allow - reporting otherwise
-        invents an actor, and throws away the instruction to turn the key on.
+        invents an actor, and throws away the instruction to turn the switch on.
+
+        **This asserted the raw gsettings key until 2026-10-14**, which was the
+        defect it names after: it checked that the refusal named
+        `vision-sense-enabled` while the Settings row is titled "Take and
+        describe photos". Both halves now, so a sentence naming both things at
+        once cannot satisfy it.
         """
         ask_bridge.set_presenter(None)
         out = execute_tool_outcome("screenshot", {}).text
-        assert "vision-sense-enabled" in out, (
-            "the headless refusal no longer names the consent key, so the user "
-            "has no way to act on it"
+        assert "Take and describe photos" in out, out
+        assert "vision-sense-enabled" not in out, (
+            f"the refusal named the raw gsettings key, which no settings window "
+            f"spells that way: {out!r}"
         )
 
     def test_can_ask_is_false_without_a_presenter(self):

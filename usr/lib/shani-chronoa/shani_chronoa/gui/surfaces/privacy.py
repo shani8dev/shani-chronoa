@@ -36,6 +36,7 @@ from gi.repository import Gtk
 from shani_chronoa import egress, markdown_lite
 from shani_chronoa.config import _SENSE_CONSENT_KEYS
 from shani_chronoa.gui.surfaces import common
+from shani_chronoa.capabilities import sense_title
 
 TITLE = "Privacy"
 ICON = "security-high-symbolic"
@@ -253,7 +254,7 @@ def build(app) -> Gtk.Widget:
         # The person-facing title, with the sense's id as the subtitle - it was
         # the bare module id ("cgroup", "rfsense") over a "granted" / "not
         # granted" line that repeated what the switch beside it already shows.
-        row = _switch_row(common.sense_title(name), name if key else
+        row = _switch_row(sense_title(name), name if key else
                           f"{name} - no consent key, so it cannot be granted here",
                           granted)
         switch = _switch_of(row)

@@ -176,7 +176,7 @@ def test_every_registered_sense_has_a_gui_title(registry):
     """The FIFTH hand-kept sense-name list, found by the audit rather than by a
     failure.
 
-    `settings_window.SENSE_LABELS` and `gui.surfaces.common.SENSE_TITLES` are two
+    `settings_window.SENSE_LABELS` and `capabilities.SENSE_TITLES` are two
     copies of the same fact - what each sense is called in the UI - and they live
     in different modules for different windows. Testing one and not the other is
     how three senses came to show as raw module names in the GUI's sense panel:
@@ -186,7 +186,7 @@ def test_every_registered_sense_has_a_gui_title(registry):
     Both directions are checked, because a title for a sense that no longer
     exists is dead config that reads as a working row.
     """
-    from shani_chronoa.gui.surfaces.common import SENSE_TITLES
+    from shani_chronoa.capabilities import SENSE_TITLES
     missing = sorted(n for n in registry if n not in SENSE_TITLES)
     assert not missing, (
         f"these senses have no GUI title, so the sense panel shows their module "
@@ -199,7 +199,7 @@ def test_the_two_ui_label_lists_agree_that_every_sense_is_named():
     """`SENSE_LABELS` and `SENSE_TITLES` both cover the registry, but they are
     separate tables, so a sense can be in one and missing from the other. This
     asserts the coverage is the same set rather than trusting that it is."""
-    from shani_chronoa.gui.surfaces.common import SENSE_TITLES
+    from shani_chronoa.capabilities import SENSE_TITLES
     only_settings = set(sw.SENSE_LABELS) - set(SENSE_TITLES)
     only_gui = set(SENSE_TITLES) - set(sw.SENSE_LABELS)
     assert not only_settings and not only_gui, (

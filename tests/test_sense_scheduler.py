@@ -183,12 +183,17 @@ def test_a_sense_whose_consent_is_off_is_never_invoked_at_all(tmp_path):
     assert scheduler.polls == 0
     # A standing refusal is recorded once, not once per interval: 0.3s at a
     # 0.05s interval must not produce six "denied" rows to report.
-    assert scheduler.summary()["denied"] == {
-        "ocr": "the ocr sense is turned off (enable 'ocr-sense-enabled')"
-    }
+    denied = scheduler.summary()["denied"]
+    assert set(denied) == {"ocr"}, denied
+    # **The refusal names the settings row, not the raw key.** It read
+    # *"the ocr sense is turned off (enable 'ocr-sense-enabled')"* until
+    # 2026-10-14, which is a switch no screen spells that way.
+    assert "Text in images" in denied["ocr"], denied["ocr"]
+    assert "ocr-sense-enabled" not in denied["ocr"], denied["ocr"]
     entry = {row.name: row for row in scheduler.plan()}["ocr"]
     assert entry.will_poll is False
-    assert "ocr-sense-enabled" in entry.denial
+    assert "Text in images" in entry.denial, entry.denial
+    assert "ocr-sense-enabled" not in entry.denial, entry.denial
 
 
 def test_consent_granted_mid_run_starts_polling_without_a_restart(tmp_path):
@@ -793,7 +798,12 @@ def test_the_launcher_lists_the_ambient_plan(gsettings_env):
     assert entries["vision"]["ambient"] is False
     assert entries["vision"]["allowed"] is False
     assert entries["vision"]["will_poll"] is False
-    assert "vision-sense-enabled" in entries["vision"]["denial"]
+    assert "vision-sense-enabled" not in entries["vision"]["denial"], (
+        "the refusal named the raw gsettings key, which no settings window "
+        f"spells that way: {entries['vision']['denial']}")
+    assert "Take and describe photos" in entries["vision"]["denial"], (
+        f"the refusal did not name its settings row: "
+        f"{entries['vision']['denial']}")
     assert sorted(
         name for name, entry in entries.items() if entry["poll_interval"] is not None
     ) == sorted(n for n, s in discover_senses().items() if s.is_ambient())
@@ -820,8 +830,12 @@ def test_the_launcher_reports_plainly_when_every_poll_is_refused(gsettings_env):
             if completed.stdout.strip().startswith("{") else []:
         if not entry["allowed"]:
             assert entry["denial"], f"{entry['name']} refused without a reason"
+            # Every refusal names the label its Settings row carries, and not
+            # the raw consent key - it read *"turned off (enable
+            # 'bluetooth-sense-enabled')"* until 2026-10-14.
+            assert f"{entry['name']}-sense-enabled" not in entry["denial"], (
+                f"{entry['name']} named its raw key: {entry['denial']}")
     assert "deny" in output and "turned off" in output, output[-400:]
-    assert "turned off (enable 'bluetooth-sense-enabled')" in output
     assert completed.returncode == 0, output[-400:]
 
 

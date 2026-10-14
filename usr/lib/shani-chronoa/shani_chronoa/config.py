@@ -15,6 +15,8 @@ import gi
 gi.require_version("Gio", "2.0")
 from gi.repository import GLib, Gio
 
+from shani_chronoa.capabilities import gate_label
+
 logger = logging.getLogger(__name__)
 
 # GSettings schema constants
@@ -756,7 +758,23 @@ class ChronoaConfig:
             # sends the user looking for a switch that does not exist. They are
             # a compatibility mechanism, not an instruction - do not "simplify"
             # the alias branch above away on the grounds that this ignores it.
-            return f"the {sense} sense is turned off (enable '{key}')"
+            #
+            # **Name the row, not the key.** Measured 2026-10-14: this sentence
+            # said *"enable 'web-sense-enabled'"* while the Settings row is
+            # titled "Web search" - so the instruction it gave pointed at a
+            # spelling no screen uses. `gate_label` is the label that row
+            # carries, and all 57 consent keys have one.
+            #
+            # **No trailing full stop.** This string is a clause in sentences
+            # built by thirty-odd callers - `"Not shown: {reason}. It reveals
+            # ..."` - so the old form ended without one and they all supply
+            # their own. Adding one produced *"...to use it.. It reveals when
+            # you are at the machine"*, which `test_sense_idle` caught. Read the
+            # call sites before choosing the punctuation, the same rule that
+            # makes the privacy-mode sentence below end without one either.
+            return (
+                f"the {sense} sense is turned off. "
+                f"Switch on \u201c{gate_label(key)}\u201d in Settings to use it")
         if sense in _NETWORKED_SENSES and self.privacy_mode:
             return (
                 f"the {sense} sense needs privacy mode off because it reaches "

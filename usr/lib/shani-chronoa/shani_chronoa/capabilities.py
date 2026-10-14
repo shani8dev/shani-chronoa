@@ -851,6 +851,86 @@ GATE_NAMES: dict[str, str] = {
 }
 
 
+#: What a person calls each built-in sense. The registry is keyed by module
+#: name, and those were the row titles: `cgroup`, `stale`, `rfsense`, `hwmon` -
+#: the same "module name shown to users" defect AGENTS.md records for `hwmon`
+#: and `thermalgrid` in 2026-09. The id stays reachable in each row's tooltip;
+#: a drop-in sense with no entry here falls back to its own name, capitalised.
+SENSE_TITLES = {
+    "accessibility": "Screen text (accessibility)", "audio": "Audio devices",
+    "bluetooth": "Bluetooth", "boots": "Boot history",
+    "capture": "Who is using the camera or mic", "cgroup": "Process limits",
+    "containers": "Containers", "coredumps": "Crashed programs",
+    "cpu": "Processor", "devices": "PCI and USB devices", "display": "Display",
+    "dnsresolvers": "Name resolution (DNS)", "faults": "Recent faults",
+    "filesystem": "Read a file you name", "filesystems": "Filesystems",
+    "firewall": "Firewall", "git": "Git working tree", "gpu": "Graphics card",
+    "hardware": "Hardware model", "heard-sound": "Sounds in the room",
+    "hearing": "Hearing", "hwmon": "Fans and temperatures", "idle": "Idle time",
+    "kernel": "Kernel", "kernellog": "What the kernel logged",
+    "labnetworks": "Lab networks", "listeners": "Open ports",
+    "polkitpolicy": "What needs no password here",
+    "location": "Location", "memory": "Remembered facts",
+    "modelfit": "Models this machine can run", "network": "Network",
+    "ocr": "Text in images", "power": "Battery and power",
+    "ups": "Uninterruptible power",
+    "printing": "Printers and scanners", "privilege": "Process privileges",
+    "resources": "Resources running out", "rfsense": "Movement over Wi-Fi",
+    "security": "Security posture", "services": "System services",
+    "sessions": "Who is logged in", "snapshots": "Snapshots",
+    "monitoring": "Who is capturing",
+    "stale": "Outdated running programs", "storage": "Disks",
+    "thermalgrid": "Infrared heat sensor", "timebase": "Clock accuracy",
+    "updates": "Package updates", "usb": "USB devices", "vision": "Vision",
+    "web": "Web pages", "wirelesslink": "Wi-Fi link quality",
+}
+
+
+def sense_title(name: str) -> str:
+    """The person-facing title for sense `name`."""
+    return SENSE_TITLES.get(name) or (name.replace("-", " ").replace("_", " ").capitalize())
+
+
+def gate_label(key: str) -> str:
+    """The label the Settings row for `key` actually shows, or the key itself.
+
+    **Why this exists.** Measured 2026-10-14: all 57 consent keys gating a tool
+    have a row in the settings window and a label in the table above - 87
+    entries, 57 distinct keys, **zero unlabelled**. So the information is
+    already there, and it was not reaching the one place a person reads it: a
+    refusal said *"the web sense is turned off (enable 'web-sense-enabled')"*,
+    naming a gsettings key when the row in front of them is titled
+    **"Web search"**. A person who follows that instruction is hunting for a
+    switch spelled a way no screen ever spells it.
+
+    `Capability.gate_label()` above has answered this since it was written, but
+    it is a *method* - so a site holding only a key could not reach it. There
+    are 46 of those: `config.sense_allowed_reason()` (which every sense refusal
+    goes through) and the hand-written refusals across `skills/`, each naming
+    its key in its own words.
+
+    **The fallback to the key is deliberate.** A key with no row must still be
+    named, and an invented label would be worse than an honest key - the same
+    ceiling `gated_by` records, where a description is the more current of two
+    sources.
+
+    **And the fallback was nearly a hole.** Measured 2026-10-14: all 57 *tool*
+    keys have a label here, but **36 of the 53 sense consent keys did not** -
+    `hearing-sense-enabled`, `cpu-sense-enabled` and the rest are gated senses
+    with no tool of their own. `SENSE_TITLES` (moved here from
+    `gui/surfaces/common.py`, which imports GTK and so cannot be read by this
+    leaf module) carries what the Senses panel calls each of them, and all 36
+    are in it - "Fans and temperatures" rather than a humanised "Hwmon". So the
+    chain is: the Settings row's wording, then the sense panel's title, then
+    the key, and no sense refusal names a raw key any more.
+    """
+    if key in GATE_NAMES:
+        return GATE_NAMES[key]
+    if key.endswith("-sense-enabled"):
+        return sense_title(key[:-len("-sense-enabled")])
+    return key
+
+
 @dataclass(frozen=True)
 class Capability:
     """One thing the assistant can do, phrased for a menu rather than a model."""

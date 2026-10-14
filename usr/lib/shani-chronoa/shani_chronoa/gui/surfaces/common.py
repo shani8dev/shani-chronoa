@@ -207,44 +207,7 @@ def surface(title: str, subtitle: str = "",
     return box, set_content
 
 
-#: What a person calls each built-in sense. The registry is keyed by module
-#: name, and those were the row titles: `cgroup`, `stale`, `rfsense`, `hwmon` -
-#: the same "module name shown to users" defect AGENTS.md records for `hwmon`
-#: and `thermalgrid` in 2026-09. The id stays reachable in each row's tooltip;
-#: a drop-in sense with no entry here falls back to its own name, capitalised.
-SENSE_TITLES = {
-    "accessibility": "Screen text (accessibility)", "audio": "Audio devices",
-    "bluetooth": "Bluetooth", "boots": "Boot history",
-    "capture": "Who is using the camera or mic", "cgroup": "Process limits",
-    "containers": "Containers", "coredumps": "Crashed programs",
-    "cpu": "Processor", "devices": "PCI and USB devices", "display": "Display",
-    "dnsresolvers": "Name resolution (DNS)", "faults": "Recent faults",
-    "filesystem": "Read a file you name", "filesystems": "Filesystems",
-    "firewall": "Firewall", "git": "Git working tree", "gpu": "Graphics card",
-    "hardware": "Hardware model", "heard-sound": "Sounds in the room",
-    "hearing": "Hearing", "hwmon": "Fans and temperatures", "idle": "Idle time",
-    "kernel": "Kernel", "kernellog": "What the kernel logged",
-    "labnetworks": "Lab networks", "listeners": "Open ports",
-    "polkitpolicy": "What needs no password here",
-    "location": "Location", "memory": "Remembered facts",
-    "modelfit": "Models this machine can run", "network": "Network",
-    "ocr": "Text in images", "power": "Battery and power",
-    "ups": "Uninterruptible power",
-    "printing": "Printers and scanners", "privilege": "Process privileges",
-    "resources": "Resources running out", "rfsense": "Movement over Wi-Fi",
-    "security": "Security posture", "services": "System services",
-    "sessions": "Who is logged in", "snapshots": "Snapshots",
-    "monitoring": "Who is capturing",
-    "stale": "Outdated running programs", "storage": "Disks",
-    "thermalgrid": "Infrared heat sensor", "timebase": "Clock accuracy",
-    "updates": "Package updates", "usb": "USB devices", "vision": "Vision",
-    "web": "Web pages", "wirelesslink": "Wi-Fi link quality",
-}
 
-
-def sense_title(name: str) -> str:
-    """The person-facing title for sense `name`."""
-    return SENSE_TITLES.get(name) or (name.replace("-", " ").replace("_", " ").capitalize())
 
 
 #: The three states a panel's own health can be in. The same closed vocabulary

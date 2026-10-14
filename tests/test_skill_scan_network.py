@@ -83,7 +83,11 @@ class TestConsentGate:
         seen = _nmap(monkeypatch)
         out = scan_network._run({})
         assert "not permitted" in out
-        assert "network-sense-enabled" in out, "the refusal must say what to change"
+        assert "Network" in out, "the refusal must name the Settings row"
+        assert "network-sense-enabled" not in out, (
+            "the refusal names the raw gsettings key, whose spelling no "
+            "settings window shows"
+        )
         assert seen == {}, "nmap was executed despite the consent gate"
 
     def test_the_refusal_uses_the_shared_reason_string(self, monkeypatch, nmap_present):

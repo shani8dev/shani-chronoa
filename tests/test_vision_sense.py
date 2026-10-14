@@ -134,7 +134,9 @@ class TestTheSenseIsRegisteredAndConsentGated:
         # The shipped default is the whole point: screen capture is opt-in.
         assert chronoa_config.privacy_mode is True
         assert chronoa_config.sense_allowed("vision") is False
-        assert "vision-sense-enabled" in chronoa_config.sense_allowed_reason("vision")
+        said = chronoa_config.sense_allowed_reason("vision")
+        assert "Take and describe photos" in said, said
+        assert "vision-sense-enabled" not in said, said
 
     def test_the_sense_name_matches_the_config_consent_table(self):
         # `CONSENT_SENSE` is spelled out in the module so a rename shows up as a
@@ -157,7 +159,8 @@ class TestTheSenseIsRegisteredAndConsentGated:
         result = vision_mod.run({})
 
         assert isinstance(result, str)
-        assert "vision-sense-enabled" in result
+        assert "Take and describe photos" in result, result
+        assert "vision-sense-enabled" not in result, result
         assert capture_spy == [], "the screen was captured before consent was checked"
 
     def test_granted_consent_is_what_opens_the_camera(

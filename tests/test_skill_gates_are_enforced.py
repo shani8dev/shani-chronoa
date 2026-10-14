@@ -279,8 +279,13 @@ class TestScreenshotRespectsItsGate:
         result = screenshot._run({})
         assert reached == [], "the screen was read while vision consent was off"
         assert "not permitted" in result
-        assert "vision-sense-enabled" in result, (
-            "the refusal must name the setting to change, or the user cannot act"
+        assert "Take and describe photos" in result, (
+            "the refusal must name the Settings row to change, or the user "
+            "cannot act"
+        )
+        assert "vision-sense-enabled" not in result, (
+            "the refusal names the raw gsettings key, whose spelling no "
+            "settings window shows"
         )
 
     def test_the_refusal_quotes_the_shared_reason(self, monkeypatch, vision_off):

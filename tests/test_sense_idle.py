@@ -97,12 +97,20 @@ class TestTheMessage:
     def test_the_refusal_names_the_key(self):
         """The real config, not a stub.
 
-        `sense_allowed_reason` is what puts the key name in the message, so a
-        hand-written stand-in would only prove the stub says what the test
-        wrote into it - which is exactly the mistake the first version of this
-        made, and the accessibility sense's test made before it.
+        `sense_allowed_reason` is what puts the settings row's label in the
+        message, so a hand-written stand-in would only prove the stub says what
+        the test wrote into it - which is exactly the mistake the first version
+        of this made, and the accessibility sense's test made before it.
+
+        **This asserted the raw gsettings key until 2026-10-14**, which was the
+        defect it named after: the sentence told the user to enable
+        `idle-sense-enabled` while the Settings row is titled "Idle time". Both
+        halves are asserted now - the label is present and the key is not -
+        because either alone is satisfiable by a sentence naming both things.
         """
-        assert "idle-sense-enabled" in I._run({})
+        said = I._run({})
+        assert "Idle time" in said, said
+        assert "idle-sense-enabled" not in said, said
 
     def test_a_short_idle_reads_as_present(self):
         assert "in use" in I._describe(1.0)

@@ -24836,3 +24836,144 @@ the last path. There is no trailing `.`, there is no `-a`, and the check that
 would have caught it is the one this file already prescribes - `git show --stat`
 naming the line count *before* the commit is pushed. I ran that check **after**,
 which is how I know the number is 26.
+
+## A refusal told the user to enable a key no screen spells that way, and 36 of 53 senses had no label at all (2026-10-14)
+
+The first of the design-review directions: **consent at the right moment.** The
+premise was that refusals name raw gsettings keys instead of the label the
+Settings row carries. Measured first, through the real path: every sense refusal
+ended *"the web sense is turned off (enable 'web-sense-enabled')"* while the row
+in front of the person is titled **"Web search"**. So the one instruction the
+refusal gave pointed at a spelling no screen anywhere uses, and a person
+following it was hunting for a switch that does not exist under that name.
+
+**That is a copy defect, not a missing feature.** `capabilities.GATE_NAMES` has
+mapped a consent key to its Settings row's label since it was written — 87
+entries covering all 57 distinct keys gating a tool, **zero unlabelled**,
+re-measured by running it rather than by trusting the table's own comment. It was
+written for the Help window and the suggestion chips, and reached nothing a
+person reads when they are refused. `Capability.gate_label()` had answered the question all along,
+but it is a **method** — so the 46 sites holding only a key could not call it.
+`capabilities.gate_label()` is that answer as a function.
+
+### The 36-key hole the fix exposed, and why the chain is two tables deep
+
+Measured after the first change, because the first change was wrong: all 57
+*tool* keys resolved, but **36 of the 53 sense consent keys fell back to the raw
+key** — `hearing`, `ocr`, `cpu`, `idle` and the rest are gated senses with no tool
+of their own, and `GATE_NAMES` is keyed on tools. One sentence per sense, and the
+fallback was doing the defect's work for most of the registry.
+
+The table that does carry them is `SENSE_TITLES`, and it was **trapped in
+`gui/surfaces/common.py`, which imports GTK** — while `sense_allowed_reason` is
+reached from a headless subprocess, and `capabilities` is the module every
+non-GUI path already imports. So the table moved to `capabilities` (which imports
+only `re` and `dataclasses`, verified) and the chain is: the Settings row's
+wording, then the sense panel's title, then the key itself. **36 of 53 → 0 of
+53**, and the two real GUI call sites were repointed rather than left reading
+through a re-export.
+
+The two tables disagree on purpose — `hwmon-sense-enabled` is "Temperatures,
+fans and power" in Settings and "Fans and temperatures" in the Senses panel — so
+the order is a decision, and `test_the_two_tables_disagree_on_purpose` pins that
+neither is a copy of the other.
+
+### The trailing full stop, which is the same class of bug one layer down
+
+The first version added one to a sentence that ends without one, because
+**thirty-odd callers append their own**: `senses/idle.py` builds *"Not shown:
+{reason}. It reveals ..."*. The result was *"...to use it.. It reveals when you
+are at the machine"*, and `test_sense_idle` caught it on the very next run. The
+old form had no trailing stop for exactly this reason, and `sense_allowed_reason`
+is a **clause**, not a sentence. Read the call sites before choosing the
+punctuation — the same rule that makes the privacy-mode branch below it end
+without one either.
+
+### Six tests were asserting the defect, and one of them twice
+
+The populations that pinned the old wording, all corrected to assert both halves
+(the row title present **and** the raw key absent, because either alone is
+satisfiable by a sentence naming both things at once):
+
+| file | what it had pinned |
+|---|---|
+| `test_config_gsettings` | the per-sense loop asserted the key is named |
+| `test_sense_accessibility` | `accessibility-sense-enabled` in the output |
+| `test_sense_idle` | `idle-sense-enabled` in the output |
+| `test_vision_sense` | `vision-sense-enabled` in two tests |
+| `test_skill_gates_are_enforced`, `test_skill_scan_network` | the key in the refusal |
+| `test_sense_scheduler` | an exact-sentence dict equality, plus two more |
+| `test_trigger_event_reachability` | **four sites**, all 19 event types |
+| `test_permission_decisions` | `vision-sense-enabled` in the headless refusal |
+
+`test_trigger_event_reachability` was the instructive one: it had **four**
+independent assertions of the same shape, and the run reported 52 failures before
+any of them was fixed. A test suite that pins a defect in nine files is a suite
+that will report the fix as a regression.
+
+**`tests/test_a_refusal_names_the_row_not_the_key.py` is the durable home** for
+the property: all 53 senses driven through the real config, a label asserted
+*equal* to the table entry rather than merely contained (an invented label would
+pass "the key is absent" while pointing at a switch nobody can find), the
+fallback chain asked rung by rung, the punctuation, and the granted-path control.
+81 tests.
+
+### Two traps of my own, both recorded because both are the shape
+
+- **A re-export is one line from a second copy.** The first version kept
+  `from ...capabilities import SENSE_TITLES` in `gui/surfaces/common.py` so every
+  existing caller kept working. pyflakes reports a re-export as an unused import,
+  the workaround is `__all__`, and `__all__` is one line from a second definition
+  nobody notices. Removed, the two real call sites repointed, and
+  `test_the_old_home_does_not_re_export_the_table` asserts the name is **absent**
+  from the old home — the shape that cannot drift.
+- **The `wpctl`-three-copies failure, guarded by a count.**
+  `test_exactly_one_definition_in_the_shipped_package` counts `SENSE_TITLES = {`
+  across the package and asserts exactly one, which is the only instrument: the
+  two copies agree the day they are written and drift the week after, so no
+  behavioural test can tell one table from two that currently match.
+
+### 11 mutations, 11 caught, 0 survivors
+
+`tools/mutations/refusal_names_the_row.py`, run on a snapshot at
+`/tmp/opencode/snap-rn2` (absolute paths, every anchor asserted `count == 1`
+first, restore verified byte-identical by `md5sum -c`, verdicts read from the
+summary line). The four shapes, each with its over-fix: the shipped defect
+restored, the Settings row's wording unreachable, the sense panel's table
+unreachable, a key humanised rather than named, the suffix test dropped, the
+panel's table bypassed, the trailing full stop, the sense unnamed, a re-export in
+the old home, a second copy of the table, and a sense panel binding its own
+`sense_title`.
+
+**Two of my witnesses over-claimed and the runner said so.** One named
+`test_a_tool_key_takes_the_settings_rows_own_wording` on the `sense_title`
+mutation — every tool key is resolved by `GATE_NAMES`, which that mutation leaves
+alone, so it passes either way. One named the definition count on the re-export
+mutation — a re-export is still one *definition*. Both corrected to the witness
+that bites, per the rule that says correct the name rather than write a test.
+
+### Verified, and the two things that were not
+
+**37 test files, one process each, fresh `XDG_STATE_HOME` per run.** All green
+except two, both proved pre-existing by running the same file against
+`git archive HEAD` on its own tree: `test_help_gate_labels_match_settings`
+(1 passed, 3 errors — the settings-window harness reporting no rows, identical at
+HEAD) and four GUI files that **segfault at GTK teardown on this box**,
+byte-identical at HEAD. The two GUI modules that could not complete a run were
+verified by import instead: both bind the moved `sense_title` and neither carries
+the old name.
+
+**Not verified: any render.** The main window still cannot be photographed above
+460px (`CHRONOA_FORCE_SIZE=1` blanks it; cause not established), so nothing here
+claims a picture. `tools/mutate.py --check-witnesses` is clean across all 68 sets
+(834 witnesses); `--check-anchors` reports one rot, `arxiv_search`'s anchor
+occurring 0 times **at HEAD as well** — pre-existing in another session's set and
+left alone.
+
+### What this does not do
+
+**The other 46 hand-written refusals in `skills/` are untouched.** Each names its
+key in its own words, and the shared helper exists and is measured — but converting
+46 files is a change with its own review, not a footnote to this one. Counted and
+recorded rather than claimed. Also untouched: the reason field and the
+timeout-is-not-a-session-denial half of the same direction, both still open.

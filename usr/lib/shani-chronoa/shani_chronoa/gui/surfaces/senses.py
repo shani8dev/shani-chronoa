@@ -61,6 +61,7 @@ from gi.repository import GLib, Gtk  # noqa: E402
 
 from shani_chronoa.config import _SENSE_CONSENT_KEYS  # noqa: E402
 from shani_chronoa.gui.surfaces import common  # noqa: E402
+from shani_chronoa.capabilities import sense_title  # noqa: E402
 from shani_chronoa.senses import discover_senses  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -284,7 +285,7 @@ def _sense_row(name: str, sense: Any, consent: _Consent) -> Gtk.Widget:
 
     handler = _Toggle(consent)
     row = common.switch_row(
-        title=_plain(common.sense_title(name)),
+        title=_plain(sense_title(name)),
         subtitle=_plain(f"{_unprefixed(summary)}\n{state}" if state else _unprefixed(summary)),
         on_changed=handler,
     )

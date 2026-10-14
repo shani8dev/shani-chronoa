@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from shani_chronoa.capabilities import gate_label
 from shani_chronoa.config import (
     _EVENT_CONSENT_KEYS,
     _EVENT_DEFAULT_ENABLED,
@@ -419,7 +420,13 @@ class TestTheConsentGate:
 
         results = engine.poll()
         assert _CALLS == []
-        assert any("git-sense-enabled" in r.reason for r in results)
+        # **The refusal names the Settings row, not the raw key.** It read
+        # *"...enable 'git-sense-enabled'"* until 2026-10-14, which is a switch
+        # no screen spells that way. Both halves, so a sentence naming both
+        # things at once cannot satisfy it.
+        said = [r.reason for r in results if "git" in r.reason]
+        assert said and "Git working tree" in said[0], said
+        assert all("git-sense-enabled" not in r for r in said), said
 
 
 class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
@@ -613,10 +620,15 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
             assert config.sense_allowed(other) is False, (
                 f"{other} is permitted with nothing granted"
             )
-            assert f"{other}-sense-enabled" in config.sense_allowed_reason(other), (
-                f"{other}'s refusal does not name its key: "
-                f"{config.sense_allowed_reason(other)!r}"
-            )
+            assert f"{other}-sense-enabled" not in config.sense_allowed_reason(
+                other), (
+                f"{other}'s refusal named its raw gsettings key, which no "
+                f"settings window spells that way: "
+                f"{config.sense_allowed_reason(other)!r}")
+            assert gate_label(f"{other}-sense-enabled") in \
+                config.sense_allowed_reason(other), (
+                f"{other}'s refusal does not name its settings row: "
+                f"{config.sense_allowed_reason(other)!r}")
 
     @pytest.mark.parametrize("event_type", WAS_INERT)
     def test_an_older_schema_that_lacks_the_key_denies_rather_than_permits(
@@ -662,9 +674,14 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
         assert "It would NOT fire right now" in refused, (
             f"{event_type} armed with {key} off: {refused!r}"
         )
-        assert key in refused, (
-            f"the refusal must name {key}; a user who cannot act on a refusal "
-            f"concludes the assistant is broken"
+        assert key not in refused, (
+            f"the refusal named the raw gsettings key {key}, which no settings "
+            f"window spells that way: {refused!r}"
+        )
+        assert gate_label(key) in refused, (
+            f"the refusal must name the settings row {gate_label(key)}; a user "
+            f"who cannot act on a refusal concludes the assistant is broken: "
+            f"{refused!r}"
         )
 
         _grant(key)
@@ -697,7 +714,11 @@ class TestEveryEventTypeIsArmableOnceItsKeyIsGranted:
         _shut(key)
         denial = _fire_denial(_rule(f"revoke-{event_type}"))
         assert denial, f"{event_type} kept firing after {key} was switched off"
-        assert key in denial, f"the refusal must name {key}: {denial!r}"
+        assert key not in denial, (
+            f"the refusal named the raw gsettings key {key}, which no settings "
+            f"window spells that way: {denial!r}")
+        assert gate_label(key) in denial, (
+            f"the refusal must name its settings row: {denial!r}")
 
     def test_an_expiry_rule_really_dispatches_through_the_engine(
         self, consent, tmp_path
