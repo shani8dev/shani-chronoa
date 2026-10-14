@@ -1,5 +1,15 @@
 """Train and evaluate a LoRA reranker over tool descriptions, and say whether it is worth it.
 
+**MEASURED ANSWER: it is not worth it, and this harness is why.** A
+purpose-trained `Qwen3-Reranker-0.6B` - a third of this base model's size,
+trained by someone else, zero training on this corpus - scores **48/55 = 87.3%**
+on the held-out half against `ranked()`'s **49/55 = 89.1%** on the same requests,
+at 6.57 s per request. Paired, it fixes 5 and breaks 6.
+
+So the loop below exists to answer a question that has been answered, and the
+answer is **do not build this**. What is left here is the evidence, the cost
+table, and the `--serve-plan` frontier, for whoever asks next.
+
 **Why a reranker at all, and why this shape.** The measured state of selection
 is: `select` offers the right tool in **95.5%** of 220 requests but ranks it
 **first** in only **80%**, and **35% of the tools it actually sends share no word

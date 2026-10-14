@@ -23186,6 +23186,40 @@ are **median 85 tokens, max 114**, against a 384 cap - **22% of the budget in
 use**. There is no length to cut, because the sequences were never long. Applying
 that paper here would have been reading it rather than measuring it.
 
+### The decision, settled by a model that needed no training at all
+
+`arXiv:2607.18152` said a **0.6B purpose-trained listwise reranker** matches a 4B
+model at 7x fewer parameters, which made the whole plan here questionable: this
+file's plan is a LoRA cross-encoder on Qwen3-1.7B with a scalar head trained from
+165 examples - a purpose-built listwise reranker, except it is a general-purpose
+model learning the job. So: `Qwen/Qwen3-Reranker-0.6B` was fetched (1.19 GB) and
+run on **the same 55 held-out requests, paired against the same `ranked()`**:
+
+| | top-1 | cost |
+|---|---:|---:|
+| `Qwen3-Reranker-0.6B`, fp32, **trained by someone else** | 48/55 = **87.3%** | 6.57 s/request |
+| `ranked()` - a dict lookup and a sort | **49/55 = 89.1%** | ~1.8 ms/request |
+
+Paired: both right 43, **reranker-only 5, baseline-only 6**. Net **-1**.
+
+**A purpose-trained listwise reranker, a third of the base size, with no training
+on this corpus at all, does not beat a dict lookup on this task.** That is the
+number the project needed and did not have, and it settles the question:
+
+- **Do not build it.** The 2.7 h training run would have to beat a model that is
+  *already* purpose-trained and lands at 87.3%, having to clear 89.1% first.
+- The nine-point headroom is real but it is not obviously reachable this way.
+- The cheaper vocabulary work below gets about a third of it for **no latency**,
+  which is the only cost axis that was ever in contention.
+
+**Caveats, so this is not read as more than it is.** The chat prompt was mine,
+constructed from the model's published protocol - a different one could score
+differently, and nobody has swept it. fp32 only, so the int8 3.9x is untested
+*here*. 55 requests, so the paired flip count (5 and 6) is small and the net -1
+is a tie rather than a result - **the honest reading is "no better", not
+"worse"**. And this measures a reranker on a **general-retrieval** model against
+a selector tuned on this machine's own 220 requests over months of eval.
+
 ### Nineteen vocabulary gaps, and an in-sample number that was five times the real one
 
 `ranked()`'s misses are **vocabulary gaps**, not ranking failures. "mute the
