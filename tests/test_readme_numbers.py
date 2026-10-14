@@ -66,16 +66,34 @@ def test_the_checker_actually_fails_when_it_should():
             else:
                 shutil.copy2(source, target)
         readme = work / "README.md"
-        readme.write_text(readme.read_text(encoding="utf-8").replace(
-            "**257 callable\n  skills**", "**99 callable\n  skills**"),
-            encoding="utf-8")
+        # **Derive the number this control drifts, do not remember it.** This used
+        # to replace the literal `"**257 callable\n  skills**"`, and the README has
+        # said **256** since `8c92258` retired `trash_file` - so the replace matched
+        # **0** times, the "drifted" copy was byte-identical to the real README,
+        # and the checker correctly exited 0. The control failed looking exactly
+        # like a broken checker, which is the one thing a negative control must
+        # never be. Same stale-literal shape as `test_schema_caps`'s 257.
+        import re
+
+        text = readme.read_text(encoding="utf-8")
+        claimed = re.search(r"\*\*(\d+) callable\s*\n?\s*skills\*\*", text)
+        assert claimed, (
+            "the README has no 'callable skills' count for this control to "
+            "drift, so the copy below would not be drifted at all")
+        real = int(claimed.group(1))
+        wrong = real + 1
+        readme.write_text(text.replace(claimed.group(0),
+                                       f"**{wrong} callable\n  skills**"),
+                          encoding="utf-8")
         out = subprocess.run(
             [sys.executable, str(work / "tests" / "check_readme_numbers.py")],
             capture_output=True, text=True, cwd=str(work), timeout=300)
         assert out.returncode != 0, (
-            "a README claiming 99 skills did not fail the checker, so the test "
-            "above would pass on a drifted file:\n" + out.stdout)
-        assert "99" in out.stdout and "257" in out.stdout, (
-            "the checker failed without saying what the drift was:\n" + out.stdout)
+            f"a README claiming {wrong} skills did not fail the checker, so the "
+            f"test above would pass on a drifted file:\n" + out.stdout)
+        assert str(wrong) in out.stdout and str(real) in out.stdout, (
+            "the checker failed without saying what the drift was: it must name "
+            f"the {wrong} the README claims and the {real} the tree holds:\n"
+            + out.stdout)
     finally:
         shutil.rmtree(work, ignore_errors=True)
