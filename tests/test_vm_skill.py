@@ -77,12 +77,30 @@ def test_gate_refuses_then_opens(tmp_path, monkeypatch) -> None:
     monkey.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     (tmp_path / "config").mkdir()
     try:
-        refused = tools.execute_tool_outcome("vm", {"action": "list"}).text
-        assert "Refusing" in refused, f"the gate is open by default: {refused!r}"
-        assert "vm-control-enabled" in refused, (
-            f"the refusal must name the switch that opens it: {refused!r}")
-
+        # **The shut half is established here, not inherited.** This used to rely
+        # on `vm-control-enabled` shipping `false`. `cf525453` made a fresh
+        # install arrive as the `everyday` preset, which enables it, so a default
+        # install had the gate open and the failure read
+        # *"the gate is open by default: 'No virtual machines are running...'"* -
+        # the gate working correctly and the expectation being the stale thing.
+        # Set first, and read back, so the refusal below cannot be vacuous.
         config = ChronoaConfig()
+        config.set("vm-control-enabled", "false")
+        assert config.get_bool("vm-control-enabled", True) is False, (
+            "the shut half did not take, so the refusal below proves nothing")
+
+        refused = tools.execute_tool_outcome("vm", {"action": "list"}).text
+        assert "Refusing" in refused, f"the gate did not shut: {refused!r}"
+        # **Either spelling.** `04316cc` made refusals name the Settings row
+        # rather than the raw key; what this has to catch is a refusal that
+        # names *neither*, leaving nobody able to find the switch.
+        from shani_chronoa.capabilities import gate_label
+
+        assert ("vm-control-enabled" in refused
+                or gate_label("vm-control-enabled") in refused), (
+                f"the refusal must name the switch that opens it, or the row "
+                f"that opens it: {refused!r}")
+
         config.set("vm-control-enabled", "true")
         assert config.get_bool("vm-control-enabled", False) is True, (
             "the grant did not take, so everything after this would be vacuous")

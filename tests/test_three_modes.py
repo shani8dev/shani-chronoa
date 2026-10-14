@@ -89,20 +89,34 @@ def _tool_names():
 # -- three chips, three words, three questions ------------------------------
 
 
-def test_the_strip_shows_the_three_modes_and_nothing_else():
+def test_the_strip_shows_the_modes_it_carries_and_nothing_else():
     """**Four chips moved off to the palette** - ambient, hands, reply style and
-    the model - because they are set once per task, while these three are
+    the model - because they are set once per task, while the ones that stay are
     changed mid-conversation. Nine chips in a row is nine words to read past the
     one you came to change.
 
     Asserted as an exact count rather than "at most", because the crowding came
     from adding chips and a ceiling nobody checks drifts upwards.
+
+    **This was 5, and it is 4 because `5ef5c62` moved Plan onto the composer.**
+    That commit measured the strip at 97% full with the model switch having no
+    home on screen, and carried the model, the reply style and Plan to
+    `answer_button` beside Send. `_plan_chip` is still **built** and still drawn
+    by `refresh()`, so a reader has no way to tell it moved - only this count
+    could, and `5ef5c62` did not update this file. Where plan mode now lives is
+    pinned by `tests/test_answer_control_is_beside_send.py`, which that commit
+    added; the two tests together cover both ends of the move, where before this
+    one asserted a strip that no longer exists.
     """
     strip = _strip()
     chips = [c for c in strip if isinstance(c, Gtk.MenuButton)]
-    assert len(chips) == 5, (
-        f"{len(chips)} chips on the strip: three modes plus presence and "
-        f"egress. Expected 5.")
+    assert len(chips) == 4, (
+        f"{len(chips)} chips on the strip: capability, auto, presence and "
+        f"egress. Expected 4. Plan mode moved beside Send in `5ef5c62`.")
+    # **Built, not appended** - the move has to stay visible as a move, or the
+    # next reader assumes a chip nobody appended is dead code.
+    assert strip._plan_chip is not None, (
+        "plan mode's chip stopped being built; `refresh()` still draws it")
 
 
 def test_each_mode_has_a_whole_number_of_words():

@@ -89,9 +89,37 @@ def test_echo_of_the_reply_is_not_a_follow_up():
     assert not _is_echo("make it twenty minutes instead", reply)
 
 
-def test_sound_cues_are_off_by_default():
+def test_cues_follow_the_sound_cues_switch(monkeypatch, gsettings_env):
+    """**Cues follow the switch**, in both directions.
+
+    This used to be `test_sound_cues_are_off_by_default` and asserted
+    `cues.play("listening") is False`. `5be170b` - *"defaults: 16 more on"*,
+    whose table lists eighteen - turned `sound-cues-enabled` **on** deliberately,
+    in the voice-UX group. So the shipped default moved on 2026-10-13 and the
+    assertion read as *"cues ignore their switch"* rather than as the stale
+    expectation it was.
+
+    Both directions are now **established rather than inherited**, which is the
+    stronger claim: a test pinning only the off case passes just as happily
+    against a `play` that always returned `False`. The player and the cue file
+    are stubbed so the assertion is about the switch rather than about whether
+    this machine has `pw-play` installed - measured here, both were present, so
+    the old failure really was the default and not a missing dependency.
+    """
     from shani_chronoa import cues
-    assert cues.play("listening") is False
+    from shani_chronoa.config import ChronoaConfig
+
+    monkeypatch.setattr(cues.shutil, "which", lambda _name: "/bin/true")
+    monkeypatch.setattr(cues, "path_for", lambda _name: "/dev/null")
+    monkeypatch.setattr(cues.subprocess, "Popen", lambda *a, **k: None)
+
+    ChronoaConfig().set("sound-cues-enabled", "false")
+    assert cues.play("listening") is False, "a cue played with the switch off"
+
+    ChronoaConfig().set("sound-cues-enabled", "true")
+    assert cues.play("listening") is True, (
+        "the cue did not play with the switch on and a player present, so the "
+        "switch is not what play() is reading")
 
 
 def test_presets_set_only_action_permissions_and_read_back():
