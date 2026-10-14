@@ -23052,6 +23052,49 @@ So the decision frame, all measured: 31.1 h/epoch unattended and reachable;
 10.5 GB and comfortable; **9.1 points of ceiling**; and **17 s per request** of
 serving cost on a 4-core CPU box. Three of those four say go.
 
+### The literature, reached the permitted way, and what it changed
+
+arXiv's API is refusing (below) and its robots.txt **disallows `/api` and
+`/search`**, so the reachable route is `/list` and `/abs` - both `Allow`ed, both
+answering in 0.28-0.80 s. Five paginated fetches of `cs.IR/recent` at the stated
+`Crawl-delay` gave 58 titles. Two were on point, and one of them cuts against
+this file's own recommendation.
+
+**`arXiv:2610.07760` - Token-Budgeted Escalation for Financial Document QA.**
+Selective escalation as finite-batch allocation: a cheap top-1 answer, then an
+*optional* deeper call only where it is predicted to help, prioritised by
+**predicted gain per token**. At a 10% budget that beats gain-only ranking by
+0.034 [0.001, 0.072] while using **46.6% fewer tokens** than always going deep.
+So the *shape* of the gate below is not a guess - it is the standard form.
+
+But its second finding is the one that matters here: **"beneficial escalation
+remains difficult to rank (AUROC 0.60)"**, and progress "depends on stronger
+query-specific benefit estimates". Additional-call **cost** is predictable
+(R^2 0.93); **benefit** is not. And the top-2 margin gate *is* a benefit
+estimate, validated on **55** requests.
+
+**That inverts the recommendation.** int8 is an **unconditional** 3.9x: it costs
+nothing in accuracy to be had wrong, and its only risk is whether quantisation
+preserves the ranking. The gate is **conditional** - its value rests entirely on a
+routing signal the literature says is hard, measured here on a sample of 55. So
+build int8 first and treat the gate as needing a trained model to validate, not
+as free money.
+
+**`arXiv:2610.11650` - SkillContrast: Difference-Guided Text Selection for Agent
+Skill Reranking.** The closest paper on earth to this problem - agent *skill*
+reranking - and it reports **51.1-58.8% fewer model-input tokens** by keeping
+only the text that *differs* between candidate skills.
+
+**Measured, that lever does not exist here, and the reason is specific.** 31.3%
+of our description tokens appear in more than 20% of descriptions - but they are
+`'.', ',', ' the', ' and', ' a', ' or', 'is', 'it', 'to'` - **function words and
+punctuation, not shared instructions.** SkillContrast removes per-candidate
+semantic redundancy; we have grammatical overlap, and stripping function words
+would buy shorter inputs at the cost of the text itself. Separately, our pairs
+are **median 85 tokens, max 114**, against a 384 cap - **22% of the budget in
+use**. There is no length to cut, because the sequences were never long. Applying
+that paper here would have been reading it rather than measuring it.
+
 ### arXiv stopped answering, and it was not this repository
 
 Measured 2026-10-14. Four calls to `export.arxiv.org/api/query`, three seconds
