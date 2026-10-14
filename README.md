@@ -25,7 +25,7 @@ the machine unless you switch it twice on purpose.
 - **Local speech-to-text** — whisper.cpp; runs on CPU or CUDA.
 - **On-device LLM** — tool-calling via llama.cpp `llama-server` by default
   (the `ollama` package is also supported), so Chronoa can act on your machine
-  rather than just chatting about it. **256 callable
+  rather than just chatting about it. **257 callable
   skills**, every one a named, schema-typed module under `skills/`. There is
   no generic shell-exec tool; the whitelist is the design, not a starting point.
   **They are all listed in [`CAPABILITIES.md`](CAPABILITIES.md)**, grouped by
