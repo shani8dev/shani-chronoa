@@ -23186,6 +23186,50 @@ are **median 85 tokens, max 114**, against a 384 cap - **22% of the budget in
 use**. There is no length to cut, because the sequences were never long. Applying
 that paper here would have been reading it rather than measuring it.
 
+### Nineteen vocabulary gaps, and an in-sample number that was five times the real one
+
+`ranked()`'s misses are **vocabulary gaps**, not ranking failures. "mute the
+sound" was answered `set_mic_mute` because both descriptions contain "mute";
+"internet speed" went to `web_search` because both mention the internet. Nothing
+about the ranking was wrong - the words the person uses were absent. Nineteen
+entries added to `_SYNONYMS`, and scored on the 220 `eval_cases.json` requests:
+
+| | top-1 | recall@4 | recall@8 |
+|---|---:|---:|---:|
+| without | 175/220 = 79.5% | 94.1% | 96.4% |
+| **with** | **192/220 = 87.3%** | 95.9% | 97.7% |
+
+**That +17 is in-sample, and the corpora are not independent.** `reranker_corpus`'s
+165-request `train` split is **100% contained in** `eval_cases.json` - every one
+of its requests appears there verbatim - so the 220 cannot be the out-of-sample
+set it was taken to be. They were also written after reading every miss in it.
+
+**The clean test, and it is not close.** Split the 220 in half by a hash of the
+request, author synonyms from **half A's 14 misses only**, and score half B:
+
+| | before | after | gain |
+|---|---:|---:|---:|
+| half A - **in sample** | 84/98 | 95/98 | **+11** |
+| half B - **out of sample** | 92/122 | 94/122 | **+2** |
+
+**The in-sample number overstates the out-of-sample one by 5x.** So the real
+figure is roughly **+3 of 220**, not +17 - still free, still worth keeping, and
+**not** the +9.1 the reranker is being asked for. The mechanism is real (generic
+entries like "internet speed" and "join a wifi network" do transfer); the
+magnitude was mostly memorisation.
+
+Two smaller things the same change surfaced:
+
+- `"who is on this network": "discover hosts network devices scan"` took "Who is
+  on this network right now." from **1288 to 1536 tokens** - exactly the budget -
+  and the cap finished over it with droppable tools still in hand. **Every word
+  added to an expansion is a word that can match another schema.** Narrowed to
+  `"discover hosts network"`: 1399 tokens.
+- Two measurement pins moved and were **re-derived rather than bumped**: the
+  zero-match floor 553 -> **552**, and `ask_user`'s share 177 -> **176**. The
+  ratio held at **39.9%** and `ask_user` moving *down* is the direction that
+  matters: a request that now finds its tool is one `ask_user` is not needed for.
+
 ### arXiv stopped answering, and it was not this repository
 
 Measured 2026-10-14. Four calls to `export.arxiv.org/api/query`, three seconds
