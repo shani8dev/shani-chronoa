@@ -129,7 +129,7 @@ def test_rows_from_text():
     assert office.rows_from_text("| a | b |\n|---|---|\n| 1 | 2 |") == [["a", "b"], ["1", "2"]]
 
 
-def test_skill_create_edit_undo(tmp_path):
+def test_skill_create_edit_undo(tmp_path, gsettings_env):
     import os
     from pathlib import Path
     from shani_chronoa.skills import undo_last_change
@@ -139,6 +139,17 @@ def test_skill_create_edit_undo(tmp_path):
     out = od._run({"action": "create", "path": str(sheet), "rows": [["Item", "Cost"], ["Rent", 900]]})
     assert out.startswith("Created") and "Rent" in out
     assert "already exists" in od._run({"action": "create", "path": str(sheet), "rows": [["x"]]})
+    # **The control is established here, not inherited.** This used to assert the
+    # refusal on the strength of the *default*, and `cf525453` ("consent defaults:
+    # a fresh install now arrives as the `everyday` preset, not as nothing") ships
+    # `file-edit-enabled` **on** - it is classified destructive and carved back
+    # out by the preset rule, which
+    # `test_editing_files_ships_on_because_it_is_not_destructive` pins. So a
+    # default install cannot produce this refusal, the line went red on 2026-10-13,
+    # and it read as a gate that had stopped gating rather than as a stale
+    # expectation. The gate is fine; the assumption about what it defaults to was
+    # not.
+    ChronoaConfig().set("file-edit-enabled", "false")
     assert "Refusing" in od._run({"action": "set_cells", "path": str(sheet), "values": {"B2": 950}})
     before = sheet.read_bytes()
     ChronoaConfig().set("file-edit-enabled", "true")

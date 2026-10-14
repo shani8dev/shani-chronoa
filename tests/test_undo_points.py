@@ -33,7 +33,18 @@ def test_overwrite_append_and_bulk_replace_are_undoable():
     assert (home / "proj" / "b.txt").read_text() == "color b"
 
 
-def test_listing_needs_the_same_consent():
+def test_listing_needs_the_same_consent(gsettings_env):
+    """Listing undo points writes nothing, so it needs no consent of its own -
+    but it reads the record those points are kept in, so it takes the same one.
+
+    **Turned off explicitly rather than inherited from the default.** The
+    sibling test above grants `file-edit-enabled`, and this one used to assume the
+    shipped default was `false`. `cf525453` made it `true` on 2026-10-13 -
+    classified destructive, then carved back out by the preset rule - so the
+    refusal this asserts stopped being something a default install could produce,
+    and the failure read as the gate having stopped gating.
+    """
+    ChronoaConfig().set("file-edit-enabled", "false")
     assert "Refusing" in undo_last_change._run({"list": True})
 
 
