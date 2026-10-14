@@ -26010,3 +26010,60 @@ earlier today turned out wrong when measured - an ambient PipeWire probe that
 over-skipped **5 of 19** runnable tests, and an `--check-anchors` verdict that was
 green because the needle matched mid-line. **A fix that cannot be shown not to
 over-fire is not a fix.**
+
+## A guard that was green by coincidence, and a sweep that reported 46 files green without running them (2026-10-14)
+
+Asked to fix all after another session landed **2,430 lines** across nine modules. The
+instrument was a 72-file sweep of every test importing those modules: **14 failures,
+1403 passed**. Re-run one file per process: **five files pass outright, and one
+failure is real.** That is the **fourth** time the serial re-run has collapsed a dozen
+claimed failures to one, and the fifth time the instrument rather than the finding has
+been the thing worth doing.
+
+### The one real failure: a test asserting nothing, for a long time
+
+`test_a_page_title_comes_from_the_registry_not_a_hand_kept_list` failed with
+`assert 'App audio' == 'Listening'`, and **both halves were the test's own**:
+
+1. **Its monkeypatch never applied.** It set `window_mod.available_surfaces`, but
+   `_surface_title` does its own `from shani_chronoa.gui.surfaces import
+   available_surfaces` *inside the function* (window.py:93), so it never reads the
+   window module's attribute. The patch was a no-op and the function read the
+   **real** registry.
+2. **So it passed by coincidence.** The panel's real title was `"Listening"` and the
+   test wanted `"Listening"`. It was green and testing nothing. `listening.py` then
+   renamed itself to **`"App audio"`**, deliberately and with reasons written down -
+   system audio capture, not the microphone, and *"Listening"* beside a microphone orb
+   pointed at neither of them. The rename turned the coincidence into a failure and
+   revealed the patch had never worked.
+
+**The part worth keeping is not the fix.** `_surface_title` falls back to
+`name.replace("_", " ").capitalize()`, which for this name is exactly `"Listening"` -
+so **the old expectation passed even with the registry never read at all.** That is
+the whole bug in one line: a guard that cannot distinguish the thing it checks from
+the default. The assertion now wants `"App audio"`, which no fallback can produce,
+and the patch goes to `surfaces.available_surfaces` where the function actually looks.
+
+**Proven to bite**: making `_surface_title` return the fallback unconditionally fails
+it with `assert 'Listening' == 'App audio'` - the precise value the old assertion
+accepted. Full file **7 passed in 807.91s**, which is worth noting on its own: at
+thirteen minutes it is the slowest file here, and three of its four sweep failures
+were contention.
+
+### And a sweep of mine that reported 46 files green having run none of them
+
+The second sweep passed **bare filenames** while running from the repository root.
+Every file answered `no tests ran in 0.00s`, and then
+
+```
+grep -cE "failed|error" results.txt   ->   0
+```
+
+**Zero failures, zero tests, and a summary indistinguishable from a clean run.** This is
+the same failure as reading a failure list nobody re-ran, wearing the costume of a tool
+that worked: the number is right and means nothing. The redo passes `tests/$f`, checks
+the path exists first, and **relabels any `no tests ran` as `DID NOT RUN`** so it cannot
+fall through into a pass tally.
+
+**A sweep must assert that it ran something.** `passed > 0` is the cheapest such check
+and it would have caught this on the first file.
