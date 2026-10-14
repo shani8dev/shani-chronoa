@@ -244,12 +244,25 @@ class TestTheLoudnessPass:
         config = ChronoaConfig()
         tts = PiperTTS(config=config)
         original = PiperTTS._engine
-        PiperTTS._engine = lambda self, reason, e=engine: e
+        # **`*args`, not a named second parameter.** `8ae9a88` ("piper: the
+        # second voice in the chain gets a switch too") gave `_engine` a second
+        # argument, `piper_reason`, so `engine()` now calls
+        # `self._engine(reason, piper_reason)`. This was
+        # `lambda self, reason, e=engine: e`, and that real second argument
+        # **bound to `e` and overwrote the forced engine** with the reason
+        # string - no error, just a value no branch matches, so `_synthesize`
+        # fell through to `else`, logged "No speech engine" and returned
+        # `b""`. All three engines then failed `assert data[:4] == b"RIFF"` for
+        # the same reason, which read as three broken engines rather than one
+        # broken seam. `*args` cannot be defeated by a parameter being added.
+        PiperTTS._engine = lambda self, *_a, **_k: engine
         try:
             data = tts.synthesize_to_bytes("The volume is at forty percent right now.")
         finally:
             PiperTTS._engine = original
-        assert data[:4] == b"RIFF", f"{engine} produced no speech"
+        assert data[:4] == b"RIFF", (
+            f"{engine} produced no speech - the forced engine is "
+            f"{engine!r}, so an empty result is that engine's own failure")
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as fh:
             fh.write(data)
             tmp = fh.name

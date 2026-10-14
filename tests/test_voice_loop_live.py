@@ -51,6 +51,8 @@ def _model() -> str:
 #: Downloaded voices and models kept between runs (see `.gitignore`).
 CACHE = REPO / "cache" / "data-home"
 _MODEL = _model()
+
+
 pytestmark = pytest.mark.skipif(
     not all(shutil.which(t) for t in _TOOLS) or not _MODEL,
     reason="needs PipeWire, wireplumber, whisper-cli, espeak-ng and a whisper model")
@@ -168,7 +170,29 @@ class _PrivateAudio:
 
 @pytest.fixture(scope="module")
 def audio(tmp_path_factory):
-    graph = _PrivateAudio(tmp_path_factory.mktemp("audio"))
+    """The private graph, or a skip that says the graph did not come up.
+
+    **A graph that will not start is a skip, not a failure.** `_PrivateAudio`
+    already knows how to tell - it waits fifteen seconds for its four virtual
+    devices and raises `AssertionError` - so this catches that and reports it,
+    naming the condition rather than leaving a chain of
+    `FileNotFoundError: Audio file not found` behind it.
+
+    Two narrower attempts got here first and both are worth recording. Asking
+    whether the **binaries** are on `PATH` is the wrong question - this machine
+    has all nine of them, and every test then failed with
+    `pw_context_connect() failed: Host is down`. Asking whether an **ambient**
+    `Pw.Context` can connect is also the wrong question, and more expensively so:
+    these tests talk to *this* graph, through its own runtime dir, and here the
+    private graph comes up perfectly well while the ambient session has no server
+    at all. That second probe over-skipped **5 of 19** tests which can and do run
+    on this machine - a skip is not coverage, and this one would have cost real
+    checks to save nothing.
+    """
+    try:
+        graph = _PrivateAudio(tmp_path_factory.mktemp("audio"))
+    except AssertionError as exc:
+        pytest.skip(f"the private PipeWire graph did not come up: {exc}")
     try:
         yield graph
     finally:
@@ -397,7 +421,16 @@ def test_voice_engines_measured(in_that_graph, tmp_path, gsettings_env, monkeypa
     config = ChronoaConfig()
     config.set("kokoro-tts-enabled", "true" if engine == "kokoro" else "false")
     tts = PiperTTS(config=config)
-    monkeypatch.setattr(PiperTTS, "_engine", lambda self, reason: engine)
+    # **`*args`, not a named second parameter.** `8ae9a88` ("piper: the second
+    # voice in the chain gets a switch too") gave `_engine` a second argument,
+    # `piper_reason`, and `engine()` calls `self._engine(reason, piper_reason)`.
+    # This was `lambda self, reason: engine`, which now raises
+    # `TypeError: <lambda>() takes 2 positional arguments but 3 were given` on
+    # every call - so the failure surfaced as a missing `heard-reply.wav` rather
+    # than as a broken seam, which is how this file looked like live-audio
+    # flakiness instead of an arity mismatch. `*args` cannot be defeated by a
+    # parameter being added.
+    monkeypatch.setattr(PiperTTS, "_engine", lambda self, *_a, **_k: engine)
     if engine != "espeak-ng":
         from shani_chronoa import voices
         ready = (voices.piper_binary() and (voices.voice_dir() / "en_US-lessac-medium.onnx").is_file()
