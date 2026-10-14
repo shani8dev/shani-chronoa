@@ -265,6 +265,22 @@ class TestTheCoreFloorIsPricedNotWaste:
     request, and a model that is not offered it guesses.
 
     This class exists so the arithmetic is not read as a defect a third time.
+
+    **And the measurement that says it is not one: the floor costs almost
+    nothing.** Trimming every zero-match tool out of the selection, keeping only
+    what scored plus `CORE`, changes top-1 not at all (**192/220 either way**)
+    and frees **four tokens** - mean selection **1181 tokens against a 1536
+    budget**. So the 40% is a *ratio*, not waste: the cap already trims to the
+    window, the average request is 355 tokens *under* it, and the tools that
+    "match nothing" are `CORE` arriving by cue rather than by ranking. There is
+    nothing to reclaim, and a change that chased the ratio would be optimising a
+    percentage.
+
+    (Getting that measurement took a shape lie worth recording: the first version
+    read top-1 from `select_tools(...)[0]`, which is **2.7%** - because
+    `select_tools` returns schemas *"in the order `tools` lists them"*, which is
+    registry order and **not** ranking. Top-1 comes from `ranked()`; only the
+    token count comes from `select_tools`.)
     """
 
     def test_the_zero_match_tools_are_core_and_are_named(self):
