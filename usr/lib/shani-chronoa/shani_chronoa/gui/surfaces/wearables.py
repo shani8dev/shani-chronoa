@@ -61,6 +61,7 @@ from shani_chronoa.skills import bluetooth_gatt as gatt  # noqa: E402
 from . import common
 
 TITLE = "Wearables"
+SECTION = "Sensing"
 ICON = "bluetooth-symbolic"
 SUBTITLE = ("Paired Bluetooth Low Energy devices and what they say about "
             "themselves - a watch's battery, a band's firmware, a sensor's "
@@ -744,6 +745,12 @@ def build(app) -> Gtk.Widget:
     """
     page, set_content = common.surface(TITLE, SUBTITLE)
     recorder = common.StatusRecorder()
+    # **The recorder is attached to the page, not only written through.** The
+    # sidebar's health dot is drawn from `page.status()`, and a panel that builds
+    # a recorder without ever assigning it leaves the dot reading a page with no
+    # answer - which is the defect `tests/test_surface_health_status.py` exists
+    # for, and which this panel's own docstring about the sibling caught.
+    page.status = recorder.status
 
     def gated(state: "State") -> Gtk.Widget:
         """An empty state, *with* the status row that matches its own word.
@@ -782,11 +789,27 @@ def build(app) -> Gtk.Widget:
     column.set_margin_top(12)
     set_content(common.scrolled(column))
 
+    # **An interim row, because the dot answers at build time.** The read runs
+    # on a thread and its real row arrives after it, but `page.status()` is
+    # answerable the moment the page exists - and a recorder answering a word
+    # with no row drawn for it is exactly what
+    # `tests/test_surface_health_status.py`'s dot-agrees test catches. Measured:
+    # on a machine with no adapter the read fails, `deliver` draws the row for
+    # the failure, and before that the recorder answered `unknown` over an empty
+    # panel. A sibling panel passed the same test by finishing first, which is a
+    # race rather than a property.
+    recorder.set(common.STATUS_UNKNOWN)
+    interim = recorder.row(
+        common.STATUS_UNKNOWN, "Reading paired devices",
+        "asking the machine what is paired")
+    column.append(interim)
+
     def deliver(widget: Gtk.Widget, health: str, headline: str,
                 summary: str) -> None:
         column.append(widget)
         recorder.set(health)
         column.append(recorder.row(health, headline, summary))
+        column.remove(interim)
 
     def when_ready(devices: list) -> None:
         listing = common.page_body(8)
