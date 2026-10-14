@@ -494,6 +494,146 @@ def evaluate(adapter_dir: str, limit: int = 0) -> int:
     return 0
 
 
+#: Measured on this box, this corpus, one request's full candidate list - each
+#: variant in its own process so peak RSS is attributable:
+#:
+#: | | per request, 8 candidates | peak RSS |
+#: |---|---:|---:|
+#: | fp32 | 10.91 s | 10.08 GB |
+#: | bf16 | 23.41 s | 3.14 GB |
+#: | **int8 dynamic** | **2.80 s** | 14.96 GB |
+#:
+#: **int8 is 3.9x faster than fp32, and bf16 is slower than fp32 on this CPU** -
+#: which is the same finding `lora_timing.py` recorded, now for serving rather
+#: than training. The int8 peak is a *conversion* peak: `quantize_dynamic` holds
+#: the fp32 weights and their int8 copies at once. Steady state is smaller.
+SERVING_COST = {"fp32": 10.91, "bf16": 23.41, "int8": 2.80}
+
+#: Top-2 score margins to gate at. Below the cutoff the baseline is confident
+#: and a reranker cannot help; above it, it fires.
+GATE_CUTOFFS = (0.0, 0.5, 1.0, 2.0, 3.0, 5.0, 8.0, 12.0, 20.0)
+
+
+def serve_plan() -> int:
+    """What a cascade reranker costs, against what it can still recover.
+
+    **The premise, measured rather than assumed.** `ranked()` already ranks first
+    correctly on **49 of the 55** held-out requests, and the only errors a
+    reranker could fix are ones where the answer was in the offered list at all -
+: five of them, which is the 9.1-point ceiling. So on **89% of requests the
+    reranker is not merely unhelpful, it is work spent on an answer already
+    correct.**
+
+    And the baseline already *knows* when it is unsure. Median top-2 score margin
+    is **8.74 when it is right and 1.49 when it is wrong** - the margin separates
+    the two populations, which is what makes a gate possible at all.
+
+    So: gate on the margin, and the average cost falls by the fire rate. The
+    table below is the whole decision, with the per-fire cost already folded in.
+    """
+    sys.path.insert(0, str(ROOT / "usr" / "lib" / "shani-chronoa"))
+    from shani_chronoa import skills, tool_select
+
+    schemas, _ = skills.discover_skills()
+    data = load_corpus()
+    rows = []
+    for item in data["held_out"]:
+        order = [(s, n) for s, n, _h in tool_select.ranked(item["say"], schemas,
+                                                          learned={})]
+        ok = bool(order) and order[0][1] == item["positive"]
+        margin = (order[0][0] - order[1][0]) if len(order) > 1 else 99.0
+        rows.append((margin, ok, bool(item.get("recall_hit"))))
+    n = len(rows)
+    fixable = sum(1 for r in rows if not r[1] and r[2])
+    print("Cascade reranking: gate on the baseline's own top-2 margin")
+    print("  held-out requests        %d" % n)
+    print("  baseline already first   %d (%.1f%%)" % (sum(r[1] for r in rows),
+                                                      100.0 * sum(r[1] for r in rows) / n))
+    print("  median margin, correct   %.2f" % sorted(r[0] for r in rows if r[1])[len([r for r in rows if r[1]]) // 2])
+    wrong = sorted(r[0] for r in rows if not r[1])
+    print("  median margin, wrong     %.2f" % (wrong[len(wrong) // 2] if wrong else 0.0))
+    print("  fixable by reranking     %d of %d" % (fixable, sum(1 for r in rows if not r[1])))
+    print()
+    print("Average cost per request, with the gate and the dtype:")
+    for variant, per_fire in (("fp32", SERVING_COST["fp32"]),
+                              ("int8", SERVING_COST["int8"])):
+        print()
+        print("  %s, %.2f s per request when it fires" % (variant, per_fire))
+        print("  %-8s %-14s %-12s %-14s %s"
+              % ("gate", "fires", "avg cost", "vs always", "of %d fixable" % fixable))
+        print("  %-8s %-14s %-12s %-14s %s"
+              % ("none", "%d/%d" % (n, n), "%.2f s" % per_fire, "1.0x", fixable))
+        for cut in GATE_CUTOFFS:
+            fired = [r for r in rows if r[0] <= cut]
+            caught = [r for r in fired if not r[1] and r[2]]
+            cost = per_fire * len(fired) / n
+            print("  %-8.1f %-14s %-12.2f %-14s %d"
+                  % (cut, "%d/%d (%.0f%%)" % (len(fired), n, 100.0 * len(fired) / n),
+                     cost, "%.1fx" % (per_fire / cost) if cost else "-", len(caught)))
+    print()
+    print("The honest reading: the *benefit* column assumes the reranker is right")
+    print("every time it fires. It is not, and until there is a trained adapter")
+    print("that column is an upper bound and the speedups are exact.")
+    return 0
+
+
+def score_agreement(pairs: int = 8) -> int:
+    """Does int8 rank the candidates the way fp32 does? **Needs a trained model.**
+
+    Quantisation is only safe if it is *nearly* the same function, and rank
+    agreement is the cheapest thing that shows whether. **Run against an untrained
+    model this comparison means nothing**, and running it anyway is the mistake
+    worth recording: an untrained head over a base model produces scores with no
+    correct order, so "the order changed" describes two arbitrary orderings and
+    not a distortion. Measured that way it reported fp32 `[6,2,3,5,7,4,1,0]`
+    against int8 `[3,6,2,4,1,5,0,7]` - which looks alarming and is not evidence
+    of anything.
+
+    So: it needs `--train --out` to have been run, and until then int8's ranking
+    safety is **unknown rather than unsafe**. The gate is not in the same
+    position - it is a function of the baseline's own scores, so it cannot change
+    an answer, only how often the reranker is asked.
+    """
+    torch, peft, _t = _require_libs()
+    from transformers import AutoModel, AutoTokenizer
+    data = load_corpus()
+    item = data["train"][0]
+    cands = candidates(item)
+    tok = AutoTokenizer.from_pretrained(str(MODEL_DIR))
+    if tok.pad_token is None:
+        tok.pad_token = tok.eos_token
+
+    def scores(model, dtype):
+        out = []
+        for _n, desc in cands[:pairs]:
+            b = tok([pair_text(item["say"], desc)], return_tensors="pt",
+                    padding=True, truncation=True, max_length=MAX_TOKENS)
+            with torch.no_grad():
+                h = model(**b).last_hidden_state
+                last = h[0, b["attention_mask"].sum(dim=1).item() - 1]
+            out.append(float(last.float().sum()))
+        return out
+
+    fp = AutoModel.from_pretrained(str(MODEL_DIR), torch_dtype=torch.float32).eval()
+    ref = scores(fp, torch.float32)
+    qm = torch.ao.quantization.quantize_dynamic(
+        AutoModel.from_pretrained(str(MODEL_DIR), torch_dtype=torch.float32).eval(),
+        {torch.nn.Linear}, dtype=torch.qint8)
+    got = scores(qm, torch.bfloat16)
+    same_order = [sorted(range(len(ref)), key=lambda i: ref[i])] == \
+                 [sorted(range(len(got)), key=lambda i: got[i])]
+    print("int8 vs fp32 on %d real candidates:" % len(ref))
+    print("  fp32 order  %s" % sorted(range(len(ref)), key=lambda i: -ref[i]))
+    print("  int8 order  %s" % sorted(range(len(got)), key=lambda i: -got[i]))
+    print("  same ranking: %s" % same_order)
+    print()
+    if not same_order:
+        print("  **The order changed.** A 3.9x speedup that reorders the list is")
+        print("  a different reranker, not the same one, and its accuracy has to")
+        print("  be measured rather than assumed.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--eval-baseline", action="store_true",
@@ -511,8 +651,13 @@ def main() -> int:
                     help="score a trained adapter directory on the held-out half")
     ap.add_argument("--eval-limit", type=int, default=0,
                     help="with --evaluate: score only N held-out requests")
+    ap.add_argument("--serve-plan", action="store_true",
+                    help="the cascade gate's cost against what it recovers")
+    ap.add_argument("--score-agreement", action="store_true",
+                    help="does int8 rank candidates the way fp32 does (needs torch)")
     args = ap.parse_args()
-    if not (args.eval_baseline or args.dry_run or args.train or args.evaluate):
+    if not (args.eval_baseline or args.dry_run or args.train or args.evaluate
+            or args.serve_plan or args.score_agreement):
         ap.print_help()
         return 0
     if args.eval_baseline:
@@ -523,6 +668,10 @@ def main() -> int:
         return train(limit=args.limit, out=args.out, dtype_name=args.dtype)
     if args.evaluate:
         return evaluate(args.evaluate, limit=args.eval_limit)
+    if args.serve_plan:
+        serve_plan()
+    if args.score_agreement:
+        return score_agreement()
     return 0
 
 
