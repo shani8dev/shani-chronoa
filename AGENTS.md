@@ -23130,6 +23130,47 @@ It does not change the recommendation - int8 is still unconditional and free of
 accuracy risk - but it does mean **the number is a property of this hardware**,
 and any claim that outlives the box should be stated in FLOPs.
 
+**`arXiv:2607.18152` - jina-reranker-v3.5.** The most consequential result of
+the search, because it questions the plan rather than refining it. A
+**0.6B-parameter listwise reranker** that "reaches 63.20 nDCG@10 on BEIR,
+**matching a 4B model at roughly 7x fewer parameters**" - via hybrid attention
+(three sliding-window then two global layers) and a three-stage self-distillation
+from a full-attention teacher. Its framing is this exact problem: "listwise
+rerankers are the discriminative core of **agentic retrieval pipelines**".
+
+**What that implies here, stated carefully.** What this file plans to build is a
+LoRA cross-encoder on **Qwen3-1.7B with a scalar head trained from scratch** - a
+purpose-built listwise reranker, except it is a general-purpose base model
+learning the job from 165 examples. If a **0.6B purpose-trained listwise
+reranker matches a 4B model at 7x fewer parameters**, then:
+
+- the parameter count that dominates this file's serving cost is roughly **3x
+  larger than it needs to be**, and
+- the **2.7-hour training run may not be needed at all** - that model is already
+  a listwise reranker.
+
+**That is an argument to evaluate one before training one. It is not a
+measurement of ours.** Nothing here has run jina-reranker on tool selection or
+on this box; its numbers are BEIR general-retrieval, the model is an external
+dependency that would have to be fetched, and a 0.6B reranker's 4-thread CPU
+latency is unknown until it is measured. What *is* measured is that the current
+plan's cost scales with a base model chosen for being the assistant's brain, not
+for being a reranker - and that is now a decision with a known alternative
+rather than an assumption nobody had questioned.
+
+**`arXiv:2607.11933` - Transforming LLMs into Efficient Cross-Encoders via
+Knowledge Distillation for RAG Reranking** independently reaches the same
+shape: LoRA fine-tune an instruct LLM as a drop-in reranker plus **4-bit
+quantization**, beating the cross-encoder baseline by 14-21% on RAGAS while
+cutting inference overhead. That corroborates the LoRA-plus-quantization recipe
+already here. Its 4-bit is GPU-shaped though, and on this CPU int8 has the
+kernels - hence int8 measured here rather than 4-bit assumed.
+
+**`arXiv:2605.20683` - Layer-wise Token Compression for Efficient Document
+Reranking** is the other compression route, and it is the one SkillContrast's
+input-length result belongs to; measured above, neither applies to 85-token
+pairs.
+
 **`arXiv:2610.11650` - SkillContrast: Difference-Guided Text Selection for Agent
 Skill Reranking.** The closest paper on earth to this problem - agent *skill*
 reranking - and it reports **51.1-58.8% fewer model-input tokens** by keeping
