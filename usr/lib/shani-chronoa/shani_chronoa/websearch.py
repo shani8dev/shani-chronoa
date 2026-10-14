@@ -309,17 +309,46 @@ def _fetch_json(url, params, component):
 _ARXIV_TIMEOUT = 30.0
 
 
-def _fetch_feed(url, params, component, timeout=None):
+#: The read timeout `_fetch_feed` uses, or `None` for the shared default.
+#:
+#: **Module state because the signature is pinned**, not because that is usually
+#: how this should be written. `_fetch_feed` is replaced wholesale by the tests,
+#: which are the only way to exercise arXiv without the network, so arXiv cannot
+#: bypass it and it cannot grow a parameter. `_arxiv_budget` sets this around
+#: arXiv's own calls and puts it back.
+_feed_timeout = None
+
+
+def _arxiv_budget(seconds):
+    """Run arXiv's fetches on its own read timeout, and hand the default back."""
+    global _feed_timeout
+    previous, _feed_timeout = _feed_timeout, seconds
+    return previous
+
+
+def _fetch_feed(url, params, component):
     """(raw, reason). Through `netjson.get_bytes` - the same HTTP policy, the
     same User-Agent and the same egress record as the JSON path, so there is
     still one policy and one record rather than one per provider shape.
 
-    `timeout` is per-provider because the shared one is a JSON-API budget: see
-    `_ARXIV_TIMEOUT` for the measurement that forced the difference.
+    **Three arguments, and that is a contract rather than an accident.** The
+    tests replace this function wholesale - some with `lambda *a: ...`, some with
+    `def fake_fetch(url, params, component)` - and they replace it *to drive the
+    arXiv path*, so arXiv has to keep going through here. A fourth positional
+    breaks the second form; a fourth keyword breaks the first. Hence the budget
+    below rather than a parameter.
     """
     from shani_chronoa.netjson import get_bytes
     try:
-        return get_bytes(component, url, params, timeout=timeout), ""
+        if _feed_timeout is None:
+            # **Called with exactly the three arguments it always got.** A stub
+            # of the form `lambda c, u, p=None: ...` - which is how a test drives
+            # this without the network - has no room for a fourth keyword, and
+            # passing one broke `test_the_stubbed_fetch_sees_the_query` while the
+            # behaviour under test was unchanged. The override is opt-in and only
+            # appears when a provider asked for it.
+            return get_bytes(component, url, params), ""
+        return get_bytes(component, url, params, timeout=_feed_timeout), ""
     except Exception as exc:
         return b"", "%s (%s)" % (exc.__class__.__name__, str(exc)[:80])
 
@@ -995,56 +1024,63 @@ def arxiv_search(query, component="skill:web_search"):
     widened = None if scoped == alternate else alternate
 
     asked = []
-    for search_query in ([scoped, widened] if widened else [scoped]):
-        _arxiv_throttle()
-        raw, why = _fetch_feed(ARXIV_ENDPOINT, {
-            "search_query": search_query,
-            "start": "0",
-            "max_results": str(_MAX_RESULTS),
-            "sortBy": "relevance",
-        }, component, timeout=_ARXIV_TIMEOUT)
-        if why:
-            # **Two different faults arrive here, and they do not get the same
-            # sentence.** Measured on this machine, four calls three seconds
-            # apart: `429 Rate exceeded` in 30.8 s, `429` in 15.8 s, **`503` in
-            # 47.1 s**, and `200` in 14.9 s. arXiv's edge in front of
-            # `export.arxiv.org` is serving refusals and outages alongside
-            # successes, and even the successes take ~15 s.
-            #
-            # So `ConnectTimeout` - never reached the host at all - is
-            # **unreachability**, and saying anything else would be the
-            # confident-wrong-answer shape this module exists to avoid. A
-            # `ReadTimeout`, a `429` or a `503` means the host *was* reached and
-            # then declined or dawdled, and calling that "unreachable" is the
-            # answer that sends someone to check whether arXiv is down while it
-            # is up and refusing us.
-            if "ConnectTimeout" in why or "ConnectError" in why:
-                return [], ("arXiv could not be reached (%s). That is the archive "
-                            "being unreachable from here, which is not a statement "
-                            "about whether any paper exists." % why), []
-            return [], ("arXiv did not answer (%s). Its edge answers bursts with "
-                        "`429 Rate exceeded`, serves `503`, and takes about 15 "
-                        "seconds even when it succeeds - so this is most likely a "
-                        "refusal or a degraded edge rather than an outage, though "
-                        "the two look the same from here. Calls are spaced %g "
-                        "seconds apart, the interval arXiv asks for. **It is not a "
-                        "statement about whether any paper exists**: no claim is "
-                        "made about what it would have said."
-                        % (why, _ARXIV_MIN_INTERVAL)), []
-        found, why = _parse_arxiv(raw)
-        if why:
-            return [], ("arXiv answered with something this could not read (%s), "
-                        "so no claim is made about what it said." % why), []
-        asked.append(search_query)
-        if found:
-            return found, "", []
-    return [], ("arXiv has no paper matching either question it was asked. "
-                "It was asked %s. arXiv is a preprint archive, so this is an "
-                "answer about preprints and not about whether the web has "
-                "anything on it - try web_search for that, or re-ask with "
-                "arXiv's own syntax (ti:, abs:, au:, AND) to widen it."
-                % "; then ".join(asked)), []
-
+    # **One budget for the whole ladder, restored in `finally`.** It is module
+    # state, and this function returns from inside the loop on a failure, so
+    # without the restore one refused arXiv search would leave every later feed
+    # fetch in the process waiting 30 seconds.
+    _arxiv_budget(_ARXIV_TIMEOUT)
+    try:
+        for search_query in ([scoped, widened] if widened else [scoped]):
+            _arxiv_throttle()
+            raw, why = _fetch_feed(ARXIV_ENDPOINT, {
+                "search_query": search_query,
+                "start": "0",
+                "max_results": str(_MAX_RESULTS),
+                "sortBy": "relevance",
+            }, component)
+            if why:
+                # **Two different faults arrive here, and they do not get the
+                # same sentence.** Measured on this machine, four calls three
+                # seconds apart: `429 Rate exceeded` in 30.8 s, `429` in 15.8 s,
+                # **`503` in 47.1 s**, and `200` in 14.9 s. arXiv's edge is
+                # serving refusals and outages alongside successes, and even the
+                # successes take ~15 s.
+                #
+                # So `ConnectTimeout` - never reached the host at all - **is**
+                # unreachability, and saying anything else would be the
+                # confident-wrong-answer shape this module exists to avoid. A
+                # `ReadTimeout`, `429` or `503` means the host *was* reached and
+                # then declined or dawdled, and calling that "unreachable" sends
+                # someone to check whether arXiv is down while it is up.
+                if "ConnectTimeout" in why or "ConnectError" in why:
+                    return [], ("arXiv could not be reached (%s). That is the "
+                                "archive being unreachable from here, which is not "
+                                "a statement about whether any paper exists."
+                                % why), []
+                return [], ("arXiv did not answer (%s). Its edge answers bursts "
+                            "with `429 Rate exceeded`, serves `503`, and takes "
+                            "about 15 seconds even when it succeeds - so this is "
+                            "most likely a refusal or a degraded edge rather than "
+                            "an outage, though the two look the same from here. "
+                            "Calls are spaced %g seconds apart, the interval arXiv "
+                            "asks for. **It is not a statement about whether any "
+                            "paper exists**: no claim is made about what it would "
+                            "have said." % (why, _ARXIV_MIN_INTERVAL)), []
+            found, why = _parse_arxiv(raw)
+            if why:
+                return [], ("arXiv answered with something this could not read "
+                            "(%s), so no claim is made about what it said." % why), []
+            asked.append(search_query)
+            if found:
+                return found, "", []
+        return [], ("arXiv has no paper matching either question it was asked. "
+                    "It was asked %s. arXiv is a preprint archive, so this is an "
+                    "answer about preprints and not about whether the web has "
+                    "anything on it - try web_search for that, or re-ask with "
+                    "arXiv's own syntax (ti:, abs:, au:, AND) to widen it."
+                    % "; then ".join(asked)), []
+    finally:
+        _arxiv_budget(None)
 
 _FEED_PARSERS = {
     "Google News": _parse_googlenews,
