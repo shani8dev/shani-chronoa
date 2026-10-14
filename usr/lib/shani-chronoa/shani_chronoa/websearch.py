@@ -299,14 +299,27 @@ def _fetch_json(url, params, component):
                                 str(exc)[:80])
 
 
-def _fetch_feed(url, params, component):
+#: arXiv's read timeout, in seconds. **Not the shared 8 s.** Measured on this
+#: machine: a successful query takes **14.9 s**, a `429` takes 30.8 s and a `503`
+#: takes 47.1 s - so at 8 s every arXiv call timed out regardless of how well it
+#: was paced, and the only thing the throttle could do was make the failure
+#: quieter. 30 s clears the healthy case and some of the degraded ones; past that
+#: the answer is not worth waiting for in an interactive tool, and the degraded
+#: case is still reported rather than hung on.
+_ARXIV_TIMEOUT = 30.0
+
+
+def _fetch_feed(url, params, component, timeout=None):
     """(raw, reason). Through `netjson.get_bytes` - the same HTTP policy, the
-    same timeout and the same egress record as the JSON path, so there is still
-    one policy and one record rather than one per provider shape.
+    same User-Agent and the same egress record as the JSON path, so there is
+    still one policy and one record rather than one per provider shape.
+
+    `timeout` is per-provider because the shared one is a JSON-API budget: see
+    `_ARXIV_TIMEOUT` for the measurement that forced the difference.
     """
     from shani_chronoa.netjson import get_bytes
     try:
-        return get_bytes(component, url, params), ""
+        return get_bytes(component, url, params, timeout=timeout), ""
     except Exception as exc:
         return b"", "%s (%s)" % (exc.__class__.__name__, str(exc)[:80])
 
@@ -989,7 +1002,7 @@ def arxiv_search(query, component="skill:web_search"):
             "start": "0",
             "max_results": str(_MAX_RESULTS),
             "sortBy": "relevance",
-        }, component)
+        }, component, timeout=_ARXIV_TIMEOUT)
         if why:
             # **Two different faults arrive here, and they do not get the same
             # sentence.** Measured on this machine, four calls three seconds

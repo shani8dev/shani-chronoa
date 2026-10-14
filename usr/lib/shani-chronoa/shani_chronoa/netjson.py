@@ -34,13 +34,23 @@ def get_json(component: str, url: str, params: Optional[dict] = None):
 
 
 def get_bytes(component: str, url: str, params: Optional[dict] = None,
-              max_bytes: int = MAX_BYTES) -> bytes:
+              max_bytes: int = MAX_BYTES, timeout=None) -> bytes:
     """The raw body of one GET, under the same timeout, User-Agent and egress
-    record as `get_json`. Raises `httpx.HTTPError` or `ValueError` (too large)."""
+    record as `get_json`. Raises `httpx.HTTPError` or `ValueError` (too large).
+
+    **`timeout` overrides the shared one per call, and defaults to it.** The
+    shared `TIMEOUT` is 8 s, which is right for the JSON APIs and wrong for every
+    provider with a different latency profile: measured today, arXiv's API answers
+    a *successful* query in **14.9 s** and a degraded one in 47 s, so every
+    correctly-paced call to it timed out and the search looked broken for a
+    reason that had nothing to do with the request. A shared constant is only
+    shared if every caller has the same budget, and these do not.
+    """
     full = url + ("?" + urllib.parse.urlencode(params) if params else "")
     status = None
+    with_prefix = TIMEOUT if timeout is None else httpx.Timeout(timeout, connect=5.0)
     try:
-        with httpx.Client(timeout=TIMEOUT, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
+        with httpx.Client(timeout=with_prefix, headers={"User-Agent": USER_AGENT}, follow_redirects=True) as c:
             r = c.get(full)
             status = r.status_code
             r.raise_for_status()
