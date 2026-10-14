@@ -25571,3 +25571,153 @@ standalone `tools/*.py` runs, which import the package with no conftest involved
 
 **Not claimed: which of the 34 are real.** That is the serial re-run's job, and this
 entry is deliberately not a verdict on them.
+
+## Typing into another app asked nothing about what held focus (2026-10-14)
+
+`ui_driver.type_text` had a `_comms_app` guard for chat surfaces and **nothing for
+password fields** — and it types through the portal, uinput or XTEST, all three of
+which are **session-wide**. So the guard that stopped text leaving the machine in
+a chat had no counterpart for text going into a password box, on the same call, in
+the same breath. The transfer is Myna's (*canonical/myna*, Ubuntu 26.10 preview):
+its Text Injection Layer specifies *"Blocking injection into secure fields
+(password fields, authentication prompts)"*.
+
+### The first version asked the wrong question and refused every call
+
+`_secure_field(app)` took the app's name and filtered the accessibility
+desktop by it. Measured on this box, before the correction:
+
+| asked about | answer |
+|---|---|
+| `slack` | *"nothing in it holds focus"* |
+| every other app | *"this desktop publishes no accessibility tree"* |
+
+Both are the **normal state of a working desktop before the window is raised** —
+which is the only moment the question has an answer. So a guard placed there
+refused every call on this box for a reason that had nothing to do with the call.
+
+It is now **app-agnostic** and takes no argument, and the signature is asserted:
+the bug *was* the parameter. `test_the_question_is_not_about_which_app` reads
+`inspect.signature` and asserts an empty one, because a function that could be
+asked about an app again would be asked about an app again.
+
+### Three verdicts, and the middle one is the reason it is not a boolean
+
+`("clear" | "secure" | "unknown", reason)`:
+
+| verdict | what happens | why |
+|---|---|---|
+| `secure` | **refuses, and no key lifts it** | a password box holding focus is a password box on every machine |
+| `clear` | proceeds in silence | the focused field is an ordinary entry |
+| `unknown` | **proceeds, and says so** in the reply | nothing could be told |
+
+**`unknown` is never returned as `clear`.** A driver that reads an unreachable
+a11y bus as permission has failed open on the exact field it exists to protect —
+with `toolkit-accessibility` off the tree publishes nothing and the guard would
+wave every keystroke through while appearing to have checked. That is the same
+shape as `_comms_app` once reading an unreachable bus as "not a chat window", and
+this file already records it as a guard that passed for months because it could
+not see the thing it was about.
+
+**And `unknown` is a disclosure rather than a lock, because failing closed would
+break the product.** Measured here: with the tree silent, **nothing reports
+FOCUSED + EDITABLE**, so a closed guard refuses every keystroke the driver sends
+on a machine where everything else works — the over-fix this file records for
+`get_children`, where *"the call must be absent"* was satisfied by deleting the
+working check.
+
+`ui-require-verified-focus` (default **false**) turns the silence into a refusal
+for a person who wants it, and **`_secure_require` fails open** where
+`_comms_override` fails closed — because that key asks for *more* strictness, and
+an unreadable config must not impose it on a machine whose schema predates it.
+
+### Wired into all four routes, because a chord is a string
+
+`type_text`, `key`, `portal_type`, `portal_key` all call one `_secure_gate`, so a
+chord can paste into a password box as readily as a string can type into one and
+both are held to the same rule. `key()`'s chord path had **no witness at all**
+before this file existed — a guard covering only `type_text` would have left the
+whole chord path uncovered while every test stayed green.
+
+### Two measurements that shaped the shape, not just the code
+
+- **Ordering is the property.** The guard sits *after* `_focus_the_window` and
+  *after* `windowactivate`. Placed earlier — beside the comms guard, before
+  `find_window` — **two tests took exactly 30 seconds each**, because
+  `_WINDOW_TIMEOUT` is 30 and a consent gate that waits for a window search reads
+  as a hang. `test_the_field_is_asked_after_the_window_is_raised` records the
+  call order rather than asserting each step happened.
+- **`comms-typing-enabled` defaults to `true`** (`gschema.xml:728`), so under
+  `conftest`'s `GSETTINGS_BACKEND=keyfile` plus a per-test `XDG_CONFIG_HOME`,
+  `_comms_override()` answers `True` and the comms refusal **never fires**. The
+  first version of the ordering test was therefore measuring *a granted
+  harness* rather than a slow guard — the `fake_bin` `PATH` lesson in a fifth
+  costume. **A test about which guard runs first has to say which consent it
+  assumes**, and this one now sets both `_secure_require` and `_comms_override`.
+
+### The key needed a row, and the refusal needed to name it
+
+`ui-require-verified-focus` is in the schema (default false), has a Settings row
+in Privacy beside `comms-typing-enabled`, and a `GATE_NAMES` entry — **a key the
+code reads but the schema does not carry takes its Python default forever**, the
+`heard-sound` / `calendar-write-enabled` class. And the refusal names **the row**
+("Only type into a known field"), not the key: this file measured 47 hand-written
+refusals naming a key no screen spells that way across 20 files. The label is read
+out of `capabilities.gate_label` with a fallback to the key, and **both directions
+are asserted**, because a refusal naming both things at once satisfies either
+assertion alone.
+
+### A settings gate that had a row and was still reported as unaccounted for
+
+`test_settings_surface_is_complete`'s `_privacy_gate_keys()` recognised only
+`<something>-enabled`, so `ui-require-verified-focus` — which **has** a row on the
+Privacy page — was reported as a key the window neither controls nor declares
+intentional. The regex was narrower than its own docstring ("a 4-tuple whose
+second element looks like a gsettings key"). **A regex that describes only the
+keys it has already seen is a list that rots**, which is the same shape as the
+hand-kept set that function was written to replace. Widened; the test still
+reports `piper-tts-enabled`, which is in HEAD's schema with no row anywhere and
+is **proved pre-existing** by reading both files at HEAD.
+
+### 30 tests, and the two equivalent mutants were the finding
+
+`tools/mutations/secure_field.py`: **18 mutations, 15 caught, 0 survivors, 3
+equivalent, 0 unmeasurable, 0 stale witnesses**, no line reading "NOT caught by".
+Run on a snapshot at `/tmp/opencode/snap-m2`, absolute paths, every anchor
+asserted `count == 1`, preflight byte-identical against the real tree, restore
+verified byte-identical, verdicts read from the tally line.
+
+Both directions are on every over-appliable guard: `entry` joining
+`_SECURE_ROLES` would refuse the role of almost every field a driver wants to type
+into — i.e. **the whole feature** — and `"unknown"` becoming `"clear"` is the
+failed-open this exists to prevent.
+
+**The two survivors on the first run were a real measurement, not gaps.**
+`if role == "password text": return False` in `_actionable` sits above
+`role in ("entry", "text", "combo box")`, and **neither spelling is in that
+tuple** — so deleting the exclusion, or "correcting" it to the bare spelling the
+old code carried, changes the answer for every input. Both are **equivalent
+mutants**, documented as such. The line is kept because it is where a reader
+looks, and the new
+`test_the_exclusion_is_what_carries_the_rule_not_the_role_tuple` **holds the two
+halves in step**, so the guard cannot be deleted *and* the role quietly accepted —
+the one edit that would turn `drive` into something that addresses a login box.
+
+**And four witnesses of mine over-claimed**, all reported by the runner's "NOT
+caught by" line and all corrected by *renaming* rather than by writing tests:
+one drove `portal_type` while naming a `type_text` mutation; one stubbed
+`_secure_field` and so could not see the roles tuple; one used a node that was
+unfocused **and** uneditable, so the EDITABLE check still skipped it; and one
+asserted the comms refusal while `comms-typing-enabled` was granted. **A witness
+that passes with the defect it names reads as coverage**, and only the runner's
+over-claim report makes that visible.
+
+### The `.pyc` trap, and it was mine
+
+35 stray `.pyc` files under `usr/`, all written at one timestamp, from a
+`python3 -c` schema probe I ran **without** `PYTHONDONTWRITEBYTECODE=1`. Removed
+by exact path after listing what would go and confirming nothing tracked (0
+entries); `test_packaging` **28 passed** after. This file records this trap
+repeatedly and each time says the habit is the only durable answer — and each
+time the source has been a standalone `tools/*.py` or `python3 -c` run, never a
+pytest run, because `tests/conftest.py` sets the flag at module scope.

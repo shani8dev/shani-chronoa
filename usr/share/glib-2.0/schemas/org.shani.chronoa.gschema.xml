@@ -730,6 +730,11 @@
       <summary>Let Chronoa type into chat and mail windows</summary>
       <description>Off: driving another app's controls works, but a window that is a chat or mail surface is refused before a keystroke, because text typed there leaves the machine. On: it may be typed into when you ask directly. Its own switch, so agreeing that Chronoa may drive your apps is not the same as agreeing it may send a message.</description>
     </key>
+    <key name="ui-require-verified-focus" type="b">
+      <default>false</default>
+      <summary>Only type into a known field</summary>
+      <description>Off: when nothing on this desktop reports which field has focus, the keystrokes are sent and the reply says the field could not be read. On: they are refused until it can be. A field holding a secret is refused either way - this is about the field that could not be identified, which is not the same question. Off by default because a machine with no accessibility bus publishes nothing at all, and a guard that cannot see is a guard that has made the feature unusable.</description>
+    </key>
     <key name="monitoring-sense-enabled" type="b">
       <default>false</default>
       <summary>Let Chronoa report who is capturing on this machine</summary>

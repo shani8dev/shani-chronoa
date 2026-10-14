@@ -783,6 +783,7 @@ GATE_NAMES: dict[str, str] = {
     "sessions-sense-enabled": "Who is on this machine",
     "monitoring-sense-enabled": "Who is capturing on this machine",
     "comms-typing-enabled": "Let Chronoa type into chat and mail windows",
+    "ui-require-verified-focus": "Only type into a known field",
     # The Settings sense rows' own titles, so Help sends people to a row that exists.
     "snapshots-sense-enabled": "Rollback points",
     "security-sense-enabled": "Firmware security",

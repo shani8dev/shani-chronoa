@@ -204,6 +204,14 @@ class PrivacyPage:
              "typed there leaves the machine. On: it may be typed into when you "
              "ask directly.",
              "ui_driver refuses a communication surface while this is off"),
+            ("Only type into a known field", "ui-require-verified-focus",
+             "Off: when nothing on this desktop reports which field has "
+             "focus, the keystrokes are sent and the reply says the field could "
+             "not be read. On: they are refused until it can be. A field holding "
+             "a secret is refused either way - this is about the field that "
+             "could not be identified, which is a different question.",
+             "ui_driver refuses a keystroke it cannot place; off by default "
+             "because a desktop with no accessibility bus publishes nothing"),
             ("Let Chronoa delete files", "file-delete-enabled",
              "Off: Chronoa can read, search, create and move files but never "
              "delete one. Deletion here is permanent and does not use the trash.",

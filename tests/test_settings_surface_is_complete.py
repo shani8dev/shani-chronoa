@@ -327,6 +327,14 @@ def _privacy_gate_keys():
     The rows are `(label, key, description, refusal)` tuples; the key is the
     second element. Only a 4-tuple whose second element looks like a gsettings
     key is taken, so a row is not invented out of an unrelated tuple.
+
+    **The key pattern is every gsettings-shaped name, not only `-enabled`.** The
+    suffix rule was narrower than this docstring's own rule and read as a gap
+    rather than as a detector limit: `ui-require-verified-focus` has a real row
+    on this page and was reported as unaccounted for, because the pattern
+    insisted on a suffix the key does not carry. A regex that describes only the
+    keys it has already seen is a list that rots - the same shape as the
+    hand-kept set this function replaced.
     """
     import ast as _ast
     tree = _ast.parse(PRIVACY.read_text())
@@ -338,7 +346,7 @@ def _privacy_gate_keys():
             if isinstance(element, ast.Tuple) and len(element.elts) == 4:
                 value = element.elts[1]
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*-enabled", value.value):
+                    if re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", value.value):
                         keys.add(value.value)
     return keys
 

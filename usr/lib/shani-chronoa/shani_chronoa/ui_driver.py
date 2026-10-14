@@ -126,7 +126,13 @@ def portal_key(app: str, keys: str) -> str:
     Modifiers are a *chord*, not separate taps: ctrl-alt-f2 must press all three
     before releasing any of them, which is the difference between a chord and
     three keys.
+
+    And the secure-field rule `portal_type` holds to. A chord can paste into a
+    password box as readily as a string can type into one, the portal is
+    session-wide, and this is the route a native Wayland client takes - so the
+    last moment the focused field is observable is immediately before the keys.
     """
+    _secure_gate(app)
     from shani_chronoa import portal
 
     tokens = [t for t in keys.replace("-", "+").split("+") if t]
@@ -172,6 +178,12 @@ def portal_click(app: str, x_percent: float, y_percent: float) -> str:
 
 def portal_type(app: str, text: str) -> str:
     """Type through the portal, for a window XTEST cannot reach."""
+    # **The secure-field check lives in here, not only in `type_text`.**
+    # This is the route a native Wayland client takes - no X window, so the
+    # window is never raised and nothing ever focuses the app - and the portal
+    # is session-wide. So the last moment the focused field can be observed is
+    # right here, immediately before the keystrokes are handed over.
+    secure_note = _secure_gate(app)
     try:
         with _portal_input() as remote:
             remote.type_text(text)
@@ -182,7 +194,7 @@ def portal_type(app: str, text: str) -> str:
     return (f"Asked the desktop's input portal to type {len(text)} character(s) "
             f"into {app}. It could not be confirmed that anything arrived - see "
             f"the app's own window, or start it with display=x11 so it can be "
-            f"driven and read through XTEST instead.")
+            f"driven and read through XTEST instead.{secure_note}")
 
 
 def _which(binary: str, verb: str) -> str:
@@ -832,7 +844,19 @@ def _actionable(node) -> bool:
         if "button" in role or role in ("menu item", "check menu item",
                                         "radio menu item", "link", "switch"):
             return bool((node.get_name() or "").strip())
-        return role in ("entry", "password", "text", "combo box") and \
+        # **A password field is excluded on purpose, and was excluded by
+        # accident first.** `Atspi.Role` holds `PASSWORD_TEXT` and
+        # `get_role_name()` returns `"password text"` - so the `"password"`
+        # this line carried matched nothing, and password boxes were left out
+        # of the observation for a reason nobody had written down. Correcting
+        # the spelling would have *added* them, which is the wrong direction:
+        # `drive`'s keystrokes are session-wide, so an app's login box would
+        # have become a target for the same reason `type_text` now refuses one.
+        # The exclusion is named here so the next reader does not "fix" it into
+        # a hole, and `tests/test_ui_driver.py` pins that it holds.
+        if role == "password text":
+            return False
+        return role in ("entry", "text", "combo box") and \
             bool((node.get_name() or "").strip())
     except (AttributeError, TypeError):
         return False
@@ -2304,6 +2328,13 @@ def type_text(app: str, title: str, text: str,
             raise GuiUnavailable(
                 f"not typing into {app}: {problem}. The text would land in "
                 f"whatever is focused, which is not necessarily this app.")
+        # **Asked here, and only here.** This is the one moment the question has
+        # an answer: the window has just been raised, so whatever holds focus is
+        # what the text will land in. Asking earlier - beside the comms guard,
+        # before `find_window` - measured "nothing holds focus" for a running
+        # app and refused every call on this desktop for a reason that had
+        # nothing to do with the call.
+        secure_note = _secure_gate(app)
         box = window_box(window_id)
         if box:
             # **The lower part of the window, not the middle - measured twice.**
@@ -2370,7 +2401,7 @@ def type_text(app: str, title: str, text: str,
                 f"Wayland window the compositor owns input, so keys reach only "
                 f"the window it has focused - look at its window.") + (
             "" if not surface else
-            f" ({surface}, which '{_COMMS_CONSENT_KEY}' allows.)")
+            f" ({surface}, which '{_COMMS_CONSENT_KEY}' allows.)") + secure_note
     finally:
         _stop_cue(cue)
 
@@ -2457,10 +2488,13 @@ def key(app: str, title: str, keys: str) -> str:
     if cue is not None and box:
         ao.cue(socket, {"ripple": [box[0] + box[2] / 2, box[1] + box[3] / 2]})
     _xdotool(["windowactivate", "--sync", window_id])
+    # After the raise, for the reason `type_text` gives: this is the one moment
+    # the focused field is knowable, and it is what the keys will land in.
+    secure_note = _secure_gate(app)
     proc = _xdotool(["key", keys])
     if proc.returncode != 0:
         raise GuiUnavailable(f"the app would not take {keys!r}")
-    return f"Sent {keys} to {app}."
+    return f"Sent {keys} to {app}.{secure_note}"
 
 
 def _read_focused_text(app: str) -> str:
@@ -2913,3 +2947,181 @@ def _comms_surface(window_id: str) -> str:
     except (OSError, subprocess.SubprocessError):
         pass
     return ""
+
+
+#: Roles whose contents are not meant to be read off the screen. Ubuntu's Myna
+#: (`canonical/myna`, the dictation tool that ships with this Ubuntu) writes the
+#: same rule into its own injection layer - *"Blocking injection into secure
+#: fields (password fields, authentication prompts)"* - and it can honour it
+#: with IBus, which refuses a password box at the protocol itself. Chronoa's
+#: routes are the RemoteDesktop portal, uinput and XTEST, and **all three are
+#: session-wide**: they deliver to whatever the compositor has focused, not to
+#: the window that was asked for. So the question cannot be "what is focused in
+#: `app`" - `app` may not be the focused thing at all - it has to be "what is
+#: focused, anywhere", asked immediately before the keys go.
+#:
+#: The spelling matters and is measured, not remembered: `Atspi.Role` holds
+#: `PASSWORD_TEXT` and `get_role_name()` returns `"password text"`. A list in
+#: this file already spelled it `"password"`, which can never match.
+_SECURE_ROLES = ("password text", "password", "pin")
+
+#: The key that asks for the focused field to be *known* before typing. Off by
+#: default because it is off on the desktop it was measured on: with
+#: `toolkit-accessibility` false, no node reports a focused text field, so
+#: defaulting it on would refuse every keystroke this driver sends. Separate
+#: from `_COMMS_CONSENT_KEY` on purpose - agreeing to type into a chat window
+#: is one decision, and demanding to see the focus first is a different one.
+_SECURE_REQUIRE_KEY = "ui-require-verified-focus"
+
+
+def _secure_require() -> bool:
+    """Whether the person has asked for the focused field to be seen first.
+
+    Fails **open**, unlike `_comms_override`, and deliberately so: this is a
+    request for *more* strictness, so an unreadable config must not silently
+    impose it - that is the direction which breaks the driver on a machine
+    whose schema predates the key.
+    """
+    try:
+        from shani_chronoa.config import ChronoaConfig
+        return bool(ChronoaConfig().get_bool(_SECURE_REQUIRE_KEY, False))
+    except Exception:  # noqa: BLE001 - an unreadable config is not a stricter one
+        return False
+
+
+def _secure_field() -> "tuple[str, str]":
+    """What holds focus anywhere, judged for whether typing into it is safe.
+
+    Returns `(verdict, reason)`. The verdict is one of three, and the third is
+    the reason this is a function rather than a boolean:
+
+    `"clear"`  the focused field is an ordinary entry, so typing is safe here;
+    `"secure"` the focused field holds a secret, so typing is refused outright;
+    `"unknown"` nothing could be told - no accessibility tree publishes a
+                focused editable node to read a role from.
+
+    `"unknown"` is never returned as `"clear"`. A driver that reads an
+    unreachable a11y bus as permission has failed open on the exact field this
+    exists to protect: with `toolkit-accessibility` off, or on a desktop with no
+    AT-SPI at all, the tree publishes nothing and the guard would wave every
+    keystroke through while appearing to have checked. That is the same shape as
+    `_comms_app` once reading an a11y bus it could not reach as "not a chat
+    window" - recorded in this file's history as a guard that passed for months
+    because it could not see the thing it was about.
+
+    **And it is asked where the answer exists, which the first version got
+    wrong.** Measured on this box before the correction, asking "what is focused
+    in `app`": `slack` -> "nothing in it holds focus", every other app -> "this
+    desktop publishes no accessibility tree". Both are the normal state of a
+    working desktop *before* the window is raised, so a guard placed there
+    refused every call for a reason that had nothing to do with the call. The
+    question is now app-agnostic and every call site asks it at the last moment
+    before the keys go.
+    """
+    _a11y_env()
+    try:
+        import gi
+
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi
+        Atspi.init()
+        for application in Atspi.get_desktop(0):
+            if application is None:
+                continue
+            for node in _walk_all(application):
+                try:
+                    states = node.get_state_set().get_states()
+                    if Atspi.StateType.FOCUSED not in states:
+                        continue
+                    if Atspi.StateType.EDITABLE not in states:
+                        continue
+                    role = (node.get_role_name() or "").strip().lower()
+                    if role in _SECURE_ROLES:
+                        return ("secure", f"the field holding focus is a {role}")
+                    return ("clear", "")
+                except Exception:  # noqa: BLE001 - a node without a readable state
+                    continue
+    except Exception as exc:  # noqa: BLE001 - no gi, no bus, no tree
+        logger.debug("could not ask what holds focus: %s", exc)
+    return ("unknown", "nothing on this desktop reports a focused text field")
+
+
+def _secure_require_label() -> str:
+    """The Settings row's own title for `_SECURE_REQUIRE_KEY`.
+
+    A refusal that names a raw gsettings key sends whoever reads it hunting for
+    a switch no screen spells that way - the defect this repository measured 47
+    times across 20 files and fixed in one place. So the refusal names the row,
+    read out of the same table Help and the suggestion chips read, and falls back
+    to the key only if that table cannot be loaded at all.
+
+    The import is **inside** the function, for the reason `_secure_require`
+    does it: `ui_driver` is imported by every headless path, and `capabilities`
+    pulls in `dataclasses` and `re` for one string.
+    """
+    try:
+        from shani_chronoa.capabilities import gate_label
+
+        label = (gate_label(_SECURE_REQUIRE_KEY) or "").strip()
+        if label and label != _SECURE_REQUIRE_KEY:
+            return label
+    except Exception:  # noqa: BLE001 - an unreadable table is not a reason to
+        pass          # print a key a person cannot act on
+    return _SECURE_REQUIRE_KEY
+
+
+def _secure_refusal(app: str) -> "tuple[str, str]":
+    """Why typing into `app` is refused here, and what to say when it is not.
+
+    Returns `(refusal, note)`. `refusal` is "" when the typing may proceed;
+    `note` is a sentence for the caller to carry when something was *not* able
+    to be checked but was allowed to proceed anyway, so the gap is visible
+    rather than silent.
+
+    Three verdicts, three outcomes, and the middle one is the reason this is a
+    tuple rather than a string:
+
+    `"secure"`  **refuses, and no key lifts it.** A password box holding focus
+                is a password box on every machine and on every reading, and the
+                words would be on the screen for whoever is looking.
+    `"clear"`   proceeds in silence - the focused field is an ordinary entry.
+    `"unknown"` **proceeds, and says so.** Measured on this very desktop: with
+                `toolkit-accessibility` off, no node anywhere reports
+                `FOCUSED` + `EDITABLE`, so the guard would refuse *every* call
+                on a machine where the driver otherwise works. A guard that
+                cannot see is a guard that has made the feature unusable - the
+                over-fix this file records for `get_children`, where "the call
+                must be absent" was satisfied by deleting the working check.
+                So the tree being silent is a disclosure, not a lock, and
+                `_SECURE_REQUIRE_KEY` is the door for a person who wants the
+                strict behaviour on their own machine.
+    """
+    verdict, reason = _secure_field()
+    if verdict == "secure":
+        return (
+            f"refusing to type into {app}: {reason}. Every route here is "
+            f"session-wide, so the words would land in a field meant to be "
+            f"hidden, and no switch makes that safe.", "")
+    if verdict == "unknown":
+        if _secure_require():
+            return (
+                f"refusing to type into {app}: {reason}, and "
+                f"'{_secure_require_label()}' asks for the focused field to be "
+                f"known before typing.", "")
+        return ("", f"({reason}, so no secret box could be ruled out)")
+    return ("", "")
+
+
+def _secure_gate(app: str) -> str:
+    """Raise if typing into `app` here is refused; else the note to carry.
+
+    The one call the four sites make, so a chord and a string, a portal and an
+    XTEST window, are all held to the same rule and all say the same thing. The
+    note is returned rather than logged, because the caller's reply is where a
+    person reads about a step they asked for - a gap recorded only in the log
+    is a gap nobody sees.
+    """
+    refusal, note = _secure_refusal(app)
+    if refusal:
+        raise GuiUnavailable(refusal)
+    return note
