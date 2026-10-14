@@ -31,6 +31,7 @@ which is the control that would have caught the first version.
 
 from __future__ import annotations
 
+import ast
 import sys
 from pathlib import Path
 
@@ -46,18 +47,59 @@ def _schema(properties, name="probe"):
                          "parameters": {"type": "object", "properties": properties}}}
 
 
+def _declared_skills() -> int:
+    """How many `Skill(...)` entries the built-in package declares.
+
+    **Derived, so it cannot go stale.** Every `skills/*.py` is parsed and its
+    `Skill(` constructor calls counted - not the registry, which is the thing
+    under test, and not a literal, which goes stale the moment a skill lands.
+
+    A module declaring `NOT_A_SKILL` is skipped, matching the loader's own rule
+    in `discover_skills`; there are none today, and the skip is what keeps a
+    future one from counting as a skill that never loaded.
+    """
+    pkg = Path(__file__).resolve().parent.parent / "usr" / "lib" / "shani-chronoa" \
+        / "shani_chronoa" / "skills"
+    declared = 0
+    for path in sorted(pkg.glob("*.py")):
+        if path.stem == "__init__":
+            continue
+        tree = ast.parse(path.read_text())
+        if any(isinstance(n, ast.Assign)
+               and any(isinstance(tgt, ast.Name) and tgt.id == "NOT_A_SKILL"
+                       for tgt in n.targets)
+               for n in tree.body):
+            continue
+        declared += sum(1 for node in ast.walk(tree)
+                        if isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "Skill")
+    return declared
+
+
 class TestTheCapsAreMeasuredNotCopied:
     """The control that would have caught `MAX_OPTIONS = 32`."""
 
     def test_nothing_that_ships_is_refused(self):
         """Every built-in skill through the caps. A cap that drops a shipped skill
-        is a cap that was not measured."""
+        is a cap that was not measured.
+
+        **The count is derived from the source, not remembered.** The literal here
+        was `257` and the registry fell to 256 when `trash_file` was retired - the
+        right code with a stale number, which is the `skills_total` failure this
+        repository records for the eval-corpus coverage block. Counting the
+        `Skill(...)` declarations in `skills/` is the number that cannot disagree
+        with itself: adding a skill moves both sides, and a cap that drops one
+        makes the registry strictly smaller than what the source declares.
+        """
         from shani_chronoa.tools import discover_skills
 
         tools, _ = discover_skills()
-        assert len(tools) == 257, (
-            f"expected the whole registry, got {len(tools)} - a cap dropped a "
-            f"skill that ships")
+        declared = _declared_skills()
+        assert len(tools) == declared, (
+            f"{len(tools)} of {declared} shipped skills loaded - a skill "
+            f"declared in the source never reached the registry, so a cap or "
+            f"the loader dropped one that ships")
         for tool in tools:
             function = tool.get("function", tool)
             parameters = function.get("parameters") or {}
