@@ -23067,18 +23067,38 @@ Selective escalation as finite-batch allocation: a cheap top-1 answer, then an
 0.034 [0.001, 0.072] while using **46.6% fewer tokens** than always going deep.
 So the *shape* of the gate below is not a guess - it is the standard form.
 
-But its second finding is the one that matters here: **"beneficial escalation
+But its second finding looked like it mattered here: **"beneficial escalation
 remains difficult to rank (AUROC 0.60)"**, and progress "depends on stronger
 query-specific benefit estimates". Additional-call **cost** is predictable
 (R^2 0.93); **benefit** is not. And the top-2 margin gate *is* a benefit
 estimate, validated on **55** requests.
 
-**That inverts the recommendation.** int8 is an **unconditional** 3.9x: it costs
-nothing in accuracy to be had wrong, and its only risk is whether quantisation
-preserves the ranking. The gate is **conditional** - its value rests entirely on a
-routing signal the literature says is hard, measured here on a sample of 55. So
-build int8 first and treat the gate as needing a trained model to validate, not
-as free money.
+**So it was measured, rather than assumed - and the measurement reversed the
+conclusion.**
+
+| | AUROC |
+|---|---:|
+| gate, held-out (55, 6 errors) | **0.891** |
+| gate, train split (163, 39 errors) | **0.832** |
+| chance | 0.500 |
+| arXiv:2610.07760, this task shape | 0.60 |
+
+Two independent splits, both far above both benchmarks. The gate's routing
+signal is **strong**, not weak, and the pessimistic result does not transfer to
+this setting - the paper's task was financial-document adjudication with
+predictors trained for it, ours is a margin the selector computes for free.
+
+**And the first run of that measurement was wrong in a way worth recording.**
+Scoring the detector with the *raw* margin returns **AUROC 0.119** where the
+truth is **0.881** - same data, same pairs, inverted, because the gate fires on a
+*low* margin and so the detector's score must be the *negated* margin. 0.119
+reads as a catastrophic result rather than as a sign error, and it nearly went in
+as one. `_auroc` now says so at the definition.
+
+**Which puts int8 and the gate back on level terms:** int8 is unconditional and
+needs no routing signal; the gate is conditional but its signal is measured at
+0.88 across two splits rather than hoped for. Both are worth building, and the
+gate is the one that recovers the 9.1 points.
 
 **`arXiv:2507.06223` - Efficiency-Effectiveness Reranking FLOPs for LLM-based
 Rerankers.** This one is a critique of **this file's own headline number**, and
