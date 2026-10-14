@@ -143,8 +143,26 @@ class TestTheRequirementLineReachesTheWidget:
         out = _run(broadway, "any", tmp_path)
         whole = [t for t in out["labels"] if t.startswith("Needs ")]
         assert whole, f"no label begins with 'Needs': {out['labels']!r}"
-        assert whole[0].endswith((".", "here.", "machine.")), (
-            f"the line stops mid-sentence: {whole[0]!r}")
+        line = whole[0]
+        # **A terminator, not a particular word.** The old assertion enumerated
+        # `(".", "here.", "machine.")` - the endings the sentence has when the
+        # tier is *usable*. `requirements_met`'s reasons are noun phrases in
+        # parentheses ("a measured decode rate (no local model is answering)"),
+        # so the refused branch ends in `)`. On a machine with no local model
+        # answering - which is every tier here - that branch is the one that
+        # runs, so the assertion could only ever pass on a box where the first
+        # card happened to be the default. A shape that depends on which machine
+        # the suite ran on is the `fake_bin PATH` lesson again.
+        assert line.endswith((".", ")")), (
+            f"the line stops mid-sentence: {line!r}")
+        # **And the real truncation: cut at the colon.** A label built from the
+        # first clause and dropped leaves "Not the default here: " with nothing
+        # after it - which is the sentence-cut-in-half this test names, and which
+        # a terminator check alone would accept if the clause happened to end in
+        # a period.
+        if "Not the default here:" in line:
+            after = line.split("Not the default here:", 1)[1].strip()
+            assert after, f"the reason was cut at the colon: {line!r}"
 
     def test_a_refused_tier_names_the_number_it_is_short_by(self, broadway, tmp_path):
         """**The card that justifies the whole change.** A tier the code refuses
