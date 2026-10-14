@@ -705,6 +705,38 @@ def _parse_googlenews(raw):
 #: slot in the chain. The reason is the one below the builder.
 ARXIV_ENDPOINT = "https://export.arxiv.org/api/query"
 
+#: **Seconds to leave between two calls to arXiv.** Measured on this machine:
+#: with no delay at all, a burst of searches drew `HTTP 429 "Rate exceeded"` from
+#: the Google Frontend edge in front of `export.arxiv.org`, and the failure was
+#: then reported as "the archive being unreachable" - which is a different fault
+#: with a different remedy, and the kind of wrong-but-plausible message that
+#: sends someone to check whether arXiv is down.
+#:
+#: arXiv's own guidance is what sets the number: the API terms ask for **three
+#: seconds** between calls, and `arxiv.org/robots.txt` - which covers
+#: `export.arxiv.org` too - carries `Crawl-delay: 15`. Three is the API's stated
+#: figure for API callers and is what this uses; 15 is the crawler's figure and
+#: is recorded because it is the stricter of the two.
+#:
+#: One `arxiv_search` asks **twice** when it widens (see its own docstring), so
+#: without this one search is already a burst of two.
+_ARXIV_MIN_INTERVAL = 3.0
+#: `None` until the first call, then `time.monotonic()`. Unannotated: `typing`
+#: is not imported for a forward reference to one float.
+_arxiv_last_call = None
+
+
+def _arxiv_throttle() -> None:
+    """Leave `_ARXIV_MIN_INTERVAL` between calls, in every process that asks."""
+    global _arxiv_last_call
+    import time
+    now = time.monotonic()
+    if _arxiv_last_call is not None:
+        wait = _ARXIV_MIN_INTERVAL - (now - _arxiv_last_call)
+        if wait > 0:
+            time.sleep(wait)
+    _arxiv_last_call = time.monotonic()
+
 #: Atom and arXiv's own extension namespace, read off a real response. Written
 #: out rather than guessed: `ET.fromstring` will not match `{atom}entry` against
 #: an unprefixed `entry`, and a namespaced document silently parses to an empty
@@ -951,6 +983,7 @@ def arxiv_search(query, component="skill:web_search"):
 
     asked = []
     for search_query in ([scoped, widened] if widened else [scoped]):
+        _arxiv_throttle()
         raw, why = _fetch_feed(ARXIV_ENDPOINT, {
             "search_query": search_query,
             "start": "0",
@@ -958,9 +991,33 @@ def arxiv_search(query, component="skill:web_search"):
             "sortBy": "relevance",
         }, component)
         if why:
-            return [], ("arXiv could not be read (%s). That is the archive being "
-                        "unreachable, which is not a statement about whether any "
-                        "paper exists." % why), []
+            # **Two different faults arrive here, and they do not get the same
+            # sentence.** Measured on this machine, four calls three seconds
+            # apart: `429 Rate exceeded` in 30.8 s, `429` in 15.8 s, **`503` in
+            # 47.1 s**, and `200` in 14.9 s. arXiv's edge in front of
+            # `export.arxiv.org` is serving refusals and outages alongside
+            # successes, and even the successes take ~15 s.
+            #
+            # So `ConnectTimeout` - never reached the host at all - is
+            # **unreachability**, and saying anything else would be the
+            # confident-wrong-answer shape this module exists to avoid. A
+            # `ReadTimeout`, a `429` or a `503` means the host *was* reached and
+            # then declined or dawdled, and calling that "unreachable" is the
+            # answer that sends someone to check whether arXiv is down while it
+            # is up and refusing us.
+            if "ConnectTimeout" in why or "ConnectError" in why:
+                return [], ("arXiv could not be reached (%s). That is the archive "
+                            "being unreachable from here, which is not a statement "
+                            "about whether any paper exists." % why), []
+            return [], ("arXiv did not answer (%s). Its edge answers bursts with "
+                        "`429 Rate exceeded`, serves `503`, and takes about 15 "
+                        "seconds even when it succeeds - so this is most likely a "
+                        "refusal or a degraded edge rather than an outage, though "
+                        "the two look the same from here. Calls are spaced %g "
+                        "seconds apart, the interval arXiv asks for. **It is not a "
+                        "statement about whether any paper exists**: no claim is "
+                        "made about what it would have said."
+                        % (why, _ARXIV_MIN_INTERVAL)), []
         found, why = _parse_arxiv(raw)
         if why:
             return [], ("arXiv answered with something this could not read (%s), "
