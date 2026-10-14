@@ -210,9 +210,77 @@ class PiperTTS:
         """
         reason = self._kokoro_reason(text)
         piper_reason = self._piper_reason()
-        chosen = self._engine(reason, piper_reason)
+        clone_reason = self._clone_reason()
+        chosen = self._engine(reason, piper_reason, clone_reason)
         self._announce(chosen, reason, piper_reason)
         return chosen
+
+    #: The registered cloned voice to speak with, or "" for the normal chain.
+    #: **Read from a setting, never from an argument**, and that is the whole
+    #: design rather than a convenience. Choosing whose voice to speak is an
+    #: identity decision, and this repository's own rule is that a learned
+    #: component advises while authority stays with the consent keys. A `voice=`
+    #: parameter on `speak` would hand exactly that authority to the model: a
+    #: reply steered by a document or a page could say "repeat that in Alice's
+    #: voice", and the consent gate - which exists precisely to stop a person
+    #: being spoken as without agreeing - would be checked and passed, because
+    #: Alice *did* agree. The agreement is about the voice, not about the words.
+    #: So a person chooses this in Settings and the model chooses the text.
+    CLONE_VOICE_KEY = "voice-clone-voice"
+
+    @property
+    def cloned_voice(self) -> str:
+        """The chosen registered voice, or "" when none is chosen.
+
+        Per call, never cached, for the same reason `timbre()` is: the settings
+        window writes it while the app is running, and a value captured in
+        `__init__` would be a switch that needs a restart to take effect.
+        """
+        try:
+            return str(self._settings().get(self.CLONE_VOICE_KEY, "") or "").strip()
+        except Exception:  # noqa: BLE001 - an unreadable preference is "no choice"
+            return ""
+
+    def _clone_reason(self) -> str:
+        """Why a cloned voice would not speak here, or "" when it would.
+
+        Asked first inside `_engine()` only because `cloned_voice` has to be set
+        for the question to arise at all. Four refusals, all named rather than
+        collapsed, because they have different remedies: no voice chosen, the
+        capability switch, the consent record, and whether the runtime exists.
+
+        **The switch is asked before the runtime**, in the same order and for
+        the same reason as `_kokoro_reason`: somebody who never turned cloning
+        on should not be walked through a ~1.7 GB install for a feature they
+        declined.
+
+        **"No voice chosen" is a refusal rather than an absence**, and that is
+        the whole of this method's contract. The cascade reads `""` as *nothing
+        is in the way*, so returning `""` for the ordinary case - nothing
+        configured, which is every install that has never touched this feature -
+        meant the cascade selected cloning on a machine that had no voice to
+        clone. An empty string is not a neutral answer to a permission; the
+        default that would have been safe here is a refusal, because the
+        alternative is enabling a feature by the absence of a setting.
+
+        It is the cheapest of the four, and that is deliberate: this returns
+        before `voice_clone` is imported at all, and `engine()` runs on every
+        reply, so a machine that never uses cloning never pays for the module.
+        """
+        if not self.cloned_voice:
+            return ("no recorded voice is chosen, so the ordinary voices are "
+                    "used instead; pick one under 'Speak with which recorded "
+                    "voice' in Settings")
+        from shani_chronoa import voice_clone
+        allowed, why = voice_clone.check(self.cloned_voice,
+                                         config=self._settings())
+        if not allowed:
+            return why
+        problem = voice_clone.clone_problem()
+        if problem:
+            return (f"a voice called {self.cloned_voice!r} is agreed and the "
+                    f"switch is on, but {problem}")
+        return ""
 
     #: The key that chooses the neural voice. Named rather than spelled at each
     #: use because the settings row, the schema, this gate and the tests all
@@ -296,8 +364,9 @@ class PiperTTS:
                     "so the reply keeps the voice for its own language")
         return ""
 
-    def _engine(self, kokoro_reason: str, piper_reason: str = "") -> Optional[str]:
-        """The cascade, given why Kokoro was not chosen.
+    def _engine(self, kokoro_reason: str, piper_reason: str = "",
+                clone_reason: str = "not consulted") -> Optional[str]:
+        """The cascade, given why each higher engine was not chosen.
 
         `kokoro_reason` empty is the whole opt-in gate: `_kokoro_reason`
         returns "" only when the user has turned Kokoro on *and* it can speak
@@ -305,7 +374,33 @@ class PiperTTS:
         Kokoro is reachable again by flipping one setting - which is what
         `engine()` announces, and what the test that reverts this ordering
         fails on.
+
+        `clone_reason` is the same shape for the same reason, and **defaults to
+        a non-empty string** so that any caller which has not been updated to
+        think about cloning gets "not chosen" rather than accidentally choosing
+        it. A parameter whose absence enabled a feature would be the wrong
+        default in a permission.
+
+        **That sentence was the specification and the signature said the
+        opposite**, which is why this is worth a paragraph rather than a
+        comment. The default was `""`, and `""` is exactly what the parameter
+        means when cloning *is* permitted - so a caller that said nothing about
+        cloning did not get "not chosen", it got "chosen". Measured, on a
+        machine with nothing configured at all: `_engine("kokoro is off")`
+        returned `'voice-clone'` rather than `'espeak-ng'`, and every one of the
+        three existing callers that pass only `kokoro_reason` got it. The
+        cascade was unreachable below its first link, and no refusal anywhere
+        said so, because a short-circuit that answers `voice-clone` looks like
+        an answer.
+
+        The other half was `_clone_reason()` returning `""` for an empty
+        choice, which `engine()` passes explicitly - so fixing only the default
+        would have left `engine()` broken while making every direct caller work,
+        and fixing only that would have left every direct caller broken. Both
+        halves are needed, and each one alone is a plausible-looking fix.
         """
+        if not clone_reason:
+            return "voice-clone"
         if not kokoro_reason:
             return "kokoro"
         if (not piper_reason and os.path.exists(self.piper_path)
@@ -518,6 +613,19 @@ class PiperTTS:
             # caller above it are unaffected.
             from shani_chronoa import cloud_voice
             return cloud_voice.CloudTTS().synthesize(text, output_file)
+        if eng == "voice-clone":
+            # Not a subprocess either, for the same reason as `cloud` below: it
+            # is an in-process model, not a program reading stdin. `voice_clone`
+            # re-checks the consent gate itself, so reaching this line through
+            # any route other than the dispatcher still needs the agreement.
+            from shani_chronoa import voice_clone
+            ok, why = voice_clone.synthesize(
+                self.cloned_voice, text, output_file, config=self._settings())
+            if not ok:
+                logger.error("cloned voice %r did not speak: %s",
+                             self.cloned_voice, why)
+                return False
+            return os.path.exists(output_file) and os.path.getsize(output_file) > 44
         if eng == "kokoro":
             cmd = self._kokoro_command(text, output_file)
         elif eng == "piper":
